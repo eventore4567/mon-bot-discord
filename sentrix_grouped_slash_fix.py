@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import types
 
 import discord
 from discord.ext import commands
@@ -280,9 +281,32 @@ async def _invoke_legacy(
     ctx.subcommand_passed = None
 
     bot.dispatch("command", ctx)
-    await root.invoke(ctx)
+    forced = _force_text_parser((root, command))
+    try:
+        await root.invoke(ctx)
+    finally:
+        for target in forced:
+            target.__dict__.pop("_parse_arguments", None)
     if not ctx.command_failed:
         bot.dispatch("command_completion", ctx)
+
+
+def _force_text_parser(targets) -> list:
+    """Sur ce chemin, ``ctx.interaction`` est renseigné mais les arguments arrivent en
+    TEXTE (StringView). ``HybridCommand._parse_arguments`` voit l'interaction et lit
+    ``interaction.namespace`` sans jamais remplir ``ctx.args`` : le callback était
+    appelé sans ``self``/``ctx`` (« Moderation.clear() missing 2 required positional
+    arguments »). On force le parseur texte de commands.py le temps de l'invocation."""
+    forced = []
+    for target in targets:
+        if not isinstance(target, (commands.HybridCommand, commands.HybridGroup)):
+            continue
+        if "_parse_arguments" in target.__dict__:
+            continue
+        base = commands.Group._parse_arguments if isinstance(target, commands.Group) else commands.Command._parse_arguments
+        target._parse_arguments = types.MethodType(base, target)
+        forced.append(target)
+    return forced
 
 
 def _unwrap_error(error: BaseException) -> BaseException:

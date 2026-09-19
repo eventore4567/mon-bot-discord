@@ -156,10 +156,10 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
         return _status("active", active_detail, configured=True)
 
     modules: dict[str, dict] = {
-        "welcome": channel_module("welcome_channel", "Le message de bienvenue a un salon valide.", "Aucun salon de bienvenue n'est choisi."),
-        "levels": channel_module("level_channel", "Les annonces de niveau ont un salon valide.", "Aucun salon de niveaux n'est choisi."),
-        "suggestions": channel_module("suggest_channel", "Les suggestions ont un salon valide.", "Aucun salon de suggestions n'est choisi."),
-        "reports": channel_module("report_channel", "Les signalements ont un salon valide.", "Aucun salon de signalements n'est choisi."),
+        "welcome": channel_module("welcome_channel", "Salon choisi.", "Aucun salon choisi."),
+        "levels": channel_module("level_channel", "Salon d'annonces choisi.", "Aucun salon d'annonces choisi."),
+        "suggestions": channel_module("suggest_channel", "Salon choisi.", "Aucun salon choisi."),
+        "reports": channel_module("report_channel", "Salon choisi.", "Aucun salon choisi."),
     }
 
     log_fields = ["log_channel", "log_messages", "log_members", "log_voice", "log_roles", "log_server", "log_automod", "log_moderation"]
@@ -169,7 +169,7 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
     elif configured_logs:
         modules["logs"] = _status("active", f"{len(configured_logs)} type(s) de logs ont un salon valide.", configured=True)
     else:
-        modules["logs"] = _status("missing", "Aucun salon de logs n'est configuré.")
+        modules["logs"] = _status("missing", "Aucun salon de logs choisi.")
 
     configured_roles = [field for field in role_fields if _optional_id(conf.get(field)) is not None]
     if any(field in invalid_by_field for field in configured_roles):
@@ -187,7 +187,8 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
     else:
         modules["tickets"] = _status("missing", "Catégorie et logs tickets non configurés.")
 
-    automod_values = [bool(automod.get(name)) for name in dashboard.AUTOMOD_FIELDS]
+    # L'escalade est un réglage par défaut, pas une protection : elle ne compte pas.
+    automod_values = [bool(automod.get(name)) for name in dashboard.AUTOMOD_FIELDS if name != "escalation"]
     modules["automod"] = (
         _status("active", f"{sum(automod_values)} protection(s) AutoMod sont actives.", configured=True)
         if any(automod_values)
@@ -239,6 +240,40 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
         if moderation_perms
         else _status("error", "SentriX ne possède aucune permission de modération utile.", configured=True)
     )
+
+    # Départ et économie : deux modules distincts de la bienvenue et des niveaux.
+    modules["goodbye"] = channel_module("goodbye_channel", "Salon choisi.", "Aucun salon choisi.")
+    modules["economy"] = _status("active", "Le système d'argent est disponible.", configured=True)
+
+    # Source unique : l'interrupteur de module (module_settings, le même que /setup et
+    # +level-system). Sans lui le Dashboard disait ACTIF pour un module coupé dans
+    # Discord, ou pour un module jamais activé dont un salon traînait en base.
+    try:
+        from cogs import setup_v2_core as core
+
+        module_for_key = {
+            "welcome": "welcome", "goodbye": "goodbye", "levels": "levels", "economy": "economy",
+            "logs": "logs", "roles": "roles", "tickets": "tickets", "notifications": "notifications",
+            "moderation": "moderation", "automod": "security", "ai": "ai",
+        }
+        for key, module in module_for_key.items():
+            if key not in modules:
+                continue
+            switch = await core.module_state(bot, guild.id, module)
+            if switch == core.MODULE_STATE_DISABLED:
+                modules[key] = _status("inactive", "Désactivé. Réglages conservés.", configured=True)
+            elif switch == core.MODULE_STATE_NOT_CONFIGURED and modules[key]["code"] != "missing":
+                modules[key] = _status("missing", "Pas encore activé.")
+            elif switch == core.MODULE_STATE_ENABLED and key == "ai" and modules[key]["code"] == "inactive":
+                modules[key] = _status("active", "Activée avec les réglages par défaut.", configured=True)
+            elif switch == core.MODULE_STATE_ENABLED and modules[key]["code"] == "missing":
+                # Activé dans la configuration mais sans ressource en base.
+                if key in ("welcome", "goodbye"):
+                    modules[key] = _status("error", "Activé, mais aucun salon choisi : rien ne sera envoyé.", configured=True)
+                else:
+                    modules[key] = _status("active", "Activé.", configured=True)
+    except Exception:
+        logger.exception("Lecture des interrupteurs de modules impossible guild=%s", guild.id)
 
     total = len(modules)
     active = sum(1 for item in modules.values() if item["code"] == "active")
@@ -365,7 +400,7 @@ def install(dashboard) -> bool:
             try:
                 await response.write_eof()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans handle_live_stream", exc_info=True)
         return response
 
     async def handle_live_metrics(request: web.Request) -> web.Response:
@@ -389,10 +424,63 @@ def install(dashboard) -> bool:
         response.headers["Cache-Control"] = "private, no-store, no-cache, must-revalidate, max-age=0"
         return response
 
+    async def handle_modules_get(request: web.Request) -> web.Response:
+        """État des modules depuis la source unique (module_settings), pour le Dashboard."""
+        try:
+            guild_id = int(request.match_info["guild_id"])
+        except (TypeError, ValueError):
+            return dashboard._json_error("Identifiant de serveur invalide.", 400)
+        _session, guild, error = await dashboard._manageable_guild(request, guild_id)
+        if error:
+            return error
+        from cogs import setup_v2_core as core
+
+        items = {
+            module: await core.module_state(request.app["bot"], guild.id, module)
+            for module in core.MODULES
+        }
+        return web.json_response({"ok": True, "modules": items, "configurable": sorted(core.CONFIGURABLE_MODULES)})
+
+    async def handle_modules_post(request: web.Request) -> web.Response:
+        """Activer / désactiver / réinitialiser un module — même écriture que /setup."""
+        try:
+            guild_id = int(request.match_info["guild_id"])
+        except (TypeError, ValueError):
+            return dashboard._json_error("Identifiant de serveur invalide.", 400)
+        session, guild, error = await dashboard._manageable_guild(request, guild_id)
+        if error:
+            return error
+        csrf_error = dashboard._require_csrf(request, session)
+        if csrf_error:
+            return csrf_error
+        try:
+            payload = await request.json()
+        except Exception:
+            return dashboard._json_error("Requête invalide.", 400)
+        from cogs import setup_v2_core as core
+
+        module = str(payload.get("module") or "").strip().lower()
+        action = str(payload.get("action") or "").strip().lower()
+        if module not in core.MODULES:
+            return dashboard._json_error("Module inconnu.", 400)
+        actor_id = int(session.get("user", {}).get("id") or 0) or None
+        bot = request.app["bot"]
+        if action == "enable":
+            await core.set_module_enabled(bot, guild.id, module, True, actor_id=actor_id)
+        elif action == "disable":
+            await core.set_module_enabled(bot, guild.id, module, False, actor_id=actor_id)
+        elif action == "reset":
+            await core.reset_module(bot, guild.id, module)
+        else:
+            return dashboard._json_error("Action inconnue (enable, disable ou reset).", 400)
+        return web.json_response({"ok": True, "module": module, "state": await core.module_state(bot, guild.id, module)})
+
     original_build_app = dashboard.build_app
 
     def build_app(bot) -> web.Application:
         app = original_build_app(bot)
+        app.router.add_get("/api/guilds/{guild_id}/modules", handle_modules_get)
+        app.router.add_post("/api/guilds/{guild_id}/modules", handle_modules_post)
         app.router.add_get("/api/guilds/{guild_id}/diagnostics", handle_diagnostics)
         app.router.add_get("/api/guilds/{guild_id}/live/stream", handle_live_stream)
         app.router.add_get("/api/guilds/{guild_id}/live/metrics", handle_live_metrics)

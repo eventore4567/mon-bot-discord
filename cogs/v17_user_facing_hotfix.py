@@ -16,7 +16,6 @@ logger = logging.getLogger("bot.v17-user-facing-hotfix")
 _DISPATCH_PATCHED = False
 _MENTION_PATCHED = False
 _PLAIN_INSTALL_PATCHED = False
-_LANGUAGE_JOIN_PATCHED = False
 PREFIX_ERROR_LIFETIME = 12.0
 
 
@@ -135,38 +134,12 @@ def _patch_duplicate_mention() -> None:
     _MENTION_PATCHED = True
 
 
-def _disable_separate_language_join_prompt() -> None:
-    """Le choix de langue reste intégré au nouvel accueil, sans second message."""
-    global _LANGUAGE_JOIN_PATCHED
-    if _LANGUAGE_JOIN_PATCHED:
-        return
-
-    from . import language_runtime
-
-    current = getattr(language_runtime, "_send_initial_language_prompt", None)
-    if current is None:
-        return
-    if getattr(current, "_sentrix_join_prompt_disabled", False):
-        _LANGUAGE_JOIN_PATCHED = True
-        return
-
-    async def no_separate_join_prompt(bot: commands.Bot, guild: discord.Guild):
-        del bot, guild
-        return None
-
-    no_separate_join_prompt._sentrix_join_prompt_disabled = True
-    no_separate_join_prompt._sentrix_original = current
-    language_runtime._send_initial_language_prompt = no_separate_join_prompt
-    _LANGUAGE_JOIN_PATCHED = True
-
-
 async def install(bot: commands.Bot, extension_name: str = "") -> None:
     del extension_name
     _patch_error_dispatch()
     _patch_plain_response_install()
     _apply_error_context_transport()
     _patch_duplicate_mention()
-    _disable_separate_language_join_prompt()
 
 
 __all__ = ["install"]

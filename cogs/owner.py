@@ -10,6 +10,7 @@ pour ne pas consommer inutilement la limite de 100 commandes slash de Discord �
 des commandes techniques utilisées rarement, la version + suffit largement.
 """
 
+import logging
 import asyncio
 import json
 import re
@@ -19,6 +20,8 @@ from discord.ext import commands, tasks
 
 from utils import embeds, checks, design_system
 from utils import sentrix_panels as panels
+
+logger = logging.getLogger("bot.owner")
 
 HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
 ACTIVITY_TYPES = {
@@ -351,7 +354,7 @@ class Owner(commands.Cog, name="Owner"):
             activity_type = ACTIVITY_TYPES.get(item.get("type", "playing"), discord.ActivityType.playing)
             await self.bot.change_presence(activity=discord.Activity(type=activity_type, name=item["text"]))
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans rotate_task", exc_info=True)
 
     @rotate_task.before_loop
     async def before_rotate(self):

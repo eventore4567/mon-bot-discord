@@ -104,7 +104,7 @@ def _add_dashboard_aliases(app: web.Application) -> None:
             if canonical:
                 existing.add(str(canonical))
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _add_dashboard_aliases", exc_info=True)
     for path in ("/dashboard", "/dashboard/"):
         if path not in existing:
             app.router.add_get(path, _redirect_to_app)
@@ -381,7 +381,7 @@ def install(dashboard) -> None:
                     try:
                         await runner.cleanup()
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans resilient_start_dashboard", exc_info=True)
                 logger.exception(
                     "Démarrage dashboard tentative %s/3 impossible.", attempt
                 )

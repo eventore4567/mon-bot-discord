@@ -132,7 +132,7 @@ async def _ensure_schema(bot: commands.Bot) -> None:
                 try:
                     names.add(str(row[1]))
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans _ensure_schema", exc_info=True)
         if "log_files" not in names:
             await bot.db.execute("ALTER TABLE guild_config ADD COLUMN log_files INTEGER")
     except Exception as exc:

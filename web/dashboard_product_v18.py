@@ -332,7 +332,7 @@ async def _execute_automation(bot, guild: discord.Guild, row: dict, *, member=No
         try:
             await _log_automation_run(bot.db, guild.id, automation_id, "error", str(exc))
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _execute_automation", exc_info=True)
 
 
 async def _run_automations(bot, guild: discord.Guild, trigger_type: str, *, member=None, message=None) -> None:
@@ -383,7 +383,7 @@ async def _analytics(db, guild_id: int) -> dict:
             row = await db.fetchone(sql, params)
             result[key] = int((row or {}).get("n", 0) if isinstance(row, dict) else row["n"] if row else 0)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _analytics", exc_info=True)
     candidates = [
         "SELECT command_name AS name,COUNT(*) AS n FROM command_logs WHERE guild_id = ? AND timestamp >= ? GROUP BY command_name ORDER BY n DESC LIMIT 10",
         "SELECT command AS name,COUNT(*) AS n FROM command_logs WHERE guild_id = ? AND timestamp >= ? GROUP BY command ORDER BY n DESC LIMIT 10",
@@ -823,7 +823,7 @@ def install(dashboard) -> bool:
                     item = _row_dict(row)
                     revision = max(revision, int(item.get("n") or 0))
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans live_metrics", exc_info=True)
                 return web.json_response(
                     {
                         "ok": True,

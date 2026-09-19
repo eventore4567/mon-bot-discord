@@ -64,9 +64,7 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1/settings") return response({ok:true,message:"Configuration enregistrée."});
       if(url.pathname==="/api/guilds/1/notifications") return response({ok:true,message:"Notification ajoutée."});
       if(url.pathname==="/api/guilds/1/embeds") return response({ok:true,message:"Embed envoyé."});
-      if(url.pathname==="/api/guilds/1/dm/apercu") return response({guild:{id:"1",name:"Serveur Test"},destinataires:11,bots_ignores:1,duree_estimee_secondes:8});
-      if(url.pathname==="/api/guilds/1/dm/job") return response({actif:false,etat:null});
-      if(url.pathname==="/api/guilds/1/dm/all") return response({demarre:true,etat:{total:11,envoyes:0,dms_fermes:0,echecs:0,bots_ignores:1,traites:0,termine:false}});
+      if(url.pathname==="/api/guilds/1/dm/apercu") return response({guild:{id:"1",name:"Serveur Test"},longueur_max:3500});
       if(url.pathname==="/api/guilds/1/dm/user") return response({resultat:"envoye",message:"Message envoyé.",bilan:{envoyes:1}});
       return response({error:`Route mock inconnue: ${url.pathname}`},404);
     };
@@ -96,7 +94,7 @@ const checks={
   security:"[data-automod]", moderation:"#sanctionList", logs:'[data-setting="log_channel"]',
   verification:"#verifyRules", roles:'[data-setting="mod_role"]', economy:"#goAccess", notifications:"#notifAdd",
   tickets:"#ticketSave", ai:"[data-ai]", embeds:"#embedSend", config:'[data-setting="prefix"]',
-  access:"#commandList", dm:"#dmAllMessage", diagnostic:".permission-grid",
+  access:"#commandList", dm:"#dmOneMessage", diagnostic:".permission-grid",
 };
 for(const tab of expectedTabs){
   const button=dom.window.document.querySelector(`#navigation button[data-tab="${tab}"]`);
@@ -109,7 +107,7 @@ for(const tab of expectedTabs){
 }
 
 const interactivePaths=requests.map(x=>x.path);
-for(const required of ["/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/dm/apercu","/api/guilds/1/dm/job"]){
+for(const required of ["/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/dm/apercu"]){
   if(!interactivePaths.includes(required)) throw new Error(`Route réelle jamais chargée: ${required}`);
 }
 

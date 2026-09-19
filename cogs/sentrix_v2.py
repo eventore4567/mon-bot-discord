@@ -6,6 +6,7 @@ un check-in quotidien et un marché entre membres utilisant la monnaie/inventair
 Toutes les commandes V2 sont préfixées uniquement afin de ne pas consommer le budget slash.
 """
 from __future__ import annotations
+import logging
 
 import sys
 import time
@@ -17,6 +18,8 @@ from discord.ext import commands
 import config
 from utils import checks, design_system, embeds, stats_service
 from utils import sentrix_panels as panels
+
+logger = logging.getLogger("bot.sentrix-v2")
 
 
 V2_PUBLIC_COMMANDS = frozenset({
@@ -318,7 +321,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
             command_catalog_cleanup.RESTORED_COMMANDS = command_catalog_cleanup.NORMAL_DIRECT_COMMANDS
             command_catalog_cleanup.apply_surface(self.bot)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans install_policy", exc_info=True)
 
     def install_help(self):
         try:
@@ -333,7 +336,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
                 ),
             ) + help_complete.CATEGORIES
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans install_help", exc_info=True)
 
     async def category_embed(self, guild_id: int, category: str, *, title: str, description=None, user=None, thumbnail=None):
         design = await self.bot.db.get_design_settings(guild_id)
@@ -553,7 +556,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
             try:
                 await self.bot.db.log_transaction(guild.id, None, member.id, "v2_checkin", reward, f"Check-in V2 — série {streak}")
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans claim_checkin", exc_info=True)
         except Exception:
             await self.bot.db.execute("DELETE FROM v2_daily_claims WHERE guild_id=? AND user_id=? AND claim_day=? AND reward=0", (guild.id, member.id, today))
             raise
@@ -588,7 +591,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
                 if interaction.message:
                     await interaction.message.edit(embed=await self.build_member_mod_embed(guild, member), view=view)
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans run_mod_action", exc_info=True)
 
     async def build_market_embed(self, guild, member):
         rows = await self.bot.db.fetchall("SELECT id,seller_id,item_name,quantity,unit_price FROM v2_market_listings WHERE guild_id=? AND status='active' ORDER BY id DESC LIMIT 12", (guild.id,))

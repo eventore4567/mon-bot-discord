@@ -85,7 +85,7 @@ async def _ensure_tables(db) -> None:
             "CREATE INDEX IF NOT EXISTS idx_sentrix_auto_reaction_guild_channel ON sentrix_dashboard_auto_reaction(guild_id, channel_id)"
         )
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _ensure_tables", exc_info=True)
 
 
 def _emoji_valid(token: str) -> bool:

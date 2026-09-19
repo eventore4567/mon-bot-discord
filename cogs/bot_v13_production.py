@@ -148,7 +148,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
             try:
                 legacy.ticket_watch_loop.cancel()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _disable_duplicate_ticket_watchers", exc_info=True)
             try:
                 await self.bot.remove_cog("BotV12TicketSLA")
             except Exception:
@@ -301,7 +301,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                             score=45,
                         )
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans ticket_sla_loop", exc_info=True)
                 continue
 
             try:
@@ -344,7 +344,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                             score=40,
                         )
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans ticket_sla_loop", exc_info=True)
             except discord.HTTPException:
                 logger.debug("V13 ticket reminder failed ticket=%s", ticket_id, exc_info=True)
             except Exception:
@@ -357,7 +357,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                 "(SELECT id FROM tickets WHERE status IN ('ouvert','open'))"
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans ticket_sla_loop", exc_info=True)
 
     @ticket_sla_loop.before_loop
     async def before_ticket_sla_loop(self) -> None:
@@ -384,7 +384,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
             try:
                 await self.bot.db.execute("DELETE FROM v13_canary_probe WHERE probe_id=?", (probe_id,))
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _probe_database", exc_info=True)
 
     async def _probe_discord(self) -> dict[str, Any]:
         if not self.bot.is_ready() or self.bot.user is None:
@@ -466,7 +466,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                         score=95 if status == "error" else 65,
                     )
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans run_live_canary", exc_info=True)
         return result
 
     @tasks.loop(minutes=CANARY_INTERVAL_MINUTES)
@@ -529,7 +529,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                         score=10 if all(state) else 60,
                     )
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans infra_watch_loop", exc_info=True)
         self._last_infra_state = state
 
     @infra_watch_loop.before_loop
@@ -667,7 +667,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                         try:
                             await instance.bot.db.close()
                         except Exception:
-                            pass
+                            logger.warning("Étape non critique ignorée dans restore_verified_backup", exc_info=True)
                         await asyncio.to_thread(shutil.copy2, rollback, db_path)
                         await instance.bot.db.connect()
                         raise
@@ -678,7 +678,7 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                             (int(time.time()), backup_id),
                         )
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans restore_verified_backup", exc_info=True)
                     await instance.infra.mirror_event(
                         "external_backup_restored_v13",
                         None,

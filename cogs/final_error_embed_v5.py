@@ -134,22 +134,31 @@ def _libelles(permissions) -> str:
     return ", ".join(noms[:-1]) + f" et {noms[-1]}"
 
 
-def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> panels.Panneau:
-    """Panneau composé pour une erreur de commande préfixée.
+# Code d'erreur Discord « Onboarding channels must be readable by everyone ».
+_ONBOARDING_CHANNEL_ERROR = 350003
 
-    Chaque cas expose désormais ses informations en SECTIONS séparées plutôt qu'en
-    un paragraphe unique : ce qui bloque, ce qu'il faut essayer, où trouver la
-    syntaxe. La bannière porte l'intention avant même la lecture du titre.
-    """
+
+def _texte_discord(exc: discord.HTTPException) -> str:
+    """Phrase courte pour un refus Discord (jamais de panneau pour un simple 4xx)."""
+    if getattr(exc, "code", None) == _ONBOARDING_CHANNEL_ERROR:
+        return "Ce salon fait partie de l'onboarding du serveur : Discord impose qu'il reste visible par tous."
+    if isinstance(exc, discord.Forbidden):
+        return "Discord a refusé l'action : vérifiez que le rôle SentriX est placé au-dessus du membre ou du rôle visé et qu'il possède la permission nécessaire."
+    texte = str(getattr(exc, "text", "") or "").strip()
+    return f"Discord a refusé la requête{f' : {texte}' if texte else ''}."
+
+
+def _texte_erreur_prefix(ctx: commands.Context, error: commands.CommandError) -> str | None:
+    """Une erreur SIMPLE (syntaxe, permission, refus Discord…) = UNE phrase.
+
+    Retourne None uniquement pour une erreur technique inattendue, seule à mériter
+    un panneau (avec référence de support)."""
     base = getattr(error, "original", error)
     prefix = _prefix(ctx)
-    commande = str(getattr(getattr(ctx, "command", None), "qualified_name", "") or "")
+    usage = _usage(ctx)
 
     if isinstance(base, commands.CommandNotFound):
         typed = str(getattr(ctx, "invoked_with", "") or "").strip()
-        # Renvoyer vers +help alors qu'on CONNAIT les commandes proches n'aide
-        # personne : taper « +sticky » doit proposer sticky-set / sticky-off. La
-        # recherche vit dans command_response_guard, on la reutilise.
         suggestions: list[str] = []
         try:
             from . import command_response_guard as guard
@@ -157,208 +166,98 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
             suggestions = guard._command_suggestions(getattr(ctx, "bot", None), ctx, typed)
         except Exception:
             logger.debug("Suggestions de commandes indisponibles.", exc_info=True)
-
-        sections = []
+        texte = f"Commande introuvable : `{prefix}{typed}`."
         if suggestions:
-            sections.append(
-                panels.Section(
-                    "Vouliez-vous dire",
-                    [
-                        panels.Ligne(f"{prefix}{nom}", "Commande existante")
-                        for nom in suggestions[:3]
-                    ],
-                )
-            )
-        sections.append(_aide(prefix, suggestions[0] if suggestions else ""))
-        return _panneau(
-            "Commande introuvable",
-            f"`{prefix}{typed}` n'existe pas.",
-            sections=sections,
-            boutons=[panels.Bouton("Voir toutes les commandes", custom_id="sentrix:erreur:help")],
-        )
-
+            texte += " Vouliez-vous dire " + " ou ".join(f"`{prefix}{nom}`" for nom in suggestions[:2]) + " ?"
+        else:
+            texte += f" Voir `{prefix}help`."
+        return texte
     if isinstance(base, commands.MissingRequiredArgument):
-        nom = str(getattr(getattr(base, "param", None), "name", "argument") or "argument")
-        return _panneau(
-            "Argument manquant",
-            f"L'argument **{nom}** est obligatoire.",
-            kind="warning",
-            sections=[
-                panels.Section("Syntaxe attendue", [panels.Ligne("Commande", f"`{_usage(ctx)}`")]),
-                _aide(prefix, commande),
-            ],
-        )
-
+        return f"Usage : `{usage}`"
     if isinstance(base, commands.TooManyArguments):
-        return _panneau(
-            "Trop d'arguments",
-            "Cette commande attend moins de valeurs que ce qui a été fourni.",
-            kind="warning",
-            sections=[
-                panels.Section("Syntaxe attendue", [panels.Ligne("Commande", f"`{_usage(ctx)}`")]),
-                _aide(prefix, commande),
-            ],
-        )
-
+        return f"Trop d'arguments. Usage : `{usage}`"
     introuvables = {
-        commands.MemberNotFound: ("Utilisateur introuvable", "ce membre", "une mention, un pseudo ou un identifiant"),
-        commands.UserNotFound: ("Utilisateur introuvable", "cet utilisateur", "une mention, un pseudo ou un identifiant"),
-        commands.RoleNotFound: ("Rôle introuvable", "ce rôle", "une mention, un nom ou un identifiant"),
-        commands.ChannelNotFound: ("Salon introuvable", "ce salon", "une mention, un nom ou un identifiant"),
-        commands.MessageNotFound: ("Message introuvable", "ce message", "un identifiant ou un lien de message"),
+        commands.MemberNotFound: "Membre introuvable : indiquez une mention, un pseudo ou un identifiant.",
+        commands.UserNotFound: "Utilisateur introuvable : indiquez une mention, un pseudo ou un identifiant.",
+        commands.RoleNotFound: "Rôle introuvable : indiquez une mention, un nom ou un identifiant.",
+        commands.ChannelNotFound: "Salon introuvable : indiquez une mention, un nom ou un identifiant.",
+        commands.MessageNotFound: "Message introuvable : indiquez un identifiant ou un lien de message.",
     }
-    for type_erreur, (titre, quoi, accepte) in introuvables.items():
+    for type_erreur, texte in introuvables.items():
         if isinstance(base, type_erreur):
-            return _panneau(
-                titre,
-                f"SentriX n'a pas trouvé {quoi} sur ce serveur.",
-                sections=[
-                    panels.Section(
-                        "Formats acceptés",
-                        [panels.Ligne("Vous pouvez donner", accepte)],
-                    ),
-                    panels.Section("Syntaxe attendue", [panels.Ligne("Commande", f"`{_usage(ctx)}`")]),
-                ],
-            )
-
-    if isinstance(base, (commands.BadUnionArgument, commands.BadArgument, commands.ConversionError)):
-        return _panneau(
-            "Argument invalide",
-            "Une des valeurs fournies n'a pas le format attendu.",
-            kind="warning",
-            sections=[
-                panels.Section("Syntaxe attendue", [panels.Ligne("Commande", f"`{_usage(ctx)}`")]),
-                _aide(prefix, commande),
-            ],
-        )
-
+            return texte
+    if isinstance(base, commands.RangeError):
+        minimum, maximum = getattr(base, "minimum", None), getattr(base, "maximum", None)
+        if minimum is not None and maximum is not None:
+            return f"La valeur doit être comprise entre {minimum} et {maximum}. Usage : `{usage}`"
+        return f"Valeur hors limites. Usage : `{usage}`"
+    if isinstance(base, (commands.BadUnionArgument, commands.BadArgument, commands.ConversionError, commands.UserInputError)):
+        return f"Argument invalide. Usage : `{usage}`"
     if isinstance(base, commands.CommandOnCooldown):
-        secondes = max(0.1, float(base.retry_after))
-        return _panneau(
-            "Commande en attente",
-            f"Cette commande est limitée pour éviter les abus.",
-            kind="warning",
-            sections=[
-                panels.Section(
-                    "Délai restant",
-                    [
-                        panels.Ligne(
-                            "Réessayez dans",
-                            f"**{secondes:.1f} s**",
-                            indice="Le compteur repart à chaque utilisation réussie.",
-                        )
-                    ],
-                )
-            ],
-        )
-
+        return f"Commande en attente : réessayez dans {max(1, round(float(base.retry_after)))} s."
+    if isinstance(base, commands.MaxConcurrencyReached):
+        return "Cette commande est déjà en cours. Terminez-la avant de recommencer."
     if isinstance(base, commands.MissingPermissions):
-        requise = _libelles(base.missing_permissions)
-        return _panneau(
-            "Permission insuffisante",
-            "Vous n'avez pas le droit d'utiliser cette commande ici.",
-            sections=[
-                panels.Section("Permission requise", [panels.Ligne("Il vous faut", f"**{requise}**")]),
-                panels.Section(
-                    "Comment l'obtenir",
-                    [
-                        panels.Ligne("Par un administrateur", "Paramètres du serveur › Rôles"),
-                        panels.Ligne("Ou via SentriX", f"`{prefix}setup` › Permissions"),
-                    ],
-                ),
-            ],
-        )
-
+        return f"Il vous faut la permission **{_libelles(base.missing_permissions)}** pour cette commande."
     if isinstance(base, commands.BotMissingPermissions):
-        requise = _libelles(base.missing_permissions)
-        return _panneau(
-            "SentriX n'a pas les permissions",
-            "L'action a été refusée par Discord, pas par SentriX.",
-            sections=[
-                panels.Section("Permission manquante", [panels.Ligne("SentriX a besoin de", f"**{requise}**")]),
-                panels.Section(
-                    "Comment la donner",
-                    [
-                        panels.Ligne("1", "Paramètres du serveur › Rôles"),
-                        panels.Ligne("2", "Ouvrez le rôle **SentriX**"),
-                        panels.Ligne("3", f"Activez **{requise}**, puis relancez la commande"),
-                    ],
-                ),
-            ],
-        )
-
+        return f"Il manque à SentriX la permission **{_libelles(base.missing_permissions)}**."
     if isinstance(base, commands.NoPrivateMessage):
-        return _panneau(
-            "Serveur requis",
-            "Cette commande a besoin d'un serveur pour savoir sur quoi agir.",
-            kind="warning",
-            sections=[panels.Section("Où l'utiliser", [panels.Ligne("Lieu", "Dans un salon d'un serveur où SentriX est présent")])],
-        )
-
+        return "Cette commande s'utilise dans un salon de serveur."
     if isinstance(base, commands.PrivateMessageOnly):
-        return _panneau(
-            "Message privé requis",
-            "Cette commande ne fonctionne qu'en conversation privée avec SentriX.",
-            kind="warning",
-            sections=[panels.Section("Où l'utiliser", [panels.Ligne("Lieu", "Dans vos messages privés avec SentriX")])],
-        )
-
+        return "Cette commande s'utilise en message privé avec SentriX."
     cls = type(base).__name__
     if cls == "BotBlacklistedError":
-        raison = str(getattr(base, "reason", "") or "Aucune raison fournie")
-        return _panneau(
-            "Accès refusé",
-            "Vous n'êtes pas autorisé à utiliser SentriX.",
-            sections=[panels.Section("Raison", [panels.Ligne("Motif enregistré", raison)])],
-        )
-
+        return f"Vous n'êtes pas autorisé à utiliser SentriX ({getattr(base, 'reason', None) or 'aucune raison fournie'})."
     if cls == "RuntimeRateLimitError":
-        # docs/core-v2-audit-technical-debt.md §3 : ce message vivait dans
-        # cogs/bot_excellence_runtime.py::improved_error_handler, un patch de
-        # classe (cls.on_command_error) définitivement masqué par le
-        # remplacement d'instance ci-dessous (bot.on_command_error =
-        # MethodType(prefix_error, bot)) — RuntimeRateLimitError (une
-        # CheckFailure sans .message) retombait donc dans le cas générique
-        # juste après et affichait à tort "Vous n'êtes pas autorisé à utiliser
-        # cette commande" pour un simple ralentissement anti-abus.
         secondes = max(1, round(float(getattr(base, "retry_after", 1.0) or 1.0)))
-        return _panneau(
-            "Fonction temporairement limitée",
-            f"Cette fonction est temporairement limitée pour protéger SentriX. Réessayez dans environ {secondes} seconde(s).",
-            kind="warning",
-        )
-
+        return f"Fonction temporairement limitée : réessayez dans {secondes} s."
     if cls == "BotPermissionError" or isinstance(base, commands.CheckFailure):
-        message = str(getattr(base, "message", "") or "Vous n'êtes pas autorisé à utiliser cette commande.")
-        return _panneau(
-            "Accès refusé",
-            message,
-            sections=[
-                panels.Section(
-                    "Que faire",
-                    [panels.Ligne("Demandez au staff", f"Un administrateur peut ouvrir l'accès via `{prefix}setup` › Permissions")],
-                )
-            ],
-        )
+        return str(getattr(base, "message", "") or "Vous n'avez pas la permission d'utiliser cette commande.")
+    if isinstance(base, discord.HTTPException):
+        return _texte_discord(base)
+    return None
 
-    if isinstance(base, discord.Forbidden):
-        return _panneau(
-            "Discord a refusé l'action",
-            "SentriX a bien reçu la commande, mais Discord a bloqué l'exécution.",
-            sections=[
-                panels.Section(
-                    "Causes possibles",
-                    [
-                        panels.Ligne("Hiérarchie", "Le rôle **SentriX** est placé sous le rôle ou le membre visé"),
-                        panels.Ligne("Permission", "Une permission manque sur ce salon ou sur le serveur"),
-                    ],
-                ),
-                panels.Section(
-                    "Correction",
-                    [panels.Ligne("À faire", "Remontez le rôle **SentriX** dans Paramètres du serveur › Rôles")],
-                ),
-            ],
-        )
+
+def _texte_erreur_slash(error: discord.app_commands.AppCommandError) -> str | None:
+    """Même règle pour les commandes slash natives."""
+    original = getattr(error, "original", error)
+    app = discord.app_commands
+    if isinstance(error, app.CommandOnCooldown):
+        return f"Commande en attente : réessayez dans {max(1, round(float(error.retry_after)))} s."
+    if isinstance(error, app.MissingPermissions):
+        return f"Il vous faut la permission **{_libelles(error.missing_permissions)}** pour cette commande."
+    if isinstance(error, app.BotMissingPermissions):
+        return f"Il manque à SentriX la permission **{_libelles(error.missing_permissions)}**."
+    if isinstance(error, (app.TransformerError, app.CommandSignatureMismatch)):
+        return "Une des options fournies est invalide."
+    cls = type(error).__name__
+    if cls == "BotBlacklistedError":
+        return f"Vous n'êtes pas autorisé à utiliser SentriX ({getattr(error, 'reason', None) or 'aucune raison fournie'})."
+    if cls == "BotPermissionError" or isinstance(error, app.CheckFailure):
+        return str(getattr(error, "message", "") or "Vous n'avez pas la permission d'utiliser cette commande.")
+    if isinstance(original, commands.CommandError):
+        # Passerelle V95/V98 : l'erreur d'origine est une erreur commands.py classique.
+        class _Ctx:  # usage minimal pour _usage()/_prefix()
+            command = None
+            clean_prefix = "/"
+            invoked_with = ""
+            bot = None
+        return _texte_erreur_prefix(_Ctx(), original)  # type: ignore[arg-type]
+    if isinstance(original, discord.HTTPException):
+        return _texte_discord(original)
+    return None
+
+
+def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> panels.Panneau:
+    """Panneau compact réservé aux erreurs TECHNIQUES inattendues.
+
+    Toutes les erreurs simples (syntaxe, permission, cible introuvable, refus
+    Discord…) sont rendues en une phrase par ``_texte_erreur_prefix`` : ce
+    panneau n'apparaît que lorsqu'un vrai bug a interrompu la commande, avec la
+    référence enregistrée côté serveur.
+    """
+    base = getattr(error, "original", error)
+    commande = str(getattr(getattr(ctx, "command", None), "qualified_name", "") or "")
 
     # Seul cas qui journalisait auparavant zero trace exploitable côté serveur —
     # voir docs/core-v2-audit-technical-debt.md §2. core.errors.pipeline.report()
@@ -373,21 +272,15 @@ def _prefix_error_panel(ctx: commands.Context, error: commands.CommandError) -> 
     )
     return _panneau(
         "Erreur de commande",
-        "Une erreur technique a interrompu la commande.",
+        "Une erreur technique a interrompu la commande. Réessayez ; si le problème persiste, communiquez cette référence au support.",
         sections=[
             panels.Section(
-                "Ce qui s'est passé",
+                "Détails",
                 [
-                    panels.Ligne("Effet sur le serveur", "**Aucun** — rien n'a été modifié"),
-                    panels.Ligne(
-                        "Référence",
-                        entree.code,
-                        indice="Enregistrée automatiquement — donnez cette référence au support si besoin.",
-                    ),
+                    panels.Ligne("Référence", entree.code),
+                    panels.Ligne("Commande", f"`{_usage(ctx)}`"),
                 ],
             ),
-            panels.Section("Ce que vous pouvez faire", [panels.Ligne("Vérifiez la syntaxe", f"`{_usage(ctx)}`")]),
-            _aide(prefix, commande),
         ],
     )
 
@@ -407,75 +300,6 @@ def _slash_error_panel(
     enrichir la référence d'erreur du repli générique ci-dessous."""
     original = getattr(error, "original", error)
 
-    if isinstance(error, discord.app_commands.CommandOnCooldown):
-        secondes = max(0.1, float(error.retry_after))
-        return _panneau(
-            "Commande en attente",
-            "Cette commande est limitée pour éviter les abus.",
-            kind="warning",
-            sections=[
-                panels.Section(
-                    "Délai restant",
-                    [panels.Ligne("Réessayez dans", f"**{secondes:.1f} s**")],
-                )
-            ],
-        )
-
-    if isinstance(error, discord.app_commands.MissingPermissions):
-        requise = _libelles(error.missing_permissions)
-        return _panneau(
-            "Permission insuffisante",
-            "Vous n'avez pas le droit d'utiliser cette commande ici.",
-            sections=[
-                panels.Section("Permission requise", [panels.Ligne("Il vous faut", f"**{requise}**")]),
-                panels.Section(
-                    "Comment l'obtenir",
-                    [panels.Ligne("Par un administrateur", "Paramètres du serveur › Rôles")],
-                ),
-            ],
-        )
-
-    if isinstance(error, discord.app_commands.BotMissingPermissions):
-        requise = _libelles(error.missing_permissions)
-        return _panneau(
-            "SentriX n'a pas les permissions",
-            "L'action a été refusée par Discord, pas par SentriX.",
-            sections=[
-                panels.Section("Permission manquante", [panels.Ligne("SentriX a besoin de", f"**{requise}**")]),
-                panels.Section(
-                    "Comment la donner",
-                    [panels.Ligne("À faire", f"Activez **{requise}** sur le rôle SentriX, puis relancez")],
-                ),
-            ],
-        )
-
-    if isinstance(error, (discord.app_commands.TransformerError,
-                          discord.app_commands.CommandSignatureMismatch)):
-        return _panneau(
-            "Argument invalide",
-            "Une valeur fournie n'a pas le format attendu par cette commande.",
-            kind="warning",
-            sections=[
-                panels.Section(
-                    "Que faire",
-                    [panels.Ligne("Vérifiez", "Le type de chaque option proposée par Discord")],
-                )
-            ],
-        )
-
-    cls = type(original).__name__
-    if cls == "BotBlacklistedError":
-        raison = str(getattr(original, "reason", "") or "Aucune raison fournie")
-        return _panneau(
-            "Accès refusé",
-            "Vous n'êtes pas autorisé à utiliser SentriX.",
-            sections=[panels.Section("Raison", [panels.Ligne("Motif enregistré", raison)])],
-        )
-
-    if cls == "BotPermissionError" or isinstance(error, discord.app_commands.CheckFailure):
-        message = str(getattr(original, "message", "") or "Vous n'êtes pas autorisé à utiliser cette commande.")
-        return _panneau("Accès refusé", message)
-
     entree = error_pipeline.report(
         original,
         command=command or "inconnue",
@@ -485,22 +309,14 @@ def _slash_error_panel(
     )
     return _panneau(
         "Erreur de commande",
-        "Une erreur technique inattendue a interrompu la commande.",
+        "Une erreur technique a interrompu la commande. Réessayez ; si le problème persiste, communiquez cette référence au support.",
         sections=[
             panels.Section(
-                "Ce qui s'est passé",
+                "Détails",
                 [
-                    panels.Ligne("Effet sur le serveur", "**Aucun** — rien n'a été modifié"),
-                    panels.Ligne(
-                        "Référence",
-                        entree.code,
-                        indice="Enregistrée automatiquement — donnez cette référence au support si besoin.",
-                    ),
+                    panels.Ligne("Référence", entree.code),
+                    panels.Ligne("Commande", f"`/{command}`" if command else "`/help`"),
                 ],
-            ),
-            panels.Section(
-                "Ce que vous pouvez faire",
-                [panels.Ligne("Réessayez", "Après avoir vérifié les options de la commande")],
             ),
         ],
     )
@@ -576,10 +392,45 @@ async def _raw_prefix_send(ctx: commands.Context, panneau: panels.Panneau) -> No
         ctx._sentrix_last_response = sent
 
 
+async def _texte_prefix_send(ctx: commands.Context, texte: str) -> None:
+    """Erreur simple = une ligne de texte dans le salon de la commande (jamais de carte)."""
+    raw_send = policy._unwrap(discord.abc.Messageable.send)
+    message = getattr(ctx, "_sentrix_last_response", None)
+    if isinstance(message, discord.Message) and getattr(message.channel, "id", None) == getattr(ctx.channel, "id", None):
+        raw_edit = policy._unwrap(discord.Message.edit)
+        try:
+            await raw_edit(message, content=texte[:1900], embeds=[], view=None, attachments=[], allowed_mentions=_ALLOWED)
+            return
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            logger.debug("Impossible de remplacer la réponse préfixée par le texte d'erreur.", exc_info=True)
+    sent = await raw_send(ctx.channel, content=texte[:1900], allowed_mentions=_ALLOWED, delete_after=_DUREE_AFFICHAGE)
+    ctx._sentrix_response_sent = True
+    if sent is not None:
+        ctx._sentrix_last_response = sent
+
+
+async def _texte_slash_send(interaction: discord.Interaction, texte: str) -> None:
+    texte = texte[:1900]
+    raw_edit = policy._unwrap(discord.Interaction.edit_original_response)
+    if not interaction.response.is_done():
+        raw_response = policy._unwrap(discord.InteractionResponse.send_message)
+        await raw_response(interaction.response, content=texte, ephemeral=True, allowed_mentions=_ALLOWED)
+        return
+    try:
+        await raw_edit(interaction, content=texte, embeds=[], view=None, attachments=[])
+    except discord.NotFound:
+        raw_webhook = policy._unwrap(discord.Webhook.send)
+        await raw_webhook(interaction.followup, content=texte, ephemeral=True, allowed_mentions=_ALLOWED)
+
+
 async def _replace_prefix_response(ctx: commands.Context, panneau: panels.Panneau) -> bool:
     """Remplace la derniere reponse d'une commande au lieu d'en creer une deuxieme."""
     message = getattr(ctx, "_sentrix_last_response", None)
     if not isinstance(message, discord.Message):
+        return False
+    # Jamais une réponse envoyée AILLEURS (le MP de sanction au membre, par exemple) :
+    # l'erreur remplacerait le message privé du membre au lieu de répondre au modérateur.
+    if getattr(message.channel, "id", None) != getattr(ctx.channel, "id", None):
         return False
     raw_edit = policy._unwrap(discord.Message.edit)
     try:
@@ -665,8 +516,12 @@ def install(bot: commands.Bot) -> None:
             except Exception:
                 logger.exception("V5 : matchmaking +tictactoe indisponible, repli sur le panneau d'erreur standard.")
 
-        panel = _prefix_error_panel(ctx, error)
+        texte = _texte_erreur_prefix(ctx, error)
         try:
+            if texte is not None:
+                await _texte_prefix_send(ctx, texte)
+                return
+            panel = _prefix_error_panel(ctx, error)
             if getattr(ctx, "_sentrix_response_sent", False):
                 replaced = await _replace_prefix_response(ctx, panel)
                 if not replaced:
@@ -684,13 +539,17 @@ def install(bot: commands.Bot) -> None:
 
     async def slash_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
         command = getattr(interaction, "command", None)
-        panel = _slash_error_panel(
-            error,
-            command=getattr(command, "qualified_name", None),
-            guild_id=interaction.guild_id,
-            user_id=getattr(interaction.user, "id", None),
-        )
+        texte = _texte_erreur_slash(error)
         try:
+            if texte is not None:
+                await _texte_slash_send(interaction, texte)
+                return
+            panel = _slash_error_panel(
+                error,
+                command=getattr(command, "qualified_name", None),
+                guild_id=interaction.guild_id,
+                user_id=getattr(interaction.user, "id", None),
+            )
             await _raw_slash_send(interaction, panel)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):
             logger.exception("V5 : impossible d’envoyer l’erreur slash en embed natif.")

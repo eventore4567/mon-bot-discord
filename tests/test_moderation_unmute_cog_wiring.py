@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from cogs.moderation import Moderation
-from utils import sentrix_panels as panels
 
 
 class _FakeRole:
@@ -76,7 +75,7 @@ def _make_cog(*, case_number=3):
 
 
 class UnmuteCogWiringTests(unittest.IsolatedAsyncioTestCase):
-    async def test_retrait_du_mute_reussi_appelle_le_service_et_rend_le_panneau(self):
+    async def test_retrait_du_mute_reussi_appelle_le_service_et_confirme_en_une_ligne(self):
         cog = _make_cog(case_number=3)
         ctx, guild, actor, target = _fake_ctx()
 
@@ -96,7 +95,7 @@ class UnmuteCogWiringTests(unittest.IsolatedAsyncioTestCase):
         target.timeout.assert_not_awaited()
         ctx.send.assert_awaited()
 
-    async def test_echec_de_persistance_n_empeche_pas_le_panneau_de_succes(self):
+    async def test_echec_de_persistance_n_empeche_pas_la_confirmation_de_succes(self):
         cog = _make_cog()
         cog.bot.db.record_sanction = AsyncMock(side_effect=RuntimeError("disque plein"))
         ctx, guild, actor, target = _fake_ctx()
@@ -104,9 +103,9 @@ class UnmuteCogWiringTests(unittest.IsolatedAsyncioTestCase):
         await Moderation.unmute.callback(cog, ctx, target, raison="test")
 
         target.timeout.assert_awaited_once()
-        panneau = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(panneau, panels.Panneau)
-        self.assertEqual(panneau.kind, "moderation")
+        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
+        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
 
 
 if __name__ == "__main__":

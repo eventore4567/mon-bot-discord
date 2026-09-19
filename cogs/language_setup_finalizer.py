@@ -76,10 +76,12 @@ def _set_author(embed: discord.Embed, bot: commands.Bot) -> None:
 
 
 async def _purge_local_slash_for_guild(bot: commands.Bot, guild: discord.Guild) -> int:
+    if getattr(guild, "unavailable", False) or not getattr(guild, "name", ""):
+        return 0  # serveur indisponible : rien à lire, on repassera au prochain démarrage
     try:
         remote = await bot.tree.fetch_commands(guild=guild)
     except discord.HTTPException:
-        logger.warning("Impossible de lire les slash locaux de %s (%s).", guild.name, guild.id)
+        logger.info("Slash locaux illisibles pour %s (%s) ; nouvel essai au prochain démarrage.", guild.name, guild.id)
         return 0
     if not remote:
         return 0

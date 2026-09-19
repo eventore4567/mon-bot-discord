@@ -28,7 +28,6 @@ logger = logging.getLogger("bot.production-embed-log-repair")
 
 _MIGRATION_KEY = "production_embed_log_repair_v2"
 _PREFIX_MARKER = "_sentrix_direct_embed_transport_v2"
-_POLICY_MARKER = "_sentrix_all_commands_embed_v2"
 _EMITTING_LOG_TYPES = tuple(
     key for key, meta in log_service.LOG_TYPES.items() if bool(meta.get("emits"))
 )
@@ -54,23 +53,7 @@ def _state(bot: commands.Bot) -> dict[str, Any]:
     return current
 
 
-def _force_all_command_embeds() -> None:
-    """Supprime la dernière exception historique : ``sentrix`` reste une commande.
-
-    Les messages ordinaires du bot ne sont pas concernés : sans racine de commande, les
-    transports globaux ne convertissent rien. Seules les sorties exécutées dans le contexte
-    d'une commande sont donc forcées en embed.
-    """
-    current = policy._plain_root
-    if getattr(current, _POLICY_MARKER, False):
-        return
-
-    def no_plain_command_root(_root: str) -> bool:
-        return False
-
-    setattr(no_plain_command_root, _POLICY_MARKER, True)
-    no_plain_command_root._sentrix_original = current
-    policy._plain_root = no_plain_command_root
+# Les racines « plain » sont définies une fois dans final_interaction_policy.PLAIN_ROOTS.
 
 
 def _install_direct_prefix_transport(bot: commands.Bot) -> None:
@@ -103,12 +86,15 @@ def _install_direct_prefix_transport(bot: commands.Bot) -> None:
             # Réponse visuellement liée au message, mais aucune notification automatique.
             kwargs["mention_author"] = False
 
-        args, kwargs = invariant._normalize_command_payload(
-            args,
-            kwargs,
-            root=root or "commande",
-            bot=getattr(self, "bot", None),
-        )
+        # Texte volontairement brut (panels.texte_court) ou racine « plain » : aucune
+        # promotion en carte ici non plus.
+        if not policy._plain_root(root):
+            args, kwargs = invariant._normalize_command_payload(
+                args,
+                kwargs,
+                root=root or "commande",
+                bot=getattr(self, "bot", None),
+            )
         return await current(self, *args, **kwargs)
 
     setattr(send_with_embed, _PREFIX_MARKER, True)
@@ -332,7 +318,6 @@ def _install_health_patch(bot: commands.Bot) -> None:
 async def setup(bot: commands.Bot) -> None:
     # Réinstaller d'abord l'invariant global, puis protéger directement le Context réel.
     invariant.install(bot)
-    _force_all_command_embeds()
     _install_direct_prefix_transport(bot)
 
     # Le runtime précédent coupe déjà le kill-switch SENTRIX_LOG_PRODUCER ; on le garde
@@ -365,5 +350,4 @@ __all__ = [
     "repair_guild_runtime",
     "_should_mass_recover",
     "_install_direct_prefix_transport",
-    "_force_all_command_embeds",
 ]

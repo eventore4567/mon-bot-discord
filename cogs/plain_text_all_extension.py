@@ -115,30 +115,11 @@ def _install_final_visual_stack(bot: commands.Bot) -> None:
     log_compact_final.PANEL_BAR = panel_bar
     log_compact_final.install()
 
-    # sentrix_runtime est maintenant installé après le chargement des cogs. Son hook
-    # Bot.add_cog ne peut donc pas rétroactivement toucher les commandes déjà présentes :
-    # on applique explicitement le patch qui doit rester actif. La surcharge de +ping
-    # a ete retiree : la commande composee de cogs/utility fait desormais tout ce que
-    # cette surcharge apportait, et davantage.
-    sentrix_runtime._patch_clear(bot)
-
-    # Le convertisseur app_commands.Range est parfait côté slash, mais son annotation a
-    # déjà produit des BadArgument sur la commande préfixée +clear. Le slash garde sa
-    # contrainte 1..100 ; seul le parseur préfixé est ramené à un entier simple, le callback
-    # final bornant ensuite la valeur à 1..100.
-    clear_command = bot.get_command("clear")
-    if clear_command is not None:
-        async def clear_signature_probe(ctx: commands.Context, nombre: int):
-            return None
-
-        probe = commands.Command(clear_signature_probe, name="_sentrix_clear_signature_probe")
-        clear_command.params = probe.params.copy()
-        clear_command.usage = "<nombre>"
-        clear_command._sentrix_clear_int_contract = True
+    # +clear vit entièrement dans cogs/moderation.py (réponse courte, journal, bornes 1..100).
 
     bot._sentrix_final_visual_stack = True
     logger.info(
-        "Pile visuelle finale restaurée : embeds, erreurs, +ping, +clear et logs compacts actifs."
+        "Pile visuelle finale restaurée : embeds, erreurs, +ping et logs compacts actifs."
     )
 
 
@@ -305,7 +286,7 @@ async def _register_official_help(bot: commands.Bot) -> None:
     try:
         bot.tree.remove_command("help", type=discord.AppCommandType.chat_input)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _register_official_help", exc_info=True)
 
     # Le Cog fournit les builders, vues, recherche et /help.
     await bot.add_cog(OfficialHelp(bot))

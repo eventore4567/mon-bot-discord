@@ -172,7 +172,7 @@ class SentriXFailoverCoordinator:
             try:
                 await client.aclose()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _connect", exc_info=True)
             raise
         self._redis = client
 
@@ -182,7 +182,7 @@ class SentriXFailoverCoordinator:
             try:
                 await client.aclose()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _drop_client", exc_info=True)
 
     async def _lire_dernier_leader(self) -> str | None:
         """Service qui détenait le leadership avant nous. Jamais bloquant."""
@@ -250,7 +250,7 @@ class SentriXFailoverCoordinator:
                     self.attente_primary_key, self.owner_id, ex=max(10, self.poll_seconds * 5)
                 )
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _try_acquire", exc_info=True)
         return False
 
     async def un_primary_attend(self) -> bool:
@@ -413,7 +413,7 @@ class SentriXFailoverCoordinator:
             except asyncio.CancelledError:
                 pass
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans close", exc_info=True)
         if release:
             await self.release()
         await self._drop_client()

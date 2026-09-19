@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-EXPECTED_SETUP_CATEGORIES = 11
+EXPECTED_SETUP_CATEGORIES = 12  # + Départs (séparé de Bienvenue)
 
 
 async def run() -> int:
@@ -197,7 +197,7 @@ async def run() -> int:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
     print(
-        "OK: FR/EN persistant, 11 categories dont Invitations, navigation V70/V72, "
+        "OK: FR/EN persistant, 12 categories dont Invitations, navigation V70/V72, "
         "Tickets V72, help officiel et aucun doublon"
     )
     return 0

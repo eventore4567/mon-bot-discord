@@ -163,7 +163,7 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild) -> discord
         db_ms = (time.perf_counter() - db_start) * 1000.0
         db_ok = bool(row and row["ok"] == 1)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans build_health_embed", exc_info=True)
 
     latency_ms = max(0.0, float(getattr(bot, "latency", 0.0) or 0.0) * 1000.0)
     me = guild.me
@@ -342,7 +342,7 @@ class V17Health(commands.Cog, name="V17Health"):
             if isinstance(channel, discord.TextChannel):
                 await panels.envoyer(channel, panels.depuis_embed(embeds.warning(text, title='Santé SentriX : commande à surveiller')), allowed_mentions=discord.AllowedMentions.none())
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _maybe_alert", exc_info=True)
 
     @commands.Cog.listener()
     async def on_command_completion(self, ctx: commands.Context):

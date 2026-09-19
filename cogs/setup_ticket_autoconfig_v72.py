@@ -506,12 +506,12 @@ async def ensure_ticket_configuration(
                 try:
                     await bot.db.execute("DELETE FROM ticket_types WHERE id=?", (created_type_id,))
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans ensure_ticket_configuration", exc_info=True)
             if created_panel_id is not None:
                 try:
                     await bot.db.execute("DELETE FROM ticket_panels_v2 WHERE id=?", (created_panel_id,))
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans ensure_ticket_configuration", exc_info=True)
             for resource in reversed(created_resources):
                 try:
                     await resource.delete(reason="Rollback SentriX V72 : configuration Tickets incomplète")

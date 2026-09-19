@@ -4,6 +4,7 @@ Le nouveau +setup et /setup utilisent le même contrôleur, modifient toujours l
 message et lisent les configurations historiques au lieu de les recréer.
 """
 from __future__ import annotations
+import logging
 
 import re
 from enum import Enum
@@ -13,6 +14,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import checks, embeds, log_service, sentrix_panels as panels
+
+logger = logging.getLogger("bot.setup-control-center")
 
 
 class ConfigState(str, Enum):
@@ -27,7 +30,8 @@ CATEGORIES = {
     "security": ("Sécurité", "Anti-spam, anti-raid, liens, mentions et protection du serveur."),
     "logs": ("Logs", "Messages, membres, rôles, salons, vocal, tickets et sécurité."),
     "tickets": ("Tickets", "Panels, types, catégories, rôles support et options des tickets."),
-    "welcome": ("Bienvenue & départ", "Accueil, départ, messages, image et rôle automatique."),
+    "welcome": ("Bienvenue", "Accueil des nouveaux membres : salon, message, image."),
+    "goodbye": ("Départs", "Message envoyé quand un membre quitte le serveur."),
     "roles": ("Rôles", "Autorôles, vérification, rôles membres et récompenses."),
     "levels": ("Niveaux & économie", "XP, activité, argent, banque, récompenses et boutique."),
     "notifications": ("Notifications", "YouTube, Twitch et TikTok, salons et rôles mentionnés."),
@@ -39,7 +43,7 @@ AUTOMOD = (
     ("antispam", "Anti-spam"), ("antiraid", "Anti-raid"), ("antilink", "Anti-lien"),
     ("antiinvite", "Anti-invitation"), ("antimention", "Anti-ping"), ("anticaps", "Anti-majuscules"),
     ("antiemoji", "Anti-emoji"), ("antibot", "Anti-bot"), ("antiaccount", "Anti-compte récent"),
-    ("antiscam", "Anti-scam"), ("antinuke", "Anti-nuke"),
+    ("antiscam", "Anti-scam"), ("antinuke", "Anti-nuke"), ("antiinsult", "Anti-insultes"),
 )
 
 BOT_PERMS = {
@@ -48,6 +52,7 @@ BOT_PERMS = {
     "logs": ("view_channel", "send_messages", "embed_links", "attach_files", "read_message_history", "view_audit_log"),
     "tickets": ("manage_channels", "manage_roles", "view_channel", "send_messages"),
     "welcome": ("view_channel", "send_messages", "embed_links", "manage_roles"),
+    "goodbye": ("view_channel", "send_messages", "embed_links"),
     "roles": ("manage_roles",),
     "levels": ("view_channel", "send_messages", "embed_links"),
     "notifications": ("view_channel", "send_messages", "embed_links", "mention_everyone"),
@@ -139,6 +144,22 @@ async def _permission_error(target):
     return await panels.envoyer(target.response, panels.depuis_embed(panel), ephemere=True)
 
 
+async def _apply_module_switch(bot, guild_id: int, module: str, state, summary: str, errors):
+    """Croise l'état « ressources » avec l'interrupteur du module (source unique :
+    module_settings). Désactivé explicitement → INACTIF quoi qu'il y ait en base ;
+    jamais configuré → NON CONFIGURÉ, même si des données existent."""
+    from cogs import setup_v2_core as core
+
+    switch = await core.module_state(bot, guild_id, module)
+    if switch == core.MODULE_STATE_DISABLED:
+        return ConfigState.INACTIVE, f"Désactivé. {summary}", errors
+    if switch == core.MODULE_STATE_NOT_CONFIGURED:
+        if state in (ConfigState.ACTIVE, ConfigState.ERROR):
+            return ConfigState.UNCONFIGURED, f"{summary} Module non activé.", errors
+        return ConfigState.UNCONFIGURED, summary, errors
+    return state, summary, errors
+
+
 async def module_statuses(bot, guild, conf):
     result = {}
 
@@ -168,16 +189,19 @@ async def module_statuses(bot, guild, conf):
         channel_id = setting.get("channel_id")
         if channel_id:
             configured_logs += 1
-        if setting.get("enabled"):
+        # Un type « activé » sans salon n'est pas actif : la ligne par défaut de
+        # log_config porte enabled=1 sans destination.
+        if setting.get("enabled") and channel_id:
             active_logs += 1
-            channel = guild.get_channel(int(channel_id)) if channel_id else None
+            channel = guild.get_channel(int(channel_id))
             if channel is None:
                 log_errors.append(f"{meta['category']} : salon introuvable.")
             else:
                 ok, reason = log_service.validate_channel(guild, channel.id, needs_file=True)
                 if not ok:
                     log_errors.append(f"{meta['category']} : {reason}.")
-    result["logs"] = (
+    result["logs"] = await _apply_module_switch(
+        bot, guild.id, "logs",
         ConfigState.ERROR if log_errors else ConfigState.ACTIVE if active_logs else ConfigState.INACTIVE if configured_logs else ConfigState.UNCONFIGURED,
         f"{active_logs} type(s) actif(s).",
         tuple(log_errors),
@@ -200,7 +224,8 @@ async def module_statuses(bot, guild, conf):
             ticket_errors.append("Un salon de logs tickets n’existe plus.")
     has_tickets = bool(panels or types or _get(conf, "ticket_category") or _get(conf, "ticket_log_channel"))
     enabled_panels = any(bool(_get(row, "enabled", 1)) for row in panels)
-    result["tickets"] = (
+    result["tickets"] = await _apply_module_switch(
+        bot, guild.id, "tickets",
         ConfigState.ERROR if ticket_errors else ConfigState.ACTIVE if (types or enabled_panels) else ConfigState.INACTIVE if has_tickets else ConfigState.UNCONFIGURED,
         f"{len(panels)} panel(s) • {len(types)} type(s).",
         tuple(ticket_errors),
@@ -208,14 +233,23 @@ async def module_statuses(bot, guild, conf):
 
     welcome_values = [
         (_get(conf, "welcome_channel"), False, "Salon de bienvenue"),
-        (_get(conf, "goodbye_channel"), False, "Salon de départ"),
         (_get(conf, "autorole"), True, "Autorole"),
     ]
     welcome_errors = [f"{label} introuvable." for value, role, label in welcome_values if _missing_resource(guild, value, role)]
-    result["welcome"] = (
-        ConfigState.ERROR if welcome_errors else ConfigState.ACTIVE if any(v for v, _, _ in welcome_values) else ConfigState.UNCONFIGURED,
-        "Accueil, départ et autorole.",
+    result["welcome"] = await _apply_module_switch(
+        bot, guild.id, "welcome",
+        ConfigState.ERROR if welcome_errors else ConfigState.ACTIVE if _get(conf, "welcome_channel") else ConfigState.UNCONFIGURED,
+        "Salon, message et image d'accueil.",
         tuple(welcome_errors),
+    )
+
+    goodbye_channel = _get(conf, "goodbye_channel")
+    goodbye_errors = ["Salon de départ introuvable."] if _missing_resource(guild, goodbye_channel, False) else []
+    result["goodbye"] = await _apply_module_switch(
+        bot, guild.id, "goodbye",
+        ConfigState.ERROR if goodbye_errors else ConfigState.ACTIVE if goodbye_channel else ConfigState.UNCONFIGURED,
+        "Salon et message de départ.",
+        tuple(goodbye_errors),
     )
 
     role_values = [(_get(conf, key), key) for key in ("autorole", "verify_role", "verification_role", "member_role", "booster_role")]
@@ -225,7 +259,8 @@ async def module_statuses(bot, guild, conf):
         f"Récompense niveau {_get(row, 'level')} introuvable."
         for row in level_roles if _missing_resource(guild, _get(row, "role_id"), True)
     ]
-    result["roles"] = (
+    result["roles"] = await _apply_module_switch(
+        bot, guild.id, "roles",
         ConfigState.ERROR if role_errors else ConfigState.ACTIVE if any(v for v, _ in role_values) or level_roles else ConfigState.UNCONFIGURED,
         f"{len(level_roles)} récompense(s) de niveau.",
         tuple(role_errors),
@@ -236,9 +271,14 @@ async def module_statuses(bot, guild, conf):
     shop_count = await bot.db.fetchone("SELECT COUNT(*) AS n FROM shop_items WHERE guild_id = ?", (guild.id,))
     level_error = _missing_resource(guild, _get(conf, "level_channel"))
     used = _get(level_count, "n", 0) or _get(economy_count, "n", 0) or _get(shop_count, "n", 0) or _get(conf, "level_channel")
-    result["levels"] = (
+    from cogs import setup_v2_core as core
+
+    economy_switch = await core.module_state(bot, guild.id, "economy")
+    economy_label = {"enabled": "Économie : ACTIVE", "disabled": "Économie : INACTIVE"}.get(economy_switch, "Économie : NON CONFIGURÉE")
+    result["levels"] = await _apply_module_switch(
+        bot, guild.id, "levels",
         ConfigState.ERROR if level_error else ConfigState.ACTIVE if used else ConfigState.UNCONFIGURED,
-        f"{_get(level_count, 'n', 0)} niveau(x) • {_get(economy_count, 'n', 0)} compte(s) • {_get(shop_count, 'n', 0)} article(s).",
+        f"{_get(level_count, 'n', 0)} niveau(x) • {_get(economy_count, 'n', 0)} compte(s) • {_get(shop_count, 'n', 0)} article(s) • {economy_label}.",
         ("Le salon de level-up n’existe plus.",) if level_error else (),
     )
 
@@ -253,7 +293,8 @@ async def module_statuses(bot, guild, conf):
                 notif_errors.append(f"{_get(row, 'platform', 'Notification')} : salon introuvable.")
             if _missing_resource(guild, _get(row, "role_id"), True):
                 notif_errors.append(f"{_get(row, 'platform', 'Notification')} : rôle introuvable.")
-    result["notifications"] = (
+    result["notifications"] = await _apply_module_switch(
+        bot, guild.id, "notifications",
         ConfigState.ERROR if notif_errors else ConfigState.ACTIVE if active_notifs else ConfigState.INACTIVE if notifications else ConfigState.UNCONFIGURED,
         f"{active_notifs}/{len(notifications)} source(s) active(s).",
         tuple(notif_errors),
@@ -266,6 +307,69 @@ async def module_statuses(bot, guild, conf):
         (),
     )
     return result
+
+
+# Premier écran : un interrupteur par module. « Anti-spam » est le filtre AutoMod du
+# même nom ; les autres sont les modules de module_settings (source unique).
+MODULE_SWITCHES = (
+    ("levels", "Niveaux"), ("economy", "Économie"), ("welcome", "Bienvenue"), ("goodbye", "Départs"),
+    ("antispam", "Anti-spam"), ("tickets", "Tickets"), ("logs", "Logs"), ("notifications", "Notifications"),
+)
+_SWITCH_LABELS = {"enabled": "ON", "disabled": "OFF", "not_configured": "OFF (non configuré)"}
+
+
+async def module_switch_states(bot, guild_id: int) -> dict[str, str]:
+    """État ON/OFF de chaque interrupteur du premier écran."""
+    from cogs import setup_v2_core as core
+
+    states: dict[str, str] = {}
+    for key, _label in MODULE_SWITCHES:
+        if key == "antispam":
+            row = await bot.db.fetchone("SELECT antispam FROM automod_settings WHERE guild_id = ?", (guild_id,))
+            states[key] = "enabled" if row and _get(row, "antispam", 0) else ("disabled" if row else "not_configured")
+        else:
+            states[key] = await core.module_state(bot, guild_id, key)
+    return states
+
+
+async def toggle_module_switch(bot, guild_id: int, key: str, actor_id: int | None) -> bool:
+    """Bascule un interrupteur ; retourne le nouvel état (True = ON)."""
+    from cogs import setup_v2_core as core
+
+    states = await module_switch_states(bot, guild_id)
+    nouveau = states.get(key) != "enabled"
+    if key == "antispam":
+        await bot.db.set_automod(guild_id, "antispam", 1 if nouveau else 0)
+        automod = bot.get_cog("Automod")
+        cache = getattr(automod, "automod_cache", None)
+        if isinstance(cache, dict):
+            cache.pop(guild_id, None)
+    else:
+        await core.set_module_enabled(bot, guild_id, key, nouveau, actor_id=actor_id)
+    return nouveau
+
+
+class ModuleSwitchSelect(discord.ui.Select):
+    """« Niveaux — ON », « Économie — OFF »… : choisir une ligne la bascule."""
+
+    def __init__(self, view, states: dict[str, str]):
+        self.owner = view
+        options = []
+        for key, label in MODULE_SWITCHES:
+            etat = states.get(key, "not_configured")
+            options.append(discord.SelectOption(
+                label=f"{label} — {_SWITCH_LABELS.get(etat, 'OFF')}",
+                value=key,
+                description=("Cliquer pour désactiver" if etat == "enabled" else "Cliquer pour activer")[:100],
+                emoji="🟢" if etat == "enabled" else "⚪",
+            ))
+        super().__init__(placeholder="Activer / désactiver un module", options=options, row=0)
+
+    async def callback(self, interaction):
+        key = self.values[0]
+        nouveau = await toggle_module_switch(self.owner.bot, self.owner.guild.id, key, interaction.user.id)
+        await self.owner.audit(interaction.user.id, f"module:{key}", "on" if nouveau else "off")
+        await self.owner.refresh(interaction)
 
 
 class CategorySelect(discord.ui.Select):
@@ -283,13 +387,74 @@ class CategorySelect(discord.ui.Select):
         await self.owner.refresh(interaction)
 
 
+# Champs pour lesquels SentriX devra AGIR sur le rôle (l'attribuer) : la hiérarchie
+# Discord doit le permettre au moment où on l'enregistre, pas au premier membre.
+_MANAGED_ROLE_FIELDS = frozenset({"autorole", "mute_role", "warn_role", "verify_role", "verification_role", "member_role", "booster_role"})
+# Champs où SentriX devra ÉCRIRE dans le salon (et souvent joindre un embed/fichier).
+_WRITABLE_CHANNEL_FIELDS = frozenset({
+    "welcome_channel", "goodbye_channel", "level_channel", "log_channel", "ticket_log_channel",
+    "suggest_channel", "announce_channel", "giveaway_channel", "rules_channel",
+})
+
+
+def validate_role_choice(guild, role, field: str) -> str | None:
+    """Motif de refus lisible, ou None si le rôle est utilisable pour ce champ."""
+    if role is None or field not in _MANAGED_ROLE_FIELDS:
+        return None
+    me = guild.me
+    if role.is_default():
+        return "Le rôle @everyone ne peut pas être utilisé ici."
+    if getattr(role, "managed", False):
+        return f"{role.mention} est géré par une intégration : SentriX ne peut pas l'attribuer."
+    if me is not None:
+        if not me.guild_permissions.manage_roles and not me.guild_permissions.administrator:
+            return "SentriX n'a pas la permission **Gérer les rôles** sur ce serveur."
+        if role >= me.top_role:
+            return (
+                f"{role.mention} est au-dessus (ou au niveau) du rôle de SentriX : "
+                "placez le rôle SentriX plus haut, puis réessayez."
+            )
+    return None
+
+
+def validate_channel_choice(guild, channel, field: str) -> str | None:
+    """Motif de refus lisible, ou None si SentriX peut réellement utiliser le salon."""
+    if channel is None or field not in _WRITABLE_CHANNEL_FIELDS:
+        return None
+    me = guild.me
+    if me is None:
+        return None
+    perms = channel.permissions_for(me)
+    missing = []
+    if not perms.view_channel:
+        missing.append("Voir le salon")
+    if not perms.send_messages:
+        missing.append("Envoyer des messages")
+    if not perms.embed_links:
+        missing.append("Intégrer des liens")
+    if field in {"log_channel", "ticket_log_channel"} and not perms.attach_files:
+        missing.append("Joindre des fichiers")
+    if missing:
+        return f"SentriX ne peut pas utiliser {channel.mention} : permission(s) manquante(s) **{', '.join(missing)}**."
+    return None
+
+
+async def _refuse(interaction, reason: str) -> None:
+    """Réponse courte et éphémère : la configuration cassée n'est PAS enregistrée."""
+    await panels.texte_court(interaction, reason, ephemere=True)
+
+
 class FieldRoleSelect(discord.ui.RoleSelect):
     def __init__(self, view, field, label, row):
         self.owner, self.field = view, field
         super().__init__(placeholder=label, min_values=0, max_values=1, row=row)
 
     async def callback(self, interaction):
-        value = self.values[0].id if self.values else None
+        role = self.values[0] if self.values else None
+        reason = validate_role_choice(self.owner.guild, role, self.field)
+        if reason:
+            return await _refuse(interaction, reason)
+        value = role.id if role else None
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, self.field, value)
         await self.owner.audit(interaction.user.id, self.field, value)
         await self.owner.refresh(interaction)
@@ -304,7 +469,14 @@ class FieldChannelSelect(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction):
-        value = self.values[0].id if self.values else None
+        chosen = self.values[0] if self.values else None
+        # ChannelSelect renvoie un AppCommandChannel : on repasse par le cache du serveur
+        # pour obtenir les permissions réelles.
+        channel = self.owner.guild.get_channel(int(chosen.id)) if chosen else None
+        reason = validate_channel_choice(self.owner.guild, channel, self.field)
+        if reason:
+            return await _refuse(interaction, reason)
+        value = chosen.id if chosen else None
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, self.field, value)
         await self.owner.audit(interaction.user.id, self.field, value)
         await self.owner.refresh(interaction)
@@ -527,6 +699,10 @@ class SetupView(discord.ui.LayoutView):
         self.bot, self.guild, self.author_id = bot, guild, int(author_id)
         self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
         self._commandes: list = []
+        # Paramètres rares (ajoutés par les couches tierces via add_item / build_embed) :
+        # cachés tant que « Paramètres avancés » n'est pas activé.
+        self.avance = False
+        self._sections_base: list = []
 
     # -- collecte des composants -------------------------------------------
     def ajouter(self, item) -> None:
@@ -550,7 +726,7 @@ class SetupView(discord.ui.LayoutView):
                 (self.guild.id, user_id, self.category or "home", action, None if value is None else str(value)),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans audit", exc_info=True)
 
     async def ensure_ai(self):
         await self.bot.db.execute(
@@ -596,17 +772,27 @@ class SetupView(discord.ui.LayoutView):
         ]
         for item in recuperes:
             self.remove_item(item)
-        self._commandes = _sans_doublons(self._commandes + recuperes)
+        # Écran simple : on ne garde des couches tierces que la langue du serveur, qui
+        # est un réglage de premier niveau ; le reste attend « Paramètres avancés ».
+        essentiels = [
+            item for item in recuperes
+            if str(getattr(item, "custom_id", "") or "") == "sentrix:setup:official:language"
+        ]
+        self._commandes = _sans_doublons(self._commandes + (recuperes if self.avance else essentiels))
         self.clear_items()
 
         embed = await self.build_embed()
         titre = str(getattr(embed, "title", "") or "SentriX — Centre de contrôle")
         resume = _sans_barre(str(getattr(embed, "description", "") or ""))
-        sections = [
-            panels.Section(str(champ.name or "").strip(), texte=_sans_barre(str(champ.value or "")))
-            for champ in getattr(embed, "fields", ())
-            if str(champ.value or "").strip()
-        ]
+        if self.avance or not self._sections_base:
+            sections = [
+                panels.Section(str(champ.name or "").strip(), texte=_sans_barre(str(champ.value or "")))
+                for champ in getattr(embed, "fields", ())
+                if str(champ.value or "").strip()
+            ]
+        else:
+            # Écran simple : uniquement les sections du centre de contrôle lui-même.
+            sections = list(self._sections_base)
 
         conteneur = discord.ui.Container(
             accent_colour=discord.Colour(panels.INTENTIONS[self.intention()][0])
@@ -634,6 +820,16 @@ class SetupView(discord.ui.LayoutView):
         home = discord.ui.Button(label="Accueil", style=discord.ButtonStyle.secondary)
         refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary)
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
+        avance = discord.ui.Button(
+            label="Paramètres avancés" if not self.avance else "Écran simple",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def toggle_avance(interaction):
+            self.avance = not self.avance
+            await self.refresh(interaction)
+
+        avance.callback = toggle_avance
 
         async def go_home(interaction):
             self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
@@ -656,7 +852,7 @@ class SetupView(discord.ui.LayoutView):
             self.stop()
 
         home.callback, refresh.callback, close.callback = go_home, do_refresh, do_close
-        self.ajouter(home); self.ajouter(refresh); self.ajouter(close)
+        self.ajouter(home); self.ajouter(refresh); self.ajouter(avance); self.ajouter(close)
 
         if self.category == "moderation":
             self.ajouter(FieldRoleSelect(self, "mod_role", "Rôle staff", 2))
@@ -717,6 +913,10 @@ class SetupView(discord.ui.LayoutView):
             self.ajouter(toggle); self.ajouter(limits)
 
     async def prepare(self):
+        if self.category is None:
+            states = await module_switch_states(self.bot, self.guild.id)
+            # Placé en tête : c'est l'action principale du premier écran.
+            self._commandes.insert(0, ModuleSwitchSelect(self, states))
         if self.category == "tickets":
             rows = await self.bot.db.fetchall(
                 "SELECT id, name FROM ticket_types WHERE guild_id = ? ORDER BY id", (self.guild.id,)
@@ -747,6 +947,7 @@ class SetupView(discord.ui.LayoutView):
             titre, resume, sections = await self._contenu_accueil(statuses)
         else:
             titre, resume, sections = await self._contenu_categorie(conf, statuses)
+        self._sections_base = list(sections)
         return _embed_de_sections(titre, resume, sections)
 
     async def _contenu_accueil(self, statuses):
@@ -754,26 +955,33 @@ class SetupView(discord.ui.LayoutView):
         actifs = sum(state == ConfigState.ACTIVE for state, _, _ in statuses.values())
         pourcentage = _completion(statuses)
 
+        switch_states = await module_switch_states(self.bot, self.guild.id)
+        interrupteurs = [
+            panels.Ligne(label, "**ON**" if switch_states.get(key) == "enabled" else "OFF")
+            for key, label in MODULE_SWITCHES
+        ]
         etats = [
             panels.Ligne(
                 CATEGORIES[cle][0],
                 statuses[cle][0].value,
-                indice=statuses[cle][1] if statuses[cle][1] else None,
+                indice=statuses[cle][1] if (self.avance and statuses[cle][1]) else None,
             )
             for cle in CATEGORY_ORDER
         ]
 
-        sections = [
-            panels.Section(
-                "État général",
-                [
-                    panels.Ligne("Configuration", f"**{pourcentage} %** terminée"),
-                    panels.Ligne("Modules actifs", f"**{actifs}** sur **{len(statuses)}**"),
-                    panels.Ligne("Serveur", self.guild.name),
-                ],
-            ),
-            panels.Section("Modules", etats),
-        ]
+        sections = [panels.Section("Modules", interrupteurs)]
+        if self.avance:
+            sections += [
+                panels.Section(
+                    "État général",
+                    [
+                        panels.Ligne("Configuration", f"**{pourcentage} %** terminée"),
+                        panels.Ligne("Modules actifs", f"**{actifs}** sur **{len(statuses)}**"),
+                        panels.Ligne("Serveur", self.guild.name),
+                    ],
+                ),
+                panels.Section("Détail par catégorie", etats),
+            ]
 
         # Ce qui bloque passe AVANT le reste : c'est la raison d'ouvrir +setup.
         erreurs = [
@@ -796,7 +1004,7 @@ class SetupView(discord.ui.LayoutView):
             for cle, data in statuses.items()
             if data[0] == ConfigState.UNCONFIGURED
         ]
-        if a_configurer:
+        if a_configurer and self.avance:
             sections.append(
                 panels.Section(
                     "Jamais configuré",
@@ -806,11 +1014,12 @@ class SetupView(discord.ui.LayoutView):
             )
 
         resume = (
-            f"**{pourcentage} %** configuré · **{actifs}/{len(statuses)}** modules actifs"
+            "Activez ou désactivez un module dans le premier menu ; choisissez une catégorie "
+            "pour la configurer. Les réglages rares sont sous « Paramètres avancés »."
         )
         if erreurs:
-            resume += f" · **{len(erreurs)}** à corriger"
-        return "SentriX — Centre de contrôle", resume, sections
+            resume += f"\n**{len(erreurs)}** point(s) à corriger."
+        return "SentriX — Configuration", resume, sections
 
     async def _contenu_categorie(self, conf, statuses):
         """Une categorie : son etat, sa configuration reelle, ce qui manque."""

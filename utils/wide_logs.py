@@ -334,7 +334,10 @@ def narrative_body(
         if reason:
             lines.append(f"**Raison :** {reason}")
     elif event_type == "member_ban":
-        lines.append(f"{member or 'Un membre'} a été banni" + (f" par {moderator}" if moderator else "") + ".")
+        lines.append(
+            f"{member or 'Un membre'} a été banni" + (f" par {moderator}" if moderator else "")
+            + (f" pour **{duration}**" if duration else "") + "."
+        )
         if reason:
             lines.append(f"**Raison :** {reason}")
     elif event_type == "member_unban":
@@ -356,6 +359,9 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} a reçu un avertissement" + (f" de {moderator}" if moderator else "") + ".")
         if reason:
             lines.append(f"**Raison :** {reason}")
+        details = _field_value(embed, "détails", "details")
+        if details:
+            lines.append(details)
     elif event_type in {"role_add", "role_remove"}:
         # Ces logs n'avaient AUCUNE branche narrative : le corps restait
         # entièrement vide, y compris le membre concerné. Le salon de logs
@@ -443,11 +449,26 @@ def narrative_body(
         lines.append(_strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id) or f"{member or 'Un membre'} a été déplacé en vocal.")
     elif event_type == "ticket_close":
         lines.append(_strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id) or "Le ticket a été fermé.")
-    elif event_type.startswith("automod_") or event_type == "antiraid":
+    elif event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"):
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         lines.append(base or f"Une protection SentriX s'est déclenchée pour {member or 'un membre'}.")
         if reason:
             lines.append(f"**Raison :** {reason}")
+        # Détails courts de l'incident (compact_fields ignore les valeurs brèves).
+        details = []
+        if channel:
+            details.append(f"Salon : {channel}")
+        supprimes = _field_value(embed, "messages")
+        if supprimes:
+            details.append(f"Messages supprimés : **{supprimes}**")
+        action = _field_value(embed, "action")
+        if action:
+            details.append(f"Sanction : **{action}**")
+        infractions = _field_value(embed, "infractions")
+        if infractions:
+            details.append(f"Infractions (1h) : {infractions}")
+        if details:
+            lines.append(" · ".join(details))
     else:
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         if base:
@@ -719,7 +740,7 @@ def _rewind_file(file: discord.File | None) -> None:
     try:
         file.fp.seek(0)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _rewind_file", exc_info=True)
 
 
 async def send_wide_log(

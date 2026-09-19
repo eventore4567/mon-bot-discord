@@ -220,7 +220,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM warnings WHERE guild_id=? AND user_id=?", (member.guild.id, member.id))
             score -= min(30, int(_get(row, "n", 0)) * 8)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _trust", exc_info=True)
         try:
             row = await self.bot.db.fetchone(
                 "SELECT COALESCE(SUM(score),0) AS s FROM ultimate_security_events WHERE guild_id=? AND user_id=? AND created_at>=?",
@@ -228,7 +228,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             )
             score -= min(25, int(_get(row, "s", 0)))
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _trust", exc_info=True)
         if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
             score += 10
         return _clamp(score, 0, 100)
@@ -254,7 +254,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             row = await self.bot.db.fetchone("SELECT season_xp FROM member_engagement WHERE guild_id=? AND user_id=?", (member.guild.id, member.id))
             if row and int(_get(row, "season_xp", 0)) > 0: wanted.add("season")
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _badges", exc_info=True)
         if guild_days >= 365: wanted.add("early")
         for badge in wanted:
             await self.bot.db.execute(

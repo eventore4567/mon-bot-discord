@@ -25,6 +25,10 @@ class _FakeBot:
     def __init__(self):
         self.guilds = []
         self.latency = 0.042
+        self.extensions = {}
+        self.cogs = {}
+        self.expected_extension_count = 0
+        self.db = SimpleNamespace(fetchone=AsyncMock(return_value={"ok": 1}))
 
     def is_ready(self):
         return True
@@ -52,7 +56,7 @@ def _fake_ctx(author_id: int):
 
 class OwnershipGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_le_decorateur_owner_only_est_bien_present(self):
-        self.assertEqual(len(CoreDiagnostics.corediag.checks), 1)
+        self.assertEqual(len(CoreDiagnostics.health.checks), 1)
 
     async def test_refuse_un_membre_qui_n_est_pas_proprietaire(self):
         """.callback() seul ne suffit pas : @checks.is_bot_owner() est un check
@@ -63,7 +67,7 @@ class OwnershipGateTests(unittest.IsolatedAsyncioTestCase):
         bot.db = SimpleNamespace(is_bot_creator=AsyncMock(return_value=False))
         ctx = SimpleNamespace(author=SimpleNamespace(id=999999), bot=bot)
 
-        predicate = CoreDiagnostics.corediag.checks[0]
+        predicate = CoreDiagnostics.health.checks[0]
         with self.assertRaises(BotPermissionError):
             await predicate(ctx)
 
@@ -72,7 +76,7 @@ class OwnershipGateTests(unittest.IsolatedAsyncioTestCase):
         bot.db = SimpleNamespace(is_bot_creator=AsyncMock(return_value=True))
         ctx = SimpleNamespace(author=SimpleNamespace(id=1), bot=bot)
 
-        predicate = CoreDiagnostics.corediag.checks[0]
+        predicate = CoreDiagnostics.health.checks[0]
         self.assertTrue(await predicate(ctx))
 
 
@@ -84,7 +88,7 @@ class RenderingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fonctionne_sans_donnees_d_observabilite(self):
         ctx = _fake_ctx(author_id=1)
-        await CoreDiagnostics.corediag.callback(self.cog, ctx)
+        await CoreDiagnostics.health.callback(self.cog, ctx)
         ctx.send.assert_awaited()
 
     async def test_fonctionne_avec_des_donnees_d_observabilite(self):
@@ -93,15 +97,29 @@ class RenderingTests(unittest.IsolatedAsyncioTestCase):
         metrics.record_error("ban", "slash")
 
         ctx = _fake_ctx(author_id=1)
-        await CoreDiagnostics.corediag.callback(self.cog, ctx)
+        await CoreDiagnostics.health.callback(self.cog, ctx)
         ctx.send.assert_awaited()
 
     async def test_plus_de_dix_commandes_ne_plante_pas(self):
         for i in range(15):
             metrics.record(f"cmd{i}", "prefix", 10.0, success=True)
         ctx = _fake_ctx(author_id=1)
-        await CoreDiagnostics.corediag.callback(self.cog, ctx)
+        await CoreDiagnostics.health.callback(self.cog, ctx)
         ctx.send.assert_awaited()
+
+    async def test_base_injoignable_donne_un_etat_degrade_sans_planter(self):
+        from utils import sentrix_panels as panels
+
+        self.bot.db = SimpleNamespace(fetchone=AsyncMock(side_effect=RuntimeError("down")))
+        ctx = _fake_ctx(author_id=1)
+        await CoreDiagnostics.health.callback(self.cog, ctx)
+        panneau = ctx.send.await_args.kwargs["view"]
+        texte = panels.texte_complet(panneau)
+        self.assertIn("DÉGRADÉ", texte)
+        self.assertIn("base de données injoignable", texte)
+
+    async def test_alias_corediag_conserve(self):
+        self.assertIn("corediag", CoreDiagnostics.health.aliases)
 
 
 class CatalogClassificationTests(unittest.TestCase):

@@ -225,7 +225,7 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
     try:
         ai_cog.histories.clear()
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _send", exc_info=True)
     ai_cog._sentrix_experience_v5_pipeline = True
     logger.info("Bot Core V5 : pipeline IA naturel modernisé pour %s.", brand_label())
 
@@ -257,7 +257,7 @@ def _install_reply_and_dm_conversations(bot: commands.Bot) -> None:
                 if ctx.valid:
                     return
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans natural_continuation", exc_info=True)
             ai_cog = bot.get_cog("Ai")
             if ai_cog is None:
                 return

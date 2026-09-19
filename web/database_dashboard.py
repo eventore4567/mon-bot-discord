@@ -85,7 +85,7 @@ async def _sqlite_snapshot(db) -> dict:
         if pragma:
             journal_mode = str(pragma[0]).upper()
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _sqlite_snapshot", exc_info=True)
     try:
         pragma = await db.fetchone("PRAGMA page_count")
         page_count = int(pragma[0]) if pragma else None
@@ -94,7 +94,7 @@ async def _sqlite_snapshot(db) -> dict:
         pragma = await db.fetchone("PRAGMA freelist_count")
         free_pages = int(pragma[0]) if pragma else None
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _sqlite_snapshot", exc_info=True)
 
     logical_size = page_count * page_size if page_count is not None and page_size is not None else None
     free_bytes = free_pages * page_size if free_pages is not None and page_size is not None else None

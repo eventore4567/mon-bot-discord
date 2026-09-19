@@ -295,7 +295,7 @@ class SecurityHardening(commands.Cog):
         try:
             self.bot.loop.call_later(15, self._handled_messages.discard, message_id)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _remember_handled", exc_info=True)
 
     async def _security_event(
         self,

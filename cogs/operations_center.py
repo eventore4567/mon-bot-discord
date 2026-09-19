@@ -372,7 +372,7 @@ class OperationsCenter(commands.Cog, name=_COG_NAME):
             if await self.bot.db.is_bot_manager(ctx.guild.id, ctx.author.id) and await self.bot.db.has_manager_permission(ctx.guild.id, ctx.author.id, category):
                 return True
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans module_permission_check", exc_info=True)
         raise commands.CheckFailure(
             f"Ce module SentriX est limité à des rôles autorisés ({MODULE_LABELS[module]})."
         )

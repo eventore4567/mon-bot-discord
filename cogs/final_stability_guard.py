@@ -102,7 +102,7 @@ def _install_safe_attachment_archive() -> bool:
                 try:
                     close()
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans all_or_none_files", exc_info=True)
         logger.warning(
             "Archive fichiers partielle ignorée pour éviter une mauvaise association (%s/%s).",
             len(files),

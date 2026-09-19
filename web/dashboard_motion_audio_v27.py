@@ -110,50 +110,39 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
     return "action";
   };
 
-  const animateFlash = () => {
-    if (reduced()) return;
-    flash.getAnimations().forEach(a => a.cancel());
-    flash.animate([{opacity:0},{opacity:.9,offset:.28},{opacity:0}],{duration:310,easing:"ease-out"});
-  };
+  // Le « flash » plein écran de navigation a été retiré : un voile qui apparaît puis
+  // disparaît sur toute la page se lit comme un clignotement.
+  const animateFlash = () => {};
+  // Règle anti-clignotement : la page en place reste affichée telle quelle pendant un
+  // chargement ; seules les données changent. Aucune sortie (assombrissement, flou,
+  // réduction) n'est jouée, et l'entrée d'une NOUVELLE page est un léger glissement
+  // sans passer par opacity 0.
   const animateExit = () => {
-    if (reduced()) return;
     pageAnimation?.cancel();
-    pageAnimation = content.animate([
-      {opacity:1,transform:"translateY(0) scale(1)",filter:"blur(0px)"},
-      {opacity:.28,transform:"translateY(10px) scale(.958)",filter:"blur(2px)"}
-    ],{duration:145,easing:"cubic-bezier(.4,0,1,1)",fill:"forwards"});
+    pageAnimation = null;
   };
   const animateSurfaceNodes = () => {
     if (reduced()) return;
     [...content.querySelectorAll(surfaceSelector)].slice(0,24).forEach((node,index) => {
+      node.getAnimations().forEach(a => a.cancel());
       node.animate([
-        {opacity:0,transform:"translateY(22px) scale(.955)"},
-        {opacity:1,transform:"translateY(-2px) scale(1.004)",offset:.72},
+        {opacity:.72,transform:"translateY(8px)"},
         {opacity:1,transform:"none"}
-      ],{duration:390,delay:Math.min(index,10)*36,easing:"cubic-bezier(.16,1,.3,1)",fill:"both"});
-    });
-    [...content.querySelectorAll(rowSelector)].slice(0,30).forEach((node,index) => {
-      node.animate([
-        {opacity:0,transform:"translateX(-16px) scale(.985)"},
-        {opacity:1,transform:"none"}
-      ],{duration:300,delay:Math.min(index,12)*18,easing:"cubic-bezier(.16,1,.3,1)",fill:"both"});
+      ],{duration:260,delay:Math.min(index,10)*22,easing:"cubic-bezier(.16,1,.3,1)"});
     });
   };
   const animateEnter = () => {
     transitionPending = false;
     document.body.dataset.sx27Transition = "0";
     pageAnimation?.cancel();
+    pageAnimation = null;
     if (!reduced()) {
       pageAnimation = content.animate([
-        {opacity:0,transform:"translateY(28px) scale(.925)",filter:"blur(5px)"},
-        {opacity:1,transform:"translateY(-4px) scale(1.008)",filter:"blur(0px)",offset:.62},
-        {opacity:1,transform:"translateY(0) scale(1)",filter:"blur(0px)"}
-      ],{duration:470,easing:"cubic-bezier(.16,1,.3,1)",fill:"both"});
-      pageAnimation.finished.then(() => {
-        if (pageAnimation?.playState === "finished") pageAnimation.cancel();
-      }).catch(() => {});
+        {opacity:.85,transform:"translateY(6px)"},
+        {opacity:1,transform:"translateY(0)"}
+      ],{duration:220,easing:"cubic-bezier(.16,1,.3,1)"});
+      pageAnimation.finished.then(() => { pageAnimation = null; }).catch(() => {});
       animateSurfaceNodes();
-      animateFlash();
     }
     finishProgress();
     document.dispatchEvent(new CustomEvent("sentrix:v27-page-enter"));
@@ -164,7 +153,6 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
     document.body.dataset.sx27Transition = "1";
     startProgress();
     animateExit();
-    animateFlash();
     clearTimeout(settleTimer);
     settleTimer = setTimeout(() => { if (transitionPending) animateEnter(); }, 1200);
   };
@@ -179,10 +167,11 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
     clearTimeout(settleTimer);
     settleTimer = setTimeout(() => {
       const next = signature();
-      const changed = next !== lastSignature;
       lastSignature = next;
-      if (transitionPending || changed) animateEnter();
-      else animateSurfaceNodes();
+      // Un rafraîchissement de données (lignes, compteurs, badges) ne rejoue JAMAIS
+      // l'entrée des cartes : c'était la cause du clignotement à chaque mise à jour.
+      // Seule une vraie navigation (transition en attente) anime l'arrivée de la page.
+      if (transitionPending) animateEnter();
     }, 24);
   };
 
@@ -222,17 +211,16 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
     if (records.some(r => r.type === "childList" && (r.addedNodes.length || r.removedNodes.length))) settleFromDom();
   }).observe(content,{childList:true,subtree:true});
 
-  new MutationObserver(() => {
+  // Seul un VRAI changement d'onglet est une navigation : un setAttribute avec la même
+  // valeur (l'adaptateur V9 réécrivait data-sx-tab toutes les 1,5 s) produit aussi un
+  // enregistrement de mutation, et relançait l'entrée de page + des cartes en boucle.
+  new MutationObserver(records => {
+    const changed = records.some(r => r.oldValue !== document.body.getAttribute("data-sx-tab"));
+    if (!changed) return;
     beginTransition();
     settleFromDom();
-  }).observe(document.body,{attributes:true,attributeFilter:["data-sx-tab"]});
+  }).observe(document.body,{attributes:true,attributeOldValue:true,attributeFilter:["data-sx-tab"]});
 
-  document.addEventListener("sentrix:live", () => {
-    if (reduced()) return;
-    content.querySelectorAll(".badge.ok,.notice.ok,.sx12-badge.ok").forEach(node => {
-      node.animate([{transform:"scale(.88)"},{transform:"scale(1.09)",offset:.58},{transform:"scale(1)"}],{duration:360,easing:"cubic-bezier(.16,1,.3,1)"});
-    });
-  });
 
   window.__sentrixMotionV27 = {
     get soundEnabled(){return soundEnabled},
@@ -241,7 +229,6 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
   };
 
   lastSignature = signature();
-  requestAnimationFrame(() => animateSurfaceNodes());
 })();
 </script>'''
 

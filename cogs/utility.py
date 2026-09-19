@@ -1,6 +1,7 @@
 """
 Cog UTILITAIRES.
-/help /ping /avatar /serverinfo /userinfo /roleinfo /channelinfo
+/help /ping /avatar /info serveur /userinfo /info role /channelinfo
+(+serverinfo et +roleinfo restent acceptés comme raccourcis texte vers +info serveur / +info role)
 /membercount /addemoji /deleteemoji /emoji-list /poll /remind /reminder-list /reminder-cancel
 /say /embed-create /translate /weather /suggest /report-bug
 /afk /roll /choose
@@ -1217,6 +1218,16 @@ class Utility(commands.Cog, name="Utility"):
         # ne doit pas s'auto-notifier, et un bot n'est jamais mentionné.
         cible = membre if (membre.id != ctx.author.id and not membre.bot) else None
         await panels.envoyer(ctx, panneau, mentionner=cible)
+
+    # Raccourcis texte historiques : ils ne créent aucune racine slash (exclus de la
+    # surface V95 via PURE_DUPLICATE_COMMANDS) et appellent la même fiche.
+    @commands.command(name="roleinfo", hidden=True)
+    async def roleinfo(self, ctx: commands.Context, role: discord.Role):
+        await self.info_role(ctx, role)
+
+    @commands.command(name="serverinfo", help="Afficher la fiche complète du serveur (raccourci de +info serveur).")
+    async def serverinfo(self, ctx: commands.Context):
+        await self.info_serveur(ctx)
 
     @info.command(name="role", description="Afficher la fiche complète d'un rôle.")
     @app_commands.describe(role="Le rôle à inspecter")

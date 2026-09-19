@@ -3,6 +3,7 @@ Cog STATISTIQUES / DÉVELOPPEMENT.
 /bot-status /server-growth /command-stats /latency /changelog /feedback /botinfo /diagnostic
 """
 
+import logging
 import time
 import platform
 import discord
@@ -14,6 +15,8 @@ from discord.ext import commands
 from utils import embeds, design_system, checks, helpers
 from utils import sentrix_panels as panels
 from database.db import now
+
+logger = logging.getLogger("bot.stats")
 
 START_TIME = time.time()
 
@@ -75,7 +78,7 @@ class Stats(commands.Cog, name="Stats"):
                 inline=True,
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans system_status", exc_info=True)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(

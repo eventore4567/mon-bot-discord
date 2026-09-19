@@ -68,7 +68,7 @@ async def _audit(request: web.Request, guild_id: int, user_id: int, action: str,
             (guild_id, user_id, action[:120], target[:300], json.dumps(details or {}, ensure_ascii=False)[:6000], int(time.time())),
         )
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _audit", exc_info=True)
 
 
 async def handle_enterprise_page(request: web.Request) -> web.Response:

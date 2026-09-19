@@ -78,8 +78,18 @@ def _root_from_interaction(interaction: discord.Interaction | None) -> str:
     return ""
 
 
+# Racines dont les réponses restent en texte Discord normal. Historique : « sentrix »
+# l'était, puis production_embed_log_repair forçait TOUT en carte, puis la vérification
+# V96 se ré-exemptait — trois couches pour une seule règle, désormais écrite ici.
+PLAIN_ROOTS = frozenset({"verification"})
+
+
 def _plain_root(root: str) -> bool:
-    return str(root or "").casefold() == "sentrix"
+    # panels.texte_court signale un envoi volontairement en texte brut (confirmations
+    # courtes de modération, petites erreurs) : il ne doit pas être promu en carte.
+    if panels.TEXTE_BRUT.get():
+        return True
+    return str(root or "").casefold() in PLAIN_ROOTS
 
 
 def _remember_plain_interaction(interaction: discord.Interaction | None) -> None:
@@ -608,6 +618,9 @@ def _install_followups() -> None:
         if token and token in _PLAIN_WEBHOOK_TOKENS:
             return await base(self, *args, **kwargs)
         root = _COMMAND_ROOT.get()
+        if _plain_root(root):
+            # texte_court() (confirmation/erreur courte) : le followup reste du texte.
+            return await base(self, *args, **kwargs)
         pages = _payload_pages(args, kwargs, root=root)
         return await _send_pages_with_callable(base, self, pages)
 

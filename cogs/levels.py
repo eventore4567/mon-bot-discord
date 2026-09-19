@@ -10,6 +10,7 @@ une seule source de vérité. Il ne peut plus y avoir deux chiffres différents 
 même membre entre deux commandes.
 """
 
+import logging
 import asyncio
 import random
 import time
@@ -21,6 +22,8 @@ from services import levels as levels_service
 from utils import embeds, checks, stats_service, design_system, visual_v5
 from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
+
+logger = logging.getLogger("bot.levels")
 
 XP_COOLDOWN_FALLBACK = 60
 XP_MIN_FALLBACK, XP_MAX_FALLBACK = 10, 25
@@ -691,6 +694,10 @@ class Levels(commands.Cog, name="Levels"):
             return
         key = (message.guild.id, message.author.id)
         last = self.cooldowns.get(key, 0)
+        # Sortie rapide AVANT toute lecture de réglages : un serveur où les niveaux ne
+        # sont pas activés ne doit pas payer deux requêtes par message (lecture en cache).
+        if not await self._niveaux_actifs(message.guild.id):
+            return
         settings = await self.bot.db.get_stats_settings(message.guild.id)
         cooldown = settings.get("xp_cooldown", XP_COOLDOWN_FALLBACK)
         if time.time() - last < cooldown:
@@ -702,7 +709,7 @@ class Levels(commands.Cog, name="Levels"):
                 if ctx.valid:
                     return
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans on_message", exc_info=True)
 
         conf = await self.bot.db.get_guild_config(message.guild.id)
         disabled_channels = set()
@@ -854,26 +861,19 @@ class Levels(commands.Cog, name="Levels"):
     # -------------------------------------------------------------- Embeds centralisés
 
     async def _niveaux_actifs(self, guild_id: int) -> bool:
-        """Le systeme de niveaux est-il actif sur ce serveur ?
+        """Le système de niveaux est-il actif sur ce serveur ?
 
-        Deux interrupteurs existent et l'un ou l'autre suffit a couper : celui
-        de +level-system et celui du panneau de configuration. Les gains d'XP
-        etaient bien bloques, mais +profile, +me et +stats continuaient
-        d'afficher niveau et XP — donc rien ne semblait desactive.
+        Source unique : module_settings (via setup_v2_core). +level-system, /setup et le
+        Dashboard écrivent tous au même endroit ; sans ligne, le module n'est pas
+        configuré donc inactif. Une erreur de lecture coupe plutôt que d'ouvrir.
         """
-        from utils import system_features
+        from cogs import setup_v2_core
 
         try:
-            if not await system_features.is_system_enabled(self.bot.db, guild_id, "levels"):
-                return False
-        except Exception:
-            pass
-        try:
-            from cogs import setup_v2_core
-
             return await setup_v2_core.module_enabled(self.bot, guild_id, "levels")
         except Exception:
-            return True
+            logger.exception("Lecture de l'état du module niveaux impossible guild=%s", guild_id)
+            return False
 
     @staticmethod
     def _next_role_text(stats: dict) -> str:

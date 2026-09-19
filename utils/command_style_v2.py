@@ -8,6 +8,7 @@ La logique métier n'est jamais modifiée : ce module agit uniquement sur le ren
 centralisé par ``cogs.plain_response_policy``.
 """
 from __future__ import annotations
+import logging
 
 import re
 import sys
@@ -17,6 +18,8 @@ from typing import Any, Iterable
 import discord
 
 from utils import microcopy, premium_style, helpers
+
+logger = logging.getLogger("bot.command-style-v2")
 
 
 _INSTALLED = False
@@ -249,7 +252,7 @@ def style_view(view: Any) -> Any:
             try:
                 item.emoji = None
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans style_view", exc_info=True)
             if item.style is discord.ButtonStyle.link:
                 continue
             haystack = f"{item.label or ''} {item.custom_id or ''}".casefold()
@@ -283,7 +286,7 @@ def style_view(view: Any) -> Any:
                 try:
                     option.emoji = None
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans style_view", exc_info=True)
             continue
 
         # Les Components V2 déjà utilisés par quelques panneaux gardent leur structure ;
@@ -293,7 +296,7 @@ def style_view(view: Any) -> Any:
             try:
                 item.content = "".join(ch for ch in _CUSTOM_EMOJI_RE.sub("", content) if not _is_emoji_codepoint(ch))
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans style_view", exc_info=True)
 
     return view
 

@@ -7,6 +7,7 @@ masqués de +help afin que les membres du staff n'aient plus des dizaines de com
 éparpillées à mémoriser.
 """
 from __future__ import annotations
+import logging
 
 import re
 import time
@@ -20,6 +21,8 @@ from utils import checks, embeds
 from utils import sentrix_panels as panels
 from . import language_runtime
 from .security_runtime_hardening import apply_recommended_security
+
+logger = logging.getLogger("bot.security-command-center")
 
 
 SECURITY_FILTERS: dict[str, tuple[str, str]] = {
@@ -172,7 +175,7 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             if await self.bot.db.is_bot_creator(ctx.author.id):
                 return True
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _critical_owner", exc_info=True)
 
         await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Accès propriétaire requis', 'Owner access required'), await self._t(ctx, "Cette action modifie une protection critique. Seul le propriétaire du serveur ou du bot peut l'utiliser.", 'This action changes a critical protection. Only the server or bot owner can use it.'), kind='danger'))
         return False
@@ -559,6 +562,8 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             "INSERT OR IGNORE INTO antinuke_whitelist (guild_id, user_id) VALUES (?, ?)",
             (ctx.guild.id, membre.id),
         )
+        from cogs.setup_v2_core import invalidate_trusted_cache
+        invalidate_trusted_cache(ctx.guild.id, membre.id)
         await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Exemption anti-nuke ajoutée', 'Anti-nuke exemption added'), membre.mention, kind='success'))
 
     @security_whitelist.command(name="user-remove", aliases=["remove-user", "membre-remove"])
@@ -569,6 +574,8 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
             "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?",
             (ctx.guild.id, membre.id),
         )
+        from cogs.setup_v2_core import invalidate_trusted_cache
+        invalidate_trusted_cache(ctx.guild.id, membre.id)
         await panels.envoyer(ctx, _panneau(await self._t(ctx, 'Exemption anti-nuke retirée', 'Anti-nuke exemption removed'), membre.mention, kind='success'))
 
     @security_whitelist.command(name="users", aliases=["members", "membres"])
@@ -833,7 +840,7 @@ def _remove_security_alias_collisions() -> None:
         from . import common_command_names
         common_command_names.PREFERRED_COMMAND_NAMES.pop("security-check", None)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _remove_security_alias_collisions", exc_info=True)
 
 
 async def install(bot: commands.Bot) -> None:

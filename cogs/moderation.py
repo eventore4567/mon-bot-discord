@@ -14,17 +14,29 @@ partagé entre serveurs, jamais deviné — voir database/db.py::record_sanction
 sur une "fiche de sanction" façon design_system. /case permet de retrouver une sanction
 précise par son numéro, /modhistory affiche l'historique complet d'un membre (tous types
 confondus, pas seulement les avertissements comme avec /warnings).
+
+Réponses : une sanction répond dans le salon par UNE ligne de texte
+(« @membre a été banni. ») via panels.texte_court ; la fiche complète (membre,
+modérateur, raison, durée, dossier, historique) part dans le salon de logs. Les
+commandes d'information (/warnings, /case, /modhistory) gardent leur panneau.
 """
 
+import asyncio
+import io
 import logging
+import re
+import time
+from datetime import timedelta
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from utils import embeds, checks, helpers, design_system
+from utils import embeds, checks, helpers, design_system, log_service
 from utils import sentrix_panels as panels
+from utils.helpers import parse_duration
+from utils.v22_rules import clean_reason
 from database.db import now
 from services import moderation as moderation_service
 
@@ -140,10 +152,18 @@ class Moderation(commands.Cog):
         logger.error("Boucle check_tempactions interrompue (%r) ; relance immédiate.", error)
         self.check_tempactions.restart()
 
-    async def log_action(self, guild: discord.Guild, embed: discord.Embed):
+    # Type d'événement du journal par action : c'est lui qui pilote la phrase narrative
+    # de la carte (« X a été mis en timeout par Y pour 1 minute »). Avec le type générique
+    # « moderation », la carte perdait modérateur et durée.
+    SANCTION_EVENT_TYPES = {
+        "ban": "member_ban", "tempban": "member_ban", "kick": "member_kick", "mute": "member_timeout",
+        "unmute": "member_untimeout", "warn": "member_warn", "unban": "member_unban",
+    }
+
+    async def log_action(self, guild: discord.Guild, embed: discord.Embed, event_type: str = "moderation"):
         # Utilise le salon "logs-moderation" dédié s'il existe (via /create-logs), sinon
         # retombe sur le salon de logs général — jamais de log perdu.
-        await helpers.send_log(self.bot, guild, "moderation", embed)
+        await helpers.send_log(self.bot, guild, event_type, embed)
 
     # "kind" détermine seulement la couleur de la fiche (succès/avertissement/danger) —
     # l'action elle-même (ce qui a réellement été fait) reste toujours le texte exact.
@@ -230,8 +250,49 @@ class Moderation(commands.Cog):
         e.add_field(name="📝 Raison", value=reason or "Aucune raison fournie", inline=False)
         for name, value in (extra_fields or {}).items():
             e.add_field(name=name, value=value, inline=False)
-        await self.log_action(ctx.guild, e)
+        await self.log_action(ctx.guild, e, self.SANCTION_EVENT_TYPES.get(action, "moderation"))
         return e
+
+    # Deux appels identiques (même serveur, même action, même cible) en moins de
+    # SANCTION_DUPLICATE_TTL s : double clic, double envoi, deux modérateurs en même
+    # temps. Le second est annulé au lieu de produire deux dossiers et deux MP.
+    SANCTION_DUPLICATE_TTL = 6.0
+
+    def _sanction_duplicate(self, ctx: commands.Context, action: str, target_id: int | None) -> bool:
+        if ctx.guild is None or target_id is None:
+            return False
+        # Par instance (jamais un dict partagé au niveau de la classe).
+        recent: dict[tuple[int, str, int], float] = self.__dict__.setdefault("_recent_sanctions", {})
+        key = (int(ctx.guild.id), str(action), int(target_id))
+        mono = time.monotonic()
+        previous = recent.get(key)
+        if previous is not None and mono - previous <= self.SANCTION_DUPLICATE_TTL:
+            return True
+        recent[key] = mono
+        if len(recent) > 5000:
+            cutoff = mono - 30.0
+            for candidate, stamp in list(recent.items()):
+                if stamp < cutoff:
+                    recent.pop(candidate, None)
+        return False
+
+    @staticmethod
+    def _normalise_prefix_duration(duree: str, raison: str) -> tuple[str, str]:
+        """Réassemble les durées françaises que le parseur préfixe coupe en deux mots
+        (`+mute @x 10 minutes spam` → durée « 10 minutes », raison « spam »)."""
+        raw_duration = str(duree or "").strip()
+        raw_reason = str(raison or "").strip()
+        if parse_duration(raw_duration) is not None or not raw_reason:
+            return raw_duration, raw_reason or "Aucune raison"
+        first, *rest = raw_reason.split(maxsplit=1)
+        candidate = f"{raw_duration} {first}".strip()
+        if parse_duration(candidate) is None:
+            return raw_duration, raw_reason or "Aucune raison"
+        return candidate, rest[0] if rest else "Aucune raison"
+
+    async def _reply(self, ctx: commands.Context, message: str, *, ephemere: bool = False):
+        """Confirmation courte dans le salon de la commande (texte brut, sans ping)."""
+        return await panels.texte_court(ctx, message, ephemere=ephemere)
 
     async def _ack(self, ctx: commands.Context):
         """Accuse réception IMMÉDIATEMENT, avant tout appel API/DB. Corrige la lenteur
@@ -353,11 +414,11 @@ class Moderation(commands.Cog):
             return await self._show_sanction_dm_status(ctx)
         normalised = self._normalise_dm_action(action)
         if normalised is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action inconnue : ban, tempban, kick, mute, warn, unban ou unmute.')))
+            return await self._reply(ctx, "Action inconnue : ban, tempban, kick, mute, warn, unban ou unmute.", ephemere=True)
         if not message:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Ajoutez le texte. Exemple : +sanctiondm {normalised} Votre message')))
+            return await self._reply(ctx, f"Ajoutez le texte. Exemple : `+sanctiondm {normalised} Votre message`", ephemere=True)
         if len(message) > 1900:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le message doit contenir au maximum 1 900 caractères.')))
+            return await self._reply(ctx, "Le message doit contenir au maximum 1 900 caractères.", ephemere=True)
         await self.bot.db.execute(
             """
             INSERT INTO sanction_dm_templates (guild_id, action, message, enabled)
@@ -367,7 +428,7 @@ class Moderation(commands.Cog):
             """,
             (ctx.guild.id, normalised, message),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le MP de **{self.DM_ACTION_LABELS[normalised]}** est configuré.\nAperçu :\n{message[:1000]}')))
+        await self._reply(ctx, f"MP de **{self.DM_ACTION_LABELS[normalised]}** configuré. Aperçu :\n{message[:1000]}")
 
     @sanctiondm.command(name="off", aliases=["disable", "desactiver"])
     @checks.is_owner_or_admin()
@@ -375,7 +436,7 @@ class Moderation(commands.Cog):
         """Désactiver le MP d'un type de sanction."""
         normalised = self._normalise_dm_action(action)
         if normalised is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action de sanction inconnue.')))
+            return await self._reply(ctx, "Action de sanction inconnue.", ephemere=True)
         await self.bot.db.execute(
             """
             INSERT INTO sanction_dm_templates (guild_id, action, message, enabled)
@@ -385,7 +446,7 @@ class Moderation(commands.Cog):
             """,
             (ctx.guild.id, normalised),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le MP de **{self.DM_ACTION_LABELS[normalised]}** est désactivé.')))
+        await self._reply(ctx, f"MP de **{self.DM_ACTION_LABELS[normalised]}** désactivé.")
 
     @sanctiondm.command(name="reset", aliases=["default", "defaut"])
     @checks.is_owner_or_admin()
@@ -393,12 +454,12 @@ class Moderation(commands.Cog):
         """Remettre le message par défaut d'un type de sanction."""
         normalised = self._normalise_dm_action(action)
         if normalised is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Action de sanction inconnue.')))
+            return await self._reply(ctx, "Action de sanction inconnue.", ephemere=True)
         await self.bot.db.execute(
             "DELETE FROM sanction_dm_templates WHERE guild_id = ? AND action = ?",
             (ctx.guild.id, normalised),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le MP de **{self.DM_ACTION_LABELS[normalised]}** utilise le texte par défaut.')))
+        await self._reply(ctx, f"MP de **{self.DM_ACTION_LABELS[normalised]}** : texte par défaut rétabli.")
 
     @sanctiondm.command(name="status", aliases=["liste", "list"])
     @checks.is_owner_or_admin()
@@ -409,11 +470,11 @@ class Moderation(commands.Cog):
     async def check_targetable(self, ctx: commands.Context, membre: discord.Member) -> bool:
         err = checks.check_hierarchy(ctx.author, membre)
         if err:
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(err)))
+            await self._reply(ctx, err, ephemere=True)
             return False
         err = checks.check_bot_hierarchy(ctx.guild, membre)
         if err:
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.error(err)))
+            await self._reply(ctx, err, ephemere=True)
             return False
         return True
 
@@ -433,6 +494,9 @@ class Moderation(commands.Cog):
         la correction d'un vrai trou trouvé pendant l'extraction : une exception de
         persistance ne fait plus jamais passer une sanction réellement appliquée
         pour un échec de commande."""
+        raison = clean_reason(raison)
+        if self._sanction_duplicate(ctx, "ban", membre.id):
+            return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "ban")
@@ -452,10 +516,10 @@ class Moderation(commands.Cog):
             self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
         )
         if not outcome.executed:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+            return await self._reply(ctx, outcome.hierarchy_error, ephemere=True)
 
-        e = await self.log_sanction(ctx, "ban", membre, raison, case_number=outcome.case_number)
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+        await self.log_sanction(ctx, "ban", membre, raison, case_number=outcome.case_number)
+        await self._reply(ctx, f"{membre.mention} a été banni.")
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
@@ -470,7 +534,18 @@ class Moderation(commands.Cog):
         déjà en place sur ban/kick/mute/unmute — même famille de commandes,
         même garde-fou : le bot doit réellement posséder la permission
         Discord avant l'exécution."""
+        raison = clean_reason(raison)
+        if ctx.interaction is None:
+            duree, raison = self._normalise_prefix_duration(duree, raison)
+        if self._sanction_duplicate(ctx, "tempban", membre.id):
+            return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
+        existing = await self.bot.db.fetchone(
+            "SELECT id FROM tempactions WHERE guild_id=? AND user_id=? AND action='ban' AND expires_at>? LIMIT 1",
+            (ctx.guild.id, membre.id, now()),
+        )
+        if existing:
+            return await self._reply(ctx, f"{membre.mention} a déjà un bannissement temporaire actif.", ephemere=True)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "tempban")
 
@@ -492,13 +567,13 @@ class Moderation(commands.Cog):
             duree=duree, render_dm_text=render_dm_text,
         )
         if not outcome.executed:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+            return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        e = await self.log_sanction(
+        await self.log_sanction(
             ctx, "tempban", membre, raison,
             duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
         )
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+        await self._reply(ctx, f"{membre.mention} a été banni pendant {helpers.format_duration(outcome.duration_seconds)}.")
 
     @commands.hybrid_command(name="unban", description="Débannir un utilisateur via son identifiant Discord.")
     @app_commands.describe(user_id="L'identifiant Discord de l'utilisateur", raison="La raison")
@@ -511,11 +586,14 @@ class Moderation(commands.Cog):
         Corrige le même trou que les six précédentes : record_sanction()
         n'était protégé par aucun try/except alors que le débannissement
         Discord avait déjà réellement réussi."""
-        await self._ack(ctx)
+        raison = clean_reason(raison)
         try:
             uid = int(user_id)
         except ValueError:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Identifiant Discord invalide.')))
+            return await self._reply(ctx, "Identifiant Discord invalide.", ephemere=True)
+        if self._sanction_duplicate(ctx, "unban", uid):
+            return await self._reply(ctx, "Ce débannissement vient déjà d'être lancé.", ephemere=True)
+        await self._ack(ctx)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "unban")
 
@@ -532,10 +610,10 @@ class Moderation(commands.Cog):
             fetch_user=self.bot.fetch_user, render_dm_text=render_dm_text,
         )
         if not outcome.executed:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+            return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        e = await self.log_sanction(ctx, "unban", outcome.resolved_target, raison, case_number=outcome.case_number)
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+        await self.log_sanction(ctx, "unban", outcome.resolved_target, raison, case_number=outcome.case_number)
+        await self._reply(ctx, f"{outcome.resolved_target} a été débanni.")
 
     # ---------------------------------------------------------------- KICK
 
@@ -549,6 +627,9 @@ class Moderation(commands.Cog):
         sanction migrée vers services/moderation.py — voir le docstring de
         ban() ci-dessus pour le détail de la migration et du trou de
         persistance corrigé en l'extrayant."""
+        raison = clean_reason(raison)
+        if self._sanction_duplicate(ctx, "kick", membre.id):
+            return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "kick")
@@ -568,10 +649,10 @@ class Moderation(commands.Cog):
             self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
         )
         if not outcome.executed:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+            return await self._reply(ctx, outcome.hierarchy_error, ephemere=True)
 
-        e = await self.log_sanction(ctx, "kick", membre, raison, case_number=outcome.case_number)
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+        await self.log_sanction(ctx, "kick", membre, raison, case_number=outcome.case_number)
+        await self._reply(ctx, f"{membre.mention} a été expulsé.")
 
     # ---------------------------------------------------------------- MUTE
 
@@ -592,6 +673,11 @@ class Moderation(commands.Cog):
         """Core V2, Phase 2 (docs/core-v2-plan.md) : troisième commande de
         sanction migrée. Forme différente de ban()/kick() (durée à valider, MP
         après l'exécution) — voir services/moderation.py::mute()."""
+        if ctx.interaction is None:
+            duree, raison = self._normalise_prefix_duration(duree, raison)
+        raison = clean_reason(raison)
+        if self._sanction_duplicate(ctx, "mute", membre.id):
+            return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "mute")
@@ -614,13 +700,13 @@ class Moderation(commands.Cog):
             duree=duree, render_dm_text=render_dm_text,
         )
         if not outcome.executed:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+            return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        e = await self.log_sanction(
+        await self.log_sanction(
             ctx, "mute", membre, raison,
             duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
         )
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+        await self._reply(ctx, f"{membre.mention} a été rendu muet pendant {helpers.format_duration(outcome.duration_seconds)}.")
 
     @commands.hybrid_command(name="unmute", description="Retirer le mute (timeout) d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à démuter", raison="La raison")
@@ -630,6 +716,9 @@ class Moderation(commands.Cog):
     async def unmute(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
         """Core V2, Phase 2 (docs/core-v2-plan.md) : quatrième commande de
         sanction migrée — voir services/moderation.py::unmute()."""
+        raison = clean_reason(raison)
+        if self._sanction_duplicate(ctx, "unmute", membre.id):
+            return await self._reply(ctx, "Cette action vient déjà d'être lancée sur ce membre.", ephemere=True)
         await self._ack(ctx)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "unmute")
@@ -649,10 +738,10 @@ class Moderation(commands.Cog):
             self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
         )
         if not outcome.executed:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.rejection_reason)))
+            return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        e = await self.log_sanction(ctx, "unmute", membre, raison, case_number=outcome.case_number)
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+        await self.log_sanction(ctx, "unmute", membre, raison, case_number=outcome.case_number)
+        await self._reply(ctx, f"{membre.mention} n'est plus muet.")
 
     # ---------------------------------------------------------------- WARN
 
@@ -671,6 +760,9 @@ class Moderation(commands.Cog):
         record_sanction() non protégé) et sur le comptage total (une lecture
         qui ne doit plus jamais faire passer un avertissement déjà enregistré
         pour un échec)."""
+        raison = clean_reason(raison)
+        if self._sanction_duplicate(ctx, "warn", membre.id):
+            return await self._reply(ctx, "Cet avertissement vient déjà d'être lancé sur ce membre.", ephemere=True)
         await self._ack(ctx)
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "warn")
@@ -707,7 +799,7 @@ class Moderation(commands.Cog):
             render_ban_dm_text=render_ban_dm_text,
         )
         if not outcome.executed:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(outcome.hierarchy_error)))
+            return await self._reply(ctx, outcome.hierarchy_error, ephemere=True)
 
         role_note = ""
         if warn_role is not None:
@@ -721,20 +813,20 @@ class Moderation(commands.Cog):
             else "inconnu (erreur de comptage)"
         )
         extra = {"📌 Détails": f"Total d'avertissements : {total_txt}{role_note}"}
-        e = await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra, case_number=outcome.case_number)
-        await panels.envoyer(ctx, panels.depuis_embed(e, kind="moderation"))
+        await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra, case_number=outcome.case_number)
+        total_note = f" ({total_txt} au total)" if outcome.total_warnings is not None else ""
+        await self._reply(ctx, f"{membre.mention} a été averti{total_note}.")
 
         if not outcome.auto_ban_triggered:
             return
         if outcome.auto_ban_hierarchy_error:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(
-                f"{membre.mention} a atteint **{outcome.total_warnings}** avertissements (seuil : {threshold}) "
-                f"mais n'a pas pu être banni automatiquement : {outcome.auto_ban_hierarchy_error}"
-            )))
+            return await self._reply(
+                ctx,
+                f"{membre.mention} a atteint {outcome.total_warnings} avertissements (seuil : {threshold}) "
+                f"mais n'a pas pu être banni automatiquement : {outcome.auto_ban_hierarchy_error}",
+            )
         if not outcome.auto_ban_executed:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
-                f'Le bannissement automatique de {membre.mention} a échoué (permissions).'
-            )))
+            return await self._reply(ctx, f"Le bannissement automatique de {membre.mention} a échoué (permissions).")
 
         style = design_system.CATEGORY_STYLES["moderation"]
         titre_dossier = (
@@ -751,8 +843,8 @@ class Moderation(commands.Cog):
         ban_e.add_field(name="🛡️ Modérateur", value=f"{self.bot.user.mention} (automatique)", inline=True)
         ban_e.add_field(name="📝 Raison", value=f"Seuil de {threshold} avertissements atteint", inline=False)
         ban_e.add_field(name="📌 Détails", value=f"Bannissement automatique — total d'avertissements : {outcome.total_warnings}", inline=False)
-        await panels.envoyer(ctx, panels.depuis_embed(ban_e))
         await self.log_action(ctx.guild, ban_e)
+        await self._reply(ctx, f"{membre.mention} a été banni automatiquement (seuil de {threshold} avertissements atteint).")
 
     @commands.hybrid_command(name="unwarn", description="Supprimer un avertissement précis via son identifiant.", with_app_command=False)
     @app_commands.describe(warn_id="L'identifiant de l'avertissement (voir /warnings)")
@@ -763,9 +855,12 @@ class Moderation(commands.Cog):
             "SELECT * FROM warnings WHERE id = ? AND guild_id = ?", (warn_id, ctx.guild.id)
         )
         if not row:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Aucun avertissement trouvé avec cet identifiant.')))
+            return await self._reply(ctx, "Aucun avertissement trouvé avec cet identifiant.", ephemere=True)
+        member = ctx.guild.get_member(int(row["user_id"]))
+        if member is not None and not await self.check_targetable(ctx, member):
+            return
         await self.bot.db.execute("DELETE FROM warnings WHERE id = ?", (warn_id,))
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"L'avertissement `#{warn_id}` a été supprimé.")))
+        await self._reply(ctx, f"Avertissement #{warn_id} supprimé.")
 
     @commands.hybrid_command(name="warnings", description="Afficher les avertissements d'un membre.")
     @app_commands.describe(membre="Le membre à consulter")
@@ -777,7 +872,7 @@ class Moderation(commands.Cog):
             (ctx.guild.id, membre.id),
         )
         if not rows:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"{membre.mention} n'a aucun avertissement.")))
+            return await self._reply(ctx, f"{membre.mention} n'a aucun avertissement.", ephemere=True)
         e = embeds.neutral(f"⚠️ Avertissements de {membre.display_name}", f"Total : {len(rows)}")
         for row in rows[:15]:
             mod = ctx.guild.get_member(row["moderator_id"])
@@ -793,10 +888,12 @@ class Moderation(commands.Cog):
     @checks.has_permission_or_modrole("moderate_members")
     async def clearwarnings(self, ctx: commands.Context, membre: discord.Member):
         await self._ack(ctx)
+        if not await self.check_targetable(ctx, membre):
+            return
         await self.bot.db.execute(
             "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Tous les avertissements de {membre.mention} ont été supprimés.')))
+        await self._reply(ctx, f"Tous les avertissements de {membre.mention} ont été supprimés.")
 
     # ---------------------------------------------------------------- DOSSIERS DE SANCTION
 
@@ -807,7 +904,7 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         row = await self.bot.db.get_sanction_by_case(ctx.guild.id, numero)
         if not row:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucun dossier `#{numero}` trouvé sur ce serveur.')))
+            return await self._reply(ctx, f"Aucun dossier #{numero} sur ce serveur.", ephemere=True)
         label = self.SANCTION_LABELS.get(row["action"], row["action"])
         kind = self.SANCTION_KIND.get(row["action"], "danger")
         colour = {"success": config.COLOR_SUCCESS, "warning": config.COLOR_WARNING, "danger": config.COLOR_ERROR}[kind]
@@ -829,7 +926,7 @@ class Moderation(commands.Cog):
         rows = await self.bot.db.get_sanction_history(ctx.guild.id, membre.id, limit=15)
         total = await self.bot.db.get_sanction_count(ctx.guild.id, membre.id)
         if not rows:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"{membre.mention} n'a aucune sanction enregistrée sur ce serveur.")))
+            return await self._reply(ctx, f"{membre.mention} n'a aucune sanction enregistrée sur ce serveur.", ephemere=True)
         style = design_system.CATEGORY_STYLES["moderation"]
         e = design_system.create_embed(
             title=f"{style['emoji']} Historique de sanctions — {membre.display_name}",
@@ -855,41 +952,155 @@ class Moderation(commands.Cog):
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_messages",), target="channel_target")
-    async def clear(self, ctx: commands.Context, nombre: app_commands.Range[int, 1, 100]):
-        await ctx.defer(ephemeral=True) if ctx.interaction else None
-        deleted = await ctx.channel.purge(limit=nombre)
-        auteurs = len({m.author.id for m in deleted if getattr(m, "author", None)})
-        await panels.envoyer(
-            ctx,
-            panels.Panneau(
-                titre="SentriX — Nettoyage",
-                sous_titre=f"**{len(deleted)}** message(s) supprimé(s) dans {ctx.channel.mention}.",
-                kind="moderation",
-                sections=[
-                    panels.Section(
-                        "Détail",
-                        [
-                            panels.Ligne("Messages supprimés", str(len(deleted))),
-                            panels.Ligne("Demandé", str(nombre)),
-                            panels.Ligne("Auteurs concernés", str(auteurs)),
-                        ],
-                        aligne=True,
-                    ),
-                    panels.Section(
-                        "À savoir",
-                        [
-                            panels.Ligne(
-                                "Limite Discord",
-                                "Les messages de plus de 14 jours ne peuvent pas être supprimés en masse",
-                            ),
-                            panels.Ligne("Modérateur", ctx.author.mention),
-                        ],
-                    ),
-                ],
-                pied="SentriX • Modération",
+    async def clear(self, ctx: commands.Context, nombre: commands.Range[int, 1, 100]):
+        """Implémentation UNIQUE de +clear / /clear.
+
+        Historique : trois implémentations coexistaient (ce corps, cogs/help_clear_fix_v80
+        et utils/sentrix_runtime._patch_clear, la dernière posée gagnant). Elles sont
+        fusionnées ici : la réponse est une ligne de texte, l'utilisateur est servi
+        AVANT le journal (transcription + aperçu, envoyés en tâche de fond), et les
+        identifiants purgés sont marqués pour que le journal « Messages » ne reçoive
+        pas N cartes individuelles avant le récapitulatif.
+        """
+        requested = max(1, min(int(nombre), 100))
+        if ctx.interaction is not None and not ctx.interaction.response.is_done():
+            await ctx.interaction.response.defer(ephemeral=True)
+
+        is_prefix = ctx.interaction is None
+        purge_limit = requested + (1 if is_prefix else 0)
+        invocation_id = getattr(getattr(ctx, "message", None), "id", None) if is_prefix else None
+
+        candidates = [message async for message in ctx.channel.history(limit=purge_limit)]
+        log_service.mark_purged(int(message.id) for message in candidates)
+
+        try:
+            deleted = await self._purge_messages(ctx, candidates, purge_limit)
+        except discord.Forbidden:
+            return await panels.texte_court(
+                ctx.channel if is_prefix else ctx,
+                "Il manque à SentriX la permission **Gérer les messages** ou **Voir l'historique** dans ce salon.",
+                ephemere=True,
+                supprimer_apres=8,
+            )
+        messages = [
+            message for message in deleted
+            if invocation_id is None or int(message.id) != int(invocation_id)
+        ]
+
+        texte = f"{len(messages)} message(s) supprimé(s)."
+        if is_prefix:
+            # Le message de commande vient d'être purgé : la confirmation est éphémère à
+            # sa manière (courte durée), sans référence à un message disparu.
+            await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
+        else:
+            await panels.texte_court(ctx, texte, ephemere=True)
+
+        asyncio.create_task(self._log_clear_safely(ctx, messages, requested))
+
+    @staticmethod
+    async def _purge_messages(ctx: commands.Context, candidates: list, purge_limit: int) -> list:
+        """Supprime des messages DÉJÀ récupérés, sans relire l'historique."""
+        if not candidates:
+            return []
+        limite_groupee = discord.utils.utcnow() - timedelta(days=14)
+        if any(message.created_at <= limite_groupee for message in candidates):
+            # Suppression groupée impossible au-delà de 14 jours : purge() sait le faire un par un.
+            return await ctx.channel.purge(limit=purge_limit)
+        try:
+            if len(candidates) == 1:
+                await candidates[0].delete()
+            else:
+                await ctx.channel.delete_messages(candidates)
+        except discord.HTTPException:
+            # Repli intégral plutôt que de laisser le salon à moitié nettoyé.
+            return await ctx.channel.purge(limit=purge_limit)
+        return candidates
+
+    async def _log_clear_safely(self, ctx: commands.Context, messages: list, requested: int) -> None:
+        """Journal de purge hors du chemin critique : un échec ici ne casse pas la commande."""
+        try:
+            await self._send_clear_log(ctx, messages, requested=requested)
+        except Exception:
+            logger.exception(
+                "Journal de purge impossible guild=%s salon=%s",
+                getattr(ctx.guild, "id", None), getattr(ctx.channel, "id", None),
+            )
+
+    _MASS_MENTION_RE = re.compile(r"@(everyone|here)\b", re.IGNORECASE)
+
+    @classmethod
+    def _neutralize_mentions(cls, value: object) -> str:
+        """Garde le texte lisible sans transformer @everyone/@here en mention Discord."""
+        return cls._MASS_MENTION_RE.sub(lambda m: "@\u200b" + m.group(1), str(value or ""))
+
+    @classmethod
+    def _clear_preview(cls, messages: list, limit: int = 10) -> str:
+        rows: list[str] = []
+        budget = 1000
+        for message in messages[:limit]:
+            author = cls._neutralize_mentions(getattr(message.author, "display_name", str(message.author)))
+            content = cls._neutralize_mentions(message.content or "[message sans texte]")
+            content = discord.utils.escape_markdown(content).replace("\n", " ").strip()
+            if len(content) > 150:
+                content = content[:149].rstrip() + "…"
+            row = f"**{author}** — {content}"
+            if len("\n".join([*rows, row])) > budget:
+                break
+            rows.append(row)
+        return "\n".join(rows) if rows else "Aucun contenu texte disponible."
+
+    @staticmethod
+    def _clear_transcript(ctx: commands.Context, messages: list, requested: int) -> bytes:
+        lines = [
+            "SentriX — transcription de clear",
+            f"Serveur: {ctx.guild.name} ({ctx.guild.id})",
+            f"Salon: #{ctx.channel.name} ({ctx.channel.id})",
+            f"Modérateur: {ctx.author} ({ctx.author.id})",
+            f"Demandé: {requested}",
+            f"Supprimé: {len(messages)}",
+            "",
+        ]
+        for index, message in enumerate(sorted(messages, key=lambda m: m.created_at), start=1):
+            lines.append(
+                f"[{index}] {message.created_at.isoformat()} | {message.author} ({message.author.id}) | "
+                f"message={message.id}"
+            )
+            lines.append(message.content or "[message sans texte]")
+            if message.attachments:
+                lines.append("Pièces jointes: " + " | ".join(attachment.url for attachment in message.attachments))
+            lines.append("")
+        return "\n".join(lines).encode("utf-8", errors="replace")
+
+    async def _send_clear_log(self, ctx: commands.Context, messages: list, *, requested: int) -> None:
+        if ctx.guild is None:
+            return
+        panel = embeds.canonical_log_embed(
+            "Messages supprimés avec Clear",
+            fields=(
+                ("Modérateur", f"<@{ctx.author.id}>", True),
+                ("Salon", f"<#{ctx.channel.id}>", True),
+                ("Nombre", str(len(messages)), True),
+                ("Messages supprimés", self._clear_preview(messages), False),
+                (
+                    "Transcription",
+                    "Le fichier joint contient la totalité des messages supprimés, leurs auteurs, IDs et pièces jointes.",
+                    False,
+                ),
             ),
-            ephemere=bool(ctx.interaction),
         )
+        file: discord.File | None = None
+        setting = await log_service.get_log_setting(self.bot, ctx.guild.id, "messages")
+        if setting.get("enabled"):
+            ok, _reason = log_service.validate_channel(ctx.guild, setting.get("channel_id"), needs_file=True)
+            if ok:
+                file = discord.File(
+                    io.BytesIO(self._clear_transcript(ctx, messages, requested)),
+                    filename=f"sentrix-clear-{ctx.channel.id}-{int(time.time())}.txt",
+                )
+        event_key = log_service.make_event_key(
+            ctx.guild.id, "clear_command", executor_id=ctx.author.id, discriminator=time.time_ns(),
+        )
+        await log_service.send_log(self.bot, ctx.guild, "messages", panel, file=file, event_key=event_key)
 
     @commands.hybrid_command(name="slowmode", description="Définir le mode lent du salon (durée libre : 5s, 1m, 10m, 1h...).", with_app_command=False)
     @app_commands.describe(duree="Ex: 5s, 30s, 1m, 10m, 1h — ou 0 / off pour désactiver (maximum 6 heures)")
@@ -906,50 +1117,13 @@ class Moderation(commands.Cog):
         else:
             secondes = helpers.parse_duration(raw)
             if secondes is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Durée invalide. Exemples valides : `5s`, `30s`, `1m`, `10m`, `1h`, ou `0` / `off` pour désactiver.')))
+                return await self._reply(ctx, "Durée invalide. Exemples : `5s`, `30s`, `1m`, `10m`, `1h`, ou `0` / `off` pour désactiver.", ephemere=True)
         secondes = max(0, min(21600, secondes))
         await ctx.channel.edit(slowmode_delay=secondes)
         if secondes == 0:
-            panneau = panels.Panneau(
-                titre="SentriX — Mode lent",
-                sous_titre=f"Le mode lent est **désactivé** dans {ctx.channel.mention}.",
-                kind="moderation",
-                sections=[
-                    panels.Section(
-                        "Effet",
-                        [panels.Ligne("Les membres peuvent", "Écrire sans délai imposé")],
-                    )
-                ],
-                pied="SentriX • Modération",
-            )
+            await self._reply(ctx, f"Mode lent désactivé dans {ctx.channel.mention}.")
         else:
-            panneau = panels.Panneau(
-                titre="SentriX — Mode lent",
-                sous_titre=f"**{helpers.format_duration(secondes)}** entre deux messages dans {ctx.channel.mention}.",
-                kind="moderation",
-                sections=[
-                    panels.Section(
-                        "Réglage",
-                        [
-                            panels.Ligne("Délai", helpers.format_duration(secondes)),
-                            panels.Ligne("Salon", ctx.channel.mention),
-                            panels.Ligne("Modérateur", ctx.author.mention),
-                        ],
-                    ),
-                    panels.Section(
-                        "À savoir",
-                        [
-                            panels.Ligne(
-                                "Exemptions",
-                                "Le staff pouvant gérer les messages n'est pas soumis au délai",
-                            ),
-                            panels.Ligne("Désactiver", "`+slowmode off`"),
-                        ],
-                    ),
-                ],
-                pied="SentriX • Modération",
-            )
-        await panels.envoyer(ctx, panneau)
+            await self._reply(ctx, f"Mode lent : {helpers.format_duration(secondes)} entre deux messages dans {ctx.channel.mention}.")
 
     @commands.hybrid_command(name="lock", description="Verrouiller le salon (empêche @everyone d'écrire).", with_app_command=False)
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
@@ -959,37 +1133,11 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         error = checks.check_channel_target(ctx.author, ctx.channel)
         if error:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(error)))
+            return await self._reply(ctx, error, ephemere=True)
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=raison)
-        await panels.envoyer(
-            ctx,
-            panels.Panneau(
-                titre="SentriX — Salon verrouillé",
-                sous_titre=f"{ctx.channel.mention} est fermé à l'écriture.",
-                kind="moderation",
-                sections=[
-                    panels.Section(
-                        "Sanction",
-                        [
-                            panels.Ligne("Salon", ctx.channel.mention),
-                            panels.Ligne("Raison", raison),
-                            panels.Ligne("Modérateur", ctx.author.mention),
-                        ],
-                    ),
-                    panels.Section(
-                        "Qui est concerné",
-                        [
-                            panels.Ligne("Bloqué", "Tous les membres du rôle par défaut"),
-                            panels.Ligne("Non bloqué", "Les rôles ayant une autorisation explicite sur ce salon"),
-                            panels.Ligne("Rouvrir", "`+unlock`"),
-                        ],
-                    ),
-                ],
-                pied="SentriX • Modération",
-            ),
-        )
+        await self._reply(ctx, f"{ctx.channel.mention} est verrouillé. Raison : {raison}")
 
     @commands.hybrid_command(name="unlock", description="Déverrouiller le salon.", with_app_command=False)
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
@@ -999,51 +1147,51 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         error = checks.check_channel_target(ctx.author, ctx.channel)
         if error:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(error)))
+            return await self._reply(ctx, error, ephemere=True)
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await panels.envoyer(
-            ctx,
-            panels.Panneau(
-                titre="SentriX — Salon déverrouillé",
-                sous_titre=f"{ctx.channel.mention} est de nouveau ouvert à l'écriture.",
-                kind="success",
-                sections=[
-                    panels.Section(
-                        "Détail",
-                        [
-                            panels.Ligne("Salon", ctx.channel.mention),
-                            panels.Ligne("Modérateur", ctx.author.mention),
-                            panels.Ligne(
-                                "Permission rétablie",
-                                "L'autorisation d'écrire revient à sa valeur d'origine",
-                                indice="Les réglages propres à chaque rôle ne sont pas modifiés.",
-                            ),
-                        ],
-                    )
-                ],
-                pied="SentriX • Modération",
-            ),
-        )
+        await self._reply(ctx, f"{ctx.channel.mention} est déverrouillé.")
 
     @commands.hybrid_command(name="hide", description="Cacher le salon aux membres (@everyone).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def hide(self, ctx: commands.Context):
         await self._ack(ctx)
-        overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
-        overwrite.view_channel = False
-        await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('🙈 Salon caché.')))
+        if await self._set_everyone_visibility(ctx, visible=False):
+            await self._reply(ctx, f"{ctx.channel.mention} est maintenant caché aux membres.")
 
     @commands.hybrid_command(name="show", description="Rendre le salon à nouveau visible.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def show(self, ctx: commands.Context):
         await self._ack(ctx)
+        if await self._set_everyone_visibility(ctx, visible=True):
+            await self._reply(ctx, f"{ctx.channel.mention} est à nouveau visible.")
+
+    # Code d'erreur Discord renvoyé quand on tente de cacher un salon déclaré dans
+    # l'onboarding communautaire (« Onboarding channels must be readable by everyone »).
+    _ONBOARDING_CHANNEL_ERROR = 350003
+
+    async def _set_everyone_visibility(self, ctx: commands.Context, *, visible: bool) -> bool:
+        """Applique la permission « voir le salon » de @everyone ; retourne False (après
+        une phrase courte) quand Discord refuse — ce n'est pas une erreur technique."""
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
-        overwrite.view_channel = None
-        await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('👁️ Salon à nouveau visible.')))
+        overwrite.view_channel = None if visible else False
+        try:
+            await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=f"{ctx.author} : {'show' if visible else 'hide'}")
+        except discord.Forbidden:
+            await self._reply(ctx, "Il manque à SentriX la permission **Gérer les salons** ici.", ephemere=True)
+            return False
+        except discord.HTTPException as exc:
+            if getattr(exc, "code", None) == self._ONBOARDING_CHANNEL_ERROR:
+                await self._reply(
+                    ctx,
+                    f"{ctx.channel.mention} fait partie de l'onboarding du serveur : Discord impose qu'il reste visible par tous. "
+                    "Retirez-le de l'onboarding (Paramètres du serveur › Onboarding) pour pouvoir le cacher.",
+                    ephemere=True,
+                )
+                return False
+            raise
+        return True
 
     # ---------------------------------------------------------------- DIVERS
 
@@ -1061,7 +1209,7 @@ class Moderation(commands.Cog):
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=pseudo[:32])
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le pseudo de {membre.mention} est maintenant **{pseudo[:32]}**.')))
+        await self._reply(ctx, f"Le pseudo de {membre.mention} est maintenant **{pseudo[:32]}**.")
 
     @commands.hybrid_command(name="resetnick", description="Réinitialiser le pseudo d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre concerné")
@@ -1073,27 +1221,31 @@ class Moderation(commands.Cog):
         if not await self.check_targetable(ctx, membre):
             return
         await membre.edit(nick=None)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le pseudo de {membre.mention} a été réinitialisé.')))
+        await self._reply(ctx, f"Le pseudo de {membre.mention} a été réinitialisé.")
 
     @commands.hybrid_command(name="move", description="Déplacer un membre vers un autre salon vocal.", with_app_command=False)
     @app_commands.describe(membre="Le membre à déplacer", salon="Le salon vocal de destination")
     @checks.has_permission_or_modrole("move_members")
     async def move(self, ctx: commands.Context, membre: discord.Member, salon: discord.VoiceChannel):
         await self._ack(ctx)
+        if not await self.check_targetable(ctx, membre):
+            return
         if not membre.voice:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce membre n'est pas en vocal.")))
+            return await self._reply(ctx, "Ce membre n'est pas en vocal.", ephemere=True)
         await membre.move_to(salon)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été déplacé vers **{salon.name}**.')))
+        await self._reply(ctx, f"{membre.mention} a été déplacé vers **{salon.name}**.")
 
     @commands.hybrid_command(name="disconnect", description="Déconnecter un membre du vocal.", with_app_command=False)
     @app_commands.describe(membre="Le membre à déconnecter")
     @checks.has_permission_or_modrole("move_members")
     async def disconnect(self, ctx: commands.Context, membre: discord.Member):
         await self._ack(ctx)
+        if not await self.check_targetable(ctx, membre):
+            return
         if not membre.voice:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce membre n'est pas en vocal.")))
+            return await self._reply(ctx, "Ce membre n'est pas en vocal.", ephemere=True)
         await membre.move_to(None)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} a été déconnecté du vocal.')))
+        await self._reply(ctx, f"{membre.mention} a été déconnecté du vocal.")
 
 
 async def setup(bot: commands.Bot):

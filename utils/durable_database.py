@@ -163,7 +163,7 @@ class DurableDatabaseReplica:
             try:
                 await pool.close()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans close", exc_info=True)
 
     async def _local_healthy(self) -> bool:
         return await asyncio.to_thread(_sqlite_healthy_sync, self.sqlite_path)

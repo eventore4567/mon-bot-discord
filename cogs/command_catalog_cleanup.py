@@ -68,6 +68,8 @@ PROOF_VISIBLE_COMMANDS = frozenset({
 
 PURE_DUPLICATE_COMMANDS = frozenset({
     "rank", "buyrole", "ask", "chat", "embed-create", "latency", "levelroles",
+    # raccourci texte de +info role (/serverinfo est, lui, une racine slash canonique V110)
+    "roleinfo",
 })
 
 SETUP_MERGED_COMMANDS = frozenset({

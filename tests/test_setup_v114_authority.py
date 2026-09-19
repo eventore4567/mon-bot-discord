@@ -5,13 +5,14 @@ from types import SimpleNamespace
 import sentrix_v103_setup_fix as v103
 
 
-class _FakeConfiguration:
+class _FakeSetupCog:
+    """Le seul moteur de setup : cogs.setup_control_center.OfficialSetup.send_setup."""
+
     def __init__(self):
-        self.active_by_guild = {}
         self.calls = []
 
-    async def _open_setup_panel(self, interaction, *, author=None):
-        self.calls.append((interaction, author))
+    async def send_setup(self, target):
+        self.calls.append(target)
 
 
 class _FakeTree:
@@ -29,12 +30,12 @@ class _FakeTree:
 
 class _FakeBot:
     def __init__(self):
-        self.configuration = _FakeConfiguration()
+        self.setup_cog = _FakeSetupCog()
         self.tree = _FakeTree()
 
     def get_cog(self, name):
-        if name == "Configuration":
-            return self.configuration
+        if name == "SentriXSetup":
+            return self.setup_cog
         return None
 
     async def is_owner(self, user):
@@ -49,14 +50,13 @@ def _interaction():
     )
 
 
-def test_v103_no_longer_executes_legacy_setup_route():
+def test_v103_routes_slash_setup_to_the_single_setup_engine():
+    """/setup et +setup ouvrent le MÊME centre (OfficialSetup.send_setup) : plus de
+    seconde interface Configuration.SetupView derrière la commande slash."""
     source = inspect.getsource(v103._replace_setup_slash) + inspect.getsource(v103._send_setup_v114)
-    # Vérifie le code exécutable historique, sans faire échouer le test si un docstring
-    # explique simplement pourquoi l'ancien routeur ne doit plus être utilisé.
-    assert "from cogs.setup_control_center import" not in source
-    assert ".send_setup(" not in source
-    assert 'bot.get_cog("Configuration")' in source
-    assert '"_open_setup_panel"' in source
+    assert 'bot.get_cog("SentriXSetup")' in source
+    assert ".send_setup(" in source
+    assert "_open_setup_panel" not in source
 
 
 def test_v103_registers_native_zero_option_v114_setup():
@@ -70,8 +70,8 @@ def test_v103_registers_native_zero_option_v114_setup():
     assert list(inspect.signature(command.callback).parameters) == ["interaction"]
 
 
-def test_v103_setup_callback_opens_configuration_panel():
+def test_v103_setup_callback_opens_the_same_panel_as_prefix_setup():
     bot = _FakeBot()
     interaction = _interaction()
     asyncio.run(v103._send_setup_v114(bot, interaction))
-    assert bot.configuration.calls == [(interaction, interaction.user)]
+    assert bot.setup_cog.calls == [interaction]

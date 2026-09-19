@@ -17,7 +17,6 @@ os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 import discord
 
 from cogs.moderation import Moderation
-from utils import sentrix_panels as panels
 
 
 class _FakeUser:
@@ -90,7 +89,7 @@ class UnbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
         guild.unban.assert_not_awaited()
         ctx.send.assert_awaited()
 
-    async def test_debannissement_reussi_appelle_le_service_et_rend_le_panneau(self):
+    async def test_debannissement_reussi_appelle_le_service_et_confirme_en_une_ligne(self):
         user = _FakeUser(2002)
         cog = _make_cog(fetch_user=AsyncMock(return_value=user))
         ctx, guild, actor = _fake_ctx()
@@ -101,7 +100,7 @@ class UnbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited()
         cog.log_action.assert_awaited_once()
 
-    async def test_echec_de_persistance_n_empeche_pas_le_panneau_de_succes(self):
+    async def test_echec_de_persistance_n_empeche_pas_la_confirmation_de_succes(self):
         user = _FakeUser(2002)
         cog = _make_cog(fetch_user=AsyncMock(return_value=user))
         cog.bot.db.record_sanction = AsyncMock(side_effect=RuntimeError("disque plein"))
@@ -111,9 +110,9 @@ class UnbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.unban.assert_awaited_once()
         ctx.send.assert_awaited()
-        panneau = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(panneau, panels.Panneau)
-        self.assertEqual(panneau.kind, "moderation")
+        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
+        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
 
 
 if __name__ == "__main__":

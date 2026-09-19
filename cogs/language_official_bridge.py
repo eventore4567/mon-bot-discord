@@ -89,7 +89,7 @@ def _english(text: object | None) -> str | None:
         translated = language_runtime._english_setup_text(value)
         value = str(translated if translated is not None else value)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _english", exc_info=True)
     for source, target in EN_REPLACEMENTS:
         value = value.replace(source, target)
     return value

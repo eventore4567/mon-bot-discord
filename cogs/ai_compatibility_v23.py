@@ -31,7 +31,7 @@ def _row_to_mapping(row: Any) -> dict[str, Any]:
     try:
         return dict(row)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _row_to_mapping", exc_info=True)
     keys = getattr(row, "keys", None)
     if callable(keys):
         result = {}

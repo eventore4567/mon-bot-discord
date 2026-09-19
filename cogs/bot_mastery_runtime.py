@@ -586,12 +586,12 @@ def _install_moderation_evidence(bot: commands.Bot) -> None:
                     try:
                         embed.add_field(name="Recommandation", value=advice, inline=False)
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans log_sanction_mastery", exc_info=True)
                 if unique:
                     try:
                         embed.add_field(name="Preuves", value=f"{len(unique)} message(s) récent(s) sauvegardé(s).", inline=False)
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans log_sanction_mastery", exc_info=True)
         except Exception as exc:
             await _group_error(self.bot, "moderation_evidence", exc)
         return embed
@@ -716,7 +716,7 @@ def _install_game_mastery(bot: commands.Bot) -> None:
                     reward.metadata["weekly_bonus"] = GAME_WEEKLY_BONUS
                     reward.metadata["weekly_target"] = GAME_WEEKLY_TARGET
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans reward_mastery", exc_info=True)
         except Exception as exc:
             await _group_error(runtime_bot, "game_weekly", exc)
         return reward
@@ -894,7 +894,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
                     await conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                     await conn.commit()
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans prepare_shutdown", exc_info=True)
             await _safe_execute(
                 self.bot,
                 "INSERT INTO shutdown_state (key,value,updated_at) VALUES ('last_shutdown','clean',?) "
@@ -1287,7 +1287,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
                     try:
                         await guild.edit_role_positions(positions={role: int(payload.get("position", 1))})
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans _rollback_nuke_v3", exc_info=True)
                 elif action == "role_update" and target_id:
                     role = guild.get_role(target_id)
                     if role and role < guild.me.top_role:
@@ -1308,7 +1308,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
                         try:
                             kwargs["verification_level"] = discord.VerificationLevel(int(verification))
                         except Exception:
-                            pass
+                            logger.warning("Étape non critique ignorée dans _rollback_nuke_v3", exc_info=True)
                     if kwargs:
                         await guild.edit(reason="Rollback anti-nuke SentriX V3", **kwargs)
                 elif action == "webhook_create" and target_id:
@@ -1451,7 +1451,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
                             ),
                         )
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans on_member_join", exc_info=True)
                 except discord.HTTPException:
                     action = "quarantine_failed"
             await self.bot.db.execute(
@@ -1503,7 +1503,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
                     if conf[key]:
                         verify_role = int(conf[key]); break
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans on_member_update", exc_info=True)
             if not verify_role or verify_role in _member_role_ids(before) or verify_role not in _member_role_ids(after):
                 return
             state = await self.bot.db.fetchone(

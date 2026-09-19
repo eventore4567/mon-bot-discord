@@ -861,7 +861,7 @@ def _install_persistent_automod(bot: commands.Bot) -> None:
         if member.id == guild.owner_id or member.id in getattr(__import__("config"), "OWNER_IDS", []):
             return None, 0
         conf = await self.get_automod_cached(guild.id)
-        if not conf.get("escalation", 1):
+        if not conf.get("escalation", 0):
             return None, 0
         if not await _ensure_schema(self.bot):
             return await current(self, guild, member, reason)
@@ -1235,7 +1235,7 @@ async def _repair_persistent_views(bot: commands.Bot) -> dict:
             bot._sentrix_shop_view_registered = True
             result["generic_views"] += 1
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _repair_persistent_views", exc_info=True)
 
     try:
         from .verification import VerifyView
@@ -1244,7 +1244,7 @@ async def _repair_persistent_views(bot: commands.Bot) -> dict:
             bot._sentrix_excellence_verify_view = True
             result["generic_views"] += 1
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _repair_persistent_views", exc_info=True)
 
     try:
         from .events import GiveawayView
@@ -1253,7 +1253,7 @@ async def _repair_persistent_views(bot: commands.Bot) -> dict:
             bot._sentrix_excellence_giveaway_view = True
             result["generic_views"] += 1
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _repair_persistent_views", exc_info=True)
     return result
 
 
@@ -1431,7 +1431,7 @@ def _install_asyncio_exception_handler(bot: commands.Bot) -> None:
         try:
             event_loop.create_task(_record_incident(bot, "asyncio", detail))
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans handler", exc_info=True)
         if previous is not None:
             previous(event_loop, context)
         else:

@@ -83,10 +83,11 @@ EXTENSIONS = [
     "cogs.invites",
     "cogs.design",
     "cogs.embed_builder",
+    # Message privé à un membre (+dm). La diffusion à tout le serveur a été retirée.
+    "cogs.direct_message",
     # cogs.visual_experience_v5 declenche finalize_runtime() et doit rester
     # DERNIERE : une extension chargee apres elle echappe a toute la pile de
-    # style. C'est ce qui laissait +dmall en dehors du systeme visuel.
-    "sentrix_broadcast_dmall_visual",
+    # style.
     "cogs.visual_experience_v5",
 ]
 
@@ -173,7 +174,7 @@ OWNER_ONLY_COMMANDS = frozenset({
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
     # Core V2, Phase 1 (docs/core-v2-plan.md) : panneau d'observabilité globale
     # au processus, jamais scopé par serveur — pas adapté à un accès admin.
-    "corediag",
+    "health", "corediag",
     # docs/core-v2-audit-technical-debt.md §16 : présent dans la copie canonique
     # (utils/access_matrix.py::OWNER_ONLY_COMMANDS) depuis le début, mais absent
     # ici — cette liste-ci n'est lue que par des outils d'audit/log (aucun
@@ -827,7 +828,19 @@ class BotAllInOne(commands.Bot):
                 "qui n’est pas présente sur votre rôle."
             ))
 
-        logger.error(f"Erreur non gérée dans la commande {ctx.command} :\n{traceback.format_exc()}")
+        # Contexte exploitable dans Railway : module, commande, serveur, membre, type —
+        # avec la vraie trace de l'exception reçue (traceback.format_exc() ne voyait
+        # rien ici : l'erreur est passée en argument, pas en cours de levée).
+        logger.error(
+            "Erreur non gérée | cog=%s commande=%s guild=%s user=%s | %s: %s",
+            getattr(getattr(ctx, "cog", None), "qualified_name", None) or getattr(getattr(ctx.command, "callback", None), "__module__", "?"),
+            getattr(ctx.command, "qualified_name", ctx.command),
+            getattr(ctx.guild, "id", None),
+            getattr(ctx.author, "id", None),
+            type(error).__name__,
+            str(error)[:300],
+            exc_info=(type(error), error, error.__traceback__),
+        )
         if ctx.author.id == PRIMARY_CREATOR_ID:
             detail = str(error).strip() or "aucun détail"
             return await ctx.send(
@@ -884,9 +897,14 @@ class BotAllInOne(commands.Bot):
         else:
             command_name = interaction.command.qualified_name if interaction.command else "inconnue"
             logger.error(
-                "Erreur non gérée dans la commande slash %s :\n%s",
+                "Erreur non gérée | slash=%s module=%s guild=%s user=%s | %s: %s",
                 command_name,
-                "".join(traceback.format_exception(type(error), error, error.__traceback__)),
+                getattr(getattr(interaction.command, "callback", None), "__module__", "?"),
+                getattr(interaction.guild, "id", None),
+                getattr(interaction.user, "id", None),
+                type(original).__name__,
+                str(original)[:300],
+                exc_info=(type(original), original, original.__traceback__),
             )
             if interaction.user.id == PRIMARY_CREATOR_ID:
                 detail = str(original).strip() or "aucun détail"

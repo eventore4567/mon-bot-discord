@@ -92,7 +92,6 @@ class SentriXAccessibility(commands.Cog):
         self.bot = bot
 
     async def cog_load(self):
-        self._install_error_explanations()
         self._install_typo_tolerant_navigation()
         self._install_accessible_pagination()
         self.bot._sentrix_accessibility_ready = True
@@ -100,113 +99,11 @@ class SentriXAccessibility(commands.Cog):
             "ready": True,
             "new_commands": 0,
             "unknown_command_suggestions": True,
-            "friendly_argument_errors": True,
+            "friendly_argument_errors": "final_error_embed_v5",
             "typo_tolerant_navigation": True,
             "text_pagination_labels": True,
         }
         logger.info("SentriX V2.3 accessibilité installée, 0 nouvelle commande.")
-
-    def _install_error_explanations(self):
-        if getattr(self.bot, "_sentrix_accessible_error_handler", False):
-            return
-        original = self.bot.on_command_error
-
-        async def accessible_error_handler(_bot, ctx: commands.Context, error: commands.CommandError):
-            raw_error = error
-            error = getattr(error, "original", error)
-
-            # Les commandes inconnues sont volontairement laissées au garde de réponses
-            # global (command_response_guard). Il est l'unique source de suggestion pour
-            # les fautes comme +hyelp -> +help. Les traiter aussi ici produisait deux embeds
-            # pour le même message Discord.
-            if isinstance(error, commands.CommandNotFound):
-                return await original(ctx, raw_error)
-
-            command = getattr(ctx, "command", None)
-            command_name = str(getattr(command, "qualified_name", "") or getattr(command, "name", "") or "commande")
-            signature = str(getattr(command, "signature", "") or "")
-            usage = usage_line(_prefix(ctx), command_name, signature)
-
-            if isinstance(error, commands.MissingRequiredArgument):
-                parameter = human_parameter(getattr(error.param, "name", None))
-                return await _safe_send(
-                    ctx,
-                    title="Information manquante",
-                    description=(
-                        f'Il manque **{parameter}**.\nUtilisez : `{usage}`\n\nLes éléments entre `< >` sont obligatoires ; ceux entre `[ ]` sont optionnels.'
-                    ),
-                )
-
-            if isinstance(error, commands.TooManyArguments):
-                return await _safe_send(
-                    ctx,
-                    title="Trop d'informations",
-                    description=f"Cette commande a reçu trop d'arguments.\nUtilisez : `{usage}`",
-                )
-
-            member_not_found = getattr(commands, "MemberNotFound", ())
-            user_not_found = getattr(commands, "UserNotFound", ())
-            role_not_found = getattr(commands, "RoleNotFound", ())
-            channel_not_found = getattr(commands, "ChannelNotFound", ())
-
-            if member_not_found and isinstance(error, member_not_found):
-                return await _safe_send(
-                    ctx,
-                    title="Membre introuvable",
-                    description=f'Mentionnez le membre ou utilisez son identifiant Discord.\nExemple : `{_prefix(ctx)}{command_name} @membre ...`',
-                )
-            if user_not_found and isinstance(error, user_not_found):
-                return await _safe_send(ctx, title="Utilisateur introuvable", description=f"Vérifiez la mention ou l'identifiant.\nUtilisez : `{usage}`")
-            if role_not_found and isinstance(error, role_not_found):
-                return await _safe_send(ctx, title="Rôle introuvable", description=f'Mentionnez un rôle existant ou vérifiez son nom.\nUtilisez : `{usage}`')
-            if channel_not_found and isinstance(error, channel_not_found):
-                return await _safe_send(ctx, title="Salon introuvable", description=f'Mentionnez un salon existant.\nUtilisez : `{usage}`')
-
-            if isinstance(error, commands.BadArgument):
-                return await _safe_send(
-                    ctx,
-                    title="Argument non compris",
-                    description=(
-                        f"Je n'ai pas compris une des informations données.\nSyntaxe attendue : `{usage}`\nVous pouvez utiliser des mentions Discord quand une commande demande un membre, un rôle ou un salon."
-                    ),
-                )
-
-            if isinstance(error, commands.CommandOnCooldown):
-                seconds = max(1, round(float(error.retry_after)))
-                if seconds >= 3600:
-                    wait = f"{seconds // 3600} h {(seconds % 3600) // 60} min"
-                elif seconds >= 60:
-                    wait = f"{seconds // 60} min {seconds % 60} s"
-                else:
-                    wait = f"{seconds} s"
-                return await _safe_send(ctx, title="Commande en pause", description=f'Vous pourrez la réutiliser dans **{wait}**.')
-
-            if isinstance(error, commands.MissingPermissions):
-                return await _safe_send(
-                    ctx,
-                    title="Permission nécessaire",
-                    description=f"Il vous manque : **{_friendly_permissions(error.missing_permissions)}**.",
-                )
-
-            if isinstance(error, commands.BotMissingPermissions):
-                return await _safe_send(
-                    ctx,
-                    title="Permission du bot manquante",
-                    description=(
-                        f"SentriX a besoin de : **{_friendly_permissions(error.missing_permissions)}**.\n"
-                        "Un administrateur doit corriger les permissions du rôle du bot."
-                    ),
-                )
-
-            if isinstance(error, commands.NoPrivateMessage):
-                return await _safe_send(ctx, title="Serveur requis", description="Cette action doit être utilisée dans un serveur Discord, pas en message privé.")
-
-            # Les erreurs de sécurité/permissions personnalisées et les exceptions métier
-            # continuent vers le gestionnaire historique, qui connaît mieux leur contexte.
-            return await original(ctx, raw_error)
-
-        self.bot.on_command_error = types.MethodType(accessible_error_handler, self.bot)
-        self.bot._sentrix_accessible_error_handler = True
 
     def _install_typo_tolerant_navigation(self):
         original = bot_experience_v6._quick_intent

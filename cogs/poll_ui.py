@@ -608,4 +608,4 @@ async def install_poll_ui(bot: commands.Bot):
 
         utility_module.CATEGORY_LABELS["PollUI"] = "📊 Sondages"
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans install_poll_ui", exc_info=True)

@@ -223,7 +223,7 @@ def install(bot: commands.Bot) -> None:
                             inline=False,
                         )
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans build_server", exc_info=True)
             except Exception:
                 logger.exception("Audit/réparation réel de build_server impossible sur %s", getattr(guild, "id", "?"))
 

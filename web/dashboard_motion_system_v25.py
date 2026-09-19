@@ -163,10 +163,8 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-system-v25-js">
     records.forEach(record => record.addedNodes.forEach(decorateAdded));
   }).observe(document.body, {childList:true,subtree:true});
 
-  document.addEventListener("sentrix:live", () => {
-    if (!content || reduced()) return;
-    content.querySelectorAll(".notice.ok,.badge.ok,.sx12-badge.ok").forEach(node => replayClass(node, "sx25-state-change"));
-  });
+  // Plus de pulsation des badges à chaque tick temps réel (20 s) : trois couches la
+  // rejouaient en même temps, ce qui se lisait comme un clignotement périodique.
   window.addEventListener("pageshow", () => requestAnimationFrame(animateSurface));
 
   requestAnimationFrame(animateSurface);

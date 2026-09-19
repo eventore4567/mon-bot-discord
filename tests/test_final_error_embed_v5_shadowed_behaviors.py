@@ -40,12 +40,15 @@ class _FauxCtx:
 
 
 def _rendu(erreur) -> str:
-    return panels.texte_complet(erreurs._prefix_error_panel(_FauxCtx(), erreur)).casefold()
+    """Une erreur simple est rendue en UNE phrase (texte), jamais en panneau."""
+    texte = erreurs._texte_erreur_prefix(_FauxCtx(), erreur)
+    assert texte is not None, "une erreur simple doit produire une phrase courte"
+    return texte.casefold()
 
 
 def test_rate_limit_error_a_son_propre_message_pas_acces_refuse():
     texte = _rendu(RuntimeRateLimitError(5.0))
-    assert "temporairement limité" in texte
+    assert "temporairement limitée" in texte
     assert "réessayez" in texte
     assert "pas autorisé" not in texte
 
@@ -80,8 +83,9 @@ def test_une_autre_commande_sans_argument_garde_le_panneau_generique():
     fake_ctx = SimpleNamespace(command=SimpleNamespace(qualified_name="ban"))
     param = SimpleNamespace(name="membre", displayed_name="membre")
     erreur = commands.MissingRequiredArgument(param)
-    texte = panels.texte_complet(erreurs._prefix_error_panel(fake_ctx, erreur)).casefold()
-    assert "argument manquant" in texte
+    fake_ctx.clean_prefix = "+"
+    texte = erreurs._texte_erreur_prefix(fake_ctx, erreur).casefold()
+    assert texte.startswith("usage : `+ban")
 
 
 def test_tictactoe_avec_un_autre_argument_manquant_garde_le_panneau_generique():
@@ -89,5 +93,6 @@ def test_tictactoe_avec_un_autre_argument_manquant_garde_le_panneau_generique():
     fake_ctx = SimpleNamespace(command=SimpleNamespace(qualified_name="tictactoe"))
     param = SimpleNamespace(name="autre_chose", displayed_name="autre_chose")
     erreur = commands.MissingRequiredArgument(param)
-    texte = panels.texte_complet(erreurs._prefix_error_panel(fake_ctx, erreur)).casefold()
-    assert "argument manquant" in texte
+    fake_ctx.clean_prefix = "+"
+    texte = erreurs._texte_erreur_prefix(fake_ctx, erreur).casefold()
+    assert texte.startswith("usage : `+tictactoe")

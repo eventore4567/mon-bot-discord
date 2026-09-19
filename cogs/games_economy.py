@@ -31,6 +31,7 @@ Commandes ajoutées ici :
 """
 
 from __future__ import annotations
+import logging
 
 import asyncio
 import random
@@ -42,6 +43,8 @@ from discord.ext import commands
 
 from utils import checks, design_system, game_rewards, stats_service
 from utils import sentrix_panels as panels
+
+logger = logging.getLogger("bot.games-economy")
 
 # ---------------------------------------------------------------------------
 # Registre de tous les mini-jeux connus du bot (cogs/minigames.py + ce fichier), utilisé
@@ -606,7 +609,7 @@ class _RPSDuelView(discord.ui.View):
         try:
             await self.message.edit(content="⏱️ Duel expiré (l'un des deux joueurs n'a pas répondu).", view=self)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans on_timeout", exc_info=True)
 
     async def maybe_resolve(self):
         if self._settled or len(self.choices) < 2:
@@ -685,7 +688,7 @@ class _NumberDuelView(discord.ui.View):
         try:
             await self.message.edit(content="⏱️ Duel expiré.", view=self)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans on_timeout", exc_info=True)
 
     async def open_modal(self, interaction: discord.Interaction):
         if interaction.user.id not in (self.p1.id, self.p2.id):
@@ -751,7 +754,7 @@ class _QuizDuelView(discord.ui.View):
         try:
             await self.message.edit(content="⏱️ Duel expiré.", view=self)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans on_timeout", exc_info=True)
 
     async def open_modal(self, interaction: discord.Interaction):
         if interaction.user.id not in (self.p1.id, self.p2.id):
@@ -950,7 +953,7 @@ class ConnectFourView(discord.ui.View):
         try:
             await panels.editer(self.message, panels.avec_composants(self.panneau("⏱️ Partie expirée (inactivité)."), self))
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans on_timeout", exc_info=True)
 
 
 class _ConnectFourButton(discord.ui.Button):
@@ -1282,7 +1285,7 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
                 ),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _run_solo", exc_info=True)
 
         await panels.envoyer(
             ctx,

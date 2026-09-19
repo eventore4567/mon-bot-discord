@@ -1,7 +1,12 @@
-"""Accueil unique et premium envoyé automatiquement lorsque SentriX rejoint un serveur."""
+"""Accueil UNIQUE envoyé lorsque SentriX rejoint un serveur.
+
+Un seul message : présentation, bouton Configurer, choix de la langue (Français /
+English), demande d'aide au créateur et liens officiels. Les anciens messages
+séparés (« Bienvenue sur SentriX V3 », « Choose your language », « Besoin d'aide pour
+configurer SentriX ? ») ont été retirés de leurs modules respectifs.
+"""
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 
@@ -16,8 +21,6 @@ logger = logging.getLogger("bot.guild-arrival")
 WELCOME_COLOUR = 0x6C5CE7
 OFFICIAL_SUPPORT_URL = "https://discord.gg/5P5Bqjqu5t"
 SUPPORT_URL = (os.getenv("SUPPORT_SERVER_URL") or OFFICIAL_SUPPORT_URL).strip()
-LEGACY_WELCOME_TITLE = "Bienvenue sur SentriX V3"
-LEGACY_WELCOME_MARKER = "Pour les membres"
 
 
 def _safe_url(value: str | None) -> str | None:
@@ -91,7 +94,9 @@ def _arrival_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
     embed.add_field(
         name="Avant de commencer",
         value=(
-            "Placez le rôle **SentriX** au-dessus des rôles qu'il doit gérer, puis utilisez le bouton **Configurer** ci-dessous."
+            "Placez le rôle **SentriX** au-dessus des rôles qu'il doit gérer, puis utilisez le bouton **Configurer** ci-dessous.\n"
+            "Tout est **inactif tant que vous ne l'avez pas configuré** : rien ne se déclenche sans votre accord.\n"
+            "Besoin d'un coup de main ? **Demander de l'aide** crée une invitation temporaire (24 h, un seul usage) pour le créateur de SentriX."
         ),
         inline=False,
     )
@@ -236,6 +241,18 @@ class GuildArrivalView(discord.ui.View):
     async def language_en(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await self._choose_language(interaction, "en")
 
+    @discord.ui.button(
+        label="Demander de l'aide",
+        style=discord.ButtonStyle.secondary,
+        custom_id="sentrix:setup-help:request:v1",
+        row=1,
+    )
+    async def request_help(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        """Même action que l'ancienne carte séparée : invitation temporaire pour le créateur."""
+        from .owner_log_rebuild import request_setup_help
+
+        await request_setup_help(self.bot, interaction)
+
 
 class GuildArrival(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -262,39 +279,6 @@ class GuildArrival(commands.Cog):
                 return channel
         return None
 
-    def _is_legacy_welcome(self, message: discord.Message, keep_message_id: int) -> bool:
-        bot_user = self.bot.user
-        if bot_user is None or message.id == keep_message_id or message.author.id != bot_user.id:
-            return False
-
-        parts = [str(message.content or "")]
-        for embed in message.embeds:
-            parts.extend((str(embed.title or ""), str(embed.description or "")))
-            if embed.author and embed.author.name:
-                parts.append(str(embed.author.name))
-            if embed.footer and embed.footer.text:
-                parts.append(str(embed.footer.text))
-            for field in embed.fields:
-                parts.extend((str(field.name or ""), str(field.value or "")))
-        blob = "\n".join(parts)
-        return LEGACY_WELCOME_TITLE in blob and LEGACY_WELCOME_MARKER in blob
-
-    async def _cleanup_legacy_welcome(self, channel: discord.TextChannel, keep_message_id: int) -> None:
-        """Supprime uniquement l'ancien accueil V3 si un vieux listener l'envoie encore."""
-        for delay in (1.0, 2.0, 4.0):
-            await asyncio.sleep(delay)
-            try:
-                async for message in channel.history(limit=15):
-                    if not self._is_legacy_welcome(message, keep_message_id):
-                        continue
-                    try:
-                        await message.delete()
-                        logger.info("Ancien accueil SentriX V3 supprimé dans guild=%s", channel.guild.id)
-                    except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-                        pass
-            except (discord.Forbidden, discord.HTTPException):
-                return
-
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
         try:
@@ -308,12 +292,8 @@ class GuildArrival(commands.Cog):
         allowed_mentions = discord.AllowedMentions(users=True, roles=False, everyone=False)
         try:
             if channel is not None:
-                message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=allowed_mentions)
-                logger.info("Accueil premium SentriX envoyé dans %s (%s).", guild.name, guild.id)
-                asyncio.create_task(
-                    self._cleanup_legacy_welcome(channel, message.id),
-                    name=f"sentrix-welcome-cleanup-{guild.id}",
-                )
+                await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=allowed_mentions)
+                logger.info("Accueil SentriX envoyé dans %s (%s).", guild.name, guild.id)
                 return
             if guild.owner is not None:
                 await panels.envoyer(guild.owner, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=allowed_mentions)

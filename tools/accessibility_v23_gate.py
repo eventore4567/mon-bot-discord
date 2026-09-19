@@ -32,9 +32,18 @@ def main() -> int:
     for marker in ("@commands.command", "@commands.hybrid_command", "@commands.group"):
         if marker in runtime:
             errors.append(f"la V2.3 ne doit pas ajouter de commande: {marker}")
-    for marker in ("CommandNotFound", "MissingRequiredArgument", "closest_commands", "match_quick_intent", "Précédent", "Suivant"):
+    for marker in ("closest_commands", "match_quick_intent", "Précédent", "Suivant"):
         if marker not in runtime:
             errors.append(f"fonction accessibilité manquante: {marker}")
+    # Les explications d'erreur (commande inconnue, argument manquant…) ont un seul
+    # propriétaire : cogs/final_error_embed_v5 (phrase courte). La V2.3 ne doit plus
+    # empiler un second rendu par-dessus.
+    erreurs = (ROOT / "cogs/final_error_embed_v5.py").read_text(encoding="utf-8")
+    for marker in ("CommandNotFound", "MissingRequiredArgument", "_texte_erreur_prefix"):
+        if marker not in erreurs:
+            errors.append(f"fonction accessibilité manquante (final_error_embed_v5): {marker}")
+    if "_install_error_explanations" in runtime:
+        errors.append("la V2.3 réinstalle une surcouche d'erreurs par-dessus final_error_embed_v5")
 
     dashboard = (ROOT / "web/dashboard_accessibility.py").read_text(encoding="utf-8")
     for marker in ("sx-skip-link", "focus-visible", "prefers-reduced-motion", "prefers-contrast", "forced-colors", "aria-label", "44px"):

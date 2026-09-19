@@ -9,6 +9,7 @@ semantic images, generated images, profile cards and ordinary channel messages a
 untouched.
 """
 from __future__ import annotations
+import logging
 
 import re
 from typing import Any
@@ -17,6 +18,8 @@ import discord
 
 from . import command_visuals as visuals
 from . import top_command_banners as top_banners
+
+logger = logging.getLogger("bot.top-banner-guard")
 
 _INSTALLED = False
 _ORIGINAL_BANNER_CHECK = None
@@ -34,7 +37,7 @@ def _extended_banner_check(url: object) -> bool:
             if original(url):
                 return True
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _extended_banner_check", exc_info=True)
     return bool(_EXTRA_BANNER_RE.search(text))
 
 

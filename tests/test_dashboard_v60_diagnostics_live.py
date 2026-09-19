@@ -67,3 +67,26 @@ def test_live_metrics_returns_real_operational_counts():
     assert payload["sanctions_revision"] == 91
     assert "FROM sanctions" in bot.db.query
     assert bot.db.params[0] == 123
+
+
+def test_les_routes_modules_sont_enregistrees_et_l_etat_vient_de_setup_v2_core():
+    """Dashboard et /setup lisent et écrivent la même vérité (module_settings)."""
+    source = inspect.getsource(dashboard_v60_diagnostics)
+    assert 'app.router.add_get("/api/guilds/{guild_id}/modules", handle_modules_get)' in source
+    assert 'app.router.add_post("/api/guilds/{guild_id}/modules", handle_modules_post)' in source
+    assert "core.module_state(" in source
+    assert "core.set_module_enabled(" in source and "core.reset_module(" in source
+    # La vue d'ensemble croise les ressources avec l'interrupteur : désactivé → INACTIF,
+    # non configuré → NON CONFIGURÉ, même si un salon traîne en base.
+    assert "MODULE_STATE_DISABLED" in source and "MODULE_STATE_NOT_CONFIGURED" in source
+    assert '"goodbye"' in source and '"economy"' in source
+
+
+def test_l_interface_propose_activer_desactiver_par_module():
+    from web import dashboard_unified_v2
+
+    html = dashboard_unified_v2.INDEX_HTML
+    assert "async function toggleModule(module,action)" in html
+    assert "/modules`,{method:'POST'" in html
+    assert 'data-action="enable"' in html and 'data-action="disable"' in html
+    assert "goodbye:'Départs'" in html and "economy:'Économie'" in html

@@ -33,7 +33,9 @@ def test_v26_is_clearly_visible_event_driven_and_accessible():
     assert "aria-busy" in script
     assert "pointerdown" in script
     assert "animationend" in script
-    assert "sentrix:live" in script
+    # Le tick temps réel (sentrix:live) ne rejoue plus aucune animation : c'était un
+    # clignotement périodique des badges toutes les 20 s.
+    assert "sentrix:live" not in script
     assert "1200" in script
 
     # La barre de progression et le fondu plein écran sont retirés : le feedback de

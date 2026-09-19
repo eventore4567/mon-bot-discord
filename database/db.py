@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
     log_automod INTEGER,
     log_moderation INTEGER,
     warn_role INTEGER,
-    warn_ban_threshold INTEGER DEFAULT 3,
+    warn_ban_threshold INTEGER DEFAULT 0,
     ticket_delete_delay INTEGER DEFAULT 30,
     ticket_transcript_dm INTEGER DEFAULT 1,
     ticket_rating_enabled INTEGER DEFAULT 1,
@@ -184,7 +184,8 @@ CREATE TABLE IF NOT EXISTS automod_settings (
     antiaccount INTEGER DEFAULT 0,
     antiscam INTEGER DEFAULT 0,
     antinuke INTEGER DEFAULT 0,
-    escalation INTEGER DEFAULT 1
+    antiinsult INTEGER DEFAULT 0,
+    escalation INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS automod_logs (
@@ -1007,7 +1008,7 @@ GUILD_CONFIG_NEW_COLUMNS = {
     "log_automod": "INTEGER",
     "log_moderation": "INTEGER",
     "warn_role": "INTEGER",
-    "warn_ban_threshold": "INTEGER DEFAULT 3",
+    "warn_ban_threshold": "INTEGER DEFAULT 0",
     "ticket_delete_delay": "INTEGER DEFAULT 30",
     "ticket_transcript_dm": "INTEGER DEFAULT 1",
     "ticket_rating_enabled": "INTEGER DEFAULT 1",
@@ -1040,7 +1041,10 @@ GUILD_CONFIG_NEW_COLUMNS = {
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
 # a été ajoutée après la création initiale de la table.
 AUTOMOD_SETTINGS_NEW_COLUMNS = {
-    "escalation": "INTEGER DEFAULT 1",
+    # Escalade automatique OFF tant qu'un administrateur ne l'a pas activée.
+    "escalation": "INTEGER DEFAULT 0",
+    # Filtre multilingue d'insultes : un filtre comme les autres, désactivé par défaut.
+    "antiinsult": "INTEGER DEFAULT 0",
 }
 
 # Même principe, pour la table tickets : "type_id" et "locked" ont été ajoutées avec
@@ -1527,6 +1531,22 @@ class Database:
         )
         # Invalide le cache : la prochaine lecture ira chercher la ligne à jour.
         self._guild_config_cache.pop(guild_id, None)
+        # Poser une ressource (salon de bienvenue, autorôle...) active le module
+        # correspondant s'il n'était pas encore configuré — même règle pour /setup, le
+        # Dashboard et les commandes. Import paresseux : database ne dépend pas de cogs.
+        try:
+            from types import SimpleNamespace
+
+            from cogs.setup_v2_core import GUILD_CONFIG_FIELD_MODULE, note_guild_config_change
+
+            if field in GUILD_CONFIG_FIELD_MODULE:
+                holder = getattr(self, "_sentrix_module_holder", None) or SimpleNamespace(db=self)
+                self._sentrix_module_holder = holder
+                await note_guild_config_change(holder, int(guild_id), field, value)
+        except Exception:
+            logging.getLogger("bot.database").warning(
+                "Activation implicite du module liée à %s impossible", field, exc_info=True
+            )
 
     def invalidate_guild_config(self, guild_id: int):
         """À appeler après toute modification de guild_config qui ne passe pas par

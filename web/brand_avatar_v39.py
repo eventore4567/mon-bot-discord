@@ -43,7 +43,7 @@ def _discord_avatar_url(bot) -> str | None:
         try:
             asset = asset.with_size(512).with_format("png")
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _discord_avatar_url", exc_info=True)
     value = str(asset or "").strip()
     return value or None
 
@@ -277,7 +277,7 @@ def install(dashboard) -> None:
             try:
                 response.text = _polish_app_html(response.text or "")
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans public_or_dashboard", exc_info=True)
         return response
 
     dashboard.handle_index = public_or_dashboard

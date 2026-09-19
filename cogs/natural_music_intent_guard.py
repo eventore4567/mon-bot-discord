@@ -151,7 +151,7 @@ def _request_text(args, kwargs) -> str:
         try:
             return str(latest(prompt) or "")
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _request_text", exc_info=True)
     return str(prompt or "")
 
 

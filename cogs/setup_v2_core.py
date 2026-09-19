@@ -20,9 +20,22 @@ from . import permission_guard
 logger = logging.getLogger("bot.setup-v2-core")
 
 MODULES = (
-    "moderation", "security", "logs", "tickets", "welcome", "roles",
+    "moderation", "security", "logs", "tickets", "welcome", "goodbye", "roles",
     "levels", "economy", "notifications", "ai",
 )
+
+# Modules qui n'existent que si quelqu'un les a configurés : sans ligne module_settings
+# ils sont NON CONFIGURÉS, donc inactifs. Historiquement l'absence de ligne valait
+# « activé », ce qui faisait envoyer des messages de bienvenue dans le salon système
+# d'un serveur fraîchement rejoint, ou compter de l'XP sans que personne ne l'ait voulu.
+# moderation / security / ai gardent le comportement inverse (actifs tant qu'on ne les
+# coupe pas) : ce sont des protections, pas des fonctionnalités à installer.
+CONFIGURABLE_MODULES = frozenset({
+    "logs", "tickets", "welcome", "goodbye", "roles", "levels", "economy", "notifications",
+})
+MODULE_STATE_ENABLED = "enabled"
+MODULE_STATE_DISABLED = "disabled"
+MODULE_STATE_NOT_CONFIGURED = "not_configured"
 
 MODERATION_COMMANDS = frozenset({
     "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
@@ -122,7 +135,46 @@ async def ensure_schema(bot: commands.Bot) -> None:
         )
         bot._sentrix_v2_schema_ready = True
         logger.info("SentriX V2: schéma prêt.")
+        try:
+            await migrate_module_defaults(bot)
+        except Exception:
+            logger.exception("Migration des modules par défaut impossible ; elle sera retentée au prochain démarrage.")
+        try:
+            await migrate_warn_threshold_default(bot)
+        except Exception:
+            logger.exception("Migration du seuil d'avertissements impossible ; elle sera retentée au prochain démarrage.")
 
+
+
+# Escalade automatique OFF par défaut : la colonne guild_config.warn_ban_threshold avait
+# DEFAULT 3, donc TOUT serveur bannissait automatiquement au 3e avertissement sans que
+# personne ne l'ait choisi. La valeur 3 n'a jamais été posée explicitement (c'était le
+# défaut du schéma) : on la remet à 0 une fois ; un serveur qui la veut la reconfigure.
+_WARN_THRESHOLD_MIGRATION = "warn_ban_threshold_default_off_v1"
+
+
+async def migrate_warn_threshold_default(bot: commands.Bot) -> int:
+    await bot.db.execute(
+        "CREATE TABLE IF NOT EXISTS sentrix_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+    )
+    done = await bot.db.fetchone("SELECT name FROM sentrix_migrations WHERE name=?", (_WARN_THRESHOLD_MIGRATION,))
+    if done is not None:
+        return 0
+    cursor = await bot.db.execute("UPDATE guild_config SET warn_ban_threshold=0 WHERE warn_ban_threshold=3")
+    changed = int(getattr(cursor, "rowcount", 0) or 0)
+    # Même logique pour l'escalade AutoMod (automod_settings.escalation avait DEFAULT 1).
+    try:
+        cursor = await bot.db.execute("UPDATE automod_settings SET escalation=0 WHERE escalation=1")
+        changed += int(getattr(cursor, "rowcount", 0) or 0)
+    except Exception:
+        logger.warning("Escalade AutoMod : remise à zéro impossible", exc_info=True)
+    await bot.db.execute(
+        "INSERT OR IGNORE INTO sentrix_migrations (name, applied_at) VALUES (?, ?)",
+        (_WARN_THRESHOLD_MIGRATION, int(time.time())),
+    )
+    if changed:
+        logger.info("Escalades automatiques désactivées (défauts historiques) : %s ligne(s) mises à jour.", changed)
+    return changed
 
 # --------------------------------------------------------------------------
 # Cache des interrupteurs de modules
@@ -183,14 +235,197 @@ async def module_enabled(bot: commands.Bot, guild_id: int, module: str) -> bool:
         return True
     await ensure_schema(bot)
     value = await module_row_value(bot, guild_id, module)
-    row = None if value is None else {"enabled": value}
-    if row is None:
+    if value is None:
         if module == "ai":
             ai = await bot.db.fetchone("SELECT enabled FROM ai_settings WHERE guild_id=?", (int(guild_id),))
             if ai is not None:
                 return bool(ai["enabled"])
-        return True
-    return bool(row["enabled"])
+        # Aucune ligne : un module configurable n'est pas configuré, donc inactif.
+        return module not in CONFIGURABLE_MODULES
+    return bool(value)
+
+
+async def module_state(bot: commands.Bot, guild_id: int, module: str) -> str:
+    """``enabled`` / ``disabled`` / ``not_configured`` — pour /setup et le Dashboard.
+
+    Une configuration absente n'est jamais présentée comme « activée » : c'est la
+    différence entre « personne n'y a touché » et « quelqu'un l'a coupé ».
+    """
+    if module not in MODULES:
+        return MODULE_STATE_ENABLED
+    await ensure_schema(bot)
+    value = await module_row_value(bot, guild_id, module)
+    if value is None:
+        if module in CONFIGURABLE_MODULES:
+            return MODULE_STATE_NOT_CONFIGURED
+        return MODULE_STATE_ENABLED if await module_enabled(bot, guild_id, module) else MODULE_STATE_DISABLED
+    return MODULE_STATE_ENABLED if value else MODULE_STATE_DISABLED
+
+
+async def reset_module(bot: commands.Bot, guild_id: int, module: str) -> None:
+    """Remet un module à l'état NON CONFIGURÉ (supprime la ligne, jamais les données)."""
+    if module not in MODULES:
+        raise ValueError(f"module inconnu: {module}")
+    await ensure_schema(bot)
+    await bot.db.execute(
+        "DELETE FROM module_settings WHERE guild_id=? AND module=?", (int(guild_id), str(module)),
+    )
+    invalidate_module_cache(guild_id, module)
+
+
+# Configurer une ressource, c'est activer le module : choisir un salon de bienvenue
+# dans /setup ou le Dashboard doit rendre la bienvenue active sans second clic. Un
+# module explicitement DÉSACTIVÉ (ligne enabled=0) n'est jamais rallumé par ce chemin.
+GUILD_CONFIG_FIELD_MODULE: dict[str, str] = {
+    "welcome_channel": "welcome",
+    "welcome_message": "welcome",
+    "welcome_image_url": "welcome",
+    "goodbye_channel": "goodbye",
+    "goodbye_message": "goodbye",
+    "autorole": "roles",
+    "level_channel": "levels",
+    "ticket_category": "tickets",
+    "ticket_log_channel": "tickets",
+    "log_channel": "logs",
+}
+
+
+async def enable_module_if_unset(bot: commands.Bot, guild_id: int, module: str, *, actor_id: int | None = None) -> bool:
+    """Active un module NON CONFIGURÉ (aucune ligne). Retourne True si une ligne a été créée."""
+    if module not in MODULES:
+        return False
+    await ensure_schema(bot)
+    if await module_row_value(bot, guild_id, module) is not None:
+        return False
+    await set_module_enabled(bot, guild_id, module, True, actor_id=actor_id)
+    return True
+
+
+async def note_guild_config_change(bot: commands.Bot, guild_id: int, field: str, value) -> None:
+    """Appelé par Database.set_guild_config : une ressource posée active son module."""
+    module = GUILD_CONFIG_FIELD_MODULE.get(str(field))
+    if module is None or value in (None, "", 0):
+        return
+    try:
+        await enable_module_if_unset(bot, guild_id, module)
+    except Exception:
+        logger.exception("Activation implicite du module %s impossible guild=%s", module, guild_id)
+
+
+# --------------------------------------------------------------------------
+# Migration : serveurs déjà présents avant le passage à « absent = non configuré »
+#
+# Un serveur qui utilisait déjà un module sans ligne module_settings (l'absence valait
+# « activé ») ne doit pas se retrouver coupé au redémarrage. On matérialise donc une
+# ligne enabled=1 là où il existe une preuve d'usage ou de configuration ; une valeur
+# réellement absente reste absente (non configurée). Idempotent, exécutée une fois.
+# --------------------------------------------------------------------------
+_MODULE_DEFAULTS_MIGRATION = "module_defaults_absent_is_off_v1"
+
+_MODULE_EVIDENCE_QUERIES: dict[str, tuple[str, ...]] = {
+    "levels": ("SELECT DISTINCT guild_id FROM levels WHERE xp > 0 OR level > 0",),
+    "economy": ("SELECT DISTINCT guild_id FROM economy WHERE cash > 0 OR bank > 0",),
+    "welcome": ("SELECT guild_id FROM guild_config WHERE welcome_channel IS NOT NULL",),
+    "goodbye": ("SELECT guild_id FROM guild_config WHERE goodbye_channel IS NOT NULL",),
+    "tickets": (
+        "SELECT DISTINCT guild_id FROM ticket_panels",
+        "SELECT DISTINCT guild_id FROM ticket_panels_v2",
+        "SELECT DISTINCT guild_id FROM tickets",
+    ),
+    "logs": (
+        "SELECT DISTINCT guild_id FROM log_config WHERE enabled = 1 AND channel_id IS NOT NULL",
+        "SELECT guild_id FROM guild_config WHERE log_channel IS NOT NULL",
+    ),
+    "roles": (
+        "SELECT guild_id FROM guild_config WHERE autorole IS NOT NULL",
+        "SELECT DISTINCT guild_id FROM autorole",
+        "SELECT DISTINCT guild_id FROM reaction_roles",
+        "SELECT DISTINCT guild_id FROM reaction_role_panels",
+        "SELECT DISTINCT guild_id FROM self_role_panels",
+    ),
+    "notifications": ("SELECT DISTINCT guild_id FROM social_notifications",),
+}
+
+
+async def _guild_ids(bot: commands.Bot, query: str) -> set[int]:
+    try:
+        rows = await bot.db.fetchall(query)
+    except Exception:
+        # Table absente sur une base plus ancienne : pas de preuve, pas de ligne.
+        return set()
+    result: set[int] = set()
+    for row in rows or ():
+        try:
+            result.add(int(row["guild_id"]))
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    return result
+
+
+async def migrate_module_defaults(bot: commands.Bot) -> dict[str, int]:
+    """Matérialise enabled=1 pour les modules déjà utilisés. Retourne {module: n_lignes}."""
+    await bot.db.execute(
+        "CREATE TABLE IF NOT EXISTS sentrix_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
+    )
+    done = await bot.db.fetchone("SELECT name FROM sentrix_migrations WHERE name=?", (_MODULE_DEFAULTS_MIGRATION,))
+    if done is not None:
+        return {}
+
+    now_ts = int(time.time())
+    created: dict[str, int] = {}
+
+    # 1. Interrupteurs explicites de l'ancien système system_features (updated_at > 0 =
+    #    posé par un administrateur ; 0 = ligne par défaut créée à la lecture).
+    explicit: dict[tuple[int, str], int] = {}
+    try:
+        rows = await bot.db.fetchall(
+            "SELECT guild_id, economy_enabled, levels_enabled FROM system_features WHERE updated_at > 0"
+        )
+    except Exception:
+        rows = []
+    for row in rows or ():
+        explicit[(int(row["guild_id"]), "economy")] = int(bool(row["economy_enabled"]))
+        explicit[(int(row["guild_id"]), "levels")] = int(bool(row["levels_enabled"]))
+
+    # 2. Preuves d'usage / de configuration.
+    evidence: dict[str, set[int]] = {}
+    for module, queries in _MODULE_EVIDENCE_QUERIES.items():
+        ids: set[int] = set()
+        for query in queries:
+            ids |= await _guild_ids(bot, query)
+        evidence[module] = ids
+
+    existing: set[tuple[int, str]] = set()
+    try:
+        for row in await bot.db.fetchall("SELECT guild_id, module FROM module_settings") or ():
+            existing.add((int(row["guild_id"]), str(row["module"])))
+    except Exception:
+        logger.warning("Étape non critique ignorée dans migrate_module_defaults", exc_info=True)
+
+    async def _materialise(guild_id: int, module: str, enabled: int) -> None:
+        if (guild_id, module) in existing:
+            return
+        await bot.db.execute(
+            "INSERT OR IGNORE INTO module_settings (guild_id,module,enabled,updated_by,updated_at) VALUES (?,?,?,?,?)",
+            (guild_id, module, enabled, None, now_ts),
+        )
+        existing.add((guild_id, module))
+        created[module] = created.get(module, 0) + 1
+
+    for (guild_id, module), enabled in explicit.items():
+        await _materialise(guild_id, module, enabled)
+    for module, ids in evidence.items():
+        for guild_id in sorted(ids):
+            await _materialise(guild_id, module, 1)
+
+    await bot.db.execute(
+        "INSERT OR IGNORE INTO sentrix_migrations (name, applied_at) VALUES (?, ?)",
+        (_MODULE_DEFAULTS_MIGRATION, now_ts),
+    )
+    invalidate_module_cache()
+    if created:
+        logger.info("Modules matérialisés pour les serveurs existants : %s", created)
+    return created
 
 
 async def set_module_enabled(
@@ -314,23 +549,48 @@ async def set_role_command_decision(
     )
 
 
+# Chemin chaud : is_trusted est appelé par DEUX listeners on_message (AutoMod et le
+# durcissement sécurité) pour chaque message, soit deux requêtes chacun. Cache court par
+# (serveur, membre), invalidé par tous les écrivains connus des deux tables.
+_TRUSTED_CACHE: dict[tuple[int, int], tuple[float, bool]] = {}
+_TRUSTED_CACHE_TTL = 15.0
+
+
+def invalidate_trusted_cache(guild_id: int | None = None, user_id: int | None = None) -> None:
+    if guild_id is None:
+        _TRUSTED_CACHE.clear()
+        return
+    for key in [k for k in _TRUSTED_CACHE if k[0] == int(guild_id) and (user_id is None or k[1] == int(user_id))]:
+        _TRUSTED_CACHE.pop(key, None)
+
+
 async def is_trusted(bot: commands.Bot, guild_id: int, user_id: int) -> bool:
+    key = (int(guild_id), int(user_id))
+    cached = _TRUSTED_CACHE.get(key)
+    now_mono = time.monotonic()
+    if cached is not None and now_mono - cached[0] < _TRUSTED_CACHE_TTL:
+        return cached[1]
     await ensure_schema(bot)
     row = await bot.db.fetchone(
         "SELECT 1 FROM trusted_members WHERE guild_id=? AND user_id=?",
-        (int(guild_id), int(user_id)),
+        key,
     )
-    if row is not None:
-        return True
-    legacy = await bot.db.fetchone(
-        "SELECT 1 FROM antinuke_whitelist WHERE guild_id=? AND user_id=?",
-        (int(guild_id), int(user_id)),
-    )
-    return legacy is not None
+    trusted = row is not None
+    if not trusted:
+        legacy = await bot.db.fetchone(
+            "SELECT 1 FROM antinuke_whitelist WHERE guild_id=? AND user_id=?",
+            key,
+        )
+        trusted = legacy is not None
+    if len(_TRUSTED_CACHE) > 20000:
+        _TRUSTED_CACHE.clear()
+    _TRUSTED_CACHE[key] = (now_mono, trusted)
+    return trusted
 
 
 async def add_trusted(bot: commands.Bot, guild_id: int, user_id: int, actor_id: int | None) -> None:
     await ensure_schema(bot)
+    invalidate_trusted_cache(guild_id, user_id)
     await bot.db.execute(
         "INSERT OR REPLACE INTO trusted_members (guild_id,user_id,added_by,added_at) VALUES (?,?,?,?)",
         (int(guild_id), int(user_id), actor_id, int(time.time())),
@@ -342,6 +602,7 @@ async def add_trusted(bot: commands.Bot, guild_id: int, user_id: int, actor_id: 
 
 
 async def remove_trusted(bot: commands.Bot, guild_id: int, user_id: int) -> None:
+    invalidate_trusted_cache(guild_id, user_id)
     await ensure_schema(bot)
     await bot.db.execute("DELETE FROM trusted_members WHERE guild_id=? AND user_id=?", (int(guild_id), int(user_id)))
     await bot.db.execute("DELETE FROM antinuke_whitelist WHERE guild_id=? AND user_id=?", (int(guild_id), int(user_id)))
@@ -600,24 +861,15 @@ def _patch_logs(bot: commands.Bot) -> None:
                 (int(message_id),),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans forget_v2", exc_info=True)
 
     logs_cog._forget_cached_message = MethodType(forget_v2, logs_cog)
     logs_cog._sentrix_setup_v2 = True
 
 
 def _patch_feature_runtimes(bot: commands.Bot) -> None:
-    levels = bot.get_cog("Levels")
-    if levels is not None and not getattr(levels, "_sentrix_setup_v2", False):
-        original_process = levels._process_xp
-
-        async def process_xp_v2(_self, message, settings, conf):
-            if not await module_enabled(bot, message.guild.id, "levels"):
-                return None
-            return await original_process(message, settings, conf)
-
-        levels._process_xp = MethodType(process_xp_v2, levels)
-        levels._sentrix_setup_v2 = True
+    # Niveaux : la garde est dans cogs/levels.py::Levels.on_message (sortie avant toute
+    # lecture de réglages), plus besoin d'envelopper _process_xp ici.
 
     tickets = bot.get_cog("Tickets")
     if tickets is not None and not getattr(tickets, "_sentrix_setup_v2", False):
@@ -768,7 +1020,8 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
             return default if value is None else value
 
         channel_id = cv("welcome_channel")
-        channel = guild.get_channel(int(channel_id)) if channel_id else guild.system_channel
+        # Pas de repli sur le salon système : sans salon configuré, rien n'est envoyé.
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
         if not isinstance(channel, (discord.TextChannel, discord.Thread)):
             return
         me = guild.me
@@ -803,7 +1056,7 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
 
     async def on_member_remove_v2(member: discord.Member):
         guild = member.guild
-        if not await module_enabled(bot, guild.id, "welcome"):
+        if not await module_enabled(bot, guild.id, "goodbye"):
             return
         conf = await bot.db.get_guild_config(guild.id)
 

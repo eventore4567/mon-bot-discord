@@ -4,6 +4,7 @@ Ce module regroupe les thèmes, micro-interactions et cartes raster. Il ne conti
 aucune donnée métier : les valeurs affichées viennent toujours de la base existante.
 """
 from __future__ import annotations
+import logging
 
 import config as _config
 
@@ -16,6 +17,8 @@ from typing import Any
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+logger = logging.getLogger("bot.visual-v5")
 
 
 ASSET_DIR = Path(__file__).resolve().parents[1] / "assets" / "sentrix"
@@ -225,7 +228,7 @@ async def render_member_card(
     try:
         avatar_bytes = await asyncio.wait_for(static_avatar.read(), timeout=4)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans render_member_card", exc_info=True)
 
     if not avatar_bytes:
         try:

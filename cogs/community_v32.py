@@ -299,7 +299,7 @@ async def _direct_ai_fallback(bot: commands.Bot, question: str, *, guild_id: int
     try:
         instructions += await community_v3._server_context(bot, guild_id, channel_id)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _direct_ai_fallback", exc_info=True)
 
     generated = await ai_service.generate(
         question,
@@ -319,7 +319,7 @@ async def _direct_ai_fallback(bot: commands.Bot, question: str, *, guild_id: int
             tokens = ai_service.estimate_tokens(question) + ai_service.estimate_tokens(generated.text)
             await ai_service.record_usage(bot, guild_id, user_id, tokens_estimate=tokens)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _direct_ai_fallback", exc_info=True)
     return {"ok": True, "text": generated.text, "model_key": generated.model_key or model_key}
 
 

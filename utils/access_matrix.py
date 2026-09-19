@@ -102,7 +102,7 @@ PUBLIC_COMMANDS = frozenset({
     "voice-limit", "voice-lock", "voice-name", "voice-transfer", "voice-unlock",
     # Commandes membre qui tombaient en fail-closed faute d'etre declarees ici :
     # elles n'ont aucun check local et affichent seulement des informations.
-    "leaderboard", "serverinfo", "gameseason",
+    "leaderboard", "serverinfo", "roleinfo", "gameseason",
 })
 
 OWNER_ONLY_COMMANDS = frozenset({
@@ -110,9 +110,9 @@ OWNER_ONLY_COMMANDS = frozenset({
     "status-rotate", "footer", "theme", "set-bot", "bot-servers", "bot-leave",
     # Diagnostics globaux (checks.is_bot_owner dans les cogs d'origine)
     "logs-diag", "reset-logs-all",
-    # Core V2, Phase 1 (docs/core-v2-plan.md) : observabilité globale au
-    # processus, jamais scopée par serveur.
-    "corediag",
+    # Diagnostic technique compact (+health, alias corediag) : métriques globales au
+    # processus, jamais scopées par serveur.
+    "health", "corediag",
 })
 
 # ---------------------------------------------------------------- NIVEAU 4
@@ -133,7 +133,6 @@ GUILD_OWNER_COMMANDS = frozenset({
     "represet",             # remet a zero la reputation de TOUS les membres
     "proofreset",           # efface toutes les preuves de verification
     # Diffusion privee a l'ensemble du serveur
-    "dmall",                # envoie un MP a tous les membres non-bot
     "dm",                   # ecrit a UN membre au nom du serveur
 })
 
@@ -267,7 +266,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "notifs-ping", "notifs-list", "notifs-remove", "welcome-config",
         "set-nickname", "alias", "diagnostic",
         # Anciennement fail-closed par oubli
-        "suivi-bot", "setup-auto", "server-audit", "health", "healthcheck",
+        "suivi-bot", "setup-auto", "server-audit", "healthcheck",
         "level-system", "security-repair",
         # Vérification par preuve (administration)
         "proofsetup", "proofexample", "proofexample-remove", "proofexamples",
@@ -455,7 +454,8 @@ MODULE_LABELS = {
     "security": "Sécurité",
     "logs": "Logs",
     "tickets": "Tickets",
-    "welcome": "Bienvenue & départ",
+    "welcome": "Bienvenue",
+    "goodbye": "Départs",
     "roles": "Rôles",
     "levels": "Niveaux",
     "economy": "Économie",
@@ -676,7 +676,8 @@ class Backend:
         return str(reason or "Aucune raison fournie")
 
     async def module_enabled(self, guild_id: int, module: str) -> bool:
-        """Meme semantique qu'avant : aucune ligne = module actif.
+        """Aucune ligne = non configuré : inactif pour un module configurable (voir
+        setup_v2_core.CONFIGURABLE_MODULES), actif pour une protection.
 
         La LECTURE passe par le cache de cogs.setup_v2_core, proprietaire canonique de
         module_settings, pour que les trois lecteurs du chemin chaud partagent une seule
@@ -684,20 +685,10 @@ class Backend:
         de fichier : utils ne doit pas dependre de cogs au chargement.
         """
         try:
-            from cogs.setup_v2_core import module_row_value
-        except Exception:
-            module_row_value = None
-        try:
-            if module_row_value is not None:
-                value = await module_row_value(self.bot, int(guild_id), str(module))
-                return True if value is None else bool(value)
-            row = await self.bot.db.fetchone(
-                "SELECT enabled FROM module_settings WHERE guild_id=? AND module=?",
-                (int(guild_id), str(module)),
-            )
+            from cogs.setup_v2_core import module_enabled as core_module_enabled
+            return await core_module_enabled(self.bot, int(guild_id), str(module))
         except Exception:
             return True  # table absente : ne casse pas un serveur existant
-        return True if row is None else bool(row["enabled"])
 
     async def explicit_rule(self, guild_id: int, author: Any, name: str):
         """Read the exact role rules persisted by Setup V2.
@@ -787,7 +778,7 @@ def backend_for(bot) -> Backend:
     try:
         bot.sentrix_access_backend = backend
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans backend_for", exc_info=True)
     return backend
 
 
@@ -846,8 +837,8 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     if module and not await backend.module_enabled(guild_id, module):
         label = MODULE_LABELS.get(module, module)
         return _deny(
-            f"Le module **{label}** est désactivé sur ce serveur. "
-            "Un administrateur peut le réactiver dans `+setup` ou `/setup`.",
+            f"Le module **{label}** n'est pas activé sur ce serveur. "
+            "Un administrateur peut l'activer dans `+setup` ou `/setup`.",
             f"module:{module}:off",
         )
 
@@ -871,11 +862,10 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     if name in GUILD_OWNER_COMMANDS:
         if _is_guild_owner(author, guild):
             return AccessDecision(True, policy="guild-owner-only")
-        if name == "dmall":
+        if name == "dm":
             return _deny(
                 "Cette commande est reservee au **proprietaire du serveur**.\n"
-                "Elle envoie un message prive a l'ensemble des membres non-bot : "
-                "le role Administrateur ne suffit pas.",
+                "Elle ecrit a un membre au nom du serveur : le role Administrateur ne suffit pas.",
                 "guild-owner-only",
             )
         return _deny(

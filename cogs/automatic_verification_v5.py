@@ -552,7 +552,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
                 (member.guild.id, member.id),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans evaluate_member", exc_info=True)
 
         await self._save_result(member, score, threshold, "verified", factors)
         await self._event(member.guild.id, member.id, "verified")

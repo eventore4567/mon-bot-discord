@@ -53,7 +53,6 @@ class SentriXV22(commands.Cog):
         self._ticket_open_locks: dict[tuple[int, int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
         self._ticket_create_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._ticket_close_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self._warn_locks: dict[tuple[int, int], asyncio.Lock] = defaultdict(asyncio.Lock)
         self._ai_settings_cache: dict[tuple[int, int], tuple[float, dict]] = {}
         self._game_settings_cache: dict[tuple[int, int], tuple[float, dict]] = {}
         self._ticket_button_cache: dict[tuple[int, int], tuple[float, dict]] = {}
@@ -164,12 +163,21 @@ class SentriXV22(commands.Cog):
         self._replace_command_callback(command, atomic_rob, "_sentrix_v22_atomic_rob")
 
     def _install_moderation_hardening(self):
+        """Borne le MP de sanction historique à 2,5 s.
+
+        Les remplacements de callbacks (unmute/warn/ban/kick/unban/tempban/mute)
+        qui vivaient ici ont été supprimés : leurs fermetures partageaient la
+        variable ``original`` réassignée à chaque boucle, si bien que ``+unmute``
+        et ``+warn`` exécutaient en production le callback de ``mute`` (dernier
+        assigné). Le nettoyage de la raison (``clean_reason``) est désormais fait
+        par cogs/moderation.py lui-même.
+        """
         moderation = self.bot.get_cog("Moderation")
         if moderation is None:
             return
 
-        original_dm = moderation._send_sanction_dm
-        if not getattr(original_dm, "_sentrix_v22", False):
+        original_dm = getattr(moderation, "_send_sanction_dm", None)
+        if original_dm is not None and not getattr(original_dm, "_sentrix_v22", False):
             async def bounded_dm(this, ctx, target, action, reason, duration_seconds=None):
                 try:
                     return await asyncio.wait_for(
@@ -181,46 +189,6 @@ class SentriXV22(commands.Cog):
                     return False
             bounded_dm._sentrix_v22 = True
             moderation._send_sanction_dm = types.MethodType(bounded_dm, moderation)
-
-        unmute = self.bot.get_command("unmute")
-        if unmute is not None and not getattr(unmute, "_sentrix_v22_hierarchy", False):
-            original = unmute.callback
-            async def guarded_unmute(cog, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
-                if not await cog.check_targetable(ctx, membre):
-                    return
-                return await original(cog, ctx, membre, raison=clean_reason(raison))
-            self._replace_command_callback(unmute, guarded_unmute, "_sentrix_v22_hierarchy")
-
-        warn = self.bot.get_command("warn")
-        if warn is not None and not getattr(warn, "_sentrix_v22_serial_warn", False):
-            original = warn.callback
-            async def serial_warn(cog, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
-                key = (ctx.guild.id, membre.id)
-                async with self._warn_locks[key]:
-                    return await original(cog, ctx, membre, raison=clean_reason(raison))
-            self._replace_command_callback(warn, serial_warn, "_sentrix_v22_serial_warn")
-
-        for name in ("ban", "kick", "unban"):
-            command = self.bot.get_command(name)
-            if command is None or getattr(command, "_sentrix_v22_reason", False):
-                continue
-            original = command.callback
-            async def reason_wrapper(cog, ctx, *args, __original=original, **kwargs):
-                if "raison" in kwargs:
-                    kwargs["raison"] = clean_reason(kwargs.get("raison"))
-                return await __original(cog, ctx, *args, **kwargs)
-            self._replace_command_callback(command, reason_wrapper, "_sentrix_v22_reason")
-
-        for name in ("tempban", "mute"):
-            command = self.bot.get_command(name)
-            if command is None or getattr(command, "_sentrix_v22_reason", False):
-                continue
-            original = command.callback
-            async def reason_duration_wrapper(cog, ctx, *args, __original=original, **kwargs):
-                if "raison" in kwargs:
-                    kwargs["raison"] = clean_reason(kwargs.get("raison"))
-                return await __original(cog, ctx, *args, **kwargs)
-            self._replace_command_callback(command, reason_duration_wrapper, "_sentrix_v22_reason")
 
     def _install_ticket_hardening(self):
         from . import tickets as tickets_module

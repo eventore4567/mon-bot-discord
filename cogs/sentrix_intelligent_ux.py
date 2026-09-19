@@ -411,7 +411,7 @@ def _install_primary_ai_listener_guard(bot: commands.Bot) -> bool:
         try:
             bot.remove_listener(previous_guard, "on_message")
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _install_primary_ai_listener_guard", exc_info=True)
 
     events = getattr(bot, "extra_events", {})
     listeners = list(events.get("on_message", [])) if isinstance(events, dict) else []

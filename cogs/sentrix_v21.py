@@ -5,6 +5,7 @@ badges et le centre IA, ajoute recherche/historique au marché, confirme les ach
 réutilise l'observabilité Production V9 pour un diagnostic lisible depuis Discord.
 """
 from __future__ import annotations
+import logging
 
 import asyncio
 import functools
@@ -24,6 +25,8 @@ from utils.v21_rules import (
     clean_market_query,
     market_totals,
 )
+
+logger = logging.getLogger("bot.sentrix-v21")
 
 V21_PUBLIC_COMMANDS = frozenset({
     "achievements-v21", "challenges", "market-find", "market-history", "market-my",
@@ -48,7 +51,7 @@ class MarketConfirmView(design_system.SentriXView):
         try:
             await interaction.message.edit(view=self)
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _disable", exc_info=True)
 
     @discord.ui.button(label="Confirmer l'achat", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -79,7 +82,6 @@ class SentriXV21(commands.Cog):
     async def cog_load(self):
         self._v2 = self.bot.get_cog("SentriXV2")
         self.install_policy()
-        self.install_help()
         self.install_v2_enrichment()
         self.install_market_hardening()
 
@@ -101,20 +103,7 @@ class SentriXV21(commands.Cog):
             command_catalog_cleanup.RESTORED_COMMANDS = command_catalog_cleanup.NORMAL_DIRECT_COMMANDS
             command_catalog_cleanup.apply_surface(self.bot)
         except Exception:
-            pass
-
-    def install_help(self):
-        try:
-            from . import help_complete
-            for spec in help_complete.CATEGORIES:
-                if spec.key == "v2":
-                    try:
-                        spec.command_names = frozenset(spec.command_names) | V21_DIRECT_COMMANDS
-                    except Exception:
-                        pass
-                    break
-        except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans install_policy", exc_info=True)
 
     def install_v2_enrichment(self):
         v2 = self._v2
@@ -170,7 +159,7 @@ class SentriXV21(commands.Cog):
                     inline=False,
                 )
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans richer_ai_embed", exc_info=True)
             snapshot = getattr(self.bot, "production_v9_health_snapshot", None)
             if isinstance(snapshot, dict):
                 ai_state = (snapshot.get("openai") or {}).get("state", "inconnu")

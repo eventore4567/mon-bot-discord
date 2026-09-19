@@ -1,5 +1,7 @@
 """Production V9: télémétrie des commandes et diagnostic santé unifié."""
 
+import logging
+import math
 import inspect
 import json
 import time
@@ -11,6 +13,8 @@ from discord.ext import commands, tasks
 
 import config
 from database.db import now
+
+logger = logging.getLogger("bot.command-observability-v9")
 
 COG_NAME = "CommandObservabilityV9"
 SLOW_SECONDS = 3.0
@@ -51,13 +55,16 @@ async def _record(bot, guild_id, user_id, name, kind, duration, status, detail="
 async def _health(bot):
     problems = []
     ready = bool(bot.is_ready())
-    latency = round(float(getattr(bot, "latency", 0.0) or 0.0) * 1000) if ready else None
+    raw_latency = float(getattr(bot, "latency", 0.0) or 0.0)
+    # discord.py renvoie NaN tant qu'aucun heartbeat n'a été mesuré : round(NaN) levait
+    # ValueError et tuait health_loop pour toute la vie du processus.
+    latency = round(raw_latency * 1000) if ready and math.isfinite(raw_latency) else None
     db_ok = False
     try:
         row = await bot.db.fetchone("SELECT 1 AS ok")
         db_ok = bool(row and int(row["ok"]) == 1)
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _health", exc_info=True)
     if not ready:
         problems.append("Discord n'est pas prêt.")
     if not db_ok:
@@ -100,21 +107,7 @@ async def _health(bot):
             ai_state = "circuit_ouvert"
             problems.append("Le service IA est temporairement dégradé.")
     except Exception:
-        pass
-
-    actual = {str(command.name).casefold() for command in bot.tree.get_commands()}
-    expected = set()
-    try:
-        from . import command_catalog_cleanup
-        expected = set(command_catalog_cleanup.normal_direct_commands())
-    except Exception:
-        pass
-    missing = sorted(expected - actual)
-    extra = sorted(actual - expected) if expected else []
-    if missing:
-        problems.append("Commandes slash manquantes: " + ", ".join(missing[:8]))
-    if extra:
-        problems.append("Commandes slash inattendues: " + ", ".join(extra[:8]))
+        logger.warning("Étape non critique ignorée dans _health", exc_info=True)
 
     cutoff = now() - 900
     counts = {}
@@ -148,10 +141,7 @@ async def _health(bot):
         "openai": {"state": ai_state},
         "commands": {
             "prefix_roots": len(bot.commands),
-            "slash_roots": len(actual),
-            "expected_slash_roots": len(expected) if expected else None,
-            "missing_slash": missing,
-            "extra_slash": extra,
+            "slash_roots": len(bot.tree.get_commands()),
             "recent_errors": counts["errors"],
             "recent_slow_or_stuck": counts["slow"],
             "recent_cooldowns": counts["cooldowns"],
@@ -348,4 +338,4 @@ async def setup(bot):
     try:
         await runtime.refresh_health()
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans setup", exc_info=True)

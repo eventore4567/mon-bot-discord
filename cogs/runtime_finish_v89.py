@@ -166,7 +166,7 @@ def _patch_setup_logs_final() -> None:
                             "enabled" if new_enabled else "disabled",
                         )
                     except Exception:
-                        pass
+                        logger.warning("Étape non critique ignorée dans toggle_category", exc_info=True)
                     if not await _best_effort_refresh(self, interaction):
                         try:
                             await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Catégorie activée.' if new_enabled else 'Catégorie désactivée.')), ephemere=True)

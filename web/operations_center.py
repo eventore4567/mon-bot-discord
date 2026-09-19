@@ -593,7 +593,7 @@ def _wrap_existing_writes(dashboard):
                             _action, request.path,
                         )
                 except Exception:
-                    pass
+                    logger.warning("Étape non critique ignorée dans wrapper", exc_info=True)
             return response
 
         wrapper._sentrix_ops_audit = True

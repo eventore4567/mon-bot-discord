@@ -106,7 +106,7 @@ def _rebuild_command_params_from_original(command: commands.Command, original, w
             if command.callback is not wrapper:
                 command.callback = wrapper
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _rebuild_command_params_from_original", exc_info=True)
         logger.exception(
             "V18 : impossible de reconstruire les paramètres de +%s.",
             getattr(command, "qualified_name", getattr(command, "name", "?")),

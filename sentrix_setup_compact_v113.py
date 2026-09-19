@@ -293,9 +293,12 @@ async def _health_snapshot(view, *, force: bool = False) -> dict[str, Any]:
     ops_score = None
     ops_label = None
     ops = getattr(view.bot, "sentrix_ops", None)
-    if ops is not None:
+    guild_obj = view._guild()
+    # Serveur indisponible (panne Discord, arrivée en cours) : le score de repli suffit,
+    # inutile de lever une AttributeError sur un guild None.
+    if ops is not None and guild_obj is not None:
         try:
-            report = await ops.health_report(view._guild())
+            report = await ops.health_report(guild_obj)
             ops_score = int(report.score)
             ops_label = str(report.label)
             findings = list(report.findings)

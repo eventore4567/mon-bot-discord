@@ -134,71 +134,6 @@ async def _set_optional_role(view: "SentriXSetupV74", field: str, role: discord.
     await view.bot.db.set_guild_config(view.guild.id, field, role.id if role else None)
 
 
-async def _sync_sanction_badge(
-    bot: commands.Bot,
-    guild: discord.Guild,
-    member: discord.Member,
-    *,
-    action: str,
-) -> None:
-    """Applique les badges optionnels après une sanction réellement exécutée."""
-    conf = await bot.db.get_guild_config(guild.id)
-    field = None
-    add = True
-    if action == "mute":
-        field = "mute_role"
-    elif action == "unmute":
-        field = "mute_role"
-        add = False
-    elif action == "warn":
-        field = "warn_role"
-
-    if field is None:
-        return
-    role = _role_from_config(guild, setup_ui._get(conf, field))
-    if role is None:
-        return
-
-    me = guild.me
-    if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
-        return
-    try:
-        if add and role not in member.roles:
-            await member.add_roles(role, reason=f"SentriX V74 : badge automatique {action}")
-        elif not add and role in member.roles:
-            await member.remove_roles(role, reason=f"SentriX V74 : retrait badge automatique {action}")
-    except discord.HTTPException:
-        logger.debug("Impossible de synchroniser le badge %s", field, exc_info=True)
-
-
-def _install_moderation_badge_sync(bot: commands.Bot) -> None:
-    cog = bot.get_cog("Moderation")
-    if cog is None:
-        return
-    cls = cog.__class__
-    current = getattr(cls, "log_sanction", None)
-    if current is None or getattr(current, "_sentrix_v74_badges", False):
-        return
-
-    async def log_sanction_v74(self, ctx, action, target, reason, duration_seconds=None, extra_fields=None):
-        result = await current(
-            self,
-            ctx,
-            action,
-            target,
-            reason,
-            duration_seconds=duration_seconds,
-            extra_fields=extra_fields,
-        )
-        if isinstance(target, discord.Member) and ctx.guild is not None:
-            await _sync_sanction_badge(self.bot, ctx.guild, target, action=action)
-        return result
-
-    log_sanction_v74._sentrix_v74_badges = True
-    log_sanction_v74._sentrix_previous = current
-    cls.log_sanction = log_sanction_v74
-
-
 class SentriXSetupV74(v73.SentriXSetupV73):
     """Dernière façade du Setup : simple pour la sécurité, complète pour les tickets."""
 
@@ -207,6 +142,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.moderation_role_id: int | None = None
         self.moderation_member_id: int | None = None
         self.moderation_profile = "moderator"
+        self.avance = False
 
     async def _effective_states(self) -> dict[str, str]:
         states = await super()._effective_states()
@@ -233,7 +169,106 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         return states
 
     async def _build_home(self) -> None:
+        """Premier écran : les modules et leur interrupteur, rien d'autre.
+
+        Avant, l'accueil listait neuf catégories avec un bouton « Configurer » chacune,
+        et activer les niveaux demandait plusieurs écrans. Maintenant : une ligne par
+        module (Niveaux, Économie, Bienvenue, Départs, Anti-spam, Tickets, Logs,
+        Notifications) avec un bouton ON/OFF direct, un menu pour ouvrir la page détaillée
+        d'une catégorie, et « Paramètres avancés » pour l'ancienne vue complète.
+        """
         self.backend.category = None
+        if getattr(self, "avance", False):
+            return await self._build_home_complet()
+
+        switch_states = await setup_ui.module_switch_states(self.bot, self.guild.id)
+        actifs = sum(1 for etat in switch_states.values() if etat == "enabled")
+
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "# Configuration de SentriX\n"
+                    f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules activés\n"
+                    "Un module désactivé ou jamais configuré ne fait rien. Activez-le ici, puis "
+                    "ouvrez sa page pour choisir ses salons et rôles."
+                ),
+                accessory=v73._thumbnail(self.bot),
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        for key, label in setup_ui.MODULE_SWITCHES:
+            etat = switch_states.get(key, "not_configured")
+            actif = etat == "enabled"
+            bouton = discord.ui.Button(
+                label="Désactiver" if actif else "Activer",
+                style=discord.ButtonStyle.secondary if actif else discord.ButtonStyle.success,
+            )
+
+            async def basculer(interaction: discord.Interaction, module=key):
+                nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
+                try:
+                    await self.backend.audit(interaction.user.id, f"module:{module}", "on" if nouveau else "off")
+                except Exception:
+                    logger.debug("Audit setup indisponible.", exc_info=True)
+                await self.refresh(interaction)
+
+            bouton.callback = basculer
+            texte_etat = "**ON**" if actif else ("OFF" if etat == "disabled" else "OFF · non configuré")
+            container.add_item(
+                discord.ui.Section(discord.ui.TextDisplay(f"**{label}** — {texte_etat}"), accessory=bouton)
+            )
+
+        # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
+        options = [
+            discord.SelectOption(label=CATEGORY_META[key][1], value=key, emoji=CATEGORY_META[key][0],
+                                 description=CATEGORY_META[key][2][:100])
+            for key in CATEGORY_ORDER
+            if key in CATEGORY_META
+        ]
+        selecteur = discord.ui.Select(placeholder="Configurer un module en détail…", options=options[:25])
+
+        async def ouvrir(interaction: discord.Interaction):
+            self.page = selecteur.values[0]
+            self.backend = self._new_backend(self.page)
+            await self.refresh(interaction)
+
+        selecteur.callback = ouvrir
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.ActionRow(selecteur))
+        # Langue du serveur : réglage de premier niveau, même sélecteur que le centre officiel.
+        try:
+            from .language_official_bridge import OfficialLanguageSelect
+
+            langue = OfficialLanguageSelect(self.backend)
+            langue.row = None
+            container.add_item(discord.ui.ActionRow(langue))
+        except Exception:
+            logger.debug("Sélecteur de langue indisponible sur l'accueil V74.", exc_info=True)
+
+        avance = discord.ui.Button(label="Paramètres avancés", style=discord.ButtonStyle.secondary)
+        refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, emoji="🔄")
+        close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
+
+        async def voir_avance(interaction: discord.Interaction):
+            self.avance = True
+            await self.refresh(interaction)
+
+        async def do_refresh(interaction: discord.Interaction):
+            await self.refresh(interaction)
+
+        async def do_close(interaction: discord.Interaction):
+            await self._close(interaction)
+
+        avance.callback = voir_avance
+        refresh.callback = do_refresh
+        close.callback = do_close
+        container.add_item(discord.ui.ActionRow(avance, refresh, close))
+        self.add_item(container)
+
+    async def _build_home_complet(self) -> None:
+        """Ancienne vue d'ensemble (toutes les catégories) — derrière « Paramètres avancés »."""
         states = await self._effective_states()
         active = sum(
             "ACTIF" in value and "INACTIF" not in value
@@ -246,8 +281,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# Configuration de SentriX\n"
-                    f"Configurez **{self.guild.name}** sans toucher à des réglages techniques inutiles.\n"
+                    "# Configuration de SentriX — paramètres avancés\n"
                     f"**{active}/{len(CATEGORY_ORDER)} modules actifs**"
                     + (f" · **{problems} à corriger**" if problems else "")
                     + "\nLes permissions des commandes sont vérifiées directement avec Discord."
@@ -276,8 +310,13 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             if index in {1, 4}:
                 container.add_item(discord.ui.Separator())
 
+        simple = discord.ui.Button(label="Écran simple", style=discord.ButtonStyle.primary)
         refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, emoji="🔄")
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
+
+        async def voir_simple(interaction: discord.Interaction):
+            self.avance = False
+            await self.refresh(interaction)
 
         async def do_refresh(interaction: discord.Interaction):
             await self.refresh(interaction)
@@ -285,9 +324,10 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         async def do_close(interaction: discord.Interaction):
             await self._close(interaction)
 
+        simple.callback = voir_simple
         refresh.callback = do_refresh
         close.callback = do_close
-        container.add_item(discord.ui.ActionRow(refresh, close))
+        container.add_item(discord.ui.ActionRow(simple, refresh, close))
         self.add_item(container)
 
     async def _build_page(self, page: str) -> None:
@@ -754,7 +794,6 @@ def install(bot: commands.Bot) -> None:
         _send_setup_v74._sentrix_previous = current
         setup_ui.OfficialSetup.send_setup = _send_setup_v74
 
-    _install_moderation_badge_sync(bot)
     bot._sentrix_setup_experience_v74 = True
     logger.info(
         "%s installé : sécurité simple, permissions Discord natives, tickets complets et modération claire.",

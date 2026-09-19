@@ -26,7 +26,7 @@ def test_v2_currency_replacement_keeps_custom_name_and_symbol():
 
 def test_v2_setup_exposes_expected_module_categories():
     assert set(core.MODULES) == {
-        "moderation", "security", "logs", "tickets", "welcome", "roles",
+        "moderation", "security", "logs", "tickets", "welcome", "goodbye", "roles",
         "levels", "economy", "notifications", "ai",
     }
     assert ui.MODULE_BY_CATEGORY["moderation"] == "moderation"

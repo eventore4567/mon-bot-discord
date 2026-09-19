@@ -174,7 +174,7 @@ async def _stop_redis(app: web.Application) -> None:
     try:
         await client.aclose()
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _stop_redis", exc_info=True)
 
 
 async def _load_session(app: web.Application, session_id: str) -> dict[str, Any] | None:
@@ -216,7 +216,7 @@ async def _store_session(
         try:
             await client.delete(_session_key(session_id))
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans _store_session", exc_info=True)
         return
 
     sync_times: dict[str, float] = app[_SYNC_APP_KEY]
@@ -276,7 +276,7 @@ async def _delete_oauth_state(app: web.Application, state: str) -> None:
     try:
         await client.delete(_state_key(state))
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans _delete_oauth_state", exc_info=True)
 
 
 def _make_browser_session_cookie(

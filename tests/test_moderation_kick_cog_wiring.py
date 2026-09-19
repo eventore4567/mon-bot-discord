@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from cogs.moderation import Moderation
-from utils import sentrix_panels as panels
 
 
 class _FakeRole:
@@ -75,7 +74,7 @@ def _make_cog(*, case_number=17):
 
 
 class KickCogWiringTests(unittest.IsolatedAsyncioTestCase):
-    async def test_expulsion_reussie_appelle_le_service_et_rend_le_panneau(self):
+    async def test_expulsion_reussie_appelle_le_service_et_confirme_en_une_ligne(self):
         cog = _make_cog(case_number=17)
         ctx, guild, actor, target = _fake_ctx()
 
@@ -96,7 +95,7 @@ class KickCogWiringTests(unittest.IsolatedAsyncioTestCase):
         target.send.assert_not_awaited()
         ctx.send.assert_awaited()  # le panneau de refus est bien rendu
 
-    async def test_echec_de_persistance_n_empeche_pas_le_panneau_de_succes(self):
+    async def test_echec_de_persistance_n_empeche_pas_la_confirmation_de_succes(self):
         """Même invariant que pour ban() : la sanction Discord a réussi, donc
         le panneau reste un succès même si la persistance du dossier échoue."""
         cog = _make_cog()
@@ -107,9 +106,9 @@ class KickCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.kick.assert_awaited_once()
         ctx.send.assert_awaited()
-        panneau = ctx.send.await_args.kwargs.get("view")
-        self.assertIsInstance(panneau, panels.Panneau)
-        self.assertEqual(panneau.kind, "moderation")
+        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
+        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
+        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
 
 
 if __name__ == "__main__":

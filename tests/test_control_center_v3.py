@@ -28,7 +28,10 @@ def test_setup_v3_uses_large_pages_and_single_module_toggle_contract():
     source = _source(CONTROL)
     assert "class V3CategorySelect" in source
     assert "class ModuleToggle" in source
-    assert 'label="Désactiver" if enabled else "Activer"' in source
+    assert 'action = "Désactiver" if enabled else "Activer"' in source
+    # Niveaux et économie : deux interrupteurs indépendants, plus de bascule couplée.
+    assert 'ModuleToggle(self, "economy", True, prefix="Économie : ")' in source
+    assert 'if self.module == "levels":' not in source
     assert 'value="security_verification"' in source
     assert 'value="roles_panel"' in source
     assert "cls.render = _v3_render" in source

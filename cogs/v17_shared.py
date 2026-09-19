@@ -340,7 +340,7 @@ def install_config_invalidation(bot: commands.Bot) -> None:
             try:
                 _db._guild_config_cache.clear()
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans execute_v17", exc_info=True)
             invalidate_permission_cache(bot)
         return result
 

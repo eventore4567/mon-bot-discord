@@ -486,7 +486,7 @@ class BotV12Machine(commands.Cog, name="BotV12Machine"):
                     (guild_id, event_type, severity, actor_id, target_id, score, payload, created_at),
                 )
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _record_event", exc_info=True)
 
     def _alert_allowed(self, guild_id: int, kind: str, cooldown: float = SECURITY_ALERT_COOLDOWN) -> bool:
         key = (guild_id, kind)

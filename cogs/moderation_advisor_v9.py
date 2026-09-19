@@ -1,5 +1,6 @@
 """Production V9: recommandations de modération basées sur des signaux vérifiables."""
 
+import logging
 import json
 
 import discord
@@ -9,6 +10,8 @@ from utils import sentrix_panels as panels
 from discord.ext import commands
 
 from database.db import now
+
+logger = logging.getLogger("bot.moderation-advisor-v9")
 
 
 def _reponse(titre: str, description: str, *, kind: str = "brand") -> discord.Embed:
@@ -60,7 +63,7 @@ async def calculate_risk(bot, guild_id: int, user_id: int) -> dict:
             (guild_id, user_id),
         )
     except Exception:
-        pass
+        logger.warning("Étape non critique ignorée dans calculate_risk", exc_info=True)
 
     sanction_count = int(sanctions["c"] or 0) if sanctions else 0
     automod_count = await _count_automod(bot, guild_id, user_id)

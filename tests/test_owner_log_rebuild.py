@@ -40,8 +40,11 @@ assert "log_service.send_test_log" in source
 assert "_rollback_routes" in source
 assert "Les anciens salons ne seront supprimés qu'après" in source
 
-# Le bouton d'aide exige une décision explicite d'un responsable du serveur.
-assert 'custom_id="sentrix:setup-help:request:v1"' in source
+# Le bouton d'aide (posé sur le message d'accueil unique, cogs/guild_arrival.py) exige
+# une décision explicite d'un responsable du serveur.
+arrival = (ROOT / "cogs" / "guild_arrival.py").read_text(encoding="utf-8") if "ROOT" in globals() else __import__("pathlib").Path("cogs/guild_arrival.py").read_text(encoding="utf-8")
+assert 'custom_id="sentrix:setup-help:request:v1"' in arrival
+assert "request_setup_help" in arrival and "async def request_setup_help" in source
 assert "perms.administrator or perms.manage_guild" in source
 assert "HELP_INVITE_MAX_AGE = 24 * 60 * 60" in source
 assert "HELP_INVITE_MAX_USES = 1" in source

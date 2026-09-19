@@ -18,14 +18,11 @@ ne nomme. Deux bugs réels trouvés et corrigés dans ce lot :
    `from .sentrix_v22 import SentriXV22` (et les trois autres) à la ligne 125-127
    et 317. Corrigé en incluant aussi les fichiers de RETENUS dans le balayage.
 
-   Après ces deux correctifs, 3 modules restent authentiquement orphelins :
-   log_rectangle_v25, premium_logs, premium_logs_v2. Preuve indépendante de
-   leur mort réelle (pas seulement l'absence de référence) :
-   tests/test_discord_ui_contract.py::test_runtime_no_longer_installs_competing_log_help_layers
-   vérifie déjà explicitement que cogs/__init__.py ne les installe plus — un
-   retrait délibéré déjà documenté et testé ailleurs, pas une découverte.
-   Non supprimés ici (aucun script n'est supprimé uniquement parce qu'il
-   n'est pas appelé) — à la discrétion de Jayden.
+   Après ces deux correctifs, 3 modules restaient authentiquement orphelins :
+   log_rectangle_v25, premium_logs, premium_logs_v2 (et moderation_logs_fix,
+   retenu uniquement par eux). Ils ont été supprimés lors de la refonte de
+   septembre 2026, une fois leur mort confirmée (aucun import dynamique,
+   cogs/__init__.py ne les installait plus, audit de reachability concordant).
 
 listener_budget_gate.py : même bug de blocage, corrigé pareil. Constat
 actuellement réel et non résolu (pas une régression de ce lot — les budgets
@@ -67,8 +64,8 @@ bot_v10_audit.py : bug réel trouvé, partiellement corrigé.
 
 runtime_reachability_audit.py : toujours purement informatif (n'échoue
 jamais, "aucune suppression automatique" dans son propre message). Recoupe
-5 des 7 candidats de dead_module_gate.py (log_rectangle_v25, premium_logs,
-premium_logs_v2, stale_discord_app_detector, command_error_probe) mais couvre
+les candidats de dead_module_gate.py (stale_discord_app_detector,
+command_error_probe) mais couvre
 un périmètre bien plus large (tout le dépôt : scripts racine, web/, HA) — pas
 redondant, complémentaire. À conserver."""
 from __future__ import annotations

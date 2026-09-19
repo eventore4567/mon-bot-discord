@@ -516,7 +516,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
                 (member.guild.id, member.id),
             )
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans evaluate_member", exc_info=True)
         await self._event(member.guild.id, member.id, "verified")
         await self._log_result(member, score, threshold, status, factors)
         return score, True
@@ -582,7 +582,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
             await self._clear_pending(member.guild.id, member.id)
             await self._event(member.guild.id, member.id, "leave")
         except Exception:
-            pass
+            logger.warning("Étape non critique ignorée dans on_member_remove", exc_info=True)
 
     @commands.Cog.listener()
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):

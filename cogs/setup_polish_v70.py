@@ -253,7 +253,7 @@ def _compact_rows(view) -> None:
             try:
                 child._row = row_map[old]
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans _compact_rows", exc_info=True)
 
 
 def _patch_render() -> None:

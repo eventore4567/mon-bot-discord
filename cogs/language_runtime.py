@@ -335,7 +335,7 @@ def localized_component(command: commands.Command, language: str) -> str:
                 if preferred:
                     return _slug(preferred)
             except Exception:
-                pass
+                logger.warning("Étape non critique ignorée dans localized_component", exc_info=True)
         return _translate_tokens(name, EN_TOKEN_MAP)
 
     if name in FR_COMMAND_NAMES:
@@ -956,22 +956,8 @@ async def _find_prompt_channel(guild: discord.Guild) -> discord.TextChannel | No
     return None
 
 
-async def _send_initial_language_prompt(bot: commands.Bot, guild: discord.Guild) -> None:
-    await _ensure_table(bot)
-    row = await bot.db.fetchone("SELECT language FROM guild_language_settings WHERE guild_id = ?", (guild.id,))
-    if row:
-        return
-    channel = await _find_prompt_channel(guild)
-    if channel is None:
-        logger.warning("Aucun salon disponible pour demander la langue sur %s.", guild.id)
-        return
-    e = embeds.brand(
-        '🌐 Choose your language • Choisissez votre langue',
-        "**Francais** → les noms des commandes et les interfaces principales seront en francais.\n"
-        "**English** → command names and the main interfaces will be in English.\n\n"
-        "Ce choix est modifiable plus tard dans `+setup`. / You can change it later in `+setup`.",
-    )
-    await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(e), LanguageChoiceView(bot)), allowed_mentions=discord.AllowedMentions.none())
+# Le choix de langue à l'arrivée est intégré au message d'accueil (cogs/guild_arrival.py,
+# boutons Français / English) : plus de second message « Choose your language ».
 
 
 async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
@@ -1011,12 +997,6 @@ def _install_listeners(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_language_listeners", False):
         return
 
-    async def guild_join(guild: discord.Guild):
-        try:
-            await _send_initial_language_prompt(bot, guild)
-        except Exception:
-            logger.exception("Impossible d'envoyer le choix de langue sur %s.", guild.id)
-
     async def ready():
         try:
             await _ensure_table(bot)
@@ -1028,7 +1008,6 @@ def _install_listeners(bot: commands.Bot) -> None:
     async def message_listener(message: discord.Message):
         await _mention_help(bot, message)
 
-    bot.add_listener(guild_join, "on_guild_join")
     bot.add_listener(ready, "on_ready")
     bot.add_listener(message_listener, "on_message")
     try:
