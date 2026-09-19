@@ -175,11 +175,11 @@ renderSanctions = async function renderModerationCenter() {
     <div class="kpis" style="margin-top:14px">
       <div class="kpi"><small>Avertissements</small><b>${number(d.warnings || 0)}</b></div>
       <div class="kpi"><small>Sanctions</small><b>${number(d.sanctions || 0)}</b></div>
-      <div class="kpi"><small>État</small><b>${muted ? 'Mute' : 'Actif'}</b></div>
+      <div class="kpi"><small>État</small><b>${d.currently_banned ? 'Banni' : muted ? 'Mute' : m.present === false ? 'Hors serveur' : 'Actif'}</b></div>
       <div class="kpi"><small>Rôles</small><b>${number((m.roles || []).length)}</b></div>
     </div>
     <div class="toolbar" style="margin-top:14px">
-      ${m.bot ? '<span class="notice warn">Les bots ne peuvent pas être sanctionnés depuis ce centre.</span>' : ['warn','mute','kick','ban'].map(a => `<button class="btn ${moderationActionClass(a)}" type="button" data-mod-action="${a}">${moderationActionLabel(a)}</button>`).join('')}
+      ${m.bot ? '<span class="notice warn">Les bots ne peuvent pas être sanctionnés depuis ce centre.</span>' : m.present === false ? (d.currently_banned ? '<button class="btn primary" type="button" data-member-reverse="unban">Débannir</button>' : '<span class="notice">Ce membre n’est plus présent sur le serveur.</span>') : ['warn','mute','kick','ban'].map(a => `<button class="btn ${moderationActionClass(a)}" type="button" data-mod-action="${a}">${moderationActionLabel(a)}</button>`).join('')}
       ${muted ? '<button class="btn" type="button" data-member-reverse="unmute">Lever le mute</button>' : ''}
       ${Number(d.warnings || 0) > 0 ? '<button class="btn" type="button" data-member-reverse="clear-warnings">Effacer les avertissements</button>' : ''}
     </div>
