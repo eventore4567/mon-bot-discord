@@ -4,7 +4,7 @@
 :root{
   --bg:#0b0d10;--bg2:#101318;--panel:#15191f;--panel2:#1a1f27;--panel3:#202630;
   --line:#2a313c;--line2:#343d49;--text:#f2f5f8;--muted:#929dac;--soft:#bac3cf;
-  --blue:#4da3ff;--blue2:#77bcff;--blue-bg:#12253a;--accent-glow:rgb(77 163 255 / .22);--accent-soft:rgb(77 163 255 / .10);
+  --blue:#4da3ff;--blue2:#77bcff;--blue-bg:#12253a;--accent-glow:rgb(77 163 255 / .22);--accent-soft:rgb(77 163 255 / .10);--rail-bg:#101318;--sidebar-bg:#101318;--hover-bg:#1a1f27;
   --green:#55d69a;--green-bg:#12301f;--amber:#efbd61;--amber-bg:#33290f;--red:#ff7081;--red-bg:#35191f;
   --shadow:0 18px 48px rgba(0,0,0,.36);--rail:64px;--sidebar:248px;--top:56px;--radius:12px;--radius-sm:8px;
 }
@@ -143,13 +143,13 @@ html[data-theme="oled"] .server-rail,html[data-theme="oled"] .sidebar{background
 
 /* ---------- structure ---------- */
 .app{display:grid;grid-template-columns:var(--rail) var(--sidebar) minmax(0,1fr);min-height:calc(100vh - var(--top))}
-.server-rail{position:sticky;top:var(--top);height:calc(100vh - var(--top));overflow:auto;border-right:1px solid var(--line);background:var(--bg2);padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:8px;scrollbar-width:none}
+.server-rail{position:sticky;top:var(--top);height:calc(100vh - var(--top));overflow:auto;border-right:1px solid var(--line);background:var(--rail-bg,var(--bg2));padding:10px 0;display:flex;flex-direction:column;align-items:center;gap:8px;scrollbar-width:none}
 .guild-btn{width:42px;height:42px;border-radius:14px;border:1px solid var(--line);background:var(--panel);display:grid;place-items:center;overflow:hidden;font-weight:700;font-size:12px;cursor:pointer;color:var(--soft)}
 .guild-btn img{width:100%;height:100%;object-fit:cover}
 .guild-btn:hover{border-color:var(--line2)}
 .guild-btn.active{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-bg)}
 .guild-btn.add{border-style:dashed;color:var(--muted);font-size:20px}
-.sidebar{position:sticky;top:var(--top);height:calc(100vh - var(--top));overflow:auto;border-right:1px solid var(--line);background:var(--bg2);padding:12px;display:flex;flex-direction:column;gap:12px}
+.sidebar{position:sticky;top:var(--top);height:calc(100vh - var(--top));overflow:auto;border-right:1px solid var(--line);background:var(--sidebar-bg,var(--bg2));padding:12px;display:flex;flex-direction:column;gap:12px}
 .server-head{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px;border:1px solid var(--line);border-radius:12px;background:var(--panel);cursor:pointer}
 .server-head:hover{border-color:var(--line2)}
 .server-icon{width:36px;height:36px;border-radius:11px;background:var(--panel3);display:grid;place-items:center;font-weight:800;font-size:12px;overflow:hidden;flex:none}
@@ -161,7 +161,7 @@ html[data-theme="oled"] .server-rail,html[data-theme="oled"] .sidebar{background
 .nav-group{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:12px 10px 4px}
 .nav-group:first-child{padding-top:2px}
 .nav button,.nav a.nav-link{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:8px 10px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--soft);cursor:pointer;font-weight:600}
-.nav button:hover,.nav a.nav-link:hover{background:var(--panel);color:var(--text)}
+.nav button:hover,.nav a.nav-link:hover{background:var(--hover-bg,var(--panel));color:var(--text)}
 .nav button.active{background:var(--blue-bg);border-color:#1f3d5e;color:var(--text)}
 .nav button .count{margin-left:auto;font-size:11px;color:var(--muted);font-weight:600}
 .nav .state-dot{width:7px;height:7px;border-radius:50%;background:var(--line2);flex:none}
@@ -423,3 +423,27 @@ html[data-density="compact"] .experience-stat{min-height:74px;padding:10px}
 .global-quick-card.accent .global-quick-icon{background:var(--quick-accent,var(--blue));color:#07111c;border-color:transparent;box-shadow:0 8px 26px var(--accent-glow)}
 @media(max-width:1100px){.global-quick-hub{grid-template-columns:1fr}.global-quick-card{min-height:88px}}
 @media(max-width:520px){.global-quick-card{grid-template-columns:auto 1fr}.global-quick-card>.btn{grid-column:1/-1}}
+
+
+/* Full custom theme editor */
+.theme-color-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.theme-color-row{display:grid;grid-template-columns:minmax(0,1fr) 44px 104px;gap:8px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg2)}
+.theme-color-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+.theme-color-copy b{font-size:12px}
+.theme-color-copy small{font-size:10px;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.theme-color-picker{width:44px!important;height:34px!important;padding:2px!important;border:1px solid var(--line2)!important;border-radius:9px!important;background:var(--panel)!important}
+.theme-color-hex{height:34px!important;padding:0 9px!important;border:1px solid var(--line2)!important;border-radius:9px!important;background:var(--panel)!important;color:var(--text)!important;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:lowercase}
+.theme-save-row{display:flex;gap:8px;align-items:center}
+.theme-save-row .input{flex:1}
+.saved-theme-list{display:grid;gap:8px}
+.saved-theme-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg2)}
+.saved-theme-preview{width:54px;height:38px;border-radius:10px;border:1px solid var(--line2);background:linear-gradient(135deg,var(--t-bg) 0 48%,var(--t-panel) 48% 76%,var(--t-accent) 76% 100%);box-shadow:inset 0 0 0 1px rgb(255 255 255 / .05)}
+html[data-glow="on"] .btn.primary{box-shadow:0 8px 22px var(--accent-soft)}
+html[data-glow="on"] .nav button.active{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--blue) 20%,transparent)}
+@media(max-width:800px){.theme-color-grid{grid-template-columns:1fr}}
+@media(max-width:560px){
+  .theme-color-row{grid-template-columns:minmax(0,1fr) 42px 94px}
+  .saved-theme-row{grid-template-columns:auto minmax(0,1fr)}
+  .saved-theme-row .row-actions{grid-column:1/-1}
+  .theme-save-row{align-items:stretch;flex-direction:column}
+}
