@@ -135,7 +135,7 @@ railServer.click();
 await sleep(300);
 if(!requests.map(x=>x.path).includes("/api/guilds/1")) throw new Error("Le clic serveur ne charge pas sa configuration.");
 
-const expectedTabs=["overview","welcome","levels","economy","roles","security","logs","tickets","games","notifications","automation","embeds","ai","settings","access","invites","backups"];
+const expectedTabs=["overview","welcome","levels","economy","roles","moderation","security","logs","tickets","games","notifications","automation","embeds","ai","settings","access","invites","backups"];
 const actualTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
 for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page unifiée absente après sélection serveur: ${tab}`);
 if(actualTabs.includes("profile")||actualTabs.includes("servers")||actualTabs.includes("preferences")) throw new Error("Les pages globales ne doivent pas encombrer la navigation serveur.");
@@ -146,7 +146,7 @@ const checks=[
   ["overview","",".module-card"], ["welcome","bienvenue",'[data-setting="welcome_message"]'], ["welcome","departs",'[data-setting="goodbye_message"]'],
   ["levels","general","#lvSave"], ["levels","levelup",'[data-setting="level_channel"]'], ["levels","roles","#lvRoleAdd"], ["levels","avance","#lvExRoles"],
   ["economy","general","#ecSave"], ["economy","boutique","#shopAdd"], ["economy","jeux","#gmEnabled"], ["economy","gains",".kpi"], ["roles","autoroles",'[data-setting="autorole"]'], ["roles","interactifs","#reactionPanelCreate"], ["roles","avance",'[data-setting="mod_role"]'],
-  ["security","protections","[data-automod]"], ["security","verification","#verifyRules"], ["security","sanctions","#sanctionList"],
+  ["moderation","","#sanctionList"], ["security","protections","[data-automod]"], ["security","verification","#verifyRules"],
   ["logs","",'[data-log-channel]'], ["tickets","","#ticketSave"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
   ["settings","",'[data-setting="prefix"]'], ["access","","#commandList"], ["embeds","","#embedSend"], ["ai","","[data-ai]"],
   ["invites","invites",".card"], ["backups","backups","#opsExport"], ["backups","history","[data-rollback]"],
@@ -173,9 +173,8 @@ const diagCalls=interactivePaths.filter(p=>p==="/api/guilds/1/diagnostics").leng
 if(diagCalls>4) throw new Error(`Diagnostics rechargé ${diagCalls} fois : le cache front ne fonctionne pas.`);
 
 
-// Message privé : plus dans la sidebar, mais accessible depuis Sanctions.
-dom.window.document.querySelector('#navigation button[data-tab="security"]').click(); await sleep(120);
-dom.window.document.querySelector('#subnav [data-sub="sanctions"]').click(); await sleep(150);
+// Message privé : plus dans la sidebar, mais accessible depuis le Centre de modération.
+dom.window.document.querySelector('#navigation button[data-tab="moderation"]').click(); await sleep(150);
 dom.window.document.querySelector('[data-go="dm"]').click(); await sleep(150);
 if(!dom.window.document.getElementById("dmOneMessage")) throw new Error("La page Message privé doit rester accessible depuis Sanctions.");
 if(!interactivePathsNow().includes("/api/guilds/1/dm/apercu")) throw new Error("Route DM jamais chargée.");
@@ -197,11 +196,10 @@ if(!dom.window.document.querySelector('[data-palette-page="backups"]')) throw ne
 if(runtimeErrors.some(message=>/SyntaxError|ReferenceError|TypeError/.test(message))){
   console.error(runtimeErrors.join("\n"));throw new Error("Erreur JavaScript dans le dashboard unifié.");
 }
-// Ancienne adresse ?tab=moderation → Sécurité › Sanctions (liens déjà partagés).
+// Adresse ?tab=moderation → Centre de modération.
 const legacy = new JSDOM(html, { url:"https://sentrix.test/app?tab=moderation&guild=1", runScripts:"dangerously", pretendToBeVisual:true, virtualConsole, beforeParse(window){ window.fetch = dom.window.fetch; window.scrollTo=()=>{}; } });
 await sleep(900);
-if(!legacy.window.document.querySelector("#sanctionList")) throw new Error("La redirection de l'ancien onglet moderation ne fonctionne pas.");
-if(!legacy.window.document.querySelector('#subnav [data-sub="sanctions"].active')) throw new Error("La sous-section Sanctions n'est pas active après redirection.");
+if(!legacy.window.document.querySelector("#sanctionList")) throw new Error("Le Centre de modération ne fonctionne pas via ?tab=moderation.");
 legacy.window.close();
 
 // États de démarrage : jamais une page réduite au bandeau.
