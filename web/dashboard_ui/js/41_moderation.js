@@ -72,7 +72,7 @@ renderSanctions = async function renderModerationCenter() {
           <input class="search-input" id="historySearch" type="search" placeholder="Filtrer l’historique…">
           <select class="search-input" id="historyAction">
             <option value="">Toutes les actions</option>
-            ${['warn','mute','kick','ban','unmute','unban','tempban','clearwarnings'].map(x => `<option value="${x}">${x}</option>`).join('')}
+            ${['warn','mute','kick','ban','unmute','unban','tempban'].map(x => `<option value="${x}">${x}</option>`).join('')}
           </select>
         </div>
       </div>
