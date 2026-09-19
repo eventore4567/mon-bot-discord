@@ -65,8 +65,9 @@ def test_no_periodic_dom_loop():
     assert intervals == [("() => liveTick(false)", "30000")], intervals
     assert "data-sx-tab" not in program
     assert "Element.prototype.animate" not in program
-    # L'entrée de page n'est posée que par une navigation utilisateur (go → render({navigation:true})).
-    assert program.count("render({ navigation: true })") == 2  # go() et première page d'un serveur
+    # Ces appels sont des transitions ponctuelles : go(), sélection d'un serveur et les
+    # deux états initiaux du profil global. Aucun n'est lancé par une boucle périodique.
+    assert program.count("render({ navigation: true })") == 4
     assert "el.classList.add('page-enter')" in program and "if (animate)" in program
 
 
@@ -74,9 +75,15 @@ def test_navigation_is_short_and_grouped():
     program = _program()
     nav = re.search(r"const NAV = \[(.*?)\n\];", program, re.S).group(1)
     pages = re.findall(r"\['([a-z]+)', '", nav)
-    assert pages == ["overview", "welcome", "levels", "economy", "roles", "security", "logs", "tickets", "notifications", "automation"]
+    assert pages == [
+        "profile", "overview", "welcome", "roles", "levels", "economy", "security",
+        "logs", "tickets", "games", "notifications", "automation", "embeds", "ai",
+    ]
     groups = re.findall(r"\['([^']+)', \[\[", nav)
-    assert groups == ["Accueil", "Communauté", "Modération", "Support", "Automatisation"]
+    assert groups == [
+        "Mon espace", "Communauté", "Progression", "Modération", "Jeux",
+        "Automatisation", "Création & personnalisation",
+    ]
     tools = re.search(r"const TOOL_GROUPS = \[(.*?)\n\];", program, re.S).group(1)
     assert len(re.findall(r"\['([a-z]+)', '", tools)) <= 10
     assert "(ancien)" not in program
