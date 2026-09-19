@@ -1,19 +1,23 @@
 /* ---------- rendu ---------- */
 const PAGES = {
-  profile: renderProfile, overview: renderOverview, welcome: renderWelcome, levels: renderLevels, economy: renderEconomy, games: renderGames, roles: renderRoles,
+  profile: renderProfile, servers: renderServers, preferences: renderPreferences,
+  overview: renderOverview, welcome: renderWelcome, levels: renderLevels, economy: renderEconomy, games: renderGames, roles: renderRoles,
   security: renderSecurity, logs: renderLogs, tickets: renderTickets, notifications: renderNotifications, automation: renderAutomation,
   settings: renderSettings, access: renderAccess, embeds: renderEmbeds, ai: renderAI, invites: renderInvites, backups: renderBackups,
   dm: renderDM, advanced: renderAdvanced, diagnostic: renderDiagnostic,
 };
-const GLOBAL_PAGES = new Set(['profile']);
+const GLOBAL_PAGES = new Set(['profile', 'servers', 'preferences']);
 let renderToken = 0;
-const REDUCED_MOTION = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const REDUCED_MOTION = () => Boolean(state.reduceMotion) || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 const SKELETON = '<div class="grid" aria-hidden="true"><div class="skeleton full" style="min-height:72px"></div><div class="skeleton" style="min-height:180px"></div><div class="skeleton" style="min-height:180px"></div></div>';
 /* render({navigation:true}) = vraie navigation utilisateur (go) : légère sortie, squelette si
    la page met plus de 150 ms, puis entrée (160 ms). Tout autre appel (enregistrement,
    Actualiser, tick live) redessine sans transition et garde le contenu visible. */
 async function render({ navigation = false } = {}) {
-  if (!state.guild && !GLOBAL_PAGES.has(state.page)) return;
+  if (!state.guild && !GLOBAL_PAGES.has(state.page)) {
+    state.page = 'servers';
+    state.sub = '';
+  }
   const token = ++renderToken;
   setHead(); renderNav(); renderSubnav(); syncUrl();
   const el = content();
@@ -41,7 +45,16 @@ async function render({ navigation = false } = {}) {
 /* ---------- serveurs ---------- */
 function renderServerRail() {
   const installed = state.guilds.filter(g => g.installed), missing = state.guilds.filter(g => !g.installed);
-  $('serverRail').innerHTML = installed.map(g => `<button class="guild-btn ${String(g.id) === String(state.guildId) ? 'active' : ''}" type="button" data-guild="${esc(g.id)}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : esc((g.name || 'S').slice(0, 2).toUpperCase())}</button>`).join('') + (missing[0] ? `<a class="guild-btn add" href="${esc(missing[0].invite_url || '#')}" title="Ajouter SentriX à un autre serveur">+</a>` : '');
+  const user = state.user || {};
+  const avatar = user.avatar_url
+    ? `<img src="${esc(user.avatar_url)}" alt="">`
+    : esc(String(user.global_name || user.username || 'ME').slice(0, 2).toUpperCase());
+  $('serverRail').innerHTML =
+    `<button class="guild-btn account ${state.guildId ? '' : 'active'}" type="button" id="globalHomeRail" title="Mon espace SentriX" aria-label="Mon espace SentriX">${avatar}</button>
+     <span class="rail-separator" aria-hidden="true"></span>` +
+    installed.map(g => `<button class="guild-btn ${String(g.id) === String(state.guildId) ? 'active' : ''}" type="button" data-guild="${esc(g.id)}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : esc((g.name || 'S').slice(0, 2).toUpperCase())}</button>`).join('') +
+    (missing[0] ? `<a class="guild-btn add" href="${esc(missing[0].invite_url || '#')}" title="Ajouter SentriX à un autre serveur">+</a>` : '');
+  $('globalHomeRail').onclick = () => exitGuildToGlobal('profile');
   $('serverRail').querySelectorAll('[data-guild]').forEach(b => b.onclick = () => selectGuild(b.dataset.guild));
 }
 function openServerPicker() {
@@ -62,9 +75,31 @@ function openServerPicker() {
     },
   });
 }
-async function selectGuild(value) {
+async function exitGuildToGlobal(page = 'profile') {
+  if (!(await guardDirty())) return;
+  if (state.guildAbort) state.guildAbort.abort();
+  state.guildAbort = null;
+  stopLive();
+  state.guildId = '';
+  state.guild = null;
+  state.guildOwner = false;
+  state.cache.clear();
+  state.ticketCreate = false;
+  state.page = GLOBAL_PAGES.has(page) ? page : 'profile';
+  state.sub = '';
+  updateChrome();
+  renderServerRail();
+  closeSidebar();
+  await render({ navigation: true });
+}
+
+async function selectGuild(value, { preservePage = false } = {}) {
   if (!value || String(value) === String(state.guildId) && state.guild) return;
   if (!(await guardDirty())) return;
+  if (!preservePage || GLOBAL_PAGES.has(state.page)) {
+    state.page = 'overview';
+    state.sub = '';
+  }
   if (state.guildAbort) state.guildAbort.abort();
   const controller = new AbortController();
   state.guildAbort = controller;
@@ -93,27 +128,25 @@ async function loadGuilds() {
   const payload = await api('/api/guilds');
   state.guilds = payload.guilds || [];
   showOnly('dashboard');
-  renderServerRail();
   const installed = state.guilds.filter(g => g.installed);
-  let wanted = new URLSearchParams(location.search).get('guild');
-  if (!wanted) { try { wanted = localStorage.getItem('sentrix:guild') || ''; } catch (_) {} }
-  if (!installed.some(g => String(g.id) === String(wanted))) {
-    // Sélection mémorisée périmée (serveur quitté, SentriX retiré) : on l'oublie.
-    try { localStorage.removeItem('sentrix:guild'); } catch (_) {}
-    wanted = installed.length === 1 ? installed[0].id : '';
-  }
-  if (wanted) { await selectGuild(wanted); return; }
-  if (installed.length) {
-    state.page = 'profile';
-    state.sub = '';
-    await render({ navigation: true });
+  const wanted = new URLSearchParams(location.search).get('guild') || '';
+  renderServerRail();
+
+  if (wanted && installed.some(g => String(g.id) === String(wanted))) {
+    await selectGuild(wanted, { preservePage: true });
     return;
   }
-  const invite = state.guilds.find(g => g.invite_url)?.invite_url;
+
+  // Règle UX : /app est toujours un espace PERSONNEL. Une guild n'est chargée
+  // qu'après un clic explicite sur sa pastille ou via un lien contenant ?guild=.
+  state.guildId = '';
+  state.guild = null;
+  state.guildOwner = false;
   state.page = 'profile';
   state.sub = '';
+  updateChrome();
+  renderServerRail();
   await render({ navigation: true });
-  const b = content().querySelector('[data-empty-action="inviteBot"]'); if (b) b.onclick = () => { location.href = invite; };
 }
 
 /* ---------- session & états de démarrage ----------
@@ -202,7 +235,7 @@ $('serverSwitch').onclick = openServerPicker;
 $('refreshButton').onclick = async () => { if (!state.guildId) return; if (!(await guardDirty())) return; state.cache.clear(); await reloadGuild(); await render(); toast('Données actualisées.'); };
 $('saveButton').onclick = saveDirty;
 $('discardButton').onclick = () => { clearDirty(); render(); };
-$('profileButton').onclick = async () => { if (!(await confirmDialog({ title: 'Se déconnecter ?', body: 'Vous devrez vous reconnecter avec Discord pour revenir.', confirm: 'Se déconnecter' }))) return; try { await api('/logout', { method: 'POST' }); } finally { location.href = '/'; } };
+$('profileButton').onclick = () => exitGuildToGlobal('profile');
 document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveDirty(); }
@@ -218,9 +251,10 @@ async function bootstrap() {
   let page = q.get('tab') || '';
   if (!page) { try { page = localStorage.getItem('sentrix:page') || ''; } catch (_) {} }
   if (LEGACY[page]) { state.sub = LEGACY[page][1] || ''; page = LEGACY[page][0]; }
-  state.page = META[page] ? page : 'overview';
+  state.page = META[page] ? page : 'profile';
   if (q.get('sub')) state.sub = q.get('sub');
   try { state.navMore = localStorage.getItem('sentrix:nav:more') === '1'; } catch (_) {}
+  if (typeof applyGlobalPreferences === 'function') applyGlobalPreferences();
   if (q.get('auth') === 'missing') { const n = $('authMessage'); n.textContent = 'Connexion Discord indisponible pour le moment. Réessayez dans quelques instants ou contactez le support.'; n.classList.remove('hidden'); history.replaceState(null, '', location.pathname); }
   renderNav();
   // Filet : si rien n'a abouti après 20 s (réseau muet, exception avalée), on le dit.
