@@ -208,3 +208,352 @@ renderSanctions = async function renderModerationCenter() {
 
   if (selectedId) await paintMember();
 };
+
+
+/* ---------- Expérience premium SentriX ----------
+   Couche UX progressive : elle résume, guide et accélère les pages existantes sans
+   créer de nouvelle source de vérité. Les écritures passent toujours par les APIs
+   déjà utilisées par SentriX. */
+const EXPERIENCE_META = {
+  overview: ['Centre de contrôle', 'Santé, modules et raccourcis du serveur.'],
+  welcome: ['Accueil des membres', 'Bienvenue, départs et aperçu Discord.'],
+  levels: ['Progression', 'XP, annonces et récompenses de rôles.'],
+  economy: ['Économie', 'Monnaie, boutique, jeux et gains.'],
+  roles: ['Rôles', 'Autorôle, rôles interactifs et progression.'],
+  moderation: ['Modération', 'Dossiers membres et sanctions réelles.'],
+  security: ['Sécurité', 'Protections automatiques et vérification.'],
+  logs: ['Logs', 'Routage précis et événements enregistrés.'],
+  tickets: ['Tickets', 'Panneaux, types, actions staff et publication.'],
+  games: ['Jeux', 'Compteur Infini, mini-jeux et règles d’accès.'],
+  notifications: ['Notifications', 'Sources sociales et annonces automatiques.'],
+  automation: ['Automatisation', 'Réactions, Starboard, sticky, planning et VoiceHub.'],
+  embeds: ['Embeds', 'Composer, prévisualiser et publier dans Discord.'],
+  ai: ['IA', 'Modèle, limites et mémoire de conversation.'],
+};
+
+const EXPERIENCE_QUICK = {
+  overview: [['welcome','Accueil'],['security','Sécurité'],['tickets','Tickets'],['logs','Logs']],
+  levels: [['levels','Général','general'],['levels','Récompenses','roles'],['roles','Rôles','niveau']],
+  economy: [['economy','Boutique','boutique'],['economy','Jeux','jeux'],['economy','Gains','gains']],
+  moderation: [['security','Sécurité','protections'],['logs','Logs'],['tickets','Tickets']],
+  security: [['moderation','Centre de modération'],['logs','Logs'],['security','Vérification','verification']],
+  logs: [['moderation','Modération'],['tickets','Tickets'],['diagnostic','Diagnostic']],
+  tickets: [['roles','Rôles'],['logs','Logs'],['moderation','Modération']],
+  games: [['games','Compteur Infini','infinite'],['economy','Économie','jeux'],['automation','Automatisation']],
+  automation: [['notifications','Notifications'],['games','Jeux'],['advanced','Centre avancé','automations']],
+  roles: [['levels','Niveaux','roles'],['security','Vérification','verification'],['welcome','Accueil']],
+  embeds: [['welcome','Accueil'],['notifications','Notifications'],['tickets','Tickets']],
+};
+
+function experienceHealth(code) {
+  const cls = code === 'active' ? 'ok' : code === 'error' ? 'bad' : code === 'partial' ? 'warn' : '';
+  const label = code === 'active' ? 'Actif' : code === 'error' ? 'Erreur' : code === 'partial' ? 'À compléter' : 'Désactivé';
+  return '<span class="badge ' + cls + '">' + esc(label) + '</span>';
+}
+
+function experienceModuleForPage(page) {
+  const key = NAV_MODULE[page];
+  if (!key || !state.guildId) return null;
+  return state.cache.get(state.guildId + ':diagnostics')?.value?.modules?.[key] || null;
+}
+
+function experienceCommandBar() {
+  const meta = EXPERIENCE_META[state.page] || pageMeta(state.page);
+  const module = experienceModuleForPage(state.page);
+  const quick = EXPERIENCE_QUICK[state.page] || [];
+  return `<section class="experience-command full">
+    <div class="experience-command-main">
+      <div class="experience-breadcrumb">
+        <button type="button" class="crumb" data-go="overview">${esc(state.guild?.guild?.name || 'Serveur')}</button>
+        <span>/</span><strong>${esc(meta[0])}</strong>
+      </div>
+      <p>${esc(meta[1] || '')}</p>
+    </div>
+    <div class="experience-command-actions">
+      ${module ? experienceHealth(moduleStatus(module)) : ''}
+      ${quick.slice(0,4).map(([page,label,sub]) => `<button class="btn sm ghost" type="button" data-go="${esc(page)}" ${sub ? `data-go-sub="${esc(sub)}"` : ''}>${esc(label)}</button>`).join('')}
+      <button class="btn sm" type="button" data-experience-search>Filtrer la page</button>
+    </div>
+  </section>`;
+}
+
+function experienceSummary(title, copy, stats, actions = []) {
+  return `<section class="experience-summary full">
+    <div class="experience-summary-copy">
+      <span class="eyebrow">SentriX Control</span>
+      <h2>${esc(title)}</h2>
+      <p>${esc(copy || '')}</p>
+      ${actions.length ? `<div class="toolbar">${actions.map(a => `<button class="btn ${a.primary ? 'primary' : ''}" type="button" data-go="${esc(a.page)}" ${a.sub ? `data-go-sub="${esc(a.sub)}"` : ''}>${esc(a.label)}</button>`).join('')}</div>` : ''}
+    </div>
+    <div class="experience-stat-grid">
+      ${stats.map(s => `<div class="experience-stat"><small>${esc(s.label)}</small><strong>${esc(s.value)}</strong>${s.note ? `<span>${esc(s.note)}</span>` : ''}</div>`).join('')}
+    </div>
+  </section>`;
+}
+
+function experienceInsertAfterCommand(html) {
+  const grid = content().querySelector('.grid');
+  if (!grid) return;
+  const command = grid.querySelector('.experience-command');
+  if (command) command.insertAdjacentHTML('afterend', html);
+  else grid.insertAdjacentHTML('afterbegin', html);
+}
+
+function bindExperienceFilter() {
+  const trigger = content().querySelector('[data-experience-search]');
+  if (!trigger) return;
+  trigger.onclick = () => {
+    if ($('experienceFilter')) { $('experienceFilter').focus(); return; }
+    const bar = content().querySelector('.experience-command');
+    const wrap = document.createElement('div');
+    wrap.className = 'experience-filter';
+    wrap.innerHTML = '<input id="experienceFilter" class="search-input" type="search" placeholder="Rechercher dans cette page…" autocomplete="off"><small id="experienceFilterCount"></small><button class="btn sm ghost" type="button" id="experienceFilterClose">Fermer</button>';
+    bar.insertAdjacentElement('afterend', wrap);
+    const targets = [...content().querySelectorAll('.card, .module-card, .row')].filter(x => !x.closest('.experience-command') && !x.closest('.experience-summary'));
+    const apply = () => {
+      const q = $('experienceFilter').value.trim().toLocaleLowerCase('fr');
+      let visible = 0;
+      for (const el of targets) {
+        const hit = !q || el.textContent.toLocaleLowerCase('fr').includes(q);
+        el.classList.toggle('experience-filtered', !hit);
+        if (hit) visible += 1;
+      }
+      $('experienceFilterCount').textContent = q ? visible + ' résultat' + (visible > 1 ? 's' : '') : '';
+    };
+    $('experienceFilter').oninput = apply;
+    $('experienceFilterClose').onclick = () => {
+      for (const el of targets) el.classList.remove('experience-filtered');
+      wrap.remove();
+    };
+    $('experienceFilter').focus();
+  };
+}
+
+async function enhanceOverviewExperience() {
+  let d; try { d = await diagnostics(); } catch (_) { return; }
+  const mods = d.modules || {};
+  const active = Object.values(mods).filter(m => m?.code === 'active').length;
+  const errors = Object.values(mods).filter(m => m?.code === 'error').length;
+  const partial = Object.values(mods).filter(m => m?.code === 'partial' || (m?.code === 'active' && m?.configured === false)).length;
+  const invalid = (d.invalid_resources || []).length;
+  const g = state.guild?.guild || {};
+  experienceInsertAfterCommand(experienceSummary(
+    g.name || 'Votre serveur',
+    'Vue instantanée de la configuration réelle du serveur.',
+    [
+      { label:'Membres', value:number(g.members || 0), note:plural(g.channels_count || 0, 'salon') },
+      { label:'Modules actifs', value:number(active), note:partial + ' à compléter' },
+      { label:'Problèmes', value:number(errors + invalid), note:invalid ? invalid + ' ressource(s) cassée(s)' : 'aucune ressource cassée' },
+      { label:'Santé', value:Number(d.score || 0) + ' %', note:errors ? errors + ' erreur(s)' : 'stable' },
+    ],
+    [
+      { page:'welcome', label:'Configurer l’accueil', primary:true },
+      { page:'security', label:'Sécuriser' },
+      { page:'tickets', label:'Tickets' },
+    ]
+  ));
+  const problems = [];
+  for (const [key, mod] of Object.entries(mods)) {
+    const code = moduleStatus(mod);
+    if (code === 'error' || code === 'partial') {
+      const ref = OVERVIEW_CARDS.find(x => x.key === key);
+      problems.push({ page:ref?.page || 'diagnostic', label:ref?.title || key, detail:mod?.detail || 'Configuration à compléter.', code });
+    }
+  }
+  for (const item of (d.invalid_resources || []).slice(0,5)) problems.push({ page:'diagnostic', label:item.field || item.type || 'Ressource', detail:item.reason || 'Ressource inaccessible.', code:'error' });
+  if (problems.length) {
+    const grid = content().querySelector('.grid');
+    const section = document.createElement('section');
+    section.className = 'card full experience-attention';
+    section.innerHTML = `<div class="card-head"><div><h2>À corriger en priorité</h2><p>Les points qui peuvent réellement bloquer SentriX.</p></div><span class="badge warn">${number(problems.length)}</span></div><div class="list">${problems.slice(0,8).map(x => `<div class="row"><div class="row-main"><b>${esc(x.label)}</b><small>${esc(x.detail)}</small></div><div class="row-actions">${experienceHealth(x.code)}<button class="btn sm" type="button" data-go="${esc(x.page)}">Ouvrir</button></div></div>`).join('')}</div>`;
+    const modules = grid.querySelector('.module-grid');
+    if (modules) modules.insertAdjacentElement('beforebegin', section); else grid.appendChild(section);
+  }
+}
+
+async function enhanceLevelsExperience() {
+  let lv; try { lv = await levelsData(); } catch (_) { return; }
+  const min = Number(lv.xp_min ?? 10), max = Number(lv.xp_max ?? 25), cd = Number(lv.xp_cooldown ?? 60);
+  const avg = Math.round((min + max) / 2 * 10) / 10;
+  experienceInsertAfterCommand(experienceSummary(
+    'Progression des membres',
+    'Réglages XP réels et récompenses branchés sur le moteur de niveaux.',
+    [
+      { label:'XP moyen', value:String(avg), note:'par gain' },
+      { label:'Délai', value:cd ? cd + ' s' : 'aucun', note:'entre deux gains' },
+      { label:'Récompenses', value:number((lv.roles || []).length), note:'rôle(s)' },
+      { label:'Annonces', value:lv.level_announce_enabled ? 'Actives' : 'Coupées', note:state.guild?.settings?.level_channel ? (channelName(state.guild.settings.level_channel) || 'salon') : 'salon courant' },
+    ]
+  ));
+  if (state.sub === 'general' && !$('xpSimulator')) {
+    const grid = content().querySelector('.grid'); if (!grid) return;
+    const sim = document.createElement('section'); sim.className='card full'; sim.id='xpSimulator';
+    sim.innerHTML = '<div class="card-head"><div><h2>Simulateur de progression</h2><p>Estimation locale, sans modifier la configuration.</p></div></div><div class="fields"><div class="field"><label for="xpSimMessages">Messages valides par jour</label><input id="xpSimMessages" type="number" min="1" max="5000" value="80"></div><div class="field"><label for="xpSimDays">Période (jours)</label><input id="xpSimDays" type="number" min="1" max="365" value="7"></div></div><div class="kpis" style="margin-top:12px"><div class="kpi"><small>XP estimé</small><strong id="xpSimTotal">—</strong></div><div class="kpi"><small>Gains max/jour</small><strong id="xpSimCap">—</strong></div></div>';
+    grid.appendChild(sim);
+    const paint = () => {
+      const msgs=Math.max(1,Number($('xpSimMessages').value||1)),days=Math.max(1,Number($('xpSimDays').value||1));
+      const cap=cd>0?Math.min(msgs,Math.floor(86400/cd)):msgs;
+      $('xpSimCap').textContent=number(cap); $('xpSimTotal').textContent='≈ '+number(Math.round(cap*avg*days))+' XP';
+    };
+    $('xpSimMessages').oninput=paint; $('xpSimDays').oninput=paint; paint();
+  }
+}
+
+async function enhanceEconomyExperience() {
+  let ec; try { ec = await economyData(); } catch (_) { return; }
+  const shop=ec.shop||[],panels=ec.panels||[];
+  experienceInsertAfterCommand(experienceSummary(
+    'Économie du serveur',
+    'Monnaie, boutique et jeux réunis autour des données réellement utilisées par SentriX.',
+    [
+      { label:'Articles', value:number(shop.length), note:shop.filter(i=>i.stock!==0).length+' disponible(s)' },
+      { label:'Panneaux', value:number(panels.length), note:'publiés' },
+      { label:'Comptes', value:number(metrics().economy_accounts||0), note:'membres avec solde' },
+      { label:'Monnaie', value:ec.currency_symbol||ec.currency_plural||'—', note:ec.currency_plural||'' },
+    ],
+    [
+      {page:'economy',sub:'boutique',label:'Boutique',primary:true},
+      {page:'economy',sub:'jeux',label:'Jeux'},
+      {page:'economy',sub:'gains',label:'Gains'},
+    ]
+  ));
+}
+
+async function enhanceRolesExperience() {
+  let rp=null,lv=null; try{rp=await rolesData();}catch(_){} try{lv=await levelsData();}catch(_){}
+  if(!rp&&!lv)return;
+  const autorole=state.guild?.settings?.autorole;
+  experienceInsertAfterCommand(experienceSummary(
+    'Architecture des rôles',
+    'Autorôle, réactions, notifications et récompenses de niveau au même endroit.',
+    [
+      {label:'Autorôle',value:autorole?(roleName(autorole)||'Configuré'):'Aucun',note:'à l’arrivée'},
+      {label:'Réactions',value:number((rp?.reaction_roles||[]).length),note:(rp?.reaction_panels||[]).length+' panneau(x)'},
+      {label:'Menus notif.',value:number((rp?.notification_panels||[]).length),note:'publiés'},
+      {label:'Niveaux',value:number((lv?.roles||[]).length),note:'récompenses'},
+    ]
+  ));
+}
+
+async function enhanceLogsExperience() {
+  let cfg; try{cfg=await logConfigData();}catch(_){return;}
+  const routes=cfg.routes||[];
+  experienceInsertAfterCommand(experienceSummary(
+    'Journalisation',
+    'Chaque famille de logs peut écrire dans son propre salon.',
+    [
+      {label:'Actifs',value:routes.filter(r=>r.enabled&&r.valid).length+'/'+routes.length,note:'routes valides'},
+      {label:'À corriger',value:number(routes.filter(r=>r.enabled&&!r.valid).length),note:'routes invalides'},
+      {label:'Salons utilisés',value:number(new Set(routes.filter(r=>r.channel_id).map(r=>String(r.channel_id))).size),note:'destinations'},
+      {label:'Couverture',value:routes.length?Math.round(routes.filter(r=>r.enabled&&r.valid).length/routes.length*100)+' %':'0 %',note:'du routage'},
+    ]
+  ));
+  if(state.sub!=='routage'||$('logPresets'))return;
+  const grid=content().querySelector('.grid'); if(!grid)return;
+  const preset=document.createElement('section'); preset.className='card full'; preset.id='logPresets';
+  preset.innerHTML='<div class="card-head"><div><h2>Configuration rapide</h2><p>Un preset pour démarrer, puis vous pouvez séparer chaque catégorie.</p></div></div><div class="toolbar"><button class="btn primary" type="button" id="logsPresetEssential">Essentiels vers un salon</button><button class="btn" type="button" id="logsPresetAll">Tout vers un salon</button><button class="btn danger" type="button" id="logsPresetOff">Tout désactiver</button></div>';
+  const summary=grid.querySelector('.experience-summary'); (summary||grid.firstElementChild).insertAdjacentElement('afterend',preset);
+  const choose=title=>openModal({title,body:'<div class="field"><label for="logsPresetChannel">Salon</label><select id="logsPresetChannel">'+channelOptions('','text','Choisir un salon')+'</select></div>',actions:[{label:'Annuler',value:null},{label:'Appliquer',kind:'primary',keep:true,onClick:()=>{const v=$('logsPresetChannel').value;if(!v)return toast('Choisissez un salon.',true);closeModal(v);}}]});
+  const apply=async(mode,ch)=>{
+    const wanted=mode==='all'?new Set(routes.map(r=>r.key)):new Set(['moderation','messages','members','voice','tickets','automod','antispam','antiraid']);
+    try{for(const r of routes){const on=wanted.has(r.key);await gpost('/logs/config',{category:r.key,channel_id:on?ch:(r.channel_id||null),enabled:on},'PUT');}invalidate('log-config-v2');toast('Preset de logs appliqué.');await render();}catch(e){toast(e.message,true);}
+  };
+  $('logsPresetEssential').onclick=async()=>{const ch=await choose('Logs essentiels');if(ch)await apply('essential',ch);};
+  $('logsPresetAll').onclick=async()=>{const ch=await choose('Tous les logs');if(ch)await apply('all',ch);};
+  $('logsPresetOff').onclick=async()=>{if(!(await confirmDialog({title:'Désactiver tous les logs ?',body:'Les salons restent mémorisés, mais aucun nouveau log ne sera envoyé.',confirm:'Désactiver',danger:true})))return;try{for(const r of routes)await gpost('/logs/config',{category:r.key,channel_id:r.channel_id||null,enabled:false},'PUT');invalidate('log-config-v2');toast('Tous les logs sont désactivés.');await render();}catch(e){toast(e.message,true);}};
+}
+
+async function enhanceTicketsExperience() {
+  let data; try{data=await v62(true);}catch(_){return;}
+  const panels=data.tickets?.panels||[],types=data.tickets?.types||[],buttons=data.tickets?.buttons||{};
+  experienceInsertAfterCommand(experienceSummary(
+    'Support & tickets',
+    'Panneaux, types et actions staff dans un seul flux de configuration.',
+    [
+      {label:'Panneaux',value:number(panels.length),note:panels.filter(p=>p.message_id).length+' publié(s)'},
+      {label:'Types',value:number(types.length),note:'options membres'},
+      {label:'Actions staff',value:number(Object.values(buttons).filter(b=>b.enabled).length),note:'boutons visibles'},
+      {label:'État',value:panels.length&&types.length?'Prêt':'À configurer',note:panels.length&&types.length?'base opérationnelle':'panneau ou type manquant'},
+    ]
+  ));
+}
+
+async function enhanceGamesExperience() {
+  let inf=null,ec=null; try{inf=await infiniteData();}catch(_){} try{ec=await economyData();}catch(_){}
+  const gs=ec?.games||ec?.game_settings||{};
+  const disabled=gs.disabled_games||gs.disabled||[];
+  experienceInsertAfterCommand(experienceSummary(
+    'Jeux & engagement',
+    'Le Compteur Infini garde sa propre progression, les autres jeux suivent les règles d’accès communes.',
+    [
+      {label:'Compteur Infini',value:inf?.enabled?'Actif':'Inactif',note:inf?.channel_id?(channelName(inf.channel_id)||'salon'):'aucun salon'},
+      {label:'Prochain nombre',value:inf?.next_number!=null?number(inf.next_number):'—',note:inf?.last_user_id?'progression en cours':'aucun joueur'},
+      {label:'Jeux coupés',value:number(Array.isArray(disabled)?disabled.length:0),note:'catalogue'},
+      {label:'Accès',value:gs.enabled===false?'Désactivé':'Ouvert',note:'règles serveur'},
+    ],
+    [{page:'games',sub:'infinite',label:'Compteur Infini',primary:true},{page:'games',sub:'catalogue',label:'Mini-jeux'},{page:'economy',sub:'jeux',label:'Accès'}]
+  ));
+}
+
+async function enhanceAutomationExperience() {
+  let d; try{d=await automationPlus();}catch(_){return;}
+  const star=d.starboard||d.starboard_config||null,sticky=d.sticky||d.stickies||[],scheduled=d.scheduled||d.scheduled_messages||[],voice=d.voicehub||d.voicehub_config||null;
+  experienceInsertAfterCommand(experienceSummary(
+    'Automatisations',
+    'Tous les automatismes SentriX regroupés sans dupliquer leurs moteurs.',
+    [
+      {label:'Starboard',value:star?'Configuré':'Inactif',note:star?.threshold?star.threshold+' réactions':''},
+      {label:'Sticky',value:number(Array.isArray(sticky)?sticky.length:(sticky?1:0)),note:'message(s)'},
+      {label:'Programmés',value:number(Array.isArray(scheduled)?scheduled.length:0),note:'en attente'},
+      {label:'VoiceHub',value:voice?'Configuré':'Inactif',note:voice?.lobby_channel_id?(channelName(voice.lobby_channel_id)||'lobby'):''},
+    ]
+  ));
+}
+
+function enhanceModerationExperience() {
+  experienceInsertAfterCommand(experienceSummary(
+    'Centre de modération',
+    'Recherchez un membre, consultez son dossier puis utilisez le même moteur que les commandes Discord.',
+    [
+      {label:'Historique',value:number(content().querySelectorAll('#sanctionList .row').length),note:'sanctions chargées'},
+      {label:'Actions',value:'4',note:'warn · mute · kick · ban'},
+      {label:'Traçabilité',value:'Active',note:'dossiers et logs'},
+      {label:'Hiérarchie',value:'Vérifiée',note:'permissions Discord'},
+    ]
+  ));
+}
+
+function enhanceEmbedsExperience() {
+  if(!$('embedTitle')||$('embedTemplates'))return;
+  const grid=content().querySelector('.grid');if(!grid)return;
+  const s=document.createElement('section');s.className='card full';s.id='embedTemplates';
+  s.innerHTML='<div class="card-head"><div><h2>Modèles rapides</h2><p>Chargez une base puis adaptez-la avant publication.</p></div></div><div class="template-grid"><button class="template-card" type="button" data-embed-template="announcement"><b>Annonce</b><small>Message important</small></button><button class="template-card" type="button" data-embed-template="rules"><b>Règlement</b><small>Champs structurés</small></button><button class="template-card" type="button" data-embed-template="event"><b>Événement</b><small>Date et inscription</small></button><button class="template-card" type="button" data-embed-template="maintenance"><b>Maintenance</b><small>État du service</small></button></div>';
+  grid.insertBefore(s,grid.children[1]||null);
+  const templates={
+    announcement:{title:'Annonce',description:'Écrivez ici votre annonce importante.',color:'#4da3ff',fields:''},
+    rules:{title:'Règlement du serveur',description:'Merci de lire les règles avant de participer.',color:'#55d69a',fields:'Respect | Restez respectueux envers tous les membres.\nContenu | Publiez dans les salons adaptés.\nStaff | Suivez les consignes de l’équipe.'},
+    event:{title:'Nouvel événement',description:'Un événement arrive sur le serveur.',color:'#7c5cff',fields:'Date | À compléter\nLieu | À compléter\nInscription | Répondez à ce message.'},
+    maintenance:{title:'Maintenance SentriX',description:'Une opération de maintenance est en cours.',color:'#f0b232',fields:'État | En cours\nImpact | À compléter\nRetour prévu | À compléter'},
+  };
+  s.querySelectorAll('[data-embed-template]').forEach(b=>b.onclick=()=>{const t=templates[b.dataset.embedTemplate];$('embedTitle').value=t.title;$('embedDescription').value=t.description;$('embedColor').value=t.color;$('embedFields').value=t.fields;$('embedTitle').dispatchEvent(new Event('input',{bubbles:true}));toast('Modèle chargé. Vérifiez l’aperçu avant l’envoi.');});
+}
+
+async function enhanceSentrixExperience() {
+  if(!state.guildId||!state.guild)return;
+  const grid=content().querySelector('.grid');if(!grid)return;
+  if(!grid.querySelector('.experience-command'))grid.insertAdjacentHTML('afterbegin',experienceCommandBar());
+  try{
+    if(state.page==='overview')await enhanceOverviewExperience();
+    else if(state.page==='levels')await enhanceLevelsExperience();
+    else if(state.page==='economy')await enhanceEconomyExperience();
+    else if(state.page==='roles')await enhanceRolesExperience();
+    else if(state.page==='logs')await enhanceLogsExperience();
+    else if(state.page==='tickets')await enhanceTicketsExperience();
+    else if(state.page==='games')await enhanceGamesExperience();
+    else if(state.page==='automation')await enhanceAutomationExperience();
+    else if(state.page==='moderation')enhanceModerationExperience();
+    else if(state.page==='embeds')enhanceEmbedsExperience();
+  }catch(e){console.warn('SentriX experience enhancement skipped:',e?.message||e);}
+  bindExperienceFilter();
+  content().querySelectorAll('[data-go]').forEach(b=>{if(!b.onclick)b.onclick=()=>go(b.dataset.go,b.dataset.goSub||'');});
+}
