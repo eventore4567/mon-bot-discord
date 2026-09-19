@@ -67,7 +67,7 @@ async function api(url, options = {}) {
     let data = {};
     try { data = await r.json(); } catch (_) {}
     if (!r.ok) {
-      const servedBy = r.headers.get('X-SentriX-HA-Served-By') || '';
+      const servedBy = r.headers?.get?.('X-SentriX-HA-Served-By') || '';
       const branchSkew = r.status === 404 && servedBy === 'peer' && new URL(String(url), location.origin).pathname.startsWith('/api/guilds/');
       const message = branchSkew
         ? 'Le serveur de test n’est pas encore l’instance Discord active. La bascule HA est nécessaire pour tester cette nouvelle page.'
