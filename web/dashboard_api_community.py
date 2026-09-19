@@ -521,5 +521,10 @@ def register(app: web.Application, dashboard) -> None:
     app.router.add_post("/api/guilds/{guild_id}/roles/reactions", reaction_post)
     app.router.add_delete("/api/guilds/{guild_id}/roles/reactions/{message_id}/{emoji_key}", reaction_delete)
 
+    # Jeux serveur : le Compteur Infini conserve son backend dédié, sans faux renommage
+    # d'un mini-jeu d'économie. Enregistrer ici garantit aussi les routes dans le recovery.
+    from .dashboard_api_games import register as register_games_routes
+    register_games_routes(app, dashboard)
+
 
 __all__ = ["register", "LEVEL_SETTING_KEYS"]
