@@ -8,7 +8,7 @@ const NAV_SERVER = [
   ['Accueil', [['overview', 'Vue d’ensemble']]],
   ['Communauté', [['welcome', 'Accueil & Départs'], ['roles', 'Rôles']]],
   ['Progression', [['levels', 'Niveaux'], ['economy', 'Économie']]],
-  ['Modération', [['security', 'Sécurité'], ['logs', 'Logs'], ['tickets', 'Tickets']]],
+  ['Modération', [['moderation', 'Centre de modération'], ['security', 'Sécurité'], ['logs', 'Logs'], ['tickets', 'Tickets']]],
   ['Jeux', [['games', 'Jeux']]],
   ['Automatisation', [['notifications', 'Notifications'], ['automation', 'Automatisation']]],
   ['Création & personnalisation', [['embeds', 'Embeds'], ['ai', 'Intelligence artificielle']]],
@@ -35,7 +35,8 @@ const META = {
   economy: ['Économie', 'Monnaie du serveur, gains et boutique.'],
   games: ['Jeux', 'Mini-jeux, récompenses et accès.'],
   roles: ['Rôles', 'Rôles donnés automatiquement ou choisis par les membres.'],
-  security: ['Sécurité', 'Protections automatiques, vérification et sanctions.'],
+  moderation: ['Centre de modération', 'Recherchez un membre, consultez son dossier et gérez les sanctions.'],
+  security: ['Sécurité', 'Protections automatiques et vérification du serveur.'],
   logs: ['Logs', 'Ce qui se passe sur le serveur, écrit dans vos salons.'],
   tickets: ['Tickets', 'Support des membres : panneaux, types et suivi.'],
   notifications: ['Notifications', 'Annonce les nouvelles vidéos et lives dans un salon.'],
@@ -56,13 +57,13 @@ const SUBS = {
   economy: [['general', 'Général'], ['boutique', 'Boutique'], ['jeux', 'Jeux'], ['gains', 'Gains'], ['avance', 'Avancé']],
   games: [['jeux', 'Catalogue & accès']],
   roles: [['autoroles', 'Autorôle'], ['interactifs', 'Rôles interactifs'], ['niveau', 'Rôles de niveau'], ['avance', 'Avancé']],
-  security: [['protections', 'Protections'], ['verification', 'Vérification'], ['sanctions', 'Sanctions']],
+  security: [['protections', 'Protections'], ['verification', 'Vérification']],
   advanced: [['actions', 'Actions'], ['members', 'Membres'], ['automations', 'Automations'], ['templates', 'Templates'], ['audit', 'Audit'], ['access', 'Accès dashboard']],
   invites: [['invites', 'Invitations'], ['webhooks', 'Webhooks']],
   backups: [['backups', 'Sauvegardes'], ['history', 'Historique']],
 };
 /* Anciennes adresses ?tab= : conservées pour les liens déjà partagés. */
-const LEGACY = { moderation: ['security', 'sanctions'], verification: ['security', 'verification'], config: ['settings'], product: ['advanced'], autoreact: ['automation'], audit: ['backups', 'history'], maintenance: ['settings'], stats: ['diagnostic'], staffactivity: ['diagnostic'], integrations: ['invites', 'webhooks'], automations: ['automation'] };
+const LEGACY = { verification: ['security', 'verification'], config: ['settings'], product: ['advanced'], autoreact: ['automation'], audit: ['backups', 'history'], maintenance: ['settings'], stats: ['diagnostic'], staffactivity: ['diagnostic'], integrations: ['invites', 'webhooks'], automations: ['automation'] };
 
 function pageMeta(page) { return META[page] || META.overview; }
 function moduleDot(key) {
