@@ -1,106 +1,198 @@
-/* ---------- Profil SentriX éditable ----------
-   Les champs ci-dessous écrivent dans la table profiles, la même que +profile. */
-const _renderProfileBase = renderProfile;
-const sentrixProfileData = (force = false) => cached('sentrix-profile-me', () => gget('/profile/me'), { force });
+/* ---------- Espace global SentriX ----------
+   Aucune route dépendante d'une guild n'est appelée ici : /app s'ouvre toujours sur
+   le compte utilisateur, puis la configuration serveur commence seulement après un clic
+   explicite sur un serveur de la colonne gauche ou de la page Mes serveurs. */
 
-renderProfile = async function renderEditableProfile() {
-  _renderProfileBase();
-  if (!state.guild || !state.guildId) return;
+function applyGlobalPreferences() {
+  let theme = 'sentrix';
+  let reduced = false;
+  try {
+    theme = localStorage.getItem('sentrix:theme') || 'sentrix';
+    reduced = localStorage.getItem('sentrix:reduce-motion') === '1';
+  } catch (_) {}
+  document.documentElement.dataset.theme = theme === 'oled' ? 'oled' : 'sentrix';
+  state.reduceMotion = reduced;
+}
+applyGlobalPreferences();
 
-  let d;
-  try { d = await sentrixProfileData(); } catch (e) {
-    const grid = content().querySelector('.grid');
-    if (grid) grid.insertAdjacentHTML('afterbegin', `<section class="card full"><div class="notice bad">${esc(e.message || 'Profil SentriX indisponible.')}</div></section>`);
-    return;
-  }
-  const p = d.profile || {}, s = d.stats || {}, m = d.member || {};
-  const grid = content().querySelector('.grid');
-  if (!grid) return;
+function globalServerCard(g, add = false) {
+  const initials = esc((g.name || 'S').slice(0, 2).toUpperCase());
+  const icon = g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : initials;
+  const role = add ? 'SentriX n’est pas installé' : (g.owner ? 'Propriétaire' : 'Administrateur');
+  return `<article class="global-server-card">
+    <div class="global-server-main">
+      <span class="global-server-icon">${icon}</span>
+      <div class="row-main">
+        <b>${esc(g.name || 'Serveur Discord')}</b>
+        <small>${esc(role)}</small>
+      </div>
+    </div>
+    <div class="toolbar">
+      ${add
+        ? `<a class="btn sm" href="${esc(g.invite_url || '#')}">Ajouter SentriX</a>`
+        : `<button class="btn sm primary" type="button" data-global-guild="${esc(g.id)}">Configurer</button>`}
+    </div>
+  </article>`;
+}
 
-  const section = document.createElement('section');
-  section.className = 'card full';
-  section.id = 'sentrixCommunityProfile';
-  section.innerHTML = `<div class="card-head">
-    <div>
-      <h2>Profil SentriX sur ${esc(state.guild.guild?.name || 'ce serveur')}</h2>
-      <p>Ces informations apparaissent dans votre profil communautaire SentriX.</p>
-    </div>
-    <span class="badge blue">${esc(String((d.badges || []).length))} badge${(d.badges || []).length === 1 ? '' : 's'}</span>
-  </div>
-  <div class="profile-line" style="margin-top:14px">
-    <span class="avatar big">${m.avatar_url ? `<img src="${esc(m.avatar_url)}" alt="">` : esc((m.display_name || m.username || '?').slice(0,2).toUpperCase())}</span>
-    <div><h3>${esc(m.display_name || m.username || 'Profil')}</h3><p>@${esc(m.username || '')}</p></div>
-  </div>
-  <div class="kpis" style="margin-top:14px">
-    <div class="kpi"><small>Niveau</small><b>${number(s.level || 0)}</b></div>
-    <div class="kpi"><small>Messages</small><b>${number(s.messages || 0)}</b></div>
-    <div class="kpi"><small>Réputation</small><b>${number(p.reputation || 0)}</b></div>
-    <div class="kpi"><small>Série</small><b>${number(s.daily_streak || 0)} j</b></div>
-  </div>
-  ${(d.badges || []).length ? `<div class="chips" style="margin-top:12px">${d.badges.map(x => `<span class="chip on">${esc(x)}</span>`).join('')}</div>` : ''}
-  <div class="fields" style="margin-top:16px">
-    <div class="field full">
-      <label for="profileBio">Bio</label>
-      <textarea id="profileBio" maxlength="200" rows="4" placeholder="Présentez-vous en quelques lignes…">${esc(p.bio || '')}</textarea>
-      <small>200 caractères maximum.</small>
-    </div>
-    <div class="field">
-      <label for="profileBirthday">Anniversaire</label>
-      <input id="profileBirthday" value="${esc(p.birthday || '')}" placeholder="JJ/MM ou AAAA-MM-JJ">
-    </div>
-    <div class="field">
-      <label for="profileBackground">Fond de carte</label>
-      <input id="profileBackground" type="url" value="${esc(p.background || '')}" placeholder="https://…">
-      <small>Facultatif · URL HTTPS.</small>
-    </div>
-  </div>
-  <div class="toolbar" style="margin-top:14px">
-    <button class="btn primary" type="button" id="profileSentrixSave">Enregistrer le profil</button>
-    <button class="btn ghost" type="button" id="profileSentrixRefresh">Actualiser</button>
-  </div>
-  <div style="margin-top:16px">
-    <h3>Aperçu</h3>
-    <div id="profileSentrixPreview" style="margin-top:8px"></div>
+function bindGlobalServerCards(root = content()) {
+  root.querySelectorAll('[data-global-guild]').forEach(b => b.onclick = () => selectGuild(b.dataset.globalGuild));
+}
+
+function renderProfile() {
+  const user = state.user || {};
+  const installed = state.guilds.filter(g => g.installed);
+  const missing = state.guilds.filter(g => !g.installed);
+  const display = user.global_name || user.username || 'Compte Discord';
+  const avatar = user.avatar_url
+    ? `<img src="${esc(user.avatar_url)}" alt="">`
+    : esc(String(display).slice(0, 2).toUpperCase());
+
+  content().innerHTML = `<div class="global-home">
+    <section class="global-hero">
+      <div class="global-profile-block">
+        <span class="global-avatar">${avatar}</span>
+        <div class="global-profile-copy">
+          <span class="eyebrow">Mon espace SentriX</span>
+          <h2>${esc(display)}</h2>
+          <p>@${esc(user.username || display)} · compte Discord connecté</p>
+          <div class="toolbar">
+            <button class="btn primary" type="button" id="profileChooseServer">Configurer un serveur</button>
+            <button class="btn" type="button" data-go="servers">Mes serveurs</button>
+          </div>
+        </div>
+      </div>
+      <div class="global-hero-stats">
+        <div class="kpi"><small>Serveurs avec SentriX</small><strong>${number(installed.length)}</strong></div>
+        <div class="kpi"><small>Serveurs administrables</small><strong>${number(state.guilds.length)}</strong></div>
+        <div class="kpi"><small>À ajouter</small><strong>${number(missing.length)}</strong></div>
+      </div>
+    </section>
+
+    <section class="card full">
+      <div class="card-head">
+        <div>
+          <h2>Continuer sur un serveur</h2>
+          <p>Vous restez dans votre espace personnel tant que vous n’avez pas choisi un serveur.</p>
+        </div>
+        <button class="btn ghost" type="button" data-go="servers">Tout afficher</button>
+      </div>
+      <div class="global-server-grid">
+        ${installed.length
+          ? installed.slice(0, 6).map(g => globalServerCard(g)).join('')
+          : emptyState('Aucun serveur avec SentriX', 'Ajoutez SentriX à un serveur dont vous êtes administrateur.')}
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Votre compte</h2>
+        <div class="list compact">
+          <div class="row"><div class="row-main"><b>Nom Discord</b><small>${esc(user.username || '—')}</small></div></div>
+          <div class="row"><div class="row-main"><b>Identifiant</b><small>${esc(user.id || '—')}</small></div></div>
+          <div class="row"><div class="row-main"><b>Session</b><small>Connectée et sécurisée par Discord OAuth2.</small></div></div>
+        </div>
+      </article>
+      <article class="card">
+        <h2>Profil communautaire</h2>
+        <p>Bio, anniversaire, fond de carte, niveau et réputation appartiennent à chaque serveur.</p>
+        <div class="notice">Choisissez un serveur pour modifier votre profil SentriX communautaire et voir vos statistiques locales.</div>
+      </article>
+      <article class="card">
+        <h2>Préférences rapides</h2>
+        <p>Le thème et les animations ne changent que ce navigateur.</p>
+        <div class="toolbar"><button class="btn" type="button" data-go="preferences">Ouvrir les préférences</button></div>
+      </article>
+      <article class="card">
+        <h2>Déconnexion</h2>
+        <p>Ferme uniquement votre session dashboard. Le bot reste actif sur vos serveurs.</p>
+        <div class="toolbar"><button class="btn danger" type="button" id="profileLogout">Se déconnecter</button></div>
+      </article>
+    </section>
   </div>`;
 
-  grid.insertBefore(section, grid.children[1] || null);
+  $('profileChooseServer').onclick = openServerPicker;
+  bindGlobalServerCards();
+  $('profileLogout').onclick = async () => {
+    if (!(await confirmDialog({ title: 'Se déconnecter ?', body: 'Vous devrez vous reconnecter avec Discord pour revenir au dashboard.', confirm: 'Se déconnecter' }))) return;
+    try { await api('/logout', { method: 'POST' }); } finally { location.href = '/'; }
+  };
+}
+
+function renderServers() {
+  const installed = state.guilds.filter(g => g.installed);
+  const missing = state.guilds.filter(g => !g.installed);
+  content().innerHTML = `<div class="grid">
+    <section class="card full">
+      <div class="card-head">
+        <div><h2>Mes serveurs</h2><p>Cliquez sur Configurer pour entrer dans le dashboard d’un serveur.</p></div>
+        <input class="search-input" id="globalServerSearch" type="search" placeholder="Rechercher un serveur…">
+      </div>
+      <div id="globalServerLists"></div>
+    </section>
+  </div>`;
 
   const paint = () => {
-    const bio = $('profileBio').value.trim() || 'Aucune bio définie pour le moment.';
-    $('profileSentrixPreview').innerHTML = discordMessage({
-      embed: {
-        title: `Profil de ${m.display_name || m.username || 'membre'}`,
-        description: bio,
-        image: $('profileBackground').value.trim(),
-        fields: [
-          { name: 'Niveau', value: String(s.level || 0), inline: true },
-          { name: 'Messages', value: number(s.messages || 0), inline: true },
-          { name: 'Réputation', value: number(p.reputation || 0), inline: true },
-          { name: 'Anniversaire', value: $('profileBirthday').value.trim() || 'Non défini', inline: true },
-        ],
-      },
-    });
+    const q = $('globalServerSearch').value.trim().toLocaleLowerCase('fr');
+    const filter = list => list.filter(g => !q || String(g.name || '').toLocaleLowerCase('fr').includes(q));
+    const have = filter(installed), add = filter(missing);
+    $('globalServerLists').innerHTML = `
+      <div class="global-section-title"><b>Avec SentriX</b><small>${plural(have.length, 'serveur')}</small></div>
+      <div class="global-server-grid">${have.length ? have.map(g => globalServerCard(g)).join('') : emptyState('Aucun résultat', q ? 'Aucun serveur installé ne correspond à votre recherche.' : 'Aucun serveur avec SentriX.')}</div>
+      ${add.length ? `<div class="global-section-title"><b>Ajouter SentriX</b><small>${plural(add.length, 'serveur')}</small></div><div class="global-server-grid">${add.map(g => globalServerCard(g, true)).join('')}</div>` : ''}
+    `;
+    bindGlobalServerCards($('globalServerLists'));
   };
-  ['profileBio','profileBirthday','profileBackground'].forEach(id => $(id).addEventListener('input', paint));
+  $('globalServerSearch').oninput = paint;
   paint();
+}
 
-  $('profileSentrixSave').onclick = async () => {
-    const button = $('profileSentrixSave');
-    button.disabled = true;
-    try {
-      const r = await gpost('/profile/me', {
-        bio: $('profileBio').value,
-        birthday: $('profileBirthday').value,
-        background: $('profileBackground').value,
-      }, 'PUT');
-      invalidate('sentrix-profile-me');
-      toast(r.message || 'Profil enregistré.');
-      await renderProfile();
-    } catch (e) { toast(e.message, true); }
-    finally { button.disabled = false; }
+function renderPreferences() {
+  let theme = 'sentrix', reduce = false;
+  try {
+    theme = localStorage.getItem('sentrix:theme') || 'sentrix';
+    reduce = localStorage.getItem('sentrix:reduce-motion') === '1';
+  } catch (_) {}
+  content().innerHTML = `<div class="grid">
+    <section class="card full">
+      <div class="card-head"><div><h2>Apparence</h2><p>Le bleu SentriX reste la couleur principale. Ces réglages sont locaux à ce navigateur.</p></div></div>
+      <div class="fields">
+        <div class="field">
+          <label for="prefTheme">Thème</label>
+          <select id="prefTheme">
+            <option value="sentrix" ${theme === 'sentrix' ? 'selected' : ''}>Sombre SentriX</option>
+            <option value="oled" ${theme === 'oled' ? 'selected' : ''}>Sombre OLED</option>
+          </select>
+        </div>
+        <label class="switch-row">
+          <span class="switch-copy"><b>Réduire les animations</b><span>Désactive les transitions de navigation même si macOS les autorise.</span></span>
+          <input class="switch" id="prefReduceMotion" type="checkbox" ${reduce ? 'checked' : ''}>
+        </label>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Navigation</h2>
+      <label class="switch-row"><span class="switch-copy"><b>Garder “Plus d’outils” ouvert</b><span>Uniquement dans la configuration d’un serveur.</span></span><input class="switch" id="prefMoreTools" type="checkbox" ${state.navMore ? 'checked' : ''}></label>
+    </section>
+    <section class="card">
+      <h2>Comportement au démarrage</h2>
+      <div class="notice ok">Le dashboard s’ouvre toujours sur Mon profil. Un serveur n’est chargé qu’après un clic explicite.</div>
+    </section>
+  </div>`;
+
+  $('prefTheme').onchange = () => {
+    try { localStorage.setItem('sentrix:theme', $('prefTheme').value); } catch (_) {}
+    applyGlobalPreferences();
+    toast('Thème appliqué.');
   };
-  $('profileSentrixRefresh').onclick = async () => {
-    invalidate('sentrix-profile-me');
-    await renderProfile();
+  $('prefReduceMotion').onchange = () => {
+    try { localStorage.setItem('sentrix:reduce-motion', $('prefReduceMotion').checked ? '1' : '0'); } catch (_) {}
+    applyGlobalPreferences();
+    toast('Préférence d’animation enregistrée.');
   };
-};
+  $('prefMoreTools').onchange = () => {
+    state.navMore = $('prefMoreTools').checked;
+    try { localStorage.setItem('sentrix:nav:more', state.navMore ? '1' : '0'); } catch (_) {}
+    renderNav();
+  };
+}
