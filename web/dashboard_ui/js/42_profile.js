@@ -73,10 +73,10 @@ renderProfile = async function renderEditableProfile() {
         description: bio,
         image: $('profileBackground').value.trim(),
         fields: [
-          ['Niveau', String(s.level || 0), true],
-          ['Messages', number(s.messages || 0), true],
-          ['Réputation', number(p.reputation || 0), true],
-          ['Anniversaire', $('profileBirthday').value.trim() || 'Non défini', true],
+          { name: 'Niveau', value: String(s.level || 0), inline: true },
+          { name: 'Messages', value: number(s.messages || 0), inline: true },
+          { name: 'Réputation', value: number(p.reputation || 0), inline: true },
+          { name: 'Anniversaire', value: $('profileBirthday').value.trim() || 'Non défini', inline: true },
         ],
       },
     });
