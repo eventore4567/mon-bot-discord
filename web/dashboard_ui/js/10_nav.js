@@ -1,8 +1,11 @@
 /* ---------- navigation ----------
    NAV : groupes visibles. Chaque page a un titre, un sous-titre court et, si besoin,
    des sous-sections. « Plus d'outils » regroupe ce qui sert rarement. */
-const NAV = [
-  ['Mon espace', [['profile', 'Mon profil'], ['overview', 'Vue d’ensemble']]],
+const NAV_GLOBAL = [
+  ['Mon espace', [['profile', 'Mon profil'], ['servers', 'Mes serveurs'], ['preferences', 'Préférences']]],
+];
+const NAV_SERVER = [
+  ['Accueil', [['overview', 'Vue d’ensemble']]],
   ['Communauté', [['welcome', 'Accueil & Départs'], ['roles', 'Rôles']]],
   ['Progression', [['levels', 'Niveaux'], ['economy', 'Économie']]],
   ['Modération', [['security', 'Sécurité'], ['logs', 'Logs'], ['tickets', 'Tickets']]],
@@ -10,6 +13,7 @@ const NAV = [
   ['Automatisation', [['notifications', 'Notifications'], ['automation', 'Automatisation']]],
   ['Création & personnalisation', [['embeds', 'Embeds'], ['ai', 'Intelligence artificielle']]],
 ];
+const NAV = NAV_SERVER;
 /* Plus d'outils : trois groupes courts. Le groupe Développeur n'apparaît que pour le
    propriétaire du bot (/api/me.developer) ; il porte aussi, le temps de la migration, les
    anciennes interfaces dont toutes les fonctions ne sont pas encore reprises ici. */
@@ -22,8 +26,10 @@ const TOOLS = TOOL_GROUPS.flatMap(([, items]) => items);
 const MIGRATION_LINKS = [['/setup-center', 'Centre Setup'], ['/operations', 'Opérations'], ['/feature-suite', 'Fonctions avancées'], ['/enterprise', 'Enterprise']];
 
 const META = {
-  profile: ['Mon profil', 'Vos serveurs, votre compte et vos préférences dashboard.'],
-  overview: ['Configuration du serveur', 'Gérez les principales fonctionnalités de SentriX.'],
+  profile: ['Mon profil', 'Votre espace SentriX personnel. Choisissez ensuite un serveur à configurer.'],
+  servers: ['Mes serveurs', 'Choisissez le serveur que vous voulez administrer avec SentriX.'],
+  preferences: ['Préférences', 'Réglez uniquement l’apparence et le comportement de votre dashboard.'],
+  overview: ['Vue d’ensemble', 'Gérez les principales fonctionnalités de ce serveur.'],
   welcome: ['Accueil & Départs', 'Messages envoyés quand un membre arrive ou quitte le serveur.'],
   levels: ['Niveaux', 'XP gagné en discutant, annonces et récompenses.'],
   economy: ['Économie', 'Monnaie du serveur, gains et boutique.'],
@@ -70,21 +76,26 @@ function navButton(page, label) {
 }
 function renderNav() {
   const nav = $('navigation');
-  const inTools = TOOLS.some(([p]) => p === state.page);
-  let html = NAV.map(([group, items]) => `<div class="nav-group">${esc(group)}</div>` + items.map(([p, l]) => navButton(p, l)).join('')).join('');
-  const groups = TOOL_GROUPS.map(([g, items]) => {
-    if (g === 'Développeur' && !state.developer) return '';
-    const visible = items.filter(([p]) => p !== 'diagnostic' || state.developer || state.guildOwner);
-    const links = g === 'Développeur' ? `<div class="nav-group">Migration</div>${MIGRATION_LINKS.map(([href, l]) => `<a class="nav-link ext" href="${href}" target="_blank" rel="noopener">${esc(l)}</a>`).join('')}` : '';
-    return visible.length || links ? `<div class="nav-group">${esc(g)}</div>${visible.map(([p, l]) => navButton(p, l)).join('')}${links}` : '';
-  }).join('');
-  html += `<details id="navMore" ${inTools || state.navMore ? 'open' : ''}><summary>Plus d’outils</summary>${groups}</details>`;
+  const globalMode = !state.guildId || !state.guild;
+  const activeNav = globalMode ? NAV_GLOBAL : NAV_SERVER;
+  const inTools = !globalMode && TOOLS.some(([p]) => p === state.page);
+  let html = activeNav.map(([group, items]) => `<div class="nav-group">${esc(group)}</div>` + items.map(([p, l]) => navButton(p, l)).join('')).join('');
+  if (!globalMode) {
+    const groups = TOOL_GROUPS.map(([g, items]) => {
+      if (g === 'Développeur' && !state.developer) return '';
+      const visible = items.filter(([p]) => p !== 'diagnostic' || state.developer || state.guildOwner);
+      const links = g === 'Développeur' ? `<div class="nav-group">Migration</div>${MIGRATION_LINKS.map(([href, l]) => `<a class="nav-link ext" href="${href}" target="_blank" rel="noopener">${esc(l)}</a>`).join('')}` : '';
+      return visible.length || links ? `<div class="nav-group">${esc(g)}</div>${visible.map(([p, l]) => navButton(p, l)).join('')}${links}` : '';
+    }).join('');
+    html += `<details id="navMore" ${inTools || state.navMore ? 'open' : ''}><summary>Plus d’outils</summary>${groups}</details>`;
+  }
   nav.innerHTML = html;
   nav.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
   const more = $('navMore');
-  more.querySelector('summary').addEventListener('click', () => setTimeout(() => { state.navMore = more.open; try { localStorage.setItem('sentrix:nav:more', more.open ? '1' : '0'); } catch (_) {} }, 0));
+  if (more) more.querySelector('summary').addEventListener('click', () => setTimeout(() => { state.navMore = more.open; try { localStorage.setItem('sentrix:nav:more', more.open ? '1' : '0'); } catch (_) {} }, 0));
 }
 function renderSubnav() {
+  if (!state.guildId || !state.guild) { const el = $('subnav'); el.classList.add('hidden'); el.innerHTML = ''; return; }
   const subs = SUBS[state.page];
   const el = $('subnav');
   if (!subs) { el.classList.add('hidden'); el.innerHTML = ''; return; }
@@ -110,12 +121,15 @@ function syncUrl() {
 }
 async function go(page, sub = '') {
   if (LEGACY[page]) { const target = LEGACY[page]; page = target[0]; sub = target[1] || sub; }
-  if (!META[page]) page = 'overview';
+  if (!META[page]) page = state.guildId ? 'overview' : 'profile';
+  const globalTarget = ['profile', 'servers', 'preferences'].includes(page);
+  if (globalTarget && state.guildId) return exitGuildToGlobal(page);
+  if (!globalTarget && !state.guildId) page = 'servers';
   if (page === state.page && (sub || '') === (state.sub || '') && content().children.length) return;
   if (!(await guardDirty())) return;
   state.page = page;
   state.sub = sub || (SUBS[page] ? SUBS[page][0][0] : '');
-  try { localStorage.setItem('sentrix:page', page); } catch (_) {}
+  if (!globalTarget) { try { localStorage.setItem('sentrix:page', page); } catch (_) {} }
   closeSidebar();
   await render({ navigation: true });
 }
@@ -126,9 +140,13 @@ function closeSidebar() { $('sidebar').classList.remove('open'); $('mobileOverla
 function paletteItems(q = '') {
   const n = q.toLocaleLowerCase('fr').trim();
   const items = [];
-  for (const [group, pages] of NAV) for (const [p, l] of pages) items.push({ page: p, label: l, group });
-  for (const [g, pages] of TOOL_GROUPS) { if (g === 'Développeur' && !state.developer) continue; for (const [p, l] of pages) items.push({ page: p, label: l, group: g }); }
-  for (const [p, subs] of Object.entries(SUBS)) for (const [k, l] of subs) items.push({ page: p, sub: k, label: `${pageMeta(p)[0]} › ${l}`, group: pageMeta(p)[0] });
+  const globalMode = !state.guildId || !state.guild;
+  const activeNav = globalMode ? NAV_GLOBAL : NAV_SERVER;
+  for (const [group, pages] of activeNav) for (const [p, l] of pages) items.push({ page: p, label: l, group });
+  if (!globalMode) {
+    for (const [g, pages] of TOOL_GROUPS) { if (g === 'Développeur' && !state.developer) continue; for (const [p, l] of pages) items.push({ page: p, label: l, group: g }); }
+    for (const [p, subs] of Object.entries(SUBS)) for (const [k, l] of subs) items.push({ page: p, sub: k, label: `${pageMeta(p)[0]} › ${l}`, group: pageMeta(p)[0] });
+  }
   return items.filter(x => !n || `${x.label} ${x.group}`.toLocaleLowerCase('fr').includes(n));
 }
 function drawPalette() {
