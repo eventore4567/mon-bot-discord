@@ -65,16 +65,18 @@ def register(app: web.Application, dashboard) -> None:
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             return None
 
-    def _member_json(member: discord.Member) -> dict:
+    def _member_json(member: discord.abc.User) -> dict:
+        roles = getattr(member, "roles", ())
         return {
             "id": str(member.id),
             "username": member.name,
-            "display_name": member.display_name,
+            "display_name": getattr(member, "display_name", member.name),
             "avatar_url": str(member.display_avatar.url),
             "bot": bool(member.bot),
+            "present": isinstance(member, discord.Member),
             "roles": [
                 {"id": str(role.id), "name": role.name}
-                for role in member.roles
+                for role in roles
                 if not role.is_default()
             ][-8:],
         }
@@ -110,8 +112,12 @@ def register(app: web.Application, dashboard) -> None:
         except (TypeError, ValueError):
             return dashboard._json_error("Identifiant de membre invalide.", 400)
         member = await _target(guild, user_id)
+        present = member is not None
         if member is None:
-            return dashboard._json_error("Ce membre n'est plus présent sur le serveur.", 404)
+            try:
+                member = await bot.fetch_user(user_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return dashboard._json_error("Utilisateur introuvable.", 404)
 
         db = bot.db
         warnings_row = await db.fetchone(
@@ -129,12 +135,20 @@ def register(app: web.Application, dashboard) -> None:
             (guild.id, member.id),
         )
         timed_out_until = getattr(member, "timed_out_until", None)
+        currently_banned = False
+        if not present:
+            try:
+                await guild.fetch_ban(discord.Object(id=user_id))
+                currently_banned = True
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                currently_banned = False
         return web.json_response({
             "ok": True,
             "member": _member_json(member),
             "warnings": int(warnings_row["n"] if warnings_row else 0),
             "sanctions": int(sanctions_row["n"] if sanctions_row else 0),
             "timed_out_until": timed_out_until.isoformat() if timed_out_until else None,
+            "currently_banned": currently_banned,
             "recent": [dict(row) for row in recent],
         })
 
