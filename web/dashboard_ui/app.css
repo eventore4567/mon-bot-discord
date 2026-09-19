@@ -131,6 +131,7 @@ html[data-theme="oled"] .server-rail,html[data-theme="oled"] .sidebar{background
 .nav .state-dot{width:7px;height:7px;border-radius:50%;background:var(--line2);flex:none}
 .nav .state-dot.on{background:var(--green)}
 .nav .state-dot.err{background:var(--red)}
+.nav .state-dot.partial{background:var(--amber)}
 .nav details{border-top:1px solid var(--line);margin-top:8px;padding-top:6px}
 .nav summary{list-style:none;cursor:pointer;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;padding:8px 10px;display:flex;justify-content:space-between;align-items:center}
 .nav summary::-webkit-details-marker{display:none}
