@@ -526,5 +526,9 @@ def register(app: web.Application, dashboard) -> None:
     from .dashboard_api_games import register as register_games_routes
     register_games_routes(app, dashboard)
 
+    # Routage canonique des journaux : log_config + événements V17.
+    from .dashboard_api_logs import register as register_log_routes
+    register_log_routes(app, dashboard)
+
 
 __all__ = ["register", "LEVEL_SETTING_KEYS"]
