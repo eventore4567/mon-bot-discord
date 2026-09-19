@@ -307,7 +307,11 @@ def _install_unknown_command_listener(bot: commands.Bot) -> None:
         else:
             text = f"La commande `{prefix}{typed}` n'existe pas.\nOuvre `{prefix}help` pour voir les commandes disponibles."
         try:
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(text, title='Commande introuvable')))
+            await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.warning(text, title='Commande introuvable')),
+                delete_after=8,
+            )
         except (discord.Forbidden, discord.HTTPException):
             pass
 
