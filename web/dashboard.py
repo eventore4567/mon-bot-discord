@@ -441,6 +441,33 @@ async def handle_guilds(request: web.Request):
 _guild_payload_inflight: dict[int, "asyncio.Future"] = {}
 
 
+def _channel_items(guild: discord.Guild) -> list[dict]:
+    """Salons exposés au dashboard, avec les permissions de SentriX sur chaque salon texte.
+
+    Source unique partagée avec le repli fail-soft de ``dashboard_oxyde_hotfix`` : le
+    dashboard avertit sous le champ (« SentriX ne peut pas envoyer de messages dans ce
+    salon ») sans appel supplémentaire.
+    """
+    me = guild.me
+    channels = []
+    for channel in guild.channels:
+        if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel)):
+            continue
+        item = {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
+        if isinstance(channel, discord.TextChannel) and me is not None:
+            try:
+                perms = channel.permissions_for(me)
+                item["perms"] = {
+                    "view": bool(perms.view_channel),
+                    "send": bool(perms.send_messages),
+                    "embed": bool(perms.embed_links),
+                }
+            except Exception:
+                pass
+        channels.append(item)
+    return channels
+
+
 async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
     guild_id = guild.id
     conf = await db.get_guild_config(guild_id)
@@ -467,22 +494,7 @@ async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
         for role in sorted(guild.roles, key=lambda role: role.position, reverse=True)
         if not role.is_default() and not role.managed
     ]
-    me = guild.me
-    channels = []
-    for channel in guild.channels:
-        if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel)):
-            continue
-        item = {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
-        if isinstance(channel, discord.TextChannel) and me is not None:
-            # Permet au dashboard d'avertir sous le champ (« SentriX ne peut pas envoyer de
-            # messages dans ce salon ») sans appel supplémentaire.
-            perms = channel.permissions_for(me)
-            item["perms"] = {
-                "view": bool(perms.view_channel),
-                "send": bool(perms.send_messages),
-                "embed": bool(perms.embed_links),
-            }
-        channels.append(item)
+    channels = _channel_items(guild)
     return {
         "guild": {
             "id": str(guild.id),
@@ -701,6 +713,7 @@ async def handle_welcome_get(request: web.Request):
         "title": presentation["title"],
         "show_avatar": bool(presentation["show_avatar"]),
         "show_member_count": bool(presentation["show_member_count"]),
+        "mode": presentation.get("mode", "embed"),
         "default_title": welcome.WELCOME_DEFAULT_TITLE,
         "default_text": welcome.WELCOME_DEFAULT_TEXT,
         "variables": ["{member}", "{username}", "{display_name}", "{server}", "{member_count}"],
@@ -730,6 +743,7 @@ async def handle_welcome_put(request: web.Request):
         show_avatar=bool(payload.get("show_avatar", True)),
         show_member_count=bool(payload.get("show_member_count", True)),
         actor_id=int(session["user"]["id"]),
+        mode="text" if str(payload.get("mode") or "embed") == "text" else "embed",
     )
     return web.json_response({"ok": True, "message": "Présentation de la bienvenue enregistrée."})
 

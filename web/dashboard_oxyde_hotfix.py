@@ -218,11 +218,15 @@ def patch_dashboard_runtime(dashboard=None) -> None:
             for role in sorted(guild.roles, key=lambda role: role.position, reverse=True)
             if not role.is_default() and not role.managed
         ]
-        channels = [
-            {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
-            for channel in guild.channels
-            if isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel))
-        ]
+        channel_items = getattr(dashboard, "_channel_items", None)
+        if callable(channel_items):
+            channels = channel_items(guild)
+        else:
+            channels = [
+                {"id": str(channel.id), "name": channel.name, "type": str(channel.type)}
+                for channel in guild.channels
+                if isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel))
+            ]
 
         return {
             "guild": {

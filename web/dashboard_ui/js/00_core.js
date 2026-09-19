@@ -8,7 +8,7 @@ const state = {
   user: null, csrf: '', developer: false,
   guilds: [], guildId: '', guild: null,
   page: 'overview', sub: '',
-  dirty: { settings: {}, automod: {}, ai: {} },
+  dirty: { settings: {}, automod: {}, ai: {}, welcome: {} },
   cache: new Map(),
   guildAbort: null,
   progressCount: 0, progressTimer: null,
@@ -111,21 +111,41 @@ function markDirty(kind, key, value) {
   $('saveState').textContent = 'Modifications non enregistrées';
   $('saveBar').classList.remove('hidden');
 }
-function clearDirty() { state.dirty = { settings: {}, automod: {}, ai: {} }; $('saveBar').classList.add('hidden'); }
+function clearDirty() { state.dirty = { settings: {}, automod: {}, ai: {}, welcome: {} }; $('saveBar').classList.add('hidden'); }
+/* Une erreur serveur qui nomme un réglage (« Le champ welcome_image_url … ») s'affiche sous ce
+   champ ; les autres passent par un toast. */
+function showFieldError(message) {
+  const m = /Le (?:champ|réglage) ([a-z_]+)/i.exec(String(message || ''));
+  const el = m && content().querySelector(`[data-setting="${m[1]}"],[data-automod="${m[1]}"],[data-ai="${m[1]}"]`);
+  if (!el) return false;
+  const holder = el.closest('.field, .switch-row'); if (!holder) return false;
+  holder.classList.add('invalid');
+  let slot = holder.querySelector('.error.server'); if (!slot) { slot = document.createElement('span'); slot.className = 'error server'; holder.appendChild(slot); }
+  slot.textContent = String(message).replace(/^Le (?:champ|réglage) [a-z_]+ /i, 'Ce champ ');
+  el.focus({ preventScroll: false });
+  el.addEventListener('input', () => { holder.classList.remove('invalid'); slot.remove(); }, { once: true });
+  return true;
+}
 async function saveDirty() {
   if (!hasDirty() || !state.guildId) return;
-  const btn = $('saveButton'); btn.disabled = true;
+  const btn = $('saveButton'); btn.disabled = true; $('saveState').textContent = 'Enregistrement…';
   try {
-    const out = await api(guildUrl('/settings'), { method: 'PUT', body: JSON.stringify(state.dirty) });
+    const { welcome, ...settings } = state.dirty;
+    if (Object.values(settings).some(x => Object.keys(x).length)) await api(guildUrl('/settings'), { method: 'PUT', body: JSON.stringify(settings) });
+    if (Object.keys(welcome || {}).length) {
+      const current = state.cache.get(`${state.guildId}:welcome`)?.value || {};
+      await api(guildUrl('/welcome'), { method: 'PUT', body: JSON.stringify({ title: current.title, show_avatar: current.show_avatar, show_member_count: current.show_member_count, mode: current.mode, ...welcome }) });
+      invalidate('welcome');
+    }
     clearDirty();
-    toast(out.message || 'Enregistré.');
+    toast('Modifications enregistrées.');
     await reloadGuild();
     await render();
-  } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+  } catch (e) { $('saveState').textContent = 'Modifications non enregistrées'; if (!showFieldError(e.message)) toast(e.message, true); } finally { btn.disabled = false; }
 }
 function readControl(el) { return el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value; }
 function bindEditable(root = content()) {
-  for (const kind of ['setting', 'automod', 'ai']) {
+  for (const kind of ['setting', 'automod', 'ai', 'welcome']) {
     root.querySelectorAll(`[data-${kind}]`).forEach(el => {
       const bucket = kind === 'setting' ? 'settings' : kind;
       const handler = () => markDirty(bucket, el.dataset[kind], readControl(el));
@@ -223,14 +243,19 @@ function previewText(text) {
     .replace(/\{member_count\}/g, String(g.members || 42))
     .replace(/\{level\}/g, '5').replace(/\{xp\}/g, '1 250');
 }
+function md(text) {
+  return esc(previewText(text))
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*(?!\*)(.+?)\*(?!\*)/g, '$1<i>$2</i>')
+    .replace(/__(.+?)__/g, '<u>$1</u>').replace(/`([^`]+)`/g, '<code>$1</code>');
+}
 function discordMessage({ content: text = '', embed = null } = {}) {
   let embedHtml = '';
   if (embed && (embed.title || embed.description || embed.image || embed.footer || (embed.fields || []).length)) {
-    const fields = (embed.fields || []).filter(f => f && (f.name || f.value)).map(f => `<div class="d-field"><b>${esc(previewText(f.name))}</b><div>${esc(previewText(f.value))}</div></div>`).join('');
+    const fields = (embed.fields || []).filter(f => f && (f.name || f.value)).map(f => `<div class="d-field"><b>${md(f.name)}</b><div>${md(f.value)}</div></div>`).join('');
     const stamp = embed.timestamp ? 'Aujourd’hui à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
-    embedHtml = `<div class="d-embed" style="border-left-color:${esc(embed.color || '#4da3ff')}"><div class="d-embed-main">${embed.author ? `<div class="d-foot">${esc(embed.author)}</div>` : ''}${embed.title ? `<div class="d-title">${esc(previewText(embed.title))}</div>` : ''}${embed.description ? `<div class="d-desc">${esc(previewText(embed.description))}</div>` : ''}${fields ? `<div class="d-fields">${fields}</div>` : ''}${embed.image ? `<img class="d-image" src="${esc(embed.image)}" alt="">` : ''}${embed.footer || stamp ? `<div class="d-foot">${esc(embed.footer || '')}${embed.footer && stamp ? ' • ' : ''}${stamp}</div>` : ''}</div>${embed.thumbnail ? `<div class="d-thumb">${embed.thumbnail === 'avatar' ? '<span class="d-avatar-thumb">' + esc((state.user?.username || 'M').slice(0, 1).toUpperCase()) + '</span>' : `<img src="${esc(embed.thumbnail)}" alt="">`}</div>` : ''}</div>`;
+    embedHtml = `<div class="d-embed" style="border-left-color:${esc(embed.color || '#4da3ff')}"><div class="d-embed-main">${embed.author ? `<div class="d-foot">${esc(embed.author)}</div>` : ''}${embed.title ? `<div class="d-title">${md(embed.title)}</div>` : ''}${embed.description ? `<div class="d-desc">${md(embed.description)}</div>` : ''}${fields ? `<div class="d-fields">${fields}</div>` : ''}${embed.image ? `<img class="d-image" src="${esc(embed.image)}" alt="">` : ''}${embed.footer || stamp ? `<div class="d-foot">${esc(embed.footer || '')}${embed.footer && stamp ? ' • ' : ''}${stamp}</div>` : ''}</div>${embed.thumbnail ? `<div class="d-thumb">${embed.thumbnail === 'avatar' ? '<span class="d-avatar-thumb">' + esc((state.user?.username || 'M').slice(0, 1).toUpperCase()) + '</span>' : `<img src="${esc(embed.thumbnail)}" alt="">`}</div>` : ''}</div>`;
   }
-  const body = text ? `<div class="d-text">${esc(previewText(text))}</div>` : (embedHtml ? '' : `<div class="d-empty">Message vide.</div>`);
+  const body = text ? `<div class="d-text">${md(text)}</div>` : (embedHtml ? '' : `<div class="d-empty">Message vide.</div>`);
   return `<div class="discord-preview"><div class="d-avatar">S</div><div class="d-body"><span class="d-name">SentriX</span><span class="d-tag">APP</span><span class="d-time">Aujourd’hui</span>${body}${embedHtml}</div></div>`;
 }
 

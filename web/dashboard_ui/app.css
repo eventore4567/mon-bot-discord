@@ -203,6 +203,7 @@ table.table th{color:var(--muted);font-weight:600;font-size:12px}
 .discord-preview .d-tag{font-size:10px;background:#5865f2;color:#fff;border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle;font-weight:700}
 .discord-preview .d-time{color:#949ba4;font-size:12px;margin-left:6px}
 .discord-preview .d-text{white-space:pre-wrap;margin-top:2px}
+.discord-preview b{color:#fff}.discord-preview code{background:#1e1f22;color:#dbdee1}
 .discord-preview .d-embed{margin-top:6px;background:#2b2d31;border-left:4px solid var(--blue);border-radius:6px;padding:10px 12px;max-width:520px;display:flex;gap:12px;align-items:flex-start}
 .discord-preview .d-embed-main{display:grid;gap:6px;min-width:0;flex:1}
 .discord-preview .d-thumb{flex:none;width:72px;height:72px;border-radius:8px;overflow:hidden;background:#1e1f22;display:grid;place-items:center}
@@ -268,4 +269,10 @@ table.table th{color:var(--muted);font-weight:600;font-size:12px}
   .profile #userName{display:none}
   .profile{padding:0 4px}
   .module-grid{grid-template-columns:1fr}
+  .save-bar{left:12px;right:12px;bottom:12px;transform:none;max-width:none;justify-content:space-between;padding:10px 12px;font-size:13px}
+  .save-actions .btn{height:32px;padding:0 11px}
+  .seg{display:flex}.seg button{flex:1}
+  .card > .card-head{flex-direction:column;align-items:flex-start}
+  .card > .card-head .toolbar{width:100%;justify-content:space-between}
+  .toolbar small{flex-basis:100%}
 }

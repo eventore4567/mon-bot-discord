@@ -66,7 +66,7 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1/embeds") return response({ok:true,message:"Embed envoyé."});
       if(url.pathname==="/api/guilds/1/dm/apercu") return response({guild:{id:"1",name:"Serveur Test"},longueur_max:3500});
       if(url.pathname==="/api/guilds/1/dm/user") return response({resultat:"envoye",message:"Message envoyé.",bilan:{envoyes:1}});
-      if(url.pathname==="/api/guilds/1/welcome") return method==="PUT" ? response({ok:true,message:"Présentation enregistrée."}) : response({ok:true,title:"Bienvenue sur {server}",show_avatar:true,show_member_count:true,default_title:"Bienvenue sur {server}",default_text:"Bienvenue {member} !",variables:["{member}","{username}","{display_name}","{server}","{member_count}"]});
+      if(url.pathname==="/api/guilds/1/welcome") return method==="PUT" ? response({ok:true,message:"Présentation enregistrée."}) : response({ok:true,title:"Bienvenue sur {server}",show_avatar:true,show_member_count:true,mode:"embed",default_title:"Bienvenue sur {server}",default_text:"Bienvenue {member} !",variables:["{member}","{username}","{display_name}","{server}","{member_count}"]});
       if(url.pathname==="/api/guilds/1/welcome/test") return response({ok:true,message:"Test envoyé."});
       if(url.pathname==="/api/guilds/1/verification-v6") return response({ok:true,configured:true,published:false,captcha_enabled:true,channel_id:"22",role_id:"15",title:"Vérification",rules_text:"1. Respectez les membres.",image_url:null,jump_url:null});
       if(url.pathname==="/api/guilds/1/automation/reactions") return response({ok:true,items:[{id:1,channel_id:"22",channel_name:"général",mode:"all",keyword:"",emojis:["👍"],enabled:1}]});

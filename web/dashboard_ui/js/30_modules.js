@@ -12,42 +12,60 @@ function bindPreviews(root = content()) {
 }
 
 /* Accueil & Départs — même moteur que le bouton « Bienvenue » de /setup :
-   guild_config (salon, message, image) + welcome_presentation_v2 (titre, avatar, compteur). */
+   guild_config (salon, message, image) + welcome_presentation_v2 (type, titre, avatar, compteur). */
 const welcomePresentation = (force = false) => cached('welcome', () => gget('/welcome'), { force });
+const GOODBYE_DEFAULT = '**{username}** a quitté **{server}**.';
+function messageTypeSwitch(mode) {
+  return `<div class="field full"><span class="label">Type de message</span><div class="seg" role="radiogroup" aria-label="Type de message"><button type="button" role="radio" aria-checked="${mode !== 'embed'}" data-mode="text" class="${mode !== 'embed' ? 'active' : ''}">Message simple</button><button type="button" role="radio" aria-checked="${mode === 'embed'}" data-mode="embed" class="${mode === 'embed' ? 'active' : ''}">Embed</button></div><small>${mode === 'embed' ? 'Un encadré avec titre, avatar et image.' : 'Un message texte, comme un membre l’écrirait.'}</small></div>`;
+}
 async function renderWelcome() {
   const s = settings();
-  let pres = { title: 'Bienvenue sur {server}', show_avatar: true, show_member_count: true, default_text: 'Bienvenue {member} !' };
-  try { pres = await welcomePresentation(); } catch (_) {}
+  const sv = key => (key in state.dirty.settings ? state.dirty.settings[key] : s[key]);  // brouillon non enregistré conservé au redessin
+  let pres = { title: 'Bienvenue sur {server}', show_avatar: true, show_member_count: true, mode: 'embed', default_text: 'Bienvenue {member} !' };
+  try { pres = { ...pres, ...(await welcomePresentation()) }; } catch (_) {}
+  const draft = state.dirty.welcome || {};
+  const mode = draft.mode || pres.mode || 'embed';
+  const embedMode = mode === 'embed';
   if (state.sub === 'departs') {
-    content().innerHTML = `<div class="grid">${await moduleHead('goodbye', 'Message envoyé quand un membre quitte le serveur.', 'Départs')}${card('', '', `<div class="fields">${channelField('Salon', 'goodbye_channel', s.goodbye_channel, { full: true, hint: 'Le message de départ est envoyé dans ce salon.' })}<div class="field full"><div class="label-row"><label for="f-goodbye_message">Message</label><span class="counter"></span>${variablesButton('f-goodbye_message')}</div><textarea id="f-goodbye_message" data-setting="goodbye_message" maxlength="1000" rows="4" placeholder="**{username}** a quitté **{server}**.">${esc(s.goodbye_message || '')}</textarea></div>${previewBlock('goodbyePreview')}</div>`, 'full')}${advanced(card('Présentation', 'Partagée avec la bienvenue.', `<label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature du message.</span></span><input class="switch" id="presAvatar" type="checkbox" ${pres.show_avatar ? 'checked' : ''}></label>`))}</div>`;
-    bindEditable(); bindModuleButtons(); bindVariables(); bindChannelWarnings();
-    bindPreview(content(), 'goodbyePreview', () => ({ embed: { title: 'Départ d’un membre', description: $('f-goodbye_message').value || '**{username}** a quitté **{server}**.', color: '#6b7280', thumbnail: $('presAvatar').checked ? 'avatar' : '', footer: 'SentriX' } }));
-    $('presAvatar').onchange = () => savePresentation({ ...pres, show_avatar: $('presAvatar').checked });
+    content().innerHTML = `<div class="grid">${await moduleHead('goodbye', 'Message envoyé quand un membre quitte le serveur.', 'Départs')}${card('', '', `<div class="fields">${channelField('Salon des départs', 'goodbye_channel', sv('goodbye_channel'), { full: true, embed: embedMode, hint: 'Le message de départ est envoyé dans ce salon.' })}${messageTypeSwitch(mode)}<div class="field full"><div class="label-row"><label for="f-goodbye_message">Message</label><span class="counter"></span>${variablesButton('f-goodbye_message')}</div><textarea id="f-goodbye_message" data-setting="goodbye_message" maxlength="1000" rows="4" placeholder="${esc(GOODBYE_DEFAULT)}">${esc(sv('goodbye_message') || '')}</textarea></div>${previewBlock('goodbyePreview')}</div>`, 'full')}${embedMode ? advanced(card('Présentation', 'Réglage partagé avec la bienvenue.', `<label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature de l’encadré.</span></span><input class="switch" data-welcome="show_avatar" type="checkbox" ${(draft.show_avatar ?? pres.show_avatar) ? 'checked' : ''}></label>`)) : ''}</div>`;
+    bindEditable(); bindModuleButtons(); bindVariables(); bindChannelWarnings(); bindModeSwitch();
+    bindPreview(content(), 'goodbyePreview', () => {
+      const text = $('f-goodbye_message').value || GOODBYE_DEFAULT;
+      const avatar = content().querySelector('[data-welcome="show_avatar"]')?.checked ?? pres.show_avatar;
+      return embedMode ? { embed: { title: 'Départ d’un membre', description: text, color: '#6b7280', thumbnail: avatar ? 'avatar' : '', footer: 'SentriX' } } : { content: text };
+    });
     return;
   }
-  content().innerHTML = `<div class="grid">${await moduleHead('welcome', 'Message envoyé quand un membre arrive.', 'Bienvenue')}${card('', '', `<div class="fields">${channelField('Salon de bienvenue', 'welcome_channel', s.welcome_channel, { full: true, hint: 'Choisissez le salon où SentriX enverra le message.' })}<div class="field full"><div class="label-row"><label for="presTitle">Titre</label></div><input id="presTitle" maxlength="256" value="${esc(pres.title || '')}" placeholder="Bienvenue sur {server}"></div><div class="field full"><div class="label-row"><label for="f-welcome_message">Message</label><span class="counter"></span>${variablesButton('f-welcome_message')}</div><textarea id="f-welcome_message" data-setting="welcome_message" maxlength="2000" rows="4" placeholder="${esc(pres.default_text || '')}">${esc(s.welcome_message || '')}</textarea></div>${previewBlock('welcomePreview')}</div><div class="toolbar"><button class="btn" type="button" id="welcomeTest">Envoyer un message test</button><small>Envoyé dans le salon choisi, adressé à vous seulement.</small></div>`, 'full')}${advanced(card('Image et présentation', '', `<div class="fields">${field('Grande image (HTTPS)', 'welcome_image_url', s.welcome_image_url || '', { type: 'url', full: true, placeholder: 'https://…', hint: 'Affichée sous le message.' })}</div><label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature du message.</span></span><input class="switch" id="presAvatar" type="checkbox" ${pres.show_avatar ? 'checked' : ''}></label><label class="switch-row"><span class="switch-copy"><b>Afficher le nombre de membres</b><span>Un champ « Membres » sous le message.</span></span><input class="switch" id="presCount" type="checkbox" ${pres.show_member_count ? 'checked' : ''}></label>`))}</div>`;
-  bindEditable(); bindModuleButtons(); bindVariables(); bindChannelWarnings();
-  const compute = () => ({
-    content: '{member}',
-    embed: { title: $('presTitle').value || pres.default_title || 'Bienvenue sur {server}', description: $('f-welcome_message').value || pres.default_text || '', image: $('f-welcome_image_url').value, thumbnail: $('presAvatar').checked ? 'avatar' : '', fields: $('presCount').checked ? [{ name: 'Membres', value: '{member_count} membre(s)' }] : [], footer: 'SentriX' },
-  });
+  const channelChosen = Boolean(sv('welcome_channel') && channelName(sv('welcome_channel')));
+  content().innerHTML = `<div class="grid">${await moduleHead('welcome', 'Message envoyé quand un membre arrive.', 'Bienvenue')}${card('', '', `<div class="fields">${channelField('Salon de bienvenue', 'welcome_channel', sv('welcome_channel'), { full: true, embed: embedMode, hint: 'Le message est envoyé dans ce salon, avec une mention du nouveau membre.' })}${messageTypeSwitch(mode)}${embedMode ? `<div class="field full"><div class="label-row"><label for="f-welcome-title">Titre de l’encadré</label>${variablesButton('f-welcome-title')}</div><input id="f-welcome-title" data-welcome="title" maxlength="256" value="${esc(draft.title ?? pres.title ?? '')}" placeholder="Bienvenue sur {server}"></div>` : ''}<div class="field full"><div class="label-row"><label for="f-welcome_message">Message</label><span class="counter"></span>${variablesButton('f-welcome_message')}</div><textarea id="f-welcome_message" data-setting="welcome_message" maxlength="2000" rows="4" placeholder="${esc(pres.default_text || '')}">${esc(sv('welcome_message') || '')}</textarea></div>${previewBlock('welcomePreview')}</div><div class="toolbar"><button class="btn" type="button" id="welcomeTest" ${channelChosen ? '' : 'disabled'}>Envoyer un message test</button><small id="welcomeTestHint">${channelChosen ? `Envoyé dans ${esc(channelName(sv('welcome_channel')))}, visible de tous mais sans mention.` : 'Choisissez un salon et enregistrez pour pouvoir tester.'}</small></div>`, 'full')}${embedMode ? advanced(card('Image et présentation', '', `<div class="fields">${field('Grande image (HTTPS)', 'welcome_image_url', sv('welcome_image_url') || '', { type: 'url', full: true, placeholder: 'https://…', hint: 'Affichée sous le message.' })}</div><label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature de l’encadré.</span></span><input class="switch" data-welcome="show_avatar" type="checkbox" ${(draft.show_avatar ?? pres.show_avatar) ? 'checked' : ''}></label><label class="switch-row"><span class="switch-copy"><b>Afficher le nombre de membres</b><span>Un champ « Membres » sous le message.</span></span><input class="switch" data-welcome="show_member_count" type="checkbox" ${(draft.show_member_count ?? pres.show_member_count) ? 'checked' : ''}></label>`)) : ''}</div>`;
+  bindEditable(); bindModuleButtons(); bindVariables(); bindChannelWarnings(); bindModeSwitch();
+  const compute = () => {
+    const text = $('f-welcome_message').value || pres.default_text || '';
+    if (!embedMode) return { content: '{member}\n' + text };
+    const avatar = content().querySelector('[data-welcome="show_avatar"]')?.checked ?? pres.show_avatar;
+    const count = content().querySelector('[data-welcome="show_member_count"]')?.checked ?? pres.show_member_count;
+    const members = Number(state.guild?.guild?.members || 0);
+    return { content: '{member}', embed: { title: $('f-welcome-title').value || pres.default_title || 'Bienvenue sur {server}', description: text, image: $('f-welcome_image_url')?.value || '', thumbnail: avatar ? 'avatar' : '', fields: count ? [{ name: 'Membres', value: `${members} membre${members > 1 ? 's' : ''}` }] : [], footer: 'SentriX' } };
+  };
   bindPreview(content(), 'welcomePreview', compute);
-  /* Titre / avatar / compteur ont leur propre table : enregistrés à part, sans passer par la barre. */
-  const persistPresentation = () => savePresentation({ title: $('presTitle').value, show_avatar: $('presAvatar').checked, show_member_count: $('presCount').checked });
-  $('presTitle').addEventListener('change', persistPresentation);
-  $('presAvatar').onchange = persistPresentation; $('presCount').onchange = persistPresentation;
   $('welcomeTest').onclick = async () => {
-    if (hasDirty()) return toast('Enregistrez d’abord vos modifications.', true);
-    const channel = channelName(s.welcome_channel);
-    if (!channel) return toast('Choisissez d’abord un salon de bienvenue.', true);
-    if (!(await confirmDialog({ title: 'Envoyer un message test ?', body: `Le message de bienvenue sera envoyé dans ${channel}, adressé à vous.`, confirm: 'Envoyer' }))) return;
+    if (hasDirty()) return toast('Enregistrez d’abord vos modifications, puis relancez le test.', true);
+    if (!(await confirmDialog({ title: 'Envoyer un message test ?', body: `Le message de bienvenue sera envoyé dans ${channelName(sv('welcome_channel'))}, sans mentionner personne.`, confirm: 'Envoyer' }))) return;
     const b = $('welcomeTest'); b.disabled = true;
-    try { const r = await gpost('/welcome/test', {}); toast(r.message || 'Test envoyé.'); } catch (e) { toast(e.message, true); } finally { b.disabled = false; }
+    try { const r = await gpost('/welcome/test', {}); toast(r.message || 'Message test envoyé.'); } catch (e) { toast(e.message, true); } finally { b.disabled = false; }
   };
 }
-async function savePresentation(values) {
-  try { await gpost('/welcome', { title: values.title, show_avatar: values.show_avatar, show_member_count: values.show_member_count }, 'PUT'); invalidate('welcome'); toast('Présentation enregistrée.'); }
-  catch (e) { toast(e.message, true); }
+/* Le type (simple / embed) change la forme du formulaire : on mémorise le brouillon puis on
+   redessine la page ; l'enregistrement passe par la barre comme les autres champs. */
+function bindModeSwitch(root = content()) {
+  root.querySelectorAll('[data-mode]').forEach(b => b.onclick = async () => {
+    if (b.classList.contains('active')) return;
+    const draft = {};
+    root.querySelectorAll('[data-welcome]').forEach(el => { draft[el.dataset.welcome] = readControl(el); });
+    Object.assign(state.dirty.welcome, draft);
+    markDirty('welcome', 'mode', b.dataset.mode);
+    await render();
+  });
 }
 
 /* Niveaux */
