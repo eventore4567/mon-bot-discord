@@ -538,12 +538,76 @@ function enhanceEmbedsExperience() {
   s.querySelectorAll('[data-embed-template]').forEach(b=>b.onclick=()=>{const t=templates[b.dataset.embedTemplate];$('embedTitle').value=t.title;$('embedDescription').value=t.description;$('embedColor').value=t.color;$('embedFields').value=t.fields;$('embedTitle').dispatchEvent(new Event('input',{bubbles:true}));toast('Modèle chargé. Vérifiez l’aperçu avant l’envoi.');});
 }
 
+
+function enhanceWelcomeExperience() {
+  const s=settings();
+  experienceInsertAfterCommand(experienceSummary(
+    'Accueil des membres',
+    'Bienvenue et départs utilisent les mêmes réglages que les commandes /setup et +setup.',
+    [
+      {label:'Bienvenue',value:s.welcome_channel?(channelName(s.welcome_channel)||'Configuré'):'Aucun salon',note:s.welcome_mode==='text'?'message simple':'embed'},
+      {label:'Départs',value:s.goodbye_channel?(channelName(s.goodbye_channel)||'Configuré'):'Aucun salon',note:s.goodbye_mode==='text'?'message simple':'embed'},
+      {label:'Autorôle',value:s.autorole?(roleName(s.autorole)||'Configuré'):'Aucun',note:'à l’arrivée'},
+      {label:'Vérification',value:s.verify_role?(roleName(s.verify_role)||'Configurée'):'Non configurée',note:'rôle final'},
+    ],
+    [{page:'welcome',sub:'bienvenue',label:'Bienvenue',primary:true},{page:'welcome',sub:'departs',label:'Départs'},{page:'roles',label:'Rôles'}]
+  ));
+}
+
+function enhanceSecurityExperience() {
+  const a=state.guild?.automod||{},s=settings();
+  const active=AUTOMOD.filter(([k])=>Boolean(a[k])).length;
+  experienceInsertAfterCommand(experienceSummary(
+    'Sécurité du serveur',
+    'Les protections actives sont appliquées par les moteurs AutoMod/anti-abus réels de SentriX.',
+    [
+      {label:'Protections',value:active+'/'+AUTOMOD.length,note:'activées'},
+      {label:'Vérification',value:s.verify_role?'Configurée':'Inactive',note:s.verify_role?(roleName(s.verify_role)||'rôle défini'):'aucun rôle'},
+      {label:'Anti-raid',value:a.antiraid?'Actif':'Inactif',note:'arrivées anormales'},
+      {label:'Anti-nuke',value:a.antinuke?'Actif':'Inactif',note:'salons et rôles'},
+    ],
+    [{page:'moderation',label:'Centre de modération',primary:true},{page:'logs',label:'Logs'},{page:'security',sub:'verification',label:'Vérification'}]
+  ));
+}
+
+function enhanceNotificationsExperience() {
+  const items=state.guild?.social_notifications||[];
+  const active=items.filter(x=>x.enabled!==0).length;
+  const platforms=[...new Set(items.map(x=>String(x.platform||'').toLowerCase()).filter(Boolean))];
+  experienceInsertAfterCommand(experienceSummary(
+    'Notifications sociales',
+    'Suivez vos sources et contrôlez où SentriX publie les nouvelles vidéos et lives.',
+    [
+      {label:'Sources',value:number(items.length),note:active+' active(s)'},
+      {label:'Plateformes',value:number(platforms.length),note:platforms.slice(0,3).join(' · ')||'aucune'},
+      {label:'Salons',value:number(new Set(items.map(x=>String(x.discord_channel_id||'')).filter(Boolean)).size),note:'destinations'},
+      {label:'Mentions',value:number(items.filter(x=>x.role_id).length),note:'sources avec rôle'},
+    ],
+    [{page:'automation',label:'Automatisations',primary:true},{page:'roles',label:'Rôles'}]
+  ));
+}
+
+function enhanceAIExperience() {
+  const a=state.guild?.ai||{};
+  experienceInsertAfterCommand(experienceSummary(
+    'Intelligence artificielle',
+    'Réglages du moteur IA réellement utilisés par SentriX.',
+    [
+      {label:'IA',value:a.enabled?'Active':'Inactive',note:a.default_model||'modèle par défaut'},
+      {label:'Mémoire',value:a.memory_enabled?'Active':'Coupée',note:a.memory_minutes?String(a.memory_minutes)+' min':''},
+      {label:'Limite/min',value:number(a.per_minute_limit||0),note:'requêtes'},
+      {label:'Limite/jour',value:number(a.daily_limit||0),note:'requêtes'},
+    ]
+  ));
+}
+
 async function enhanceSentrixExperience() {
   if(!state.guildId||!state.guild)return;
   const grid=content().querySelector('.grid');if(!grid)return;
   if(!grid.querySelector('.experience-command'))grid.insertAdjacentHTML('afterbegin',experienceCommandBar());
   try{
     if(state.page==='overview')await enhanceOverviewExperience();
+    else if(state.page==='welcome')enhanceWelcomeExperience();
     else if(state.page==='levels')await enhanceLevelsExperience();
     else if(state.page==='economy')await enhanceEconomyExperience();
     else if(state.page==='roles')await enhanceRolesExperience();
@@ -552,7 +616,10 @@ async function enhanceSentrixExperience() {
     else if(state.page==='games')await enhanceGamesExperience();
     else if(state.page==='automation')await enhanceAutomationExperience();
     else if(state.page==='moderation')enhanceModerationExperience();
+    else if(state.page==='security')enhanceSecurityExperience();
+    else if(state.page==='notifications')enhanceNotificationsExperience();
     else if(state.page==='embeds')enhanceEmbedsExperience();
+    else if(state.page==='ai')enhanceAIExperience();
   }catch(e){console.warn('SentriX experience enhancement skipped:',e?.message||e);}
   bindExperienceFilter();
   content().querySelectorAll('[data-go]').forEach(b=>{if(!b.onclick)b.onclick=()=>go(b.dataset.go,b.dataset.goSub||'');});
