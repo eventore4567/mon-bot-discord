@@ -16,6 +16,7 @@ Aucun token utilisateur, token du bot ou secret OAuth n'est envoyé au navigateu
 
 import asyncio
 import logging
+import os
 import secrets
 import time
 from urllib.parse import urlencode, urlparse, urlunparse
@@ -98,7 +99,22 @@ def _client_id(bot) -> str:
     return str(bot.user.id) if bot.user else ""
 
 
+def _own_public_host() -> str:
+    """Domaine public Railway de CETTE instance (primary ou standby)."""
+    return (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip().strip("/").casefold()
+
+
 def _public_url(request: web.Request) -> str:
+    """URL publique servant de base à OAuth (redirect_uri) et aux cookies.
+
+    Chaque instance HA répond à OAuth sur son propre domaine public quand le navigateur
+    l'utilise : le cookie de state, le callback Discord et le cookie de session restent
+    alors sur le même hôte. Sinon, l'URL publique configurée (domaine principal).
+    """
+    seen = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().casefold()
+    own = _own_public_host()
+    if own and seen == own:
+        return f"https://{own}"
     configured = (config.DASHBOARD_PUBLIC_URL or "").strip().rstrip("/")
     if configured:
         return configured
@@ -298,15 +314,16 @@ def _canonical_host() -> str:
 
 
 def _canonical_redirect(request: web.Request) -> web.HTTPFound | None:
-    """Le cookie de state OAuth et le cookie de session sont liés à l'hôte du navigateur,
-    alors que Discord renvoie toujours sur DASHBOARD_PUBLIC_URL. Un parcours commencé sur un
-    autre hôte (domaine du standby, domaine interne) ne peut donc jamais aboutir : on le
-    ramène d'abord sur l'hôte canonique, sans créer de state."""
+    """Le cookie de state OAuth et le cookie de session sont liés à l'hôte du navigateur ;
+    Discord ne renvoie que sur une URL enregistrée. Les hôtes qui savent répondre à OAuth
+    sont l'hôte canonique (DASHBOARD_PUBLIC_URL) et le domaine public de cette instance
+    (RAILWAY_PUBLIC_DOMAIN, callback à enregistrer dans le portail Discord). Tout autre
+    hôte (alias, hostname interne) est ramené sur l'hôte canonique sans créer de state."""
     canonical = _canonical_host()
     if not canonical:
         return None
     seen = _request_host(request)
-    if not seen or seen == canonical:
+    if not seen or seen == canonical or seen == _own_public_host():
         return None
     # Environnements locaux (harnais, audits, CI) : pas d'hôte public, donc pas de bascule.
     bare = seen.rsplit(":", 1)[0] if seen.count(":") == 1 else seen.split("]")[0].lstrip("[")

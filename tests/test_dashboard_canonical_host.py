@@ -23,6 +23,7 @@ from web import dashboard  # noqa: E402
 @pytest.fixture
 def canonical(monkeypatch):
     monkeypatch.setattr(config, "DASHBOARD_PUBLIC_URL", "https://mon-bot-discord-production-8944.up.railway.app")
+    monkeypatch.delenv("RAILWAY_PUBLIC_DOMAIN", raising=False)
     yield
 
 
@@ -58,6 +59,20 @@ def test_loopback_hosts_are_never_redirected(canonical):
     for host in ("127.0.0.1:8992", "localhost:8080", "[::1]:8080"):
         req = make_mocked_request("GET", "/app", headers={"Host": host})
         assert dashboard._canonical_redirect(req) is None, host
+
+
+def test_own_public_domain_answers_oauth_itself(canonical, monkeypatch):
+    """Le standby répond à OAuth sur son propre domaine : cookies et callback sur le même hôte."""
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "sentrix-standby-production.up.railway.app")
+    req = make_mocked_request("GET", "/login", headers={"Host": "sentrix-standby-production.up.railway.app"})
+    assert dashboard._canonical_redirect(req) is None
+    assert dashboard._public_url(req) == "https://sentrix-standby-production.up.railway.app"
+    # Depuis le domaine principal, la même instance renvoie toujours l'URL canonique.
+    req = make_mocked_request("GET", "/login", headers={"Host": "mon-bot-discord-production-8944.up.railway.app"})
+    assert dashboard._public_url(req) == "https://mon-bot-discord-production-8944.up.railway.app"
+    # Un hôte inconnu reste redirigé.
+    req = make_mocked_request("GET", "/login", headers={"Host": "autre-alias.example"})
+    assert dashboard._canonical_redirect(req) is not None
 
 
 def test_middleware_only_touches_app_and_login(canonical):
