@@ -232,7 +232,23 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && st
 $('mobileMenu').onclick = () => ($('sidebar').classList.contains('open') ? closeSidebar() : openSidebar());
 $('mobileOverlay').onclick = closeSidebar;
 $('serverSwitch').onclick = openServerPicker;
-$('refreshButton').onclick = async () => { if (!state.guildId) return; if (!(await guardDirty())) return; state.cache.clear(); await reloadGuild(); await render(); toast('Données actualisées.'); };
+$('refreshButton').onclick = async () => {
+    if (!(await guardDirty())) return;
+    state.cache.clear();
+    if (!state.guildId) {
+      try {
+        const payload = await api('/api/guilds');
+        state.guilds = payload.guilds || [];
+        renderServerRail();
+        await render();
+        toast('Espace actualisé.');
+      } catch (e) { toast(e.message, true); }
+      return;
+    }
+    await reloadGuild();
+    await render();
+    toast('Données actualisées.');
+  };
 $('saveButton').onclick = saveDirty;
 $('discardButton').onclick = () => { clearDirty(); render(); };
 $('profileButton').onclick = () => exitGuildToGlobal('profile');
