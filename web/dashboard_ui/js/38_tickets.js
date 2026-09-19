@@ -22,9 +22,13 @@ async function appendTicketButtonSettings() {
   section.id = 'ticketStaffActions';
   section.innerHTML = `<div class="card-head">
       <div><h2>Actions dans les tickets</h2><p>Choisissez les boutons réellement utiles au staff. Les changements s’appliquent aux nouveaux tickets.</p></div>
-      <button class="btn" type="button" id="ticketButtonsRecommended">Configuration simple</button>
+      <div class="toolbar">
+        <button class="btn sm" type="button" data-ticket-preset="minimal">Minimal</button>
+        <button class="btn sm primary" type="button" data-ticket-preset="support">Support</button>
+        <button class="btn sm" type="button" data-ticket-preset="complete">Complet</button>
+      </div>
     </div>
-    <div class="notice">Conseil : gardez 3 à 5 actions principales. Les actions rares peuvent rester désactivées.</div>
+    <div class="notice">Conseil : le preset Support garde les actions utiles au quotidien. Vous pouvez ensuite activer ou désactiver chaque bouton individuellement.</div>
     <div class="list" id="ticketButtonRows" style="margin-top:10px">
       ${entries.map(([key, cfg]) => `<div class="row" data-ticket-button-row="${esc(key)}">
         <div class="row-main">
@@ -81,20 +85,36 @@ async function appendTicketButtonSettings() {
   content().querySelectorAll('[data-ticket-button-enabled],[data-ticket-button-label],[data-ticket-button-emoji]').forEach(el => {
     el.addEventListener(el.matches('input[type="checkbox"]') ? 'change' : 'input', paint);
   });
-  $('ticketButtonsRecommended').onclick = async () => {
-    const keep = new Set(['claim', 'add', 'close']);
+  const presets = {
+    minimal: new Set(['claim', 'close']),
+    support: new Set(['claim', 'add', 'note', 'close']),
+    complete: new Set(entries.map(([key]) => key)),
+  };
+  const presetLabels = {
+    minimal: 'Minimal : Prendre en charge + Fermer',
+    support: 'Support : Prendre en charge + Ajouter + Note + Fermer',
+    complete: 'Complet : toutes les actions disponibles',
+  };
+  content().querySelectorAll('[data-ticket-preset]').forEach(button => button.onclick = async () => {
+    const name = button.dataset.ticketPreset;
+    const keep = presets[name] || presets.support;
+    if (name === 'complete' && !(await confirmDialog({
+      title: 'Afficher toutes les actions ?',
+      body: 'Le ticket aura beaucoup de boutons. Utilisez ce preset seulement si votre staff en a réellement besoin.',
+      confirm: 'Activer toutes les actions',
+    }))) return;
     for (const [key] of entries) {
       const sw = content().querySelector(`[data-ticket-button-enabled="${CSS.escape(key)}"]`);
       sw.checked = keep.has(key);
     }
     paint();
-    const button = $('ticketButtonsRecommended');
+    const label = button.textContent;
     button.disabled = true; button.textContent = 'Enregistrement…';
     try {
       for (const [key] of entries) await saveKey(key);
-      toast('Configuration simple appliquée : Prendre en charge, Ajouter un membre, Fermer.');
-    } finally { button.disabled = false; button.textContent = 'Configuration simple'; }
-  };
+      toast(presetLabels[name] || 'Preset appliqué.');
+    } finally { button.disabled = false; button.textContent = label; }
+  });
   paint();
 }
 
