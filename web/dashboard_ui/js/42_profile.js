@@ -416,7 +416,7 @@ function renderPreferences() {
   const setThemeColor=(key,value)=>{
     const field=DASHBOARD_COLOR_FIELDS.find(([k])=>k===key);if(!field)return;
     const next=normalizeHex(value,readThemeColors(theme)[key]);colors=readThemeColors(theme);colors[key]=next;writeThemeColors(colors);applyGlobalPreferences();
-    const pick=content().querySelector(`[data-theme-color-picker="${CSS.escape(key)}"]`),hex=content().querySelector(`[data-theme-color-hex="${CSS.escape(key)}"]`);
+    const pick=content().querySelector(`[data-theme-color-picker="${key}"]`),hex=content().querySelector(`[data-theme-color-hex="${key}"]`);
     if(pick)pick.value=next;if(hex)hex.value=next;refreshContrast();
   };
 
