@@ -1625,6 +1625,28 @@ class Ai(commands.Cog, name="Ai"):
         if spec is None:
             return False
 
+        if (
+            not confirmed
+            and action.intent in {"tickets.grant_access", "category.restrict_role"}
+        ):
+            view = _NaturalPlanConfirmView(
+                self,
+                message=message,
+                actions=(action,),
+                prefix=prefix,
+                author_id=message.author.id,
+            )
+            sent = await message.reply(
+                "Cette action modifie les accès du serveur :\n\n"
+                f"**1.** {ai_actions.describe_action(action)}\n\n"
+                "Voulez-vous vraiment l’exécuter ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+
         if action.intent == "navigation.dashboard":
             await self._send_dashboard_link(message)
             self._pending_actions.pop(self._pending_key(message), None)
