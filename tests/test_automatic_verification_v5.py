@@ -124,10 +124,6 @@ class AutomaticVerificationV5Tests(unittest.TestCase):
         self.assertIn("install_control_center_v3_ui_fix(bot)", source)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_v5_keeps_manual_start_compatibility(self):
         from cogs.automatic_verification_v5 import AutomaticVerificationV5
         self.assertTrue(callable(getattr(AutomaticVerificationV5, "start_human_verification", None)))
@@ -135,3 +131,8 @@ if __name__ == "__main__":
         manual = source.split("async def start_human_verification", 1)[1].split("async def evaluate_member", 1)[0]
         self.assertIn('reason="manual-button"', manual)
         self.assertNotIn("_challenges", manual)
+
+
+
+if __name__ == "__main__":
+    unittest.main()
