@@ -333,3 +333,78 @@ def test_native_ai_payload_accepts_only_registered_fields():
         "name": "rm -rf",
         "confidence": 100,
     }) is None
+
+
+def test_category_and_role_colour_are_native_actions():
+    category = ai_actions.local_parse("SentriX crée une catégorie STAFF")
+    assert category is not None
+    assert category.intent == "category.create"
+    assert category.slots["name"].casefold() == "staff"
+
+    colour = ai_actions.local_parse("SentriX mets le role Staff en rouge")
+    assert colour is not None
+    assert colour.intent == "role.color"
+    assert colour.slots["role"].casefold() == "staff"
+    assert colour.slots["color"].casefold() == "rouge"
+
+
+def test_multi_action_detection_needs_multiple_actions():
+    assert ai_actions.looks_multi_action(
+        "crée une catégorie STAFF puis crée un salon staff-chat"
+    )
+    assert ai_actions.looks_multi_action(
+        "crée un rôle Staff et mets le rôle Staff en rouge"
+    )
+    assert not ai_actions.looks_multi_action("ban Tomioka pour spam")
+
+
+@pytest.mark.asyncio
+async def test_multi_action_planner_is_closed_and_ordered(monkeypatch):
+    class Result:
+        ok = True
+        text = (
+            '{"actions":['
+            '{"intent":"category.create","name":"STAFF","confidence":99},'
+            '{"intent":"channel.create_text","name":"staff-chat","category":"STAFF","confidence":99},'
+            '{"intent":"role.create","name":"Modérateur","confidence":99},'
+            '{"intent":"category.restrict_role","category":"STAFF","role":"Modérateur","confidence":99}'
+            ']}'
+        )
+
+    async def fake_generate(*args, **kwargs):
+        return Result()
+
+    monkeypatch.setattr(ai_actions.ai_service, "generate", fake_generate)
+    plan = await ai_actions.parse_action_plan(
+        "crée une catégorie STAFF puis un salon staff-chat, crée le rôle Modérateur et limite STAFF à ce rôle",
+        guild_id=1,
+        channel_id=2,
+        user_id=3,
+    )
+    assert [action.intent for action in plan] == [
+        "category.create",
+        "channel.create_text",
+        "role.create",
+        "category.restrict_role",
+    ]
+    assert plan[1].slots["category"] == "STAFF"
+    assert all(action.source == "plan" for action in plan)
+
+
+@pytest.mark.asyncio
+async def test_multi_action_planner_rejects_unknown_intent(monkeypatch):
+    class Result:
+        ok = True
+        text = '{"actions":[{"intent":"system.shell","name":"x","confidence":100},{"intent":"role.create","name":"x","confidence":100}]}'
+
+    async def fake_generate(*args, **kwargs):
+        return Result()
+
+    monkeypatch.setattr(ai_actions.ai_service, "generate", fake_generate)
+    plan = await ai_actions.parse_action_plan(
+        "fais deux actions dangereuses puis crée un rôle",
+        guild_id=1,
+        channel_id=2,
+        user_id=3,
+    )
+    assert plan == ()
