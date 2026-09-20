@@ -1501,6 +1501,118 @@ class Ai(commands.Cog, name="Ai"):
 
         return False
 
+    async def _grant_ticket_access_role(
+        self,
+        message: discord.Message,
+        action: ai_actions.ParsedAction,
+    ) -> bool:
+        """Ajoute un rôle aux règles d'accès de tous les panels/types de tickets.
+
+        Les règles de ping sont conservées à l'identique. Une règle spécifique à un
+        type continue de surcharger son panel, mais reçoit elle aussi le rôle demandé.
+        """
+        guild = message.guild
+        actor = message.author
+
+        async def reply(text: str):
+            await message.reply(
+                text,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+        raw_role = str(action.slots.get("role") or "").strip()
+        if action.source in {"ai", "plan"} and not self._native_slot_grounded(message, raw_role):
+            await reply("Je ne veux pas inventer le rôle. Mentionnez-le ou écrivez son nom dans la demande.")
+            return True
+
+        decision = await access_matrix.evaluate(
+            self.bot,
+            command_name="ticketsetup",
+            author=actor,
+            guild=guild,
+        )
+        if not decision.allowed:
+            await reply(decision.message)
+            return True
+
+        role, ambiguous = self._resolve_native_role(guild, raw_role)
+        if ambiguous:
+            await reply("Plusieurs rôles portent ce nom. Mentionnez directement le rôle à autoriser.")
+            return True
+        if role is None or role.is_default() or role.managed:
+            await reply("Je ne trouve pas clairement ce rôle, ou Discord ne permet pas de l'utiliser pour les tickets.")
+            return True
+        if actor.id != guild.owner_id and actor.top_role <= role and not actor.guild_permissions.administrator:
+            await reply("Votre rôle le plus haut doit être au-dessus du rôle que vous voulez autoriser.")
+            return True
+
+        from . import ticket_ping_role
+
+        panels = await self.bot.db.fetchall(
+            "SELECT id FROM ticket_panels_v2 WHERE guild_id=?",
+            (guild.id,),
+        )
+        if not panels:
+            await reply("Aucun panel de tickets n’est encore configuré sur ce serveur.")
+            return True
+
+        panel_ids = {int(row["id"]) for row in panels}
+        changed_panels = 0
+        changed_types = 0
+
+        for panel_id in panel_ids:
+            current = await ticket_ping_role.get_ticket_role_rules(
+                self.bot, guild.id, panel_id, 0
+            )
+            access_ids = list(current.get("access_role_ids") or [])
+            if role.id not in access_ids:
+                access_ids.append(role.id)
+            await ticket_ping_role.set_ticket_role_rules(
+                self.bot,
+                guild.id,
+                panel_id,
+                type_id=0,
+                access_role_ids=access_ids,
+                ping_role_ids=current.get("ping_role_ids") or [],
+            )
+            changed_panels += 1
+
+        type_rows = await self.bot.db.fetchall(
+            "SELECT id,panel_id FROM ticket_types WHERE guild_id=?",
+            (guild.id,),
+        )
+        for row in type_rows:
+            panel_id = int(row["panel_id"] or 0)
+            type_id = int(row["id"] or 0)
+            if panel_id not in panel_ids or not type_id:
+                continue
+            own = await ticket_ping_role.get_ticket_role_rules(
+                self.bot, guild.id, panel_id, type_id
+            )
+            # Sans règle spécifique, la nouvelle règle du panel est déjà héritée.
+            if not own.get("configured"):
+                continue
+            access_ids = list(own.get("access_role_ids") or [])
+            if role.id not in access_ids:
+                access_ids.append(role.id)
+            await ticket_ping_role.set_ticket_role_rules(
+                self.bot,
+                guild.id,
+                panel_id,
+                type_id=type_id,
+                access_role_ids=access_ids,
+                ping_role_ids=own.get("ping_role_ids") or [],
+            )
+            changed_types += 1
+
+        await reply(
+            f"Le rôle **{role.name}** a maintenant accès aux tickets de "
+            f"**{changed_panels}** panel(s)"
+            + (f" et **{changed_types}** règle(s) spécifique(s)." if changed_types else ".")
+        )
+        return True
+
     async def _handle_parsed_action(
         self,
         message: discord.Message,
@@ -1628,6 +1740,9 @@ class Ai(commands.Cog, name="Ai"):
             )
             view.message = sent
             return True
+
+        if action.intent == "tickets.grant_access":
+            return await self._grant_ticket_access_role(message, action)
 
         if action.intent == "navigation.setup":
             section = str(action.slots.get("section") or "").strip() or None
