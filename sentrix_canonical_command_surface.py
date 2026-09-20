@@ -6,6 +6,7 @@ Les commandes préfixées ``+`` et leurs callbacks métier restent inchangés.
 from __future__ import annotations
 
 import logging
+import os
 
 from discord.ext import commands
 
@@ -159,6 +160,149 @@ BUCKETS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Noms slash courts (validés le 20/09/2026). Désactivés par défaut : les commandes
+# slash sont GLOBALES à l'application Discord, donc partagées entre le service primaire
+# et le standby. Activer SENTRIX_SHORT_SLASH_NAMES=1 sur les DEUX services en même temps
+# (au déploiement sur main), jamais sur un seul, sinon l'autre instance ne reconnaît
+# plus les noms synchronisés.
+# ---------------------------------------------------------------------------
+SHORT_SLASH_ENV = "SENTRIX_SHORT_SLASH_NAMES"
+
+
+def short_slash_enabled() -> bool:
+    return (os.getenv(SHORT_SLASH_ENV) or "0").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+SHORT_ROOTS = {
+    "proprietaire": "owner", "notifications": "notifs", "messages": "embed", "statistiques": "stats",
+}
+# Origine préfixe -> (racine, sous-groupe ou "" = directement sous la racine, feuille).
+SHORT_TARGETS: dict[str, tuple[str, str, str]] = {
+    # /preuve (ex /configuration general proof…)
+    "proof": ("preuve", "", "aide"), "proofexample": ("preuve", "", "exemple"),
+    "proofexamples": ("preuve", "", "exemples"), "proofexample-remove": ("preuve", "", "retirer"),
+    "proofpanel": ("preuve", "", "panneau"), "proofreset": ("preuve", "", "reset"),
+    "proofsetup": ("preuve", "", "setup"), "proofstatus": ("preuve", "", "etat"),
+    # /economie à plat + /shoprole
+    "give-money": ("economie", "", "donner"), "reset-economy": ("economie", "", "reset"),
+    "shoppanel": ("economie", "", "panneau"), "buy": ("economie", "", "acheter"),
+    "sell": ("economie", "", "vendre"), "economyleaderboard": ("economie", "", "top"),
+    "stats": ("economie", "", "stats"), "banque": ("economie", "", "banque"),
+    "economy": ("economie", "", "resume"),
+    "shoprole": ("shoprole", "", "infos"), "shoprole add": ("shoprole", "", "ajouter"),
+    "shoprole list": ("shoprole", "", "liste"), "shoprole price": ("shoprole", "", "prix"),
+    "shoprole remove": ("shoprole", "", "retirer"),
+    # /ia sans préfixe ai-
+    "ai disable": ("ia", "", "off"), "ai enable": ("ia", "", "on"), "ai help": ("ia", "", "aide"),
+    "ai model": ("ia", "", "modele"), "ai reset": ("ia", "", "reset"), "ai search": ("ia", "", "recherche"),
+    # /infos
+    "info role": ("infos", "", "role"), "info serveur": ("infos", "", "serveur"),
+    # /jeux : sous-groupes conservés (36 jeux > 25), feuilles courtes
+    "adventure": ("jeux", "aventure", "quete"), "slots": ("jeux", "casino", "slots"),
+    "coinflip": ("jeux", "casino", "pileface"), "highlow": ("jeux", "casino", "plusmoins"),
+    "mathrace": ("jeux", "courses", "maths"), "guessrace": ("jeux", "courses", "devinette"),
+    "emoji-race": ("jeux", "courses", "emoji"), "wordrace": ("jeux", "courses", "taper"),
+    "reactionevent": ("jeux", "courses", "clic"), "lastmessage": ("jeux", "courses", "dernier"),
+    "triviastart": ("jeux", "rapides", "culture"), "numberduel": ("jeux", "duels", "nombres"),
+    "quizduel": ("jeux", "duels", "savoir"), "reactionduel": ("jeux", "duels", "reflexe"),
+    "guess-number": ("jeux", "rapides", "devine"), "wordgame": ("jeux", "rapides", "mots"),
+    "scramble": ("jeux", "rapides", "melange"), "rps": ("jeux", "rapides", "chifoumi"),
+    "colorquiz": ("jeux", "rapides", "couleurs"), "emojiquiz": ("jeux", "rapides", "emojis"),
+    "dailygames": ("jeux", "stats", "jour"),
+    # /embed (ex /messages embed-…)
+    "embed create": ("embed", "", "creer"), "embed delete": ("embed", "", "supprimer"),
+    "embed duplicate": ("embed", "", "copier"), "embed edit": ("embed", "", "modifier"),
+    "embed export": ("embed", "", "exporter"), "embed import": ("embed", "", "importer"),
+    "embed list": ("embed", "", "liste"), "embed message": ("embed", "", "message"),
+    "embed preview": ("embed", "", "apercu"), "embed rename": ("embed", "", "renommer"),
+    "embed send": ("embed", "", "envoyer"), "embedconfig addrole": ("embed", "", "addrole"),
+    "embedconfig list": ("embed", "", "roles"),
+    # modération
+    "sanctiondm off": ("sanctiondm", "", "off"), "sanctiondm reset": ("sanctiondm", "", "reset"),
+    "sanctiondm status": ("sanctiondm", "", "etat"), "addemoji": ("emoji", "", "ajouter"),
+    "deleteemoji": ("emoji", "", "supprimer"), "resetnick": ("moderation", "", "resetnick"),
+    # musique
+    "music remove": ("musique", "file", "enlever"), "music autoplay": ("musique", "lecture", "auto"),
+    "music playlist create": ("musique", "playlist", "sauver"),
+    # niveaux à plat
+    "repleaderboard": ("niveaux", "", "toprep"), "rephistory": ("niveaux", "", "rephisto"),
+    "voice-time": ("niveaux", "", "vocal"), "set-bio": ("niveaux", "", "bio"),
+    "rep": ("niveaux", "", "rep"), "reputation": ("niveaux", "", "reputation"),
+    "reset-levels": ("niveaux", "", "reset"),
+    # /notifs
+    "notifs-remove": ("notifs", "", "retirer"),
+    # /infini, /pro, /serveur (ex /outils …)
+    "infinit status": ("infini", "", "etat"), "infinit stop": ("infini", "", "stop"),
+    "sentrixpro aimod": ("pro", "", "aimod"), "sentrixpro autorole": ("pro", "", "autorole"),
+    "sentrixpro badges": ("pro", "", "badges"), "sentrixpro digest": ("pro", "", "digest"),
+    "sentrixpro goal": ("pro", "", "goal"), "sentrixpro help": ("pro", "", "aide"),
+    "sentrixpro history": ("pro", "", "histo"), "sentrixpro live": ("pro", "", "live"),
+    "sentrixpro lockdown": ("pro", "", "lockdown"), "sentrixpro module": ("pro", "", "module"),
+    "sentrixpro modules": ("pro", "", "modules"), "sentrixpro notifications": ("pro", "", "notifs"),
+    "sentrixpro quarantine-setup": ("pro", "", "quarantaine"), "sentrixpro season": ("pro", "", "saison"),
+    "sentrixpro security": ("pro", "", "securite"), "sentrixpro status": ("pro", "", "etat"),
+    "sentrixpro trust": ("pro", "", "trust"), "sentrixpro welcome": ("pro", "", "welcome"),
+    "sentrixpro ticket-summary": ("tickets", "", "resume"),
+    "server-audit": ("serveur", "", "audit"), "server-health": ("serveur", "", "sante"),
+    "server-managed": ("serveur", "", "maintenance"),
+    # /owner
+    "bot-leave": ("owner", "", "quitter"), "bot-servers": ("owner", "", "serveurs"),
+    "set-bot": ("owner", "", "bot"), "setstatus": ("owner", "", "statut"),
+    "status-rotate": ("owner", "", "rotation"),
+    # /roles à plat
+    "massrole": ("roles", "", "masse"), "roleall": ("roles", "", "tous"),
+    "rolepanel dropdown": ("roles", "", "menu"), "rolepanel reaction": ("roles", "", "emoji"),
+    "verification": ("roles", "", "verif"),
+    # /securite à plat
+    "antinuke": ("securite", "", "antinuke"), "antiraid": ("securite", "", "antiraid"),
+    "syncbl": ("securite", "", "syncbl"),
+    # /stats
+    "server-growth": ("stats", "", "croissance"), "permissions explain": ("stats", "", "perms"),
+    # /tickets
+    "ticket": ("tickets", "", "ouvrir"),
+    # /concours en français
+    "giveaway blacklist": ("concours", "", "exclure"), "giveaway unblacklist": ("concours", "", "autoriser"),
+    "giveaway create": ("concours", "", "creer"), "giveaway cancel": ("concours", "", "annuler"),
+    "giveaway end": ("concours", "", "terminer"), "giveaway list": ("concours", "", "liste"),
+    "giveaway": ("concours", "", "panneau"), "giveaway reroll": ("concours", "", "relancer"),
+}
+# Doublons slash masqués uniquement avec les noms courts (le + reste utilisable).
+SHORT_DUPLICATES = frozenset({"giveaway-reroll"})
+# Racines directes V110 raccourcies (source -> nom public).
+SHORT_DIRECT = {"clearwarnings": "clearwarns", "membercount": "membres", "channelinfo": "salon", "leaderboard-levels": "top"}
+
+
+def _install_flat_bucket_support() -> None:
+    """Sous-groupe "" = feuille directement sous la racine, même pour une racine
+    sémantique (/securite antinuke au lieu de /securite antinuke antinuke)."""
+    if getattr(v98, "_sentrix_flat_bucket", False):
+        return
+    original = v98._add_semantic_root
+
+    def add_semantic_root(bot, root, members, report):
+        flat = [target for target in members if v98.semantic_bucket(root.name, target) == ""]
+        grouped = [target for target in members if target not in flat]
+        if grouped:
+            original(bot, root, grouped, report)
+        used = {child.name for child in root.commands}
+        for target in flat:
+            leaf = v95._unique_leaf(target.leaf_name, used, target.original_name)
+            callback, native = v95._make_callback(bot, target.command)
+            import discord.app_commands as app_commands
+            slash = app_commands.Command(name=leaf, description=v95._description(target.command), callback=callback)
+            root.add_command(slash)
+            report[f"/{root.name} {slash.name}"] = {
+                "original": target.original_name, "category": root.name,
+                "subcategory": None, "native_options": bool(native),
+            }
+        if len(root.commands) > v95.MAX_CHILDREN:
+            raise RuntimeError(f"V98 group too large: {root.name} has {len(root.commands)} children")
+
+    v98._add_semantic_root = add_semantic_root
+    v98._sentrix_flat_bucket = True
+
+
 def _qualified(command: commands.Command) -> str:
     return str(getattr(command, "qualified_name", "") or getattr(command, "name", "")).casefold().strip()
 
@@ -177,20 +321,29 @@ def install() -> None:
     old_bucket = v98.semantic_bucket
     old_surface = v95._add_grouped_surface
 
+    short = short_slash_enabled()
+
     def should_expose(command: commands.Command) -> bool:
         name, simple = _qualified(command), _simple(command)
         if getattr(command, "hidden", False) or name in DUPLICATES or simple in DUPLICATES:
+            return False
+        if short and (name in SHORT_DUPLICATES or simple in SHORT_DUPLICATES):
             return False
         return bool(old_should_expose(command))
 
     def group_for(command: commands.Command):
         qualified, simple = _qualified(command), _simple(command)
+        if short and qualified in SHORT_TARGETS:
+            target_root, _bucket, target_leaf = SHORT_TARGETS[qualified]
+            return target_root, target_leaf
         if qualified.startswith("music playlist "):
             return "musique", PLAYLIST_LEAVES.get(simple, simple)
         if qualified.startswith("music "):
             return "musique", MUSIC_LEAVES.get(simple, simple)
         root, leaf = old_group_for(command)
         root = ROOTS.get(str(root).casefold(), str(root).casefold())
+        if short:
+            root = SHORT_ROOTS.get(root, root)
         return root, LEAVES.get(qualified, LEAVES.get(simple, leaf))
 
     def bucket(root_name: str, target: v95.SlashTarget) -> str:
@@ -198,6 +351,8 @@ def install() -> None:
         original_root = ROOT_BACK.get(root, root)
         original_name = str(target.original_name or "").casefold().strip()
         simple = original_name.split(" ")[-1]
+        if short and original_name in SHORT_TARGETS:
+            return SHORT_TARGETS[original_name][1]
         if root == "musique" or original_root == "music":
             if original_name.startswith("music playlist "):
                 return "playlist"
@@ -228,6 +383,13 @@ def install() -> None:
     v95._group_for = group_for
     v95._add_grouped_surface = surface
     v98.semantic_bucket = bucket
+    if short:
+        _install_flat_bucket_support()
+        try:
+            import sentrix_command_surface_v110 as v110
+            v110.STANDARD_DIRECT_SLASH.update(SHORT_DIRECT)
+        except Exception:
+            logger.warning("Racines directes courtes non appliquées (V110 indisponible).", exc_info=True)
     v98.semantic_leaf = leaf
     v98._chunk_group_names = chunks
     v98.FORCED_SEMANTIC_ROOTS = frozenset({
@@ -243,4 +405,4 @@ def install() -> None:
     logger.warning("Surface slash canonique active : noms français, doublons masqués, /musique structuré.")
 
 
-__all__ = ["install", "ROOTS", "LEAVES", "MUSIC_LEAVES", "PLAYLIST_LEAVES"]
+__all__ = ["install", "ROOTS", "LEAVES", "MUSIC_LEAVES", "PLAYLIST_LEAVES", "SHORT_TARGETS", "SHORT_ROOTS", "SHORT_DIRECT", "short_slash_enabled"]
