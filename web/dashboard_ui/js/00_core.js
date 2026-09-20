@@ -118,8 +118,13 @@ function markDirty(kind, key, value) {
   state.dirty[kind][key] = value;
   $('saveState').textContent = 'Modifications non enregistrées';
   $('saveBar').classList.remove('hidden');
+  document.body.classList.add('save-pending');
 }
-function clearDirty() { state.dirty = { settings: {}, automod: {}, ai: {}, welcome: {} }; $('saveBar').classList.add('hidden'); }
+function clearDirty() {
+  state.dirty = { settings: {}, automod: {}, ai: {}, welcome: {} };
+  $('saveBar').classList.add('hidden');
+  document.body.classList.remove('save-pending');
+}
 /* Une erreur serveur qui nomme un réglage (« Le champ welcome_image_url … ») s'affiche sous ce
    champ ; les autres passent par un toast. */
 function showFieldError(message) {
