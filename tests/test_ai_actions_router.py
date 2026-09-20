@@ -241,3 +241,13 @@ def test_pronoun_target_is_context_marker_not_a_guessed_member():
     assert parsed is not None
     assert parsed.intent == "moderation.ban"
     assert parsed.slots["target"] == "__recent__"
+
+
+
+def test_bare_action_gate_allows_commands_but_not_normal_chat():
+    assert ai_actions.is_bare_action_candidate("ban Tomioka")
+    assert ai_actions.is_bare_action_candidate("mute Tomioka 2h")
+    assert ai_actions.is_bare_action_candidate("ouvre setup")
+    assert ai_actions.is_bare_action_candidate("configure mes logs")
+    assert not ai_actions.is_bare_action_candidate("tu penses quoi des bans sur Discord ?")
+    assert not ai_actions.is_bare_action_candidate("comment fonctionne le mute ?")
