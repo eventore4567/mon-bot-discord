@@ -14,6 +14,13 @@ async function appendTicketButtonSettings() {
   const buttons = data.tickets?.buttons || {};
   const entries = Object.entries(buttons);
   if (!entries.length) return;
+
+  // Navigation lente : le squelette global peut remplacer le contenu pendant l'appel API.
+  // Sur la sous-page Actions staff, on recrée toujours notre propre conteneur après
+  // réception des données afin qu'aucune carte skeleton ne reste coincée au-dessus.
+  if (state.page === 'tickets' && state.sub === 'actions') {
+    content().innerHTML = '<div class="grid ticket-page ticket-actions-page"></div>';
+  }
   const grid = content().querySelector('.grid');
   if (!grid || $('ticketStaffActions')) return;
 
