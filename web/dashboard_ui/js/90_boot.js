@@ -127,27 +127,41 @@ async function selectGuild(value) {
     else errorView(e, () => selectGuild(requested));
   } finally { if (controller === state.guildAbort) state.guildAbort = null; }
 }
+function isHardReloadNavigation() {
+  try {
+    const entry = performance?.getEntriesByType?.('navigation')?.[0];
+    if (entry?.type) return entry.type === 'reload';
+    // Compatibilité anciens navigateurs.
+    return Number(performance?.navigation?.type) === 1;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function loadGuilds() {
   const payload = await api('/api/guilds');
   state.guilds = payload.guilds || [];
   showOnly('dashboard');
   const installed = state.guilds.filter(g => g.installed);
-  const wanted = new URLSearchParams(location.search).get('guild') || '';
+  const hardReload = isHardReloadNavigation();
+  const wanted = hardReload ? '' : (new URLSearchParams(location.search).get('guild') || '');
   renderServerRail();
 
+  // Un lien direct vers une guild reste possible, mais F5 / ⌘R ramène toujours
+  // à Mon profil. On évite ainsi qu'un rechargement restaure un serveur actif.
   if (wanted && installed.some(g => String(g.id) === String(wanted))) {
     state.preserveGuildPage = true;
     await selectGuild(wanted);
     return;
   }
 
-  // Règle UX : /app est toujours un espace PERSONNEL. Une guild n'est chargée
-  // qu'après un clic explicite sur sa pastille ou via un lien contenant ?guild=.
   state.guildId = '';
   state.guild = null;
   state.guildOwner = false;
   state.page = 'profile';
   state.sub = '';
+  state.ticketEditorOpen = false;
+  state.ticketCreate = false;
   updateChrome();
   renderServerRail();
   await render({ navigation: true });
