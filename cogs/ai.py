@@ -1007,7 +1007,7 @@ class Ai(commands.Cog, name="Ai"):
             return True
         source = ai_actions.normalize_text(message.content)
         wanted = ai_actions.normalize_text(raw)
-        ids = re.findall(r"\\d{15,22}", raw)
+        ids = re.findall(r"\d{15,22}", raw)
         if ids and not all(item in message.content for item in ids):
             return False
         return not wanted or wanted in source
@@ -1020,7 +1020,7 @@ class Ai(commands.Cog, name="Ai"):
             candidates = [c for c in candidates if isinstance(c, (discord.VoiceChannel, discord.StageChannel))]
         elif voice is False:
             candidates = [c for c in candidates if isinstance(c, (discord.TextChannel, discord.Thread))]
-        match = re.fullmatch(r"<#(\\d{15,22})>", value) or re.fullmatch(r"(\\d{15,22})", value)
+        match = re.fullmatch(r"<#(\d{15,22})>", value) or re.fullmatch(r"(\d{15,22})", value)
         if match:
             channel = guild.get_channel(int(match.group(1)))
             if channel in candidates:
@@ -1037,7 +1037,7 @@ class Ai(commands.Cog, name="Ai"):
     @staticmethod
     def _resolve_native_role(guild: discord.Guild, raw: str):
         value = str(raw or "").strip()
-        match = re.fullmatch(r"<@&(\\d{15,22})>", value) or re.fullmatch(r"(\\d{15,22})", value)
+        match = re.fullmatch(r"<@&(\d{15,22})>", value) or re.fullmatch(r"(\d{15,22})", value)
         if match:
             role = guild.get_role(int(match.group(1)))
             return role, ()
