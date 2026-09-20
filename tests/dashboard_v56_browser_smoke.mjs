@@ -113,6 +113,9 @@ if(bootstrapPaths.includes("/api/guilds/1")) throw new Error("Le dashboard ne do
 
 const dashboard=dom.window.document.getElementById("dashboard");
 if(!dashboard||dashboard.classList.contains("hidden")) throw new Error("Dashboard masqué après session.");
+if(!dom.window.document.body.classList.contains("dashboard-locked")) throw new Error("Le dashboard prêt doit verrouiller le scroll global.");
+if(!dom.window.document.body.classList.contains("startup-done")) throw new Error("L’écran de démarrage doit se terminer après le bootstrap.");
+
 if(!dom.window.document.getElementById("sentrix-dashboard-unified-v2")) throw new Error("Frontend unifié absent.");
 if(!dom.window.document.getElementById("sentrix-unified-runtime-v2")) throw new Error("Runtime unifié absent.");
 if(dom.window.document.querySelector("#sxFeaturesFrame,.sx-features-shell,#sentrix-v64-final")) throw new Error("Une ancienne couche frontend est encore embarquée.");
@@ -122,7 +125,7 @@ const executableScripts=[...dom.window.document.querySelectorAll("script")].filt
 if(executableScripts.length!==1) throw new Error(`${executableScripts.length} scripts exécutables au lieu de 1.`);
 if(dom.window.document.querySelectorAll("style").length!==1) throw new Error("Plusieurs feuilles de style embarquées.");
 const responsiveCss=dom.window.document.querySelector("style").textContent;
-for(const token of ["responsive universel v3","max-width:1024px","max-width:600px","pointer:coarse","safe-area-inset-bottom","100dvh","body.save-pending .workspace","sxPageIn 240ms"]){
+for(const token of ["responsive universel v3","max-width:1024px","max-width:600px","pointer:coarse","safe-area-inset-bottom","100dvh","body.save-pending .workspace","sxPageIn 240ms","startup-screen","sxBootProgress","body.dashboard-locked",".workspace{"]){
   if(!responsiveCss.includes(token)) throw new Error(`Responsive universel incomplet: ${token}`);
 }
 dom.window.document.getElementById("mobileMenu").click();
