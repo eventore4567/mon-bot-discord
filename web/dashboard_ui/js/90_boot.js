@@ -158,8 +158,24 @@ async function loadGuilds() {
    Aucun état intermédiaire ne laisse la page vide : soit le dashboard, soit la page de
    connexion, soit un panneau d'erreur avec « Réessayer » / « Se reconnecter ». */
 const boot = { state: 'booting', watchdog: null };
+const startupStartedAt = performance.now();
+let startupFinished = false;
+function finishStartupScreen({ immediate = false } = {}) {
+  if (startupFinished) return;
+  startupFinished = true;
+  const elapsed = performance.now() - startupStartedAt;
+  const wait = immediate ? 0 : Math.max(0, 780 - elapsed);
+  setTimeout(() => {
+    document.body.classList.remove('startup-loading');
+    document.body.classList.add('startup-done');
+    setTimeout(() => $('startupScreen')?.remove(), 450);
+  }, wait);
+}
 function showOnly(id) {
   for (const k of ['landing', 'bootState', 'dashboard']) $(k).classList.toggle('hidden', k !== id);
+  document.body.classList.toggle('dashboard-locked', id === 'dashboard');
+  if (id === 'dashboard') finishStartupScreen();
+  else if (id === 'landing' || id === 'bootState') finishStartupScreen({ immediate: true });
 }
 function setBootState(state, { title, message, ref, retry = true, reconnect = false } = {}) {
   boot.state = state;
