@@ -801,3 +801,36 @@ body.dashboard-locked #content{min-height:0}
   .startup-mark{animation:none!important}.startup-progress i{transition:none!important}
   .startup-screen{transition:none}
 }
+
+
+/* ---------- annonces santé dashboard ---------- */
+.startup-hint{
+  position:absolute;left:50%;bottom:max(72px,calc(env(safe-area-inset-bottom,0px) + 72px));
+  width:min(520px,calc(100vw - 40px));transform:translateX(-50%);
+  color:#9aa5b4;font-size:12px;text-align:center;line-height:1.45;
+  opacity:0;transition:opacity .25s ease;
+}
+.startup-hint.visible{opacity:1}
+.health-notice{
+  position:fixed;left:50%;top:calc(var(--top-safe) + 12px);z-index:78;
+  transform:translateX(-50%);display:flex;align-items:center;gap:9px;
+  max-width:min(680px,calc(100vw - 28px));padding:9px 10px 9px 12px;
+  border:1px solid color-mix(in srgb,var(--amber) 42%,var(--line));
+  border-radius:12px;background:color-mix(in srgb,var(--panel2) 92%,var(--amber-bg));
+  box-shadow:var(--shadow);font-size:13px;font-weight:600;
+}
+.health-notice.bad{border-color:color-mix(in srgb,var(--red) 46%,var(--line));background:color-mix(in srgb,var(--panel2) 90%,var(--red-bg))}
+.health-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 14px color-mix(in srgb,var(--amber) 52%,transparent);flex:none}
+.health-notice.bad .health-dot{background:var(--red);box-shadow:0 0 14px color-mix(in srgb,var(--red) 52%,transparent)}
+#healthNoticeText{min-width:0;overflow-wrap:anywhere}
+.health-retry,.health-close{
+  flex:none;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;
+}
+.health-retry{padding:4px 7px;border-radius:7px;background:color-mix(in srgb,var(--text) 8%,transparent)}
+.health-retry:hover{background:color-mix(in srgb,var(--text) 13%,transparent)}
+.health-close{width:28px;height:28px;border-radius:7px;font-size:18px;line-height:1}
+.health-close:hover{background:color-mix(in srgb,var(--text) 9%,transparent)}
+@media(max-width:600px){
+  .health-notice{top:calc(var(--top-safe) + 8px);left:10px;right:10px;transform:none;max-width:none}
+  .health-retry{margin-left:auto}
+}
