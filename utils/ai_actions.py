@@ -161,6 +161,53 @@ ACTIONS: dict[str, ActionSpec] = {
         "tickets.open", "ticket", (), (), None, "low",
         description="ouvrir/créer un ticket",
     ),
+    # Actions Discord natives : elles ne passent pas par une commande +, mais restent
+    # strictement bornées à ce registre et seront exécutées avec vérifications de
+    # permissions + hiérarchie dans cogs.ai.
+    "voice.join": ActionSpec(
+        "voice.join", None, (), (), None, "low",
+        description="rejoindre le salon vocal actuel de l'utilisateur",
+    ),
+    "voice.leave": ActionSpec(
+        "voice.leave", None, (), (), None, "low",
+        description="quitter le salon vocal actuel du bot",
+    ),
+    "channel.create_voice": ActionSpec(
+        "channel.create_voice", None, ("name",), ("category",), None, "medium",
+        description="créer un salon vocal",
+    ),
+    "channel.create_text": ActionSpec(
+        "channel.create_text", None, ("name",), ("category",), None, "medium",
+        description="créer un salon textuel",
+    ),
+    "channel.rename": ActionSpec(
+        "channel.rename", None, ("channel", "name"), (), None, "medium",
+        description="renommer un salon existant",
+    ),
+    "role.create": ActionSpec(
+        "role.create", None, ("name",), (), None, "medium",
+        description="créer un rôle",
+    ),
+    "role.give": ActionSpec(
+        "role.give", None, ("target", "role"), (), "member", "medium",
+        description="donner un rôle à un membre",
+    ),
+    "role.remove": ActionSpec(
+        "role.remove", None, ("target", "role"), (), "member", "medium",
+        description="retirer un rôle à un membre",
+    ),
+    "message.send": ActionSpec(
+        "message.send", None, ("channel", "text"), (), None, "medium",
+        description="envoyer un message dans un salon textuel",
+    ),
+    "member.nickname": ActionSpec(
+        "member.nickname", None, ("target", "nickname"), (), "member", "medium",
+        description="modifier le pseudo serveur d'un membre",
+    ),
+    "member.move_voice": ActionSpec(
+        "member.move_voice", None, ("target", "channel"), (), "member", "medium",
+        description="déplacer un membre vers un salon vocal",
+    ),
 }
 
 # Synonymes déterministes : le modèle reste le repli, pas le seul moyen de comprendre.
@@ -389,6 +436,9 @@ def is_bare_action_candidate(text: str) -> bool:
         "donne moi le dashboard", "donne le dashboard", "dashboard",
         "active l anti", "active anti", "desactive l anti", "desactive anti",
         "configure les logs", "configure mes logs", "mets les logs",
+        "rejoins le vocal", "rejoint le vocal", "rejoin le vocal", "regoin une voc", "reg une voc",
+        "quitte le vocal", "cree une voc", "crée une voc", "cree un salon vocal", "crée un salon vocal",
+        "cree un salon textuel", "crée un salon textuel", "cree un role", "crée un role",
     )
     return any(gate.startswith(prefix) for prefix in strong_starts)
 
@@ -397,6 +447,98 @@ def local_parse(question: str) -> ParsedAction | None:
     normalized = normalize_text(question)
     if not normalized:
         return None
+
+    # -------- actions Discord natives fréquentes --------
+    # Les fautes usuelles sont volontairement tolérées ici : le modèle reste le repli.
+    voice_words = ("vocal", "vocale", "voc", "voice", "vc")
+    has_voice_word = any(re.search(rf"\\b{re.escape(word)}\\b", normalized) for word in voice_words)
+    if has_voice_word:
+        if re.search(r"\\b(?:quitte|quit|leave|deco|deconnecte|déconnecte|sors?)\\b", normalized):
+            return ParsedAction("voice.leave", {}, confidence=99, source="local")
+        if re.search(r"\\b(?:rejoint|rejoins|rejoin|regoin|reg|join|viens|connecte(?:[- ]?toi)?)\\b", normalized):
+            return ParsedAction("voice.join", {}, confidence=99, source="local")
+
+    # « crée une voc » doit être comprise comme une action incomplète : SentriX
+    # demandera simplement le nom au lieu de répondre qu'il ne peut pas agir.
+    create_match = re.search(
+        r"\\b(?:cree|crée|creer|créer|ajoute|ajouter)\\s+(?:moi\\s+)?(?:un(?:e)?\\s+)?"
+        r"(?:(?:salon|channel)\\s+)?(vocal|vocale|voc|voice|textuel|texte|text)\\b(.*)$",
+        question,
+        re.IGNORECASE,
+    )
+    if create_match:
+        kind = normalize_text(create_match.group(1))
+        tail = create_match.group(2).strip(" .,:;!-")
+        tail = re.sub(r"^(?:appele|appelé|nomme|nommé|qui s['’]appelle)\\s+", "", tail, flags=re.IGNORECASE).strip()
+        slots: dict[str, Any] = {}
+        if tail:
+            slots["name"] = tail[:100]
+        return ParsedAction(
+            "channel.create_voice" if kind in {"vocal", "vocale", "voc", "voice"} else "channel.create_text",
+            slots,
+            confidence=99,
+            source="local",
+        )
+
+    role_create = re.search(
+        r"\\b(?:cree|crée|creer|créer|ajoute|ajouter)\\s+(?:moi\\s+)?(?:un\\s+)?role\\s+(.+)$",
+        normalized,
+    )
+    if role_create:
+        return ParsedAction("role.create", {"name": role_create.group(1).strip(" .,:;!-")[:100]}, 99, "local")
+
+    role_change = re.search(
+        r"\\b(donne|ajoute|retire|enleve|enlève)\\s+(?:le\\s+)?role\\s+(.+?)\\s+(?:a|à|de)\\s+@?([^\\s,;]+)",
+        question,
+        re.IGNORECASE,
+    )
+    if role_change:
+        verb = normalize_text(role_change.group(1))
+        return ParsedAction(
+            "role.remove" if verb in {"retire", "enleve"} else "role.give",
+            {"role": role_change.group(2).strip(" .,:;!-")[:100], "target": role_change.group(3).strip(" .,:;!?")[:120]},
+            99,
+            "local",
+        )
+
+    rename_channel = re.search(
+        r"\\b(?:renomme|rename)\\s+(<#\\d{15,22}>|#[A-Za-z0-9_-]{1,100})\\s+(?:en|vers)\\s+(.+)$",
+        question,
+        re.IGNORECASE,
+    )
+    if rename_channel:
+        return ParsedAction(
+            "channel.rename",
+            {"channel": rename_channel.group(1), "name": rename_channel.group(2).strip(" .,:;!-")[:100]},
+            99,
+            "local",
+        )
+
+    send_message = re.search(
+        r"\\b(?:envoie|envoye|send|ecris|écris)\\s+(.+?)\\s+(?:dans|sur)\\s+(<#\\d{15,22}>|#[A-Za-z0-9_-]{1,100})\\s*$",
+        question,
+        re.IGNORECASE,
+    )
+    if send_message:
+        return ParsedAction(
+            "message.send",
+            {"text": send_message.group(1).strip(), "channel": send_message.group(2)},
+            99,
+            "local",
+        )
+
+    nick = re.search(
+        r"\\b(?:change|mets|modifie)\\s+(?:le\\s+)?(?:pseudo|surnom)\\s+(?:de|a|à)\\s+@?([^\\s,;]+)\\s+(?:en|a|à)\\s+(.+)$",
+        question,
+        re.IGNORECASE,
+    )
+    if nick:
+        return ParsedAction(
+            "member.nickname",
+            {"target": nick.group(1).strip(" .,:;!?"), "nickname": nick.group(2).strip(" .,:;!-")[:32]},
+            99,
+            "local",
+        )
 
     log_route = _extract_log_route(question, normalized)
     if log_route is not None:
@@ -502,7 +644,11 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
     if confidence < 70:
         return None
     slots: dict[str, Any] = {}
-    for key in ("target", "reason", "duration", "query", "app", "state", "section", "log_category", "channel", "user_id"):
+    for key in (
+        "target", "reason", "duration", "query", "app", "state", "section",
+        "log_category", "channel", "user_id", "name", "category", "role",
+        "text", "nickname",
+    ):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             slots[key] = value.strip()[:500]
@@ -540,7 +686,7 @@ async def classify_with_ai(
         "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
         "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
         "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
-        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, confidence.\n"
+        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, name, category, role, text, nickname, confidence.\n"
         "Actions autorisées:\n" + catalog
     )
     result = await ai_service.generate(
@@ -596,6 +742,19 @@ def missing_prompt(intent: str, slot: str, *, target: discord.Member | None = No
         return "Dans quel salon voulez-vous envoyer ces logs ?"
     if slot == "log_category":
         return "Quelle catégorie de logs voulez-vous configurer ?"
+    if slot == "name":
+        if intent == "channel.create_voice":
+            return "Quel nom voulez-vous donner au salon vocal ?"
+        if intent == "channel.create_text":
+            return "Quel nom voulez-vous donner au salon textuel ?"
+        if intent == "role.create":
+            return "Quel nom voulez-vous donner au rôle ?"
+    if slot == "role":
+        return "Quel rôle voulez-vous utiliser ?"
+    if slot == "text":
+        return "Quel message voulez-vous envoyer ?"
+    if slot == "nickname":
+        return "Quel nouveau pseudo voulez-vous donner à ce membre ?"
     return f"Quelle valeur voulez-vous utiliser pour « {slot} » ?"
 
 
@@ -633,6 +792,9 @@ def merge_followup(action: ParsedAction, answer: str) -> ParsedAction:
         candidate = _log_category_alias(value)
         if candidate:
             slots["log_category"] = candidate
+    elif slot in {"name", "category", "role", "text", "nickname"} and value:
+        limits = {"name": 100, "category": 100, "role": 100, "text": 1900, "nickname": 32}
+        slots[slot] = value[: limits[slot]]
     return ParsedAction(action.intent, slots, action.confidence, "followup")
 
 
