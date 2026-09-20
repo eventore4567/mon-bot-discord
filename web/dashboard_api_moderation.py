@@ -258,6 +258,17 @@ def register(app: web.Application, dashboard) -> None:
             return dashboard._json_error("Le centre de modération ne sanctionne pas les bots depuis le dashboard.", 400)
 
         _event, _label, bot_permission = _ACTION_META[action]
+        actor_permissions = actor.guild_permissions
+        if guild.owner_id != actor.id and not actor_permissions.administrator and not getattr(actor_permissions, bot_permission, False):
+            pretty = {
+                "ban_members": "Bannir des membres",
+                "kick_members": "Expulser des membres",
+                "moderate_members": "Exclure temporairement des membres",
+            }.get(bot_permission, bot_permission)
+            return dashboard._json_error(
+                f"Vous n'avez pas la permission Discord « {pretty} » requise pour cette action.",
+                403,
+            )
         me = guild.me
         if me is None or not getattr(me.guild_permissions, bot_permission, False):
             return dashboard._json_error(
