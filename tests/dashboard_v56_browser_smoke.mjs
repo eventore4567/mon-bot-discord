@@ -145,6 +145,8 @@ await sleep(120);
 for(const selector of ['#prefTheme','[data-theme-color-picker="bg"]','[data-theme-color-picker="sidebar"]','[data-theme-color-picker="text"]','#themeSaveName','#themeSaveButton']){
   if(!dom.window.document.querySelector(selector)) throw new Error(`Éditeur de thème incomplet: ${selector}`);
 }
+if(dom.window.document.querySelectorAll('[data-curated-theme]').length<4) throw new Error("Palettes prêtes absentes.");
+if(!dom.window.document.querySelector('.theme-preset-card')) throw new Error("Aperçu de palette dégradée absent.");
 const bgPicker=dom.window.document.querySelector('[data-theme-color-picker="bg"]');
 bgPicker.value="#112233";bgPicker.dispatchEvent(new dom.window.Event("input",{bubbles:true}));
 const themeColors=JSON.parse(dom.window.localStorage.getItem("sentrix:theme-colors")||"{}");
