@@ -184,9 +184,21 @@ ACTIONS: dict[str, ActionSpec] = {
         "channel.rename", None, ("channel", "name"), (), None, "medium",
         description="renommer un salon existant",
     ),
+    "category.create": ActionSpec(
+        "category.create", None, ("name",), (), None, "medium",
+        description="créer une catégorie Discord",
+    ),
+    "category.restrict_role": ActionSpec(
+        "category.restrict_role", None, ("category", "role"), (), None, "high", True,
+        description="rendre une catégorie privée et l'autoriser uniquement à un rôle",
+    ),
     "role.create": ActionSpec(
         "role.create", None, ("name",), (), None, "medium",
         description="créer un rôle",
+    ),
+    "role.color": ActionSpec(
+        "role.color", None, ("role", "color"), (), None, "medium",
+        description="modifier la couleur d'un rôle",
     ),
     "role.give": ActionSpec(
         "role.give", None, ("target", "role"), (), "member", "medium",
@@ -439,6 +451,7 @@ def is_bare_action_candidate(text: str) -> bool:
         "rejoins le vocal", "rejoint le vocal", "rejoin le vocal", "regoin une voc", "reg une voc",
         "quitte le vocal", "cree une voc", "crée une voc", "cree un salon vocal", "crée un salon vocal",
         "cree un salon textuel", "crée un salon textuel", "cree un role", "crée un role",
+        "cree une categorie", "crée une catégorie", "crée une categorie",
     )
     return any(gate.startswith(prefix) for prefix in strong_starts)
 
@@ -478,6 +491,26 @@ def local_parse(question: str) -> ParsedAction | None:
             slots,
             confidence=99,
             source="local",
+        )
+
+    category_create = re.search(
+        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:une\s+)?categorie\s+(.+)$",
+        normalized,
+    )
+    if category_create:
+        return ParsedAction("category.create", {"name": category_create.group(1).strip(" .,:;!-")[:100]}, 99, "local")
+
+    role_color = re.search(
+        r"\b(?:mets|met|change|modifie)\s+(?:le\s+)?role\s+(.+?)\s+(?:en|couleur)\s+(#[0-9a-fA-F]{6}|[A-Za-zÀ-ÿ]+)\b",
+        question,
+        re.IGNORECASE,
+    )
+    if role_color:
+        return ParsedAction(
+            "role.color",
+            {"role": role_color.group(1).strip(" .,:;!-")[:100], "color": role_color.group(2)[:40]},
+            99,
+            "local",
         )
 
     role_create = re.search(
@@ -647,7 +680,7 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
     for key in (
         "target", "reason", "duration", "query", "app", "state", "section",
         "log_category", "channel", "user_id", "name", "category", "role",
-        "text", "nickname",
+        "text", "nickname", "color",
     ):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
@@ -686,7 +719,7 @@ async def classify_with_ai(
         "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
         "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
         "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
-        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, name, category, role, text, nickname, confidence.\n"
+        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, name, category, role, text, nickname, color, confidence.\n"
         "Actions autorisées:\n" + catalog
     )
     result = await ai_service.generate(
@@ -704,6 +737,97 @@ async def classify_with_ai(
     if not result.ok:
         return None
     return _validate_ai_payload(_json_object(result.text))
+
+
+def looks_multi_action(question: str) -> bool:
+    """Détecte une demande qui contient vraisemblablement plusieurs actions."""
+    text = normalize_text(question)
+    if not text or len(text) > 1800:
+        return False
+    separators = sum(text.count(token) for token in (" puis ", " ensuite ", ";", " et apres ", " et après "))
+    action_words = re.findall(
+        r"\b(?:cree|creer|ajoute|donne|retire|renomme|configure|mets|change|deplace|"
+        r"envoie|ban|bannis|warn|mute|kick|active|desactive|rejoint|quitte|lance|joue)\b",
+        text,
+    )
+    # Une simple phrase « ban X et raison Y » ne devient pas artificiellement un plan.
+    return separators >= 1 or len(action_words) >= 2
+
+
+async def parse_action_plan(
+    question: str,
+    *,
+    guild_id: int | None,
+    channel_id: int | None,
+    user_id: int | None,
+) -> tuple[ParsedAction, ...]:
+    """Transforme une instruction composée en 2..8 actions autorisées et ordonnées.
+
+    Le modèle ne reçoit aucun pouvoir : chaque élément repasse par le même validateur
+    fermé que parse_action(), puis l'exécution vérifie localement permissions, hiérarchie
+    et existence réelle des ressources Discord.
+    """
+    if not looks_multi_action(question):
+        return ()
+    catalog = "\n".join(
+        f"- {spec.intent}: {spec.description}; required={','.join(spec.required) or 'none'}; optional={','.join(spec.optional) or 'none'}"
+        for spec in ACTIONS.values()
+        if spec.intent != "desktop.open_app"
+    )
+    instructions = (
+        "Tu es le planificateur d'actions de SentriX. Tu n'exécutes RIEN. "
+        "Découpe uniquement une demande explicite en plusieurs actions Discord, dans l'ordre exact. "
+        "Retourne UNIQUEMENT un JSON {\"actions\":[...]} sans markdown. "
+        "Chaque action doit utiliser un intent EXACT de la liste et seulement les champs autorisés. "
+        "Maximum 8 actions. N'invente jamais un membre, rôle, salon, catégorie, ID, nom, couleur, durée ou raison. "
+        "Les noms créés dans une étape peuvent être réutilisés mot pour mot dans les étapes suivantes. "
+        "Si la demande ne contient pas au moins deux actions claires, retourne {\"actions\":[]}. "
+        "Champs autorisés par action: intent,target,user_id,duration,reason,count,query,state,section,"
+        "log_category,channel,name,category,role,text,nickname,color,confidence.\n"
+        "ACTIONS AUTORISÉES:\n" + catalog
+    )
+    result = await ai_service.generate(
+        question,
+        model_key=ai_service.MODEL_LUNA,
+        reasoning_effort="none",
+        instructions=instructions,
+        guild_id=guild_id,
+        channel_id=channel_id,
+        user_id=user_id,
+        command="sentrix-action-plan",
+        web_search=False,
+        max_output_tokens=900,
+    )
+    if not result.ok:
+        return ()
+    payload = _json_object(result.text)
+    if not payload or not isinstance(payload.get("actions"), list):
+        return ()
+    actions: list[ParsedAction] = []
+    for raw in payload["actions"][:8]:
+        if not isinstance(raw, dict):
+            return ()
+        raw = dict(raw)
+        raw.setdefault("confidence", 90)
+        parsed = _validate_ai_payload(raw)
+        if parsed is None:
+            return ()
+        parsed.source = "plan"
+        if missing_slots(parsed):
+            return ()
+        actions.append(parsed)
+    return tuple(actions) if len(actions) >= 2 else ()
+
+
+def describe_action(action: ParsedAction) -> str:
+    """Résumé utilisateur court pour la confirmation d'un plan."""
+    label = action.spec.description if action.spec else action.intent
+    details = []
+    for key in ("name", "target", "role", "category", "channel", "log_category", "color", "duration", "count"):
+        value = action.slots.get(key)
+        if value not in (None, ""):
+            details.append(f"{key}={value}")
+    return label + (f" ({', '.join(details[:4])})" if details else "")
 
 
 async def parse_action(
@@ -749,12 +873,18 @@ def missing_prompt(intent: str, slot: str, *, target: discord.Member | None = No
             return "Quel nom voulez-vous donner au salon textuel ?"
         if intent == "role.create":
             return "Quel nom voulez-vous donner au rôle ?"
+        if intent == "category.create":
+            return "Quel nom voulez-vous donner à la catégorie ?"
+    if slot == "category":
+        return "Quelle catégorie voulez-vous utiliser ?"
     if slot == "role":
         return "Quel rôle voulez-vous utiliser ?"
     if slot == "text":
         return "Quel message voulez-vous envoyer ?"
     if slot == "nickname":
         return "Quel nouveau pseudo voulez-vous donner à ce membre ?"
+    if slot == "color":
+        return "Quelle couleur voulez-vous utiliser (ex. rouge ou #ff0000) ?"
     return f"Quelle valeur voulez-vous utiliser pour « {slot} » ?"
 
 
@@ -792,8 +922,8 @@ def merge_followup(action: ParsedAction, answer: str) -> ParsedAction:
         candidate = _log_category_alias(value)
         if candidate:
             slots["log_category"] = candidate
-    elif slot in {"name", "category", "role", "text", "nickname"} and value:
-        limits = {"name": 100, "category": 100, "role": 100, "text": 1900, "nickname": 32}
+    elif slot in {"name", "category", "role", "text", "nickname", "color"} and value:
+        limits = {"name": 100, "category": 100, "role": 100, "text": 1900, "nickname": 32, "color": 40}
         slots[slot] = value[: limits[slot]]
     return ParsedAction(action.intent, slots, action.confidence, "followup")
 
