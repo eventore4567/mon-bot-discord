@@ -1006,6 +1006,52 @@ class Ai(commands.Cog, name="Ai"):
             await self._propose_log_configuration(message)
             return True
 
+        if action.intent == "config.logs.route":
+            resolution = ai_actions.resolve_text_channel(
+                message.guild, str(action.slots.get("channel") or "")
+            )
+            if resolution.ambiguous:
+                options = "\n".join(
+                    f"- <#{int(ch.id)}> — #{ch.name}" for ch in resolution.ambiguous
+                )
+                await message.reply(
+                    "J’ai trouvé plusieurs salons possibles. Lequel voulez-vous utiliser ?\n" + options,
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+            if resolution.channel is None:
+                await message.reply(
+                    "Je ne trouve pas ce salon clairement. Mentionnez directement le salon, par exemple <#123456789012345678>.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+            category = str(action.slots.get("log_category") or "")
+            proposal = ai_actions.LogProposal(
+                category=category,
+                label=ai_actions.log_category_label(category),
+                channel_id=int(resolution.channel.id),
+                channel_name=str(resolution.channel.name),
+                score=100,
+                evidence="choix explicite de l'utilisateur",
+            )
+            view = _LogConfigConfirmView(
+                self,
+                source_message=message,
+                author_id=message.author.id,
+                proposals=(proposal,),
+            )
+            sent = await message.reply(
+                f"Je vais envoyer les logs **{proposal.label}** dans <#{proposal.channel_id}>. "
+                "Voulez-vous appliquer ce changement ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+
         if action.intent == "navigation.setup":
             section = str(action.slots.get("section") or "").strip() or None
             decision = await access_matrix.evaluate(
