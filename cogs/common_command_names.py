@@ -37,7 +37,7 @@ PREFERRED_COMMAND_NAMES: dict[str, str] = {
     "report-bug": "bugreport",
     "image-prompt": "prompt",
     "fact-check": "factcheck",
-    "ai-translate": "aitranslate",
+    "ai-translate": "aitrad",
     "bot-status": "status",
     "server-growth": "growth",
     "command-stats": "cmdstats",
@@ -61,9 +61,9 @@ PREFERRED_COMMAND_NAMES: dict[str, str] = {
     "invitebonushistory": "invitehistory",
     "addbonusinvites": "addinvites",
     "removebonusinvites": "removeinvites",
-    "notifs-ping": "notify",
-    "notifs-list": "notifications",
-    "notifs-remove": "removenotif",
+    "notifs-ping": "notif",
+    "notifs-list": "notifs",
+    "notifs-remove": "unnotif",
     "welcome-config": "welcome",
     "antiaccount": "antialt",
     "antinuke-whitelist-add": "nukewladd",
@@ -110,11 +110,11 @@ PREFERRED_COMMAND_NAMES: dict[str, str] = {
     "setwarnbanthreshold": "warnthreshold",
     "set-xp": "setxp",
     "add-xp": "addxp",
-    "reset-levels": "resetlevels",
+    "reset-levels": "resetxp",
     "levelcheck": "checklevel",
     "levelrepair": "fixlevel",
     "designsetup": "design",
-    "embedconfig": "embedsettings",
+    "embedconfig": "embedroles",
     "rolepanel": "roles",
     "rolepanel-refresh": "refreshroles",
     "reactionrole-add": "rradd",
@@ -122,10 +122,97 @@ PREFERRED_COMMAND_NAMES: dict[str, str] = {
     "reactionrole-list": "rrlist",
     "aisetup": "aiconfig",
     "diagnostic": "diagnose",
-    "reset-economy": "reseteconomy",
-    "status-rotate": "statusrotate",
+    "reset-economy": "reseteco",
+    "status-rotate": "rotation",
     "bot-servers": "servers",
-    "bot-leave": "leaveserver",
+    "bot-leave": "quitter",
+    # Noms courts validés le 20/09/2026 (voir tests/test_short_command_names.py). Le nom
+    # interne ne change jamais : permissions, catalogue et récompenses restent identiques,
+    # seul le nom conseillé/affiché et l'alias tapé par les membres sont courts.
+    "economyleaderboard": "topeco",
+    "repleaderboard": "toprep",
+    "achievements-v21": "badges",
+    "server-managed": "maintenance",
+    "server-health": "checkup",
+    "server-audit": "saudit",
+    "market-history": "mhisto",
+    "market-cancel": "mcancel",
+    "market-sell": "msell",
+    "market-find": "mfind",
+    "market-buy": "mbuy",
+    "market-my": "mmine",
+    "proofexample-remove": "proofdel",
+    "proofexamples": "prooflist",
+    "proofexample": "proofadd",
+    "setstatus": "statut",
+    "set-bot": "bot",
+    "reactionevent": "event",
+    "ticketcenter": "tickets",
+    "systemstatus": "sysinfo",
+    "profilecard": "carte",
+    "lastmessage": "lastmsg",
+    "gameprofile": "gprofil",
+    "gamehistory": "ghisto",
+    "gamestats": "gstats",
+    "dailygames": "jeuxjour",
+    "deleteemoji": "delemoji",
+    "voice-time": "vocal",
+    "give-money": "give",
+    "removerole": "delrole",
+    "economyhub": "ecohub",
+    "emoji-race": "emojirace",
+    "reactionduel": "duelreac",
+    "numberduel": "duelnum",
+    "quizduel": "duelquiz",
+    "set-bio": "bio",
+    "sentrixpro": "pro",
+    "infinit": "infini",
+}
+
+# Anciens noms conseillés remplacés ci-dessus : ils restent tapables (alias secondaires).
+LEGACY_PREFERRED_ALIASES: dict[str, tuple[str, ...]] = {
+    "ai-translate": ("aitranslate",),
+    "notifs-ping": ("notify",),
+    "notifs-list": ("notifications",),
+    "notifs-remove": ("removenotif",),
+    "reset-economy": ("reseteconomy",),
+    "status-rotate": ("statusrotate",),
+    "bot-leave": ("leaveserver",),
+    "reset-levels": ("resetlevels",),
+    "embedconfig": ("embedsettings",),
+}
+
+# Sous-commandes : "groupe sous-commande" interne -> nom court de la feuille. Le groupe
+# lui-même est raccourci via PREFERRED_COMMAND_NAMES (sentrixpro -> pro), la feuille ici.
+PREFERRED_SUBCOMMAND_NAMES: dict[str, str] = {
+    "sentrixpro quarantine-setup": "quarantaine",
+    "sentrixpro ticket-summary": "tickets",
+    "sentrixpro notifications": "notifs",
+    "sentrixpro security": "securite",
+    "sentrixpro profile": "profil",
+    "sentrixpro history": "histo",
+    "sentrixpro status": "etat",
+    "sentrixpro season": "saison",
+    "sentrixpro help": "aide",
+    "embedconfig removerole": "delrole",
+    "embed duplicate": "copier",
+    "embed preview": "apercu",
+    "embed message": "msg",
+    "music playlist": "pl",
+    "music nowplaying": "np",
+    "music previous": "prev",
+    "music autoplay": "auto",
+    "manage permissions": "perms",
+    "manage duplicates": "doublons",
+    "manage simulate": "simul",
+    "manage snapshot": "snap",
+    "giveaway blacklist": "exclure",
+    "sanctiondm status": "etat",
+    "rolepanel dropdown": "menu",
+    "rolepanel reaction": "emoji",
+    "shoprole remove": "del",
+    "shoprole price": "prix",
+    "infinit status": "etat",
 }
 
 # Alias secondaires : ils ne remplacent PAS le nom affiché dans +help. Ils permettent
@@ -190,7 +277,20 @@ def preferred_name(command: commands.Command) -> str:
         return str(getattr(command, "name", "") or "")
     root, *rest = qualified.split(" ")
     root = PREFERRED_COMMAND_NAMES.get(root, root)
-    return " ".join([root, *rest]) if rest else root
+    if not rest:
+        return root
+    # Feuilles raccourcies (music playlist -> music pl) ; un niveau intermédiaire
+    # renommé se propage à ses enfants (music playlist add -> music pl add).
+    parts = qualified.split(" ")
+    leaves = []
+    for depth in range(1, len(parts)):
+        leaves.append(PREFERRED_SUBCOMMAND_NAMES.get(" ".join(parts[: depth + 1]), parts[depth]))
+    return " ".join([root, *leaves])
+
+
+def display_name(command: commands.Command) -> str:
+    """Nom conseillé complet (« pro etat », « music pl add »), pour +help et le balayage."""
+    return preferred_name(command)
 
 
 def _register_alias(bot: commands.Bot, command: commands.Command, preferred: str) -> bool:
@@ -210,6 +310,21 @@ def _register_alias(bot: commands.Bot, command: commands.Command, preferred: str
         aliases.append(preferred)
     bot.all_commands[preferred] = command
     command.extras["sentrix_preferred_name"] = preferred
+    return True
+
+
+def _register_sub_alias(command: commands.Command, alias: str) -> bool:
+    """Alias court d'une sous-commande, enregistré dans le groupe parent uniquement."""
+    parent = command.parent
+    if parent is None or not alias or alias == str(command.name):
+        return False
+    existing = parent.all_commands.get(alias)
+    if existing is not None:
+        return existing is command
+    aliases = getattr(command, "aliases", None)
+    if isinstance(aliases, list) and alias not in aliases:
+        aliases.append(alias)
+    parent.all_commands[alias] = command
     return True
 
 
@@ -385,26 +500,89 @@ def _patch_help_renderers() -> None:
     logger.info("+help affiche désormais les noms de commandes familiers.")
 
 
+def _apply_short_names(bot: commands.Bot, command: commands.Command) -> tuple[int, int, int]:
+    """Alias court + alias secondaires pour une commande et toutes ses sous-commandes."""
+    added = french_added = sub_added = 0
+    nodes = [command, *(command.walk_commands() if isinstance(command, commands.Group) else [])]
+    for node in nodes:
+        if node.parent is not None:
+            leaf = PREFERRED_SUBCOMMAND_NAMES.get(str(node.qualified_name))
+            if leaf and _register_sub_alias(node, leaf):
+                sub_added += 1
+            continue
+        preferred = PREFERRED_COMMAND_NAMES.get(str(node.name))
+        if preferred and _register_alias(bot, node, preferred):
+            added += 1
+        for alias in FRENCH_COMMAND_ALIASES.get(str(node.name), ()) + LEGACY_PREFERRED_ALIASES.get(str(node.name), ()):
+            if _register_secondary_alias(bot, node, alias):
+                french_added += 1
+    return added, french_added, sub_added
+
+
+def _apply_sub_short_names(command: commands.Command) -> int:
+    """Alias courts des sous-commandes d'un nœud ajouté à un groupe (pas besoin du bot)."""
+    added = 0
+    nodes = [command, *(command.walk_commands() if isinstance(command, commands.Group) else [])]
+    for node in nodes:
+        if node.parent is None:
+            continue
+        leaf = PREFERRED_SUBCOMMAND_NAMES.get(str(node.qualified_name))
+        if leaf and _register_sub_alias(node, leaf):
+            added += 1
+    return added
+
+
+def _watch_late_commands() -> None:
+    """Les couches chargées après cet installateur (market, manage permissions, proof…)
+    ajoutent ou remplacent des commandes plus tard, parfois directement dans un groupe :
+    chaque add_command (bot OU groupe) reçoit son nom court immédiatement."""
+    if getattr(commands.GroupMixin, "_sentrix_short_names_watch", False):
+        return
+    original_add = commands.GroupMixin.add_command
+
+    def add_command_with_short_name(self, command: commands.Command) -> None:
+        original_add(self, command)
+        try:
+            if isinstance(self, commands.Bot):
+                _apply_short_names(self, command)
+            else:
+                _apply_sub_short_names(command)
+        except Exception:
+            logger.warning("Nom court impossible pour +%s", getattr(command, "qualified_name", "?"), exc_info=True)
+
+    add_command_with_short_name._sentrix_original = original_add
+    commands.GroupMixin.add_command = add_command_with_short_name
+    commands.GroupMixin._sentrix_short_names_watch = True
+
+
+def refresh_short_names(bot: commands.Bot) -> None:
+    """Dernière passe de fin de boot : certaines couches remplacent des (sous-)commandes
+    par des copies après le premier passage ; on ré-applique les noms courts manquants."""
+    for command in list(bot.commands):
+        try:
+            _apply_short_names(bot, command)
+        except Exception:
+            logger.warning("Nom court impossible pour +%s", getattr(command, "qualified_name", "?"), exc_info=True)
+
+
 def install(bot: commands.Bot) -> None:
     _patch_user_converter()
     _install_mention_listener(bot)
 
     added = 0
     french_added = 0
-    for command in list(bot.walk_commands()):
-        if command.parent is not None:
-            continue
-
-        preferred = PREFERRED_COMMAND_NAMES.get(str(command.name))
-        if preferred and _register_alias(bot, command, preferred):
-            added += 1
-
-        for alias in FRENCH_COMMAND_ALIASES.get(str(command.name), ()):
-            if _register_secondary_alias(bot, command, alias):
-                french_added += 1
+    sub_added = 0
+    for command in list(bot.commands):
+        a, f, sub = _apply_short_names(bot, command)
+        added += a
+        french_added += f
+        sub_added += sub
+    _watch_late_commands()
 
     _patch_help_renderers()
     if added:
         logger.info("%s alias de commandes familiers ajoutés.", added)
     if french_added:
         logger.info("%s alias français simples disponibles.", french_added)
+    if sub_added:
+        logger.info("%s sous-commandes avec un nom court.", sub_added)

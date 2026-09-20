@@ -161,7 +161,14 @@ def prefix_argument(param: commands.Parameter) -> str | None:
 
 def prefix_invocation(command: commands.Command) -> tuple[str, list[str]]:
     """"+ban <@cible> test sweep" + liste des paramètres non générables."""
-    parts = [f"+{command.qualified_name}"]
+    # Nom court conseillé (cogs/common_command_names.py) : le balayage prouve ainsi que
+    # chaque alias court résout bien vers la même commande, avec les mêmes permissions.
+    try:
+        from cogs.common_command_names import display_name
+        shown = display_name(command)
+    except Exception:  # noqa: BLE001
+        shown = command.qualified_name
+    parts = [f"+{shown}"]
     missing: list[str] = []
     for name, param in command.clean_params.items():
         if not param.required:
@@ -373,7 +380,7 @@ async def sweep(*, only: list[str], include_owner: bool, timeout: float, transpo
                 bot, guild, transport="prefix", name=name, invocation=invocation,
                 runner=lambda inv=invocation: harness.run_prefix(bot, guild, inv),
                 capture=capture, reports=reports, timeout=timeout,
-                generated_args=len(invocation.split()) - 1 - name.count(" "),
+                generated_args=len(invocation.split()) - 1 - invocation.split(" ")[0].count(" ") - (len(_prefix_words(invocation, command)) - 1),
             ))
             print(f"[{results[-1]['status']:8}] {invocation}", flush=True)
 
@@ -406,6 +413,12 @@ async def sweep(*, only: list[str], include_owner: bool, timeout: float, transpo
 
     counts = {key: sum(1 for r in results if r["status"] == key) for key in ("cassee", "fragile", "ok", "ignoree")}
     return {"generated_at": int(time.time()), "counts": counts, "total": len(results), "results": results}
+
+
+def _prefix_words(invocation: str, command: commands.Command) -> list[str]:
+    """Mots du nom affiché (« +music pl add » → 3) pour ne pas les compter comme arguments."""
+    depth = command.qualified_name.count(" ") + 1
+    return invocation.split(" ")[:depth]
 
 
 def _leaf_options(options: list) -> list:
