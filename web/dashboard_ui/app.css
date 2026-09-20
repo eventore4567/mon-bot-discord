@@ -1242,8 +1242,8 @@ html[data-theme="oled"] body.dashboard-locked::after{
 body.dashboard-locked{
   --chroma-cyan:#68d7ff;
   --chroma-blue:#6f8dff;
-  --chroma-violet:#a66cff;
-  --chroma-pink:#ff6eb6;
+  --chroma-violet:#7e95c7;
+  --chroma-pink:#9fb7d4;
   --glass-surface:color-mix(in srgb,var(--panel) 78%,transparent);
   --glass-surface-strong:color-mix(in srgb,var(--panel2) 84%,transparent);
   --glass-line:color-mix(in srgb,var(--text) 10%,var(--line));
@@ -1254,8 +1254,8 @@ body.dashboard-locked .topbar{
     linear-gradient(105deg,
       color-mix(in srgb,var(--chroma-cyan) 3%,transparent),
       transparent 28%,
-      color-mix(in srgb,var(--chroma-violet) 4%,transparent) 58%,
-      color-mix(in srgb,var(--chroma-pink) 3%,transparent)),
+      color-mix(in srgb,var(--chroma-blue) 3%,transparent) 58%,
+      color-mix(in srgb,var(--chroma-cyan) 2%,transparent)),
     color-mix(in srgb,var(--bg) 82%,transparent);
   border-bottom-color:color-mix(in srgb,var(--chroma-blue) 14%,var(--line));
 }
@@ -1266,7 +1266,7 @@ body.dashboard-locked .server-rail{
     linear-gradient(180deg,
       color-mix(in srgb,var(--chroma-blue) 3%,transparent),
       transparent 32%,
-      color-mix(in srgb,var(--chroma-violet) 2.5%,transparent) 74%,
+      color-mix(in srgb,var(--chroma-blue) 2%,transparent) 74%,
       transparent),
     color-mix(in srgb,var(--sidebar-bg,var(--bg2)) 86%,transparent);
 }
@@ -1279,7 +1279,7 @@ body.dashboard-locked :is(
   border-color:var(--glass-line);
   background:
     radial-gradient(circle at 8% 0%,color-mix(in srgb,var(--chroma-cyan) 4.5%,transparent),transparent 30%),
-    radial-gradient(circle at 100% 10%,color-mix(in srgb,var(--chroma-violet) 4%,transparent),transparent 28%),
+    radial-gradient(circle at 100% 10%,color-mix(in srgb,var(--chroma-blue) 3%,transparent),transparent 28%),
     linear-gradient(145deg,
       color-mix(in srgb,var(--panel) 82%,transparent),
       color-mix(in srgb,var(--panel2) 76%,transparent));
@@ -1288,7 +1288,7 @@ body.dashboard-locked :is(
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / .045),
     inset 1px 0 0 color-mix(in srgb,var(--chroma-cyan) 5%,transparent),
-    inset -1px 0 0 color-mix(in srgb,var(--chroma-pink) 4%,transparent),
+    inset -1px 0 0 color-mix(in srgb,var(--chroma-cyan) 2.5%,transparent),
     0 14px 36px rgb(0 0 0 / .20);
 }
 
@@ -1305,13 +1305,13 @@ body.dashboard-locked :is(.card,.module-card,.global-server-card,.theme-preset-c
     border-color:color-mix(in srgb,var(--blue2) 26%,var(--line2));
     background:
       radial-gradient(circle at 4% 0%,color-mix(in srgb,var(--chroma-cyan) 7%,transparent),transparent 30%),
-      radial-gradient(circle at 100% 4%,color-mix(in srgb,var(--chroma-pink) 5.5%,transparent),transparent 30%),
+      radial-gradient(circle at 100% 4%,color-mix(in srgb,var(--chroma-cyan) 3.5%,transparent),transparent 30%),
       linear-gradient(145deg,
         color-mix(in srgb,var(--panel) 86%,transparent),
         color-mix(in srgb,var(--panel2) 80%,transparent));
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / .065),
-      0 0 0 1px color-mix(in srgb,var(--chroma-violet) 7%,transparent),
+      0 0 0 1px color-mix(in srgb,var(--chroma-blue) 5%,transparent),
       0 16px 42px rgb(0 0 0 / .24),
       0 0 30px color-mix(in srgb,var(--blue) 6%,transparent);
     transform:translateY(-1px);
@@ -1341,7 +1341,7 @@ body.dashboard-locked .btn.primary{
     linear-gradient(105deg,
       color-mix(in srgb,var(--chroma-cyan) 72%,var(--blue)),
       color-mix(in srgb,var(--blue) 88%,var(--chroma-violet)) 46%,
-      color-mix(in srgb,var(--chroma-violet) 55%,var(--blue2)));
+      color-mix(in srgb,var(--chroma-blue) 42%,var(--blue2)));
   color:#06111c;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / .24),
@@ -1352,7 +1352,7 @@ body.dashboard-locked .btn.primary:hover{
     linear-gradient(105deg,
       color-mix(in srgb,var(--chroma-cyan) 82%,var(--blue2)),
       color-mix(in srgb,var(--blue2) 86%,var(--chroma-violet)) 46%,
-      color-mix(in srgb,var(--chroma-pink) 28%,var(--chroma-violet)));
+      color-mix(in srgb,var(--chroma-cyan) 24%,var(--chroma-blue)));
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / .30),
     0 10px 28px color-mix(in srgb,var(--blue) 24%,transparent);
@@ -1366,8 +1366,8 @@ body.dashboard-locked .nav button.active{
   background:
     linear-gradient(100deg,
       color-mix(in srgb,var(--blue) 18%,transparent),
-      color-mix(in srgb,var(--chroma-violet) 9%,transparent) 68%,
-      color-mix(in srgb,var(--chroma-pink) 5%,transparent));
+      color-mix(in srgb,var(--chroma-blue) 7%,transparent) 68%,
+      color-mix(in srgb,var(--chroma-cyan) 2%,transparent));
   border-color:color-mix(in srgb,var(--blue2) 34%,var(--line));
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / .035),
@@ -1382,7 +1382,7 @@ body.dashboard-locked .subnav button.active::after{
   position:absolute;
   left:12%;right:12%;bottom:-1px;
   height:2px;border-radius:999px;
-  background:linear-gradient(90deg,var(--chroma-cyan),var(--blue2),var(--chroma-violet),var(--chroma-pink));
+  background:linear-gradient(90deg,var(--chroma-cyan),var(--blue2),var(--chroma-blue),#b7c9dc);
   box-shadow:0 0 12px color-mix(in srgb,var(--blue) 35%,transparent);
 }
 
@@ -1398,7 +1398,7 @@ body.dashboard-locked :is(.field input,.field select,.field textarea,.search-inp
   border-color:color-mix(in srgb,var(--blue2) 58%,var(--line2));
   box-shadow:
     0 0 0 3px color-mix(in srgb,var(--blue) 11%,transparent),
-    0 0 24px color-mix(in srgb,var(--chroma-violet) 5%,transparent);
+    0 0 24px color-mix(in srgb,var(--chroma-blue) 4%,transparent);
   outline:none;
 }
 
@@ -1430,4 +1430,24 @@ html[data-glow="off"] body.dashboard-locked :is(.card,.module-card,.global-serve
     box-shadow:none!important;
     backdrop-filter:none!important;
   }
+}
+
+
+/* chromatique v2 : froid, sobre, métallique */
+body.dashboard-locked{
+  --chroma-cyan:#7fdcff;
+  --chroma-blue:#6d8dff;
+  --chroma-violet:#7e95c7;
+  --chroma-pink:#9fb7d4;
+}
+body.dashboard-locked :is(.card,.module-card,.global-server-card,.theme-preset-card){
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .04),
+    0 12px 30px rgb(0 0 0 / .18);
+}
+body.dashboard-locked .btn.primary{
+  background:linear-gradient(105deg,#7fdcff 0%,#6d8dff 52%,#8da4c8 100%);
+}
+body.dashboard-locked .subnav button.active::after{
+  background:linear-gradient(90deg,#7fdcff,#6d8dff,#9fb7d4);
 }
