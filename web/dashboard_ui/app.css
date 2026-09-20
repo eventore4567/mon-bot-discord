@@ -834,3 +834,49 @@ body.dashboard-locked #content{min-height:0}
   .health-notice{top:calc(var(--top-safe) + 8px);left:10px;right:10px;transform:none;max-width:none}
   .health-retry{margin-left:auto}
 }
+
+
+/* ---------- scrollbars SentriX ----------
+   Plus fines, arrondies et discrètes que la barre native grise. */
+:where(.workspace,.sidebar,.server-rail,.table-wrap,.palette-results,.modal,.options){
+  scrollbar-width:thin;
+  scrollbar-color:color-mix(in srgb,var(--blue) 55%,var(--line2)) transparent;
+  scroll-behavior:smooth;
+}
+:where(.workspace,.sidebar,.server-rail,.table-wrap,.palette-results,.modal,.options)::-webkit-scrollbar{
+  width:8px;
+  height:8px;
+}
+:where(.workspace,.sidebar,.server-rail,.table-wrap,.palette-results,.modal,.options)::-webkit-scrollbar-track{
+  background:transparent;
+}
+:where(.workspace,.sidebar,.server-rail,.table-wrap,.palette-results,.modal,.options)::-webkit-scrollbar-thumb{
+  min-height:42px;
+  border:2px solid transparent;
+  border-radius:999px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb,var(--blue) 78%,#ffffff 4%),
+      color-mix(in srgb,var(--blue2) 70%,var(--panel2))
+    ) padding-box;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 5%,transparent);
+}
+:where(.workspace,.sidebar,.server-rail,.table-wrap,.palette-results,.modal,.options)::-webkit-scrollbar-thumb:hover{
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb,var(--blue) 90%,#ffffff 7%),
+      color-mix(in srgb,var(--blue2) 84%,var(--panel2))
+    ) padding-box;
+}
+:where(.workspace,.sidebar,.server-rail,.table-wrap,.palette-results,.modal,.options)::-webkit-scrollbar-corner{
+  background:transparent;
+}
+
+/* Le rail de serveurs reste visuellement propre : pas de barre permanente. */
+.server-rail{
+  scrollbar-width:none;
+}
+.server-rail::-webkit-scrollbar{
+  width:0;
+  height:0;
+}
