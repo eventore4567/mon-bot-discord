@@ -261,6 +261,17 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveDirty(); }
   if (e.key === 'Escape') { closePalette(); closeModal(); closeSidebar(); }
 });
+/* ---------- responsive universel : synchronisation menu ---------- */
+const responsiveNavMq = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 1024px)') : null;
+function syncResponsiveNav() {
+  if (responsiveNavMq && !responsiveNavMq.matches) closeSidebar();
+}
+if (responsiveNavMq) {
+  if (typeof responsiveNavMq.addEventListener === 'function') responsiveNavMq.addEventListener('change', syncResponsiveNav);
+  else if (typeof responsiveNavMq.addListener === 'function') responsiveNavMq.addListener(syncResponsiveNav);
+}
+window.addEventListener('orientationchange', () => setTimeout(syncResponsiveNav, 120));
+
 window.addEventListener('beforeunload', e => { if (hasDirty()) { e.preventDefault(); e.returnValue = ''; } });
 window.addEventListener('offline', () => $('netNotice').classList.remove('hidden'));
 window.addEventListener('online', () => $('netNotice').classList.add('hidden'));
