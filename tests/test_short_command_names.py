@@ -110,3 +110,21 @@ def test_every_short_name_is_shorter_than_the_internal_one():
     for internal, leaf in short.PREFERRED_SUBCOMMAND_NAMES.items():
         assert " " not in leaf and len(leaf) <= len(internal.split(" ")[-1]), (internal, leaf)
 
+
+
+def test_short_slash_names_are_gated_and_short(monkeypatch):
+    import sentrix_canonical_command_surface as surface
+
+    monkeypatch.delenv(surface.SHORT_SLASH_ENV, raising=False)
+    assert surface.short_slash_enabled() is False, "désactivé par défaut : slash globaux partagés primaire/standby"
+    monkeypatch.setenv(surface.SHORT_SLASH_ENV, "1")
+    assert surface.short_slash_enabled() is True
+
+    seen: set[tuple[str, str, str]] = set()
+    for origin, (root, bucket, leaf) in surface.SHORT_TARGETS.items():
+        assert " " not in root and " " not in leaf and " " not in bucket, origin
+        assert len(root) <= 10 and len(leaf) <= 12, (origin, root, leaf)
+        assert (root, bucket, leaf) not in seen, f"chemin slash en double : /{root} {bucket} {leaf}".replace("  ", " ")
+        seen.add((root, bucket, leaf))
+    for source, public in surface.SHORT_DIRECT.items():
+        assert len(public) < len(source), (source, public)
