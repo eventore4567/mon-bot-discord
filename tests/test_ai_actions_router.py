@@ -209,3 +209,27 @@ def test_text_channel_resolution_accepts_unique_exact_channel():
     guild = SimpleNamespace(text_channels=[target, _channel(21, "general")])
     result = ai_actions.resolve_text_channel(guild, "#logs-vocal")
     assert result.channel is target
+
+
+
+def test_tempban_is_distinct_from_permanent_ban():
+    parsed = ai_actions.local_parse("bannis temporairement Tomioka pendant 2 jours pour raid")
+    assert parsed is not None
+    assert parsed.intent == "moderation.tempban"
+    assert parsed.slots["duration"] == "2j"
+    member = _member(111111111111111, "tomioka")
+    assert ai_actions.build_command_line(parsed, prefix="+", member=member) == "+tempban <@111111111111111> 2j raid"
+
+
+def test_unban_requires_a_real_discord_id_and_keeps_context():
+    parsed = ai_actions.local_parse("SentriX débannis 123456789012345678 pour erreur")
+    assert parsed is not None
+    assert parsed.intent == "moderation.unban"
+    assert parsed.slots["user_id"] == "123456789012345678"
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+unban 123456789012345678 erreur"
+
+    missing = ai_actions.local_parse("SentriX débannis cet utilisateur")
+    assert missing is not None
+    assert ai_actions.missing_slots(missing) == ("user_id",)
+    completed = ai_actions.merge_followup(missing, "123456789012345678")
+    assert ai_actions.build_command_line(completed, prefix="+") == "+unban 123456789012345678"
