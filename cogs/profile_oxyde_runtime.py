@@ -1,11 +1,13 @@
-"""Profil SentriX lisible et distinct des statistiques personnelles.
+"""Profil communautaire SentriX.
 
-`+profile` / `+profil` ouvre le profil communautaire interactif.
-`+me` reste une commande distincte et affiche uniquement les statistiques personnelles.
+`/me` ouvre le profil communautaire interactif.
+`+profile` / `+profil` sont supprimées.
+`+me` reste une commande préfixée distincte pour les statistiques personnelles.
 """
 from __future__ import annotations
 
 import functools
+import logging
 
 import discord
 from discord.ext import commands
@@ -16,6 +18,7 @@ from . import community_v3, community_v31
 from utils import sentrix_panels as panels
 
 CARD_COLOUR = premium_style.COLORS["profile"]
+logger = logging.getLogger("bot.profile-runtime")
 
 
 def _fmt(value) -> str:
@@ -244,7 +247,7 @@ class CleanProfileView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
             return True
-        await interaction.response.send_message('Ouvrez votre propre profil avec `+profil`.', ephemeral=True)
+        await interaction.response.send_message('Ouvrez votre propre profil avec `/me`.', ephemeral=True)
         return False
 
     async def _show(self, interaction: discord.Interaction, page: str):
@@ -349,37 +352,66 @@ def _install_me(bot: commands.Bot) -> None:
     command._sentrix_personal_stats_v18 = True
 
 
+async def send_profile_slash(
+    bot: commands.Bot,
+    interaction: discord.Interaction,
+    membre: discord.Member | None = None,
+) -> None:
+    """Implémentation native de /me.
+
+    On diffère immédiatement la réponse avant les lectures DB afin d'éviter l'expiration
+    Discord à 3 secondes qui provoquait l'erreur générique observée avec /profile.
+    """
+    if interaction.guild is None:
+        if interaction.response.is_done():
+            await interaction.followup.send("Cette commande fonctionne uniquement sur un serveur.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Cette commande fonctionne uniquement sur un serveur.", ephemeral=True)
+        return
+
+    if not interaction.response.is_done():
+        await interaction.response.defer(thinking=True)
+
+    member = membre
+    if member is None:
+        if isinstance(interaction.user, discord.Member):
+            member = interaction.user
+        else:
+            member = interaction.guild.get_member(interaction.user.id)
+            if member is None:
+                try:
+                    member = await interaction.guild.fetch_member(interaction.user.id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    await interaction.followup.send(
+                        "Impossible de récupérer votre profil Discord pour le moment.",
+                        ephemeral=True,
+                    )
+                    return
+
+    try:
+        view = CleanProfileView(bot, interaction.guild, member, interaction.user.id)
+        embed = await build_page(bot, interaction.guild, member, interaction.user.id, "overview")
+        message = await interaction.followup.send(embed=embed, view=view, wait=True)
+        view.message = message
+    except Exception:
+        logger.exception(
+            "Échec /me guild=%s user=%s target=%s",
+            getattr(interaction.guild, "id", None),
+            getattr(interaction.user, "id", None),
+            getattr(member, "id", None),
+        )
+        try:
+            await interaction.followup.send(
+                "Le profil est temporairement indisponible. Réessayez dans quelques instants.",
+                ephemeral=True,
+            )
+        except discord.HTTPException:
+            pass
+
+
 def install(bot: commands.Bot) -> None:
     _keep_me_in_final_catalog()
     _install_me(bot)
-
-    command = bot.get_command("profile")
-    if command is None or getattr(command, "_sentrix_oxyde_profile", False):
-        return
-
-    # Utilise le transport discord.py brut pour préserver exactement cette carte, sans que
-    # premium_style_runtime ne rajoute des titres/footers/champs historiques.
-    try:
-        from . import premium_style_runtime
-        raw_context_send = premium_style_runtime._ORIGINALS.get("context_send") or commands.Context.send
-    except Exception:
-        raw_context_send = commands.Context.send
-
-    async def profile_callback(cog, ctx: commands.Context, membre: discord.Member = None):
-        if ctx.guild is None:
-            return await ctx.send("Cette commande fonctionne uniquement sur un serveur.")
-        member = membre or ctx.author
-        view = CleanProfileView(bot, ctx.guild, member, ctx.author.id)
-        embed = await build_page(bot, ctx.guild, member, ctx.author.id, "overview")
-        message = await raw_context_send(ctx, embed=embed, view=view)
-        view.message = message
-
-    params = command.params.copy()
-    profile_callback = functools.wraps(command.callback)(profile_callback)
-    command.callback = profile_callback
-    command.params = params
-    command._sentrix_oxyde_profile = True
-
 
 async def setup(bot: commands.Bot) -> None:
     install(bot)
