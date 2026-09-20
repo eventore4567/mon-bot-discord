@@ -301,3 +301,13 @@ if(ticketSource.includes('await _renderTicketsBase();\n  await appendTicketButto
 if(!ticketSource.includes('ticket-actions-page')) throw new Error('Actions staff doit recréer son conteneur après le chargement API.');
 const moderationSource = sourceByName.get('41_moderation.js') || '';
 if(!moderationSource.includes("if(state.page==='tickets'&&state.sub==='actions')return;")) throw new Error('Actions staff doit ignorer le hero/KPI SentriX Experience.');
+
+
+// Tickets v3 : la page Panneaux doit être une liste compacte et l'éditeur doit
+// s'ouvrir comme une vue interne séparée, sans hero/KPI.
+const modulesSource = sourceByName.get('30_modules.js') || '';
+if(!modulesSource.includes('ticket-panels-home')) throw new Error('Tickets doit afficher une liste compacte de panneaux.');
+if(!modulesSource.includes('ticket-panel-editor')) throw new Error('Tickets doit avoir un éditeur interne séparé.');
+if(!modulesSource.includes('ticketEditorBack')) throw new Error('L’éditeur Tickets doit proposer un retour aux panneaux.');
+if(!modulesSource.includes('state.ticketEditorOpen = true')) throw new Error('L’ouverture interne d’un panneau n’est pas câblée.');
+if(!moderationSource.includes("if(state.page==='tickets')return;")) throw new Error('Tickets ne doit plus recevoir le hero/KPI SentriX Experience.');
