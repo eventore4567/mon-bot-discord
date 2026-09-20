@@ -224,7 +224,7 @@ def normalize_duration(value: str | None) -> str | None:
     raw = normalize_text(value).strip(" .,;:")
     if raw in {"une semaine", "1 semaine", "un week", "1 week"}:
         return "7j"
-    compact = re.fullmatch(r"(\d{1,4})\s*([smhjd])", raw)
+    compact = re.search(r"\b(\d{1,4})\s*([smhjd])\b", raw)
     if compact:
         return f"{int(compact.group(1))}{_DURATION_UNITS[compact.group(2)]}"
     match = re.search(
@@ -282,6 +282,7 @@ def _extract_target(question: str) -> str | None:
         # « mets Tomioka en mute pendant 10h », le mot suivant « mute » est
         # « pendant », pas la cible.
         r"\bmets\s+@?([^\s,;]+)\s+en\s+(?:mute|timeout)",
+        r"\b(?:enl[eè]ve|retire)\s+le\s+(?:mute|timeout)\s+(?:de|du|d['’])\s*@?([^\s,;]+)",
         r"\b(?:tempban|ban\s+temporaire|bannis\s+temporairement|bannir\s+temporairement)\s+@?([^\s,;]+)",
         r"\b(?:unmute|demute|démute)\s+@?([^\s,;]+)",
         r"\b(?:ban|bannis|bannir|warn|avertis|avertir|mute|mut|kick|expulse|vire)\s+@?([^\s,;]+)",
