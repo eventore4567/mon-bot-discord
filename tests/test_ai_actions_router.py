@@ -286,3 +286,50 @@ def test_dynamic_arguments_must_be_grounded_in_original_request():
         "ban cet utilisateur",
         "<@123456789012345678>",
     )
+
+
+def test_voice_join_typos_become_real_native_action():
+    for text in ("SentriX rejoint le vocal", "SentriX regoin une voc", "SentriX reg une voc"):
+        parsed = ai_actions.local_parse(text)
+        assert parsed is not None
+        assert parsed.intent == "voice.join"
+        assert ai_actions.missing_slots(parsed) == ()
+
+
+def test_create_voice_channel_without_name_asks_followup():
+    parsed = ai_actions.local_parse("SentriX crée une voc")
+    assert parsed is not None
+    assert parsed.intent == "channel.create_voice"
+    assert ai_actions.missing_slots(parsed) == ("name",)
+    completed = ai_actions.merge_followup(parsed, "Gaming")
+    assert completed.slots["name"] == "Gaming"
+    assert ai_actions.missing_slots(completed) == ()
+
+
+def test_native_role_and_cross_channel_message_parsing():
+    role = ai_actions.local_parse("SentriX donne le role VIP à Tomioka")
+    assert role is not None
+    assert role.intent == "role.give"
+    assert role.slots["role"].casefold() == "vip"
+    assert role.slots["target"].casefold() == "tomioka"
+
+    msg = ai_actions.local_parse("SentriX envoie maintenance à 20h dans #annonces")
+    assert msg is not None
+    assert msg.intent == "message.send"
+    assert msg.slots["channel"].casefold() == "#annonces"
+    assert "maintenance" in msg.slots["text"].casefold()
+
+
+def test_native_ai_payload_accepts_only_registered_fields():
+    parsed = ai_actions._validate_ai_payload({
+        "intent": "channel.create_text",
+        "name": "annonces",
+        "confidence": 95,
+    })
+    assert parsed is not None
+    assert parsed.slots["name"] == "annonces"
+    assert ai_actions._validate_ai_payload({
+        "intent": "system.shell",
+        "name": "rm -rf",
+        "confidence": 100,
+    }) is None
