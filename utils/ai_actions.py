@@ -161,6 +161,10 @@ ACTIONS: dict[str, ActionSpec] = {
         "tickets.open", "ticket", (), (), None, "low",
         description="ouvrir/créer un ticket",
     ),
+    "tickets.grant_access": ActionSpec(
+        "tickets.grant_access", None, ("role",), (), None, "high", True,
+        description="donner à un rôle l'accès aux tickets existants et futurs du serveur",
+    ),
     # Actions Discord natives : elles ne passent pas par une commande +, mais restent
     # strictement bornées à ce registre et seront exécutées avec vérifications de
     # permissions + hiérarchie dans cogs.ai.
@@ -452,6 +456,7 @@ def is_bare_action_candidate(text: str) -> bool:
         "quitte le vocal", "cree une voc", "crée une voc", "cree un salon vocal", "crée un salon vocal",
         "cree un salon textuel", "crée un salon textuel", "cree un role", "crée un role",
         "cree une categorie", "crée une catégorie", "crée une categorie",
+        "donne acces aux tickets", "donne l acces aux tickets", "ajoute acces aux tickets",
     )
     return any(gate.startswith(prefix) for prefix in strong_starts)
 
@@ -573,7 +578,26 @@ def local_parse(question: str) -> ParsedAction | None:
             "local",
         )
 
-    log_route = _extract_log_route(question, normalized)
+    ticket_access = re.search(
+        r"\b(?:donne|ajoute|accorde)\s+(?:l['’]?acces|acces)\s+(?:aux?|pour\s+les?)\s+tickets?\s+(?:au|a|à)\s+(?:role\s+)?@?([^\s,;]+)",
+        question,
+        re.IGNORECASE,
+    )
+    if not ticket_access:
+        ticket_access = re.search(
+            r"\b(?:donne|ajoute|accorde)\s+(?:au\s+)?role\s+(.+?)\s+(?:l['’]?acces|acces)\s+(?:aux?|pour\s+les?)\s+tickets?",
+            question,
+            re.IGNORECASE,
+        )
+    if ticket_access:
+        return ParsedAction(
+            "tickets.grant_access",
+            {"role": ticket_access.group(1).strip(" .,:;!?")[:100]},
+            99,
+            "local",
+        )
+
+        log_route = _extract_log_route(question, normalized)
     if log_route is not None:
         return log_route
 
