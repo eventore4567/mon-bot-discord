@@ -190,7 +190,8 @@ applyGlobalPreferences();
 function globalServerCard(g, add = false) {
   const initials = esc((g.name || 'S').slice(0, 2).toUpperCase());
   const icon = g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : initials;
-  const role = add ? 'SentriX n’est pas installé' : (g.owner ? 'Propriétaire' : 'Administrateur');
+  const accessLabels = {owner:'Propriétaire',administrator:'Administrateur',manage_guild:'Gérer le serveur'};
+  const role = add ? 'SentriX n’est pas installé' : (accessLabels[g.access_level] || (g.owner ? 'Propriétaire' : 'Permission vérifiée'));
   return `<article class="global-server-card">
     <div class="global-server-main">
       <span class="global-server-icon">${icon}</span>
