@@ -755,21 +755,16 @@ body.save-pending .workspace{padding-bottom:104px}
   border-radius:999px;overflow:hidden;background:rgba(255,255,255,.10);
 }
 .startup-progress i{
-  display:block;height:100%;width:42%;border-radius:inherit;
+  display:block;height:100%;width:4%;border-radius:inherit;
   background:linear-gradient(90deg,var(--blue),var(--blue2));
-  animation:sxBootProgress 1.05s cubic-bezier(.4,0,.2,1) infinite;
   box-shadow:0 0 18px var(--accent-glow);
+  transition:width .30s cubic-bezier(.22,.7,.2,1);
 }
 body.startup-done .startup-screen{opacity:0;visibility:hidden;pointer-events:none}
 @keyframes sxBootMark{
   from{opacity:0;transform:scale(.82);filter:blur(8px)}
   65%{opacity:1;transform:scale(1.035);filter:blur(0)}
   to{opacity:1;transform:scale(1)}
-}
-@keyframes sxBootProgress{
-  0%{transform:translateX(-120%)}
-  55%{transform:translateX(75%)}
-  100%{transform:translateX(250%)}
 }
 
 /* ---------- shell dashboard verrouillé ----------
@@ -802,6 +797,6 @@ body.dashboard-locked #content{min-height:0}
   }
 }
 @media (prefers-reduced-motion:reduce){
-  .startup-mark,.startup-progress i{animation:none!important}
+  .startup-mark{animation:none!important}.startup-progress i{transition:none!important}
   .startup-screen{transition:none}
 }
