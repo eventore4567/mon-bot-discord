@@ -687,22 +687,24 @@ def local_parse(question: str) -> ParsedAction | None:
         )
 
     play_match = re.search(
-        r"\b(?:joue|jouer|play|lance|mets|met)\s+(?:(?:moi\s+)?(?:la\s+)?"
+        r"\b(joue|jouer|play|lance|mets|met)\s+(?:(?:moi\s+)?(?:la\s+)?"
         r"(?:musique|music|chanson|titre|morceau|son|track)\s+)?(.+)$",
         question,
         re.IGNORECASE,
     )
     if play_match:
-        query = play_match.group(1).strip(" .,:;!-")
-        # Mots purement génériques => SentriX demande le titre au lieu d'inventer.
-        if normalize_text(query) in {"musique", "music", "un son", "une chanson", "un titre", "un morceau"}:
-            query = ""
-        return ParsedAction(
-            "music.play",
-            {"query": query[:500]} if query else {},
-            99,
-            "local",
-        )
+        verb = normalize_text(play_match.group(1))
+        if verb in {"joue", "jouer", "play"} or music_context:
+            query = play_match.group(2).strip(" .,:;!-")
+            # Mots purement génériques => SentriX demande le titre au lieu d'inventer.
+            if normalize_text(query) in {"musique", "music", "un son", "une chanson", "un titre", "un morceau"}:
+                query = ""
+            return ParsedAction(
+                "music.play",
+                {"query": query[:500]} if query else {},
+                99,
+                "local",
+            )
 
     intent = None
     for candidate, words in _INTENT_PATTERNS:
@@ -816,7 +818,8 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
     count = payload.get("count")
     if count is not None:
         try:
-            slots["count"] = max(1, min(int(count), 100))
+            minimum = 0 if intent == "music.volume" else 1
+            slots["count"] = max(minimum, min(int(count), 100))
         except (TypeError, ValueError):
             pass
     return ParsedAction(intent=intent, slots=slots, confidence=min(100, confidence), source="ai")
