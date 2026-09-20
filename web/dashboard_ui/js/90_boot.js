@@ -172,6 +172,48 @@ async function loadGuilds() {
    Aucun état intermédiaire ne laisse la page vide : soit le dashboard, soit la page de
    connexion, soit un panneau d'erreur avec « Réessayer » / « Se reconnecter ». */
 const boot = { state: 'booting', watchdog: null };
+let startupSlowTimer = null;
+let dashboardHealthTimer = null;
+let dashboardHealthFailures = 0;
+function scheduleStartupSlowHint() {
+  clearTimeout(startupSlowTimer);
+  startupSlowTimer = setTimeout(() => {
+    if (boot.state !== 'booting' && boot.state !== 'loading_guilds') return;
+    const hint = $('startupHint');
+    if (!hint) return;
+    hint.textContent = 'Le chargement prend un peu plus de temps. SentriX vérifie la connexion au service…';
+    hint.classList.add('visible');
+  }, 6000);
+}
+function clearStartupSlowHint() {
+  clearTimeout(startupSlowTimer);
+  startupSlowTimer = null;
+  const hint = $('startupHint');
+  if (hint) hint.classList.remove('visible');
+}
+async function dashboardHealthTick({ manual = false } = {}) {
+  if (boot.state !== 'ready' || (!manual && document.hidden)) return;
+  try {
+    await api('/ready', { background: true });
+    dashboardHealthFailures = 0;
+    if (dashboardIssueKey === 'SXD-HEALTH') hideDashboardIssue('SXD-HEALTH');
+  } catch (_) {
+    dashboardHealthFailures += 1;
+    if (manual || dashboardHealthFailures >= 2) {
+      announceDashboardIssue(
+        'SentriX détecte un souci de connexion au dashboard. Les données peuvent mettre quelques secondes à revenir.',
+        { code: 'SXD-HEALTH', retry: () => dashboardHealthTick({ manual: true }), bad: true, sticky: true }
+      );
+    }
+  }
+}
+function startDashboardHealthWatch() {
+  clearInterval(dashboardHealthTimer);
+  dashboardHealthFailures = 0;
+  dashboardHealthTimer = setInterval(() => dashboardHealthTick(), 30000);
+  setTimeout(() => dashboardHealthTick(), 5000);
+}
+
 const startupStartedAt = performance.now();
 let startupFinished = false;
 let startupPercent = 4;
@@ -270,10 +312,10 @@ function showOnly(id) {
 }
 function setBootState(state, { title, message, ref, retry = true, reconnect = false } = {}) {
   boot.state = state;
-  if (state === 'ready') { clearTimeout(boot.watchdog); showOnly('dashboard'); return; }
-  if (state === 'auth_required') { clearTimeout(boot.watchdog); showOnly('landing'); loadPublic(); return; }
+  if (state === 'ready') { clearTimeout(boot.watchdog); clearStartupSlowHint(); showOnly('dashboard'); startDashboardHealthWatch(); return; }
+  if (state === 'auth_required') { clearTimeout(boot.watchdog); clearStartupSlowHint(); showOnly('landing'); loadPublic(); return; }
   if (state === 'error') {
-    clearTimeout(boot.watchdog);
+    clearTimeout(boot.watchdog); clearStartupSlowHint();
     $('bootTitle').textContent = title || 'Une erreur empêche le dashboard de charger.';
     $('bootMessage').textContent = message || '';
     $('bootRef').textContent = ref ? `Référence : ${ref}` : '';
@@ -364,6 +406,12 @@ $('refreshButton').onclick = async () => {
     await render();
     toast('Données actualisées.');
   };
+$('healthNoticeClose').onclick = () => hideDashboardIssue();
+$('healthNoticeRetry').onclick = async () => {
+  const retry = dashboardIssueRetry;
+  hideDashboardIssue();
+  if (retry) await retry();
+};
 $('saveButton').onclick = saveDirty;
 $('discardButton').onclick = () => { clearDirty(); render(); };
 $('profileButton').onclick = () => exitGuildToGlobal('profile');
@@ -401,12 +449,32 @@ async function bootstrap() {
   if (typeof applyGlobalPreferences === 'function') applyGlobalPreferences();
   if (q.get('auth') === 'missing') { const n = $('authMessage'); n.textContent = 'Connexion Discord indisponible pour le moment. Réessayez dans quelques instants ou contactez le support.'; n.classList.remove('hidden'); history.replaceState(null, '', location.pathname); }
   renderNav();
+  // Petit avertissement avant le vrai timeout : l'utilisateur sait que SentriX travaille encore.
+  scheduleStartupSlowHint();
   // Filet : si rien n'a abouti après 20 s (réseau muet, exception avalée), on le dit.
   boot.watchdog = setTimeout(() => { if (boot.state === 'booting' || boot.state === 'loading_guilds') setBootState('error', { title: 'Le dashboard met trop de temps à charger.', message: 'Le serveur ne répond pas. Réessayez, ou reconnectez-vous si le problème persiste.', ref: 'SXD-BOOT-TIMEOUT', reconnect: true }); }, 20000);
   await loadSession();
 }
 $('bootRetry').onclick = () => { boot.state = 'booting'; showOnly('bootState'); $('bootTitle').textContent = 'Nouvelle tentative…'; $('bootMessage').textContent = ''; $('bootRef').textContent = ''; loadSession(); };
-window.addEventListener('error', e => { if (boot.state !== 'ready') setBootState('error', { title: 'Une erreur empêche le dashboard de charger.', message: String(e?.message || 'Erreur JavaScript.'), ref: 'SXD-BOOT-JS', reconnect: true }); });
-window.addEventListener('unhandledrejection', e => { if (boot.state !== 'ready') setBootState('error', { title: 'Une erreur empêche le dashboard de charger.', message: String(e?.reason?.message || e?.reason || 'Erreur inattendue.'), ref: 'SXD-BOOT-PROMISE', reconnect: true }); });
+window.addEventListener('error', e => {
+  if (boot.state !== 'ready') {
+    setBootState('error', { title: 'Une erreur empêche le dashboard de charger.', message: String(e?.message || 'Erreur JavaScript.'), ref: 'SXD-BOOT-JS', reconnect: true });
+    return;
+  }
+  announceDashboardIssue(
+    'SentriX a détecté un bug sur cette page. Vous pouvez réessayer sans quitter le dashboard.',
+    { code: 'SXD-RUNTIME-JS', retry: () => render(), bad: true }
+  );
+});
+window.addEventListener('unhandledrejection', e => {
+  if (boot.state !== 'ready') {
+    setBootState('error', { title: 'Une erreur empêche le dashboard de charger.', message: String(e?.reason?.message || e?.reason || 'Erreur inattendue.'), ref: 'SXD-BOOT-PROMISE', reconnect: true });
+    return;
+  }
+  announceDashboardIssue(
+    'Une action du dashboard a rencontré un problème. Réessayez ; SentriX garde la page ouverte.',
+    { code: 'SXD-RUNTIME-PROMISE', retry: () => render(), bad: true }
+  );
+});
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootstrap, { once: true });
 else bootstrap();
