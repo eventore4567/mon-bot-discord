@@ -114,7 +114,7 @@ CATEGORIES: tuple[CategorySpec, ...] = (
     ),
     CategorySpec(
         "events", "🎉", "Giveaways et événements",
-        "Concours, événements et tournois communautaires.",
+        "Giveaways, événements et tournois communautaires.",
         "community",
         frozenset({
             "giveaway-list", "giveaway-create", "giveaway-end",
