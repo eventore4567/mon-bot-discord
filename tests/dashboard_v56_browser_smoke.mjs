@@ -337,3 +337,15 @@ const bootSource = sourceByName.get('90_boot.js') || '';
 if(!bootSource.includes('function isHardReloadNavigation()')) throw new Error('Détection du rechargement navigateur absente.');
 if(!bootSource.includes("const wanted = hardReload ? ''")) throw new Error('Un rechargement doit ignorer la guild présente dans l’URL.');
 if(!bootSource.includes("state.page = 'profile'")) throw new Error('Le rechargement doit revenir à Mon profil.');
+
+
+// Surveillance dashboard : avertissement discret si le boot traîne, si /ready échoue
+// plusieurs fois ou si une erreur JS survient après l'ouverture.
+const coreSource = sourceByName.get('00_core.js') || '';
+if(!html.includes('id="healthNotice"')) throw new Error('Annonce santé dashboard absente.');
+if(!html.includes('id="startupHint"')) throw new Error('Message de chargement lent absent.');
+if(!coreSource.includes('function announceDashboardIssue(')) throw new Error('Gestionnaire d’annonce de bug absent.');
+if(!coreSource.includes('SXD-API-')) throw new Error('Les erreurs API 5xx/réseau ne déclenchent pas d’annonce.');
+if(!bootSource.includes('scheduleStartupSlowHint')) throw new Error('Le démarrage lent n’est pas détecté.');
+if(!bootSource.includes("api('/ready', { background: true })")) throw new Error('Le dashboard ne surveille pas son endpoint /ready.');
+if(!bootSource.includes('SXD-RUNTIME-JS') || !bootSource.includes('SXD-RUNTIME-PROMISE')) throw new Error('Les erreurs runtime ne sont pas annoncées.');
