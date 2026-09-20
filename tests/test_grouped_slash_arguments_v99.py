@@ -322,3 +322,51 @@ def test_generated_slash_unknown_option_still_gets_a_phrase():
     descriptions = v95._option_descriptions(command, option_names)
 
     assert descriptions["valeur_speciale"].startswith("Valeur à fournir")
+
+
+
+def test_deferred_slash_result_uses_original_response_once():
+    from types import SimpleNamespace
+    from utils import sentrix_panels as panels
+
+    token = "slash-prefix-parity-test"
+    panels._REPONSES_DIFFEREES_FINALISEES.pop(token, None)
+
+    response = SimpleNamespace(
+        type=discord.InteractionResponseType.deferred_channel_message,
+        is_done=lambda: True,
+    )
+    interaction = SimpleNamespace(token=token, id=123, response=response)
+
+    assert panels.reponse_differee_a_finaliser(interaction) is True
+    panels.marquer_reponse_differee_finalisee(interaction)
+    assert panels.reponse_differee_a_finaliser(interaction) is False
+    panels._REPONSES_DIFFEREES_FINALISEES.pop(token, None)
+
+
+def test_deferred_slash_edit_payload_keeps_same_result_content():
+    from utils import sentrix_panels as panels
+
+    marker = object()
+    payload = panels.kwargs_edition_reponse_differee({
+        "content": "2 message(s) supprimé(s).",
+        "ephemeral": True,
+        "delete_after": 4,
+        "files": [marker],
+    })
+
+    assert payload["content"] == "2 message(s) supprimé(s)."
+    assert "ephemeral" not in payload
+    assert "delete_after" not in payload
+    assert payload["attachments"] == [marker]
+
+
+def test_final_context_transport_finalizes_deferred_slash_before_followup():
+    from pathlib import Path
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "final_interaction_policy.py"
+    ).read_text(encoding="utf-8")
+
+    assert "panels.reponse_differee_a_finaliser(interaction)" in source
+    assert "interaction.edit_original_response(" in source
+    assert "panels.marquer_reponse_differee_finalisee(interaction)" in source
