@@ -60,6 +60,7 @@ const SUBS = {
   games: [['jeux', 'Catalogue & accès']],
   music: [['player', 'Lecteur'], ['queue', 'File d’attente'], ['playlists', 'Playlists']],
   roles: [['autoroles', 'Autorôle'], ['interactifs', 'Rôles interactifs'], ['niveau', 'Rôles de niveau'], ['avance', 'Avancé']],
+  tickets: [['panneaux', 'Panneaux'], ['actions', 'Actions staff']],
   security: [['protections', 'Protections'], ['verification', 'Vérification']],
   advanced: [['actions', 'Actions'], ['members', 'Membres'], ['automations', 'Automations'], ['templates', 'Templates'], ['audit', 'Audit'], ['access', 'Accès dashboard']],
   invites: [['invites', 'Invitations'], ['webhooks', 'Webhooks']],
