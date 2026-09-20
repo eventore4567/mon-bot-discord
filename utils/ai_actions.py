@@ -64,6 +64,13 @@ class LogProposal:
     evidence: str = ""
 
 
+@dataclass(slots=True)
+class ChannelResolution:
+    channel: Any | None = None
+    ambiguous: tuple[Any, ...] = ()
+    error: str | None = None
+
+
 ACTIONS: dict[str, ActionSpec] = {
     "moderation.ban": ActionSpec(
         "moderation.ban", "ban", ("target",), ("reason",), "member", "medium",
@@ -112,6 +119,10 @@ ACTIONS: dict[str, ActionSpec] = {
     "config.logs.auto": ActionSpec(
         "config.logs.auto", None, (), (), None, "medium", True,
         "analyser les salons et proposer un routage automatique des logs",
+    ),
+    "config.logs.route": ActionSpec(
+        "config.logs.route", None, ("log_category", "channel"), (), None, "medium", True,
+        "placer une catégorie précise de logs dans un salon précis",
     ),
     "desktop.open_app": ActionSpec(
         "desktop.open_app", None, ("app",), (), None, "medium", True,
@@ -297,10 +308,59 @@ def _security_toggle_intent(normalized: str) -> tuple[str, str] | None:
     return None
 
 
+def _extract_log_route(question: str, normalized: str) -> ParsedAction | None:
+    if "log" not in normalized and "journal" not in normalized:
+        return None
+    categories = (
+        ("moderation", ("moderation", "mod", "sanction")),
+        ("messages", ("messages", "message")),
+        ("members", ("membres", "member", "arrivees", "departs", "join", "leave")),
+        ("voice", ("vocal", "voice", "voc", "vc")),
+        ("tickets", ("tickets", "ticket", "support")),
+        ("channels", ("salons", "channels", "channel")),
+        ("roles", ("roles", "rôles", "role")),
+        ("automod", ("automod", "auto mod")),
+        ("spam", ("spam", "anti spam", "antispam")),
+        ("raid", ("raid", "anti raid", "antiraid")),
+        ("server", ("serveur", "server", "guild")),
+        ("resources", ("ressources", "resources", "invites", "emoji")),
+        ("files", ("fichiers", "files", "uploads")),
+        ("soundboard", ("soundboard", "sons")),
+    )
+    category = None
+    for key, words in categories:
+        if any(normalize_text(word) in normalized for word in words):
+            category = key
+            break
+    if category is None:
+        return None
+
+    channel = None
+    mention = re.search(r"<#(\d{15,22})>", question)
+    if mention:
+        channel = mention.group(0)
+    else:
+        named = re.search(r"(?:dans|sur|vers)\s+#([A-Za-z0-9_-]{1,100})", question, re.IGNORECASE)
+        if named:
+            channel = "#" + named.group(1)
+    if channel is None:
+        return None
+    return ParsedAction(
+        intent="config.logs.route",
+        slots={"log_category": category, "channel": channel},
+        confidence=99,
+        source="local",
+    )
+
+
 def local_parse(question: str) -> ParsedAction | None:
     normalized = normalize_text(question)
     if not normalized:
         return None
+
+    log_route = _extract_log_route(question, normalized)
+    if log_route is not None:
+        return log_route
 
     toggle = _security_toggle_intent(normalized)
     if toggle is not None:
@@ -392,7 +452,7 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
     if confidence < 70:
         return None
     slots: dict[str, Any] = {}
-    for key in ("target", "reason", "duration", "query", "app", "state", "section"):
+    for key in ("target", "reason", "duration", "query", "app", "state", "section", "log_category", "channel"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             slots[key] = value.strip()[:500]
@@ -430,7 +490,7 @@ async def classify_with_ai(
         "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
         "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
         "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
-        "Champs autorisés: intent, target, duration, reason, count, query, app, state, section, confidence.\n"
+        "Champs autorisés: intent, target, duration, reason, count, query, app, state, section, log_category, channel, confidence.\n"
         "Actions autorisées:\n" + catalog
     )
     result = await ai_service.generate(
@@ -480,6 +540,10 @@ def missing_prompt(intent: str, slot: str, *, target: discord.Member | None = No
         return f"Pendant combien de temps voulez-vous mute {who} ?"
     if slot == "count":
         return "Combien de messages voulez-vous supprimer ?"
+    if slot == "channel":
+        return "Dans quel salon voulez-vous envoyer ces logs ?"
+    if slot == "log_category":
+        return "Quelle catégorie de logs voulez-vous configurer ?"
     return f"Quelle valeur voulez-vous utiliser pour « {slot} » ?"
 
 
@@ -507,6 +571,12 @@ def merge_followup(action: ParsedAction, answer: str) -> ParsedAction:
         state = _toggle_state(normalize_text(value))
         if state:
             slots["state"] = state
+    elif slot == "channel" and value:
+        slots["channel"] = value[:120]
+    elif slot == "log_category" and value:
+        candidate = _log_category_alias(value)
+        if candidate:
+            slots["log_category"] = candidate
     return ParsedAction(action.intent, slots, action.confidence, "followup")
 
 
@@ -619,6 +689,67 @@ def build_command_line(
     if action.intent.startswith("security.") and slots.get("state"):
         command += f" {slots['state']}"
     return command
+
+
+def _log_category_alias(value: str | None) -> str | None:
+    normalized = normalize_text(value or "")
+    if not normalized:
+        return None
+    aliases = {
+        "moderation": ("moderation", "mod", "sanction"),
+        "messages": ("messages", "message"),
+        "members": ("membres", "members", "join", "leave", "arrivees", "departs"),
+        "voice": ("vocal", "voice", "voc", "vc"),
+        "tickets": ("tickets", "ticket", "support"),
+        "channels": ("salons", "channels", "channel"),
+        "roles": ("roles", "role", "rôles"),
+        "automod": ("automod", "auto mod"),
+        "spam": ("spam", "antispam", "anti spam"),
+        "raid": ("raid", "antiraid", "anti raid"),
+        "server": ("server", "serveur", "guild"),
+        "resources": ("resources", "ressources", "invite", "emoji"),
+        "files": ("files", "fichiers", "upload"),
+        "soundboard": ("soundboard", "sons"),
+    }
+    for key, words in aliases.items():
+        if normalized == key or any(normalize_text(word) in normalized for word in words):
+            return key
+    return None
+
+
+def resolve_text_channel(guild: Any, target_text: str | None) -> ChannelResolution:
+    raw = str(target_text or "").strip()
+    if not raw:
+        return ChannelResolution(error="missing")
+    channels = list(getattr(guild, "text_channels", ()) or ())
+
+    match = re.fullmatch(r"<#(\d{15,22})>", raw) or re.fullmatch(r"(\d{15,22})", raw)
+    if match:
+        cid = int(match.group(1))
+        channel = next((ch for ch in channels if int(getattr(ch, "id", 0) or 0) == cid), None)
+        return ChannelResolution(channel=channel, error=None if channel else "not_found")
+
+    wanted = normalize_text(raw.lstrip("#"))
+    exact = [ch for ch in channels if normalize_text(getattr(ch, "name", "")) == wanted]
+    if len(exact) == 1:
+        return ChannelResolution(channel=exact[0])
+    if len(exact) > 1:
+        return ChannelResolution(ambiguous=tuple(exact[:5]))
+
+    ranked: list[tuple[float, Any]] = []
+    for ch in channels:
+        name = normalize_text(getattr(ch, "name", ""))
+        if not name:
+            continue
+        score = difflib.SequenceMatcher(a=wanted, b=name).ratio()
+        if score >= 0.82:
+            ranked.append((score, ch))
+    ranked.sort(key=lambda row: row[0], reverse=True)
+    if not ranked:
+        return ChannelResolution(error="not_found")
+    if len(ranked) == 1 or (ranked[0][0] >= .92 and ranked[0][0] - ranked[1][0] >= .10):
+        return ChannelResolution(channel=ranked[0][1])
+    return ChannelResolution(ambiguous=tuple(ch for _, ch in ranked[:5]))
 
 
 _LOG_MATCH_RULES: dict[str, tuple[str, tuple[str, ...]]] = {
