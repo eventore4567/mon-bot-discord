@@ -176,6 +176,46 @@ ACTIONS: dict[str, ActionSpec] = {
         "voice.leave", None, (), (), None, "low",
         description="quitter le salon vocal actuel du bot",
     ),
+    "music.play": ActionSpec(
+        "music.play", "play", ("query",), (), None, "low",
+        description="jouer immédiatement un titre, artiste, playlist ou lien demandé",
+    ),
+    "music.pause": ActionSpec(
+        "music.pause", "music pause", (), (), None, "low",
+        description="mettre la musique en pause",
+    ),
+    "music.resume": ActionSpec(
+        "music.resume", "music resume", (), (), None, "low",
+        description="reprendre la musique",
+    ),
+    "music.skip": ActionSpec(
+        "music.skip", "music skip", (), (), None, "low",
+        description="passer au titre suivant",
+    ),
+    "music.previous": ActionSpec(
+        "music.previous", "music previous", (), (), None, "low",
+        description="revenir au titre précédent",
+    ),
+    "music.stop": ActionSpec(
+        "music.stop", "music stop", (), (), None, "low",
+        description="arrêter la musique et vider la file",
+    ),
+    "music.queue": ActionSpec(
+        "music.queue", "music queue", (), (), None, "low",
+        description="afficher la file d'attente musicale",
+    ),
+    "music.nowplaying": ActionSpec(
+        "music.nowplaying", "music nowplaying", (), (), None, "low",
+        description="afficher le titre actuellement joué",
+    ),
+    "music.shuffle": ActionSpec(
+        "music.shuffle", "music shuffle", (), (), None, "low",
+        description="mélanger la file d'attente",
+    ),
+    "music.volume": ActionSpec(
+        "music.volume", "music volume", ("count",), (), None, "low",
+        description="régler le volume de la musique entre 0 et 100",
+    ),
     "channel.create_voice": ActionSpec(
         "channel.create_voice", None, ("name",), ("category",), None, "medium",
         description="créer un salon vocal",
@@ -453,7 +493,10 @@ def is_bare_action_candidate(text: str) -> bool:
         "active l anti", "active anti", "desactive l anti", "desactive anti",
         "configure les logs", "configure mes logs", "mets les logs",
         "rejoins le vocal", "rejoint le vocal", "rejoin le vocal", "regoin une voc", "reg une voc",
-        "quitte le vocal", "cree une voc", "crée une voc", "cree un salon vocal", "crée un salon vocal",
+        "quitte le vocal", "joue ", "jouer ", "play ", "mets la musique", "met la musique",
+        "mets le son", "met le son", "lance la musique", "pause la musique", "reprends la musique",
+        "passe la musique", "skip ", "arrete la musique", "arrête la musique", "volume ",
+        "cree une voc", "crée une voc", "cree un salon vocal", "crée un salon vocal",
         "cree un salon textuel", "crée un salon textuel", "cree un role", "crée un role",
         "cree une categorie", "crée une catégorie", "crée une categorie",
         "donne acces aux tickets", "donne l acces aux tickets", "ajoute acces aux tickets",
@@ -605,6 +648,61 @@ def local_parse(question: str) -> ParsedAction | None:
     if toggle is not None:
         intent, state = toggle
         return ParsedAction(intent=intent, slots={"state": state}, confidence=98, source="local")
+
+    # -------- lecteur musique : fast-path déterministe --------
+    # Les actions structurelles (rôles, salons, logs, pseudo...) ont déjà été testées
+    # au-dessus, donc « mets le rôle X en rouge » ne peut pas être confondu avec play.
+    music_context = bool(re.search(
+        r"\b(?:musique|music|son|chanson|titre|morceau|track|playlist|lecture)\b",
+        normalized,
+    ))
+
+    if music_context and re.search(r"\b(?:pause|mets?\s+en\s+pause)\b", normalized):
+        return ParsedAction("music.pause", {}, 99, "local")
+    if music_context and re.search(r"\b(?:reprend|reprends|reprendre|continue|relance)\b", normalized):
+        return ParsedAction("music.resume", {}, 99, "local")
+    if music_context and re.search(r"\b(?:suivant|skip|passe|zappe)\b", normalized):
+        return ParsedAction("music.skip", {}, 99, "local")
+    if music_context and re.search(r"\b(?:precedent|précédent|previous|retourne)\b", normalized):
+        return ParsedAction("music.previous", {}, 99, "local")
+    if music_context and re.search(r"\b(?:arrete|arrête|stop|coupe)\b", normalized):
+        return ParsedAction("music.stop", {}, 99, "local")
+    if music_context and re.search(r"\b(?:melange|mélange|shuffle)\b", normalized):
+        return ParsedAction("music.shuffle", {}, 99, "local")
+    if music_context and re.search(r"\b(?:file|queue|attente)\b", normalized):
+        return ParsedAction("music.queue", {}, 98, "local")
+    if music_context and re.search(r"\b(?:encours|en cours|nowplaying|quel(?:le)? .*joue)\b", normalized):
+        return ParsedAction("music.nowplaying", {}, 98, "local")
+
+    volume = re.search(
+        r"\b(?:volume|son)\s*(?:a|à|sur)?\s*(\d{1,3})(?:\s*%)?\b",
+        normalized,
+    )
+    if volume and music_context:
+        return ParsedAction(
+            "music.volume",
+            {"count": max(0, min(int(volume.group(1)), 100))},
+            99,
+            "local",
+        )
+
+    play_match = re.search(
+        r"\b(?:joue|jouer|play|lance|mets|met)\s+(?:(?:moi\s+)?(?:la\s+)?"
+        r"(?:musique|music|chanson|titre|morceau|son|track)\s+)?(.+)$",
+        question,
+        re.IGNORECASE,
+    )
+    if play_match:
+        query = play_match.group(1).strip(" .,:;!-")
+        # Mots purement génériques => SentriX demande le titre au lieu d'inventer.
+        if normalize_text(query) in {"musique", "music", "un son", "une chanson", "un titre", "un morceau"}:
+            query = ""
+        return ParsedAction(
+            "music.play",
+            {"query": query[:500]} if query else {},
+            99,
+            "local",
+        )
 
     intent = None
     for candidate, words in _INTENT_PATTERNS:
@@ -771,7 +869,7 @@ def looks_multi_action(question: str) -> bool:
     separators = sum(text.count(token) for token in (" puis ", " ensuite ", ";", " et apres ", " et après "))
     action_words = re.findall(
         r"\b(?:cree|creer|ajoute|donne|retire|renomme|configure|mets|change|deplace|"
-        r"envoie|ban|bannis|warn|mute|kick|active|desactive|rejoint|quitte|lance|joue)\b",
+        r"envoie|ban|bannis|warn|mute|kick|active|desactive|rejoint|quitte|lance|joue|play|pause|skip|stop|reprends)\b",
         text,
     )
     # Une simple phrase « ban X et raison Y » ne devient pas artificiellement un plan.
@@ -885,7 +983,13 @@ def missing_prompt(intent: str, slot: str, *, target: discord.Member | None = No
         who = target.mention if target is not None else "ce membre"
         return f"Pendant combien de temps voulez-vous mute {who} ?"
     if slot == "count":
+        if intent == "music.volume":
+            return "Quel volume voulez-vous utiliser, entre 0 et 100 ?"
         return "Combien de messages voulez-vous supprimer ?"
+    if slot == "query":
+        if intent == "music.play":
+            return "Quelle musique voulez-vous que je mette ? Donnez un titre, un artiste, une playlist ou un lien."
+        return "Que voulez-vous rechercher ?"
     if slot == "channel":
         return "Dans quel salon voulez-vous envoyer ces logs ?"
     if slot == "log_category":
@@ -927,7 +1031,10 @@ def merge_followup(action: ParsedAction, answer: str) -> ParsedAction:
     elif slot == "count":
         match = re.search(r"\d{1,3}", value)
         if match:
-            slots["count"] = max(1, min(int(match.group(0)), 100))
+            minimum = 0 if action.intent == "music.volume" else 1
+            slots["count"] = max(minimum, min(int(match.group(0)), 100))
+    elif slot == "query" and value:
+        slots["query"] = value[:500]
     elif slot == "target" and value:
         slots["target"] = value[:120]
     elif slot == "app" and value:
@@ -1058,6 +1165,15 @@ def build_command_line(
 
     if action.intent == "moderation.purge":
         return f"{command} {int(slots['count'])}" if slots.get("count") else None
+
+    if action.intent == "music.play":
+        query = str(slots.get("query") or "").strip()
+        return f"{command} {query}" if query else None
+
+    if action.intent == "music.volume":
+        if slots.get("count") is None:
+            return None
+        return f"{command} {max(0, min(int(slots['count']), 100))}"
 
     if action.intent in {"moderation.warnings", "moderation.history", "economy.balance"}:
         if member is not None:
