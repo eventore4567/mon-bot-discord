@@ -37,6 +37,32 @@ function toast(message, bad = false) {
   setTimeout(() => n.remove(), bad ? 6000 : 3600);
 }
 
+let dashboardIssueTimer = null;
+let dashboardIssueRetry = null;
+let dashboardIssueKey = '';
+function hideDashboardIssue(key = '') {
+  if (key && dashboardIssueKey && key !== dashboardIssueKey) return;
+  clearTimeout(dashboardIssueTimer);
+  dashboardIssueTimer = null;
+  dashboardIssueRetry = null;
+  dashboardIssueKey = '';
+  const notice = $('healthNotice');
+  if (notice) notice.classList.add('hidden');
+}
+function announceDashboardIssue(message, { code = '', retry = null, bad = false, sticky = false } = {}) {
+  const notice = $('healthNotice');
+  if (!notice) return toast(message, true);
+  const key = String(code || message || 'dashboard-issue');
+  dashboardIssueKey = key;
+  dashboardIssueRetry = typeof retry === 'function' ? retry : null;
+  $('healthNoticeText').textContent = String(message || 'SentriX a détecté un problème temporaire.');
+  $('healthNoticeRetry').classList.toggle('hidden', !dashboardIssueRetry);
+  notice.classList.toggle('bad', Boolean(bad));
+  notice.classList.remove('hidden');
+  clearTimeout(dashboardIssueTimer);
+  if (!sticky) dashboardIssueTimer = setTimeout(() => hideDashboardIssue(key), 8500);
+}
+
 /* ---------- réseau ---------- */
 const BACKGROUND_PATHS = new Set(['/api/public', '/health', '/ready']);
 function isBackground(url) {
@@ -75,6 +101,18 @@ async function api(url, options = {}) {
       throw Object.assign(new Error(message), { status: branchSkew ? 503 : r.status, upstreamStatus: r.status, servedBy, code: branchSkew ? 'HA_VERSION_SKEW' : '', data });
     }
     return data;
+  } catch (e) {
+    const status = Number(e?.status || 0);
+    const networkFailure = e instanceof TypeError || status === 0;
+    if (!background && (networkFailure || status >= 500)) {
+      announceDashboardIssue(
+        networkFailure
+          ? 'SentriX n’arrive pas à joindre le dashboard. Vérifiez votre connexion puis réessayez.'
+          : 'SentriX a détecté un problème temporaire du dashboard. Certaines actions peuvent être indisponibles.',
+        { code: `SXD-API-${status || 'NET'}`, retry: () => location.reload(), bad: status >= 500 }
+      );
+    }
+    throw e;
   } finally { if (!background) progressEnd(); }
 }
 const guildUrl = (path = '') => `/api/guilds/${encodeURIComponent(state.guildId)}${path}`;
