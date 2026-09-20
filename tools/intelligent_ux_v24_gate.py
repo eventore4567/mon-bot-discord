@@ -46,7 +46,6 @@ def main() -> int:
             "_message_is_claimed",
             "_claim_natural_message",
             "content.startswith(prefix)",
-            "ai_cog._natural_command_line",
             "ai_cog._invoke_natural_command",
             "primary = originals[0]",
             "_sentrix_v24_primary_ai_listener_guard_fn",
@@ -55,6 +54,22 @@ def main() -> int:
         ):
             if marker not in text:
                 errors.append(f"garantie V2.4 absente: {marker}")
+
+    # Le routeur naturel canonique a été déplacé dans cogs/ai.py. V2.4 ne doit
+    # plus appeler _natural_command_line directement depuis sentrix_intelligent_ux :
+    # le guard délègue à _invoke_natural_command, lequel conserve ce fallback en interne
+    # et ajoute le registre strict / résolution / confirmations.
+    ai_cog_path = ROOT / "cogs/ai.py"
+    if ai_cog_path.exists():
+        text = ai_cog_path.read_text(encoding="utf-8")
+        for marker in (
+            "def _natural_command_line",
+            "async def _invoke_natural_command",
+            "async def _classify_existing_command",
+            "ai_actions.parse_action",
+        ):
+            if marker not in text:
+                errors.append(f"routeur IA canonique incomplet: {marker}")
 
     parser = ROOT / "utils/intelligent_ux.py"
     if parser.exists():
