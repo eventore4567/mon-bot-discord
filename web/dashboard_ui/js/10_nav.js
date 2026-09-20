@@ -20,7 +20,7 @@ const NAV = NAV_SERVER;
    anciennes interfaces dont toutes les fonctions ne sont pas encore reprises ici. */
 const TOOL_GROUPS = [
   ['Outils', [['invites', 'Invitations & webhooks']]],
-  ['Administration', [['settings', 'Paramètres'], ['access', 'Commandes & accès'], ['backups', 'Sauvegardes & historique'], ['diagnostic', 'Diagnostic']]],
+  ['Administration', [['settings', 'Paramètres'], ['backups', 'Sauvegardes & historique'], ['diagnostic', 'Diagnostic']]],
   ['Développeur', [['advanced', 'Centre avancé']]],
 ];
 const TOOLS = TOOL_GROUPS.flatMap(([, items]) => items);
@@ -79,27 +79,23 @@ function moduleDot(key) {
 }
 const NAV_MODULE = { welcome: 'welcome', levels: 'levels', economy: 'economy', games: 'economy', music: 'music', roles: 'roles', security: 'automod', logs: 'logs', tickets: 'tickets', notifications: 'notifications' };
 function navButton(page, label) {
-  return `<button type="button" data-tab="${page}" class="${state.page === page ? 'active' : ''}" ${state.page === page ? 'aria-current="page"' : ''}>${esc(label)}${NAV_MODULE[page] ? moduleDot(NAV_MODULE[page]) : ''}</button>`;
+  return `<button type="button" data-tab="${page}" class="${state.page === page ? 'active' : ''}" ${state.page === page ? 'aria-current="page"' : ''}>${esc(label)}</button>`;
 }
 function renderNav() {
   const nav = $('navigation');
   const globalMode = !state.guildId || !state.guild;
   const activeNav = globalMode ? NAV_GLOBAL : NAV_SERVER;
-  const inTools = !globalMode && TOOLS.some(([p]) => p === state.page);
   let html = activeNav.map(([group, items]) => `<div class="nav-group">${esc(group)}</div>` + items.map(([p, l]) => navButton(p, l)).join('')).join('');
   if (!globalMode) {
-    const groups = TOOL_GROUPS.map(([g, items]) => {
+    html += TOOL_GROUPS.map(([g, items]) => {
       if (g === 'Développeur' && !state.developer) return '';
       const visible = items.filter(([p]) => p !== 'diagnostic' || state.developer || state.guildOwner);
       const links = g === 'Développeur' ? `<div class="nav-group">Migration</div>${MIGRATION_LINKS.map(([href, l]) => `<a class="nav-link ext" href="${href}" target="_blank" rel="noopener">${esc(l)}</a>`).join('')}` : '';
       return visible.length || links ? `<div class="nav-group">${esc(g)}</div>${visible.map(([p, l]) => navButton(p, l)).join('')}${links}` : '';
     }).join('');
-    html += `<details id="navMore" ${inTools || state.navMore ? 'open' : ''}><summary>Plus d’outils</summary>${groups}</details>`;
   }
   nav.innerHTML = html;
   nav.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => go(b.dataset.tab));
-  const more = $('navMore');
-  if (more) more.querySelector('summary').addEventListener('click', () => setTimeout(() => { state.navMore = more.open; try { localStorage.setItem('sentrix:nav:more', more.open ? '1' : '0'); } catch (_) {} }, 0));
 }
 function renderSubnav() {
   if (!state.guildId || !state.guild) { const el = $('subnav'); el.classList.add('hidden'); el.innerHTML = ''; return; }
