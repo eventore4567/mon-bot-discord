@@ -16,6 +16,7 @@
     <div class="startup-name">SentriX</div>
     <div class="startup-copy">Dashboard</div>
   </div>
+  <div class="startup-hint" id="startupHint" aria-live="polite"></div>
   <div class="startup-progress" id="startupProgress" role="progressbar" aria-label="Chargement du dashboard" aria-valuemin="0" aria-valuemax="100" aria-valuenow="4"><i id="startupProgressBar"></i></div>
 </div>
 <a class="skip" href="#main">Aller au contenu</a>
@@ -85,6 +86,12 @@
 <div class="progress" id="progress" aria-hidden="true"></div>
 <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
 <div class="net-notice hidden" id="netNotice" role="status">Connexion perdue. Les modifications seront envoyées quand la connexion reviendra.</div>
+<div class="health-notice hidden" id="healthNotice" role="status" aria-live="polite">
+  <span class="health-dot" aria-hidden="true"></span>
+  <span id="healthNoticeText">SentriX a détecté un problème temporaire.</span>
+  <button class="health-retry hidden" id="healthNoticeRetry" type="button">Réessayer</button>
+  <button class="health-close" id="healthNoticeClose" type="button" aria-label="Fermer">×</button>
+</div>
 <div class="modal-backdrop hidden" id="modalBackdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-head"><h2 id="modalTitle"></h2><button class="icon-btn" id="modalClose" type="button" aria-label="Fermer">×</button></div><div class="modal-body" id="modalBody"></div><div class="modal-actions" id="modalActions"></div></div></div>
 <div class="modal-backdrop hidden" id="paletteBackdrop"><div class="palette" role="dialog" aria-modal="true" aria-label="Aller à une page"><input id="paletteInput" type="search" placeholder="Aller à…" autocomplete="off"><div class="palette-results" id="paletteResults"></div></div></div>
 
