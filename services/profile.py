@@ -1,6 +1,6 @@
 """ProfileService — Core V2, Phase 4 (docs/core-v2-plan.md).
 
-+profile (cogs/profile_oxyde_runtime.py::build_page — le corps réellement
+/me (cogs/profile_oxyde_runtime.py::build_page — le renderer réellement
 exécuté ; cogs/levels.py::profile ne s'exécute jamais, voir
 docs/core-v2-audit-technical-debt.md #15) assemblait ses données et calculait
 ses badges en appelant directement un module cog voisin
@@ -25,7 +25,7 @@ from cogs import community_v31
 
 
 async def build_snapshot(bot: Any, guild: discord.Guild, member: discord.Member) -> dict[str, Any]:
-    """Agrège statistiques, progression, classements et bio pour /profile.
+    """Agrège statistiques, progression, classements et bio pour /me.
 
     Délègue à community_v31._profile_snapshot() : ce module reste le seul
     endroit qui sait assembler stats_service + community_v3 + la bio + les
