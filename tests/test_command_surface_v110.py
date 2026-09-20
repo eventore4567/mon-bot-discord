@@ -60,3 +60,9 @@ def test_collision_suffix_is_readable() -> None:
     assert second == "leaderboard-2"
     assert third == "leaderboard-3"
     assert len(used) == 3
+
+
+
+def test_profile_is_exposed_as_me_not_profile() -> None:
+    assert surface.STANDARD_DIRECT_SLASH["profile"] == "me"
+    assert "profile" not in surface.STANDARD_DIRECT_SLASH.values()
