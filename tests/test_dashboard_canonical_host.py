@@ -144,3 +144,34 @@ def test_bare_callback_without_session_still_fails_closed(canonical):
     response = asyncio.run(dashboard.handle_callback(req))
     assert response.status == 403
     assert "Connexion impossible" in response.text
+
+
+def test_signed_state_survives_process_restart(canonical, monkeypatch):
+    """Le callback doit rester valide même si Railway a redémarré le process entre login et callback."""
+    monkeypatch.setattr(config, "DISCORD_CLIENT_SECRET", "ci-oauth-secret")
+    login_req = make_mocked_request(
+        "GET",
+        "/login",
+        headers={"Host": "mon-bot-discord-production-8944.up.railway.app"},
+        app={"oauth_states": {}, "bot": type("Bot", (), {"user": type("User", (), {"id": 123})()})()},
+    )
+    state = dashboard._new_oauth_state(login_req)
+    fresh_app = {"oauth_states": {}, "sessions": {}, "bot": None}
+    callback_req = make_mocked_request(
+        "GET",
+        f"/oauth/callback?state={state}&error=access_denied",
+        headers={
+            "Host": "mon-bot-discord-production-8944.up.railway.app",
+            "Cookie": f"{dashboard.OAUTH_STATE_COOKIE}={state}",
+        },
+        app=fresh_app,
+    )
+    with pytest.raises(web.HTTPFound) as redirect:
+        asyncio.run(dashboard.handle_callback(callback_req))
+    assert redirect.value.location == "/?auth=denied"
+
+
+def test_manage_guild_permission_is_dashboard_access():
+    member = type("Member", (), {"guild_permissions": type("Perms", (), {"administrator": False, "manage_guild": True})()})()
+    guild = type("Guild", (), {"owner_id": 99})()
+    assert dashboard._dashboard_access_level(guild, member, 42) == "manage_guild"
