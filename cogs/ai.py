@@ -1077,6 +1077,158 @@ class Ai(commands.Cog, name="Ai"):
         self._pending_actions.pop(self._pending_key(message), None)
         return await self._invoke_command_line(message, command_line)
 
+    def _command_candidates(self, question: str) -> list[commands.Command]:
+        """Préfiltre les commandes réellement chargées avant le classifieur IA.
+
+        Cela évite d'envoyer tout le catalogue au modèle et, surtout, interdit de
+        sélectionner une commande qui n'existe pas dans ce runtime.
+        """
+        normalized = ai_actions.normalize_text(question)
+        tokens = {t for t in re.findall(r"[a-z0-9_-]{2,}", normalized) if len(t) >= 2}
+        rows: list[tuple[float, commands.Command]] = []
+        for command in self.bot.walk_commands():
+            if getattr(command, "hidden", False) or not getattr(command, "enabled", True):
+                continue
+            qualified = str(getattr(command, "qualified_name", "") or "").strip()
+            if not qualified:
+                continue
+            root = qualified.split(" ", 1)[0].casefold()
+            # Les commandes IA ne doivent jamais être rappelées depuis le routeur d'actions :
+            # sinon une demande non reconnue pourrait reboucler vers +ai/+sentrix.
+            if access_matrix.module_for_command(root) == "ai":
+                continue
+            # Les commandes propriétaire GLOBAL restent volontairement hors de portée de
+            # l'interpréteur naturel. Elles gardent leur syntaxe explicite.
+            if root in access_matrix.OWNER_ONLY_COMMANDS:
+                continue
+
+            aliases = " ".join(str(a) for a in getattr(command, "aliases", ()) or ())
+            description = str(
+                getattr(command, "description", "") or getattr(command, "help", "") or ""
+            )
+            signature = str(getattr(command, "signature", "") or "")
+            haystack = ai_actions.normalize_text(
+                f"{qualified} {aliases} {description} {signature}"
+            )
+            command_tokens = set(re.findall(r"[a-z0-9_-]{2,}", haystack))
+            overlap = len(tokens & command_tokens)
+            ratio = 0.0
+            if normalized and qualified:
+                import difflib
+                ratio = difflib.SequenceMatcher(
+                    a=normalized, b=ai_actions.normalize_text(qualified)
+                ).ratio()
+            direct = 4.0 if ai_actions.normalize_text(qualified) in normalized else 0.0
+            score = overlap * 2.0 + ratio * 3.0 + direct
+            if score >= 1.2:
+                rows.append((score, command))
+
+        rows.sort(key=lambda item: item[0], reverse=True)
+        return [command for _, command in rows[:28]]
+
+    async def _classify_existing_command(
+        self,
+        message: discord.Message,
+        question: str,
+        prefix: str,
+    ) -> str | None:
+        """Repli générique vers les commandes EXISTANTES, jamais vers du code arbitraire."""
+        candidates = self._command_candidates(question)
+        if not candidates:
+            return None
+
+        catalog_rows = []
+        allowed: dict[str, commands.Command] = {}
+        for command in candidates:
+            qualified = str(command.qualified_name).strip()
+            allowed[qualified.casefold()] = command
+            description = str(
+                getattr(command, "description", "") or getattr(command, "help", "") or ""
+            ).replace("\n", " ")[:220]
+            signature = str(getattr(command, "signature", "") or "").replace("\n", " ")[:180]
+            catalog_rows.append(
+                f"- {qualified} | paramètres: {signature or 'aucun'} | {description}"
+            )
+
+        instructions = (
+            "Tu classes une demande explicite adressée à SentriX vers UNE commande Discord "
+            "déjà existante. Tu n'exécutes rien et tu ne décides jamais des permissions. "
+            "Retourne UNIQUEMENT du JSON: "
+            '{"command": string|null, "arguments": string, "confidence": integer}. '
+            "La valeur command doit être EXACTEMENT un nom de la liste ci-dessous. "
+            "Si aucune commande ne correspond clairement, command=null et confidence=0. "
+            "N'invente aucun ID, mention, membre, rôle, salon, durée ou raison. "
+            "Les arguments doivent seulement réorganiser les informations réellement "
+            "présentes dans le message, sans préfixe de commande et sans nouvelle ligne. "
+            "Une commande dangereuse reste autorisée dans la classification : le backend "
+            "demandera ensuite une confirmation et vérifiera les permissions.\n\n"
+            "COMMANDES AUTORISÉES:\n" + "\n".join(catalog_rows)
+        )
+        result = await ai_service.generate(
+            question,
+            model_key=ai_service.MODEL_LUNA,
+            reasoning_effort="none",
+            instructions=instructions,
+            guild_id=message.guild.id if message.guild else None,
+            channel_id=getattr(message.channel, "id", None),
+            user_id=message.author.id,
+            command="sentrix-command-router",
+            web_search=False,
+            max_output_tokens=180,
+        )
+        if not result.ok:
+            return None
+        try:
+            payload = json.loads(str(result.text or "").strip())
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", str(result.text or ""), re.DOTALL)
+            if not match:
+                return None
+            try:
+                payload = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(payload, dict):
+            return None
+        name = str(payload.get("command") or "").strip().casefold()
+        if name not in allowed:
+            return None
+        try:
+            confidence = int(payload.get("confidence", 0))
+        except (TypeError, ValueError):
+            confidence = 0
+        if confidence < 78:
+            return None
+        arguments = str(payload.get("arguments") or "").strip()
+        if "\n" in arguments or "\r" in arguments or len(arguments) > 900:
+            return None
+
+        command = allowed[name]
+        qualified = str(command.qualified_name).strip()
+        line = f"{prefix}{qualified}" + (f" {arguments}" if arguments else "")
+        return line
+
+    def _dynamic_command_needs_confirmation(self, command_line: str, prefix: str) -> bool:
+        raw = str(command_line or "")
+        if raw.startswith(prefix):
+            raw = raw[len(prefix):]
+        parts = raw.strip().split()
+        if not parts:
+            return False
+        root = parts[0].casefold()
+        dangerous = set(access_matrix.GUILD_OWNER_COMMANDS) | {
+            "delete-channel", "massrole", "roleall", "blacklist-users",
+            "lockdown-server", "panic",
+        }
+        if root in dangerous:
+            return True
+        if root == "clear" and len(parts) > 1:
+            try:
+                return int(parts[1]) >= 50
+            except ValueError:
+                return False
+        return False
+
     async def _invoke_natural_command(
         self,
         message: discord.Message,
@@ -1110,8 +1262,30 @@ class Ai(commands.Cog, name="Ai"):
             prefix,
             has_attachment=bool(message.attachments),
         )
+        if command_line:
+            return await self._invoke_command_line(message, command_line)
+
+        # 4) Couverture large : choisit parmi les commandes réellement chargées.
+        # Aucun nom inventé n'est accepté et les commandes global-owner sont exclues.
+        command_line = await self._classify_existing_command(message, question, prefix)
         if not command_line:
             return False
+        if self._dynamic_command_needs_confirmation(command_line, prefix):
+            view = _NaturalActionConfirmView(
+                self,
+                message=message,
+                command_line=command_line,
+                author_id=message.author.id,
+            )
+            sent = await message.reply(
+                "Cette demande correspond à une action sensible ou potentiellement "
+                "destructive. Voulez-vous vraiment l’exécuter ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
         return await self._invoke_command_line(message, command_line)
 
     @commands.Cog.listener()
