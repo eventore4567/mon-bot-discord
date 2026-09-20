@@ -367,6 +367,28 @@ def _extract_log_route(question: str, normalized: str) -> ParsedAction | None:
     )
 
 
+def is_bare_action_candidate(text: str) -> bool:
+    """Vrai uniquement pour une instruction autonome, pas pour une discussion ordinaire.
+
+    Permet les formes demandées comme « ban Tomioka » sans transformer chaque phrase
+    contenant le mot "ban" en commande. Le classifieur IA large reste réservé aux
+    messages explicitement adressés à SentriX.
+    """
+    normalized = normalize_text(text).strip()
+    if not normalized or len(normalized) > 500:
+        return False
+    strong_starts = (
+        "ban ", "bannis ", "bannir ", "tempban ", "ban temporaire ",
+        "warn ", "avertis ", "mute ", "mut ", "mets ", "unmute ", "demute ",
+        "kick ", "expulse ", "purge ", "clear ", "supprime les ", "efface les ",
+        "ouvre setup", "ouvre help", "montre help", "affiche help",
+        "donne moi le dashboard", "donne le dashboard", "dashboard",
+        "active l anti", "active anti", "desactive l anti", "desactive anti",
+        "configure les logs", "configure mes logs", "mets les logs",
+    )
+    return any(normalized.startswith(prefix) for prefix in strong_starts)
+
+
 def local_parse(question: str) -> ParsedAction | None:
     normalized = normalize_text(question)
     if not normalized:
