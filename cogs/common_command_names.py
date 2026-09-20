@@ -255,7 +255,6 @@ FRENCH_COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "shop": ("boutique",),
     "level": ("niveau",),
     "leaderboard-levels": ("classementniveaux",),
-    "profile": ("profil",),
     "ticket": ("support",),
     "giveaway-list": ("concours",),
     "invite-leaderboard": ("classementinvites",),
