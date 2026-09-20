@@ -129,6 +129,7 @@ class CommandEmbedInvariantTests(unittest.TestCase):
             "style_v2": ROOT / "utils" / "command_style_v2.py",
             "wide": ROOT / "utils" / "wide_compact_v6.py",
             "ping": ROOT / "utils" / "ping_final_style.py",
+            "log_compact": ROOT / "utils" / "log_compact_final.py",
             "panels": ROOT / "utils" / "sentrix_panels.py",
             "visuals": ROOT / "utils" / "command_visuals.py",
             "errors": ROOT / "cogs" / "final_error_embed_v5.py",
@@ -141,6 +142,7 @@ class CommandEmbedInvariantTests(unittest.TestCase):
         assert 'BAR = ""' in sources["style_v2"]
         assert 'LONG_BAR = ""' in sources["wide"]
         assert 'PANEL_BAR = ""' in sources["ping"]
+        assert 'PANEL_BAR = ""' in sources["log_compact"]
         assert "conteneur.add_item(discord.ui.Separator())" not in sources["panels"]
         assert "container.add_item(_small_separator())" not in sources["visuals"]
         assert 'BAR = ""' in sources["errors"]
