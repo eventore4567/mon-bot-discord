@@ -89,3 +89,19 @@ def test_clear_public_range_starts_at_two():
     assert 'nombre: commands.Range[int, 2, 100]' in source
     assert 'Nombre de messages à supprimer (2 à 100)' in source
     assert 'requested = max(2, min(int(nombre), 100))' in source
+
+
+
+def test_clear_plus_and_slash_share_exact_same_confirmation_text():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "moderation.py").read_text(encoding="utf-8")
+
+    start = source.index('@commands.hybrid_command(name="clear"')
+    end = source.index("    @staticmethod\n    async def _purge_messages", start)
+    body = source[start:end]
+
+    # Une seule phrase est calculée avant la branche + / slash, puis réutilisée dans
+    # les deux transports. Donc /clear 2 affiche bien le même « 2 message(s) supprimé(s). ».
+    assert 'texte = f"{len(messages)} message(s) supprimé(s)."' in body
+    assert "await panels.texte_court(ctx.channel, texte" in body
+    assert "await panels.texte_court(ctx, texte" in body
