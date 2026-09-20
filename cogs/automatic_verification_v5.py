@@ -486,7 +486,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         if bool(getattr(member, "pending", False)):
             embed = discord.Embed(
                 title="Règles Discord requises",
-                description="Accepte d'abord les règles du serveur Discord, puis clique de nouveau sur **Commencer**.",
+                description="Acceptez d'abord les règles du serveur Discord, puis cliquez de nouveau sur **Commencer**.",
                 colour=discord.Colour.orange(),
             )
             return await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
