@@ -382,6 +382,72 @@ class _NaturalActionConfirmView(discord.ui.View):
                 pass
 
 
+class _NaturalPlanConfirmView(discord.ui.View):
+    """Confirmation unique pour une demande contenant plusieurs actions."""
+
+    def __init__(
+        self,
+        cog: "Ai",
+        *,
+        message: discord.Message,
+        actions: tuple[ai_actions.ParsedAction, ...],
+        prefix: str,
+        author_id: int,
+    ):
+        super().__init__(timeout=75)
+        self.cog = cog
+        self.source_message = message
+        self.actions = actions
+        self.prefix = prefix
+        self.author_id = int(author_id)
+        self.message: discord.Message | None = None
+        self.done = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if int(interaction.user.id) != self.author_id:
+            await interaction.response.send_message(
+                "Ce plan appartient à une autre personne.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Exécuter le plan", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.done:
+            return await interaction.response.send_message("Ce plan a déjà été traité.", ephemeral=True)
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content=f"Plan confirmé — exécution de **{len(self.actions)}** étape(s)…",
+            view=self,
+        )
+        await self.cog._execute_action_plan(
+            self.source_message,
+            self.actions,
+            self.prefix,
+            status_message=self.message,
+        )
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Plan annulé.", view=self)
+
+    async def on_timeout(self):
+        if self.done:
+            return
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(content="Plan expiré sans exécution.", view=self)
+            except discord.HTTPException:
+                pass
+
+
 # ---------------------------------------------------------------- VUE : +aisetup
 
 class AiLimitsModal(discord.ui.Modal, title="⏱️ Limites de l'IA"):
@@ -1440,6 +1506,8 @@ class Ai(commands.Cog, name="Ai"):
         message: discord.Message,
         action: ai_actions.ParsedAction,
         prefix: str,
+        *,
+        confirmed: bool = False,
     ) -> bool:
         spec = action.spec
         if spec is None:
@@ -1493,6 +1561,58 @@ class Ai(commands.Cog, name="Ai"):
                 score=100,
                 evidence="choix explicite de l'utilisateur",
             )
+            if confirmed:
+                decision = await access_matrix.evaluate(
+                    self.bot,
+                    command_name="setup",
+                    author=message.author,
+                    guild=message.guild,
+                )
+                if not decision.allowed:
+                    await message.reply(
+                        decision.message,
+                        mention_author=False,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    return True
+                ok, reason = log_service.validate_channel(
+                    message.guild, proposal.channel_id, needs_file=True
+                )
+                if not ok:
+                    await message.reply(
+                        f"Je ne peux pas utiliser ce salon pour les logs : {reason}",
+                        mention_author=False,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    return True
+                try:
+                    await log_service.set_log_channel(
+                        self.bot,
+                        message.guild.id,
+                        proposal.category,
+                        proposal.channel_id,
+                    )
+                    from . import setup_v2_core
+                    await setup_v2_core.enable_module_if_unset(
+                        self.bot,
+                        message.guild.id,
+                        "logs",
+                        actor_id=message.author.id,
+                    )
+                except Exception:
+                    logger.exception("Configuration de logs pendant un plan impossible.")
+                    await message.reply(
+                        "Je n’ai pas pu appliquer cette étape de configuration des logs.",
+                        mention_author=False,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    return True
+                await message.reply(
+                    f"Logs **{proposal.label}** configurés dans <#{proposal.channel_id}>.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
             view = _LogConfigConfirmView(
                 self,
                 source_message=message,
@@ -1597,7 +1717,7 @@ class Ai(commands.Cog, name="Ai"):
         # Une suppression importante demande une confirmation explicite. Les sanctions
         # classiques (warn/mute/ban) restent directes si la demande est claire, comme les
         # commandes normales.
-        if action.intent == "moderation.purge" and int(action.slots.get("count") or 0) >= 50:
+        if not confirmed and action.intent == "moderation.purge" and int(action.slots.get("count") or 0) >= 50:
             view = _NaturalActionConfirmView(
                 self,
                 message=message,
@@ -1617,7 +1737,57 @@ class Ai(commands.Cog, name="Ai"):
         self._pending_actions.pop(self._pending_key(message), None)
         return await self._invoke_command_line(message, command_line)
 
-    def _command_candidates(self, question: str) -> list[commands.Command]:
+    async def _execute_action_plan(
+        self,
+        message: discord.Message,
+        actions: tuple[ai_actions.ParsedAction, ...],
+        prefix: str,
+        *,
+        status_message: discord.Message | None = None,
+    ) -> None:
+        """Exécute séquentiellement un plan validé, sans jamais court-circuiter les checks."""
+        completed = 0
+        for index, action in enumerate(actions, 1):
+            try:
+                handled = await self._handle_parsed_action(
+                    message,
+                    action,
+                    prefix,
+                    confirmed=True,
+                )
+            except Exception:
+                logger.exception(
+                    "Plan naturel: exception étape=%s intent=%s user=%s",
+                    index,
+                    action.intent,
+                    message.author.id,
+                )
+                handled = False
+            if not handled:
+                await message.reply(
+                    f"Plan interrompu à l’étape **{index}** : je n’ai pas pu relier "
+                    f"« {action.intent} » à une action exécutable.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                break
+            completed += 1
+
+        if status_message is not None:
+            try:
+                await status_message.edit(
+                    content=(
+                        f"Plan traité : **{completed}/{len(actions)}** étape(s) ont été "
+                        "transmises aux moteurs SentriX. Les messages ci-dessous indiquent "
+                        "précisément les réussites ou refus Discord."
+                    ),
+                    view=None,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                pass
+
+        def _command_candidates(self, question: str) -> list[commands.Command]:
         """Préfiltre les commandes réellement chargées avant le classifieur IA.
 
         Cela évite d'envoyer tout le catalogue au modèle et, surtout, interdit de
@@ -1832,7 +2002,38 @@ class Ai(commands.Cog, name="Ai"):
                 self._remember_pending(message, completed)
                 return await self._handle_parsed_action(message, completed, prefix)
 
-        # 2) Routeur strict : heuristiques rapides puis classifieur IA avec registre fermé.
+        # 2) Demandes composées : plan borné à 8 actions du registre fermé.
+        plan = await ai_actions.parse_action_plan(
+            question,
+            guild_id=message.guild.id if message.guild else None,
+            channel_id=getattr(message.channel, "id", None),
+            user_id=message.author.id,
+        )
+        if plan:
+            lines = [
+                f"**{index}.** {ai_actions.describe_action(action)}"
+                for index, action in enumerate(plan, 1)
+            ]
+            view = _NaturalPlanConfirmView(
+                self,
+                message=message,
+                actions=plan,
+                prefix=prefix,
+                author_id=message.author.id,
+            )
+            sent = await message.reply(
+                "J’ai compris une demande en plusieurs étapes :\n\n"
+                + "\n".join(lines)
+                + "\n\nJe vais vérifier les permissions et la hiérarchie à chaque étape. "
+                "Exécuter ce plan ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+
+        # 3) Routeur strict : heuristiques rapides puis classifieur IA avec registre fermé.
         action = await ai_actions.parse_action(
             question,
             guild_id=message.guild.id if message.guild else None,
@@ -1844,7 +2045,7 @@ class Ai(commands.Cog, name="Ai"):
             if handled:
                 return True
 
-        # 3) Compatibilité : les demandes qui citent explicitement une commande SentriX
+        # 4) Compatibilité : les demandes qui citent explicitement une commande SentriX
         # existante continuent d'utiliser le routeur historique dynamique.
         command_line = self._natural_command_line(
             question,
@@ -1854,7 +2055,7 @@ class Ai(commands.Cog, name="Ai"):
         if command_line:
             return await self._invoke_command_line(message, command_line)
 
-        # 4) Couverture large : choisit parmi les commandes réellement chargées.
+        # 5) Couverture large : choisit parmi les commandes réellement chargées.
         # Aucun nom inventé n'est accepté et les commandes global-owner sont exclues.
         command_line = await self._classify_existing_command(message, question, prefix)
         if not command_line:
