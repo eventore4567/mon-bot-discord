@@ -21,7 +21,7 @@ from discord.ext import commands
 
 import config
 from database.db import now
-from utils import embeds
+from utils import embeds, ai_actions
 from utils.instance_identity import wake_words
 from utils import sentrix_panels as panels
 from utils.intelligent_ux import (
@@ -456,7 +456,13 @@ def _install_primary_ai_listener_guard(bot: commands.Bot) -> bool:
 
         question = _extract_explicit_question(bot, message)
         if question is None:
-            return await primary(message)
+            # Forme courte volontairement prise en charge : « ban Tomioka », « mute
+            # Tomioka 2h », « ouvre setup »… Seulement les impératifs déterministes
+            # fortement typés passent ici. Le classifieur IA large n'est JAMAIS lancé
+            # sur une conversation Discord ordinaire.
+            if not ai_actions.is_bare_action_candidate(content):
+                return await primary(message)
+            question = content
 
         # Routeur unique : cogs.ai possède désormais l'interprétation et l'exécution.
         # On l'appelle avant toute réponse conversationnelle. S'il ne reconnaît aucune
