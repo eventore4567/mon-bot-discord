@@ -376,3 +376,13 @@ if(!cssSource.includes('sxBootAuraA') || !cssSource.includes('sxBootAuraB')) thr
 if(!cssSource.includes('sxBootPulse')) throw new Error('Le halo central animé est absent.');
 if(!cssSource.includes('.startup-screen::before') || !cssSource.includes('.startup-screen::after')) throw new Error('Le background animé du startup screen est incomplet.');
 if(!cssSource.includes('.startup-screen::before,.startup-screen::after,.startup-center::before{animation:none!important}')) throw new Error('Reduced motion doit couper les animations du background.');
+
+
+// Ambiance globale : le fond animé doit continuer après l'écran de démarrage,
+// sans empêcher reduced-motion.
+if(!cssSource.includes('ambiance animée dashboard complet')) throw new Error('Ambiance animée globale absente.');
+for(const token of ['sxDashboardAuraA','sxDashboardAuraB','sxDashboardPulse','body.dashboard-locked::before','body.dashboard-locked::after']){
+  if(!cssSource.includes(token)) throw new Error('Animation globale dashboard incomplète: '+token);
+}
+if(!cssSource.includes('body.dashboard-locked .sidebar') || !cssSource.includes('backdrop-filter:blur(14px)')) throw new Error('Sidebar ne laisse pas passer l’ambiance du fond.');
+if(!cssSource.includes('body.dashboard-locked::before,\n  body.dashboard-locked::after,\n  body.dashboard-locked .workspace::before{\n    animation:none!important;')) throw new Error('Reduced motion doit couper le fond animé global.');
