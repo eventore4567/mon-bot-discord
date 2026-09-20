@@ -98,5 +98,28 @@ class CommandEmbedInvariantTests(unittest.TestCase):
         )
 
 
+    def test_shared_command_ui_has_no_decorative_divider(self):
+        panels = (ROOT / "utils" / "sentrix_panels.py").read_text(encoding="utf-8")
+        embeds = (ROOT / "utils" / "embeds.py").read_text(encoding="utf-8")
+        errors = (ROOT / "cogs" / "final_error_embed_v5.py").read_text(encoding="utf-8")
+
+        assert "conteneur.add_item(discord.ui.Separator())" not in panels
+        assert 'BAR = ""' in embeds
+        assert 'BAR = ""' in errors
+        assert 'return f"{BAR}\\n{body}"' not in embeds
+
+    def test_success_is_never_inferred_as_error_for_a_completed_delete(self):
+        from utils import embeds as sx_embeds
+
+        self.assertEqual(
+            sx_embeds._kind_from_text("Action effectuée", "Messages supprimés."),
+            "success",
+        )
+        card = sx_embeds.success("Configuration enregistrée.")
+        self.assertEqual(card.title, "Succès")
+        self.assertEqual(card.colour.value, sx_embeds.COLOR_SUCCESS)
+
+
+
 if __name__ == "__main__":
     unittest.main()
