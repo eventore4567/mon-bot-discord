@@ -386,3 +386,13 @@ for(const token of ['sxDashboardAuraA','sxDashboardAuraB','sxDashboardPulse','bo
 }
 if(!cssSource.includes('body.dashboard-locked .sidebar') || !cssSource.includes('backdrop-filter:blur(14px)')) throw new Error('Sidebar ne laisse pas passer l’ambiance du fond.');
 if(!cssSource.includes('body.dashboard-locked::before,\n  body.dashboard-locked::after,\n  body.dashboard-locked .workspace::before{\n    animation:none!important;')) throw new Error('Reduced motion doit couper le fond animé global.');
+
+
+// Style chromatique verre : surfaces translucides, reflets spectraux et fallback
+// mobile/accessibilité.
+if(!cssSource.includes('chromatique glass SentriX')) throw new Error('Style chromatique global absent.');
+for(const token of ['--chroma-cyan','--chroma-violet','--chroma-pink','backdrop-filter:blur(18px)','subnav button.active::after','btn.primary']){
+  if(!cssSource.includes(token)) throw new Error('Effet chromatique incomplet: '+token);
+}
+if(!cssSource.includes('backdrop-filter:blur(11px) saturate(118%)')) throw new Error('Version mobile allégée du verre chromatique absente.');
+if(!cssSource.includes('@media (forced-colors:active)')) throw new Error('Fallback forced-colors absent.');
