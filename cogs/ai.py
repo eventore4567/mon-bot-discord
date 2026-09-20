@@ -47,7 +47,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from utils import embeds, checks, design_system, ai_service, ai_actions
+from utils import embeds, checks, design_system, ai_service, ai_actions, access_matrix, log_service
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.ai")
@@ -202,6 +202,134 @@ class _FakeCtxForDelivery:
 
     async def send(self, *args, **kwargs):
         return await self.channel.send(*args, **kwargs)
+
+
+class _LogConfigConfirmView(discord.ui.View):
+    """Confirmation des routes de logs : aucune écriture avant le clic explicite."""
+
+    def __init__(
+        self,
+        cog: "Ai",
+        *,
+        source_message: discord.Message,
+        author_id: int,
+        proposals: tuple[ai_actions.LogProposal, ...],
+    ):
+        super().__init__(timeout=90)
+        self.cog = cog
+        self.source_message = source_message
+        self.author_id = int(author_id)
+        self.proposals = proposals
+        self.message: discord.Message | None = None
+        self.done = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if int(interaction.user.id) != self.author_id:
+            await interaction.response.send_message(
+                "Cette configuration appartient à une autre personne.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.done:
+            return await interaction.response.send_message("Cette proposition a déjà été traitée.", ephemeral=True)
+        decision = await access_matrix.evaluate(
+            self.cog.bot,
+            command_name="setup",
+            author=interaction.user,
+            guild=interaction.guild,
+        )
+        if not decision.allowed:
+            return await interaction.response.send_message(decision.message, ephemeral=True)
+
+        valid: list[ai_actions.LogProposal] = []
+        rejected: list[str] = []
+        for proposal in self.proposals:
+            ok, reason = log_service.validate_channel(
+                interaction.guild, proposal.channel_id, needs_file=True
+            )
+            if ok:
+                valid.append(proposal)
+            else:
+                rejected.append(f"{proposal.label}: {reason}")
+
+        if not valid:
+            return await interaction.response.send_message(
+                "Aucune route proposée n’est encore utilisable par SentriX.", ephemeral=True
+            )
+
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="Configuration des logs en cours…", view=self
+        )
+
+        saved: list[ai_actions.LogProposal] = []
+        try:
+            for proposal in valid:
+                await log_service.set_log_channel(
+                    self.cog.bot,
+                    interaction.guild.id,
+                    proposal.category,
+                    proposal.channel_id,
+                )
+                saved.append(proposal)
+            from . import setup_v2_core
+            await setup_v2_core.enable_module_if_unset(
+                self.cog.bot,
+                interaction.guild.id,
+                "logs",
+                actor_id=interaction.user.id,
+            )
+        except Exception:
+            logger.exception("Configuration naturelle des logs impossible.")
+            if self.message is not None:
+                try:
+                    await self.message.edit(
+                        content="Je n’ai pas pu appliquer toute la configuration des logs. "
+                        "Aucune réussite non vérifiée ne sera annoncée.",
+                        view=self,
+                    )
+                except discord.HTTPException:
+                    pass
+            return
+
+        result = "\n".join(
+            f"**{p.label}** → <#{p.channel_id}>" for p in saved
+        )
+        suffix = ""
+        if rejected:
+            suffix = "\n\nNon appliqué : " + " · ".join(rejected[:3])
+        if self.message is not None:
+            try:
+                await self.message.edit(
+                    content="Configuration appliquée :\n\n" + result + suffix,
+                    view=self,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                pass
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Configuration annulée.", view=self)
+
+    async def on_timeout(self):
+        if self.done:
+            return
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(content="Proposition de logs expirée.", view=self)
+            except discord.HTTPException:
+                pass
 
 
 class _NaturalActionConfirmView(discord.ui.View):
@@ -742,6 +870,77 @@ class Ai(commands.Cog, name="Ai"):
             return None
         return action
 
+    async def _send_readonly_setup(self, message: discord.Message, denial: str = "") -> None:
+        """Vue de consultation : aucune écriture, aucun composant de configuration."""
+        try:
+            from . import setup_control_center
+            conf = await self.bot.db.get_guild_config(message.guild.id)
+            statuses = await setup_control_center.module_statuses(self.bot, message.guild, conf)
+            rows = []
+            for key, (state, summary, errors) in statuses.items():
+                raw_state = str(getattr(state, "value", state) or "")
+                label = {
+                    "active": "Actif", "inactive": "Inactif", "unconfigured": "Non configuré",
+                    "error": "Erreur", "enabled": "Actif", "disabled": "Inactif",
+                }.get(raw_state.casefold(), raw_state or "État inconnu")
+                detail = str(summary or "").strip()
+                if errors:
+                    detail += (" · " if detail else "") + str(errors[0])
+                rows.append(f"**{key.capitalize()}** — {label}" + (f" · {detail}" if detail else ""))
+            body = "\n".join(rows[:12]) or "Aucune configuration à afficher."
+        except Exception:
+            logger.exception("Lecture seule du setup impossible.")
+            body = "La configuration ne peut pas être chargée pour le moment."
+
+        view = discord.ui.View(timeout=120)
+        view.add_item(discord.ui.Button(
+            label="Ouvrir le Dashboard",
+            style=discord.ButtonStyle.link,
+            url=config.DASHBOARD_APP_URL,
+        ))
+        note = (
+            "\n\n-# Mode lecture seule : vous pouvez consulter cet état, mais pas modifier "
+            "la configuration sans les permissions nécessaires."
+        )
+        if denial:
+            note += "\n-# " + denial.replace("\n", " ")[:350]
+        await message.reply(
+            "**SentriX — Setup (lecture seule)**\n" + body + note,
+            view=view,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    async def _propose_log_configuration(self, message: discord.Message) -> None:
+        proposals = ai_actions.propose_log_routes(message.guild)
+        if not proposals:
+            return await message.reply(
+                "Je n’ai trouvé aucun routage de logs suffisamment clair. "
+                "Créez des salons explicites comme #logs-moderation, #logs-messages, "
+                "#logs-vocal ou #logs-tickets, puis réessayez.",
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        lines = [
+            f"**{proposal.label}** → <#{proposal.channel_id}>"
+            for proposal in proposals
+        ]
+        view = _LogConfigConfirmView(
+            self,
+            source_message=message,
+            author_id=message.author.id,
+            proposals=proposals,
+        )
+        sent = await message.reply(
+            "J’ai analysé le nom, le sujet et la catégorie de vos salons. "
+            "Je propose :\n\n" + "\n".join(lines)
+            + "\n\nJe n’ai encore rien modifié. Voulez-vous appliquer cette configuration ?",
+            view=view,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        view.message = sent
+
     async def _send_dashboard_link(self, message: discord.Message) -> None:
         view = discord.ui.View(timeout=120)
         view.add_item(discord.ui.Button(
@@ -785,6 +984,31 @@ class Ai(commands.Cog, name="Ai"):
             await self._send_dashboard_link(message)
             self._pending_actions.pop(self._pending_key(message), None)
             return True
+
+        if action.intent == "desktop.open_app":
+            await message.reply(
+                "Aucun appareil SentriX Desktop n’est actuellement connecté. "
+                "SentriX ne peut pas ouvrir une application installée sur votre ordinateur depuis Railway.",
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return True
+
+        if action.intent == "config.logs.auto":
+            await self._propose_log_configuration(message)
+            return True
+
+        if action.intent == "navigation.setup":
+            decision = await access_matrix.evaluate(
+                self.bot,
+                command_name="setup",
+                author=message.author,
+                guild=message.guild,
+            )
+            if not decision.allowed:
+                await self._send_readonly_setup(message, decision.reason)
+                return True
+            return await self._invoke_command_line(message, f"{prefix}setup")
 
         member = None
         if spec.target_kind == "member":
