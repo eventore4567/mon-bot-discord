@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import os
+from types import SimpleNamespace
+
+os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
+
+from utils import ai_actions
+
+
+def test_ban_natural_language_and_reason():
+    parsed = ai_actions.local_parse("tu peux bannir Tomioka pour spam stp")
+    assert parsed is not None
+    assert parsed.intent == "moderation.ban"
+    assert parsed.slots["target"].casefold() == "tomioka"
+    assert parsed.slots["reason"] == "spam stp"
+
+
+def test_mute_understands_words_and_normalizes_duration():
+    parsed = ai_actions.local_parse("mets Tomioka en mute pendant dix heures pour insultes")
+    assert parsed is not None
+    assert parsed.intent == "moderation.mute"
+    assert parsed.slots["target"].casefold() == "tomioka"
+    assert parsed.slots["duration"] == "10h"
+    assert parsed.slots["reason"] == "insultes"
+
+
+def test_unmute_beats_mute_pattern():
+    parsed = ai_actions.local_parse("enlève le mute de Tomioka")
+    assert parsed is not None
+    assert parsed.intent == "moderation.unmute"
+
+
+def test_purge_extracts_count_and_caps_at_100():
+    parsed = ai_actions.local_parse("supprime les 300 derniers messages")
+    assert parsed is not None
+    assert parsed.intent == "moderation.purge"
+    assert parsed.slots["count"] == 100
+
+
+def test_dashboard_typo_is_understood():
+    parsed = ai_actions.local_parse("donne moi le lien du dashbord")
+    assert parsed is not None
+    assert parsed.intent == "navigation.dashboard"
+
+
+def test_duration_formats_cover_requested_examples():
+    assert ai_actions.normalize_duration("10 minutes") == "10m"
+    assert ai_actions.normalize_duration("1 heure") == "1h"
+    assert ai_actions.normalize_duration("2 heures") == "2h"
+    assert ai_actions.normalize_duration("24h") == "24h"
+    assert ai_actions.normalize_duration("une semaine") == "7j"
+    assert ai_actions.normalize_duration("30 jours") == "30j"
+
+
+def _member(uid: int, name: str, display: str | None = None):
+    return SimpleNamespace(
+        id=uid,
+        name=name,
+        display_name=display or name,
+        global_name=None,
+        mention=f"<@{uid}>",
+    )
+
+
+class _Guild:
+    def __init__(self, members):
+        self.members = list(members)
+
+    def get_member(self, uid):
+        return next((m for m in self.members if int(m.id) == int(uid)), None)
+
+
+def test_member_resolution_never_guesses_ambiguous_name():
+    a = _member(111111111111111, "tomioka", "Tomioka")
+    b = _member(222222222222222, "tomioka2", "Tomioka")
+    result = ai_actions.resolve_member(_Guild([a, b]), "Tomioka")
+    assert result.member is None
+    assert {m.id for m in result.ambiguous} == {a.id, b.id}
+
+
+def test_member_resolution_accepts_unique_clear_match():
+    a = _member(111111111111111, "tomioka", "Tomioka")
+    b = _member(222222222222222, "someoneelse", "Someone Else")
+    result = ai_actions.resolve_member(_Guild([a, b]), "Tomioka")
+    assert result.member is a
+    assert result.ambiguous == ()
+
+
+def test_missing_duration_can_be_completed_by_followup():
+    parsed = ai_actions.local_parse("mute Tomioka")
+    assert parsed is not None
+    assert ai_actions.missing_slots(parsed) == ("duration",)
+    completed = ai_actions.merge_followup(parsed, "10 heures")
+    assert completed.slots["duration"] == "10h"
+    assert ai_actions.missing_slots(completed) == ()
+
+
+def test_command_rendering_reuses_existing_commands():
+    member = _member(111111111111111, "tomioka")
+    action = ai_actions.ParsedAction(
+        "moderation.mute",
+        {"target": "Tomioka", "duration": "2h", "reason": "spam"},
+    )
+    assert ai_actions.build_command_line(action, prefix="+", member=member) == "+mute <@111111111111111> 2h spam"
+
+
+def test_ai_payload_is_fail_closed():
+    assert ai_actions._validate_ai_payload({"intent": "owner.eval", "confidence": 100}) is None
+    assert ai_actions._validate_ai_payload({"intent": "moderation.ban", "confidence": 20}) is None
