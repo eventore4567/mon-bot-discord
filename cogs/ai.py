@@ -1228,8 +1228,13 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("Je ne suis dans aucun salon vocal sur ce serveur.")
                 return True
             same_channel = bool(getattr(actor, "voice", None) and actor.voice.channel == vc.channel)
-            if not same_channel and not actor.guild_permissions.move_members:
-                await reply("Vous devez être dans mon salon vocal ou avoir **Déplacer des membres**.")
+            can_manage = bool(
+                actor.guild_permissions.move_members
+                or actor.guild_permissions.manage_guild
+                or actor.guild_permissions.administrator
+            )
+            if not same_channel and not can_manage:
+                await reply("Vous devez être dans mon salon vocal ou avoir une permission de gestion du serveur.")
                 return True
             try:
                 await vc.disconnect()
@@ -1237,7 +1242,10 @@ class Ai(commands.Cog, name="Ai"):
                 if music is not None and hasattr(music, "get_queue"):
                     queue = music.get_queue(guild.id)
                     queue.voice_client = None
-                await reply("J’ai quitté le salon vocal.")
+                    queue.tracks.clear()
+                    queue.history.clear()
+                    queue.current = None
+                await reply("J’ai quitté le salon vocal et arrêté la lecture.")
             except discord.HTTPException:
                 await reply("Je n’ai pas réussi à quitter le salon vocal.")
             return True
