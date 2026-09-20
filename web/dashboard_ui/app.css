@@ -1431,23 +1431,3 @@ html[data-glow="off"] body.dashboard-locked :is(.card,.module-card,.global-serve
     backdrop-filter:none!important;
   }
 }
-
-
-/* chromatique v2 : froid, sobre, métallique */
-body.dashboard-locked{
-  --chroma-cyan:#7fdcff;
-  --chroma-blue:#6d8dff;
-  --chroma-violet:#7e95c7;
-  --chroma-pink:#9fb7d4;
-}
-body.dashboard-locked :is(.card,.module-card,.global-server-card,.theme-preset-card){
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / .04),
-    0 12px 30px rgb(0 0 0 / .18);
-}
-body.dashboard-locked .btn.primary{
-  background:linear-gradient(105deg,#7fdcff 0%,#6d8dff 52%,#8da4c8 100%);
-}
-body.dashboard-locked .subnav button.active::after{
-  background:linear-gradient(90deg,#7fdcff,#6d8dff,#9fb7d4);
-}
