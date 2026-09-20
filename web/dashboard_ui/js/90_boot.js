@@ -161,37 +161,92 @@ const boot = { state: 'booting', watchdog: null };
 const startupStartedAt = performance.now();
 let startupFinished = false;
 let startupPercent = 4;
+let startupTarget = 4;
+let startupFrame = null;
+let startupLastFrame = 0;
 let startupDrip = null;
-function setStartupProgress(value) {
-  if (startupFinished && Number(value) < 100) return;
-  const next = Math.max(startupPercent, Math.min(100, Math.round(Number(value) || 0)));
-  startupPercent = next;
+
+function paintStartupProgress(value) {
+  startupPercent = Math.max(0, Math.min(100, Number(value) || 0));
   const bar = $('startupProgressBar');
   const wrap = $('startupProgress');
-  if (bar) bar.style.width = `${next}%`;
-  if (wrap) wrap.setAttribute('aria-valuenow', String(next));
+  if (bar) bar.style.width = `${startupPercent.toFixed(2)}%`;
+  if (wrap) wrap.setAttribute('aria-valuenow', String(Math.round(startupPercent)));
 }
+
+function startupProgressFrame(now) {
+  if (!startupLastFrame) startupLastFrame = now;
+  const dt = Math.min(48, Math.max(0, now - startupLastFrame));
+  startupLastFrame = now;
+  const remaining = startupTarget - startupPercent;
+
+  if (remaining > 0.015) {
+    // Vitesse volontairement régulière : environ 2,4 s pour parcourir toute la barre.
+    // Les jalons réseau déplacent seulement la cible ; la barre n'effectue jamais de saut.
+    const maxStep = (dt / 1000) * (startupTarget >= 100 ? 46 : 39);
+    const easedStep = Math.max(0.035, Math.min(maxStep, remaining * 0.16));
+    paintStartupProgress(Math.min(startupTarget, startupPercent + easedStep));
+  } else if (startupPercent !== startupTarget) {
+    paintStartupProgress(startupTarget);
+  }
+
+  if (!startupFinished || startupPercent < 99.98) {
+    startupFrame = requestAnimationFrame(startupProgressFrame);
+  } else {
+    startupFrame = null;
+  }
+}
+
+function ensureStartupProgressFrame() {
+  if (startupFrame == null) {
+    startupLastFrame = 0;
+    startupFrame = requestAnimationFrame(startupProgressFrame);
+  }
+}
+
+function setStartupProgress(value) {
+  if (startupFinished && Number(value) < 100) return;
+  startupTarget = Math.max(startupTarget, Math.min(100, Number(value) || 0));
+  ensureStartupProgressFrame();
+}
+
 function startStartupProgress() {
-  setStartupProgress(4);
+  paintStartupProgress(4);
+  startupTarget = 4;
+  ensureStartupProgressFrame();
   clearInterval(startupDrip);
   startupDrip = setInterval(() => {
-    if (startupFinished || startupPercent >= 92) return;
-    const step = startupPercent < 35 ? 2 : startupPercent < 70 ? 1.4 : 0.7;
-    setStartupProgress(Math.min(92, startupPercent + step));
-  }, 110);
+    if (startupFinished || startupTarget >= 90) return;
+    const step = startupTarget < 35 ? 1.1 : startupTarget < 70 ? 0.75 : 0.38;
+    setStartupProgress(Math.min(90, startupTarget + step));
+  }, 180);
 }
+
 function finishStartupScreen({ immediate = false } = {}) {
   if (startupFinished) return;
   startupFinished = true;
   clearInterval(startupDrip);
-  setStartupProgress(100);
-  const elapsed = performance.now() - startupStartedAt;
-  const wait = immediate ? 0 : Math.max(180, 900 - elapsed);
-  setTimeout(() => {
+
+  if (immediate) {
+    startupTarget = 100;
+    paintStartupProgress(100);
+  } else {
+    setStartupProgress(100);
+  }
+
+  const finishWhenSmooth = () => {
+    const elapsed = performance.now() - startupStartedAt;
+    const visuallyComplete = startupPercent >= 99.7;
+    const minimumShown = elapsed >= 2200;
+    if (!immediate && (!visuallyComplete || !minimumShown)) {
+      setTimeout(finishWhenSmooth, 45);
+      return;
+    }
     document.body.classList.remove('startup-loading');
     document.body.classList.add('startup-done');
     setTimeout(() => $('startupScreen')?.remove(), 450);
-  }, wait);
+  };
+  finishWhenSmooth();
 }
 function showOnly(id) {
   for (const k of ['landing', 'bootState', 'dashboard']) $(k).classList.toggle('hidden', k !== id);
