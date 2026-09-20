@@ -410,3 +410,15 @@ async def test_multi_action_planner_rejects_unknown_intent(monkeypatch):
         user_id=3,
     )
     assert plan == ()
+
+
+def test_ticket_access_role_is_a_closed_native_action():
+    parsed = ai_actions.local_parse("SentriX donne accès aux tickets au role Staff")
+    assert parsed is not None
+    assert parsed.intent == "tickets.grant_access"
+    assert parsed.slots["role"].casefold() == "staff"
+
+    spec = ai_actions.ACTIONS["tickets.grant_access"]
+    assert spec.command is None
+    assert spec.required == ("role",)
+    assert spec.confirm is True
