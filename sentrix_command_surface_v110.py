@@ -64,7 +64,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
 
     # Niveaux / profil — /level et /leaderboard sont des conventions répandues.
     "level": "level",
-    "profile": "profile",
+    "profile": "me",
     "leaderboard-levels": "leaderboard",
     "set-xp": "setxp",
     "add-xp": "addxp",
@@ -221,6 +221,32 @@ def _find_command(bot, source_name: str):
 
 
 def _make_direct_slash(bot, source_name: str, public_name: str):
+    # /me est volontairement natif : l'ancienne commande hybride /profile pouvait
+    # dépasser la fenêtre de 3 secondes avant sa première réponse et finir sur
+    # l'erreur générique Discord. Le renderer communautaire possède désormais son
+    # propre defer + gestion d'erreur dans profile_oxyde_runtime.
+    if source_name == "profile" and public_name == "me":
+        from cogs import profile_oxyde_runtime as profile_runtime
+
+        async def profile_me(interaction: discord.Interaction, membre: discord.Member = None):
+            await profile_runtime.send_profile_slash(bot, interaction, membre)
+
+        profile_me.__name__ = "slash_me"
+        profile_me.__qualname__ = "slash_me"
+        profile_me.__annotations__ = {
+            "interaction": discord.Interaction,
+            "membre": discord.Member,
+        }
+        profile_me._sentrix_original_command = "profile"
+        profile_me._sentrix_native_options = True
+        profile_me = app_commands.describe(membre="Le membre visé (optionnel)")(profile_me)
+        slash = app_commands.Command(
+            name="me",
+            description="Afficher votre profil communautaire.",
+            callback=profile_me,
+        )
+        return slash, None, True
+
     command = _find_command(bot, source_name)
     if command is None:
         return None
@@ -247,7 +273,7 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
         slash, command, native = built
         tree.add_command(slash, override=True)
         direct_report[f"/{slash.name}"] = {
-            "original": str(command.qualified_name),
+            "original": str(command.qualified_name) if command is not None else source_name,
             "native_options": bool(native),
         }
         installed += 1
