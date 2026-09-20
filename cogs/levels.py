@@ -1429,9 +1429,10 @@ class Levels(commands.Cog, name="Levels"):
         except discord.HTTPException:
             pass
 
-    @commands.hybrid_command(name="profile", description="Afficher votre profil communautaire.")
-    @app_commands.describe(membre="Le membre visé (optionnel)")
-    async def profile(self, ctx: commands.Context, membre: discord.Member = None):
+    # Ancien rendu conservé temporairement comme helper interne uniquement.
+    # La commande publique +profile/+profil est supprimée ; le profil communautaire
+    # officiel est maintenant /me via cogs/profile_oxyde_runtime.py.
+    async def _legacy_profile(self, ctx: commands.Context, membre: discord.Member = None):
         # Première commande migrée vers utils/design_system (Phase 2) : contrairement à
         # /stats et /level, /profile n'avait pas de couleur/footer pilotés par
         # +statsconfig — elle peut donc adopter le nouveau système sans rien casser de
