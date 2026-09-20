@@ -579,13 +579,13 @@ def local_parse(question: str) -> ParsedAction | None:
         )
 
     ticket_access = re.search(
-        r"\b(?:donne|ajoute|accorde)\s+(?:l['’]?acces|acces)\s+(?:aux?|pour\s+les?)\s+tickets?\s+(?:au|a|à)\s+(?:role\s+)?@?([^\s,;]+)",
+        r"\b(?:donne|ajoute|accorde)\s+(?:l['’]?acc[eè]s|acc[eè]s)\s+(?:aux?|pour\s+les?)\s+tickets?\s+(?:au|a|à)\s+(?:r[oô]le\s+)?@?([^\s,;]+)",
         question,
         re.IGNORECASE,
     )
     if not ticket_access:
         ticket_access = re.search(
-            r"\b(?:donne|ajoute|accorde)\s+(?:au\s+)?role\s+(.+?)\s+(?:l['’]?acces|acces)\s+(?:aux?|pour\s+les?)\s+tickets?",
+            r"\b(?:donne|ajoute|accorde)\s+(?:au\s+)?r[oô]le\s+(.+?)\s+(?:l['’]?acc[eè]s|acc[eè]s)\s+(?:aux?|pour\s+les?)\s+tickets?",
             question,
             re.IGNORECASE,
         )
