@@ -9,7 +9,15 @@
 /*__CSS__*/
 </style>
 </head>
-<body>
+<body class="startup-loading">
+<div class="startup-screen" id="startupScreen" role="status" aria-live="polite" aria-label="Chargement de SentriX">
+  <div class="startup-center">
+    <div class="startup-mark" aria-hidden="true"><span>S</span></div>
+    <div class="startup-name">SentriX</div>
+    <div class="startup-copy">Dashboard</div>
+  </div>
+  <div class="startup-progress" aria-hidden="true"><i></i></div>
+</div>
 <a class="skip" href="#main">Aller au contenu</a>
 <header class="topbar">
   <a class="brand" href="/" aria-label="SentriX"><span class="brand-mark">S</span><span class="brand-copy">SentriX<small>Dashboard</small></span></a>
