@@ -386,3 +386,9 @@ for(const token of ['sxDashboardAuraA','sxDashboardAuraB','sxDashboardPulse','bo
 }
 if(!cssSource.includes('body.dashboard-locked .sidebar') || !cssSource.includes('backdrop-filter:blur(14px)')) throw new Error('Sidebar ne laisse pas passer l’ambiance du fond.');
 if(!cssSource.includes('body.dashboard-locked::before,\n  body.dashboard-locked::after,\n  body.dashboard-locked .workspace::before{\n    animation:none!important;')) throw new Error('Reduced motion doit couper le fond animé global.');
+
+
+// Le style chromatique expérimental doit rester entièrement retiré.
+for(const token of ['chromatique glass SentriX','--chroma-cyan','--chroma-blue','--chroma-violet','--chroma-pink','reflets spectraux']){
+  if(cssSource.includes(token)) throw new Error('Ancien style chromatique encore présent: '+token);
+}
