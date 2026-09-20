@@ -121,6 +121,16 @@ if(dom.window.document.querySelector("#sxFeaturesFrame,.sx-features-shell,#sentr
 const executableScripts=[...dom.window.document.querySelectorAll("script")].filter(s=>s.type!=="application/json");
 if(executableScripts.length!==1) throw new Error(`${executableScripts.length} scripts exécutables au lieu de 1.`);
 if(dom.window.document.querySelectorAll("style").length!==1) throw new Error("Plusieurs feuilles de style embarquées.");
+const responsiveCss=dom.window.document.querySelector("style").textContent;
+for(const token of ["responsive universel v3","max-width:1024px","max-width:600px","pointer:coarse","safe-area-inset-bottom","100dvh"]){
+  if(!responsiveCss.includes(token)) throw new Error(`Responsive universel incomplet: ${token}`);
+}
+dom.window.document.getElementById("mobileMenu").click();
+if(!dom.window.document.body.classList.contains("nav-open")) throw new Error("Le menu mobile ne verrouille pas le scroll de la page.");
+if(dom.window.document.getElementById("mobileOverlay").classList.contains("hidden")) throw new Error("Overlay mobile absent à l'ouverture.");
+dom.window.document.getElementById("mobileOverlay").click();
+if(dom.window.document.body.classList.contains("nav-open")) throw new Error("Le verrouillage mobile reste actif après fermeture.");
+
 
 // Mode global : profil / serveurs / préférences uniquement. La configuration serveur
 // n'apparaît qu'après un clic explicite sur une pastille de la colonne gauche.
