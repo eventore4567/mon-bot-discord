@@ -278,6 +278,7 @@ def _extract_target(question: str) -> str | None:
         return mention.group(0)
     # Formulations fréquentes où la cible se place après le verbe.
     patterns = (
+        r"\b(?:tempban|ban\s+temporaire|bannis\s+temporairement|bannir\s+temporairement)\s+@?([^\s,;]+)",
         r"\b(?:ban|bannis|bannir|warn|avertis|avertir|mute|mut|kick|expulse|vire)\s+@?([^\s,;]+)",
         r"\bmets\s+@?([^\s,;]+)\s+en\s+(?:mute|timeout)",
         r"\b(?:unmute|demute|démute)\s+@?([^\s,;]+)",
