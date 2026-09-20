@@ -105,7 +105,7 @@ def _install_final_visual_stack(bot: commands.Bot) -> None:
     ping_final_style.install()
     sentrix_visual_cleanup.install()
 
-    panel_bar = wide_compact_v6.LONG_BAR
+    panel_bar = ""
     sentrix_visual_cleanup.PANEL_BAR = panel_bar
     sentrix_runtime.BAR = panel_bar
     sentrix_runtime.CHANGE_BAR = ""
@@ -119,7 +119,7 @@ def _install_final_visual_stack(bot: commands.Bot) -> None:
 
     bot._sentrix_final_visual_stack = True
     logger.info(
-        "Pile visuelle finale restaurée : embeds, erreurs, +ping et logs compacts actifs."
+        "Pile visuelle finale active : commandes sans séparateurs décoratifs, erreurs et logs compacts actifs."
     )
 
 
