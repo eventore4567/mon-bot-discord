@@ -630,7 +630,9 @@ def _install_followups() -> None:
 
 
 async def _permission_denial(interaction: discord.Interaction, decision) -> None:
-    text = str(getattr(decision, "reason", None) or "Vous n'avez pas accès à cette commande.")
+    # decision.message : la raison seule pour un module coupé / un MP / une liste noire,
+    # l'en-tête « pas accès » uniquement pour un vrai refus de permission.
+    text = str(getattr(decision, "message", None) or getattr(decision, "reason", None) or "Vous n'avez pas accès à cette commande.")
     panel = sentrix_embeds.error(text)
     try:
         if interaction.response.is_done():
@@ -652,13 +654,18 @@ def _slash_error_embed(error: BaseException) -> discord.Embed:
             f"Cette commande est en recharge. Réessayez dans {max(1, round(error.retry_after))} s."
         )
     if isinstance(error, discord.app_commands.MissingPermissions):
-        return sentrix_embeds.error("Vous n'avez pas les permissions nécessaires pour cette commande.")
+        from utils.error_texts import missing_permissions_text
+        return sentrix_embeds.error(missing_permissions_text(error.missing_permissions))
     if isinstance(error, discord.app_commands.BotMissingPermissions):
-        return sentrix_embeds.error("SentriX n'a pas les permissions nécessaires pour terminer cette action.")
+        from utils.error_texts import bot_missing_permissions_text
+        return sentrix_embeds.error(bot_missing_permissions_text(error.missing_permissions))
     if isinstance(original, discord.Forbidden):
         return sentrix_embeds.error("Discord a refusé cette action. Vérifiez les permissions du bot.")
-    if isinstance(error, discord.app_commands.CheckFailure):
-        return sentrix_embeds.error("Vous n'avez pas accès à cette commande.")
+    if isinstance(error, discord.app_commands.CheckFailure) or isinstance(original, commands.CheckFailure):
+        from utils.error_texts import CHECK_FALLBACK, check_failure_message
+        # Le message du check (système d'argent coupé, propriétaire…) est conservé ;
+        # jamais « pas accès » pour un check muet.
+        return sentrix_embeds.error(check_failure_message(error) or check_failure_message(original) or CHECK_FALLBACK)
     return sentrix_embeds.error("Cette commande a rencontré un problème technique.")
 
 

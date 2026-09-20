@@ -304,7 +304,25 @@ def _serialize_value(value) -> str:
         return value.mention
     if hasattr(value, "value") and not isinstance(value, (str, int, float)):
         value = value.value
-    return shlex.quote(str(value))
+    return _quote_for_string_view(str(value))
+
+
+def _quote_for_string_view(text: str) -> str:
+    """Cite une valeur pour le parseur préfixe de discord.py (StringView).
+
+    ``shlex.quote`` entourait la valeur d'apostrophes ASCII (``'<@&123>'``) que
+    StringView ne reconnaît PAS comme des guillemets : une mention ou un texte avec
+    espaces tapé dans une option slash libre arrivait avec ses apostrophes, un
+    ``Greedy[Role]`` ne consommait rien et l'option suivante (``price``) recevait la
+    mention (« Converting to int failed », /shoprole ajouter). StringView comprend
+    les guillemets doubles avec ``\"`` échappé : on n'utilise que ceux-là.
+    """
+    if text == "":
+        return '""'
+    needs_quotes = any(ch.isspace() for ch in text) or '"' in text or text[0] in "'‘’“”„«»「」"
+    if not needs_quotes:
+        return text
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _argument_text(command: commands.Command, option_names: tuple[str, ...], kwargs: dict) -> str:

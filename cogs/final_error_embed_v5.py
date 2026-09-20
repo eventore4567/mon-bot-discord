@@ -28,6 +28,7 @@ BAR = "━━━━━━━━━━━━━━━━━━━━━━━━�
 ERROR_COLOR = int(_config.COLOR_ERROR)
 WARNING_COLOR = int(_config.COLOR_WARNING)
 FOOTER = "SentriX • Réponse rapide et sécurisée"
+from utils.error_texts import CHECK_FALLBACK as _CHECK_FALLBACK  # noqa: E402
 _ALLOWED = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=False)
 
 # Un message d'erreur qui reste affiché indéfiniment finit par encombrer le
@@ -176,6 +177,18 @@ def _texte_erreur_prefix(ctx: commands.Context, error: commands.CommandError) ->
         else:
             texte += f" Voir `{prefix}help`."
         return texte
+    # Textes partagés avec le transport slash (utils/error_texts.py) : permission exacte,
+    # message d'un BotPermissionError conservé, argument fautif nommé.
+    from utils import error_texts
+
+    parametre = getattr(getattr(ctx, "current_parameter", None), "name", None)
+    partage = error_texts.user_error_text(base, usage=usage, param_name=parametre)
+    if partage is not None:
+        return partage
+    if isinstance(base, commands.CheckFailure):
+        # Check nu sans raison : demandée à la matrice / aux systèmes coupés par
+        # l'appelant asynchrone (prefix_error) ; ici on ne conclut jamais « permission ».
+        return error_texts.CHECK_FALLBACK
     if isinstance(base, commands.MissingRequiredArgument):
         return f"Usage : `{usage}`"
     if isinstance(base, commands.TooManyArguments):
@@ -210,16 +223,9 @@ def _texte_erreur_prefix(ctx: commands.Context, error: commands.CommandError) ->
     if isinstance(base, commands.PrivateMessageOnly):
         return "Cette commande s'utilise en message privé avec SentriX."
     cls = type(base).__name__
-    if cls == "BotBlacklistedError":
-        return f"Vous n'êtes pas autorisé à utiliser SentriX ({getattr(base, 'reason', None) or 'aucune raison fournie'})."
     if cls == "RuntimeRateLimitError":
         secondes = max(1, round(float(getattr(base, "retry_after", 1.0) or 1.0)))
         return f"Fonction temporairement limitée : réessayez dans {secondes} s."
-    if cls == "BotPermissionError" or isinstance(base, commands.CheckFailure):
-        message = str(getattr(base, "message", "") or str(base) or "").strip()
-        if message and not message.startswith("The check functions for command "):
-            return message
-        return "Commande refusée par une règle d’accès. Utilisez `+permissions explain` pour voir la permission ou la règle requise."
     if isinstance(base, discord.HTTPException):
         return _texte_discord(base)
     return None
@@ -232,19 +238,24 @@ def _texte_erreur_slash(error: discord.app_commands.AppCommandError) -> str | No
     if isinstance(error, app.CommandOnCooldown):
         return f"Commande en attente : réessayez dans {max(1, round(float(error.retry_after)))} s."
     if isinstance(error, app.MissingPermissions):
-        return f"Il vous faut la permission **{_libelles(error.missing_permissions)}** pour cette commande."
+        from utils.error_texts import missing_permissions_text
+        return missing_permissions_text(error.missing_permissions)
     if isinstance(error, app.BotMissingPermissions):
-        return f"Il manque à SentriX la permission **{_libelles(error.missing_permissions)}**."
+        from utils.error_texts import bot_missing_permissions_text
+        return bot_missing_permissions_text(error.missing_permissions)
     if isinstance(error, (app.TransformerError, app.CommandSignatureMismatch)):
         return "Une des options fournies est invalide."
-    cls = type(error).__name__
-    if cls == "BotBlacklistedError":
-        return f"Vous n'êtes pas autorisé à utiliser SentriX ({getattr(error, 'reason', None) or 'aucune raison fournie'})."
-    if cls == "BotPermissionError" or isinstance(error, app.CheckFailure):
-        message = str(getattr(error, "message", "") or str(error) or "").strip()
-        if message and not message.startswith("The check functions for command "):
-            return message
-        return "Commande refusée par une règle d’accès. Utilisez `/permissions explain` pour voir la permission ou la règle requise."
+    from utils import error_texts
+
+    for candidate in (error, original):
+        partage = error_texts.user_error_text(candidate)
+        if partage is not None:
+            return partage
+    if isinstance(error, app.CheckFailure) or isinstance(original, commands.CheckFailure):
+        texte = error_texts.check_failure_message(error) or error_texts.check_failure_message(original)
+        # Jamais « pas la permission » pour un check muet : le vrai motif est demandé à
+        # la matrice par slash_error ; ici le dernier recours n'accuse pas une permission.
+        return texte or error_texts.CHECK_FALLBACK
     if isinstance(original, commands.CommandError):
         # Passerelle V95/V98 : l'erreur d'origine est une erreur commands.py classique.
         class _Ctx:  # usage minimal pour _usage()/_prefix()
@@ -545,6 +556,15 @@ def install(bot: commands.Bot) -> None:
                 logger.exception("V5 : matchmaking +tictactoe indisponible, repli sur le panneau d'erreur standard.")
 
         texte = _texte_erreur_prefix(ctx, error)
+        if texte == _CHECK_FALLBACK and isinstance(base, commands.CheckFailure):
+            try:
+                from utils.error_texts import explain_check_failure
+
+                texte = await explain_check_failure(
+                    self, command=ctx.command, author=getattr(ctx, "author", None), guild=getattr(ctx, "guild", None),
+                )
+            except Exception:
+                logger.debug("Explication du refus impossible.", exc_info=True)
         try:
             if texte is not None:
                 duree = _DUREE_COMMANDE_INTROUVABLE if isinstance(base, commands.CommandNotFound) else _DUREE_AFFICHAGE
@@ -569,6 +589,15 @@ def install(bot: commands.Bot) -> None:
     async def slash_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
         command = getattr(interaction, "command", None)
         texte = _texte_erreur_slash(error)
+        if texte == _CHECK_FALLBACK:
+            try:
+                from utils.error_texts import explain_check_failure
+
+                texte = await explain_check_failure(
+                    bot, command=command, author=getattr(interaction, "user", None), guild=getattr(interaction, "guild", None),
+                )
+            except Exception:
+                logger.debug("Explication du refus slash impossible.", exc_info=True)
         try:
             if texte is not None:
                 await _texte_slash_send(interaction, texte)

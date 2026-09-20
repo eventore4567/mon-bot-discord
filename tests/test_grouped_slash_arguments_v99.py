@@ -115,7 +115,8 @@ def test_compact_errors_are_plain_sentences():
         commands.BucketType.user,
     )
 
-    assert fix._short_error(cooldown) == "Cette commande est en cooldown. Réessaie dans 3 s."
+    # Texte partagé avec le préfixe (utils/error_texts.py) : même phrase sur les deux transports.
+    assert fix._short_error(cooldown) == "Commande en attente : réessayez dans 3 s."
     assert "embed" not in fix._short_error(commands.BadArgument("bad")).casefold()
 
 

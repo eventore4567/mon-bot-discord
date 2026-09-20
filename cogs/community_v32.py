@@ -339,7 +339,10 @@ def _install_ai_recovery(bot: commands.Bot) -> None:
     if getattr(ai_cog, "_sentrix_v32_ai_handler", False):
         return
 
-    async def professional_ai(this, ctx: commands.Context, question: str, *, forced_advanced: bool = False):
+    async def professional_ai(this, ctx: commands.Context, question: str, *, forced_advanced: bool = False,
+                              force_web_search: bool = False):
+        # `force_web_search` est passé par +ai search / /ia recherche : sans ce paramètre le
+        # remplaçant V3.2 levait TypeError (SXR-CMD, trouvé par tools/command_sweep.py).
         guild_id = ctx.guild.id if ctx.guild else None
         channel_id = ctx.channel.id
 
@@ -369,6 +372,7 @@ def _install_ai_recovery(bot: commands.Bot) -> None:
                     question=question,
                     forced_advanced=forced_advanced,
                     command=command_name,
+                    force_web_search=force_web_search,
                 )
         except Exception:
             logger.exception("V3.2 : pipeline +ai principal en erreur, activation du fallback direct.")

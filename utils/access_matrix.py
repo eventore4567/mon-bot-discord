@@ -586,6 +586,32 @@ def help_requirement(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 DENIAL_HEADER = "Vous n'avez pas accès à cette commande."
+# Politiques dont la cause n'est PAS une permission du membre : le refus dit la vraie
+# cause (module coupé, fonction IA coupée, message privé, liste noire) sans l'en-tête
+# « Vous n'avez pas accès », qui faisait croire à un problème de permission.
+NON_PERMISSION_POLICY_PREFIXES = ("module:", "ai:", "guild-required", "global-blacklist", "invalid")
+
+
+def module_disabled_message(module: str) -> str:
+    """Même phrase sur les deux transports et dans les trois évaluateurs (matrice, V65, V68).
+
+    L'économie et les niveaux sont des « systèmes » pour les membres (c'est le mot des
+    interrupteurs +economy-system / +level-system et du garde métier) : on le garde.
+    """
+    if module == "economy":
+        return ("Le **système d'argent est désactivé** sur ce serveur. "
+                "Un administrateur peut le réactiver dans `+setup` ou `/setup`.")
+    if module == "levels":
+        return ("Le **système de niveaux est désactivé** sur ce serveur. "
+                "Un administrateur peut le réactiver dans `+setup` ou `/setup`.")
+    label = MODULE_LABELS.get(module, module)
+    return (f"Le module **{label}** est désactivé sur ce serveur. "
+            "Un administrateur peut le réactiver dans `+setup` ou `/setup`.")
+
+
+def is_permission_policy(policy: str) -> bool:
+    policy = str(policy or "")
+    return not any(policy.startswith(prefix) for prefix in NON_PERMISSION_POLICY_PREFIXES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -600,6 +626,8 @@ class AccessDecision:
             return ""
         if not self.reason:
             return DENIAL_HEADER
+        if not is_permission_policy(self.policy):
+            return self.reason
         return f"{DENIAL_HEADER}\n\n{self.reason}"
 
 
@@ -835,12 +863,7 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
     # (4) module désactivé
     module = module_for_command(name)
     if module and not await backend.module_enabled(guild_id, module):
-        label = MODULE_LABELS.get(module, module)
-        return _deny(
-            f"Le module **{label}** n'est pas activé sur ce serveur. "
-            "Un administrateur peut l'activer dans `+setup` ou `/setup`.",
-            f"module:{module}:off",
-        )
+        return _deny(module_disabled_message(module), f"module:{module}:off")
 
     # (4b) sous-interrupteurs IA
     if module == "ai" and name not in AI_ALWAYS_ALLOWED:
@@ -929,6 +952,13 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
         return AccessDecision(True, policy="public")
 
     # (11) fail-closed
+    declared = SUBCOMMAND_TIERS.get(name)
+    if declared:
+        return _deny(
+            "**Permission requise :** Administrateur ou un rôle autorisé "
+            "dans `Setup > Permissions`.",
+            f"categorie:{declared}",
+        )
     for category, names in CATEGORY_COMMANDS.items():
         if name in names:
             return _deny(
@@ -950,4 +980,5 @@ __all__ = [
     "GUILD_OWNER_COMMANDS", "DISCORD_PERMISSION_COMMANDS", "CATEGORY_COMMANDS",
     "KNOWN_COMMANDS",
     "PERMISSION_LABELS", "PERMISSIONS_SENSIBLES", "MODULE_LABELS", "DENIAL_HEADER",
+    "is_permission_policy", "NON_PERMISSION_POLICY_PREFIXES", "module_disabled_message",
 ]

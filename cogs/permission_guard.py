@@ -275,12 +275,52 @@ async def _assert_fail_closed_contract(bot: commands.Bot) -> None:
         )
 
 
+def _strip_command_checks(command: commands.Command) -> int:
+    """Même règle que _strip_redundant_local_checks, pour UNE commande (et ses enfants)."""
+    removed = 0
+    nodes = [command, *(command.walk_commands() if isinstance(command, commands.Group) else [])]
+    for node in nodes:
+        root = node.root_parent or node
+        if normalise(getattr(root, "name", "")) not in access_matrix.KNOWN_COMMANDS:
+            continue
+        for holder in (node, getattr(node, "app_command", None)):
+            checks_list = getattr(holder, "checks", None) if holder is not None else None
+            if not isinstance(checks_list, list):
+                continue
+            keep = [c for c in checks_list if not _is_redundant_authorization_check(c)]
+            removed += len(checks_list) - len(keep)
+            checks_list[:] = keep
+    return removed
+
+
+def _watch_late_commands() -> None:
+    """Les commandes ajoutées APRÈS l'installation (couches de boot tardives : +modcenter,
+    +systemstatus…) gardaient leur ancien check local d'autorisation, plus strict que la
+    matrice (le propriétaire de SentriX y était refusé). Chaque add_command repasse le
+    même balayage que l'installation."""
+    if getattr(commands.GroupMixin, "_sentrix_permission_guard_watch", False):
+        return
+    original_add = commands.GroupMixin.add_command
+
+    def add_command_stripped(self, command: commands.Command) -> None:
+        original_add(self, command)
+        try:
+            _strip_command_checks(command)
+        except Exception:
+            logger.debug("Balayage des checks impossible pour %s", getattr(command, "qualified_name", "?"), exc_info=True)
+
+    add_command_stripped._sentrix_original = original_add
+    commands.GroupMixin.add_command = add_command_stripped
+    commands.GroupMixin._sentrix_permission_guard_watch = True
+
+
 def install(bot: commands.Bot) -> None:
     _force_help_public(bot)
     if getattr(bot, "_sentrix_permission_guard_installed", False):
         return
 
     removed = _strip_redundant_local_checks(bot)
+    _watch_late_commands()
 
     async def prefix_permission_guard(ctx: commands.Context) -> bool:
         command = getattr(ctx, "command", None)

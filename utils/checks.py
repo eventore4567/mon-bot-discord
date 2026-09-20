@@ -171,15 +171,14 @@ def is_owner_or_admin_for(category: str):
 
 def has_permission(permission: str):
     async def predicate(ctx: commands.Context) -> bool:
+        if await is_verified_bot_owner(ctx):
+            return True
         if not isinstance(ctx.author, discord.Member):
             raise BotPermissionError("Cette commande doit être utilisée sur un serveur.")
         if getattr(ctx.author.guild_permissions, permission, False):
             return True
         label = permission_label(permission)
-        raise BotPermissionError(
-            "Vous ne pouvez pas utiliser cette commande.\n\n"
-            f"**Permission requise :** {label}"
-        )
+        raise BotPermissionError(f"Il te faut la permission **{label}** pour utiliser cette commande.")
 
     return commands.check(_mark(predicate, permission_label(permission)))
 
@@ -199,12 +198,14 @@ async def is_mod_or_permission(ctx: commands.Context, permission: str) -> bool:
 
 def has_permission_or_modrole(permission: str):
     async def predicate(ctx: commands.Context) -> bool:
+        if await is_verified_bot_owner(ctx):
+            return True
         if await is_mod_or_permission(ctx, permission):
             return True
         label = permission_label(permission)
         raise BotPermissionError(
-            "Vous ne pouvez pas utiliser cette commande.\n\n"
-            f"**Permission requise :** {label} ou le rôle staff configuré"
+            f"Il te faut la permission **{label}** (ou le rôle staff configuré dans Setup) "
+            "pour utiliser cette commande."
         )
 
     return commands.check(_mark(predicate, f"{permission_label(permission)} ou rôle staff"))

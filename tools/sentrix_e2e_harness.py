@@ -58,6 +58,19 @@ ADMIN_ROLE_ID = 100000000000000100
 BOT_ROLE_ID = 100000000000000101
 MEMBER_ROLE_ID = 100000000000000102
 PING_ROLE_ID = 100000000000000103
+MOD_ROLE_ID = 100000000000000104       # modérateur : kick/ban/mute/messages, pas admin
+ADMIN_ID = 100000000000000079          # administrateur (rôle Admin) qui n'est PAS propriétaire
+MOD_ID = 100000000000000080            # modérateur (rôle Modérateur)
+
+MEMBER_PERMISSIONS = discord.Permissions(
+    view_channel=True, send_messages=True, read_message_history=True, add_reactions=True,
+    embed_links=True, attach_files=True, connect=True, speak=True, use_application_commands=True,
+    change_nickname=True, use_external_emojis=True,
+)
+MOD_PERMISSIONS = discord.Permissions(
+    MEMBER_PERMISSIONS.value, kick_members=True, ban_members=True, manage_messages=True,
+    moderate_members=True, manage_nicknames=True, mute_members=True, deafen_members=True, move_members=True,
+)
 
 CALLS: list[tuple[str, str, Any]] = []
 STATE: dict[str, Any] = {
@@ -315,7 +328,11 @@ async def setup_world(bot):
     state = bot._connection
     everything = str(discord.Permissions.all().value)
     roles = [
-        {"id": str(GID), "name": "@everyone", "permissions": str(discord.Permissions.general().value), "position": 0, "color": 0, "hoist": False, "managed": False, "mentionable": False},
+        # @everyone = un vrai membre : lire, écrire, réagir, parler. Permissions.general()
+        # donnait Gérer le serveur / les salons / les rôles à tout le monde et masquait
+        # les refus de permission dans les balayages.
+        {"id": str(GID), "name": "@everyone", "permissions": str(MEMBER_PERMISSIONS.value), "position": 0, "color": 0, "hoist": False, "managed": False, "mentionable": False},
+        {"id": str(MOD_ROLE_ID), "name": "Modérateur", "permissions": str(MOD_PERMISSIONS.value), "position": 3, "color": 0, "hoist": False, "managed": False, "mentionable": False},
         {"id": str(ADMIN_ROLE_ID), "name": "Admin", "permissions": everything, "position": 5, "color": 0, "hoist": False, "managed": False, "mentionable": False},
         {"id": str(BOT_ROLE_ID), "name": "SentriX", "permissions": everything, "position": 4, "color": 0, "hoist": False, "managed": True, "mentionable": False},
         {"id": str(PING_ROLE_ID), "name": "Ping annonces", "permissions": "0", "position": 2, "color": 0, "hoist": False, "managed": False, "mentionable": True},
@@ -331,6 +348,8 @@ async def setup_world(bot):
         member_payload(AUTHOR_ID, "jayden", [ADMIN_ROLE_ID]),
         member_payload(TARGET_ID, "cible", [MEMBER_ROLE_ID]),
         member_payload(SECOND_ID, "second", [MEMBER_ROLE_ID]),
+        member_payload(ADMIN_ID, "admin", [ADMIN_ROLE_ID]),
+        member_payload(MOD_ID, "modo", [MOD_ROLE_ID]),
         member_payload(BOT_ID, "SentriX", [BOT_ROLE_ID]),
     ]
     guild_data = {
@@ -356,7 +375,9 @@ async def setup_world(bot):
         except Exception:
             pass
     from cogs import setup_v2_core
-    for module in ("logs", "levels", "economy", "welcome", "tickets", "security", "automod", "notifications", "games"):
+    # Tous les modules configurables ACTIFS (absence de ligne = inactif) : un module oublié
+    # ici ferait passer chaque commande du module pour « module désactivé ».
+    for module in sorted(setup_v2_core.CONFIGURABLE_MODULES | {"moderation", "security", "automod", "ai", "games", "permissions"}):
         try:
             await setup_v2_core.set_module_enabled(bot, GID, module, True)
         except Exception:

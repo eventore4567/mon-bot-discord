@@ -85,7 +85,8 @@ def test_une_autre_commande_sans_argument_garde_le_panneau_generique():
     erreur = commands.MissingRequiredArgument(param)
     fake_ctx.clean_prefix = "+"
     texte = erreurs._texte_erreur_prefix(fake_ctx, erreur).casefold()
-    assert texte.startswith("usage : `+ban")
+    # Le message nomme l'argument fautif PUIS rappelle la syntaxe (audit 20/09/2026).
+    assert "« membre »" in texte and "usage : `+ban" in texte
 
 
 def test_tictactoe_avec_un_autre_argument_manquant_garde_le_panneau_generique():
@@ -95,4 +96,4 @@ def test_tictactoe_avec_un_autre_argument_manquant_garde_le_panneau_generique():
     erreur = commands.MissingRequiredArgument(param)
     fake_ctx.clean_prefix = "+"
     texte = erreurs._texte_erreur_prefix(fake_ctx, erreur).casefold()
-    assert texte.startswith("usage : `+tictactoe")
+    assert "« autre_chose »" in texte and "usage : `+tictactoe" in texte

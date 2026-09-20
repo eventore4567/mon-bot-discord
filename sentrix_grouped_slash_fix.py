@@ -321,75 +321,47 @@ def _unwrap_error(error: BaseException) -> BaseException:
     return current
 
 
-def _permission_labels(permissions) -> str:
-    """Libellés Discord français partagés avec la matrice SentriX."""
-    try:
-        from utils.access_matrix import permission_label
-        labels = [permission_label(str(value)) for value in (permissions or ())]
-    except Exception:
-        labels = [str(value).replace("_", " ").capitalize() for value in (permissions or ())]
-    if not labels:
-        return "une permission supplémentaire"
-    if len(labels) == 1:
-        return labels[0]
-    return ", ".join(labels[:-1]) + f" et {labels[-1]}"
-
-
-def _specific_check_failure_message(error: BaseException) -> str | None:
-    """Préserve la vraie raison d'un refus au lieu de la remplacer par « pas la permission ».
-
-    BotPermissionError est utilisé par la matrice pour des causes très différentes :
-    module désactivé, rôle Setup refusé, permission Discord précise, commande owner-only,
-    système économique coupé, etc. Écraser ce texte rendait le diagnostic faux.
-    """
-    message = str(getattr(error, "message", "") or str(error) or "").strip()
-    generic = {
-        "The check functions for command failed.",
-        "The check functions for command failed",
-    }
-    if message and message not in generic and not message.startswith("The check functions for command "):
-        return message
-    return None
-
-
 def _short_error(error: BaseException) -> str:
-    """Erreur slash courte, mais jamais au prix de perdre la cause réelle."""
-    raw = _unwrap_error(error)
+    """Message court qui dit la VRAIE cause (utils/error_texts.py, partagé avec le préfixe).
 
-    if isinstance(raw, commands.CommandOnCooldown):
-        seconds = max(1, int(round(raw.retry_after)))
-        return f"Cette commande est en cooldown. Réessaie dans {seconds} s."
-    if isinstance(raw, commands.MissingRequiredArgument):
-        name = getattr(getattr(raw, "param", None), "name", "option")
-        return f"Il manque l’option obligatoire « {name} »."
-    if isinstance(raw, commands.BotMissingPermissions):
-        return f"Il manque à SentriX la permission **{_permission_labels(raw.missing_permissions)}**."
-    if isinstance(raw, commands.MissingPermissions):
-        return f"Il te faut la permission **{_permission_labels(raw.missing_permissions)}** pour cette commande."
-    if isinstance(raw, commands.NotOwner):
-        return "Cette commande est réservée au **propriétaire de SentriX**."
-    if isinstance(raw, commands.CheckFailure):
-        specific = _specific_check_failure_message(raw)
-        if specific:
-            return specific
-        return "Cette commande a été refusée par une règle d’accès. Utilise `/permissions explain` pour voir la permission requise."
-    if isinstance(raw, commands.NoPrivateMessage):
-        return "Cette commande doit être utilisée dans un serveur."
-    if isinstance(raw, commands.PrivateMessageOnly):
-        return "Cette commande doit être utilisée en message privé."
-    if isinstance(raw, commands.MaxConcurrencyReached):
-        return "Cette commande est déjà en cours. Réessaie dans un instant."
-    if isinstance(raw, (commands.BadArgument, commands.TooManyArguments)):
-        return "Une des options fournies est invalide."
-    if isinstance(raw, discord.Forbidden):
-        return "Discord refuse cette action : vérifie la permission requise et la hiérarchie des rôles."
-    if isinstance(raw, discord.HTTPException):
-        return "Discord a refusé la requête. Réessaie dans un instant."
+    Un ``BotPermissionError`` (système d'argent coupé, permission du bot, propriétaire…)
+    garde toujours son message d'origine ; ``MissingPermissions`` nomme la permission
+    exacte. Le générique « pas la permission » n'existe plus : la matrice est consultée
+    pour un check nu (voir ``_short_error_for``) et le dernier recours ne parle pas de
+    permission.
+    """
+    from utils import error_texts
+
+    raw = _unwrap_error(error)
+    for candidate in (error, raw):
+        text = error_texts.user_error_text(candidate)
+        if text:
+            return text
+    if isinstance(raw, commands.CheckFailure) or isinstance(error, commands.CheckFailure):
+        return error_texts.CHECK_FALLBACK
     return "Une erreur est survenue pendant la commande. Réessaie."
 
 
-async def _send_short_error(interaction: discord.Interaction, error: BaseException) -> None:
-    text = _short_error(error)[:1900]
+async def _short_error_for(bot, command: commands.Command, interaction: discord.Interaction, error: BaseException) -> str:
+    """Comme ``_short_error`` mais, pour un check nu, demande d'abord la raison à la
+    matrice d'accès et aux systèmes coupés (économie/niveaux)."""
+    from utils import error_texts
+
+    raw = _unwrap_error(error)
+    text = _short_error(error)
+    if text == error_texts.CHECK_FALLBACK and isinstance(raw, commands.CheckFailure):
+        try:
+            return await error_texts.explain_check_failure(
+                bot, command=command,
+                author=getattr(interaction, "user", None), guild=getattr(interaction, "guild", None),
+            )
+        except Exception:
+            logger.debug("Explication du refus impossible.", exc_info=True)
+    return text
+
+
+async def _send_short_error(interaction: discord.Interaction, error: BaseException, text: str | None = None) -> None:
+    text = (text or _short_error(error))[:1900]
     try:
         if interaction.response.is_done():
             # Après ``defer(thinking=True)``, éditer la réponse originale retire l'état
@@ -433,7 +405,7 @@ async def _invoke_original_fixed(
             exc.__class__.__name__,
             exc,
         )
-        await _send_short_error(interaction, exc)
+        await _send_short_error(interaction, exc, await _short_error_for(bot, command, interaction, exc))
     except Exception as exc:
         ctx.command_failed = True
         logger.exception("Erreur inattendue slash groupée %s", command.qualified_name)
