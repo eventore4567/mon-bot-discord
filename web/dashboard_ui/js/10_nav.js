@@ -129,10 +129,17 @@ async function go(page, sub = '') {
   const globalTarget = ['profile', 'servers', 'preferences'].includes(page);
   if (globalTarget && state.guildId) return exitGuildToGlobal(page);
   if (!globalTarget && !state.guildId) page = 'servers';
-  if (page === state.page && (sub || '') === (state.sub || '') && content().children.length) return;
+  const targetSub = sub || (SUBS[page] ? SUBS[page][0][0] : '');
+  const resetTicketEditor = page === 'tickets' && targetSub === 'panneaux' && Boolean(state.ticketEditorOpen || state.ticketCreate);
+  if (page === state.page && targetSub === (state.sub || '') && content().children.length && !resetTicketEditor) return;
   if (!(await guardDirty())) return;
   state.page = page;
-  state.sub = sub || (SUBS[page] ? SUBS[page][0][0] : '');
+  state.sub = targetSub;
+  if (page === 'tickets' && targetSub === 'panneaux') {
+    state.ticketEditorOpen = false;
+    state.ticketCreate = false;
+  }
+  if (page !== 'tickets') state.ticketEditorOpen = false;
   if (!globalTarget) { try { localStorage.setItem('sentrix:page', page); } catch (_) {} }
   closeSidebar();
   await render({ navigation: true });
