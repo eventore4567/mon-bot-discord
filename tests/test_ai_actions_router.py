@@ -251,3 +251,19 @@ def test_bare_action_gate_allows_commands_but_not_normal_chat():
     assert ai_actions.is_bare_action_candidate("configure mes logs")
     assert not ai_actions.is_bare_action_candidate("tu penses quoi des bans sur Discord ?")
     assert not ai_actions.is_bare_action_candidate("comment fonctionne le mute ?")
+
+
+
+def test_compact_duration_inside_full_sentence():
+    parsed = ai_actions.local_parse("mut Tomioka 2h")
+    assert parsed is not None
+    assert parsed.intent == "moderation.mute"
+    assert parsed.slots["target"].casefold() == "tomioka"
+    assert parsed.slots["duration"] == "2h"
+
+
+def test_natural_unmute_phrase_keeps_member_target():
+    parsed = ai_actions.local_parse("SentriX enlève le mute de Tomioka")
+    assert parsed is not None
+    assert parsed.intent == "moderation.unmute"
+    assert parsed.slots["target"].casefold() == "tomioka"
