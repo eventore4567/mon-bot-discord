@@ -126,3 +126,12 @@ class AutomaticVerificationV5Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_v5_keeps_manual_start_compatibility(self):
+        from cogs.automatic_verification_v5 import AutomaticVerificationV5
+        self.assertTrue(callable(getattr(AutomaticVerificationV5, "start_human_verification", None)))
+        source = Path("cogs/automatic_verification_v5.py").read_text(encoding="utf-8")
+        manual = source.split("async def start_human_verification", 1)[1].split("async def evaluate_member", 1)[0]
+        self.assertIn('reason="manual-button"', manual)
+        self.assertNotIn("_challenges", manual)
