@@ -271,3 +271,28 @@ def test_invoke_native_journalise_le_diagnostic_meme_sans_desaccord(caplog):
 
     asyncio.run(run())
     assert any("Diagnostic sanction (native)" in record.message for record in caplog.records)
+
+
+def test_compact_error_preserve_botpermission_reason():
+    from utils.checks import BotPermissionError
+    error = BotPermissionError(
+        "Le **système d'argent est désactivé** sur ce serveur. "
+        "Les soldes, récompenses et boutiques sont actuellement bloqués."
+    )
+    rendered = fix._short_error(error)
+    assert "système d'argent est désactivé" in rendered
+    assert "Tu n’as pas la permission" not in rendered
+
+
+def test_compact_error_names_exact_missing_permission():
+    error = commands.MissingPermissions(["manage_messages"])
+    rendered = fix._short_error(error)
+    assert "Gérer les messages" in rendered
+    assert "permission" in rendered
+
+
+def test_compact_error_names_exact_bot_missing_permission():
+    error = commands.BotMissingPermissions(["manage_roles"])
+    rendered = fix._short_error(error)
+    assert "Gérer les rôles" in rendered
+    assert "SentriX" in rendered
