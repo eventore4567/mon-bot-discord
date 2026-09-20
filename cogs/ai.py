@@ -16,8 +16,9 @@ Commandes :
 +aisetup (admin)                  — configuration de l'IA pour ce serveur
 +aidiag (admin)                   — diagnostic technique de la connexion à l'IA (sans la clé)
 
-Messages naturels : « SentriX ouvre-moi setup », « SentriX affiche help » ou
-« SentriX ajoute cet emoji ». Les demandes de liens et d'informations actuelles utilisent
+Messages naturels : « SentriX ouvre-moi setup », « SentriX affiche help »,
+« SentriX joue Faded », « SentriX quitte le vocal » ou « SentriX ajoute cet emoji ».
+Les demandes de liens et d'informations actuelles utilisent
 la recherche web publique avec des sources cliquables.
 
 Moteur : utils/ai_service.py — AsyncOpenAI + Responses API, GPT-5.6 Terra par défaut, Sol
