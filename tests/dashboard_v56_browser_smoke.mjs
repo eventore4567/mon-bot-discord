@@ -356,3 +356,15 @@ if(!cssSource.includes('scrollbars SentriX')) throw new Error('Style de scrollba
 if(!cssSource.includes('::-webkit-scrollbar-thumb')) throw new Error('Thumb de scrollbar personnalisé absent.');
 if(!cssSource.includes('scrollbar-width:thin')) throw new Error('Scrollbar Firefox non affinée.');
 if(!cssSource.includes('scroll-behavior:smooth')) throw new Error('Défilement fluide absent.');
+
+
+// Compatibilité appareils : 320px, tablettes, clavier virtuel, safe areas,
+// fenêtres partagées et préférences système.
+if(!html.includes('interactive-widget=resizes-content')) throw new Error('Le viewport mobile ne gère pas le clavier virtuel.');
+if(!cssSource.includes('compatibilité appareils v4')) throw new Error('La couche de compatibilité appareils est absente.');
+for(const token of ['max-width:390px','max-width:340px','max-height:500px','keyboard-open','display-mode:standalone','prefers-contrast:more','forced-colors:active']){
+  if(!cssSource.includes(token)) throw new Error('Compatibilité appareil manquante: '+token);
+}
+if(!bootSource.includes('function syncVisualViewport()')) throw new Error('VisualViewport mobile non synchronisé.');
+if(!bootSource.includes("'--visual-height'")) throw new Error('Hauteur visuelle mobile non propagée au CSS.');
+if(!bootSource.includes("'keyboard-open'")) throw new Error('Clavier virtuel non détecté.');
