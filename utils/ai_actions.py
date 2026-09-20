@@ -597,7 +597,7 @@ def local_parse(question: str) -> ParsedAction | None:
             "local",
         )
 
-        log_route = _extract_log_route(question, normalized)
+    log_route = _extract_log_route(question, normalized)
     if log_route is not None:
         return log_route
 
