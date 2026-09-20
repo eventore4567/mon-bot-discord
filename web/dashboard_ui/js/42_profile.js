@@ -41,20 +41,52 @@ const DASHBOARD_THEME_BASES = {
 
 const DASHBOARD_CURATED_PALETTES = {
   rose: {
-    label:'Rose OLED', note:'Noir profond, rose néon et surfaces légèrement violettes.', theme:'oled', accent:'#ff4fa3',
+    label:'Rose OLED', note:'Noir profond, rose néon et surfaces violettes.', theme:'oled', accent:'#ff4fa3',
     colors:{bg:'#000000',bg2:'#080509',rail:'#09050a',sidebar:'#0d080e',panel:'#120b13',panel2:'#18101a',panel3:'#211623',hover:'#1b111d',line:'#2f2032',line2:'#49304c',text:'#fff7fb',muted:'#aa93a2',soft:'#d7c2cf',success:'#55d69a',warning:'#f0bd61',danger:'#ff7081'}
   },
-  blue: {
-    label:'SentriX Azure', note:'Bleu propre, lisible et équilibré pour tous les écrans.', theme:'sentrix', accent:'#4da3ff',
+  azure: {
+    label:'SentriX Azure', note:'Bleu propre, moderne et très lisible.', theme:'sentrix', accent:'#4da3ff',
     colors:{bg:'#090c11',bg2:'#0d1218',rail:'#0c1117',sidebar:'#0e131a',panel:'#141a22',panel2:'#1a222c',panel3:'#222d39',hover:'#1b2530',line:'#293645',line2:'#3a4a5d',text:'#f4f8fc',muted:'#91a0b2',soft:'#bdc9d7',success:'#55d69a',warning:'#efbd61',danger:'#ff7081'}
   },
   violet: {
-    label:'Cosmos Violet', note:'Dégradé nuit avec violet lumineux et contrastes doux.', theme:'midnight', accent:'#8a6cff',
+    label:'Cosmos Violet', note:'Nuit violette, profonde et lumineuse.', theme:'midnight', accent:'#8a6cff',
     colors:{bg:'#070611',bg2:'#0d0b19',rail:'#0a0815',sidebar:'#0d0b19',panel:'#141023',panel2:'#1a1530',panel3:'#231d3d',hover:'#1c1734',line:'#30284a',line2:'#463a68',text:'#f7f3ff',muted:'#9d94b5',soft:'#cbc3df',success:'#57d9a2',warning:'#f0bd66',danger:'#ff7485'}
   },
   emerald: {
-    label:'Emerald Graphite', note:'Graphite sombre avec accent vert premium et discret.', theme:'graphite', accent:'#45d69a',
+    label:'Emerald Graphite', note:'Graphite sombre avec vert premium.', theme:'graphite', accent:'#45d69a',
     colors:{bg:'#090b0b',bg2:'#0e1211',rail:'#0d1110',sidebar:'#101513',panel:'#161c1a',panel2:'#1c2421',panel3:'#25302c',hover:'#1e2925',line:'#2d3a35',line2:'#3d5049',text:'#f3f8f6',muted:'#94a59f',soft:'#c3d0cc',success:'#55d69a',warning:'#efbd61',danger:'#ff7081'}
+  },
+  crimson: {
+    label:'Crimson Night', note:'Rouge profond, noir et contraste agressif propre.', theme:'oled', accent:'#ff4d67',
+    colors:{bg:'#030304',bg2:'#0a0708',rail:'#0b0708',sidebar:'#0f090a',panel:'#160d10',panel2:'#1d1115',panel3:'#29181e',hover:'#211319',line:'#352027',line2:'#56303a',text:'#fff6f7',muted:'#b09a9f',soft:'#dbc8cc',success:'#55d69a',warning:'#f4bd64',danger:'#ff6579'}
+  },
+  sunset: {
+    label:'Sunset Orange', note:'Orange chaud sur fond charbon très sombre.', theme:'graphite', accent:'#ff8a45',
+    colors:{bg:'#0b0908',bg2:'#120e0c',rail:'#100d0b',sidebar:'#15100e',panel:'#1b1411',panel2:'#241a16',panel3:'#30221c',hover:'#281c17',line:'#3d2a22',line2:'#5a3a2d',text:'#fff8f3',muted:'#ae9c91',soft:'#dcc9bd',success:'#5ad6a0',warning:'#ffc166',danger:'#ff7485'}
+  },
+  gold: {
+    label:'Royal Gold', note:'Noir luxe avec accent or et bordures chaudes.', theme:'oled', accent:'#e6b84f',
+    colors:{bg:'#030303',bg2:'#0a0906',rail:'#0b0a07',sidebar:'#0e0c08',panel:'#15120b',panel2:'#1d180f',panel3:'#292116',hover:'#221c12',line:'#382f1d',line2:'#584827',text:'#fffaf0',muted:'#b0a38b',soft:'#ddd0b5',success:'#58d49b',warning:'#efbd61',danger:'#ff7081'}
+  },
+  cyan: {
+    label:'Cyber Cyan', note:'Cyan électrique avec surfaces bleu-noir.', theme:'midnight', accent:'#28d7f5',
+    colors:{bg:'#050b0f',bg2:'#081219',rail:'#071017',sidebar:'#09151d',panel:'#0e1b24',panel2:'#13242f',panel3:'#19313f',hover:'#152a36',line:'#21404f',line2:'#2d5d70',text:'#f2fcff',muted:'#8ea9b3',soft:'#bfd5dc',success:'#55d69a',warning:'#efbd61',danger:'#ff7081'}
+  },
+  ice: {
+    label:'Ice Blue', note:'Bleu glacier froid, net et minimal.', theme:'sentrix', accent:'#79bfff',
+    colors:{bg:'#080c12',bg2:'#0c121b',rail:'#0b1119',sidebar:'#0e151f',panel:'#141e2a',panel2:'#1a2735',panel3:'#223344',hover:'#1c2b3a',line:'#2b4053',line2:'#3b5870',text:'#f5faff',muted:'#96a9ba',soft:'#c5d3df',success:'#58d59d',warning:'#efbd61',danger:'#ff7485'}
+  },
+  sakura: {
+    label:'Sakura', note:'Rose doux et prune sombre, plus calme que Rose OLED.', theme:'midnight', accent:'#ff85b3',
+    colors:{bg:'#0b070b',bg2:'#130c12',rail:'#110a10',sidebar:'#160d15',panel:'#1d121c',panel2:'#261724',panel3:'#332030',hover:'#2a1a28',line:'#41293d',line2:'#603a59',text:'#fff7fb',muted:'#b39eaa',soft:'#decbd5',success:'#59d5a0',warning:'#efbd61',danger:'#ff7081'}
+  },
+  royal: {
+    label:'Royal Blue', note:'Bleu roi intense avec fond marine premium.', theme:'midnight', accent:'#5b7cff',
+    colors:{bg:'#060914',bg2:'#0a1020',rail:'#090f1d',sidebar:'#0b1224',panel:'#101a30',panel2:'#16223c',panel3:'#1d2d4e',hover:'#192843',line:'#263a5e',line2:'#355080',text:'#f4f7ff',muted:'#919fba',soft:'#c1cbe0',success:'#55d69a',warning:'#efbd61',danger:'#ff7081'}
+  },
+  mono: {
+    label:'Monochrome', note:'Noir, gris et blanc sans couleur parasite.', theme:'graphite', accent:'#d7dde5',
+    colors:{bg:'#08090a',bg2:'#0d0f11',rail:'#0c0e10',sidebar:'#101214',panel:'#16191c',panel2:'#1c2024',panel3:'#252a2f',hover:'#20252a',line:'#30363c',line2:'#444c55',text:'#f7f8fa',muted:'#9ca3ab',soft:'#ccd1d6',success:'#67d7a4',warning:'#efbd61',danger:'#ff7081'}
   },
 };
 
@@ -341,12 +373,6 @@ function renderPreferences() {
       <span class="theme-preset-copy"><b>${esc(preset.label)}</b><small>${esc(preset.note)}</small></span>
       <span class="theme-preset-apply">Appliquer</span>
     </button>`).join('');
-  const colorControls=DASHBOARD_COLOR_FIELDS.map(([key,label]) => `
-    <div class="theme-color-row" data-theme-color-row="${key}">
-      <div class="theme-color-copy"><b>${esc(label)}</b><small>${esc(key)}</small></div>
-      <input class="theme-color-picker" type="color" value="${colors[key]}" data-theme-color-picker="${key}" aria-label="${esc(label)}">
-      <input class="theme-color-hex" value="${colors[key]}" maxlength="7" data-theme-color-hex="${key}" aria-label="${esc(label)} HEX">
-    </div>`).join('');
   const savedHtml=savedThemes.length ? savedThemes.map(t => `
     <div class="saved-theme-row">
       <div class="saved-theme-preview" style="--t-bg:${esc(t.colors?.bg||'#0b0d10')};--t-panel:${esc(t.colors?.panel||'#15191f')};--t-accent:${esc(t.accent||'#4da3ff')}"></div>
@@ -374,7 +400,7 @@ function renderPreferences() {
             <option value="midnight" ${theme==='midnight'?'selected':''}>Midnight bleu nuit</option>
             <option value="graphite" ${theme==='graphite'?'selected':''}>Graphite neutre</option>
           </select>
-          <small>Choisir un preset remet les couleurs avancées sur sa palette d’origine.</small>
+          <small>Choisir un preset applique sa palette d’origine.</small>
         </div>
         <div class="field">
           <label for="prefBanner">Décor du profil</label>
@@ -397,18 +423,10 @@ function renderPreferences() {
 
     <section class="card full theme-palette-card">
       <div class="card-head">
-        <div><h2>Palettes prêtes</h2><p>Des combinaisons déjà équilibrées : fond, cartes, textes, bordures et accent sont accordés automatiquement.</p></div>
-        <span class="badge blue">Dégradés prêts</span>
+        <div><h2>Thèmes prêts</h2><p>Choisissez un style complet. Les fonds, cartes, textes, bordures, dégradés et accents sont déjà harmonisés.</p></div>
+        <span class="badge blue">${Object.keys(DASHBOARD_CURATED_PALETTES).length} thèmes</span>
       </div>
       <div class="theme-preset-grid">${curatedPaletteHtml}</div>
-      <details class="advanced theme-advanced-editor">
-        <summary><span>Éditeur de couleurs avancé</span><small>Pour modifier une couleur précise uniquement.</small></summary>
-        <div class="advanced-body">
-          <div class="toolbar"><button class="btn sm" id="prefResetColors" type="button">Revenir aux couleurs de base</button></div>
-          <div class="theme-color-grid">${colorControls}</div>
-          <div id="themeContrastStatus" class="notice"></div>
-        </div>
-      </details>
     </section>
 
     <section class="card">
@@ -442,23 +460,10 @@ function renderPreferences() {
   </div>`;
 
   const save=(key,value)=>{try{localStorage.setItem(key,value);}catch(_){} applyGlobalPreferences();};
-  const refreshContrast=()=>{
-    colors=readThemeColors((()=>{try{return localStorage.getItem('sentrix:theme')||'sentrix';}catch(_){return 'sentrix';}})());
-    const status=contrastStatus(colors),el=$('themeContrastStatus');
-    if(status.ok){el.className='notice ok';el.textContent='Contraste lisible : texte principal et secondaire restent suffisamment visibles.';}
-    else {el.className='notice warn';el.textContent='Contraste faible : '+status.bad.map(x=>x[0]).join(', ')+'. Ajustez les couleurs avant d’enregistrer ce thème.';}
-  };
   const setAccent=value=>{
     const next=normalizeAccent(value);save('sentrix:accent',next);$('prefAccentColor').value=next;$('prefAccentHex').value=next;
     content().querySelectorAll('[data-accent]').forEach(b=>b.classList.toggle('active',b.dataset.accent===next));
   };
-  const setThemeColor=(key,value)=>{
-    const field=DASHBOARD_COLOR_FIELDS.find(([k])=>k===key);if(!field)return;
-    const next=normalizeHex(value,readThemeColors(theme)[key]);colors=readThemeColors(theme);colors[key]=next;writeThemeColors(colors);applyGlobalPreferences();
-    const pick=content().querySelector(`[data-theme-color-picker="${key}"]`),hex=content().querySelector(`[data-theme-color-hex="${key}"]`);
-    if(pick)pick.value=next;if(hex)hex.value=next;refreshContrast();
-  };
-
   content().querySelectorAll('[data-curated-theme]').forEach(b=>b.onclick=()=>{
     const preset=DASHBOARD_CURATED_PALETTES[b.dataset.curatedTheme];if(!preset)return;
     try{
@@ -479,9 +484,6 @@ function renderPreferences() {
   $('prefAccentColor').oninput=()=>setAccent($('prefAccentColor').value);
   $('prefAccentHex').onchange=()=>{const raw=String($('prefAccentHex').value||'').trim();if(!/^#[0-9a-f]{6}$/i.test(raw)){ $('prefAccentHex').value=accent;return toast('Couleur HEX invalide.',true);}setAccent(raw);};
   content().querySelectorAll('[data-accent]').forEach(b=>b.onclick=()=>setAccent(b.dataset.accent));
-  content().querySelectorAll('[data-theme-color-picker]').forEach(el=>el.oninput=()=>setThemeColor(el.dataset.themeColorPicker,el.value));
-  content().querySelectorAll('[data-theme-color-hex]').forEach(el=>el.onchange=()=>{const raw=String(el.value||'').trim();if(!/^#[0-9a-f]{6}$/i.test(raw)){const now=readThemeColors(theme)[el.dataset.themeColorHex];el.value=now;return toast('Couleur HEX invalide.',true);}setThemeColor(el.dataset.themeColorHex,raw);});
-  $('prefResetColors').onclick=()=>{try{localStorage.removeItem('sentrix:theme-colors');}catch(_){}applyGlobalPreferences();renderPreferences();toast('Couleurs du preset restaurées.');};
   $('themeSaveButton').onclick=()=>{
     const name=String($('themeSaveName').value||'').trim();if(!name)return toast('Donnez un nom au thème.',true);
     const snapshot=captureThemeSnapshot(name),status=contrastStatus(snapshot.colors);
@@ -495,7 +497,6 @@ function renderPreferences() {
     for(const key of ['sentrix:theme','sentrix:accent','sentrix:theme-colors','sentrix:glow','sentrix:density','sentrix:radius','sentrix:banner','sentrix:reduce-motion']){try{localStorage.removeItem(key);}catch(_){}}
     applyGlobalPreferences();renderPreferences();toast('Apparence réinitialisée.');
   };
-  refreshContrast();
 }
 
 
