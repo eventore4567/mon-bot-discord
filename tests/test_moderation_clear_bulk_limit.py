@@ -80,3 +80,12 @@ def test_small_batches_keep_single_bulk_call(count):
         assert channel.bulk_calls == []
     else:
         assert channel.bulk_calls == [count]
+
+
+
+def test_clear_public_range_starts_at_two():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "moderation.py").read_text(encoding="utf-8")
+    assert 'nombre: commands.Range[int, 2, 100]' in source
+    assert 'Nombre de messages à supprimer (2 à 100)' in source
+    assert 'requested = max(2, min(int(nombre), 100))' in source
