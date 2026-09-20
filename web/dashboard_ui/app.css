@@ -725,15 +725,49 @@ body.save-pending .workspace{padding-bottom:104px}
 /* ---------- démarrage SentriX ----------
    Animation unique à l'ouverture, inspirée d'un écran de démarrage système. */
 .startup-screen{
-  position:fixed;inset:0;z-index:2000;display:grid;place-items:center;
+  position:fixed;inset:0;z-index:2000;display:grid;place-items:center;overflow:hidden;
+  isolation:isolate;
   background:
-    radial-gradient(circle at 50% 42%,color-mix(in srgb,var(--blue) 12%,transparent),transparent 30%),
-    #050608;
+    radial-gradient(circle at 50% 42%,color-mix(in srgb,var(--blue) 10%,transparent),transparent 30%),
+    linear-gradient(180deg,#050608,#030405 74%,#050608);
   color:#f7f9fc;
   opacity:1;visibility:visible;
   transition:opacity .38s ease,visibility .38s ease;
 }
-.startup-center{display:grid;place-items:center;gap:9px;transform:translateY(-3vh)}
+.startup-screen::before,
+.startup-screen::after{
+  content:"";position:absolute;inset:auto;z-index:-1;pointer-events:none;
+  width:min(72vw,980px);aspect-ratio:1;border-radius:50%;
+  filter:blur(72px);opacity:.18;will-change:transform,opacity;
+}
+.startup-screen::before{
+  left:-18vw;top:-28vh;
+  background:
+    radial-gradient(circle at 40% 42%,color-mix(in srgb,var(--blue) 92%,transparent),transparent 42%),
+    radial-gradient(circle at 68% 64%,color-mix(in srgb,var(--blue2) 52%,transparent),transparent 54%);
+  animation:sxBootAuraA 7.4s ease-in-out infinite alternate;
+}
+.startup-screen::after{
+  right:-22vw;bottom:-38vh;
+  background:
+    radial-gradient(circle at 58% 40%,color-mix(in srgb,var(--blue2) 78%,transparent),transparent 40%),
+    radial-gradient(circle at 30% 70%,color-mix(in srgb,var(--blue) 42%,transparent),transparent 58%);
+  animation:sxBootAuraB 8.8s ease-in-out infinite alternate;
+}
+.startup-center{
+  display:grid;place-items:center;gap:9px;transform:translateY(-3vh);
+  position:relative;z-index:1;
+}
+.startup-center::before{
+  content:"";position:absolute;left:50%;top:50%;z-index:-1;
+  width:min(46vw,520px);height:min(46vw,520px);
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--blue) 9%,transparent),transparent 66%);
+  filter:blur(8px);
+  animation:sxBootPulse 3.6s ease-in-out infinite;
+  pointer-events:none;
+}
 .startup-mark{
   width:76px;height:76px;border-radius:23px;display:grid;place-items:center;
   background:linear-gradient(145deg,#10141b,#080a0f);
@@ -766,6 +800,20 @@ body.startup-done .startup-screen{opacity:0;visibility:hidden;pointer-events:non
   from{opacity:0;transform:scale(.82);filter:blur(8px)}
   65%{opacity:1;transform:scale(1.035);filter:blur(0)}
   to{opacity:1;transform:scale(1)}
+}
+@keyframes sxBootAuraA{
+  0%{transform:translate3d(-2%,0,0) scale(.92) rotate(-4deg);opacity:.12}
+  50%{transform:translate3d(12%,10%,0) scale(1.06) rotate(4deg);opacity:.22}
+  100%{transform:translate3d(20%,4%,0) scale(1.12) rotate(8deg);opacity:.16}
+}
+@keyframes sxBootAuraB{
+  0%{transform:translate3d(0,4%,0) scale(.90) rotate(3deg);opacity:.11}
+  50%{transform:translate3d(-12%,-8%,0) scale(1.08) rotate(-4deg);opacity:.20}
+  100%{transform:translate3d(-18%,-2%,0) scale(1.14) rotate(-8deg);opacity:.15}
+}
+@keyframes sxBootPulse{
+  0%,100%{transform:translate(-50%,-50%) scale(.90);opacity:.34}
+  50%{transform:translate(-50%,-50%) scale(1.08);opacity:.72}
 }
 
 /* ---------- shell dashboard verrouillé ----------
@@ -800,6 +848,7 @@ body.dashboard-locked #content{min-height:0}
 @media (prefers-reduced-motion:reduce){
   .startup-mark{animation:none!important}.startup-progress i{transition:none!important}
   .startup-screen{transition:none}
+  .startup-screen::before,.startup-screen::after,.startup-center::before{animation:none!important}
 }
 
 
