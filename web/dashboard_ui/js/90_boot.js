@@ -420,6 +420,29 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveDirty(); }
   if (e.key === 'Escape') { closePalette(); closeModal(); closeSidebar(); }
 });
+/* ---------- viewport mobile réel / clavier virtuel ---------- */
+let visualViewportFrame = null;
+function syncVisualViewport() {
+  if (visualViewportFrame != null) cancelAnimationFrame(visualViewportFrame);
+  visualViewportFrame = requestAnimationFrame(() => {
+    visualViewportFrame = null;
+    const vv = window.visualViewport;
+    const width = Math.max(1, Math.round(vv?.width || window.innerWidth || document.documentElement.clientWidth || 1));
+    const height = Math.max(1, Math.round(vv?.height || window.innerHeight || document.documentElement.clientHeight || 1));
+    document.documentElement.style.setProperty('--visual-width', `${width}px`);
+    document.documentElement.style.setProperty('--visual-height', `${height}px`);
+    const baseHeight = Math.max(1, Math.round(window.innerHeight || height));
+    const keyboardOpen = Boolean(vv && baseHeight - height > Math.max(120, baseHeight * 0.16));
+    document.body.classList.toggle('keyboard-open', keyboardOpen);
+  });
+}
+window.addEventListener('resize', syncVisualViewport, { passive: true });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncVisualViewport, { passive: true });
+  window.visualViewport.addEventListener('scroll', syncVisualViewport, { passive: true });
+}
+syncVisualViewport();
+
 /* ---------- responsive universel : synchronisation menu ---------- */
 const responsiveNavMq = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 1024px)') : null;
 function syncResponsiveNav() {
@@ -429,7 +452,7 @@ if (responsiveNavMq) {
   if (typeof responsiveNavMq.addEventListener === 'function') responsiveNavMq.addEventListener('change', syncResponsiveNav);
   else if (typeof responsiveNavMq.addListener === 'function') responsiveNavMq.addListener(syncResponsiveNav);
 }
-window.addEventListener('orientationchange', () => setTimeout(syncResponsiveNav, 120));
+window.addEventListener('orientationchange', () => setTimeout(() => { syncResponsiveNav(); syncVisualViewport(); }, 120));
 
 window.addEventListener('beforeunload', e => { if (hasDirty()) { e.preventDefault(); e.returnValue = ''; } });
 window.addEventListener('offline', () => $('netNotice').classList.remove('hidden'));
