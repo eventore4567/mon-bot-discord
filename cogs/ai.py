@@ -47,7 +47,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from utils import embeds, checks, design_system, ai_service
+from utils import embeds, checks, design_system, ai_service, ai_actions
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.ai")
@@ -204,6 +204,56 @@ class _FakeCtxForDelivery:
         return await self.channel.send(*args, **kwargs)
 
 
+class _NaturalActionConfirmView(discord.ui.View):
+    """Confirmation minimale pour les actions naturelles à risque élevé."""
+
+    def __init__(self, cog: "Ai", *, message: discord.Message, command_line: str, author_id: int):
+        super().__init__(timeout=45)
+        self.cog = cog
+        self.source_message = message
+        self.command_line = command_line
+        self.author_id = int(author_id)
+        self.message: discord.Message | None = None
+        self.done = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if int(interaction.user.id) != self.author_id:
+            await interaction.response.send_message(
+                "Cette confirmation appartient à une autre personne.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.done:
+            return await interaction.response.send_message("Cette action a déjà été traitée.", ephemeral=True)
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Action confirmée. Exécution en cours…", view=self)
+        await self.cog._invoke_command_line(self.source_message, self.command_line)
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Action annulée.", view=self)
+
+    async def on_timeout(self):
+        if self.done:
+            return
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(content="Confirmation expirée.", view=self)
+            except discord.HTTPException:
+                pass
+
+
 # ---------------------------------------------------------------- VUE : +aisetup
 
 class AiLimitsModal(discord.ui.Modal, title="⏱️ Limites de l'IA"):
@@ -355,6 +405,9 @@ class Ai(commands.Cog, name="Ai"):
         # quotidienne qui elle est suivie en base via ai_service.record_usage).
         self._last_used: dict[tuple, float] = {}
         self._minute_bucket: dict[tuple, list] = {}
+        # Contexte court des actions naturelles incomplètes ("mute Tomioka" -> "10h").
+        # Il est volontairement en RAM : ce n'est pas une donnée métier et il expire vite.
+        self._pending_actions: dict[tuple[int, int], tuple[float, ai_actions.ParsedAction]] = {}
         self._cleanup_memory.start()
 
     def cog_unload(self):
@@ -657,22 +710,13 @@ class Ai(commands.Cog, name="Ai"):
             return command_line
         return None
 
-    async def _invoke_natural_command(
-        self,
-        message: discord.Message,
-        question: str,
-        prefix: str,
-    ) -> bool:
-        command_line = self._natural_command_line(
-            question,
-            prefix,
-            has_attachment=bool(message.attachments),
-        )
-        if not command_line:
-            return False
+    async def _invoke_command_line(self, message: discord.Message, command_line: str) -> bool:
+        """Exécute UNE commande existante sans modifier le message Discord d'origine.
 
-        # Une copie du message évite de modifier l'événement Discord original. bot.invoke()
-        # conserve alors tous les convertisseurs, checks, permissions et cooldowns normaux.
+        Le passage par bot.invoke() est volontaire : permission_guard/access_matrix,
+        checks.action_validation, convertisseurs Discord, hiérarchie, cooldowns, services
+        métier, logs et persistance restent exactement ceux de la commande classique.
+        """
         synthetic_message = copy.copy(message)
         synthetic_message.content = command_line
         ctx = await self.bot.get_context(synthetic_message)
@@ -680,6 +724,171 @@ class Ai(commands.Cog, name="Ai"):
             return False
         await self.bot.invoke(ctx)
         return True
+
+    def _pending_key(self, message: discord.Message) -> tuple[int, int]:
+        return (int(message.guild.id), int(message.author.id))
+
+    def _remember_pending(self, message: discord.Message, action: ai_actions.ParsedAction) -> None:
+        self._pending_actions[self._pending_key(message)] = (time.monotonic() + 120.0, action)
+
+    def _take_pending(self, message: discord.Message) -> ai_actions.ParsedAction | None:
+        key = self._pending_key(message)
+        item = self._pending_actions.get(key)
+        if item is None:
+            return None
+        expires_at, action = item
+        if time.monotonic() > expires_at:
+            self._pending_actions.pop(key, None)
+            return None
+        return action
+
+    async def _send_dashboard_link(self, message: discord.Message) -> None:
+        view = discord.ui.View(timeout=120)
+        view.add_item(discord.ui.Button(
+            label="Ouvrir le Dashboard",
+            style=discord.ButtonStyle.link,
+            url=config.DASHBOARD_APP_URL,
+        ))
+        await message.reply(
+            "Dashboard SentriX :",
+            view=view,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    async def _ask_for_missing_action_slot(
+        self,
+        message: discord.Message,
+        action: ai_actions.ParsedAction,
+        slot: str,
+        *,
+        member: discord.Member | None = None,
+    ) -> None:
+        self._remember_pending(message, action)
+        await message.reply(
+            ai_actions.missing_prompt(action.intent, slot, target=member),
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    async def _handle_parsed_action(
+        self,
+        message: discord.Message,
+        action: ai_actions.ParsedAction,
+        prefix: str,
+    ) -> bool:
+        spec = action.spec
+        if spec is None:
+            return False
+
+        if action.intent == "navigation.dashboard":
+            await self._send_dashboard_link(message)
+            self._pending_actions.pop(self._pending_key(message), None)
+            return True
+
+        member = None
+        if spec.target_kind == "member":
+            target_text = action.slots.get("target")
+            resolution = ai_actions.resolve_member(
+                message.guild,
+                target_text,
+                message=message,
+                bot_user_id=getattr(self.bot.user, "id", None),
+            )
+            if resolution.ambiguous:
+                names = "\n".join(
+                    f"- {m.mention} — {m.display_name} (`{m.id}`)"
+                    for m in resolution.ambiguous
+                )
+                self._remember_pending(message, action)
+                await message.reply(
+                    "J’ai trouvé plusieurs membres possibles. Lequel voulez-vous viser ?\n" + names,
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+            member = resolution.member
+            if member is None and "target" in spec.required:
+                await self._ask_for_missing_action_slot(message, action, "target")
+                return True
+            if target_text and member is None:
+                self._remember_pending(message, action)
+                await message.reply(
+                    f"Je ne trouve pas de membre correspondant clairement à « {target_text} ». "
+                    "Mentionnez le membre ou donnez son nom exact.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+
+        missing = ai_actions.missing_slots(action)
+        if missing:
+            await self._ask_for_missing_action_slot(message, action, missing[0], member=member)
+            return True
+
+        command_line = ai_actions.build_command_line(action, prefix=prefix, member=member)
+        if not command_line:
+            return False
+
+        # Une suppression importante demande une confirmation explicite. Les sanctions
+        # classiques (warn/mute/ban) restent directes si la demande est claire, comme les
+        # commandes normales.
+        if action.intent == "moderation.purge" and int(action.slots.get("count") or 0) >= 50:
+            view = _NaturalActionConfirmView(
+                self,
+                message=message,
+                command_line=command_line,
+                author_id=message.author.id,
+            )
+            sent = await message.reply(
+                f"Cette action supprimera jusqu’à **{int(action.slots['count'])} messages** "
+                "dans ce salon. Voulez-vous continuer ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+
+        self._pending_actions.pop(self._pending_key(message), None)
+        return await self._invoke_command_line(message, command_line)
+
+    async def _invoke_natural_command(
+        self,
+        message: discord.Message,
+        question: str,
+        prefix: str,
+    ) -> bool:
+        # 1) Une réponse courte peut compléter une action commencée juste avant.
+        pending = self._take_pending(message)
+        if pending is not None:
+            completed = ai_actions.merge_followup(pending, question)
+            if completed.slots != pending.slots:
+                self._remember_pending(message, completed)
+                return await self._handle_parsed_action(message, completed, prefix)
+
+        # 2) Routeur strict : heuristiques rapides puis classifieur IA avec registre fermé.
+        action = await ai_actions.parse_action(
+            question,
+            guild_id=message.guild.id if message.guild else None,
+            channel_id=getattr(message.channel, "id", None),
+            user_id=message.author.id,
+        )
+        if action is not None:
+            handled = await self._handle_parsed_action(message, action, prefix)
+            if handled:
+                return True
+
+        # 3) Compatibilité : les demandes qui citent explicitement une commande SentriX
+        # existante continuent d'utiliser le routeur historique dynamique.
+        command_line = self._natural_command_line(
+            question,
+            prefix,
+            has_attachment=bool(message.attachments),
+        )
+        if not command_line:
+            return False
+        return await self._invoke_command_line(message, command_line)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
