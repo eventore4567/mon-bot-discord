@@ -64,3 +64,12 @@ def test_profile_secondary_pages_are_spaced_too():
     assert '"\\n\\n".join(cleaned)' in source
     assert 'f"Progression\\n**{state}**\\n\\n"' in source
     assert 'f"Palier\\n**{progression[\'tier\']}**\\n\\n"' in source
+
+
+
+def test_profilecard_has_plus_command_and_french_alias():
+    source = (ROOT / "cogs" / "sentrix_v2.py").read_text(encoding="utf-8")
+    assert '@commands.hybrid_command(name="profilecard", aliases=["profilcard"]' in source
+    assert "with_app_command=False" in source
+    aliases = (ROOT / "cogs" / "common_command_names.py").read_text(encoding="utf-8")
+    assert '"profilecard": "carte"' in aliases
