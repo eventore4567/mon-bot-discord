@@ -770,6 +770,10 @@ _LOG_MATCH_RULES: dict[str, tuple[str, tuple[str, ...]]] = {
 }
 
 
+def log_category_label(category: str) -> str:
+    return (_LOG_MATCH_RULES.get(str(category)) or (str(category).capitalize(), ()))[0]
+
+
 def _channel_text(channel: Any) -> tuple[str, str, str]:
     name = normalize_text(getattr(channel, "name", ""))
     topic = normalize_text(getattr(channel, "topic", ""))
