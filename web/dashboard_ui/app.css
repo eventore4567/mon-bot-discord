@@ -720,3 +720,88 @@ body.save-pending .workspace{padding-bottom:104px}
     padding:8px;
   }
 }
+
+
+/* ---------- démarrage SentriX ----------
+   Animation unique à l'ouverture, inspirée d'un écran de démarrage système. */
+.startup-screen{
+  position:fixed;inset:0;z-index:2000;display:grid;place-items:center;
+  background:
+    radial-gradient(circle at 50% 42%,color-mix(in srgb,var(--blue) 12%,transparent),transparent 30%),
+    #050608;
+  color:#f7f9fc;
+  opacity:1;visibility:visible;
+  transition:opacity .38s ease,visibility .38s ease;
+}
+.startup-center{display:grid;place-items:center;gap:9px;transform:translateY(-3vh)}
+.startup-mark{
+  width:76px;height:76px;border-radius:23px;display:grid;place-items:center;
+  background:linear-gradient(145deg,#10141b,#080a0f);
+  border:1px solid rgba(255,255,255,.10);
+  box-shadow:0 24px 70px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.06);
+  animation:sxBootMark .72s cubic-bezier(.2,.8,.2,1) both;
+}
+.startup-mark span{
+  display:grid;place-items:center;width:52px;height:52px;border-radius:17px;
+  background:linear-gradient(135deg,var(--blue),var(--blue2));
+  color:#06111c;font-size:27px;font-weight:900;letter-spacing:-.06em;
+  box-shadow:0 0 34px var(--accent-glow);
+}
+.startup-name{font-size:22px;font-weight:780;letter-spacing:-.025em}
+.startup-copy{font-size:11px;color:#8f99a8;letter-spacing:.22em;text-transform:uppercase}
+.startup-progress{
+  position:absolute;left:50%;bottom:max(46px,env(safe-area-inset-bottom,0px));
+  width:min(230px,58vw);height:3px;transform:translateX(-50%);
+  border-radius:999px;overflow:hidden;background:rgba(255,255,255,.10);
+}
+.startup-progress i{
+  display:block;height:100%;width:42%;border-radius:inherit;
+  background:linear-gradient(90deg,var(--blue),var(--blue2));
+  animation:sxBootProgress 1.05s cubic-bezier(.4,0,.2,1) infinite;
+  box-shadow:0 0 18px var(--accent-glow);
+}
+body.startup-done .startup-screen{opacity:0;visibility:hidden;pointer-events:none}
+@keyframes sxBootMark{
+  from{opacity:0;transform:scale(.82);filter:blur(8px)}
+  65%{opacity:1;transform:scale(1.035);filter:blur(0)}
+  to{opacity:1;transform:scale(1)}
+}
+@keyframes sxBootProgress{
+  0%{transform:translateX(-120%)}
+  55%{transform:translateX(75%)}
+  100%{transform:translateX(250%)}
+}
+
+/* ---------- shell dashboard verrouillé ----------
+   La fenêtre entière ne se déplace plus : seul le contenu central et les rails
+   possèdent leur propre défilement. */
+body.dashboard-locked{
+  height:100dvh;min-height:0;overflow:hidden;overscroll-behavior:none;
+}
+body.dashboard-locked .topbar{position:relative;top:auto;flex:none}
+body.dashboard-locked .app{
+  height:calc(100dvh - var(--top-safe));min-height:0;overflow:hidden;
+}
+body.dashboard-locked .server-rail,
+body.dashboard-locked .sidebar{
+  position:relative;top:auto;height:100%;min-height:0;overscroll-behavior:contain;
+}
+body.dashboard-locked .workspace{
+  height:100%;min-height:0;overflow-y:auto;overflow-x:hidden;
+  overscroll-behavior:contain;scrollbar-gutter:stable;
+}
+body.dashboard-locked #content{min-height:0}
+@supports not (height:100dvh){
+  body.dashboard-locked{height:100vh}
+  body.dashboard-locked .app{height:calc(100vh - var(--top-safe))}
+}
+@media(max-width:1024px){
+  body.dashboard-locked .sidebar{
+    position:fixed;left:0;top:var(--top-safe);
+    height:calc(100dvh - var(--top-safe));
+  }
+}
+@media (prefers-reduced-motion:reduce){
+  .startup-mark,.startup-progress i{animation:none!important}
+  .startup-screen{transition:none}
+}
