@@ -633,3 +633,30 @@ body.save-pending .workspace{padding-bottom:104px}
   .theme-preset-art{height:58px}
   .theme-preset-apply{grid-column:2}
 }
+
+
+/* Tickets compacts v2 */
+.ticket-page{gap:10px}
+.ticket-page .card{padding:12px;gap:9px}
+.ticket-page .fields{gap:8px}
+.ticket-page .field{gap:4px}
+.ticket-page .field textarea{min-height:64px}
+.ticket-page .toolbar{gap:6px}
+.ticket-page .row{padding:8px 10px}
+.ticket-actions-compact{padding:12px!important}
+.ticket-action-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.ticket-action-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg2);min-width:0}
+.ticket-action-copy{display:flex;flex-direction:column;gap:1px;min-width:0}
+.ticket-action-copy b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-action-copy small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-action-controls{display:flex;align-items:center;gap:6px;flex:none}
+.ticket-mini-switch{display:grid;place-items:center;padding:2px;cursor:pointer}
+.ticket-mini-switch .switch{width:34px;height:20px}
+.ticket-mini-switch .switch::after{width:14px;height:14px}
+.ticket-mini-switch .switch:checked::after{transform:translateX(14px)}
+@media(max-width:900px){.ticket-action-list{grid-template-columns:1fr}}
+@media(max-width:600px){
+  .ticket-page{gap:8px}
+  .ticket-page .card{padding:10px}
+  .ticket-action-item{padding:8px}
+}
