@@ -97,3 +97,15 @@ def test_tictactoe_avec_un_autre_argument_manquant_garde_le_panneau_generique():
     fake_ctx.clean_prefix = "+"
     texte = erreurs._texte_erreur_prefix(fake_ctx, erreur).casefold()
     assert "« autre_chose »" in texte and "usage : `+tictactoe" in texte
+
+
+
+def test_late_error_never_replaces_an_existing_result():
+    from pathlib import Path
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "final_error_embed_v5.py"
+    ).read_text(encoding="utf-8")
+
+    assert "réponse déjà envoyée conservée" in source
+    assert "résultat utilisateur conservé" in source
+    assert "replaced = await _replace_prefix_response(ctx, panel)" not in source
