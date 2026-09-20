@@ -15,6 +15,8 @@ Aucun token utilisateur, token du bot ou secret OAuth n'est envoyé au navigateu
 """
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import os
 import secrets
@@ -38,6 +40,7 @@ OAUTH_STATE_COOKIE = "sentrix_oauth_state"
 SESSION_TTL = 12 * 60 * 60
 OAUTH_STATE_TTL = 10 * 60
 ADMINISTRATOR = 1 << 3
+MANAGE_GUILD = 1 << 5
 
 AUTOMOD_FIELDS = {
     "antispam", "antilink", "antiinvite", "antimention", "anticaps",
@@ -128,6 +131,41 @@ def _oauth_ready(bot) -> bool:
     return bool(_client_id(bot) and config.DISCORD_CLIENT_SECRET)
 
 
+def _oauth_state_host(request: web.Request) -> str:
+    """Hôte public inclus dans la signature du state OAuth."""
+    return (urlparse(_public_url(request)).hostname or _request_host(request) or "").casefold()
+
+
+def _oauth_state_secret() -> bytes:
+    # Le secret OAuth est déjà identique sur primary + standby. Le state devient donc
+    # vérifiable après un redéploiement ou une bascule HA sans stockage mémoire partagé.
+    return (config.DISCORD_CLIENT_SECRET or "").encode("utf-8")
+
+
+def _new_oauth_state(request: web.Request) -> str:
+    issued = int(time.time())
+    nonce = secrets.token_urlsafe(20)
+    payload = f"{issued}.{nonce}.{_oauth_state_host(request)}"
+    signature = hmac.new(_oauth_state_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{issued}.{nonce}.{signature}"
+
+
+def _verify_signed_oauth_state(request: web.Request, state: str) -> bool:
+    try:
+        issued_raw, nonce, signature = str(state or "").split(".", 2)
+        issued = int(issued_raw)
+    except (TypeError, ValueError):
+        return False
+    if not nonce or not signature:
+        return False
+    age = time.time() - issued
+    if age < -30 or age > OAUTH_STATE_TTL:
+        return False
+    payload = f"{issued}.{nonce}.{_oauth_state_host(request)}"
+    expected = hmac.new(_oauth_state_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return bool(_oauth_state_secret()) and secrets.compare_digest(signature, expected)
+
+
 def _invite_url(bot, guild_id: int | None = None) -> str | None:
     client_id = _client_id(bot)
     if not client_id:
@@ -189,15 +227,23 @@ def _require_csrf(request: web.Request, session: dict) -> web.Response | None:
     return None
 
 
-async def _administrator_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
-    """Vérifie les permissions actuelles, sans se fier uniquement à la session OAuth.
+def _dashboard_access_level(guild: discord.Guild, member: discord.Member, user_id: int) -> str | None:
+    """Niveau d'accès Discord réellement valable pour administrer un serveur."""
+    if int(guild.owner_id or 0) == int(user_id):
+        return "owner"
+    permissions = member.guild_permissions
+    if permissions.administrator:
+        return "administrator"
+    if permissions.manage_guild:
+        return "manage_guild"
+    return None
 
-    Le cache membres est autoritaire dès que le serveur est chunké (intent ``members`` +
-    chunking au démarrage) : une absence signifie « pas membre » et ne justifie pas un
-    appel REST. ``fetch_member`` ne sert plus que pour un serveur pas encore chunké. Avant,
-    chaque appel d'API du dashboard finissait par un ``fetch_member`` REST — soumis au
-    rate-limit Discord, il pouvait échouer et transformer un membre Administrateur bien
-    réel en « accès refusé » (404) sur la route demandée.
+
+async def _administrator_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
+    """Vérifie en direct l'accès dashboard : propriétaire, Administrateur ou Gérer le serveur.
+
+    Le nom historique de la fonction est conservé car les modules du dashboard l'utilisent
+    déjà, mais aucun accès n'est accordé à partir d'une simple session OAuth obsolète.
     """
     member = guild.get_member(user_id)
     if member is None:
@@ -207,7 +253,7 @@ async def _administrator_member(guild: discord.Guild, user_id: int) -> discord.M
             member = await guild.fetch_member(user_id)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             return None
-    return member if member.guild_permissions.administrator else None
+    return member if _dashboard_access_level(guild, member, user_id) else None
 
 
 async def _manageable_guild(request: web.Request, guild_id: int):
@@ -343,7 +389,9 @@ async def handle_login(request: web.Request):
     if redirect is not None:
         raise redirect
 
-    state = secrets.token_urlsafe(32)
+    state = _new_oauth_state(request)
+    # Compatibilité avec les anciens tests/flux : la table mémoire reste un cache de
+    # courte durée, mais la validation ne dépend plus d'elle.
     request.app["oauth_states"][state] = time.time() + OAUTH_STATE_TTL
     redirect_uri = f"{_public_url(request)}/oauth/callback"
     logger.info("OAuth : demande de connexion depuis %s, callback %s, state créé (%s).", _request_host(request), redirect_uri, state[:6])
@@ -385,9 +433,13 @@ async def handle_callback(request: web.Request):
         raise web.HTTPFound("/app")
 
     cookie_state = request.cookies.get(OAUTH_STATE_COOKIE, "")
-    expires_at = request.app["oauth_states"].pop(state, 0)
-    if not state or not secrets.compare_digest(state, cookie_state) or expires_at <= time.time():
-        reason = "state absent" if not state else "cookie de state absent" if not cookie_state else "cookie de state différent" if not secrets.compare_digest(state, cookie_state) else "state inconnu de cette instance" if not expires_at else "state expiré"
+    oauth_states = request.app.get("oauth_states", {})
+    expires_at = oauth_states.pop(state, 0) if isinstance(oauth_states, dict) else 0
+    signed_valid = _verify_signed_oauth_state(request, state)
+    legacy_valid = bool(expires_at and expires_at > time.time())
+    cookie_valid = bool(state and cookie_state and secrets.compare_digest(state, cookie_state))
+    if not cookie_valid or not (signed_valid or legacy_valid):
+        reason = "state absent" if not state else "cookie de state absent" if not cookie_state else "cookie de state différent" if not cookie_valid else "state expiré ou signature invalide"
         logger.warning("OAuth : callback refusé sur %s (%s, state %s).", _request_host(request), reason, state[:6] or "—")
         return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=403)
     logger.info("OAuth : callback accepté sur %s (state %s).", _request_host(request), state[:6])
@@ -427,12 +479,15 @@ async def handle_callback(request: web.Request):
     manageable = []
     for guild in oauth_guilds:
         permissions = int(guild.get("permissions", "0"))
-        if bool(guild.get("owner")) or permissions & ADMINISTRATOR:
+        owner = bool(guild.get("owner"))
+        access_level = "owner" if owner else "administrator" if permissions & ADMINISTRATOR else "manage_guild" if permissions & MANAGE_GUILD else None
+        if access_level:
             manageable.append({
                 "id": str(guild["id"]),
                 "name": guild["name"],
                 "icon_url": _guild_icon_url(guild),
-                "owner": bool(guild.get("owner")),
+                "owner": owner,
+                "access_level": access_level,
             })
 
     session_id = secrets.token_urlsafe(48)
@@ -496,11 +551,17 @@ async def handle_guilds(request: web.Request):
         guild_id = int(item["id"])
         installed_guild = bot.get_guild(guild_id)
         installed = installed_guild is not None
-        if installed and await _administrator_member(installed_guild, user_id) is None:
-            continue
+        access_level = item.get("access_level") or ("owner" if item.get("owner") else "administrator")
+        if installed:
+            member = await _administrator_member(installed_guild, user_id)
+            if member is None:
+                continue
+            access_level = _dashboard_access_level(installed_guild, member, user_id)
         guilds.append({
             **item,
             "installed": installed,
+            "access_level": access_level,
+            "permission_verified": bool(installed),
             "invite_url": None if installed else _invite_url(bot, guild_id),
         })
     guilds.sort(key=lambda item: (not item["installed"], item["name"].casefold()))
