@@ -328,3 +328,12 @@ const cssSource = css;
 if(!cssSource.includes('Tickets viewport fill v4')) throw new Error('Le remplissage vertical Tickets est absent.');
 if(!cssSource.includes('.ticket-panels-home,') || !cssSource.includes('.ticket-panel-editor,') || !cssSource.includes('.ticket-actions-page{')) throw new Error('Toutes les vues Tickets doivent partager le fond pleine hauteur.');
 if(!cssSource.includes('min-height:calc(100dvh - var(--top-safe) - 156px)')) throw new Error('Tickets doit remplir la hauteur disponible du viewport.');
+
+
+// Rechargement navigateur : même si l'URL contient ?guild= et une page serveur,
+// SentriX doit repartir sur Mon profil. Les liens directs restent possibles lors
+// d'une navigation normale.
+const bootSource = sourceByName.get('90_boot.js') || '';
+if(!bootSource.includes('function isHardReloadNavigation()')) throw new Error('Détection du rechargement navigateur absente.');
+if(!bootSource.includes("const wanted = hardReload ? ''")) throw new Error('Un rechargement doit ignorer la guild présente dans l’URL.');
+if(!bootSource.includes("state.page = 'profile'")) throw new Error('Le rechargement doit revenir à Mon profil.');
