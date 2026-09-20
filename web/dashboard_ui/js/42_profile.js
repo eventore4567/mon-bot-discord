@@ -39,6 +39,25 @@ const DASHBOARD_THEME_BASES = {
   graphite: { bg:'#0d0e10', bg2:'#121417', rail:'#101214', sidebar:'#121417', panel:'#181b1f', panel2:'#1e2227', panel3:'#252a30', line:'#30363d', line2:'#3b434c', text:'#f3f4f6', muted:'#9aa1aa', soft:'#c6cbd1', hover:'#1e2227', success:'#58d39a', warning:'#eebd67', danger:'#ff7586' },
 };
 
+const DASHBOARD_CURATED_PALETTES = {
+  rose: {
+    label:'Rose OLED', note:'Noir profond, rose néon et surfaces légèrement violettes.', theme:'oled', accent:'#ff4fa3',
+    colors:{bg:'#000000',bg2:'#080509',rail:'#09050a',sidebar:'#0d080e',panel:'#120b13',panel2:'#18101a',panel3:'#211623',hover:'#1b111d',line:'#2f2032',line2:'#49304c',text:'#fff7fb',muted:'#aa93a2',soft:'#d7c2cf',success:'#55d69a',warning:'#f0bd61',danger:'#ff7081'}
+  },
+  blue: {
+    label:'SentriX Azure', note:'Bleu propre, lisible et équilibré pour tous les écrans.', theme:'sentrix', accent:'#4da3ff',
+    colors:{bg:'#090c11',bg2:'#0d1218',rail:'#0c1117',sidebar:'#0e131a',panel:'#141a22',panel2:'#1a222c',panel3:'#222d39',hover:'#1b2530',line:'#293645',line2:'#3a4a5d',text:'#f4f8fc',muted:'#91a0b2',soft:'#bdc9d7',success:'#55d69a',warning:'#efbd61',danger:'#ff7081'}
+  },
+  violet: {
+    label:'Cosmos Violet', note:'Dégradé nuit avec violet lumineux et contrastes doux.', theme:'midnight', accent:'#8a6cff',
+    colors:{bg:'#070611',bg2:'#0d0b19',rail:'#0a0815',sidebar:'#0d0b19',panel:'#141023',panel2:'#1a1530',panel3:'#231d3d',hover:'#1c1734',line:'#30284a',line2:'#463a68',text:'#f7f3ff',muted:'#9d94b5',soft:'#cbc3df',success:'#57d9a2',warning:'#f0bd66',danger:'#ff7485'}
+  },
+  emerald: {
+    label:'Emerald Graphite', note:'Graphite sombre avec accent vert premium et discret.', theme:'graphite', accent:'#45d69a',
+    colors:{bg:'#090b0b',bg2:'#0e1211',rail:'#0d1110',sidebar:'#101513',panel:'#161c1a',panel2:'#1c2421',panel3:'#25302c',hover:'#1e2925',line:'#2d3a35',line2:'#3d5049',text:'#f3f8f6',muted:'#94a59f',soft:'#c3d0cc',success:'#55d69a',warning:'#efbd61',danger:'#ff7081'}
+  },
+};
+
 const DASHBOARD_COLOR_FIELDS = [
   ['bg','Fond général','--bg'],
   ['bg2','Fond secondaire','--bg2'],
@@ -315,6 +334,12 @@ function renderPreferences() {
   const palette=DASHBOARD_ACCENTS.map(([hex,label]) =>
     `<button class="accent-swatch ${accent===hex?'active':''}" type="button" data-accent="${hex}" title="${esc(label)}" aria-label="${esc(label)}" style="--swatch:${hex}"></button>`
   ).join('');
+  const curatedPaletteHtml=Object.entries(DASHBOARD_CURATED_PALETTES).map(([key,preset]) => `
+    <button class="theme-preset-card" type="button" data-curated-theme="${key}" style="--preset-bg:${preset.colors.bg};--preset-bg2:${preset.colors.bg2};--preset-panel:${preset.colors.panel};--preset-accent:${preset.accent}">
+      <span class="theme-preset-art" aria-hidden="true"></span>
+      <span class="theme-preset-copy"><b>${esc(preset.label)}</b><small>${esc(preset.note)}</small></span>
+      <span class="theme-preset-apply">Appliquer</span>
+    </button>`).join('');
   const colorControls=DASHBOARD_COLOR_FIELDS.map(([key,label]) => `
     <div class="theme-color-row" data-theme-color-row="${key}">
       <div class="theme-color-copy"><b>${esc(label)}</b><small>${esc(key)}</small></div>
@@ -369,10 +394,20 @@ function renderPreferences() {
       </div>
     </section>
 
-    <section class="card full">
-      <div class="card-head"><div><h2>Éditeur de couleurs avancé</h2><p>Vous pouvez personnaliser séparément chaque zone du dashboard.</p></div><button class="btn sm" id="prefResetColors" type="button">Couleurs du preset</button></div>
-      <div class="theme-color-grid">${colorControls}</div>
-      <div id="themeContrastStatus" class="notice"></div>
+    <section class="card full theme-palette-card">
+      <div class="card-head">
+        <div><h2>Palettes prêtes</h2><p>Des combinaisons déjà équilibrées : fond, cartes, textes, bordures et accent sont accordés automatiquement.</p></div>
+        <span class="badge blue">Dégradés prêts</span>
+      </div>
+      <div class="theme-preset-grid">${curatedPaletteHtml}</div>
+      <details class="advanced theme-advanced-editor">
+        <summary><span>Éditeur de couleurs avancé</span><small>Pour modifier une couleur précise uniquement.</small></summary>
+        <div class="advanced-body">
+          <div class="toolbar"><button class="btn sm" id="prefResetColors" type="button">Revenir aux couleurs de base</button></div>
+          <div class="theme-color-grid">${colorControls}</div>
+          <div id="themeContrastStatus" class="notice"></div>
+        </div>
+      </details>
     </section>
 
     <section class="card">
@@ -423,6 +458,17 @@ function renderPreferences() {
     if(pick)pick.value=next;if(hex)hex.value=next;refreshContrast();
   };
 
+  content().querySelectorAll('[data-curated-theme]').forEach(b=>b.onclick=()=>{
+    const preset=DASHBOARD_CURATED_PALETTES[b.dataset.curatedTheme];if(!preset)return;
+    try{
+      localStorage.setItem('sentrix:theme',preset.theme);
+      localStorage.setItem('sentrix:accent',preset.accent);
+      localStorage.setItem('sentrix:theme-colors',JSON.stringify(preset.colors));
+      localStorage.setItem('sentrix:glow','1');
+      localStorage.setItem('sentrix:banner','aurora');
+    }catch(_){}
+    applyGlobalPreferences();renderPreferences();toast(preset.label+' appliqué.');
+  });
   $('prefTheme').onchange=()=>{theme=$('prefTheme').value;try{localStorage.setItem('sentrix:theme',theme);localStorage.removeItem('sentrix:theme-colors');}catch(_){}applyGlobalPreferences();renderPreferences();toast('Preset appliqué.');};
   $('prefBanner').onchange=()=>{save('sentrix:banner',$('prefBanner').value);toast('Décor appliqué.');};
   $('prefDensity').onchange=()=>{save('sentrix:density',$('prefDensity').value);toast('Densité appliquée.');};
