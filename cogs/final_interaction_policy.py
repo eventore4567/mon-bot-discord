@@ -452,16 +452,49 @@ def _install_context_send() -> None:
 
     async def context_send(self: commands.Context, *args, **kwargs):
         root = _root_name(getattr(self, "command", None)) or _COMMAND_ROOT.get()
+        interaction = getattr(self, "interaction", None)
+
         if _plain_root(root):
+            if interaction is not None and panels.reponse_differee_a_finaliser(interaction):
+                charge = dict(kwargs)
+                if args and charge.get("content") is None:
+                    charge["content"] = args[0]
+                try:
+                    result = await interaction.edit_original_response(
+                        **panels.kwargs_edition_reponse_differee(charge)
+                    )
+                    panels.marquer_reponse_differee_finalisee(interaction)
+                    _mark_context_response(self, result)
+                    return result
+                except (discord.NotFound, discord.HTTPException):
+                    logger.debug("Réponse différée texte non éditable, repli Context.send.", exc_info=True)
             result = await base(self, *args, **kwargs)
             _mark_context_response(self, result)
             return result
+
         pages = _payload_pages(
             args, kwargs, root=root, bot=getattr(self, "bot", None)
         )
         first = None
-        for page_args, page_kwargs in pages:
-            result = await base(self, *page_args, **page_kwargs)
+        for index, (page_args, page_kwargs) in enumerate(pages):
+            if (
+                index == 0
+                and interaction is not None
+                and panels.reponse_differee_a_finaliser(interaction)
+            ):
+                charge = dict(page_kwargs)
+                if page_args and charge.get("content") is None:
+                    charge["content"] = page_args[0]
+                try:
+                    result = await interaction.edit_original_response(
+                        **panels.kwargs_edition_reponse_differee(charge)
+                    )
+                    panels.marquer_reponse_differee_finalisee(interaction)
+                except (discord.NotFound, discord.HTTPException):
+                    logger.debug("Réponse différée commande non éditable, repli Context.send.", exc_info=True)
+                    result = await base(self, *page_args, **page_kwargs)
+            else:
+                result = await base(self, *page_args, **page_kwargs)
             if first is None:
                 first = result
         _mark_context_response(self, first)
