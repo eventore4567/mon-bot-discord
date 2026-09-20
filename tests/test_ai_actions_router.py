@@ -108,3 +108,62 @@ def test_command_rendering_reuses_existing_commands():
 def test_ai_payload_is_fail_closed():
     assert ai_actions._validate_ai_payload({"intent": "owner.eval", "confidence": 100}) is None
     assert ai_actions._validate_ai_payload({"intent": "moderation.ban", "confidence": 20}) is None
+
+
+
+def test_security_toggle_maps_to_existing_command():
+    parsed = ai_actions.local_parse("SentriX active l'anti-spam")
+    assert parsed is not None
+    assert parsed.intent == "security.antispam"
+    assert parsed.slots["state"] == "on"
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+antispam on"
+
+    parsed = ai_actions.local_parse("désactive les liens")
+    assert parsed is not None
+    assert parsed.intent == "security.antilink"
+    assert parsed.slots["state"] == "off"
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+antilink off"
+
+
+def test_desktop_open_app_never_becomes_a_discord_command():
+    parsed = ai_actions.local_parse("SentriX ouvre Roblox")
+    assert parsed is not None
+    assert parsed.intent == "desktop.open_app"
+    assert parsed.slots["app"].casefold() == "roblox"
+    assert ai_actions.build_command_line(parsed, prefix="+") is None
+
+
+def _channel(uid: int, name: str, *, topic: str = "", category: str = ""):
+    cat = SimpleNamespace(name=category) if category else None
+    return SimpleNamespace(id=uid, name=name, topic=topic, category=cat)
+
+
+def test_log_autoconfig_scores_channel_name_topic_and_category_without_writing():
+    guild = SimpleNamespace(text_channels=[
+        _channel(1, "sanctions", topic="Logs de modération"),
+        _channel(2, "logs-messages"),
+        _channel(3, "voice-logs"),
+        _channel(4, "ticket-logs"),
+        _channel(5, "general"),
+    ])
+    proposals = ai_actions.propose_log_routes(guild)
+    by_category = {p.category: p.channel_id for p in proposals}
+    assert by_category["moderation"] == 1
+    assert by_category["messages"] == 2
+    assert by_category["voice"] == 3
+    assert by_category["tickets"] == 4
+
+
+def test_log_autoconfig_refuses_ambiguous_equal_matches():
+    guild = SimpleNamespace(text_channels=[
+        _channel(10, "logs-moderation-a"),
+        _channel(11, "logs-moderation-b"),
+    ])
+    proposals = ai_actions.propose_log_routes(guild)
+    assert not any(p.category == "moderation" for p in proposals)
+
+
+def test_log_autoconfig_phrase_is_not_misread_as_generic_setup():
+    parsed = ai_actions.local_parse("SentriX configure mes logs")
+    assert parsed is not None
+    assert parsed.intent == "config.logs.auto"
