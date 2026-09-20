@@ -660,3 +660,25 @@ body.save-pending .workspace{padding-bottom:104px}
   .ticket-page .card{padding:10px}
   .ticket-action-item{padding:8px}
 }
+
+
+/* Tickets navigation interne v3 */
+.ticket-panels-home{max-width:1180px}
+.ticket-panels-card{padding:14px!important}
+.ticket-panel-list{display:grid;gap:8px}
+.ticket-panel-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg2)}
+.ticket-panel-main{display:grid;gap:2px;min-width:0}
+.ticket-panel-main b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-panel-main small{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-editor-head{display:flex;align-items:center;gap:12px;padding:8px 2px}
+.ticket-editor-head>div{display:grid;gap:1px}
+.ticket-editor-head b{font-size:15px}
+.ticket-editor-head small{color:var(--muted);font-size:12px}
+.ticket-panel-editor{max-width:1180px}
+.ticket-panel-editor .card-head{padding-right:96px}
+@media(max-width:700px){
+  .ticket-panel-row{grid-template-columns:minmax(0,1fr) auto}
+  .ticket-panel-row .badge{grid-column:1}
+  .ticket-panel-row .btn{grid-column:2;grid-row:1 / span 2}
+  .ticket-panel-editor .card-head{padding-right:0}
+}
