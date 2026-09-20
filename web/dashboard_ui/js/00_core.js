@@ -70,9 +70,15 @@ async function api(url, options = {}) {
       const servedBy = r.headers?.get?.('X-SentriX-HA-Served-By') || '';
       const branchSkew = r.status === 404 && servedBy === 'peer' && new URL(String(url), location.origin).pathname.startsWith('/api/guilds/');
       const message = branchSkew
-        ? 'Le serveur de test n’est pas encore l’instance Discord active. La bascule HA est nécessaire pour tester cette nouvelle page.'
+        ? 'Version HA désynchronisée : cette page existe sur le dashboard affiché, mais pas encore sur l’instance Discord active. Primary et standby doivent exécuter la même version.'
         : (data.error || data.message || `Erreur HTTP ${r.status}`);
-      throw Object.assign(new Error(message), { status: branchSkew ? 503 : r.status, upstreamStatus: r.status, servedBy, data });
+      throw Object.assign(new Error(message), {
+        status: branchSkew ? 503 : r.status,
+        upstreamStatus: r.status,
+        servedBy,
+        code: branchSkew ? 'HA_VERSION_SKEW' : '',
+        data,
+      });
     }
     return data;
   } finally { if (!background) progressEnd(); }
