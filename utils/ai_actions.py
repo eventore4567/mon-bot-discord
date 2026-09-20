@@ -746,8 +746,8 @@ def build_command_line(
             return None
         return command
 
-    if action.intent == "navigation.help" and slots.get("query"):
-        command += f" {str(slots['query']).strip()[:80]}"
+    # +help est volontairement root-only dans le runtime actuel : la recherche
+    # se fait depuis le menu interactif. Ne jamais lui ajouter un argument historique.
     if action.intent.startswith("security.") and slots.get("state"):
         command += f" {slots['state']}"
     return command
