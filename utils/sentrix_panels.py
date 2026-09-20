@@ -240,7 +240,6 @@ class Panneau(discord.ui.LayoutView):
             rendu = section.rendu()
             if not rendu:
                 continue
-            conteneur.add_item(discord.ui.Separator())
             conteneur.add_item(discord.ui.TextDisplay(rendu[:_LIMITE_BLOC]))
 
         # 4 — pied de page en petit, comme la signature d'un document.
@@ -250,7 +249,6 @@ class Panneau(discord.ui.LayoutView):
             # prend toute la largeur sous le texte plutot qu'une vignette d'angle.
             contenu = discord.ui.MediaGallery()
             contenu.add_item(media=str(image))
-            conteneur.add_item(discord.ui.Separator())
             conteneur.add_item(contenu)
 
         if pied:
@@ -259,7 +257,6 @@ class Panneau(discord.ui.LayoutView):
         # 5 — navigation, DANS le conteneur pour rester sous l'accent de couleur.
         rangees = _rangees(boutons)
         if rangees:
-            conteneur.add_item(discord.ui.Separator())
             for rangee in rangees:
                 conteneur.add_item(rangee)
 
@@ -434,7 +431,7 @@ async def envoyer(
     return await destination.send(**kwargs)
 
 
-_BARRE_DESSINEE = _re.compile(r"[━─—]{6,}")
+_BARRE_DESSINEE = _re.compile(r"[-━─—]{6,}")
 
 
 def _sans_barre(texte: str) -> str:
@@ -625,7 +622,6 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
 
     rangees = _rangees_d_items(enfants)
     if rangees:
-        conteneur.add_item(discord.ui.Separator())
         for rangee in rangees:
             conteneur.add_item(rangee)
 
