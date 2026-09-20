@@ -515,22 +515,15 @@ async def _raw_slash_send(interaction: discord.Interaction, panneau: panels.Pann
         await raw_response(interaction.response, **kwargs)
         return
 
-    # Une reponse normale existe deja. La remplacer evite le couple « resultat +
-    # erreur » qui faisait croire a une double reponse de SentriX.
-    try:
-        message = await raw_edit(interaction, content=None, embeds=[], view=panneau,
-                                 attachments=panneau.fichiers())
-        await _effacer_plus_tard(message)
-        return
-    except discord.NotFound:
-        # Pas de message original : dans ce cas seulement, un follow-up ne duplique rien.
-        raw_webhook = policy._unwrap(discord.Webhook.send)
-        kwargs = {"view": panneau, "ephemeral": True, "allowed_mentions": _ALLOWED, "wait": True}
-        fichiers = panneau.fichiers()
-        if fichiers:
-            kwargs["files"] = fichiers
-        message = await raw_webhook(interaction.followup, **kwargs)
-        await _effacer_plus_tard(message)
+    # Une vraie réponse existe déjà : ne jamais la remplacer par une erreur tardive.
+    # Les échecs de logs/cleanup après une action réussie ne doivent pas transformer
+    # visuellement un « Succès » en « Erreur ». Les erreurs avant résultat passent par
+    # le chemin deferred ci-dessus et restent donc affichées normalement.
+    logger.warning(
+        "Erreur slash après réponse déjà envoyée : résultat utilisateur conservé (%s).",
+        getattr(getattr(interaction, "command", None), "qualified_name", "commande"),
+    )
+    return
 
 
 def install(bot: commands.Bot) -> None:
@@ -572,12 +565,10 @@ def install(bot: commands.Bot) -> None:
                 return
             panel = _prefix_error_panel(ctx, error)
             if getattr(ctx, "_sentrix_response_sent", False):
-                replaced = await _replace_prefix_response(ctx, panel)
-                if not replaced:
-                    logger.warning(
-                        "Erreur après réponse pour +%s : deuxième message supprimé pour éviter un doublon.",
-                        getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
-                    )
+                logger.warning(
+                    "Erreur après réponse pour +%s : réponse déjà envoyée conservée.",
+                    getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
+                )
                 return
             await _raw_prefix_send(ctx, panel)
         except Exception:
