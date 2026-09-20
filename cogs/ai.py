@@ -870,7 +870,13 @@ class Ai(commands.Cog, name="Ai"):
             return None
         return action
 
-    async def _send_readonly_setup(self, message: discord.Message, denial: str = "") -> None:
+    async def _send_readonly_setup(
+        self,
+        message: discord.Message,
+        denial: str = "",
+        *,
+        section: str | None = None,
+    ) -> None:
         """Vue de consultation : aucune écriture, aucun composant de configuration."""
         try:
             from . import setup_control_center
@@ -878,6 +884,8 @@ class Ai(commands.Cog, name="Ai"):
             statuses = await setup_control_center.module_statuses(self.bot, message.guild, conf)
             rows = []
             for key, (state, summary, errors) in statuses.items():
+                if section and key != section:
+                    continue
                 raw_state = str(getattr(state, "value", state) or "")
                 label = {
                     "active": "Actif", "inactive": "Inactif", "unconfigured": "Non configuré",
@@ -999,6 +1007,7 @@ class Ai(commands.Cog, name="Ai"):
             return True
 
         if action.intent == "navigation.setup":
+            section = str(action.slots.get("section") or "").strip() or None
             decision = await access_matrix.evaluate(
                 self.bot,
                 command_name="setup",
@@ -1006,8 +1015,21 @@ class Ai(commands.Cog, name="Ai"):
                 guild=message.guild,
             )
             if not decision.allowed:
-                await self._send_readonly_setup(message, decision.reason)
+                await self._send_readonly_setup(message, decision.reason, section=section)
                 return True
+            if section:
+                try:
+                    from . import setup_control_center
+                    if section in setup_control_center.CATEGORIES:
+                        view = setup_control_center.SetupView(
+                            self.bot, message.guild, message.author.id
+                        )
+                        view.category = section
+                        await view.composer()
+                        await panels.envoyer(message.channel, view)
+                        return True
+                except Exception:
+                    logger.exception("Ouverture directe d'une section Setup impossible.")
             return await self._invoke_command_line(message, f"{prefix}setup")
 
         member = None
