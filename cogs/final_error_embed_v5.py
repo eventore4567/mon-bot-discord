@@ -20,7 +20,7 @@ from core.errors import pipeline as error_pipeline
 
 logger = logging.getLogger("bot.final-error-embed-v5")
 
-BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+BAR = ""
 # Ces deux couleurs etaient figees en dur et datent d'avant l'unification de la
 # palette. Comme ce module rend TOUS les messages d'erreur du bot, chaque refus,
 # chaque cooldown et chaque erreur interne sortait encore a l'ancienne teinte
@@ -68,7 +68,7 @@ def _clip(value: object, limit: int = 3900) -> str:
 def _panel(title: str, description: str, *, warning: bool = False) -> discord.Embed:
     embed = discord.Embed(
         title=_clip(title, 256) or "Erreur de commande",
-        description=f"{BAR}\n{_clip(description)}",
+        description=_clip(description),
         colour=discord.Colour(WARNING_COLOR if warning else ERROR_COLOR),
     )
     embed.set_footer(text=FOOTER)
