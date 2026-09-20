@@ -1285,10 +1285,11 @@ class Ai(commands.Cog, name="Ai"):
             return False
         root = parts[0].casefold()
         dangerous = set(access_matrix.GUILD_OWNER_COMMANDS) | {
-            "delete-channel", "massrole", "roleall", "blacklist-users",
-            "lockdown-server", "panic",
+            "delete-channel", "deleteemoji", "massrole", "roleall",
+            "blacklist-user", "blacklist-users", "lockdown-server", "panic",
+            "pay", "give-money",
         }
-        if root in dangerous:
+        if root in dangerous or root.startswith(("wipe", "reset", "restore", "delete-", "mass")):
             return True
         if root == "clear" and len(parts) > 1:
             try:
