@@ -45,6 +45,7 @@ from .owner_sanction_immunity import install as install_owner_sanction_immunity
 from .permission_guard import install as install_permission_guard
 from .permission_setup_hardening_v65 import install as install_permission_setup_hardening_v65
 from .poll_ui import install_poll_ui
+from .command_health import install as install_command_health
 from .production_ops import install as install_production_ops
 from .public_language_choice import install as install_public_language_choice
 from .remove_code_command import install as install_remove_code_command
@@ -260,6 +261,7 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _load_proof_verification(bot)
     await _run_installer("renforcement commandes V41", install_command_hardening_v41, bot)
     await _run_installer("opérations production", install_production_ops, bot)
+    await _run_installer("santé des commandes", install_command_health, bot)
     await _run_installer("permissions commandes", install_permission_guard, bot)
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
     await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)

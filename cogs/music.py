@@ -476,12 +476,20 @@ class Music(commands.Cog, name="Music"):
 
     @music.command(name="volume", description="Régler le volume (0 à 100).")
     @app_commands.describe(niveau="Le niveau de volume entre 0 et 100")
-    async def music_volume(self, ctx: commands.Context, niveau: app_commands.Range[int, 0, 100]):
+    async def music_volume(self, ctx: commands.Context, niveau: commands.Range[int, 0, 100]):
+        # commands.Range (pas app_commands.Range) : le transformer slash n'a pas de
+        # convertisseur préfixe, `+music volume 50` répondait « Argument invalide ».
         queue = self.get_queue(ctx.guild.id)
         queue.volume = niveau / 100
         if queue.voice_client and queue.voice_client.source:
             queue.voice_client.source.volume = queue.volume
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Volume réglé", description=f"Volume réglé sur **{niveau}%**.", kind="success")))
+
+    _LOOP_ALIASES = {
+        "off": "off", "désactivé": "off", "desactive": "off", "non": "off", "stop": "off", "0": "off",
+        "track": "track", "piste": "track", "titre": "track", "morceau": "track", "1": "track",
+        "queue": "queue", "file": "queue", "liste": "queue", "all": "queue", "tout": "queue",
+    }
 
     @music.command(name="loop", description="Répéter la piste actuelle, toute la file, ou désactiver.")
     @app_commands.choices(mode=[
@@ -489,9 +497,16 @@ class Music(commands.Cog, name="Music"):
         app_commands.Choice(name="Piste actuelle", value="track"),
         app_commands.Choice(name="File d'attente", value="queue"),
     ])
-    async def music_loop(self, ctx: commands.Context, mode: app_commands.Choice[str]):
+    async def music_loop(self, ctx: commands.Context, mode: str):
         queue = self.get_queue(ctx.guild.id)
-        value = mode.value if isinstance(mode, app_commands.Choice) else mode
+        # `str` + @app_commands.choices : le slash garde ses trois choix, le préfixe
+        # accepte les mêmes valeurs et leurs équivalents français.
+        raw = (mode.value if isinstance(mode, app_commands.Choice) else str(mode)).casefold().strip()
+        value = self._LOOP_ALIASES.get(raw)
+        if value is None:
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                ctx.guild.id, title="Mode inconnu",
+                description="Choisissez **off**, **piste** ou **file** (ex. `+music loop piste`).", kind="danger")))
         queue.loop_track = value == "track"
         queue.loop_queue = value == "queue"
         label = {"off": "désactivée", "track": "piste actuelle", "queue": "file d'attente"}[value]
@@ -521,7 +536,7 @@ class Music(commands.Cog, name="Music"):
 
     @music.command(name="seek", description="Aller à une position précise dans la piste en cours (en secondes).")
     @app_commands.describe(secondes="Position cible en secondes depuis le début de la piste")
-    async def music_seek(self, ctx: commands.Context, secondes: app_commands.Range[int, 0, 36000]):
+    async def music_seek(self, ctx: commands.Context, secondes: commands.Range[int, 0, 36000]):
         queue = self.get_queue(ctx.guild.id)
         if not queue.current or not queue.voice_client:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien à avancer", description="Aucune musique en cours de lecture.", kind="danger")))

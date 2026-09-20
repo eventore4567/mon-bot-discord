@@ -1,0 +1,56 @@
+name: SentriX Command Sweep
+
+# Exécute TOUTES les commandes (préfixe + slash) sur le bot booté comme en production,
+# avec des arguments générés depuis les signatures réelles (tools/command_sweep.py).
+# Rouge dès qu'une commande produit une erreur technique (référence SXR) ; les commandes
+# « fragiles » restent informatives dans le rapport publié en artefact.
+
+on:
+  push:
+    branches: [main, "dashboard-refonte-*"]
+  pull_request:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sentrix-command-sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile sweep tooling
+        run: python -m py_compile tools/command_sweep.py tools/sentrix_e2e_harness.py cogs/command_health.py
+
+      - name: Sweep every command (strict on technical errors)
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          OPENAI_API_KEY: ""
+          POSTGRES_URL: ""
+          REDIS_URL: ""
+        run: python tools/command_sweep.py --strict --out reports/command_sweep
+
+      - name: Publish report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: command-sweep-report
+          path: reports/command_sweep.*
+          if-no-files-found: warn

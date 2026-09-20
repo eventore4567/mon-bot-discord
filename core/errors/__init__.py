@@ -12,6 +12,6 @@ appelle pour obtenir une référence courte (SXR-CMD-xxxx) et faire journaliser 
 trace complète côté serveur, avant de continuer à construire son propre panneau
 utilisateur exactement comme avant.
 """
-from .pipeline import ErrorReport, clean_message, next_code, report, reset_for_tests
+from .pipeline import ErrorReport, clean_message, next_code, report, reset_for_tests, subscribe, unsubscribe
 
-__all__ = ["ErrorReport", "clean_message", "next_code", "report", "reset_for_tests"]
+__all__ = ["ErrorReport", "clean_message", "next_code", "report", "reset_for_tests", "subscribe", "unsubscribe"]

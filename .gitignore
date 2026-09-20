@@ -57,3 +57,6 @@ assets/log_banners/banner_*.png
 assets/log_banners/banner_*.webp
 !assets/log_banners/banner_source_*.webp
 database/backups/
+
+# Rapports locaux du balayage des commandes (tools/command_sweep.py)
+reports/
