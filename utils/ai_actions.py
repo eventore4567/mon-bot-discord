@@ -278,10 +278,13 @@ def _extract_target(question: str) -> str | None:
         return mention.group(0)
     # Formulations fréquentes où la cible se place après le verbe.
     patterns = (
-        r"\b(?:tempban|ban\s+temporaire|bannis\s+temporairement|bannir\s+temporairement)\s+@?([^\s,;]+)",
-        r"\b(?:ban|bannis|bannir|warn|avertis|avertir|mute|mut|kick|expulse|vire)\s+@?([^\s,;]+)",
+        # Les formes composées passent AVANT le verbe générique : dans
+        # « mets Tomioka en mute pendant 10h », le mot suivant « mute » est
+        # « pendant », pas la cible.
         r"\bmets\s+@?([^\s,;]+)\s+en\s+(?:mute|timeout)",
+        r"\b(?:tempban|ban\s+temporaire|bannis\s+temporairement|bannir\s+temporairement)\s+@?([^\s,;]+)",
         r"\b(?:unmute|demute|démute)\s+@?([^\s,;]+)",
+        r"\b(?:ban|bannis|bannir|warn|avertis|avertir|mute|mut|kick|expulse|vire)\s+@?([^\s,;]+)",
         r"\b(?:sanctions|avertissements|warnings)\s+(?:de|du|d['’])\s*@?([^\s,;]+)",
         r"\b(?:solde|balance|argent)\s+(?:de|du|d['’])\s*@?([^\s,;]+)",
     )
@@ -811,10 +814,18 @@ def log_category_label(category: str) -> str:
     return (_LOG_MATCH_RULES.get(str(category)) or (str(category).capitalize(), ()))[0]
 
 
+def _log_match_text(value: object) -> str:
+    # Discord emploie naturellement des tirets/underscores dans les noms de salons.
+    # Pour le scoring uniquement, « ticket-logs », « ticket_logs » et « ticket logs »
+    # doivent être équivalents.
+    text = normalize_text(str(value or ""))
+    return re.sub(r"[-_]+", " ", text).strip()
+
+
 def _channel_text(channel: Any) -> tuple[str, str, str]:
-    name = normalize_text(getattr(channel, "name", ""))
-    topic = normalize_text(getattr(channel, "topic", ""))
-    category = normalize_text(getattr(getattr(channel, "category", None), "name", ""))
+    name = _log_match_text(getattr(channel, "name", ""))
+    topic = _log_match_text(getattr(channel, "topic", ""))
+    category = _log_match_text(getattr(getattr(channel, "category", None), "name", ""))
     return name, topic, category
 
 
@@ -828,7 +839,7 @@ def _log_channel_score(channel: Any, keywords: tuple[str, ...]) -> tuple[int, st
         score += 2
         evidence.append("nom de salon de logs")
     for keyword in keywords:
-        key = normalize_text(keyword)
+        key = _log_match_text(keyword)
         if not key:
             continue
         if name == key:
