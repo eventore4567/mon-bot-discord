@@ -167,3 +167,19 @@ def test_log_autoconfig_phrase_is_not_misread_as_generic_setup():
     parsed = ai_actions.local_parse("SentriX configure mes logs")
     assert parsed is not None
     assert parsed.intent == "config.logs.auto"
+
+
+
+def test_setup_section_is_extracted_without_losing_navigation_intent():
+    parsed = ai_actions.local_parse("SentriX ouvre les paramètres d'économie")
+    assert parsed is not None
+    assert parsed.intent == "navigation.setup"
+    assert parsed.slots["section"] == "economy"
+
+
+def test_sanction_history_uses_full_modhistory_command_not_warning_list():
+    parsed = ai_actions.local_parse("montre-moi les sanctions de Tomioka")
+    assert parsed is not None
+    assert parsed.intent == "moderation.history"
+    member = _member(111111111111111, "tomioka")
+    assert ai_actions.build_command_line(parsed, prefix="+", member=member) == "+modhistory <@111111111111111>"
