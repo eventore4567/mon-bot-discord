@@ -209,7 +209,18 @@ class VerificationPanelView(discord.ui.View):
         cog = interaction.client.get_cog(legacy._COG_NAME)
         if cog is None:
             return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Service indisponible', "La vérification SentriX n'est pas chargée pour le moment.", state='error')), ephemere=True)
-        await cog.start_human_verification(interaction)
+        starter = getattr(cog, "start_human_verification", None)
+        if not callable(starter):
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(_status_embed(
+                    'Service de vérification indisponible',
+                    "Le moteur actif ne fournit pas encore le démarrage manuel. Réessayez après actualisation du panneau.",
+                    state='error',
+                )),
+                ephemere=True,
+            )
+        await starter(interaction)
 
     @discord.ui.button(
         label="Relancer",
@@ -222,9 +233,24 @@ class VerificationPanelView(discord.ui.View):
         if cog is None or interaction.guild is None:
             return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Impossible de relancer', 'La vérification est indisponible.', state='error')), ephemere=True)
         key = (interaction.guild.id, interaction.user.id)
-        cog._challenges.pop(key, None)
-        cog._last_start.pop(key, None)
-        await cog.start_human_verification(interaction)
+        challenges = getattr(cog, "_challenges", None)
+        if isinstance(challenges, dict):
+            challenges.pop(key, None)
+        last_start = getattr(cog, "_last_start", None)
+        if isinstance(last_start, dict):
+            last_start.pop(key, None)
+        starter = getattr(cog, "start_human_verification", None)
+        if not callable(starter):
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(_status_embed(
+                    'Service de vérification indisponible',
+                    "Le moteur actif ne fournit pas encore le démarrage manuel. Réessayez après actualisation du panneau.",
+                    state='error',
+                )),
+                ephemere=True,
+            )
+        await starter(interaction)
 
     @discord.ui.button(
         label="Comment ça marche ?",
