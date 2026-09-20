@@ -34,7 +34,7 @@ COLOR_NEUTRAL = runtime.COLOR_NEUTRAL
 
 # Une seule ligne volontairement un peu plus courte que l'ancienne V6 : elle garde
 # l'effet visuel large sans produire un petit reste de ━━━ sur la ligne suivante.
-PANEL_BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+PANEL_BAR = ""
 
 _IDENTITY_FIELDS = {"membre", "auteur", "utilisateur", "cible"}
 _BEFORE_FIELDS = {"avant", "ancienne valeur", "ancien"}
@@ -70,11 +70,8 @@ def _clean_text(value: Any, limit: int = 4096) -> str:
 
 
 def _command_text(value: Any, limit: int = 4096) -> str:
-    """Normalise une commande vers exactement UNE séparation large et propre."""
-    body = _clean_text(value, max(1, limit - len(PANEL_BAR) - 1))
-    if body:
-        return sx.clip(f"{PANEL_BAR}\n{body}", limit)
-    return PANEL_BAR
+    """Retire tous les anciens séparateurs sans en recréer un."""
+    return _clean_text(value, limit)
 
 
 def _one_line(value: Any, limit: int = 600) -> str:
@@ -356,8 +353,8 @@ def install() -> None:
     if _INSTALLED:
         return
 
-    # Les vieux renderers peuvent encore générer une barre trop longue ; toutes les
-    # commandes sont ensuite normalisées vers PANEL_BAR par cette dernière couche.
+    # Les vieux renderers peuvent encore générer une barre : cette dernière couche
+    # la retire définitivement au lieu d'en créer une nouvelle.
     runtime.BAR = PANEL_BAR
     runtime.CHANGE_BAR = ""
     sx.BAR = PANEL_BAR
