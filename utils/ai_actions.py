@@ -91,7 +91,11 @@ ACTIONS: dict[str, ActionSpec] = {
     ),
     "moderation.warnings": ActionSpec(
         "moderation.warnings", "warnings", ("target",), (), "member", "low",
-        description="afficher les avertissements/sanctions d'un membre",
+        description="afficher les avertissements d'un membre",
+    ),
+    "moderation.history": ActionSpec(
+        "moderation.history", "modhistory", ("target",), (), "member", "low",
+        description="afficher l'historique complet des sanctions d'un membre",
     ),
     "navigation.help": ActionSpec(
         "navigation.help", "help", (), ("query",), None, "low",
@@ -150,7 +154,8 @@ _INTENT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("moderation.kick", ("kick", "expulse", "expulser")),
     ("moderation.ban", ("ban ", "bannis", "bannir", "vire ", "virer ")),
     ("moderation.purge", ("purge", "clear", "supprime les", "efface les")),
-    ("moderation.warnings", ("sanctions de", "avertissements de", "warnings de", "historique de sanctions")),
+    ("moderation.history", ("sanctions de", "historique de sanctions", "dossier de sanctions")),
+    ("moderation.warnings", ("avertissements de", "warnings de")),
     ("navigation.dashboard", ("dashboard", "dashbord", "dash board", "tableau de bord")),
     ("navigation.help", ("ouvre help", "affiche help", "montre help", "aide", "commandes")),
     ("navigation.setup", ("ouvre setup", "affiche setup", "montre setup", "configuration", "parametres", "paramètres")),
@@ -602,10 +607,10 @@ def build_command_line(
     if action.intent == "moderation.purge":
         return f"{command} {int(slots['count'])}" if slots.get("count") else None
 
-    if action.intent in {"moderation.warnings", "economy.balance"}:
+    if action.intent in {"moderation.warnings", "moderation.history", "economy.balance"}:
         if member is not None:
             command += f" {member.mention}"
-        elif action.intent == "moderation.warnings":
+        elif action.intent in {"moderation.warnings", "moderation.history"}:
             return None
         return command
 
