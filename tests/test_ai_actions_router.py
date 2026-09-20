@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from types import SimpleNamespace
 
+import pytest
+
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from utils import ai_actions
