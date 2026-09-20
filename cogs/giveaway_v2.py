@@ -642,6 +642,9 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         row = await self.bot.db.fetchone("SELECT * FROM giveaways_v2 WHERE guild_id=? AND message_id=?", (ctx.guild.id, message_id))
         if row is None:
             return False
+        if row["status"] != "actif":
+            await ctx.send("Aucun giveaway actif correspondant à cet ID.")
+            return True
         await self.bot.db.execute("UPDATE giveaways_v2 SET status='annule' WHERE id=?", (row["id"],))
         channel = ctx.guild.get_channel(int(row["channel_id"]))
         if channel:
