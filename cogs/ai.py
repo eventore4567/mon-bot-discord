@@ -999,6 +999,315 @@ class Ai(commands.Cog, name="Ai"):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
+    @staticmethod
+    def _native_slot_grounded(message: discord.Message, value: object) -> bool:
+        """Refuse qu'un classifieur IA invente une cible ou un paramètre Discord."""
+        raw = str(value or "").strip()
+        if not raw:
+            return True
+        source = ai_actions.normalize_text(message.content)
+        wanted = ai_actions.normalize_text(raw)
+        ids = re.findall(r"\\d{15,22}", raw)
+        if ids and not all(item in message.content for item in ids):
+            return False
+        return not wanted or wanted in source
+
+    @staticmethod
+    def _resolve_native_channel(guild: discord.Guild, raw: str, *, voice: bool | None = None):
+        value = str(raw or "").strip()
+        candidates = list(guild.channels)
+        if voice is True:
+            candidates = [c for c in candidates if isinstance(c, (discord.VoiceChannel, discord.StageChannel))]
+        elif voice is False:
+            candidates = [c for c in candidates if isinstance(c, (discord.TextChannel, discord.Thread))]
+        match = re.fullmatch(r"<#(\\d{15,22})>", value) or re.fullmatch(r"(\\d{15,22})", value)
+        if match:
+            channel = guild.get_channel(int(match.group(1)))
+            if channel in candidates:
+                return channel, ()
+            return None, ()
+        wanted = ai_actions.normalize_text(value.lstrip("#"))
+        exact = [c for c in candidates if ai_actions.normalize_text(getattr(c, "name", "")) == wanted]
+        if len(exact) == 1:
+            return exact[0], ()
+        if len(exact) > 1:
+            return None, tuple(exact[:5])
+        return None, ()
+
+    @staticmethod
+    def _resolve_native_role(guild: discord.Guild, raw: str):
+        value = str(raw or "").strip()
+        match = re.fullmatch(r"<@&(\\d{15,22})>", value) or re.fullmatch(r"(\\d{15,22})", value)
+        if match:
+            role = guild.get_role(int(match.group(1)))
+            return role, ()
+        wanted = ai_actions.normalize_text(value.lstrip("@"))
+        exact = [r for r in guild.roles if ai_actions.normalize_text(r.name) == wanted]
+        if len(exact) == 1:
+            return exact[0], ()
+        if len(exact) > 1:
+            return None, tuple(exact[:5])
+        return None, ()
+
+    async def _execute_native_action(
+        self,
+        message: discord.Message,
+        action: ai_actions.ParsedAction,
+        *,
+        member: discord.Member | None = None,
+    ) -> bool:
+        """Exécute une petite surface Discord native, avec permissions et hiérarchie.
+
+        Le classifieur choisit seulement un intent du registre. Toutes les décisions
+        d'autorisation et toute résolution d'objet Discord restent locales.
+        """
+        guild = message.guild
+        actor = message.author
+        me = guild.me
+        if me is None:
+            await message.reply("SentriX n’est pas prêt sur ce serveur.", mention_author=False)
+            return True
+
+        async def reply(text: str):
+            await message.reply(
+                text,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+        # Un slot produit par IA doit provenir textuellement de la demande. Les parseurs
+        # locaux sont déjà déterministes et ne passent pas par cette garde.
+        if action.source == "ai":
+            for key, value in action.slots.items():
+                if key in {"reason", "duration", "count", "state", "section"}:
+                    continue
+                if not self._native_slot_grounded(message, value):
+                    await reply(
+                        "Je peux faire cette action, mais je ne veux pas inventer un paramètre. "
+                        "Précisez le membre, rôle, salon ou nom directement dans votre demande."
+                    )
+                    return True
+
+        intent = action.intent
+        reason = f"Action naturelle SentriX demandée par {actor} ({actor.id})"
+
+        if intent == "voice.join":
+            voice_state = getattr(actor, "voice", None)
+            channel = getattr(voice_state, "channel", None)
+            if channel is None:
+                await reply("Rejoignez d’abord le salon vocal dans lequel vous voulez que SentriX vienne.")
+                return True
+            perms = channel.permissions_for(me)
+            if not perms.connect:
+                await reply("Je n’ai pas la permission **Se connecter** dans ce salon vocal.")
+                return True
+            try:
+                vc = guild.voice_client
+                if vc and vc.is_connected():
+                    if vc.channel.id != channel.id:
+                        await vc.move_to(channel)
+                else:
+                    vc = await channel.connect()
+                music = self.bot.get_cog("Music")
+                if music is not None and hasattr(music, "get_queue"):
+                    queue = music.get_queue(guild.id)
+                    queue.voice_client = vc
+                    queue.text_channel = message.channel
+                await reply(f"J’ai rejoint **{channel.name}**.")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                logger.warning("Action naturelle voice.join impossible: %s", exc)
+                await reply("Je n’ai pas pu rejoindre ce salon vocal. Vérifiez mes permissions vocales.")
+            return True
+
+        if intent == "voice.leave":
+            vc = guild.voice_client
+            if vc is None or not vc.is_connected():
+                await reply("Je ne suis dans aucun salon vocal sur ce serveur.")
+                return True
+            same_channel = bool(getattr(actor, "voice", None) and actor.voice.channel == vc.channel)
+            if not same_channel and not actor.guild_permissions.move_members:
+                await reply("Vous devez être dans mon salon vocal ou avoir **Déplacer des membres**.")
+                return True
+            try:
+                await vc.disconnect()
+                music = self.bot.get_cog("Music")
+                if music is not None and hasattr(music, "get_queue"):
+                    queue = music.get_queue(guild.id)
+                    queue.voice_client = None
+                await reply("J’ai quitté le salon vocal.")
+            except discord.HTTPException:
+                await reply("Je n’ai pas réussi à quitter le salon vocal.")
+            return True
+
+        if intent in {"channel.create_voice", "channel.create_text", "channel.rename"}:
+            if not actor.guild_permissions.manage_channels:
+                await reply("Vous n’avez pas la permission **Gérer les salons**.")
+                return True
+            if not me.guild_permissions.manage_channels:
+                await reply("Il me manque la permission **Gérer les salons**.")
+                return True
+
+            if intent == "channel.rename":
+                channel, ambiguous = self._resolve_native_channel(guild, str(action.slots.get("channel") or ""))
+                if ambiguous:
+                    await reply("Plusieurs salons portent ce nom. Mentionnez directement le salon à renommer.")
+                    return True
+                if channel is None:
+                    await reply("Je ne trouve pas clairement le salon à renommer.")
+                    return True
+                try:
+                    await channel.edit(name=str(action.slots["name"])[:100], reason=reason)
+                    await reply(f"Salon renommé en **{channel.name}**.")
+                except (discord.Forbidden, discord.HTTPException):
+                    await reply("Je n’ai pas pu renommer ce salon.")
+                return True
+
+            category = None
+            category_name = str(action.slots.get("category") or "").strip()
+            if category_name:
+                wanted = ai_actions.normalize_text(category_name)
+                matches = [x for x in guild.categories if ai_actions.normalize_text(x.name) == wanted]
+                if len(matches) != 1:
+                    await reply("Je ne trouve pas clairement cette catégorie. Donnez son nom exact.")
+                    return True
+                category = matches[0]
+            name = str(action.slots.get("name") or "").strip()[:100]
+            try:
+                if intent == "channel.create_voice":
+                    created = await guild.create_voice_channel(name, category=category, reason=reason)
+                    await reply(f"Salon vocal créé : **{created.name}**.")
+                else:
+                    created = await guild.create_text_channel(name, category=category, reason=reason)
+                    await reply(f"Salon textuel créé : **#{created.name}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu créer ce salon. Vérifiez mes permissions et la limite de salons.")
+            return True
+
+        if intent in {"role.create", "role.give", "role.remove"}:
+            if not actor.guild_permissions.manage_roles:
+                await reply("Vous n’avez pas la permission **Gérer les rôles**.")
+                return True
+            if not me.guild_permissions.manage_roles:
+                await reply("Il me manque la permission **Gérer les rôles**.")
+                return True
+            if intent == "role.create":
+                try:
+                    role = await guild.create_role(name=str(action.slots["name"])[:100], reason=reason)
+                    await reply(f"Rôle créé : **{role.name}**.")
+                except (discord.Forbidden, discord.HTTPException):
+                    await reply("Je n’ai pas pu créer ce rôle.")
+                return True
+
+            role, ambiguous = self._resolve_native_role(guild, str(action.slots.get("role") or ""))
+            if ambiguous:
+                await reply("Plusieurs rôles portent ce nom. Mentionnez directement le rôle.")
+                return True
+            if role is None or role.is_default() or role.managed:
+                await reply("Je ne trouve pas ce rôle, ou Discord ne permet pas de le modifier.")
+                return True
+            if member is None:
+                await reply("Je ne trouve pas clairement le membre visé.")
+                return True
+            if actor.id != guild.owner_id and actor.top_role <= role:
+                await reply("Votre rôle le plus haut doit être au-dessus du rôle que vous voulez gérer.")
+                return True
+            if me.top_role <= role:
+                await reply("Mon rôle SentriX doit être placé au-dessus de ce rôle.")
+                return True
+            if role.permissions.administrator and not actor.guild_permissions.administrator:
+                await reply("Seul un administrateur peut attribuer ou retirer un rôle **Administrateur** via SentriX.")
+                return True
+            try:
+                if intent == "role.give":
+                    await member.add_roles(role, reason=reason)
+                    await reply(f"Rôle **{role.name}** ajouté à **{member.display_name}**.")
+                else:
+                    await member.remove_roles(role, reason=reason)
+                    await reply(f"Rôle **{role.name}** retiré à **{member.display_name}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Discord a refusé la modification de ce rôle. Vérifiez la hiérarchie.")
+            return True
+
+        if intent == "message.send":
+            if not actor.guild_permissions.manage_messages:
+                await reply("Vous n’avez pas la permission **Gérer les messages** pour me faire parler dans un autre salon.")
+                return True
+            channel, ambiguous = self._resolve_native_channel(
+                guild, str(action.slots.get("channel") or ""), voice=False
+            )
+            if ambiguous:
+                await reply("Plusieurs salons correspondent. Mentionnez directement le salon.")
+                return True
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                await reply("Je ne trouve pas ce salon textuel.")
+                return True
+            actor_perms = channel.permissions_for(actor)
+            bot_perms = channel.permissions_for(me)
+            if not (actor_perms.view_channel and actor_perms.send_messages):
+                await reply("Vous n’avez pas accès en écriture à ce salon.")
+                return True
+            if not (bot_perms.view_channel and bot_perms.send_messages):
+                await reply("Je ne peux pas écrire dans ce salon.")
+                return True
+            text = str(action.slots.get("text") or "").strip()[:1900]
+            await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+            await reply(f"Message envoyé dans **#{channel.name}**.")
+            return True
+
+        if intent == "member.nickname":
+            if member is None:
+                await reply("Je ne trouve pas clairement le membre visé.")
+                return True
+            if not actor.guild_permissions.manage_nicknames:
+                await reply("Vous n’avez pas la permission **Gérer les pseudos**.")
+                return True
+            if not me.guild_permissions.manage_nicknames:
+                await reply("Il me manque la permission **Gérer les pseudos**.")
+                return True
+            if actor.id != guild.owner_id and actor.top_role <= member.top_role:
+                await reply("Vous ne pouvez pas modifier le pseudo d’un membre au même niveau ou au-dessus de vous.")
+                return True
+            if me.top_role <= member.top_role:
+                await reply("Mon rôle doit être au-dessus de ce membre dans la hiérarchie.")
+                return True
+            try:
+                await member.edit(nick=str(action.slots["nickname"])[:32], reason=reason)
+                await reply(f"Pseudo de **{member.display_name}** mis à jour.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu modifier ce pseudo.")
+            return True
+
+        if intent == "member.move_voice":
+            if member is None:
+                await reply("Je ne trouve pas clairement le membre visé.")
+                return True
+            if not actor.guild_permissions.move_members:
+                await reply("Vous n’avez pas la permission **Déplacer des membres**.")
+                return True
+            if not me.guild_permissions.move_members:
+                await reply("Il me manque la permission **Déplacer des membres**.")
+                return True
+            channel, ambiguous = self._resolve_native_channel(
+                guild, str(action.slots.get("channel") or ""), voice=True
+            )
+            if ambiguous:
+                await reply("Plusieurs salons vocaux correspondent. Mentionnez directement le salon.")
+                return True
+            if channel is None:
+                await reply("Je ne trouve pas ce salon vocal.")
+                return True
+            if getattr(member, "voice", None) is None:
+                await reply("Ce membre n’est actuellement dans aucun salon vocal.")
+                return True
+            try:
+                await member.move_to(channel, reason=reason)
+                await reply(f"**{member.display_name}** a été déplacé vers **{channel.name}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu déplacer ce membre.")
+            return True
+
+        return False
+
     async def _handle_parsed_action(
         self,
         message: discord.Message,
@@ -1147,6 +1456,12 @@ class Ai(commands.Cog, name="Ai"):
         if missing:
             await self._ask_for_missing_action_slot(message, action, missing[0], member=member)
             return True
+
+        if action.intent.startswith(("voice.", "channel.", "role.", "message.", "member.")):
+            handled = await self._execute_native_action(message, action, member=member)
+            if handled:
+                self._pending_actions.pop(self._pending_key(message), None)
+                return True
 
         command_line = ai_actions.build_command_line(action, prefix=prefix, member=member)
         if not command_line:
