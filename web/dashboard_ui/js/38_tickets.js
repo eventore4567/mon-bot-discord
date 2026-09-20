@@ -17,105 +17,104 @@ async function appendTicketButtonSettings() {
   const grid = content().querySelector('.grid');
   if (!grid || $('ticketStaffActions')) return;
 
+  const working = Object.fromEntries(entries.map(([key, cfg]) => [key, { ...cfg }]));
   const section = document.createElement('section');
-  section.className = 'card full';
+  section.className = 'card full ticket-actions-compact';
   section.id = 'ticketStaffActions';
-  section.innerHTML = `<div class="card-head">
-      <div><h2>Actions dans les tickets</h2><p>Choisissez les boutons réellement utiles au staff. Les changements s’appliquent aux nouveaux tickets.</p></div>
-      <div class="toolbar">
-        <button class="btn sm" type="button" data-ticket-preset="minimal">Minimal</button>
-        <button class="btn sm primary" type="button" data-ticket-preset="support">Support</button>
-        <button class="btn sm" type="button" data-ticket-preset="complete">Complet</button>
-      </div>
-    </div>
-    <div class="notice">Conseil : le preset Support garde les actions utiles au quotidien. Vous pouvez ensuite activer ou désactiver chaque bouton individuellement.</div>
-    <div class="list" id="ticketButtonRows" style="margin-top:10px">
-      ${entries.map(([key, cfg]) => `<div class="row" data-ticket-button-row="${esc(key)}">
-        <div class="row-main">
-          <b><span data-ticket-button-preview-emoji="${esc(key)}">${esc(cfg.emoji || '')}</span> <span data-ticket-button-preview-label="${esc(key)}">${esc(cfg.label || TICKET_BUTTON_LABELS[key] || key)}</span></b>
-          <small>${esc(TICKET_BUTTON_LABELS[key] || key)}</small>
-        </div>
-        <div class="row-actions" style="flex-wrap:wrap">
-          <input class="search-input" style="width:150px" maxlength="80" data-ticket-button-label="${esc(key)}" value="${esc(cfg.label || TICKET_BUTTON_LABELS[key] || key)}" aria-label="Libellé">
-          <input class="search-input" style="width:75px" maxlength="100" data-ticket-button-emoji="${esc(key)}" value="${esc(cfg.emoji || '')}" aria-label="Emoji">
-          <select class="select" data-ticket-button-style="${esc(key)}" aria-label="Style">
-            ${[['bleu','Bleu'],['gris','Gris'],['vert','Vert'],['rouge','Rouge']].map(([v,l]) => `<option value="${v}" ${cfg.style === v ? 'selected' : ''}>${l}</option>`).join('')}
-          </select>
-          <select class="select" data-ticket-button-role="${esc(key)}" aria-label="Rôle requis">${roleOptions(cfg.role_id || '', 'Tout le staff')}</select>
-          <label class="switch-row" style="padding:4px 6px"><input class="switch" type="checkbox" data-ticket-button-enabled="${esc(key)}" ${cfg.enabled ? 'checked' : ''} aria-label="Activer"></label>
-          <button class="btn sm" type="button" data-ticket-button-save="${esc(key)}">Enregistrer</button>
-        </div>
-      </div>`).join('')}
-    </div>
-    <div style="margin-top:14px">
-      <h3>Aperçu des actions visibles</h3>
-      <div class="toolbar" id="ticketButtonsPreview" style="margin-top:8px;flex-wrap:wrap"></div>
-    </div>`;
-  grid.appendChild(section);
 
-  const paint = () => {
-    const enabled = entries.filter(([key]) => content().querySelector(`[data-ticket-button-enabled="${CSS.escape(key)}"]`)?.checked);
-    $('ticketButtonsPreview').innerHTML = enabled.length
-      ? enabled.map(([key]) => {
-          const label = content().querySelector(`[data-ticket-button-label="${CSS.escape(key)}"]`)?.value || TICKET_BUTTON_LABELS[key] || key;
-          const emoji = content().querySelector(`[data-ticket-button-emoji="${CSS.escape(key)}"]`)?.value || '';
-          return `<span class="btn sm">${esc(emoji)} ${esc(label)}</span>`;
-        }).join('')
-      : '<span class="info">Aucune action activée.</span>';
+  const draw = () => {
+    section.innerHTML = `<div class="card-head">
+      <div><h2>Actions dans les tickets</h2><p>Activez seulement les actions dont votre staff a besoin.</p></div>
+      <span class="badge">${entries.filter(([key]) => working[key]?.enabled).length}/${entries.length} actives</span>
+    </div>
+    <div class="ticket-action-list">
+      ${entries.map(([key]) => {
+        const cfg = working[key] || {};
+        const label = cfg.label || TICKET_BUTTON_LABELS[key] || key;
+        return `<div class="ticket-action-item">
+          <div class="ticket-action-copy">
+            <b><span>${esc(cfg.emoji || '')}</span> ${esc(label)}</b>
+            <small>${esc(TICKET_BUTTON_LABELS[key] || key)}</small>
+          </div>
+          <div class="ticket-action-controls">
+            <label class="ticket-mini-switch" title="${cfg.enabled ? 'Désactiver' : 'Activer'}">
+              <input class="switch" type="checkbox" data-ticket-button-enabled="${esc(key)}" ${cfg.enabled ? 'checked' : ''} aria-label="Activer ${esc(label)}">
+            </label>
+            <button class="btn sm" type="button" data-ticket-button-edit="${esc(key)}">Modifier</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+
+    section.querySelectorAll('[data-ticket-button-enabled]').forEach(el => {
+      el.onchange = async () => {
+        const key = el.dataset.ticketButtonEnabled;
+        const previous = Boolean(working[key]?.enabled);
+        working[key].enabled = el.checked;
+        el.disabled = true;
+        try {
+          await saveKey(key);
+          toast(el.checked ? 'Action activée.' : 'Action désactivée.');
+          draw();
+        } catch (e) {
+          working[key].enabled = previous;
+          el.checked = previous;
+          el.disabled = false;
+          toast(e.message, true);
+        }
+      };
+    });
+    section.querySelectorAll('[data-ticket-button-edit]').forEach(button => {
+      button.onclick = () => editKey(button.dataset.ticketButtonEdit);
+    });
   };
 
   const saveKey = async key => {
-    const enabled = content().querySelector(`[data-ticket-button-enabled="${CSS.escape(key)}"]`);
-    const label = content().querySelector(`[data-ticket-button-label="${CSS.escape(key)}"]`);
-    const emoji = content().querySelector(`[data-ticket-button-emoji="${CSS.escape(key)}"]`);
-    const style = content().querySelector(`[data-ticket-button-style="${CSS.escape(key)}"]`);
-    const role = content().querySelector(`[data-ticket-button-role="${CSS.escape(key)}"]`);
-    try {
-      const r = await v62Action({
-        action: 'ticket_button_save', key,
-        enabled: enabled.checked, label: label.value, emoji: emoji.value,
-        style: style.value, role_id: role.value || null,
-      });
-      toast(r.message || 'Action enregistrée.');
-      paint();
-    } catch (e) { toast(e.message, true); }
+    const cfg = working[key];
+    return v62Action({
+      action: 'ticket_button_save',
+      key,
+      enabled: Boolean(cfg.enabled),
+      label: cfg.label || TICKET_BUTTON_LABELS[key] || key,
+      emoji: cfg.emoji || '',
+      style: cfg.style || 'bleu',
+      role_id: cfg.role_id || null,
+    });
   };
 
-  content().querySelectorAll('[data-ticket-button-save]').forEach(b => b.onclick = () => saveKey(b.dataset.ticketButtonSave));
-  content().querySelectorAll('[data-ticket-button-enabled],[data-ticket-button-label],[data-ticket-button-emoji]').forEach(el => {
-    el.addEventListener(el.matches('input[type="checkbox"]') ? 'change' : 'input', paint);
-  });
-  const presets = {
-    minimal: new Set(['claim', 'close']),
-    support: new Set(['claim', 'add', 'note', 'close']),
-    complete: new Set(entries.map(([key]) => key)),
+  const editKey = key => {
+    const cfg = working[key] || {};
+    openModal({
+      title: `Configurer « ${cfg.label || TICKET_BUTTON_LABELS[key] || key} »`,
+      body: `<div class="fields">
+        <div class="field"><label for="ticketActionLabel">Nom du bouton</label><input id="ticketActionLabel" maxlength="80" value="${esc(cfg.label || TICKET_BUTTON_LABELS[key] || key)}"></div>
+        <div class="field"><label for="ticketActionEmoji">Emoji</label><input id="ticketActionEmoji" maxlength="100" value="${esc(cfg.emoji || '')}"></div>
+        <div class="field"><label for="ticketActionStyle">Couleur</label><select id="ticketActionStyle">${[['bleu','Bleu'],['gris','Gris'],['vert','Vert'],['rouge','Rouge']].map(([v,l]) => `<option value="${v}" ${(cfg.style || 'bleu') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div class="field"><label for="ticketActionRole">Rôle requis</label><select id="ticketActionRole">${roleOptions(cfg.role_id || '', 'Tout le staff')}</select></div>
+      </div>`,
+      actions: [
+        { label: 'Annuler' },
+        { label: 'Enregistrer', kind: 'primary', keep: true, onClick: async () => {
+          working[key] = {
+            ...working[key],
+            label: $('ticketActionLabel').value.trim() || TICKET_BUTTON_LABELS[key] || key,
+            emoji: $('ticketActionEmoji').value.trim(),
+            style: $('ticketActionStyle').value,
+            role_id: $('ticketActionRole').value || null,
+          };
+          try {
+            await saveKey(key);
+            closeModal();
+            draw();
+            toast('Action mise à jour.');
+          } catch (e) { toast(e.message, true); }
+        } },
+      ],
+    });
   };
-  const presetLabels = {
-    minimal: 'Minimal : Prendre en charge + Fermer',
-    support: 'Support : Prendre en charge + Ajouter + Note + Fermer',
-    complete: 'Complet : toutes les actions disponibles',
-  };
-  content().querySelectorAll('[data-ticket-preset]').forEach(button => button.onclick = async () => {
-    const name = button.dataset.ticketPreset;
-    const keep = presets[name] || presets.support;
-    if (name === 'complete' && !(await confirmDialog({
-      title: 'Afficher toutes les actions ?',
-      body: 'Le ticket aura beaucoup de boutons. Utilisez ce preset seulement si votre staff en a réellement besoin.',
-      confirm: 'Activer toutes les actions',
-    }))) return;
-    for (const [key] of entries) {
-      const sw = content().querySelector(`[data-ticket-button-enabled="${CSS.escape(key)}"]`);
-      sw.checked = keep.has(key);
-    }
-    paint();
-    const label = button.textContent;
-    button.disabled = true; button.textContent = 'Enregistrement…';
-    try {
-      for (const [key] of entries) await saveKey(key);
-      toast(presetLabels[name] || 'Preset appliqué.');
-    } finally { button.disabled = false; button.textContent = label; }
-  });
-  paint();
+
+  grid.appendChild(section);
+  draw();
 }
 
 renderTickets = async function renderTicketsWithActions() {
