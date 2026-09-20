@@ -378,16 +378,19 @@ def is_bare_action_candidate(text: str) -> bool:
     normalized = normalize_text(text).strip()
     if not normalized or len(normalized) > 500:
         return False
+    gate = re.sub(r"[-_’']+", " ", normalized)
+    gate = re.sub(r"\s+", " ", gate).strip()
     strong_starts = (
-        "ban ", "bannis ", "bannir ", "tempban ", "ban temporaire ",
+        "ban ", "bannis ", "bannir ", "vire ", "tempban ", "ban temporaire ",
         "warn ", "avertis ", "mute ", "mut ", "mets ", "unmute ", "demute ",
         "kick ", "expulse ", "purge ", "clear ", "supprime les ", "efface les ",
-        "ouvre setup", "ouvre help", "montre help", "affiche help",
+        "ouvre setup", "ouvre moi setup", "ouvre help", "ouvre moi help",
+        "montre help", "affiche help",
         "donne moi le dashboard", "donne le dashboard", "dashboard",
         "active l anti", "active anti", "desactive l anti", "desactive anti",
         "configure les logs", "configure mes logs", "mets les logs",
     )
-    return any(normalized.startswith(prefix) for prefix in strong_starts)
+    return any(gate.startswith(prefix) for prefix in strong_starts)
 
 
 def local_parse(question: str) -> ParsedAction | None:
