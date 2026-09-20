@@ -121,5 +121,37 @@ class CommandEmbedInvariantTests(unittest.TestCase):
 
 
 
+    def test_all_command_renderers_are_divider_free(self):
+        files = {
+            "embeds": ROOT / "utils" / "embeds.py",
+            "runtime": ROOT / "utils" / "sentrix_runtime.py",
+            "cleanup": ROOT / "utils" / "sentrix_visual_cleanup.py",
+            "style_v2": ROOT / "utils" / "command_style_v2.py",
+            "wide": ROOT / "utils" / "wide_compact_v6.py",
+            "ping": ROOT / "utils" / "ping_final_style.py",
+            "panels": ROOT / "utils" / "sentrix_panels.py",
+            "visuals": ROOT / "utils" / "command_visuals.py",
+            "errors": ROOT / "cogs" / "final_error_embed_v5.py",
+        }
+        sources = {name: path.read_text(encoding="utf-8") for name, path in files.items()}
+
+        assert 'BAR = ""' in sources["embeds"]
+        assert 'BAR = ""' in sources["runtime"]
+        assert 'PANEL_BAR = ""' in sources["cleanup"]
+        assert 'BAR = ""' in sources["style_v2"]
+        assert 'LONG_BAR = ""' in sources["wide"]
+        assert 'PANEL_BAR = ""' in sources["ping"]
+        assert "conteneur.add_item(discord.ui.Separator())" not in sources["panels"]
+        assert "container.add_item(_small_separator())" not in sources["visuals"]
+        assert 'BAR = ""' in sources["errors"]
+
+    def test_final_transport_strips_legacy_drawn_dividers(self):
+        from cogs import final_interaction_policy as policy
+
+        raw = "--------\nTexte utile\n━━━━━━━━━━━━\nSuite"
+        self.assertEqual(policy._strip_drawn_dividers(raw), "Texte utile\nSuite")
+
+
+
 if __name__ == "__main__":
     unittest.main()
