@@ -398,6 +398,12 @@ def local_parse(question: str) -> ParsedAction | None:
     target = _extract_target(question)
     if target:
         slots["target"] = target
+    elif intent.startswith("moderation.") and re.search(
+        r"(?:\b(?:le|la|lui)\b|-(?:le|la)\b)", normalized
+    ):
+        # Le runtime ne résoudra ce marqueur que vers une cible récente du MÊME
+        # utilisateur et du MÊME serveur, avec un TTL court. Aucun membre n'est deviné.
+        slots["target"] = "__recent__"
     duration = normalize_duration(question)
     if duration:
         slots["duration"] = duration
