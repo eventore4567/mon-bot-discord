@@ -249,6 +249,8 @@ def test_bare_action_gate_allows_commands_but_not_normal_chat():
     assert ai_actions.is_bare_action_candidate("ban Tomioka")
     assert ai_actions.is_bare_action_candidate("mute Tomioka 2h")
     assert ai_actions.is_bare_action_candidate("ouvre setup")
+    assert ai_actions.is_bare_action_candidate("ouvre-moi setup")
+    assert ai_actions.is_bare_action_candidate("active l’anti-spam")
     assert ai_actions.is_bare_action_candidate("configure mes logs")
     assert not ai_actions.is_bare_action_candidate("tu penses quoi des bans sur Discord ?")
     assert not ai_actions.is_bare_action_candidate("comment fonctionne le mute ?")
