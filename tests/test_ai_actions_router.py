@@ -183,3 +183,29 @@ def test_sanction_history_uses_full_modhistory_command_not_warning_list():
     assert parsed.intent == "moderation.history"
     member = _member(111111111111111, "tomioka")
     assert ai_actions.build_command_line(parsed, prefix="+", member=member) == "+modhistory <@111111111111111>"
+
+
+
+def test_direct_log_route_extracts_category_and_channel_name():
+    parsed = ai_actions.local_parse("mets les logs vocaux dans #logs-vocal")
+    assert parsed is not None
+    assert parsed.intent == "config.logs.route"
+    assert parsed.slots["log_category"] == "voice"
+    assert parsed.slots["channel"] == "#logs-vocal"
+
+
+def test_text_channel_resolution_does_not_guess_ambiguous_channel():
+    guild = SimpleNamespace(text_channels=[
+        _channel(20, "logs-vocal"),
+        _channel(21, "logs-vocal"),
+    ])
+    result = ai_actions.resolve_text_channel(guild, "#logs-vocal")
+    assert result.channel is None
+    assert len(result.ambiguous) == 2
+
+
+def test_text_channel_resolution_accepts_unique_exact_channel():
+    target = _channel(20, "logs-vocal")
+    guild = SimpleNamespace(text_channels=[target, _channel(21, "general")])
+    result = ai_actions.resolve_text_channel(guild, "#logs-vocal")
+    assert result.channel is target
