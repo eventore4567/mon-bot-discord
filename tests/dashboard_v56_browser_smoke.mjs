@@ -300,7 +300,7 @@ if(ticketSource.includes('await _renderTicketsBase();\n  await appendTicketButto
 // ni recevoir les cartes d'expérience/KPI de la page principale.
 if(!ticketSource.includes('ticket-actions-page')) throw new Error('Actions staff doit recréer son conteneur après le chargement API.');
 const moderationSource = sourceByName.get('41_moderation.js') || '';
-if(!moderationSource.includes("if(state.page==='tickets'&&state.sub==='actions')return;")) throw new Error('Actions staff doit ignorer le hero/KPI SentriX Experience.');
+if(!moderationSource.includes("if(state.page==='tickets')return;")) throw new Error('Tickets doit ignorer le hero/KPI SentriX Experience.');
 
 
 // Tickets v3 : la page Panneaux doit être une liste compacte et l'éditeur doit
