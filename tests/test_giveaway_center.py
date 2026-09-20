@@ -137,3 +137,17 @@ async def _pas_de_double_racine():
 
 def test_le_centre_ne_double_jamais_une_racine_existante():
     asyncio.run(_pas_de_double_racine())
+
+
+
+def test_concours_alias_is_removed():
+    groupe = giveaway_center.GiveawayCenter.giveaway
+    assert "concours" not in groupe.aliases
+    assert "giveaways" in groupe.aliases
+
+
+def test_empty_active_state_has_a_dedicated_message():
+    from pathlib import Path
+    source = Path(giveaway_center.__file__).read_text(encoding="utf-8")
+    assert "Aucun giveaway actif sur ce serveur." in source
+    assert "async def _has_active" in source
