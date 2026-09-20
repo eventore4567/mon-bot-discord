@@ -311,3 +311,11 @@ if(!modulesSource.includes('ticket-panel-editor')) throw new Error('Tickets doit
 if(!modulesSource.includes('ticketEditorBack')) throw new Error('L’éditeur Tickets doit proposer un retour aux panneaux.');
 if(!modulesSource.includes('state.ticketEditorOpen = true')) throw new Error('L’ouverture interne d’un panneau n’est pas câblée.');
 if(!moderationSource.includes("if(state.page==='tickets')return;")) throw new Error('Tickets ne doit plus recevoir le hero/KPI SentriX Experience.');
+
+
+// Tickets : les vues courtes doivent remplir proprement le viewport au lieu de
+// laisser un grand vide noir sous la dernière carte.
+const cssSource = css;
+if(!cssSource.includes('Tickets viewport fill v4')) throw new Error('Le remplissage vertical Tickets est absent.');
+if(!cssSource.includes('.ticket-panels-home,') || !cssSource.includes('.ticket-panel-editor,') || !cssSource.includes('.ticket-actions-page{')) throw new Error('Toutes les vues Tickets doivent partager le fond pleine hauteur.');
+if(!cssSource.includes('min-height:calc(100dvh - var(--top-safe) - 156px)')) throw new Error('Tickets doit remplir la hauteur disponible du viewport.');
