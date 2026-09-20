@@ -82,11 +82,11 @@ def test_navigation_is_short_and_grouped():
     pages = re.findall(r"\['([a-z]+)', '", server_nav)
     assert pages == [
         "overview", "welcome", "roles", "levels", "economy", "moderation", "security",
-        "logs", "tickets", "games", "notifications", "automation", "embeds", "ai",
+        "logs", "tickets", "games", "music", "notifications", "automation", "embeds", "ai",
     ]
     groups = re.findall(r"\['([^']+)', \[\[", server_nav)
     assert groups == [
-        "Accueil", "Communauté", "Progression", "Modération", "Jeux",
+        "Accueil", "Communauté", "Progression", "Modération", "Jeux", "Musique",
         "Automatisation", "Création & personnalisation",
     ]
 
