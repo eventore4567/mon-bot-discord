@@ -76,6 +76,14 @@ ACTIONS: dict[str, ActionSpec] = {
         "moderation.ban", "ban", ("target",), ("reason",), "member", "medium",
         description="bannir définitivement un membre",
     ),
+    "moderation.tempban": ActionSpec(
+        "moderation.tempban", "tempban", ("target", "duration"), ("reason",), "member", "medium",
+        description="bannir temporairement un membre pendant une durée",
+    ),
+    "moderation.unban": ActionSpec(
+        "moderation.unban", "unban", ("user_id",), ("reason",), None, "medium",
+        description="débannir un utilisateur via son identifiant Discord",
+    ),
     "moderation.kick": ActionSpec(
         "moderation.kick", "kick", ("target",), ("reason",), "member", "medium",
         description="expulser un membre",
@@ -159,6 +167,8 @@ ACTIONS: dict[str, ActionSpec] = {
 _INTENT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("config.logs.auto", ("configure les logs", "configure mes logs", "configurer les logs", "setup des logs", "setup logs")),
     ("desktop.open_app", ("ouvre roblox", "lance roblox", "ouvre minecraft", "lance minecraft", "ouvre discord", "lance discord")),
+    ("moderation.unban", ("unban", "deban", "déban", "debannis", "débannis", "debannir", "débannir")),
+    ("moderation.tempban", ("tempban", "ban temporaire", "bannissement temporaire", "bannis temporairement")),
     ("moderation.unmute", ("unmute", "demute", "démute", "enleve le mute", "retire le mute", "enlève le mute")),
     ("moderation.mute", ("mute", "mut ", "mets en mute", "mettre en mute", "timeout")),
     ("moderation.warn", ("warn", "avertis", "avertir", "avertissement")),
@@ -376,6 +386,10 @@ def local_parse(question: str) -> ParsedAction | None:
         return None
 
     slots: dict[str, Any] = {}
+    if intent == "moderation.unban":
+        uid_match = re.search(r"\b(\d{15,22})\b", question)
+        if uid_match:
+            slots["user_id"] = uid_match.group(1)
     if intent == "desktop.open_app":
         match = re.search(r"\b(?:ouvre|lance)\s+([A-Za-z0-9 ._+-]{2,80})", question, re.IGNORECASE)
         if match:
@@ -452,7 +466,7 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
     if confidence < 70:
         return None
     slots: dict[str, Any] = {}
-    for key in ("target", "reason", "duration", "query", "app", "state", "section", "log_category", "channel"):
+    for key in ("target", "reason", "duration", "query", "app", "state", "section", "log_category", "channel", "user_id"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             slots[key] = value.strip()[:500]
@@ -490,7 +504,7 @@ async def classify_with_ai(
         "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
         "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
         "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
-        "Champs autorisés: intent, target, duration, reason, count, query, app, state, section, log_category, channel, confidence.\n"
+        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, confidence.\n"
         "Actions autorisées:\n" + catalog
     )
     result = await ai_service.generate(
@@ -535,6 +549,8 @@ def missing_slots(action: ParsedAction) -> tuple[str, ...]:
 def missing_prompt(intent: str, slot: str, *, target: discord.Member | None = None) -> str:
     if slot == "target":
         return "Quel membre voulez-vous viser ?"
+    if slot == "user_id":
+        return "Quel est l’identifiant Discord de l’utilisateur à débannir ?"
     if slot == "duration":
         who = target.mention if target is not None else "ce membre"
         return f"Pendant combien de temps voulez-vous mute {who} ?"
@@ -571,6 +587,10 @@ def merge_followup(action: ParsedAction, answer: str) -> ParsedAction:
         state = _toggle_state(normalize_text(value))
         if state:
             slots["state"] = state
+    elif slot == "user_id":
+        match = re.search(r"\b\d{15,22}\b", value)
+        if match:
+            slots["user_id"] = match.group(0)
     elif slot == "channel" and value:
         slots["channel"] = value[:120]
     elif slot == "log_category" and value:
@@ -665,10 +685,20 @@ def build_command_line(
             command += f" {reason}"
         return command
 
-    if action.intent == "moderation.mute":
+    if action.intent in {"moderation.mute", "moderation.tempban"}:
         if member is None or not slots.get("duration"):
             return None
         command += f" {member.mention} {slots['duration']}"
+        reason = str(slots.get("reason") or "").strip()
+        if reason:
+            command += f" {reason}"
+        return command
+
+    if action.intent == "moderation.unban":
+        uid = str(slots.get("user_id") or "").strip()
+        if not re.fullmatch(r"\d{15,22}", uid):
+            return None
+        command += f" {uid}"
         reason = str(slots.get("reason") or "").strip()
         if reason:
             command += f" {reason}"
