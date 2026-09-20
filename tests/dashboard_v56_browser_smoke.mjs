@@ -349,3 +349,10 @@ if(!coreSource.includes('SXD-API-')) throw new Error('Les erreurs API 5xx/résea
 if(!bootSource.includes('scheduleStartupSlowHint')) throw new Error('Le démarrage lent n’est pas détecté.');
 if(!bootSource.includes("api('/ready', { background: true })")) throw new Error('Le dashboard ne surveille pas son endpoint /ready.');
 if(!bootSource.includes('SXD-RUNTIME-JS') || !bootSource.includes('SXD-RUNTIME-PROMISE')) throw new Error('Les erreurs runtime ne sont pas annoncées.');
+
+
+// Scrollbars SentriX : la grosse barre système grise ne doit pas revenir.
+if(!cssSource.includes('scrollbars SentriX')) throw new Error('Style de scrollbar SentriX absent.');
+if(!cssSource.includes('::-webkit-scrollbar-thumb')) throw new Error('Thumb de scrollbar personnalisé absent.');
+if(!cssSource.includes('scrollbar-width:thin')) throw new Error('Scrollbar Firefox non affinée.');
+if(!cssSource.includes('scroll-behavior:smooth')) throw new Error('Défilement fluide absent.');
