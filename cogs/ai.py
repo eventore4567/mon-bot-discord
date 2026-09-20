@@ -1787,7 +1787,7 @@ class Ai(commands.Cog, name="Ai"):
             except discord.HTTPException:
                 pass
 
-        def _command_candidates(self, question: str) -> list[commands.Command]:
+    def _command_candidates(self, question: str) -> list[commands.Command]:
         """Préfiltre les commandes réellement chargées avant le classifieur IA.
 
         Cela évite d'envoyer tout le catalogue au modèle et, surtout, interdit de
