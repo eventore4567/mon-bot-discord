@@ -368,3 +368,11 @@ for(const token of ['max-width:390px','max-width:340px','max-height:500px','keyb
 if(!bootSource.includes('function syncVisualViewport()')) throw new Error('VisualViewport mobile non synchronisé.');
 if(!bootSource.includes("'--visual-height'")) throw new Error('Hauteur visuelle mobile non propagée au CSS.');
 if(!bootSource.includes("'keyboard-open'")) throw new Error('Clavier virtuel non détecté.');
+
+
+// Écran de démarrage : le fond doit être animé sans bloquer les préférences
+// reduced-motion.
+if(!cssSource.includes('sxBootAuraA') || !cssSource.includes('sxBootAuraB')) throw new Error('Les halos animés du background de démarrage sont absents.');
+if(!cssSource.includes('sxBootPulse')) throw new Error('Le halo central animé est absent.');
+if(!cssSource.includes('.startup-screen::before') || !cssSource.includes('.startup-screen::after')) throw new Error('Le background animé du startup screen est incomplet.');
+if(!cssSource.includes('.startup-screen::before,.startup-screen::after,.startup-center::before{animation:none!important}')) throw new Error('Reduced motion doit couper les animations du background.');
