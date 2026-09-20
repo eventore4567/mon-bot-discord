@@ -276,3 +276,14 @@ if(!stale.dashboard||stale.boot) throw new Error("Une guild mémorisée invalide
 console.log("Dashboard unified-v2 browser smoke OK:",interactivePaths.join(" -> "));
 console.log("Pages unified-v2 OK:",expectedTabs.join(", "));
 dom.window.close();
+
+
+// Navigation simplifiée : aucun tiroir « Plus d’outils », aucun point d’état,
+// et la page de règles personnalisées de commandes n’est plus proposée.
+const navSource = sourceByName.get('10_nav.js') || '';
+if(navSource.includes('id="navMore"') || navSource.includes('Plus d’outils')) throw new Error('La navigation doit rester ouverte sans « Plus d’outils ».');
+if(navSource.includes("['access', 'Commandes & accès']")) throw new Error('Commandes & accès ne doit plus être proposé dans la navigation.');
+if(navSource.includes('moduleDot(NAV_MODULE[page])')) throw new Error('Les points de statut ne doivent plus encombrer la navigation.');
+const ticketSource = sourceByName.get('38_tickets.js') || '';
+if(!ticketSource.includes('ticket-action-list') || !ticketSource.includes('data-ticket-button-edit')) throw new Error('Les actions Tickets doivent utiliser la vue compacte.');
+if(ticketSource.includes('data-ticket-preset')) throw new Error('Les presets Tickets encombrants doivent être retirés.');
