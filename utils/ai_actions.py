@@ -451,25 +451,25 @@ def local_parse(question: str) -> ParsedAction | None:
     # -------- actions Discord natives fréquentes --------
     # Les fautes usuelles sont volontairement tolérées ici : le modèle reste le repli.
     voice_words = ("vocal", "vocale", "voc", "voice", "vc")
-    has_voice_word = any(re.search(rf"\\b{re.escape(word)}\\b", normalized) for word in voice_words)
+    has_voice_word = any(re.search(rf"\b{re.escape(word)}\b", normalized) for word in voice_words)
     if has_voice_word:
-        if re.search(r"\\b(?:quitte|quit|leave|deco|deconnecte|déconnecte|sors?)\\b", normalized):
+        if re.search(r"\b(?:quitte|quit|leave|deco|deconnecte|déconnecte|sors?)\b", normalized):
             return ParsedAction("voice.leave", {}, confidence=99, source="local")
-        if re.search(r"\\b(?:rejoint|rejoins|rejoin|regoin|reg|join|viens|connecte(?:[- ]?toi)?)\\b", normalized):
+        if re.search(r"\b(?:rejoint|rejoins|rejoin|regoin|reg|join|viens|connecte(?:[- ]?toi)?)\b", normalized):
             return ParsedAction("voice.join", {}, confidence=99, source="local")
 
     # « crée une voc » doit être comprise comme une action incomplète : SentriX
     # demandera simplement le nom au lieu de répondre qu'il ne peut pas agir.
     create_match = re.search(
-        r"\\b(?:cree|crée|creer|créer|ajoute|ajouter)\\s+(?:moi\\s+)?(?:un(?:e)?\\s+)?"
-        r"(?:(?:salon|channel)\\s+)?(vocal|vocale|voc|voice|textuel|texte|text)\\b(.*)$",
+        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:un(?:e)?\s+)?"
+        r"(?:(?:salon|channel)\s+)?(vocal|vocale|voc|voice|textuel|texte|text)\b(.*)$",
         question,
         re.IGNORECASE,
     )
     if create_match:
         kind = normalize_text(create_match.group(1))
         tail = create_match.group(2).strip(" .,:;!-")
-        tail = re.sub(r"^(?:appele|appelé|nomme|nommé|qui s['’]appelle)\\s+", "", tail, flags=re.IGNORECASE).strip()
+        tail = re.sub(r"^(?:appele|appelé|nomme|nommé|qui s['’]appelle)\s+", "", tail, flags=re.IGNORECASE).strip()
         slots: dict[str, Any] = {}
         if tail:
             slots["name"] = tail[:100]
@@ -481,14 +481,14 @@ def local_parse(question: str) -> ParsedAction | None:
         )
 
     role_create = re.search(
-        r"\\b(?:cree|crée|creer|créer|ajoute|ajouter)\\s+(?:moi\\s+)?(?:un\\s+)?role\\s+(.+)$",
+        r"\b(?:cree|crée|creer|créer|ajoute|ajouter)\s+(?:moi\s+)?(?:un\s+)?role\s+(.+)$",
         normalized,
     )
     if role_create:
         return ParsedAction("role.create", {"name": role_create.group(1).strip(" .,:;!-")[:100]}, 99, "local")
 
     role_change = re.search(
-        r"\\b(donne|ajoute|retire|enleve|enlève)\\s+(?:le\\s+)?role\\s+(.+?)\\s+(?:a|à|de)\\s+@?([^\\s,;]+)",
+        r"\b(donne|ajoute|retire|enleve|enlève)\s+(?:le\s+)?role\s+(.+?)\s+(?:a|à|de)\s+@?([^\s,;]+)",
         question,
         re.IGNORECASE,
     )
@@ -502,7 +502,7 @@ def local_parse(question: str) -> ParsedAction | None:
         )
 
     rename_channel = re.search(
-        r"\\b(?:renomme|rename)\\s+(<#\\d{15,22}>|#[A-Za-z0-9_-]{1,100})\\s+(?:en|vers)\\s+(.+)$",
+        r"\b(?:renomme|rename)\s+(<#\d{15,22}>|#[A-Za-z0-9_-]{1,100})\s+(?:en|vers)\s+(.+)$",
         question,
         re.IGNORECASE,
     )
@@ -515,7 +515,7 @@ def local_parse(question: str) -> ParsedAction | None:
         )
 
     send_message = re.search(
-        r"\\b(?:envoie|envoye|send|ecris|écris)\\s+(.+?)\\s+(?:dans|sur)\\s+(<#\\d{15,22}>|#[A-Za-z0-9_-]{1,100})\\s*$",
+        r"\b(?:envoie|envoye|send|ecris|écris)\s+(.+?)\s+(?:dans|sur)\s+(<#\d{15,22}>|#[A-Za-z0-9_-]{1,100})\s*$",
         question,
         re.IGNORECASE,
     )
@@ -528,7 +528,7 @@ def local_parse(question: str) -> ParsedAction | None:
         )
 
     nick = re.search(
-        r"\\b(?:change|mets|modifie)\\s+(?:le\\s+)?(?:pseudo|surnom)\\s+(?:de|a|à)\\s+@?([^\\s,;]+)\\s+(?:en|a|à)\\s+(.+)$",
+        r"\b(?:change|mets|modifie)\s+(?:le\s+)?(?:pseudo|surnom)\s+(?:de|a|à)\s+@?([^\s,;]+)\s+(?:en|a|à)\s+(.+)$",
         question,
         re.IGNORECASE,
     )
