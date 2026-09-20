@@ -297,3 +297,28 @@ def test_compact_error_names_exact_bot_missing_permission():
     rendered = fix._short_error(error)
     assert "Gérer les rôles" in rendered
     assert "SentriX" in rendered
+
+
+
+def test_generated_slash_options_get_helpful_descriptions():
+    async def clear(ctx, nombre: commands.Range[int, 2, 100]):
+        return None
+
+    command = commands.Command(clear, name="clear")
+    _signature, _native, option_names = v95._build_signature(command)
+    descriptions = v95._option_descriptions(command, option_names)
+
+    assert "nombre" in descriptions
+    assert "2" in descriptions["nombre"]
+    assert "100" in descriptions["nombre"]
+
+
+def test_generated_slash_unknown_option_still_gets_a_phrase():
+    async def custom(ctx, valeur_speciale: str):
+        return None
+
+    command = commands.Command(custom, name="custom")
+    _signature, _native, option_names = v95._build_signature(command)
+    descriptions = v95._option_descriptions(command, option_names)
+
+    assert descriptions["valeur_speciale"].startswith("Valeur à fournir")
