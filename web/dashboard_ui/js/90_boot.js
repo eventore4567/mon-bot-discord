@@ -160,11 +160,33 @@ async function loadGuilds() {
 const boot = { state: 'booting', watchdog: null };
 const startupStartedAt = performance.now();
 let startupFinished = false;
+let startupPercent = 4;
+let startupDrip = null;
+function setStartupProgress(value) {
+  if (startupFinished && Number(value) < 100) return;
+  const next = Math.max(startupPercent, Math.min(100, Math.round(Number(value) || 0)));
+  startupPercent = next;
+  const bar = $('startupProgressBar');
+  const wrap = $('startupProgress');
+  if (bar) bar.style.width = `${next}%`;
+  if (wrap) wrap.setAttribute('aria-valuenow', String(next));
+}
+function startStartupProgress() {
+  setStartupProgress(4);
+  clearInterval(startupDrip);
+  startupDrip = setInterval(() => {
+    if (startupFinished || startupPercent >= 92) return;
+    const step = startupPercent < 35 ? 2 : startupPercent < 70 ? 1.4 : 0.7;
+    setStartupProgress(Math.min(92, startupPercent + step));
+  }, 110);
+}
 function finishStartupScreen({ immediate = false } = {}) {
   if (startupFinished) return;
   startupFinished = true;
+  clearInterval(startupDrip);
+  setStartupProgress(100);
   const elapsed = performance.now() - startupStartedAt;
-  const wait = immediate ? 0 : Math.max(0, 780 - elapsed);
+  const wait = immediate ? 0 : Math.max(180, 900 - elapsed);
   setTimeout(() => {
     document.body.classList.remove('startup-loading');
     document.body.classList.add('startup-done');
@@ -213,6 +235,7 @@ async function loadPublic() {
 }
 function showLanding() { setBootState('auth_required'); }
 async function loadSession() {
+  setStartupProgress(18);
   let me;
   try { me = await api('/api/me'); }
   catch (e) {
@@ -220,14 +243,17 @@ async function loadSession() {
     bootError(e, 'AUTH');
     return false;
   }
+  setStartupProgress(43);
   state.user = me.user; state.csrf = me.csrf; state.developer = Boolean(me.developer);
   $('profileButton').classList.remove('hidden');
   $('userName').textContent = me.user?.username || 'Compte';
   if (me.user?.avatar_url) $('userAvatar').innerHTML = `<img src="${esc(me.user.avatar_url)}" alt="">`;
   renderNav();
   boot.state = 'loading_guilds';
+  setStartupProgress(62);
   try { await loadGuilds(); }
   catch (e) { bootError(e, 'GUILDS'); return false; }
+  setStartupProgress(92);
   setBootState('ready');
   return true;
 }
@@ -294,6 +320,8 @@ window.addEventListener('online', () => $('netNotice').classList.add('hidden'));
 window.addEventListener('popstate', () => { const q = new URLSearchParams(location.search); const p = q.get('tab'); if (p && p !== state.page) go(p, q.get('sub') || ''); });
 
 async function bootstrap() {
+  startStartupProgress();
+  setStartupProgress(8);
   const q = new URLSearchParams(location.search);
   let page = q.get('tab') || '';
   if (!page) { try { page = localStorage.getItem('sentrix:page') || ''; } catch (_) {} }
