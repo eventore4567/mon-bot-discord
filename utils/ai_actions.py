@@ -1,0 +1,534 @@
+"""Routeur d'actions naturelles de SentriX.
+
+Cette couche NE réimplémente aucune commande métier. Elle transforme une demande
+naturelle en une action strictement autorisée, résout les paramètres ambigus et rend
+une ligne de commande existante. L'exécution finale reste assurée par commands.Bot :
+matrice d'accès, checks d'action, hiérarchie Discord, services métier, logs et
+persistance restent donc exactement ceux des commandes classiques.
+
+Le modèle IA est uniquement un classifieur/extracteur de paramètres. Il ne décide
+jamais des permissions et ne peut pas choisir une action absente du registre.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import difflib
+import json
+import re
+import unicodedata
+from typing import Any
+
+import discord
+
+from utils import ai_service
+
+
+@dataclass(frozen=True, slots=True)
+class ActionSpec:
+    intent: str
+    command: str | None
+    required: tuple[str, ...] = ()
+    optional: tuple[str, ...] = ()
+    target_kind: str | None = None
+    risk: str = "low"
+    confirm: bool = False
+    description: str = ""
+
+
+@dataclass(slots=True)
+class ParsedAction:
+    intent: str
+    slots: dict[str, Any]
+    confidence: int = 100
+    source: str = "local"
+
+    @property
+    def spec(self) -> ActionSpec | None:
+        return ACTIONS.get(self.intent)
+
+
+@dataclass(slots=True)
+class MemberResolution:
+    member: discord.Member | None = None
+    ambiguous: tuple[discord.Member, ...] = ()
+    error: str | None = None
+
+
+ACTIONS: dict[str, ActionSpec] = {
+    "moderation.ban": ActionSpec(
+        "moderation.ban", "ban", ("target",), ("reason",), "member", "medium",
+        description="bannir définitivement un membre",
+    ),
+    "moderation.kick": ActionSpec(
+        "moderation.kick", "kick", ("target",), ("reason",), "member", "medium",
+        description="expulser un membre",
+    ),
+    "moderation.warn": ActionSpec(
+        "moderation.warn", "warn", ("target",), ("reason",), "member", "low",
+        description="avertir un membre",
+    ),
+    "moderation.mute": ActionSpec(
+        "moderation.mute", "mute", ("target", "duration"), ("reason",), "member", "low",
+        description="mettre un membre en mute/timeout pendant une durée",
+    ),
+    "moderation.unmute": ActionSpec(
+        "moderation.unmute", "unmute", ("target",), ("reason",), "member", "low",
+        description="retirer le mute/timeout d'un membre",
+    ),
+    "moderation.purge": ActionSpec(
+        "moderation.purge", "clear", ("count",), (), None, "high",
+        description="supprimer les derniers messages du salon",
+    ),
+    "moderation.warnings": ActionSpec(
+        "moderation.warnings", "warnings", ("target",), (), "member", "low",
+        description="afficher les avertissements/sanctions d'un membre",
+    ),
+    "navigation.help": ActionSpec(
+        "navigation.help", "help", (), ("query",), None, "low",
+        description="ouvrir le centre d'aide ou rechercher une commande",
+    ),
+    "navigation.setup": ActionSpec(
+        "navigation.setup", "setup", (), (), None, "low",
+        description="ouvrir le centre de configuration SentriX",
+    ),
+    "navigation.dashboard": ActionSpec(
+        "navigation.dashboard", None, (), (), None, "low",
+        description="donner le lien du dashboard SentriX",
+    ),
+    "economy.balance": ActionSpec(
+        "economy.balance", "balance", (), ("target",), "member", "low",
+        description="afficher le solde d'un membre",
+    ),
+    "economy.shop": ActionSpec(
+        "economy.shop", "shop", (), (), None, "low",
+        description="ouvrir la boutique du serveur",
+    ),
+    "levels.leaderboard": ActionSpec(
+        "levels.leaderboard", "leaderboard-levels", (), (), None, "low",
+        description="afficher le classement des niveaux",
+    ),
+    "server.info": ActionSpec(
+        "server.info", "serverinfo", (), (), None, "low",
+        description="afficher les informations du serveur",
+    ),
+    "tickets.open": ActionSpec(
+        "tickets.open", "ticket", (), (), None, "low",
+        description="ouvrir/créer un ticket",
+    ),
+}
+
+# Synonymes déterministes : le modèle reste le repli, pas le seul moyen de comprendre.
+_INTENT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("moderation.unmute", ("unmute", "demute", "démute", "enleve le mute", "retire le mute", "enlève le mute")),
+    ("moderation.mute", ("mute", "mut ", "mets en mute", "mettre en mute", "timeout")),
+    ("moderation.warn", ("warn", "avertis", "avertir", "avertissement")),
+    ("moderation.kick", ("kick", "expulse", "expulser")),
+    ("moderation.ban", ("ban ", "bannis", "bannir", "vire ", "virer ")),
+    ("moderation.purge", ("purge", "clear", "supprime les", "efface les")),
+    ("moderation.warnings", ("sanctions de", "avertissements de", "warnings de", "historique de sanctions")),
+    ("navigation.dashboard", ("dashboard", "dashbord", "dash board", "tableau de bord")),
+    ("navigation.help", ("ouvre help", "affiche help", "montre help", "aide", "commandes")),
+    ("navigation.setup", ("ouvre setup", "affiche setup", "montre setup", "configuration", "parametres", "paramètres")),
+    ("economy.balance", ("balance", "solde", "argent de")),
+    ("economy.shop", ("boutique", "shop")),
+    ("levels.leaderboard", ("classement des niveaux", "leaderboard niveaux", "top niveaux")),
+    ("server.info", ("infos du serveur", "information du serveur", "server info", "serverinfo")),
+    ("tickets.open", ("cree un ticket", "crée un ticket", "ouvre un ticket", "ticket support")),
+)
+
+_NUMBER_WORDS = {
+    "zero": 0, "zéro": 0, "un": 1, "une": 1, "deux": 2, "trois": 3,
+    "quatre": 4, "cinq": 5, "six": 6, "sept": 7, "huit": 8, "neuf": 9,
+    "dix": 10, "onze": 11, "douze": 12, "treize": 13, "quatorze": 14,
+    "quinze": 15, "seize": 16, "vingt": 20, "trente": 30,
+}
+
+_DURATION_UNITS = {
+    "s": "s", "sec": "s", "seconde": "s", "secondes": "s",
+    "m": "m", "min": "m", "minute": "m", "minutes": "m",
+    "h": "h", "heure": "h", "heures": "h",
+    "j": "j", "jour": "j", "jours": "j",
+    "d": "j", "day": "j", "days": "j",
+    "semaine": "j", "semaines": "j", "week": "j", "weeks": "j",
+}
+
+
+def normalize_text(value: str) -> str:
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", value.casefold()).strip()
+
+
+def _number(value: str) -> int | None:
+    raw = normalize_text(value)
+    if raw.isdigit():
+        return int(raw)
+    return _NUMBER_WORDS.get(raw)
+
+
+def normalize_duration(value: str | None) -> str | None:
+    """Convertit les formes naturelles vers le format déjà compris par helpers.parse_duration."""
+    if not value:
+        return None
+    raw = normalize_text(value).strip(" .,;:")
+    if raw in {"une semaine", "1 semaine", "un week", "1 week"}:
+        return "7j"
+    compact = re.fullmatch(r"(\d{1,4})\s*([smhjd])", raw)
+    if compact:
+        return f"{int(compact.group(1))}{_DURATION_UNITS[compact.group(2)]}"
+    match = re.search(
+        r"\b(\d{1,4}|zero|un|une|deux|trois|quatre|cinq|six|sept|huit|neuf|dix|"
+        r"onze|douze|treize|quatorze|quinze|seize|vingt|trente)\s*"
+        r"(secondes?|secs?|minutes?|mins?|heures?|jours?|semaines?|weeks?|days?)\b",
+        raw,
+    )
+    if not match:
+        return None
+    amount = _number(match.group(1))
+    unit = _DURATION_UNITS.get(normalize_text(match.group(2)).rstrip())
+    if amount is None or unit is None:
+        # formes plurielles non listées après normalisation
+        u = normalize_text(match.group(2))
+        if u.startswith("semaine") or u.startswith("week"):
+            unit = "j"
+        elif u.startswith("heure"):
+            unit = "h"
+        elif u.startswith("minute") or u.startswith("min"):
+            unit = "m"
+        elif u.startswith("seconde") or u.startswith("sec"):
+            unit = "s"
+        elif u.startswith("jour") or u.startswith("day"):
+            unit = "j"
+    if amount is None or unit is None:
+        return None
+    if normalize_text(match.group(2)).startswith(("semaine", "week")):
+        amount *= 7
+    return f"{amount}{unit}"
+
+
+def _extract_reason(question: str) -> str | None:
+    match = re.search(r"\b(?:pour|parce\s+qu['’]?(?:il|elle)?|raison\s*[:=-]?)\s+(.+)$", question, re.IGNORECASE)
+    if not match:
+        return None
+    reason = match.group(1).strip(" .,:;-")
+    return reason[:500] or None
+
+
+def _extract_count(question: str) -> int | None:
+    match = re.search(r"\b(\d{1,3})\s+(?:derniers?\s+)?messages?\b", normalize_text(question))
+    if not match:
+        return None
+    return max(1, min(int(match.group(1)), 100))
+
+
+def _extract_target(question: str) -> str | None:
+    mention = re.search(r"<@!?(\d{15,22})>", question)
+    if mention:
+        return mention.group(0)
+    # Formulations fréquentes où la cible se place après le verbe.
+    patterns = (
+        r"\b(?:ban|bannis|bannir|warn|avertis|avertir|mute|mut|kick|expulse|vire)\s+@?([^\s,;]+)",
+        r"\bmets\s+@?([^\s,;]+)\s+en\s+(?:mute|timeout)",
+        r"\b(?:unmute|demute|démute)\s+@?([^\s,;]+)",
+        r"\b(?:sanctions|avertissements|warnings)\s+(?:de|du|d['’])\s*@?([^\s,;]+)",
+        r"\b(?:solde|balance|argent)\s+(?:de|du|d['’])\s*@?([^\s,;]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, question, re.IGNORECASE)
+        if match:
+            value = match.group(1).strip(" .,:;!?")
+            if value and normalize_text(value) not in {"moi", "me", "mon"}:
+                return value
+    return None
+
+
+def local_parse(question: str) -> ParsedAction | None:
+    normalized = normalize_text(question)
+    if not normalized:
+        return None
+    intent = None
+    for candidate, words in _INTENT_PATTERNS:
+        if any(normalize_text(word) in normalized for word in words):
+            intent = candidate
+            break
+    if intent is None:
+        return None
+
+    slots: dict[str, Any] = {}
+    target = _extract_target(question)
+    if target:
+        slots["target"] = target
+    duration = normalize_duration(question)
+    if duration:
+        slots["duration"] = duration
+    reason = _extract_reason(question)
+    if reason:
+        slots["reason"] = reason
+    count = _extract_count(question)
+    if count is not None:
+        slots["count"] = count
+
+    if intent == "navigation.help":
+        # "help ban" / "aide tickets" -> recherche interne, sans forcer un faux argument.
+        match = re.search(r"\b(?:help|aide)\s+(.+)$", question, re.IGNORECASE)
+        if match:
+            slots["query"] = match.group(1).strip()[:80]
+
+    return ParsedAction(intent=intent, slots=slots, confidence=95, source="local")
+
+
+def _json_object(text: str) -> dict[str, Any] | None:
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^\s*```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```\s*$", "", raw)
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            return None
+        try:
+            value = json.loads(match.group(0))
+            return value if isinstance(value, dict) else None
+        except json.JSONDecodeError:
+            return None
+
+
+def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
+    if not payload:
+        return None
+    intent = str(payload.get("intent") or "").strip()
+    if intent not in ACTIONS:
+        return None
+    try:
+        confidence = int(payload.get("confidence", 0))
+    except (TypeError, ValueError):
+        confidence = 0
+    if confidence < 70:
+        return None
+    slots: dict[str, Any] = {}
+    for key in ("target", "reason", "duration", "query"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            slots[key] = value.strip()[:500]
+    if "duration" in slots:
+        normalized = normalize_duration(slots["duration"])
+        if normalized:
+            slots["duration"] = normalized
+        else:
+            slots.pop("duration", None)
+    count = payload.get("count")
+    if count is not None:
+        try:
+            slots["count"] = max(1, min(int(count), 100))
+        except (TypeError, ValueError):
+            pass
+    return ParsedAction(intent=intent, slots=slots, confidence=min(100, confidence), source="ai")
+
+
+async def classify_with_ai(
+    question: str,
+    *,
+    guild_id: int | None,
+    channel_id: int | None,
+    user_id: int | None,
+) -> ParsedAction | None:
+    """Classifie une demande explicite. Le résultat est ensuite validé localement."""
+    catalog = "\n".join(
+        f"- {spec.intent}: {spec.description}; required={','.join(spec.required) or 'none'}"
+        for spec in ACTIONS.values()
+    )
+    instructions = (
+        "Tu es le classifieur d'actions de SentriX. Tu n'exécutes rien. "
+        "Retourne UNIQUEMENT un objet JSON valide, sans markdown. "
+        "Choisis uniquement un intent de la liste. Si la demande n'est pas une action "
+        "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
+        "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
+        "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
+        "Champs autorisés: intent, target, duration, reason, count, query, confidence.\n"
+        "Actions autorisées:\n" + catalog
+    )
+    result = await ai_service.generate(
+        question,
+        model_key=ai_service.MODEL_LUNA,
+        reasoning_effort="none",
+        instructions=instructions,
+        guild_id=guild_id,
+        channel_id=channel_id,
+        user_id=user_id,
+        command="sentrix-action-router",
+        web_search=False,
+        max_output_tokens=220,
+    )
+    if not result.ok:
+        return None
+    return _validate_ai_payload(_json_object(result.text))
+
+
+async def parse_action(
+    question: str,
+    *,
+    guild_id: int | None,
+    channel_id: int | None,
+    user_id: int | None,
+) -> ParsedAction | None:
+    parsed = local_parse(question)
+    if parsed is not None:
+        return parsed
+    return await classify_with_ai(
+        question, guild_id=guild_id, channel_id=channel_id, user_id=user_id
+    )
+
+
+def missing_slots(action: ParsedAction) -> tuple[str, ...]:
+    spec = action.spec
+    if spec is None:
+        return ()
+    return tuple(name for name in spec.required if action.slots.get(name) in (None, ""))
+
+
+def missing_prompt(intent: str, slot: str, *, target: discord.Member | None = None) -> str:
+    if slot == "target":
+        return "Quel membre voulez-vous viser ?"
+    if slot == "duration":
+        who = target.mention if target is not None else "ce membre"
+        return f"Pendant combien de temps voulez-vous mute {who} ?"
+    if slot == "count":
+        return "Combien de messages voulez-vous supprimer ?"
+    return f"Quelle valeur voulez-vous utiliser pour « {slot} » ?"
+
+
+def merge_followup(action: ParsedAction, answer: str) -> ParsedAction:
+    """Complète UNE action en attente avec une réponse courte."""
+    slots = dict(action.slots)
+    missing = missing_slots(action)
+    if not missing:
+        return ParsedAction(action.intent, slots, action.confidence, action.source)
+    slot = missing[0]
+    value = str(answer or "").strip()
+    if slot == "duration":
+        duration = normalize_duration(value)
+        if duration:
+            slots["duration"] = duration
+    elif slot == "count":
+        match = re.search(r"\d{1,3}", value)
+        if match:
+            slots["count"] = max(1, min(int(match.group(0)), 100))
+    elif slot == "target" and value:
+        slots["target"] = value[:120]
+    return ParsedAction(action.intent, slots, action.confidence, "followup")
+
+
+def _member_names(member: discord.Member) -> tuple[str, ...]:
+    values = {
+        str(getattr(member, "name", "") or ""),
+        str(getattr(member, "display_name", "") or ""),
+        str(getattr(member, "global_name", "") or ""),
+    }
+    return tuple(v for v in values if v)
+
+
+def resolve_member(
+    guild: discord.Guild,
+    target_text: str | None,
+    *,
+    message: discord.Message | None = None,
+    bot_user_id: int | None = None,
+) -> MemberResolution:
+    """Résout une cible sans jamais deviner quand plusieurs membres sont plausibles."""
+    if message is not None:
+        mentions = [
+            member for member in getattr(message, "mentions", ())
+            if isinstance(member, discord.Member) and int(member.id) != int(bot_user_id or 0)
+        ]
+        if len(mentions) == 1:
+            return MemberResolution(member=mentions[0])
+        if len(mentions) > 1:
+            return MemberResolution(ambiguous=tuple(mentions[:5]))
+
+    raw = str(target_text or "").strip()
+    if not raw:
+        return MemberResolution(error="missing")
+
+    id_match = re.fullmatch(r"<@!?(\d{15,22})>", raw) or re.fullmatch(r"(\d{15,22})", raw)
+    if id_match:
+        member = guild.get_member(int(id_match.group(1)))
+        if member is not None:
+            return MemberResolution(member=member)
+        return MemberResolution(error="not_found")
+
+    wanted = normalize_text(raw.lstrip("@"))
+    exact: list[discord.Member] = []
+    for member in guild.members:
+        if any(normalize_text(name) == wanted for name in _member_names(member)):
+            exact.append(member)
+    if len(exact) == 1:
+        return MemberResolution(member=exact[0])
+    if len(exact) > 1:
+        return MemberResolution(ambiguous=tuple(exact[:5]))
+
+    scored: list[tuple[float, discord.Member]] = []
+    for member in guild.members:
+        best = max(
+            (difflib.SequenceMatcher(a=wanted, b=normalize_text(name)).ratio() for name in _member_names(member)),
+            default=0.0,
+        )
+        if best >= 0.78:
+            scored.append((best, member))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if not scored:
+        return MemberResolution(error="not_found")
+    if len(scored) == 1 or (scored[0][0] >= 0.90 and scored[0][0] - scored[1][0] >= 0.12):
+        return MemberResolution(member=scored[0][1])
+    return MemberResolution(ambiguous=tuple(member for _, member in scored[:5]))
+
+
+def build_command_line(
+    action: ParsedAction,
+    *,
+    prefix: str,
+    member: discord.Member | None = None,
+) -> str | None:
+    spec = action.spec
+    if spec is None or not spec.command:
+        return None
+    command = f"{prefix}{spec.command}"
+    slots = action.slots
+
+    if action.intent in {"moderation.ban", "moderation.kick", "moderation.warn", "moderation.unmute"}:
+        if member is None:
+            return None
+        command += f" {member.mention}"
+        reason = str(slots.get("reason") or "").strip()
+        if reason:
+            command += f" {reason}"
+        return command
+
+    if action.intent == "moderation.mute":
+        if member is None or not slots.get("duration"):
+            return None
+        command += f" {member.mention} {slots['duration']}"
+        reason = str(slots.get("reason") or "").strip()
+        if reason:
+            command += f" {reason}"
+        return command
+
+    if action.intent == "moderation.purge":
+        return f"{command} {int(slots['count'])}" if slots.get("count") else None
+
+    if action.intent in {"moderation.warnings", "economy.balance"}:
+        if member is not None:
+            command += f" {member.mention}"
+        elif action.intent == "moderation.warnings":
+            return None
+        return command
+
+    if action.intent == "navigation.help" and slots.get("query"):
+        command += f" {str(slots['query']).strip()[:80]}"
+    return command
+
+
+def public_catalog() -> tuple[ActionSpec, ...]:
+    return tuple(ACTIONS.values())
