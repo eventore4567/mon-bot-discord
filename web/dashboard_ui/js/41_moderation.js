@@ -605,7 +605,7 @@ async function enhanceSentrixExperience() {
   if(!state.guildId||!state.guild)return;
   // La sous-page Actions staff de Tickets est volontairement une page d'édition
   // compacte. Aucun hero/KPI ne doit être injecté au-dessus.
-  if(state.page==='tickets'&&state.sub==='actions')return;
+  if(state.page==='tickets')return;
   const grid=content().querySelector('.grid');if(!grid)return;
   if(!grid.querySelector('.experience-command'))grid.insertAdjacentHTML('afterbegin',experienceCommandBar());
   try{
