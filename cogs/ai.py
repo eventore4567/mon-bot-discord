@@ -1285,7 +1285,7 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("Je n’ai pas pu créer ce salon. Vérifiez mes permissions et la limite de salons.")
             return True
 
-        if intent in {"role.create", "role.give", "role.remove"}:
+        if intent in {"role.create", "role.color", "role.give", "role.remove"}:
             if not actor.guild_permissions.manage_roles:
                 await reply("Vous n’avez pas la permission **Gérer les rôles**.")
                 return True
