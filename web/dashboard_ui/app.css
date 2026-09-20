@@ -682,3 +682,41 @@ body.save-pending .workspace{padding-bottom:104px}
   .ticket-panel-row .btn{grid-column:2;grid-row:1 / span 2}
   .ticket-panel-editor .card-head{padding-right:0}
 }
+
+
+/* Tickets viewport fill v4
+   Évite le grand vide noir sous les cartes quand la page contient peu d'éléments. */
+.ticket-panels-home,
+.ticket-panel-editor,
+.ticket-actions-page{
+  width:100%;
+  max-width:none;
+  min-height:calc(100dvh - var(--top-safe) - 156px);
+  align-content:start;
+  padding:12px;
+  border:1px solid color-mix(in srgb,var(--line) 82%,transparent);
+  border-radius:16px;
+  background:
+    radial-gradient(circle at 92% 4%,color-mix(in srgb,var(--blue) 8%,transparent),transparent 34%),
+    linear-gradient(180deg,color-mix(in srgb,var(--panel) 74%,var(--bg)),color-mix(in srgb,var(--bg2) 86%,var(--bg)));
+  box-sizing:border-box;
+}
+.ticket-panels-home>.card,
+.ticket-panel-editor>.card,
+.ticket-actions-page>.card{box-shadow:none}
+@supports not (height:100dvh){
+  .ticket-panels-home,.ticket-panel-editor,.ticket-actions-page{min-height:calc(100vh - var(--top-safe) - 156px)}
+}
+@media(max-width:1024px){
+  .ticket-panels-home,.ticket-panel-editor,.ticket-actions-page{
+    min-height:calc(100dvh - var(--top-safe) - 132px);
+    padding:10px;
+  }
+}
+@media(max-width:600px){
+  .ticket-panels-home,.ticket-panel-editor,.ticket-actions-page{
+    min-height:calc(100dvh - var(--top-safe) - 118px);
+    border-radius:13px;
+    padding:8px;
+  }
+}
