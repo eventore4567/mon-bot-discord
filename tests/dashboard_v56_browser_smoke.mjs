@@ -104,7 +104,7 @@ const dom = new JSDOM(html, {
 });
 
 const sleep = ms => new Promise(resolve=>setTimeout(resolve,ms));
-await sleep(1200);
+await sleep(2800);
 const bootstrapPaths=requests.map(x=>x.path);
 for(const required of ["/api/me","/api/guilds"]){
   if(!bootstrapPaths.includes(required)) throw new Error(`Bootstrap manquant: ${required}`);
@@ -117,6 +117,9 @@ if(!dom.window.document.body.classList.contains("dashboard-locked")) throw new E
 if(!dom.window.document.body.classList.contains("startup-done")) throw new Error("L’écran de démarrage doit se terminer après le bootstrap.");
 const startupProgress=dom.window.document.getElementById("startupProgress");
 if(startupProgress && Number(startupProgress.getAttribute("aria-valuenow") || 0) < 92) throw new Error("La barre de démarrage doit progresser par étapes jusqu'à la fin du bootstrap.");
+if(!sourceByName.get('90_boot.js')?.includes('startupTarget = 4')) throw new Error('La barre de démarrage doit interpoler vers une cible au lieu de sauter.');
+if(!sourceByName.get('90_boot.js')?.includes('elapsed >= 2200')) throw new Error('Le chargement SentriX est trop rapide : durée minimale fluide absente.');
+
 
 
 if(!dom.window.document.getElementById("sentrix-dashboard-unified-v2")) throw new Error("Frontend unifié absent.");
