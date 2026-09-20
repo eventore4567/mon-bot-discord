@@ -216,7 +216,10 @@ def _texte_erreur_prefix(ctx: commands.Context, error: commands.CommandError) ->
         secondes = max(1, round(float(getattr(base, "retry_after", 1.0) or 1.0)))
         return f"Fonction temporairement limitée : réessayez dans {secondes} s."
     if cls == "BotPermissionError" or isinstance(base, commands.CheckFailure):
-        return str(getattr(base, "message", "") or "Vous n'avez pas la permission d'utiliser cette commande.")
+        message = str(getattr(base, "message", "") or str(base) or "").strip()
+        if message and not message.startswith("The check functions for command "):
+            return message
+        return "Commande refusée par une règle d’accès. Utilisez `+permissions explain` pour voir la permission ou la règle requise."
     if isinstance(base, discord.HTTPException):
         return _texte_discord(base)
     return None
@@ -238,7 +241,10 @@ def _texte_erreur_slash(error: discord.app_commands.AppCommandError) -> str | No
     if cls == "BotBlacklistedError":
         return f"Vous n'êtes pas autorisé à utiliser SentriX ({getattr(error, 'reason', None) or 'aucune raison fournie'})."
     if cls == "BotPermissionError" or isinstance(error, app.CheckFailure):
-        return str(getattr(error, "message", "") or "Vous n'avez pas la permission d'utiliser cette commande.")
+        message = str(getattr(error, "message", "") or str(error) or "").strip()
+        if message and not message.startswith("The check functions for command "):
+            return message
+        return "Commande refusée par une règle d’accès. Utilisez `/permissions explain` pour voir la permission ou la règle requise."
     if isinstance(original, commands.CommandError):
         # Passerelle V95/V98 : l'erreur d'origine est une erreur commands.py classique.
         class _Ctx:  # usage minimal pour _usage()/_prefix()
