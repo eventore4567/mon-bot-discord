@@ -98,8 +98,8 @@ ACTIONS: dict[str, ActionSpec] = {
         description="ouvrir le centre d'aide ou rechercher une commande",
     ),
     "navigation.setup": ActionSpec(
-        "navigation.setup", "setup", (), (), None, "low",
-        description="ouvrir le centre de configuration SentriX",
+        "navigation.setup", "setup", (), ("section",), None, "low",
+        description="ouvrir le centre de configuration SentriX, éventuellement sur une section précise",
     ),
     "navigation.dashboard": ActionSpec(
         "navigation.dashboard", None, (), (), None, "low",
@@ -334,6 +334,24 @@ def local_parse(question: str) -> ParsedAction | None:
         if match:
             slots["query"] = match.group(1).strip()[:80]
 
+    if intent == "navigation.setup":
+        sections = (
+            ("tickets", ("ticket", "support")),
+            ("logs", ("logs", "journal")),
+            ("levels", ("niveau", "niveaux", "xp")),
+            ("economy", ("economie", "économie", "economy", "boutique")),
+            ("roles", ("role", "rôle", "roles", "rôles")),
+            ("security", ("securite", "sécurité", "automod", "anti spam", "antispam")),
+            ("notifications", ("notification", "notifications")),
+            ("ai", (" ia", "intelligence artificielle")),
+            ("moderation", ("moderation", "modération", "sanction")),
+            ("welcome", ("bienvenue", "accueil", "welcome")),
+        )
+        for key, words in sections:
+            if any(ai_actions_word in normalized for ai_actions_word in (normalize_text(w) for w in words)):
+                slots["section"] = key
+                break
+
     return ParsedAction(intent=intent, slots=slots, confidence=95, source="local")
 
 
@@ -369,7 +387,7 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
     if confidence < 70:
         return None
     slots: dict[str, Any] = {}
-    for key in ("target", "reason", "duration", "query", "app", "state"):
+    for key in ("target", "reason", "duration", "query", "app", "state", "section"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             slots[key] = value.strip()[:500]
@@ -407,7 +425,7 @@ async def classify_with_ai(
         "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
         "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
         "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
-        "Champs autorisés: intent, target, duration, reason, count, query, confidence.\n"
+        "Champs autorisés: intent, target, duration, reason, count, query, app, state, section, confidence.\n"
         "Actions autorisées:\n" + catalog
     )
     result = await ai_service.generate(
