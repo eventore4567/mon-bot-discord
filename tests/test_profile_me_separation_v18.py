@@ -29,19 +29,26 @@ def test_me_is_kept_out_of_duplicate_pruning():
 def test_me_is_personal_stats_not_profile():
     source = _profile_source()
     start = source.index("async def me_callback")
-    end = source.index("def install", start)
+    end = source.index("async def send_profile_slash", start)
     callback = source[start:end]
     assert "cog._send_stats(ctx, ctx.author)" in callback
     assert "CleanProfileView" not in callback
     assert "build_page" not in callback
 
 
-def test_profile_and_profil_keep_community_profile_surface():
+def test_prefix_profile_is_removed_and_slash_me_keeps_community_profile_surface():
     aliases = (ROOT / "cogs" / "common_command_names.py").read_text(encoding="utf-8")
+    levels = (ROOT / "cogs" / "levels.py").read_text(encoding="utf-8")
+    surface = (ROOT / "sentrix_command_surface_v110.py").read_text(encoding="utf-8")
     source = _profile_source()
-    assert '"profile": ("profil",)' in aliases
+
+    assert '"profile": ("profil",)' not in aliases
+    assert '@commands.hybrid_command(name="profile"' not in levels
+    assert '"profile": "me"' in surface
+    assert "async def send_profile_slash(" in source
+    assert "await interaction.response.defer(thinking=True)" in source
     assert "CleanProfileView" in source
-    assert 'build_page(bot, ctx.guild, member, ctx.author.id, "overview")' in source
+    assert 'build_page(bot, interaction.guild, member, interaction.user.id, "overview")' in source
 
 
 def test_profile_overview_is_compact_inline_grid():
