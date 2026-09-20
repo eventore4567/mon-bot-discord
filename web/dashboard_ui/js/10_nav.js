@@ -140,8 +140,22 @@ async function go(page, sub = '') {
   closeSidebar();
   await render({ navigation: true });
 }
-function openSidebar() { $('sidebar').classList.add('open'); $('mobileOverlay').classList.remove('hidden'); $('mobileMenu').setAttribute('aria-expanded', 'true'); }
-function closeSidebar() { $('sidebar').classList.remove('open'); $('mobileOverlay').classList.add('hidden'); $('mobileMenu').setAttribute('aria-expanded', 'false'); }
+function openSidebar() {
+  const sidebar = $('sidebar'), overlay = $('mobileOverlay'), button = $('mobileMenu');
+  if (!sidebar || !overlay || !button) return;
+  sidebar.classList.add('open');
+  overlay.classList.remove('hidden');
+  button.setAttribute('aria-expanded', 'true');
+  document.body.classList.add('nav-open');
+}
+function closeSidebar() {
+  const sidebar = $('sidebar'), overlay = $('mobileOverlay'), button = $('mobileMenu');
+  if (!sidebar || !overlay || !button) return;
+  sidebar.classList.remove('open');
+  overlay.classList.add('hidden');
+  button.setAttribute('aria-expanded', 'false');
+  document.body.classList.remove('nav-open');
+}
 
 /* ---------- palette ⌘K ---------- */
 const PALETTE_KEYWORDS = {
