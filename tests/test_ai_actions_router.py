@@ -233,3 +233,11 @@ def test_unban_requires_a_real_discord_id_and_keeps_context():
     assert ai_actions.missing_slots(missing) == ("user_id",)
     completed = ai_actions.merge_followup(missing, "123456789012345678")
     assert ai_actions.build_command_line(completed, prefix="+") == "+unban 123456789012345678"
+
+
+
+def test_pronoun_target_is_context_marker_not_a_guessed_member():
+    parsed = ai_actions.local_parse("SentriX bannis-le")
+    assert parsed is not None
+    assert parsed.intent == "moderation.ban"
+    assert parsed.slots["target"] == "__recent__"
