@@ -34,10 +34,10 @@ class SecurityVerificationV71Tests(unittest.TestCase):
         self.assertIn("DEFAULT_SCORE_THRESHOLD = 1888", SOURCE)
         self.assertIn("verification_threshold INTEGER NOT NULL DEFAULT 1888", SOURCE)
 
-    def test_score_uses_real_discord_signals_not_fake_thousand_factors(self):
+    def test_score_uses_real_discord_signals_and_full_adaptive_engine(self):
         node = next(
             n for n in ast.walk(TREE)
-            if isinstance(n, ast.FunctionDef) and n.name == "_score"
+            if isinstance(n, ast.AsyncFunctionDef) and n.name == "_score"
         )
         text = ast.unparse(node)
         for signal in (
@@ -47,6 +47,19 @@ class SecurityVerificationV71Tests(unittest.TestCase):
             self.assertIn(signal, text)
         self.assertNotIn("ip_address", SOURCE.casefold())
         self.assertNotIn("device_fingerprint", SOURCE.casefold())
+        self.assertIn("GATEWAY_CHECK_COUNT = 14", SOURCE)
+        self.assertIn("ADAPTIVE_SIGNAL_COUNT = 40", SOURCE)
+        self.assertIn("TOTAL_REAL_CHECKS = GATEWAY_CHECK_COUNT + ADAPTIVE_SIGNAL_COUNT", SOURCE)
+        self.assertIn("collect_factors", text)
+        self.assertIn("asyncio.create_task", text)
+        self.assertIn("critical_failure", text)
+
+
+
+    def test_gateway_contract_is_exactly_54_real_checks(self):
+        self.assertIn("TOTAL_REAL_CHECKS = GATEWAY_CHECK_COUNT + ADAPTIVE_SIGNAL_COUNT", SOURCE)
+        self.assertIn("54 contrôles", SOURCE)
+        self.assertIn("len(checks) != TOTAL_REAL_CHECKS", SOURCE)
 
     def test_three_human_challenge_proofs_are_mandatory(self):
         self.assertIn("core_ok", SOURCE)
