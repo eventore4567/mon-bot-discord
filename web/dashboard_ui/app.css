@@ -1234,3 +1234,200 @@ html[data-theme="oled"] body.dashboard-locked::after{
     animation:none!important;
   }
 }
+
+
+/* ---------- chromatique glass SentriX ----------
+   Verre sombre + reflets spectraux légers, inspirés d'une interface système
+   chromatique sans transformer le dashboard en arc-en-ciel. */
+body.dashboard-locked{
+  --chroma-cyan:#68d7ff;
+  --chroma-blue:#6f8dff;
+  --chroma-violet:#a66cff;
+  --chroma-pink:#ff6eb6;
+  --glass-surface:color-mix(in srgb,var(--panel) 78%,transparent);
+  --glass-surface-strong:color-mix(in srgb,var(--panel2) 84%,transparent);
+  --glass-line:color-mix(in srgb,var(--text) 10%,var(--line));
+}
+
+body.dashboard-locked .topbar{
+  background:
+    linear-gradient(105deg,
+      color-mix(in srgb,var(--chroma-cyan) 3%,transparent),
+      transparent 28%,
+      color-mix(in srgb,var(--chroma-violet) 4%,transparent) 58%,
+      color-mix(in srgb,var(--chroma-pink) 3%,transparent)),
+    color-mix(in srgb,var(--bg) 82%,transparent);
+  border-bottom-color:color-mix(in srgb,var(--chroma-blue) 14%,var(--line));
+}
+
+body.dashboard-locked .sidebar,
+body.dashboard-locked .server-rail{
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb,var(--chroma-blue) 3%,transparent),
+      transparent 32%,
+      color-mix(in srgb,var(--chroma-violet) 2.5%,transparent) 74%,
+      transparent),
+    color-mix(in srgb,var(--sidebar-bg,var(--bg2)) 86%,transparent);
+}
+
+body.dashboard-locked :is(
+  .card,.module-card,.global-server-card,.landing-card,.boot-card,
+  .experience-command,.experience-summary,.ticket-panel-row,.ticket-action-item,
+  .personalization-preview,.theme-preset-card,.row,.kpi
+){
+  border-color:var(--glass-line);
+  background:
+    radial-gradient(circle at 8% 0%,color-mix(in srgb,var(--chroma-cyan) 4.5%,transparent),transparent 30%),
+    radial-gradient(circle at 100% 10%,color-mix(in srgb,var(--chroma-violet) 4%,transparent),transparent 28%),
+    linear-gradient(145deg,
+      color-mix(in srgb,var(--panel) 82%,transparent),
+      color-mix(in srgb,var(--panel2) 76%,transparent));
+  backdrop-filter:blur(18px) saturate(132%);
+  -webkit-backdrop-filter:blur(18px) saturate(132%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .045),
+    inset 1px 0 0 color-mix(in srgb,var(--chroma-cyan) 5%,transparent),
+    inset -1px 0 0 color-mix(in srgb,var(--chroma-pink) 4%,transparent),
+    0 14px 36px rgb(0 0 0 / .20);
+}
+
+body.dashboard-locked :is(.card,.module-card,.global-server-card,.theme-preset-card,.ticket-panel-row,.ticket-action-item){
+  transition:
+    border-color .22s ease,
+    box-shadow .22s ease,
+    background .22s ease,
+    transform .22s cubic-bezier(.2,.75,.2,1);
+}
+
+@media (hover:hover) and (pointer:fine){
+  body.dashboard-locked :is(.card,.module-card,.global-server-card,.theme-preset-card,.ticket-panel-row,.ticket-action-item):hover{
+    border-color:color-mix(in srgb,var(--blue2) 26%,var(--line2));
+    background:
+      radial-gradient(circle at 4% 0%,color-mix(in srgb,var(--chroma-cyan) 7%,transparent),transparent 30%),
+      radial-gradient(circle at 100% 4%,color-mix(in srgb,var(--chroma-pink) 5.5%,transparent),transparent 30%),
+      linear-gradient(145deg,
+        color-mix(in srgb,var(--panel) 86%,transparent),
+        color-mix(in srgb,var(--panel2) 80%,transparent));
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / .065),
+      0 0 0 1px color-mix(in srgb,var(--chroma-violet) 7%,transparent),
+      0 16px 42px rgb(0 0 0 / .24),
+      0 0 30px color-mix(in srgb,var(--blue) 6%,transparent);
+    transform:translateY(-1px);
+  }
+}
+
+body.dashboard-locked .btn{
+  border-color:color-mix(in srgb,var(--text) 10%,var(--line2));
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb,var(--panel2) 92%,transparent),
+      color-mix(in srgb,var(--chroma-violet) 4%,var(--panel2)));
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / .04);
+  transition:background .2s ease,border-color .2s ease,box-shadow .2s ease,transform .16s ease;
+}
+body.dashboard-locked .btn:hover{
+  border-color:color-mix(in srgb,var(--blue2) 26%,var(--line2));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .07),
+    0 5px 18px rgb(0 0 0 / .18);
+}
+body.dashboard-locked .btn:active{transform:scale(.985)}
+
+body.dashboard-locked .btn.primary{
+  border-color:color-mix(in srgb,var(--blue2) 52%,var(--blue));
+  background:
+    linear-gradient(105deg,
+      color-mix(in srgb,var(--chroma-cyan) 72%,var(--blue)),
+      color-mix(in srgb,var(--blue) 88%,var(--chroma-violet)) 46%,
+      color-mix(in srgb,var(--chroma-violet) 55%,var(--blue2)));
+  color:#06111c;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .24),
+    0 8px 24px color-mix(in srgb,var(--blue) 18%,transparent);
+}
+body.dashboard-locked .btn.primary:hover{
+  background:
+    linear-gradient(105deg,
+      color-mix(in srgb,var(--chroma-cyan) 82%,var(--blue2)),
+      color-mix(in srgb,var(--blue2) 86%,var(--chroma-violet)) 46%,
+      color-mix(in srgb,var(--chroma-pink) 28%,var(--chroma-violet)));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .30),
+    0 10px 28px color-mix(in srgb,var(--blue) 24%,transparent);
+}
+
+body.dashboard-locked .nav button.active,
+body.dashboard-locked .subnav button.active{
+  position:relative;
+}
+body.dashboard-locked .nav button.active{
+  background:
+    linear-gradient(100deg,
+      color-mix(in srgb,var(--blue) 18%,transparent),
+      color-mix(in srgb,var(--chroma-violet) 9%,transparent) 68%,
+      color-mix(in srgb,var(--chroma-pink) 5%,transparent));
+  border-color:color-mix(in srgb,var(--blue2) 34%,var(--line));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .035),
+    0 0 22px color-mix(in srgb,var(--blue) 7%,transparent);
+}
+body.dashboard-locked .subnav button.active{
+  border-bottom-color:transparent;
+  color:var(--text);
+}
+body.dashboard-locked .subnav button.active::after{
+  content:"";
+  position:absolute;
+  left:12%;right:12%;bottom:-1px;
+  height:2px;border-radius:999px;
+  background:linear-gradient(90deg,var(--chroma-cyan),var(--blue2),var(--chroma-violet),var(--chroma-pink));
+  box-shadow:0 0 12px color-mix(in srgb,var(--blue) 35%,transparent);
+}
+
+body.dashboard-locked :is(.field input,.field select,.field textarea,.search-input,.input){
+  background:
+    linear-gradient(145deg,
+      color-mix(in srgb,var(--bg2) 90%,transparent),
+      color-mix(in srgb,var(--chroma-blue) 2.5%,var(--bg2)));
+  border-color:color-mix(in srgb,var(--text) 10%,var(--line2));
+  box-shadow:inset 0 1px 0 rgb(255 255 255 / .025);
+}
+body.dashboard-locked :is(.field input,.field select,.field textarea,.search-input,.input):focus{
+  border-color:color-mix(in srgb,var(--blue2) 58%,var(--line2));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb,var(--blue) 11%,transparent),
+    0 0 24px color-mix(in srgb,var(--chroma-violet) 5%,transparent);
+  outline:none;
+}
+
+/* Le mode sans glow garde le verre mais retire les halos spectraux. */
+html[data-glow="off"] body.dashboard-locked :is(.card,.module-card,.global-server-card,.theme-preset-card,.btn.primary,.nav button.active){
+  box-shadow:none;
+}
+
+/* Sur mobile, moins de blur pour la fluidité. */
+@media(max-width:768px){
+  body.dashboard-locked :is(
+    .card,.module-card,.global-server-card,.landing-card,.boot-card,
+    .experience-command,.experience-summary,.ticket-panel-row,.ticket-action-item,
+    .personalization-preview,.theme-preset-card,.row,.kpi
+  ){
+    backdrop-filter:blur(11px) saturate(118%);
+    -webkit-backdrop-filter:blur(11px) saturate(118%);
+  }
+}
+
+/* En contraste forcé, on rend la main au système. */
+@media (forced-colors:active){
+  body.dashboard-locked :is(
+    .card,.module-card,.global-server-card,.btn,.nav button.active,
+    .field input,.field select,.field textarea,.search-input,.input
+  ){
+    background:Canvas!important;
+    color:CanvasText;
+    box-shadow:none!important;
+    backdrop-filter:none!important;
+  }
+}
