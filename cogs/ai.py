@@ -536,6 +536,7 @@ class Ai(commands.Cog, name="Ai"):
         # Contexte court des actions naturelles incomplètes ("mute Tomioka" -> "10h").
         # Il est volontairement en RAM : ce n'est pas une donnée métier et il expire vite.
         self._pending_actions: dict[tuple[int, int], tuple[float, ai_actions.ParsedAction]] = {}
+        self._recent_targets: dict[tuple[int, int], tuple[float, int]] = {}
         self._cleanup_memory.start()
 
     def cog_unload(self):
@@ -870,6 +871,26 @@ class Ai(commands.Cog, name="Ai"):
             return None
         return action
 
+    def _remember_recent_target(self, message: discord.Message, member: discord.Member) -> None:
+        self._recent_targets[self._pending_key(message)] = (
+            time.monotonic() + 90.0,
+            int(member.id),
+        )
+
+    def _recent_target(self, message: discord.Message) -> discord.Member | None:
+        key = self._pending_key(message)
+        item = self._recent_targets.get(key)
+        if item is None:
+            return None
+        expires_at, member_id = item
+        if time.monotonic() > expires_at:
+            self._recent_targets.pop(key, None)
+            return None
+        member = message.guild.get_member(int(member_id))
+        if member is None:
+            self._recent_targets.pop(key, None)
+        return member
+
     async def _send_readonly_setup(
         self,
         message: discord.Message,
@@ -1081,12 +1102,19 @@ class Ai(commands.Cog, name="Ai"):
         member = None
         if spec.target_kind == "member":
             target_text = action.slots.get("target")
-            resolution = ai_actions.resolve_member(
-                message.guild,
-                target_text,
-                message=message,
-                bot_user_id=getattr(self.bot.user, "id", None),
-            )
+            if target_text == "__recent__":
+                recent = self._recent_target(message)
+                resolution = ai_actions.MemberResolution(
+                    member=recent,
+                    error=None if recent is not None else "missing",
+                )
+            else:
+                resolution = ai_actions.resolve_member(
+                    message.guild,
+                    target_text,
+                    message=message,
+                    bot_user_id=getattr(self.bot.user, "id", None),
+                )
             if resolution.ambiguous:
                 names = "\n".join(
                     f"- {m.mention} — {m.display_name} (`{m.id}`)"
@@ -1100,6 +1128,8 @@ class Ai(commands.Cog, name="Ai"):
                 )
                 return True
             member = resolution.member
+            if member is not None:
+                self._remember_recent_target(message, member)
             if member is None and "target" in spec.required:
                 await self._ask_for_missing_action_slot(message, action, "target")
                 return True
