@@ -107,13 +107,40 @@ def _remember_plain_interaction(interaction: discord.Interaction | None) -> None
                 _PLAIN_WEBHOOK_TOKENS.pop(key, None)
 
 
+_DRAWN_DIVIDER_RE = re.compile(
+    r"(?m)^[ \t]*(?:[-━─═—–_=•·┄┈┉┅┇]{6,})[ \t]*(?:\n|$)"
+)
+
+
+def _strip_drawn_dividers(value: Any) -> str:
+    """Dernier filet de sécurité : aucune vieille barre décorative dans une commande."""
+    text = str(value or "").replace("\r", "")
+    text = _DRAWN_DIVIDER_RE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def _clean_embed(
     embed: discord.Embed | None,
     *,
     root: str = "",
     bot: Any = None,
 ) -> discord.Embed | None:
-    return sentrix_embeds.style_existing(embed, root=root, bot=bot)
+    result = sentrix_embeds.style_existing(embed, root=root, bot=bot)
+    if not isinstance(result, discord.Embed):
+        return result
+
+    if result.description is not None:
+        result.description = _strip_drawn_dividers(result.description) or None
+
+    for index, field in enumerate(list(result.fields)):
+        value = _strip_drawn_dividers(field.value)
+        result.set_field_at(
+            index,
+            name=field.name,
+            value=value or "Aucune information.",
+            inline=field.inline,
+        )
+    return result
 
 
 def _title_for_text(text: str) -> str:
