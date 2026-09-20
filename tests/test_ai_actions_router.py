@@ -422,3 +422,57 @@ def test_ticket_access_role_is_a_closed_native_action():
     assert spec.command is None
     assert spec.required == ("role",)
     assert spec.confirm is True
+
+
+
+def test_natural_music_play_uses_real_play_command():
+    parsed = ai_actions.local_parse("SentriX joue Faded Alan Walker")
+    assert parsed is not None
+    assert parsed.intent == "music.play"
+    assert parsed.slots["query"].casefold() == "faded alan walker"
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+play Faded Alan Walker"
+
+
+def test_natural_music_controls_are_deterministic():
+    cases = {
+        "SentriX mets la musique en pause": "music.pause",
+        "SentriX reprends la musique": "music.resume",
+        "SentriX passe la musique": "music.skip",
+        "SentriX arrête la musique": "music.stop",
+        "SentriX mélange la musique": "music.shuffle",
+        "SentriX montre la file de musique": "music.queue",
+    }
+    for text, intent in cases.items():
+        parsed = ai_actions.local_parse(text)
+        assert parsed is not None, text
+        assert parsed.intent == intent, text
+
+
+def test_natural_music_missing_title_asks_instead_of_inventing():
+    action = ai_actions.ParsedAction("music.play", {})
+    assert ai_actions.missing_slots(action) == ("query",)
+    assert "Quelle musique" in ai_actions.missing_prompt("music.play", "query")
+    completed = ai_actions.merge_followup(action, "Blinding Lights")
+    assert ai_actions.build_command_line(completed, prefix="+") == "+play Blinding Lights"
+
+
+def test_natural_volume_supports_zero_to_one_hundred():
+    parsed = ai_actions.local_parse("SentriX mets le volume de la musique à 0")
+    assert parsed is not None
+    assert parsed.intent == "music.volume"
+    assert parsed.slots["count"] == 0
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+music volume 0"
+
+    parsed = ai_actions._validate_ai_payload({
+        "intent": "music.volume",
+        "count": 0,
+        "confidence": 99,
+    })
+    assert parsed is not None
+    assert parsed.slots["count"] == 0
+
+
+def test_launching_desktop_app_is_not_misread_as_music():
+    parsed = ai_actions.local_parse("SentriX lance Roblox")
+    assert parsed is not None
+    assert parsed.intent == "desktop.open_app"
