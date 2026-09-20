@@ -287,3 +287,10 @@ if(navSource.includes('moduleDot(NAV_MODULE[page])')) throw new Error('Les point
 const ticketSource = sourceByName.get('38_tickets.js') || '';
 if(!ticketSource.includes('ticket-action-list') || !ticketSource.includes('data-ticket-button-edit')) throw new Error('Les actions Tickets doivent utiliser la vue compacte.');
 if(ticketSource.includes('data-ticket-preset')) throw new Error('Les presets Tickets encombrants doivent être retirés.');
+
+
+// Tickets : les actions staff doivent vivre dans une sous-page interne dédiée,
+// jamais sous le formulaire principal.
+if(!navSource.includes("tickets: [['panneaux', 'Panneaux'], ['actions', 'Actions staff']]")) throw new Error('Tickets doit séparer Panneaux et Actions staff.');
+if(!ticketSource.includes("if (state.sub === 'actions')")) throw new Error('La page Actions staff Tickets n’est pas routée séparément.');
+if(ticketSource.includes('await _renderTicketsBase();\n  await appendTicketButtonSettings();')) throw new Error('Les actions staff ne doivent plus être ajoutées sous le panneau principal.');
