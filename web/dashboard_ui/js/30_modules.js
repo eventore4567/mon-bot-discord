@@ -139,11 +139,57 @@ async function renderTickets() {
   let data; try { data = await v62(true); } catch (e) { return errorView(e); }
   const panels = data.tickets?.panels || [], types = data.tickets?.types || [];
   const countFor = id => types.filter(t => String(t.panel_id) === String(id)).length;
-  const head = await moduleHead('tickets', 'Panneaux, types et publication du système Tickets.');
+  const head = '';
+  const editingPanel = Boolean(state.ticketEditorOpen || state.ticketCreate);
+
+  if (!editingPanel && panels.length) {
+    content().innerHTML = `<div class="grid ticket-page ticket-panels-home">
+      <section class="card full ticket-panels-card">
+        <div class="card-head">
+          <div><h2>Panneaux de tickets</h2><p>Choisissez un panneau à modifier. Les réglages détaillés s’ouvrent dans une page interne séparée.</p></div>
+          <button class="btn primary" id="ticketCreateOpen" type="button">Nouveau panneau</button>
+        </div>
+        <div class="ticket-panel-list">
+          ${panels.map(p => {
+            const n = countFor(p.id);
+            const published = Boolean(p.message_id);
+            const channel = channelName(p.channel_id) || (p.channel_id ? 'salon introuvable' : 'aucun salon');
+            return `<article class="ticket-panel-row">
+              <div class="ticket-panel-main">
+                <b>${esc(p.title || p.name || 'Panneau')}</b>
+                <small>${esc(p.name || 'Support')} · ${plural(n, 'type')} · ${esc(channel)}</small>
+              </div>
+              <span class="badge ${published ? 'ok' : 'warn'}">${published ? 'Publié' : 'Non publié'}</span>
+              <button class="btn sm" type="button" data-ticket-panel-open="${esc(p.id)}">Configurer</button>
+            </article>`;
+          }).join('')}
+        </div>
+      </section>
+    </div>`;
+    $('ticketCreateOpen').onclick = () => {
+      state.ticketPanelId = null;
+      state.ticketCreate = true;
+      state.ticketEditorOpen = true;
+      render({ navigation: true });
+    };
+    content().querySelectorAll('[data-ticket-panel-open]').forEach(b => b.onclick = () => {
+      state.ticketPanelId = b.dataset.ticketPanelOpen;
+      state.ticketCreate = false;
+      state.ticketEditorOpen = true;
+      render({ navigation: true });
+    });
+    return;
+  }
+
   if (!panels.length && !state.ticketCreate) {
     content().innerHTML = `<div class="grid ticket-page">${head}${emptyState('Vous n’avez pas encore configuré vos tickets', 'Créez un premier panneau : les membres cliqueront dessus pour ouvrir un ticket.', { id: 'ticketCreate', label: 'Créer mon premier panneau' })}</div>`;
     bindModuleButtons();
-    content().querySelector('[data-empty-action="ticketCreate"]').onclick = () => { state.ticketCreate = true; renderTickets(); };
+    content().querySelector('[data-empty-action="ticketCreate"]').onclick = () => {
+      state.ticketPanelId = null;
+      state.ticketCreate = true;
+      state.ticketEditorOpen = true;
+      render({ navigation: true });
+    };
     return;
   }
   // Panneau sélectionné : celui mémorisé, sinon celui qui a le plus de types, sinon le premier.
@@ -154,18 +200,28 @@ async function renderTickets() {
   const colorHex = p => p?.color ? '#' + Number(p.color).toString(16).padStart(6, '0') : '#4DA3FF';
   const canPublish = Boolean(selected?.id) && panelTypes.length > 0 && Boolean(panel.channel_id);
   const publishHint = !selected?.id ? 'Enregistrez d’abord le panneau.' : !panelTypes.length ? 'Ajoutez au moins un type à ce panneau pour pouvoir le publier.' : !panel.channel_id ? 'Choisissez le salon du panneau, puis enregistrez.' : panel.message_id ? `Publié dans ${channelName(panel.channel_id) || 'un salon'} · ${plural(panelTypes.length, 'type')}. Republiez après un changement.` : `Prêt à publier dans ${channelName(panel.channel_id) || 'un salon'} · ${plural(panelTypes.length, 'type')}.`;
-  content().innerHTML = `<div class="grid ticket-page">${head}${card('Panneau', 'Le message Discord sur lequel les membres cliquent pour ouvrir un ticket.', `<div class="fields"><div class="field full"><label for="ticketPanelPick">Panneau</label><select id="ticketPanelPick">${panels.map(p => `<option value="${esc(p.id)}" ${String(p.id) === String(panel.id) ? 'selected' : ''}>${esc(p.name || p.title || 'Panneau')} · ${plural(countFor(p.id), 'type')}${p.message_id ? ' · publié' : ''}</option>`).join('')}<option value="" ${!selected ? 'selected' : ''}>+ Nouveau panneau</option></select></div><div class="field"><label for="ticketName">Nom interne</label><input id="ticketName" value="${esc(panel.name || 'Support')}"></div><div class="field"><label for="ticketChannel">Salon du panneau</label><select id="ticketChannel">${channelOptions(panel.channel_id || '', 'text', 'Choisir un salon')}</select></div><div class="field full"><label for="ticketTitle">Titre affiché</label><input id="ticketTitle" value="${esc(panel.title || 'Support')}"></div><div class="field full"><label for="ticketDescription">Description</label><textarea id="ticketDescription" maxlength="2000" rows="2">${esc(panel.description || 'Choisissez une option ci-dessous pour ouvrir un ticket.')}</textarea></div><div class="field"><label for="ticketStyle">Affichage</label><select id="ticketStyle"><option value="select">Menu déroulant</option><option value="button" ${panel.style === 'button' ? 'selected' : ''}>Boutons</option></select></div><div class="field"><label for="ticketMax">Tickets ouverts par membre</label><input id="ticketMax" type="number" min="1" max="20" value="${Number(panel.max_per_member || 1)}"></div><div class="field"><label for="ticketColor">Couleur</label><input id="ticketColor" type="color" value="${colorHex(panel)}"></div></div><div class="toolbar"><button class="btn primary" type="button" id="ticketSave">${selected ? 'Enregistrer' : 'Créer le panneau'}</button><button class="btn" type="button" id="ticketPublish" ${canPublish ? '' : 'disabled'}>${panel.message_id ? 'Mettre à jour dans Discord' : 'Publier dans Discord'}</button>${selected ? `<button class="btn danger" type="button" id="ticketDelete">Supprimer</button>` : ''}<small id="ticketPublishHint">${esc(publishHint)}</small></div>`, 'full')}<section class="card full"><div class="card-head"><div><h2>Types de ce panneau</h2><p>${selected ? `Chaque type devient une option du panneau « ${esc(panel.name || 'Support')} ».` : 'Créez le panneau, puis ajoutez ses types.'}</p></div>${selected ? `<button class="btn primary" type="button" id="ticketTypeAdd">Ajouter un type</button>` : ''}</div><div class="list">${panelTypes.length ? panelTypes.map(t => `<div class="row"><div class="row-main"><b>${esc(t.emoji || '🎫')} ${esc(t.name || 'Type')}</b><small>${esc(t.description || 'Sans description')}${t.staff_role_id ? ' · ' + esc(roleName(t.staff_role_id) || 'rôle supprimé') : ''}${t.use_form ? ' · formulaire' : ''}</small></div><div class="row-actions"><button class="btn sm" type="button" data-type-edit="${esc(t.id)}">Modifier</button><button class="btn sm danger" type="button" data-type-del="${esc(t.id)}">Retirer</button></div></div>`).join('') : emptyState('Aucun type sur ce panneau', 'Exemple : Support, Recrutement, Signalement.')}</div>${types.length > panelTypes.length ? `<p class="card-copy"><small>${plural(types.length - panelTypes.length, 'autre type existe', 'autres types existent')} sur d’autres panneaux.</small></p>` : ''}</section></div>`;
+  const editorHead = `<section class="ticket-editor-head full">
+    <button class="btn sm" id="ticketEditorBack" type="button">Retour aux panneaux</button>
+    <div><b>${esc(selected ? (panel.title || panel.name || 'Panneau') : 'Nouveau panneau')}</b><small>${selected ? 'Modification du panneau' : 'Création d’un panneau'}</small></div>
+  </section>`;
+  content().innerHTML = `<div class="grid ticket-page ticket-panel-editor">${head}${editorHead}${card('Panneau', 'Le message Discord sur lequel les membres cliquent pour ouvrir un ticket.', `<div class="fields"><div class="field"><label for="ticketName">Nom interne</label><input id="ticketName" value="${esc(panel.name || 'Support')}"></div><div class="field"><label for="ticketChannel">Salon du panneau</label><select id="ticketChannel">${channelOptions(panel.channel_id || '', 'text', 'Choisir un salon')}</select></div><div class="field full"><label for="ticketTitle">Titre affiché</label><input id="ticketTitle" value="${esc(panel.title || 'Support')}"></div><div class="field full"><label for="ticketDescription">Description</label><textarea id="ticketDescription" maxlength="2000" rows="2">${esc(panel.description || 'Choisissez une option ci-dessous pour ouvrir un ticket.')}</textarea></div><div class="field"><label for="ticketStyle">Affichage</label><select id="ticketStyle"><option value="select">Menu déroulant</option><option value="button" ${panel.style === 'button' ? 'selected' : ''}>Boutons</option></select></div><div class="field"><label for="ticketMax">Tickets ouverts par membre</label><input id="ticketMax" type="number" min="1" max="20" value="${Number(panel.max_per_member || 1)}"></div><div class="field"><label for="ticketColor">Couleur</label><input id="ticketColor" type="color" value="${colorHex(panel)}"></div></div><div class="toolbar"><button class="btn primary" type="button" id="ticketSave">${selected ? 'Enregistrer' : 'Créer le panneau'}</button><button class="btn" type="button" id="ticketPublish" ${canPublish ? '' : 'disabled'}>${panel.message_id ? 'Mettre à jour dans Discord' : 'Publier dans Discord'}</button>${selected ? `<button class="btn danger" type="button" id="ticketDelete">Supprimer</button>` : ''}<small id="ticketPublishHint">${esc(publishHint)}</small></div>`, 'full')}<section class="card full"><div class="card-head"><div><h2>Types de ce panneau</h2><p>${selected ? `Chaque type devient une option du panneau « ${esc(panel.name || 'Support')} ».` : 'Créez le panneau, puis ajoutez ses types.'}</p></div>${selected ? `<button class="btn primary" type="button" id="ticketTypeAdd">Ajouter un type</button>` : ''}</div><div class="list">${panelTypes.length ? panelTypes.map(t => `<div class="row"><div class="row-main"><b>${esc(t.emoji || '🎫')} ${esc(t.name || 'Type')}</b><small>${esc(t.description || 'Sans description')}${t.staff_role_id ? ' · ' + esc(roleName(t.staff_role_id) || 'rôle supprimé') : ''}${t.use_form ? ' · formulaire' : ''}</small></div><div class="row-actions"><button class="btn sm" type="button" data-type-edit="${esc(t.id)}">Modifier</button><button class="btn sm danger" type="button" data-type-del="${esc(t.id)}">Retirer</button></div></div>`).join('') : emptyState('Aucun type sur ce panneau', 'Exemple : Support, Recrutement, Signalement.')}</div>${types.length > panelTypes.length ? `<p class="card-copy"><small>${plural(types.length - panelTypes.length, 'autre type existe', 'autres types existent')} sur d’autres panneaux.</small></p>` : ''}</section></div>`;
   bindModuleButtons();
-  $('ticketPanelPick').onchange = () => { state.ticketPanelId = $('ticketPanelPick').value; state.ticketCreate = !$('ticketPanelPick').value; renderTickets(); };
+  $('ticketEditorBack').onclick = () => {
+    state.ticketEditorOpen = false;
+    state.ticketCreate = false;
+    render({ navigation: true });
+  };
   $('ticketSave').onclick = async () => {
     try {
       const r = await v62Action({ action: 'ticket_panel_save', panel_id: selected?.id || null, name: $('ticketName').value, title: $('ticketTitle').value, description: $('ticketDescription').value, channel_id: $('ticketChannel').value, style: $('ticketStyle').value, max_per_member: $('ticketMax').value, color: $('ticketColor').value, enabled: true });
       if (r?.panel_id) state.ticketPanelId = String(r.panel_id);
-      state.ticketCreate = false; await renderTickets();
+      state.ticketCreate = false;
+      state.ticketEditorOpen = true;
+      await renderTickets();
     } catch (e) { toast(e.message, true); }
   };
   $('ticketPublish').onclick = async () => { if (!selected?.id) return; try { await v62Action({ action: 'ticket_send', panel_id: selected.id }); await renderTickets(); } catch (e) { toast(e.message, true); } };
-  const del = $('ticketDelete'); if (del) del.onclick = async () => { if (!(await confirmDialog({ title: 'Supprimer ce panneau ?', body: `Le panneau « ${panel.name || 'Support'} » et ses ${plural(panelTypes.length, 'type')} seront supprimés. Les tickets déjà ouverts restent.`, confirm: 'Supprimer', danger: true }))) return; try { await v62Action({ action: 'ticket_panel_delete', panel_id: selected.id }); state.ticketPanelId = null; await renderTickets(); } catch (e) { toast(e.message, true); } };
+  const del = $('ticketDelete'); if (del) del.onclick = async () => { if (!(await confirmDialog({ title: 'Supprimer ce panneau ?', body: `Le panneau « ${panel.name || 'Support'} » et ses ${plural(panelTypes.length, 'type')} seront supprimés. Les tickets déjà ouverts restent.`, confirm: 'Supprimer', danger: true }))) return; try { await v62Action({ action: 'ticket_panel_delete', panel_id: selected.id }); state.ticketPanelId = null; state.ticketCreate = false; state.ticketEditorOpen = false; await render({ navigation: true }); } catch (e) { toast(e.message, true); } };
   const typeEditor = (t) => openModal({
     title: t ? `Modifier « ${t.name} »` : 'Ajouter un type de ticket',
     body: `<div class="fields"><div class="field"><label for="ttName">Nom</label><input id="ttName" maxlength="80" value="${esc(t?.name || '')}" placeholder="Support"></div><div class="field"><label for="ttEmoji">Emoji</label><input id="ttEmoji" maxlength="100" value="${esc(t?.emoji || '🎫')}"></div><div class="field full"><label for="ttDesc">Description (visible par les membres)</label><input id="ttDesc" maxlength="150" value="${esc(t?.description || '')}" placeholder="Besoin d’aide ? Ouvrez un ticket."></div><div class="field"><label for="ttStaff">Rôle qui gère ces tickets</label><select id="ttStaff">${roleOptions(t?.staff_role_id || '', 'Rôle staff du serveur')}</select></div><div class="field"><label for="ttCategory">Catégorie des salons</label><select id="ttCategory">${channelOptions(t?.category_id || '', 'category', 'Catégorie par défaut')}</select></div><div class="field"><label for="ttLog">Salon des logs de ces tickets</label><select id="ttLog">${channelOptions(t?.log_channel_id || '', 'text', 'Logs tickets par défaut')}</select></div><div class="field"><label for="ttStyle">Couleur du bouton</label><select id="ttStyle">${BUTTON_STYLES.map(([v, l]) => `<option value="${v}" ${(t?.button_style || 'bleu') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div class="field full"><label for="ttOpen">Message envoyé à l’ouverture (facultatif)</label><textarea id="ttOpen" maxlength="1000" rows="3">${esc(t?.open_message || '')}</textarea></div></div><label class="switch-row"><span class="switch-copy"><b>Mentionner le rôle staff</b><span>À chaque ouverture de ticket.</span></span><input class="switch" id="ttMention" type="checkbox" ${t ? (t.mention_staff ? 'checked' : '') : 'checked'}></label>`,
