@@ -396,3 +396,9 @@ for(const token of ['--chroma-cyan','--chroma-violet','--chroma-pink','backdrop-
 }
 if(!cssSource.includes('backdrop-filter:blur(11px) saturate(118%)')) throw new Error('Version mobile allégée du verre chromatique absente.');
 if(!cssSource.includes('@media (forced-colors:active)')) throw new Error('Fallback forced-colors absent.');
+
+
+// Chromatique v2 : éviter le rendu arc-en-ciel, rester bleu/cyan/argent.
+if(!cssSource.includes('chromatique v2 : froid, sobre, métallique')) throw new Error('Palette chromatique sobre absente.');
+if(!cssSource.includes('--chroma-cyan:#7fdcff') || !cssSource.includes('--chroma-blue:#6d8dff')) throw new Error('Palette chromatique froide incomplète.');
+if(!cssSource.includes('background:linear-gradient(105deg,#7fdcff 0%,#6d8dff 52%,#8da4c8 100%)')) throw new Error('Bouton primaire chromatique sobre absent.');
