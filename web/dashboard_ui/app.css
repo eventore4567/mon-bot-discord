@@ -880,3 +880,186 @@ body.dashboard-locked #content{min-height:0}
   width:0;
   height:0;
 }
+
+
+/* ---------- compatibilité appareils v4 ----------
+   Reflow 320px -> ultrawide, iOS/Android avec clavier, tablettes, foldables,
+   zoom texte, tactile, souris, contrastes renforcés et mode standalone. */
+:root{
+  --visual-height:100dvh;
+  --visual-width:100vw;
+}
+html,body{max-width:100%;overflow-x:hidden}
+body{min-width:0}
+img,svg,video,canvas{max-width:100%;height:auto}
+button,input,select,textarea,.btn,.input,.search-input{max-width:100%;min-width:0}
+.btn,.icon-btn,.profile,.server-head,.nav button,.nav a.nav-link,.subnav button{
+  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+}
+.btn,.icon-btn,.profile,.server-head{
+  height:auto;
+  min-height:34px;
+}
+.field input,.field select,.field textarea,.input,.search-input{
+  width:100%;
+}
+.toolbar,.head-actions,.save-actions,.landing-actions,.accent-custom{
+  min-width:0;
+  flex-wrap:wrap;
+}
+.card,.module-card,.row,.switch-row,.notice,.error-state,.global-server-card,
+.ticket-panel-row,.ticket-action-item{
+  max-width:100%;
+  min-width:0;
+}
+.row-main,.server-copy,.global-server-main,.global-profile-copy,.card-head>div{
+  min-width:0;
+}
+.workspace,.sidebar,.server-rail,.modal,.palette,.table-wrap{
+  -webkit-overflow-scrolling:touch;
+}
+table{max-width:none}
+.table-wrap{overscroll-behavior-inline:contain}
+pre,code{max-width:100%;overflow-wrap:anywhere}
+pre{overflow:auto}
+body.dashboard-locked{
+  height:var(--visual-height,100dvh);
+  max-height:var(--visual-height,100dvh);
+}
+body.dashboard-locked .app{
+  height:calc(var(--visual-height,100dvh) - var(--top-safe));
+  max-height:calc(var(--visual-height,100dvh) - var(--top-safe));
+}
+body.dashboard-locked .workspace{
+  min-width:0;
+  scrollbar-gutter:auto;
+}
+@supports (height:100svh){
+  .landing,.boot-state{min-height:calc(100svh - var(--top-safe))}
+}
+
+/* Portables compacts / fenêtres partagées */
+@media (min-width:1025px) and (max-width:1280px){
+  :root{--rail:58px;--sidebar:220px}
+  .workspace{padding-left:18px;padding-right:18px}
+  .top-search{min-width:170px}
+  .nav button,.nav a.nav-link{padding-left:8px;padding-right:8px}
+  .experience-summary{grid-template-columns:minmax(0,1fr)}
+}
+
+/* Tablettes paysage / petites fenêtres desktop : menu mobile plus tôt. */
+@media (max-width:1180px){
+  .top-search{display:none}
+  .workspace-head{gap:10px}
+  .head-actions{flex-wrap:wrap}
+  .experience-summary{grid-template-columns:minmax(0,1fr)}
+  .global-server-grid,.module-grid{grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))}
+}
+
+/* Téléphones et tablettes */
+@media (max-width:768px){
+  body{background-attachment:scroll}
+  .workspace{overscroll-behavior-y:contain}
+  .workspace-head h1{font-size:clamp(20px,6vw,24px)}
+  .workspace-head p{font-size:clamp(12px,3.7vw,14px)}
+  .card,.module-card{border-radius:clamp(10px,3vw,14px)}
+  .toolbar>.btn,.head-actions>.btn{max-width:100%}
+  .global-server-grid,.module-grid,.permission-grid{grid-template-columns:minmax(0,1fr)}
+  .discord-preview .d-embed{max-width:100%}
+  .landing-inner{gap:18px}
+}
+
+/* Petits téléphones, split-screen et anciens iPhone/Android (~320-390px). */
+@media (max-width:390px){
+  :root{--top:52px}
+  .topbar{
+    gap:6px;
+    padding-left:max(8px,env(safe-area-inset-left,0px));
+    padding-right:max(8px,env(safe-area-inset-right,0px));
+  }
+  .brand{gap:7px}
+  .brand-mark{width:30px;height:30px;border-radius:9px}
+  .brand-copy{font-size:13px}
+  .runtime{padding:5px 7px}
+  .profile{padding-right:4px}
+  .workspace{
+    padding-left:max(10px,env(safe-area-inset-left,0px));
+    padding-right:max(10px,env(safe-area-inset-right,0px));
+  }
+  .workspace-head,.card-head{gap:8px}
+  .kpis,.landing-kpis,.experience-stat-grid{grid-template-columns:minmax(0,1fr)}
+  .btn{padding-left:9px;padding-right:9px;white-space:normal;text-align:center}
+  .badge{white-space:normal;text-align:center}
+  .ticket-panel-row{grid-template-columns:minmax(0,1fr)}
+  .ticket-panel-row .btn,.ticket-panel-row .badge{grid-column:1;grid-row:auto;width:100%}
+  .ticket-action-item{align-items:flex-start;flex-direction:column}
+  .ticket-action-controls{width:100%;justify-content:space-between}
+}
+
+/* Ultra-petits écrans / vue multi-fenêtre. */
+@media (max-width:340px){
+  .brand-copy small,.runtime,.profile #userName{display:none}
+  .top-right{gap:4px}
+  .workspace{padding:9px 8px max(16px,env(safe-area-inset-bottom,0px))}
+  .sidebar{width:94vw}
+  .global-profile-block,.profile-line{flex-direction:column;align-items:flex-start}
+  .landing-actions .btn,.head-actions .btn,.save-actions .btn{width:100%}
+  .subnav button{padding-left:9px;padding-right:9px}
+}
+
+/* Téléphones en paysage : préserver la hauteur utile. */
+@media (max-height:500px) and (orientation:landscape){
+  :root{--top:46px}
+  .topbar{height:var(--top-safe)}
+  .sidebar{padding-top:8px;padding-bottom:8px}
+  .workspace{padding-top:8px}
+  .workspace-head{margin-bottom:8px}
+  .modal{max-height:96dvh}
+  .startup-center{transform:none;gap:5px}
+  .startup-mark{width:58px;height:58px;border-radius:18px}
+  .startup-mark span{width:40px;height:40px;font-size:21px}
+}
+
+/* Clavier virtuel ouvert : privilégier le formulaire actif. */
+body.keyboard-open .save-bar{display:none!important}
+body.keyboard-open .workspace{padding-bottom:max(14px,env(safe-area-inset-bottom,0px))}
+body.keyboard-open .modal{max-height:calc(var(--visual-height,100dvh) - 8px)}
+body.keyboard-open .palette{max-height:calc(var(--visual-height,100dvh) - 8px)}
+body.keyboard-open .health-notice{top:8px}
+
+/* Apps installées / mode standalone. */
+@media (display-mode:standalone){
+  .topbar{
+    padding-left:max(16px,env(safe-area-inset-left,0px));
+    padding-right:max(16px,env(safe-area-inset-right,0px));
+  }
+  .workspace{
+    padding-bottom:max(24px,env(safe-area-inset-bottom,0px));
+  }
+}
+
+/* Préférences système */
+@media (prefers-contrast:more){
+  :root{--line:#47515e;--line2:#657181;--muted:#b7c0cc}
+  .btn,.card,.module-card,.row,.switch-row,.field input,.field select,.field textarea{
+    border-width:2px;
+  }
+}
+@media (forced-colors:active){
+  *{box-shadow:none!important}
+  .brand-mark,.startup-mark span,.accent-swatch{forced-color-adjust:none}
+  .btn,.icon-btn,.card,.module-card,.row,.field input,.field select,.field textarea{
+    border:1px solid CanvasText;
+  }
+}
+
+/* Navigation au clavier et texte agrandi : aucun contrôle ne doit être coupé. */
+@media (min-width:1px){
+  .nav button,.nav a.nav-link,.subnav button,.btn,.profile,.server-head{
+    line-height:1.25;
+  }
+  .nav button,.nav a.nav-link,.subnav button{
+    min-height:36px;
+  }
+}
