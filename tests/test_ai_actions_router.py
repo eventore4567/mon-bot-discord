@@ -6,6 +6,7 @@ from types import SimpleNamespace
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from utils import ai_actions
+from cogs.ai import Ai
 
 
 def test_ban_natural_language_and_reason():
@@ -267,3 +268,19 @@ def test_natural_unmute_phrase_keeps_member_target():
     assert parsed is not None
     assert parsed.intent == "moderation.unmute"
     assert parsed.slots["target"].casefold() == "tomioka"
+
+
+
+def test_dynamic_arguments_must_be_grounded_in_original_request():
+    assert Ai._arguments_grounded_in_question(
+        "donne le rôle VIP à Tomioka",
+        "Tomioka VIP",
+    )
+    assert not Ai._arguments_grounded_in_question(
+        "donne le rôle VIP à Tomioka",
+        "Tomioka Administrateur",
+    )
+    assert not Ai._arguments_grounded_in_question(
+        "ban cet utilisateur",
+        "<@123456789012345678>",
+    )
