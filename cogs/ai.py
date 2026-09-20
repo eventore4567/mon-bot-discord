@@ -1049,6 +1049,43 @@ class Ai(commands.Cog, name="Ai"):
             return None, tuple(exact[:5])
         return None, ()
 
+    @staticmethod
+    def _resolve_native_category(guild: discord.Guild, raw: str):
+        value = str(raw or "").strip()
+        match = re.fullmatch(r"<#(\d{15,22})>", value) or re.fullmatch(r"(\d{15,22})", value)
+        if match:
+            channel = guild.get_channel(int(match.group(1)))
+            return (channel, ()) if isinstance(channel, discord.CategoryChannel) else (None, ())
+        wanted = ai_actions.normalize_text(value.lstrip("#"))
+        exact = [cat for cat in guild.categories if ai_actions.normalize_text(cat.name) == wanted]
+        if len(exact) == 1:
+            return exact[0], ()
+        if len(exact) > 1:
+            return None, tuple(exact[:5])
+        return None, ()
+
+    @staticmethod
+    def _parse_native_colour(raw: str) -> discord.Colour | None:
+        value = ai_actions.normalize_text(raw)
+        named = {
+            "rouge": 0xED4245, "red": 0xED4245,
+            "bleu": 0x3498DB, "blue": 0x3498DB,
+            "vert": 0x57F287, "green": 0x57F287,
+            "jaune": 0xFEE75C, "yellow": 0xFEE75C,
+            "orange": 0xE67E22,
+            "violet": 0x9B59B6, "purple": 0x9B59B6,
+            "rose": 0xEB459E, "pink": 0xEB459E,
+            "noir": 0x1F1F1F, "black": 0x1F1F1F,
+            "blanc": 0xFFFFFF, "white": 0xFFFFFF,
+            "gris": 0x95A5A6, "grey": 0x95A5A6, "gray": 0x95A5A6,
+        }
+        if value in named:
+            return discord.Colour(named[value])
+        match = re.fullmatch(r"#?([0-9a-fA-F]{6})", str(raw or "").strip())
+        if match:
+            return discord.Colour(int(match.group(1), 16))
+        return None
+
     async def _execute_native_action(
         self,
         message: discord.Message,
@@ -1077,7 +1114,7 @@ class Ai(commands.Cog, name="Ai"):
 
         # Un slot produit par IA doit provenir textuellement de la demande. Les parseurs
         # locaux sont déjà déterministes et ne passent pas par cette garde.
-        if action.source == "ai":
+        if action.source in {"ai", "plan"}:
             for key, value in action.slots.items():
                 if key in {"reason", "duration", "count", "state", "section"}:
                     continue
@@ -1139,6 +1176,71 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("Je n’ai pas réussi à quitter le salon vocal.")
             return True
 
+        if intent == "category.create":
+            if not actor.guild_permissions.manage_channels:
+                await reply("Vous n’avez pas la permission **Gérer les salons**.")
+                return True
+            if not me.guild_permissions.manage_channels:
+                await reply("Il me manque la permission **Gérer les salons**.")
+                return True
+            name = str(action.slots.get("name") or "").strip()[:100]
+            if not name:
+                await reply("Le nom de la catégorie est manquant.")
+                return True
+            if any(ai_actions.normalize_text(cat.name) == ai_actions.normalize_text(name) for cat in guild.categories):
+                await reply(f"Une catégorie **{name}** existe déjà.")
+                return True
+            try:
+                created = await guild.create_category(name, reason=reason)
+                await reply(f"Catégorie créée : **{created.name}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu créer cette catégorie.")
+            return True
+
+        if intent == "category.restrict_role":
+            if not (actor.guild_permissions.manage_channels and actor.guild_permissions.manage_roles):
+                await reply("Vous devez avoir **Gérer les salons** et **Gérer les rôles**.")
+                return True
+            if not (me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
+                await reply("Il me faut **Gérer les salons** et **Gérer les rôles** pour modifier les accès.")
+                return True
+            category, category_ambiguous = self._resolve_native_category(
+                guild, str(action.slots.get("category") or "")
+            )
+            role, role_ambiguous = self._resolve_native_role(
+                guild, str(action.slots.get("role") or "")
+            )
+            if category_ambiguous or role_ambiguous:
+                await reply("Le rôle ou la catégorie est ambigu. Donnez leurs noms exacts.")
+                return True
+            if category is None:
+                await reply("Je ne trouve pas clairement cette catégorie.")
+                return True
+            if role is None or role.is_default() or role.managed:
+                await reply("Je ne trouve pas clairement ce rôle, ou Discord ne permet pas de le gérer.")
+                return True
+            if actor.id != guild.owner_id and actor.top_role <= role:
+                await reply("Votre rôle le plus haut doit être au-dessus du rôle autorisé.")
+                return True
+            if me.top_role <= role:
+                await reply("Mon rôle SentriX doit être au-dessus du rôle autorisé.")
+                return True
+            try:
+                await category.set_permissions(guild.default_role, view_channel=False, reason=reason)
+                await category.set_permissions(
+                    role,
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    connect=True,
+                    speak=True,
+                    reason=reason,
+                )
+                await reply(f"Accès de **{category.name}** limité à **{role.name}** (et aux permissions supérieures de Discord).")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu modifier les permissions de cette catégorie.")
+            return True
+
         if intent in {"channel.create_voice", "channel.create_text", "channel.rename"}:
             if not actor.guild_permissions.manage_channels:
                 await reply("Vous n’avez pas la permission **Gérer les salons**.")
@@ -1190,6 +1292,31 @@ class Ai(commands.Cog, name="Ai"):
             if not me.guild_permissions.manage_roles:
                 await reply("Il me manque la permission **Gérer les rôles**.")
                 return True
+            if intent == "role.color":
+                role, ambiguous = self._resolve_native_role(guild, str(action.slots.get("role") or ""))
+                if ambiguous:
+                    await reply("Plusieurs rôles portent ce nom. Mentionnez directement le rôle.")
+                    return True
+                if role is None or role.is_default() or role.managed:
+                    await reply("Je ne trouve pas ce rôle, ou Discord ne permet pas de le modifier.")
+                    return True
+                colour = self._parse_native_colour(str(action.slots.get("color") or ""))
+                if colour is None:
+                    await reply("Couleur invalide. Utilisez un nom simple comme **rouge** ou un code **#RRGGBB**.")
+                    return True
+                if actor.id != guild.owner_id and actor.top_role <= role:
+                    await reply("Votre rôle le plus haut doit être au-dessus du rôle à modifier.")
+                    return True
+                if me.top_role <= role:
+                    await reply("Mon rôle SentriX doit être au-dessus du rôle à modifier.")
+                    return True
+                try:
+                    await role.edit(colour=colour, reason=reason)
+                    await reply(f"Couleur de **{role.name}** mise à jour.")
+                except (discord.Forbidden, discord.HTTPException):
+                    await reply("Je n’ai pas pu modifier la couleur de ce rôle.")
+                return True
+
             if intent == "role.create":
                 try:
                     role = await guild.create_role(name=str(action.slots["name"])[:100], reason=reason)
@@ -1457,7 +1584,7 @@ class Ai(commands.Cog, name="Ai"):
             await self._ask_for_missing_action_slot(message, action, missing[0], member=member)
             return True
 
-        if action.intent.startswith(("voice.", "channel.", "role.", "message.", "member.")):
+        if action.intent.startswith(("voice.", "channel.", "category.", "role.", "message.", "member.")):
             handled = await self._execute_native_action(message, action, member=member)
             if handled:
                 self._pending_actions.pop(self._pending_key(message), None)
