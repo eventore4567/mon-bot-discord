@@ -118,6 +118,10 @@ async function appendTicketButtonSettings() {
 }
 
 renderTickets = async function renderTicketsWithActions() {
+  if (state.sub === 'actions') {
+    content().innerHTML = '<div class="grid ticket-page"></div>';
+    await appendTicketButtonSettings();
+    return;
+  }
   await _renderTicketsBase();
-  await appendTicketButtonSettings();
 };
