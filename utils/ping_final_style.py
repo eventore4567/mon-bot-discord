@@ -15,7 +15,7 @@ from utils import helpers
 from . import command_style_v2
 
 _INSTALLED = False
-PANEL_BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+PANEL_BAR = ""
 
 
 def _latency_quality(latency_ms: int) -> tuple[str, str]:
@@ -57,7 +57,6 @@ def _enrich_ping(embed: discord.Embed, command) -> None:
 
     embed.title = "Ping"
     embed.description = (
-        f"{PANEL_BAR}\n"
         f"## Latence : **{latency_ms} ms**\n"
         f"**Qualité :** {quality}\n\n"
         f"**Connexion :** {'Active' if active else 'Hors ligne'}   •   "
