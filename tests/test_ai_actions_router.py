@@ -476,3 +476,18 @@ def test_launching_desktop_app_is_not_misread_as_music():
     parsed = ai_actions.local_parse("SentriX lance Roblox")
     assert parsed is not None
     assert parsed.intent == "desktop.open_app"
+
+
+
+def test_natural_voice_leave_is_a_real_native_action():
+    parsed = ai_actions.local_parse("SentriX quitte le vocal")
+    assert parsed is not None
+    assert parsed.intent == "voice.leave"
+    assert parsed.spec is not None
+    assert parsed.spec.command is None
+
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "ai.py").read_text(encoding="utf-8")
+    assert 'queue.tracks.clear()' in source
+    assert 'queue.history.clear()' in source
+    assert 'queue.current = None' in source
