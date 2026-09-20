@@ -10,6 +10,7 @@ const NAV_SERVER = [
   ['Progression', [['levels', 'Niveaux'], ['economy', 'Économie']]],
   ['Modération', [['moderation', 'Centre de modération'], ['security', 'Sécurité'], ['logs', 'Logs'], ['tickets', 'Tickets']]],
   ['Jeux', [['games', 'Jeux']]],
+  ['Musique', [['music', 'Musique']]],
   ['Automatisation', [['notifications', 'Notifications'], ['automation', 'Automatisation']]],
   ['Création & personnalisation', [['embeds', 'Embeds'], ['ai', 'Intelligence artificielle']]],
 ];
@@ -34,6 +35,7 @@ const META = {
   levels: ['Niveaux', 'XP gagné en discutant, annonces et récompenses.'],
   economy: ['Économie', 'Monnaie du serveur, gains et boutique.'],
   games: ['Jeux', 'Mini-jeux, récompenses et accès.'],
+  music: ['Musique', 'Lecteur vocal, file d’attente et playlists SentriX.'],
   roles: ['Rôles', 'Rôles donnés automatiquement ou choisis par les membres.'],
   moderation: ['Centre de modération', 'Recherchez un membre, consultez son dossier et gérez les sanctions.'],
   security: ['Sécurité', 'Protections automatiques et vérification du serveur.'],
@@ -56,6 +58,7 @@ const SUBS = {
   levels: [['general', 'Général'], ['levelup', 'Message de niveau'], ['roles', 'Récompenses'], ['avance', 'Avancé']],
   economy: [['general', 'Général'], ['boutique', 'Boutique'], ['jeux', 'Jeux'], ['gains', 'Gains'], ['avance', 'Avancé']],
   games: [['jeux', 'Catalogue & accès']],
+  music: [['player', 'Lecteur'], ['queue', 'File d’attente'], ['playlists', 'Playlists']],
   roles: [['autoroles', 'Autorôle'], ['interactifs', 'Rôles interactifs'], ['niveau', 'Rôles de niveau'], ['avance', 'Avancé']],
   security: [['protections', 'Protections'], ['verification', 'Vérification']],
   advanced: [['actions', 'Actions'], ['members', 'Membres'], ['automations', 'Automations'], ['templates', 'Templates'], ['audit', 'Audit'], ['access', 'Accès dashboard']],
@@ -74,7 +77,7 @@ function moduleDot(key) {
   const label = code === 'active' ? 'Activé' : code === 'error' ? 'Erreur' : code === 'partial' ? 'Partiellement configuré' : 'Désactivé';
   return `<span class="state-dot ${cls}" title="${esc(label)}" aria-label="${esc(label)}"></span>`;
 }
-const NAV_MODULE = { welcome: 'welcome', levels: 'levels', economy: 'economy', games: 'economy', roles: 'roles', security: 'automod', logs: 'logs', tickets: 'tickets', notifications: 'notifications' };
+const NAV_MODULE = { welcome: 'welcome', levels: 'levels', economy: 'economy', games: 'economy', music: 'music', roles: 'roles', security: 'automod', logs: 'logs', tickets: 'tickets', notifications: 'notifications' };
 function navButton(page, label) {
   return `<button type="button" data-tab="${page}" class="${state.page === page ? 'active' : ''}" ${state.page === page ? 'aria-current="page"' : ''}>${esc(label)}${NAV_MODULE[page] ? moduleDot(NAV_MODULE[page]) : ''}</button>`;
 }
@@ -155,6 +158,7 @@ const PALETTE_KEYWORDS = {
   logs: 'logs journal audit message supprimé vocal rôle modération',
   tickets: 'ticket support panneau formulaire transcript staff bouton',
   games: 'jeu jeux compteur infini infinite number guess mini-jeu',
+  music: 'musique music vocal voice playlist lecture play pause skip file queue spotify youtube deezer soundcloud',
   notifications: 'notification youtube twitch tiktok kick live vidéo',
   automation: 'automation automatisation reaction auto starboard sticky programmé voicehub vocal',
   embeds: 'embed message annonce aperçu discord builder',
