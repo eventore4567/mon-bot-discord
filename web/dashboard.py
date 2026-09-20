@@ -265,8 +265,10 @@ async def _manageable_guild(request: web.Request, guild_id: int):
         return session, None, _json_error("Serveur introuvable ou accès refusé.", 404)
 
     user_id = int(session["user"]["id"])
-    if await _administrator_member(guild, user_id) is None:
+    member = await _administrator_member(guild, user_id)
+    if member is None:
         return session, None, _json_error("Serveur introuvable ou accès refusé.", 404)
+    request["dashboard_member"] = member
     return session, guild, None
 
 
@@ -1171,6 +1173,18 @@ async def handle_sanction_action(request: web.Request):
     bot = request.app["bot"]
     db = bot.db
     moderator_id = int(session["user"]["id"])
+    actor = request.get("dashboard_member")
+    if actor is None:
+        return _json_error("Impossible de vérifier vos permissions Discord. Rechargez le dashboard.", 403)
+    actor_permissions = actor.guild_permissions
+    if guild.owner_id != moderator_id and not actor_permissions.administrator:
+        needed = {
+            "unban": ("ban_members", "Bannir des membres"),
+            "unmute": ("moderate_members", "Exclure temporairement des membres"),
+            "clear-warnings": ("moderate_members", "Exclure temporairement des membres"),
+        }[action]
+        if not getattr(actor_permissions, needed[0], False):
+            return _json_error(f"Vous n'avez pas la permission Discord « {needed[1]} » requise pour cette action.", 403)
     audit_reason = f"{session['user']['username']} ({moderator_id}) via dashboard : {reason}"
     bot_member = guild.me
     try:
