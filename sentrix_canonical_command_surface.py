@@ -23,7 +23,7 @@ ROOTS = {
     "sanctions": "moderation", "moderation": "moderation", "security": "securite",
     "config": "configuration", "server": "serveur", "role": "roles", "roles": "roles",
     "embeds": "messages", "owner": "proprietaire", "more": "outils",
-    "giveaway": "concours", "invites": "invitations", "notifications": "notifications",
+    "giveaway": "giveaway", "invites": "invitations", "notifications": "notifications",
     "social": "social", "stats": "statistiques",
 }
 ROOT_BACK = {
@@ -48,7 +48,7 @@ ROOT_DESCRIPTIONS = {
     "roles": "Rôles, panels et vérification.",
     "messages": "Embeds, annonces et design des messages.",
     "proprietaire": "Commandes réservées au propriétaire de SentriX.",
-    "concours": "Concours et tirages au sort.",
+    "giveaway": "Giveaways et tirages au sort.",
     "invitations": "Invitations, classements et bonus.",
     "notifications": "Notifications sociales et messages d'accueil.",
     "social": "Fonctions sociales de SentriX.",
@@ -261,11 +261,11 @@ SHORT_TARGETS: dict[str, tuple[str, str, str]] = {
     "server-growth": ("stats", "", "croissance"), "permissions explain": ("stats", "", "perms"),
     # /tickets
     "ticket": ("tickets", "", "ouvrir"),
-    # /concours en français
-    "giveaway blacklist": ("concours", "", "exclure"), "giveaway unblacklist": ("concours", "", "autoriser"),
-    "giveaway create": ("concours", "", "creer"), "giveaway cancel": ("concours", "", "annuler"),
-    "giveaway end": ("concours", "", "terminer"), "giveaway list": ("concours", "", "liste"),
-    "giveaway": ("concours", "", "panneau"), "giveaway reroll": ("concours", "", "relancer"),
+    # /giveaway
+    "giveaway blacklist": ("giveaway", "", "exclure"), "giveaway unblacklist": ("giveaway", "", "autoriser"),
+    "giveaway create": ("giveaway", "", "creer"), "giveaway cancel": ("giveaway", "", "annuler"),
+    "giveaway end": ("giveaway", "", "terminer"), "giveaway list": ("giveaway", "", "liste"),
+    "giveaway": ("giveaway", "", "panneau"), "giveaway reroll": ("giveaway", "", "relancer"),
 }
 # Doublons slash masqués uniquement avec les noms courts (le + reste utilisable).
 SHORT_DUPLICATES = frozenset({"giveaway-reroll"})
