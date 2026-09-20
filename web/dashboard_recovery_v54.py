@@ -323,8 +323,10 @@ def _build_core_app(dashboard, bot) -> web.Application:
         dashboard.handle_sanction_action,
     )
     from .dashboard_api_community import register as register_community_routes
+    from .dashboard_api_music import register as register_music_routes
 
     register_community_routes(app, dashboard)
+    register_music_routes(app, dashboard)
     return app
 
 
