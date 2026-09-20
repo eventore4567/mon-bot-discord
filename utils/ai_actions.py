@@ -54,6 +54,16 @@ class MemberResolution:
     error: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class LogProposal:
+    category: str
+    label: str
+    channel_id: int
+    channel_name: str
+    score: int
+    evidence: str = ""
+
+
 ACTIONS: dict[str, ActionSpec] = {
     "moderation.ban": ActionSpec(
         "moderation.ban", "ban", ("target",), ("reason",), "member", "medium",
@@ -95,6 +105,19 @@ ACTIONS: dict[str, ActionSpec] = {
         "navigation.dashboard", None, (), (), None, "low",
         description="donner le lien du dashboard SentriX",
     ),
+    "config.logs.auto": ActionSpec(
+        "config.logs.auto", None, (), (), None, "medium", True,
+        "analyser les salons et proposer un routage automatique des logs",
+    ),
+    "desktop.open_app": ActionSpec(
+        "desktop.open_app", None, ("app",), (), None, "medium", True,
+        "demander l'ouverture d'une application locale via SentriX Desktop",
+    ),
+    "security.antispam": ActionSpec("security.antispam", "antispam", ("state",), (), None, "medium", description="activer ou désactiver l'anti-spam"),
+    "security.antilink": ActionSpec("security.antilink", "antilink", ("state",), (), None, "medium", description="activer ou désactiver le blocage des liens"),
+    "security.antiinvite": ActionSpec("security.antiinvite", "antiinvite", ("state",), (), None, "medium", description="activer ou désactiver le blocage des invitations"),
+    "security.antiraid": ActionSpec("security.antiraid", "antiraid", ("state",), (), None, "medium", description="activer ou désactiver l'anti-raid"),
+    "security.antinuke": ActionSpec("security.antinuke", "antinuke", ("state",), (), None, "high", description="activer ou désactiver l'anti-nuke"),
     "economy.balance": ActionSpec(
         "economy.balance", "balance", (), ("target",), "member", "low",
         description="afficher le solde d'un membre",
@@ -119,6 +142,8 @@ ACTIONS: dict[str, ActionSpec] = {
 
 # Synonymes déterministes : le modèle reste le repli, pas le seul moyen de comprendre.
 _INTENT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("config.logs.auto", ("configure les logs", "configure mes logs", "configurer les logs", "setup des logs", "setup logs")),
+    ("desktop.open_app", ("ouvre roblox", "lance roblox", "ouvre minecraft", "lance minecraft", "ouvre discord", "lance discord")),
     ("moderation.unmute", ("unmute", "demute", "démute", "enleve le mute", "retire le mute", "enlève le mute")),
     ("moderation.mute", ("mute", "mut ", "mets en mute", "mettre en mute", "timeout")),
     ("moderation.warn", ("warn", "avertis", "avertir", "avertissement")),
@@ -242,10 +267,41 @@ def _extract_target(question: str) -> str | None:
     return None
 
 
+def _toggle_state(normalized: str) -> str | None:
+    if re.search(r"\b(desactive|desactiver|désactive|désactiver|coupe|eteins|éteins|off)\b", normalized):
+        return "off"
+    if re.search(r"\b(active|activer|allume|on)\b", normalized):
+        return "on"
+    return None
+
+
+def _security_toggle_intent(normalized: str) -> tuple[str, str] | None:
+    state = _toggle_state(normalized)
+    if state is None:
+        return None
+    families = (
+        ("security.antispam", ("anti spam", "antispam", "spam")),
+        ("security.antilink", ("anti lien", "antilink", "liens", "links")),
+        ("security.antiinvite", ("anti invite", "antiinvite", "invitations discord")),
+        ("security.antiraid", ("anti raid", "antiraid", "raid")),
+        ("security.antinuke", ("anti nuke", "antinuke", "nuke")),
+    )
+    for intent, tokens in families:
+        if any(token in normalized for token in tokens):
+            return intent, state
+    return None
+
+
 def local_parse(question: str) -> ParsedAction | None:
     normalized = normalize_text(question)
     if not normalized:
         return None
+
+    toggle = _security_toggle_intent(normalized)
+    if toggle is not None:
+        intent, state = toggle
+        return ParsedAction(intent=intent, slots={"state": state}, confidence=98, source="local")
+
     intent = None
     for candidate, words in _INTENT_PATTERNS:
         if any(normalize_text(word) in normalized for word in words):
@@ -255,6 +311,10 @@ def local_parse(question: str) -> ParsedAction | None:
         return None
 
     slots: dict[str, Any] = {}
+    if intent == "desktop.open_app":
+        match = re.search(r"\b(?:ouvre|lance)\s+([A-Za-z0-9 ._+-]{2,80})", question, re.IGNORECASE)
+        if match:
+            slots["app"] = match.group(1).strip(" .,:;!?")
     target = _extract_target(question)
     if target:
         slots["target"] = target
@@ -309,7 +369,7 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
     if confidence < 70:
         return None
     slots: dict[str, Any] = {}
-    for key in ("target", "reason", "duration", "query"):
+    for key in ("target", "reason", "duration", "query", "app", "state"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             slots[key] = value.strip()[:500]
@@ -418,6 +478,12 @@ def merge_followup(action: ParsedAction, answer: str) -> ParsedAction:
             slots["count"] = max(1, min(int(match.group(0)), 100))
     elif slot == "target" and value:
         slots["target"] = value[:120]
+    elif slot == "app" and value:
+        slots["app"] = value[:80]
+    elif slot == "state":
+        state = _toggle_state(normalize_text(value))
+        if state:
+            slots["state"] = state
     return ParsedAction(action.intent, slots, action.confidence, "followup")
 
 
@@ -527,7 +593,99 @@ def build_command_line(
 
     if action.intent == "navigation.help" and slots.get("query"):
         command += f" {str(slots['query']).strip()[:80]}"
+    if action.intent.startswith("security.") and slots.get("state"):
+        command += f" {slots['state']}"
     return command
+
+
+_LOG_MATCH_RULES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "moderation": ("Modération", ("moderation", "mod logs", "logs mod", "sanctions", "warn", "ban", "mute")),
+    "messages": ("Messages", ("messages", "message logs", "logs messages", "edits", "deletes", "suppression")),
+    "members": ("Membres / arrivées-départs", ("members", "membres", "join leave", "arrivees departs", "arrivee depart", "joins", "leaves")),
+    "voice": ("Vocal", ("voice", "vocal", "voc logs", "logs voc", "voice logs", "vc logs")),
+    "tickets": ("Tickets", ("tickets", "ticket logs", "logs tickets", "support logs")),
+    "channels": ("Salons", ("channels", "salons", "channel logs", "logs salons")),
+    "roles": ("Rôles", ("roles", "rôles", "role logs", "logs roles")),
+    "automod": ("AutoMod", ("automod", "auto mod", "moderation auto")),
+    "spam": ("Anti-Spam", ("spam logs", "antispam logs", "anti spam")),
+    "raid": ("Anti-Raid", ("raid logs", "antiraid logs", "anti raid")),
+    "server": ("Serveur", ("server logs", "serveur", "guild logs")),
+    "resources": ("Ressources", ("resources", "ressources", "emoji logs", "invite logs")),
+    "files": ("Fichiers", ("files", "fichiers", "upload logs")),
+    "soundboard": ("Soundboard", ("soundboard", "sons")),
+}
+
+
+def _channel_text(channel: Any) -> tuple[str, str, str]:
+    name = normalize_text(getattr(channel, "name", ""))
+    topic = normalize_text(getattr(channel, "topic", ""))
+    category = normalize_text(getattr(getattr(channel, "category", None), "name", ""))
+    return name, topic, category
+
+
+def _log_channel_score(channel: Any, keywords: tuple[str, ...]) -> tuple[int, str]:
+    name, topic, category = _channel_text(channel)
+    if not name:
+        return 0, ""
+    score = 0
+    evidence: list[str] = []
+    if any(token in name for token in ("log", "logs", "journal")):
+        score += 2
+        evidence.append("nom de salon de logs")
+    for keyword in keywords:
+        key = normalize_text(keyword)
+        if not key:
+            continue
+        if name == key:
+            score += 10
+            evidence.append(f"nom exact « {keyword} »")
+        elif key in name:
+            score += 7
+            evidence.append(f"nom contient « {keyword} »")
+        if key in topic:
+            score += 3
+            evidence.append(f"sujet contient « {keyword} »")
+        if key in category:
+            score += 2
+            evidence.append(f"catégorie contient « {keyword} »")
+    return score, evidence[0] if evidence else ""
+
+
+def propose_log_routes(guild: Any, *, max_categories: int = 14) -> tuple[LogProposal, ...]:
+    """Propose des routes sans rien écrire. Une proposition faible ou ambiguë est ignorée."""
+    channels = [
+        ch for ch in getattr(guild, "text_channels", ())
+        if getattr(ch, "id", None) and getattr(ch, "name", None)
+    ]
+    candidates: list[tuple[int, str, str, Any, str]] = []
+    for key, (label, keywords) in _LOG_MATCH_RULES.items():
+        ranked: list[tuple[int, Any, str]] = []
+        for channel in channels:
+            score, evidence = _log_channel_score(channel, keywords)
+            if score >= 7:
+                ranked.append((score, channel, evidence))
+        ranked.sort(key=lambda row: row[0], reverse=True)
+        if not ranked:
+            continue
+        # Deux salons quasi équivalents = pas de devinette. L'utilisateur pourra les
+        # configurer manuellement au lieu de recevoir un mauvais routage automatique.
+        if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 2:
+            continue
+        score, channel, evidence = ranked[0]
+        candidates.append((score, key, label, channel, evidence))
+
+    candidates.sort(key=lambda row: row[0], reverse=True)
+    used_channels: set[int] = set()
+    proposals: list[LogProposal] = []
+    for score, key, label, channel, evidence in candidates:
+        cid = int(channel.id)
+        if cid in used_channels:
+            continue
+        used_channels.add(cid)
+        proposals.append(LogProposal(key, label, cid, str(channel.name), score, evidence))
+        if len(proposals) >= max_categories:
+            break
+    return tuple(proposals)
 
 
 def public_catalog() -> tuple[ActionSpec, ...]:
