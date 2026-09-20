@@ -294,3 +294,10 @@ if(ticketSource.includes('data-ticket-preset')) throw new Error('Les presets Tic
 if(!navSource.includes("tickets: [['panneaux', 'Panneaux'], ['actions', 'Actions staff']]")) throw new Error('Tickets doit séparer Panneaux et Actions staff.');
 if(!ticketSource.includes("if (state.sub === 'actions')")) throw new Error('La page Actions staff Tickets n’est pas routée séparément.');
 if(ticketSource.includes('await _renderTicketsBase();\n  await appendTicketButtonSettings();')) throw new Error('Les actions staff ne doivent plus être ajoutées sous le panneau principal.');
+
+
+// La sous-page Actions staff Tickets ne doit jamais conserver le squelette de navigation
+// ni recevoir les cartes d'expérience/KPI de la page principale.
+if(!ticketSource.includes('ticket-actions-page')) throw new Error('Actions staff doit recréer son conteneur après le chargement API.');
+const moderationSource = sourceByName.get('41_moderation.js') || '';
+if(!moderationSource.includes("if(state.page==='tickets'&&state.sub==='actions')return;")) throw new Error('Actions staff doit ignorer le hero/KPI SentriX Experience.');
