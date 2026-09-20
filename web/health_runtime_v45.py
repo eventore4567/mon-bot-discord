@@ -85,6 +85,24 @@ def _command_policy_state(bot) -> tuple[bool, int, int]:
     return dangerous == 0, unknown, dangerous
 
 
+def _command_health_state(bot) -> dict:
+    """Commandes en erreur depuis le démarrage (cogs/command_health.py) — noms et
+    compteurs uniquement, aucune donnée de membre."""
+    state = getattr(bot, "_sentrix_command_health", None)
+    if not isinstance(state, dict):
+        return {"broken_commands": 0, "total_errors": 0, "top": []}
+    rows = [
+        {"command": name, "errors": int(row.get("errors") or 0), "last_exc": row.get("last_exc")}
+        for name, row in (state.get("commands") or {}).items()
+    ]
+    rows.sort(key=lambda row: (-row["errors"], row["command"]))
+    return {
+        "broken_commands": len(rows),
+        "total_errors": sum(row["errors"] for row in rows),
+        "top": rows[:5],
+    }
+
+
 def _backup_state(bot) -> bool | None:
     ops = getattr(bot, "_sentrix_production_ops", None)
     if not isinstance(ops, dict):
@@ -138,6 +156,7 @@ async def _snapshot(bot, dashboard) -> dict:
         "member_count": _count_members(bot),
         "uptime_seconds": max(0, int(time.time() - start_time)),
         "backup_ok": _backup_state(bot),
+        "command_health": _command_health_state(bot),
         "release": _release_id(),
     }
 

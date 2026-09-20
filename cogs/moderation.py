@@ -1010,8 +1010,13 @@ class Moderation(commands.Cog):
             if len(candidates) == 1:
                 await candidates[0].delete()
             else:
-                await ctx.channel.delete_messages(candidates)
-        except discord.HTTPException:
+                # Discord refuse plus de 100 messages par appel groupé : `+clear 100`
+                # produit 101 candidats (les 100 demandés + le message de commande),
+                # donc on découpe. discord.py lève ClientException (pas HTTPException)
+                # quand la limite est dépassée — c'était l'origine de SXR-CMD-0001.
+                for start in range(0, len(candidates), 100):
+                    await ctx.channel.delete_messages(candidates[start:start + 100])
+        except (discord.HTTPException, discord.ClientException):
             # Repli intégral plutôt que de laisser le salon à moitié nettoyé.
             return await ctx.channel.purge(limit=purge_limit)
         return candidates

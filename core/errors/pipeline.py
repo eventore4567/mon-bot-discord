@@ -15,6 +15,24 @@ logger = logging.getLogger("core.errors")
 
 _counter = itertools.count(1)
 
+# Abonnés notifiés à chaque référence émise (cogs/command_health.py). Le pipeline
+# reste pur : un abonné reçoit l'ErrorReport déjà construit, jamais le Context, et
+# une exception chez lui ne remonte jamais jusqu'à la commande en erreur.
+_subscribers: list = []
+
+
+def subscribe(callback) -> None:
+    """Enregistre ``callback(report)`` ; idempotent pour un même callable."""
+    if callback not in _subscribers:
+        _subscribers.append(callback)
+
+
+def unsubscribe(callback) -> None:
+    try:
+        _subscribers.remove(callback)
+    except ValueError:
+        pass
+
 
 def next_code() -> str:
     """Référence courte affichée à l'utilisateur ET recherchable dans les logs.
@@ -85,6 +103,11 @@ def report(
         entry.exc_type,
         exc_info=exc,
     )
+    for callback in list(_subscribers):
+        try:
+            callback(entry)
+        except Exception:  # pragma: no cover - un abonné ne doit jamais casser la commande
+            logger.exception("Abonné du pipeline d'erreur en échec : %s", getattr(callback, "__qualname__", callback))
     return entry
 
 
@@ -92,3 +115,4 @@ def reset_for_tests() -> None:
     """Remet le compteur à 1 — tests uniquement, jamais appelé par le runtime."""
     global _counter
     _counter = itertools.count(1)
+    _subscribers.clear()
