@@ -9,46 +9,28 @@ def _profile_source() -> str:
     return (ROOT / "cogs" / "profile_oxyde_runtime.py").read_text(encoding="utf-8")
 
 
-def test_profile_runtime_is_loaded_in_production():
+def test_profile_runtime_is_not_loaded_in_production():
     boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
-    assert 'bot_main.EXTENSIONS.append("cogs.profile_oxyde_runtime")' in boot
+    assert 'bot_main.EXTENSIONS.append("cogs.profile_oxyde_runtime")' not in boot
 
 
-def test_profile_runtime_is_a_real_extension():
-    source = _profile_source()
-    assert "async def setup(bot: commands.Bot)" in source
-    assert "install(bot)" in source
-
-
-def test_me_is_kept_out_of_duplicate_pruning():
-    source = _profile_source()
-    assert 'duplicates.discard("me")' in source
-    assert "bot_main.PRUNED_COMMANDS" in source
-
-
-def test_me_is_personal_stats_not_profile():
-    source = _profile_source()
-    start = source.index("async def me_callback")
-    end = source.index("async def send_profile_slash", start)
-    callback = source[start:end]
-    assert "cog._send_stats(ctx, ctx.author)" in callback
-    assert "CleanProfileView" not in callback
-    assert "build_page" not in callback
-
-
-def test_prefix_profile_is_removed_and_slash_me_keeps_community_profile_surface():
-    aliases = (ROOT / "cogs" / "common_command_names.py").read_text(encoding="utf-8")
+def test_plus_me_is_removed():
     levels = (ROOT / "cogs" / "levels.py").read_text(encoding="utf-8")
-    surface = (ROOT / "sentrix_command_surface_v110.py").read_text(encoding="utf-8")
-    source = _profile_source()
+    assert '@commands.hybrid_command(name="me"' not in levels
+    assert "async def _legacy_me(" in levels
 
-    assert '"profile": ("profil",)' not in aliases
-    assert '@commands.hybrid_command(name="profile"' not in levels
-    assert '"profile": "me"' in surface
-    assert "async def send_profile_slash(" in source
-    assert "await interaction.response.defer(thinking=True)" in source
-    assert "CleanProfileView" in source
-    assert 'build_page(bot, interaction.guild, member, interaction.user.id, "overview")' in source
+
+def test_profile_and_me_are_absent_from_direct_slash_surface():
+    surface = (ROOT / "sentrix_command_surface_v110.py").read_text(encoding="utf-8")
+    assert '"profile": "me"' not in surface
+    assert '"profile": "profile"' not in surface
+
+
+def test_profilecard_is_the_documented_public_profile():
+    aliases = (ROOT / "cogs" / "common_command_names.py").read_text(encoding="utf-8")
+    boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
+    assert '"profilecard": "carte"' in aliases
+    assert "/outils profilecard" in boot
 
 
 def test_profile_overview_is_compact_inline_grid():
