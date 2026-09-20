@@ -1110,10 +1110,8 @@ class Levels(commands.Cog, name="Levels"):
     async def stats_cmd(self, ctx: commands.Context, membre: discord.Member = None):
         await self._send_stats(ctx, membre)
 
-    @commands.hybrid_command(name="me", description="Afficher toutes vos statistiques personnelles sur ce serveur.", with_app_command=False)
-    @app_commands.describe(membre="Le membre visé (optionnel)")
-    async def me(self, ctx: commands.Context, membre: discord.Member = None):
-        """Alias historique de /stats — conservé pour ne rien casser côté utilisateurs."""
+    # Ancien alias +me retiré : la carte de profil officielle est /outils profilecard.
+    async def _legacy_me(self, ctx: commands.Context, membre: discord.Member = None):
         await self._send_stats(ctx, membre)
 
     async def _send_level(self, ctx: commands.Context, membre: discord.Member = None):
@@ -1431,7 +1429,7 @@ class Levels(commands.Cog, name="Levels"):
 
     # Ancien rendu conservé temporairement comme helper interne uniquement.
     # La commande publique +profile/+profil est supprimée ; le profil communautaire
-    # officiel est maintenant /me via cogs/profile_oxyde_runtime.py.
+    # public a été retiré au profit de /outils profilecard.
     async def _legacy_profile(self, ctx: commands.Context, membre: discord.Member = None):
         # Première commande migrée vers utils/design_system (Phase 2) : contrairement à
         # /stats et /level, /profile n'avait pas de couleur/footer pilotés par
