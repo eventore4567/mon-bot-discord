@@ -14,7 +14,7 @@ from . import embeds as sx
 from . import sentrix_runtime as runtime
 
 _INSTALLED = False
-PANEL_BAR = sx.BAR
+PANEL_BAR = ""
 _SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
 
 _ORIGINAL_LOG_EMBED = sx.log_embed
@@ -57,7 +57,7 @@ def _finalize_log(embed: discord.Embed | None) -> discord.Embed | None:
     if not isinstance(embed, discord.Embed):
         return embed
     body = _clean_description(embed.description)
-    embed.description = f"{PANEL_BAR}\n{body}" if body else PANEL_BAR
+    embed.description = body or None
     return embed
 
 
