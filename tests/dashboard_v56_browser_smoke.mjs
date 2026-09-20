@@ -122,7 +122,7 @@ const executableScripts=[...dom.window.document.querySelectorAll("script")].filt
 if(executableScripts.length!==1) throw new Error(`${executableScripts.length} scripts exécutables au lieu de 1.`);
 if(dom.window.document.querySelectorAll("style").length!==1) throw new Error("Plusieurs feuilles de style embarquées.");
 const responsiveCss=dom.window.document.querySelector("style").textContent;
-for(const token of ["responsive universel v3","max-width:1024px","max-width:600px","pointer:coarse","safe-area-inset-bottom","100dvh"]){
+for(const token of ["responsive universel v3","max-width:1024px","max-width:600px","pointer:coarse","safe-area-inset-bottom","100dvh","body.save-pending .workspace","sxPageIn 240ms"]){
   if(!responsiveCss.includes(token)) throw new Error(`Responsive universel incomplet: ${token}`);
 }
 dom.window.document.getElementById("mobileMenu").click();
