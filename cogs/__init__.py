@@ -29,6 +29,7 @@ from .command_hardening_v41 import install as install_command_hardening_v41
 from .command_runtime_hardening_v18 import repair_wrapped_signatures
 from .command_response_guard import install as install_command_response_guard
 from .common_command_names import install as install_common_command_names
+from .common_command_names import refresh_short_names as refresh_short_command_names
 from .control_center_v3 import _install_setup_v3 as install_control_center_v3_setup_ui
 from .control_center_v3 import install as install_control_center_v3
 from .control_center_v3_language import install as install_control_center_v3_language
@@ -292,6 +293,9 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     # Cette exception de permission doit être installée en dernier : elle enveloppe la
     # décision V66 finale sans contourner les refus Setup/blacklist/module.
     await _run_installer("whitelist ban par membre", install_ban_command_whitelist, bot)
+    # Noms courts : dernière passe après toutes les couches (certaines remplacent des
+    # sous-commandes par des copies sans alias).
+    await _run_installer("noms courts des commandes", refresh_short_command_names, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
         "Runtime SentriX finalisé : Setup V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72."

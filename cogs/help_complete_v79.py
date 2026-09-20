@@ -33,6 +33,7 @@ from utils.command_permissions import (
     permission_label,
 )
 from . import help as legacy
+from .common_command_names import display_name as _short_name
 from . import help_components_v77 as v77
 from . import setup_components_v73 as setup_v73
 
@@ -199,7 +200,9 @@ def _title(entry: HelpEntry, prefix: str = "+") -> str:
     if entry.slash_name:
         parts.append(f"/{entry.slash_name}")
     if entry.prefix_command is not None:
-        parts.append(f"{prefix}{entry.prefix_command.qualified_name}")
+        # Nom court conseillé (cogs/common_command_names.py) ; le nom interne reste
+        # tapable et apparaît dans la ligne Alias.
+        parts.append(f"{prefix}{_short_name(entry.prefix_command)}")
     return " · ".join(parts) or entry.name
 
 
@@ -222,20 +225,33 @@ def _slash_usage(entry: HelpEntry) -> str | None:
 def _prefix_usage(entry: HelpEntry, prefix: str) -> str | None:
     if entry.prefix_command is None:
         return None
-    return legacy._usage(entry.prefix_command, prefix)
+    return _with_short_name(entry.prefix_command, legacy._usage(entry.prefix_command, prefix), prefix)
+
+
+def _with_short_name(command: commands.Command, text: str, prefix: str) -> str:
+    """Remplace « +nom-interne » par « +nom-court » dans une syntaxe ou un exemple."""
+    short = _short_name(command)
+    if short == command.qualified_name:
+        return text
+    return text.replace(f"{prefix}{command.qualified_name}", f"{prefix}{short}", 1)
 
 
 def _example(entry: HelpEntry, prefix: str) -> str:
     if entry.prefix_command is not None:
-        return command_example(entry.prefix_command, prefix)
+        return _with_short_name(entry.prefix_command, command_example(entry.prefix_command, prefix), prefix)
     return _slash_usage(entry) or f"/{entry.slash_name or entry.name}"
 
 
 def _aliases(entry: HelpEntry) -> str:
     command = entry.prefix_command
-    if command is None or not command.aliases:
+    if command is None:
         return "Aucun"
-    return ", ".join(f"`{alias}`" for alias in command.aliases[:12])
+    short = _short_name(command)
+    names = [str(command.qualified_name)] if short != command.qualified_name else []
+    names += [alias for alias in command.aliases if alias != short.split(" ")[-1] and alias != short]
+    if not names:
+        return "Aucun"
+    return ", ".join(f"`{alias}`" for alias in names[:12])
 
 
 def _search(bot: commands.Bot, query: str) -> list[HelpEntry]:
@@ -248,6 +264,7 @@ def _search(bot: commands.Bot, query: str) -> list[HelpEntry]:
         if entry.slash_name:
             names.append(_normalise(entry.slash_name))
         if entry.prefix_command is not None:
+            names.append(_normalise(_short_name(entry.prefix_command)))
             names.extend(_normalise(alias) for alias in (entry.prefix_command.aliases or []))
         category_label = v77._meta(entry.category)[1].casefold()
         description = _description(entry).casefold()
@@ -276,6 +293,7 @@ def _exact(rows: list[HelpEntry], query: str) -> HelpEntry | None:
         if entry.slash_name:
             names.add(_normalise(entry.slash_name))
         if entry.prefix_command is not None:
+            names.add(_normalise(_short_name(entry.prefix_command)))
             names.update(_normalise(alias) for alias in (entry.prefix_command.aliases or []))
         if needle in names:
             return entry
