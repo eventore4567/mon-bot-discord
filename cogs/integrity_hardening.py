@@ -308,7 +308,7 @@ def _install_runtime_registry_audit(bot: commands.Bot) -> bool:
                 errors.append(
                     f"signature invalide {command.qualified_name}: {type(exc).__name__}"
                 )
-        # Ne pas comparer le runtime à NORMAL_DIRECT_COMMANDS ici : cette table sert
+        # Ne pas comparer le runtime à l'ancienne liste de commandes directes : elle sert
         # à la présentation/pruning historique, alors que la surface finale est
         # reconstruite par les couches canoniques (groupes slash, noms courts,
         # commandes fusionnées/supprimées). Exiger chaque ancien nom produit donc
