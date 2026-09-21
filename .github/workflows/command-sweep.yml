@@ -55,6 +55,8 @@ jobs:
             tests/test_economy_race_conditions.py \
             tests/test_services_economy.py \
             tests/test_services_tickets.py \
+            tests/test_access_matrix.py \
+            tests/test_giveaway_center.py \
             tests/test_ha_transition_observability.py \
             tests/test_ha_sigterm_failover.py
 
