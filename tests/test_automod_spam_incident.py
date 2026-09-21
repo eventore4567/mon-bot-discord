@@ -550,3 +550,22 @@ def test_native_sync_command_distinguishes_local_and_global_counts():
     assert "**Total SentriX sur" in source
     assert "Le **0** n'est pas un échec de synchronisation" in source
 
+def test_native_sync_command_enables_safe_baseline_when_server_has_no_native_config():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "automod.py").read_text(encoding="utf-8")
+    block = source.split('name="automod-native-sync"', 1)[1].split('name="security-check"', 1)[0]
+    assert '("antilink", "Anti-liens total")' in block
+    assert '("antiscam", "Anti-arnaque")' in block
+    assert '("antimention", "Anti-mentions")' in block
+    assert '("antiinsult", "Contenu sensible")' in block
+    assert "await self.bot.db.set_automod(ctx.guild.id, field, 1)" in block
+    assert "Activées automatiquement par cette commande" in block
+
+
+def test_native_sync_command_reports_when_discord_created_zero_rules():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "automod.py").read_text(encoding="utf-8")
+    block = source.split('name="automod-native-sync"', 1)[1].split('name="security-check"', 1)[0]
+    assert "Discord n'a créé aucune règle native" in block
+    assert "Gérer le serveur" in block
+
