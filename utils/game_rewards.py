@@ -220,11 +220,32 @@ async def reward_game_winner(
     bot, guild_id: int, user_id: int, game_name: str, base_amount: int, session_id: str,
     result: str = "win", metadata: dict | None = None,
 ) -> GameReward:
-    """Point d'entrée UNIQUE pour créditer une récompense de mini-jeu. Applique les réglages
-    du serveur (+gamesetup), puis délègue à Database.record_game_reward() pour l'écriture
-    atomique + la protection anti-double-récompense (contrainte UNIQUE sur session_id)."""
+    """Point d'entrée UNIQUE pour créditer une récompense de mini-jeu.
+
+    La limite quotidienne est vérifiée ICI, pas seulement dans les commandes rapides :
+    les duels, jeux communautaires, vues à boutons et futures commandes ne peuvent donc
+    plus contourner +gamesetup par un chemin de récompense direct.
+    """
     metadata = metadata or {}
     settings = await get_settings(bot, guild_id)
+
+    if result == "win" and base_amount > 0:
+        limit = int(settings.get("daily_limit", 0) or 0)
+        if limit > 0:
+            played = await bot.db.count_game_rewards_today(guild_id, user_id)
+            if played >= limit:
+                return GameReward(
+                    success=False,
+                    game_name=game_name,
+                    session_id=session_id,
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    amount=0,
+                    result=result,
+                    reason="daily_limit",
+                    metadata={**metadata, "daily_limit": limit, "played_today": played},
+                )
+
     final_amount = compute_reward(settings, base_amount) if result == "win" else 0
     ok, display_id_or_reason, credited = await bot.db.record_game_reward(
         guild_id, user_id, game_name, session_id, result, final_amount, json.dumps(metadata),
