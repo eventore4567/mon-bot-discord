@@ -498,7 +498,7 @@ def _install_bridge(bot: commands.Bot, name: str, target_name: str, description:
 def _install_profile(bot: commands.Bot) -> None:
     command = bot.get_command("profile")
     if command is None:
-        logger.warning("V81: commande profile introuvable")
+        logger.info("V81: ancien +profile absent ; patch premium ignoré proprement")
         return
     current = command.callback
     if getattr(current, "_sentrix_profile_v81", False):
