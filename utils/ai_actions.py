@@ -410,20 +410,44 @@ def _toggle_state(normalized: str) -> str | None:
 
 
 def _security_toggle_intent(normalized: str) -> tuple[str, str] | None:
-    state = _toggle_state(normalized)
-    if state is None:
-        return None
+    """Comprend aussi l'objectif demandé, pas seulement les mots « on/off ».
+
+    Exemple réel : « censure tous les liens du serv » signifie clairement activer
+    l'anti-liens. Avant, le routeur ne voyait aucun mot "active/on" et laissait l'IA
+    répondre avec une commande à taper au lieu d'exécuter l'action.
+    """
     families = (
         ("security.antispam", ("anti spam", "antispam", "spam")),
-        ("security.antilink", ("anti lien", "antilink", "liens", "links")),
-        ("security.antiinvite", ("anti invite", "antiinvite", "invitations discord")),
+        ("security.antilink", ("anti lien", "antilink", "liens", "lien", "links", "link")),
+        ("security.antiinvite", ("anti invite", "antiinvite", "invitations discord", "invites discord")),
         ("security.antiraid", ("anti raid", "antiraid", "raid")),
         ("security.antinuke", ("anti nuke", "antinuke", "nuke")),
     )
-    for intent, tokens in families:
-        if any(token in normalized for token in tokens):
-            return intent, state
-    return None
+    intent = next(
+        (candidate for candidate, tokens in families if any(token in normalized for token in tokens)),
+        None,
+    )
+    if intent is None:
+        return None
+
+    state = _toggle_state(normalized)
+    if state is None:
+        # Verbes qui expriment directement l'effet souhaité.
+        if re.search(
+            r"\b(?:bloque|bloquer|bloc|censure|censurer|interdit|interdire|filtre|filtrer|"
+            r"empeche|empêche|empecher|empêcher|protege|protège|proteger|protéger|"
+            r"supprime|supprimer|retire|retirer)\b",
+            normalized,
+        ):
+            state = "on"
+        elif re.search(
+            r"\b(?:autorise|autoriser|permet|permettre|debloque|débloque|debloquer|débloquer|"
+            r"laisse passer|laisser passer|accepte|accepter)\b",
+            normalized,
+        ):
+            state = "off"
+
+    return (intent, state) if state is not None else None
 
 
 def _extract_log_route(question: str, normalized: str) -> ParsedAction | None:
@@ -491,6 +515,8 @@ def is_bare_action_candidate(text: str) -> bool:
         "montre help", "affiche help",
         "donne moi le dashboard", "donne le dashboard", "dashboard",
         "active l anti", "active anti", "desactive l anti", "desactive anti",
+        "bloque ", "censure ", "interdit ", "interdis ", "filtre ", "empeche ", "empêche ",
+        "protege ", "protège ", "autorise ", "permet ", "debloque ", "débloque ",
         "configure les logs", "configure mes logs", "mets les logs",
         "rejoins le vocal", "rejoint le vocal", "rejoin le vocal", "regoin une voc", "reg une voc",
         "quitte le vocal", "joue ", "jouer ", "play ", "mets la musique", "met la musique",
@@ -872,7 +898,8 @@ def looks_multi_action(question: str) -> bool:
     separators = sum(text.count(token) for token in (" puis ", " ensuite ", ";", " et apres ", " et après "))
     action_words = re.findall(
         r"\b(?:cree|creer|ajoute|donne|retire|renomme|configure|mets|change|deplace|"
-        r"envoie|ban|bannis|warn|mute|kick|active|desactive|rejoint|quitte|lance|joue|play|pause|skip|stop|reprends)\b",
+        r"envoie|ban|bannis|warn|mute|kick|active|desactive|bloque|censure|interdit|autorise|"
+        r"rejoint|quitte|lance|joue|play|pause|skip|stop|reprends)\b",
         text,
     )
     # Une simple phrase « ban X et raison Y » ne devient pas artificiellement un plan.
