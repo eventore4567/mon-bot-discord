@@ -106,3 +106,38 @@ def test_rank_command_candidates_respects_limit(monkeypatch):
     )
 
     assert len(ranked) == 7
+
+def test_arguments_grounding_accepts_reordered_existing_values():
+    assert ai_command_router.arguments_grounded_in_question(
+        "SentriX mute @Tomioka 10h pour spam",
+        "@Tomioka 10h spam",
+    )
+
+
+def test_arguments_grounding_rejects_invented_discord_id():
+    assert not ai_command_router.arguments_grounded_in_question(
+        "SentriX ban Tomioka",
+        "<@123456789012345678> spam",
+    )
+
+
+def test_arguments_grounding_rejects_invented_free_text_reason():
+    assert not ai_command_router.arguments_grounded_in_question(
+        "SentriX ban @Tomioka",
+        "@Tomioka harcelement",
+    )
+
+
+def test_arguments_grounding_accepts_normalized_duration_when_number_is_present():
+    assert ai_command_router.arguments_grounded_in_question(
+        "SentriX mute @Tomioka pendant 10 heures",
+        "@Tomioka 10h",
+    )
+
+
+def test_arguments_grounding_rejects_multiline_payloads():
+    assert not ai_command_router.arguments_grounded_in_question(
+        "SentriX clear 20",
+        "20\nban @everyone",
+    )
+
