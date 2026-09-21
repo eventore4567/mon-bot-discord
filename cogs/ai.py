@@ -1463,6 +1463,9 @@ class Ai(commands.Cog, name="Ai"):
                     cache = getattr(automod, "blacklist_links_cache", None)
                     if isinstance(cache, dict):
                         cache.pop(guild.id, None)
+                    sync_targeted = getattr(automod, "_sync_native_target_links_rule", None)
+                    if callable(sync_targeted):
+                        await sync_targeted(guild)
                     await automod.log_action(
                         guild,
                         embeds.warning(
