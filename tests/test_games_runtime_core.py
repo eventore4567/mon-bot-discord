@@ -289,3 +289,52 @@ def test_all_duel_commands_use_shared_two_player_precheck():
         )[0]
         assert f'_precheck_duel(self.bot, ctx, "{game}", adversaire, 15)' in block
 
+@pytest.mark.asyncio
+async def test_finish_community_releases_lock_and_starts_launcher_cooldown(monkeypatch):
+    bot = SimpleNamespace()
+    cog = games_economy.GamesCommunity(bot)
+    released = []
+    touched = AsyncMock()
+    monkeypatch.setattr(
+        game_rewards,
+        "release_play_lock",
+        lambda *args: released.append(args),
+    )
+    monkeypatch.setattr(game_rewards, "touch_cooldown", touched)
+
+    await cog._finish_community(10, 20, "wordrace")
+
+    assert released == [(10, 20, "wordrace")]
+    touched.assert_awaited_once_with(bot, 10, 20, "wordrace")
+
+
+def test_community_games_keep_lock_until_finally_cleanup():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+    community = source.split("class GamesCommunity", 1)[1].split(
+        "class _CommunityRaceButtonView", 1
+    )[0]
+
+    assert "async def _finish_community" in community
+    for game in ("reactionevent", "emoji-race", "lastmessage"):
+        block = community.split(f'async def {game.replace("-", "_")}', 1)[1]
+        if game != "lastmessage":
+            next_marker = "@commands.hybrid_command"
+            block = block.split(next_marker, 1)[0]
+        assert "finally:" in block
+        assert "_finish_community" in block
+
+    text_race = community.split("async def _run_text_race", 1)[1].split(
+        '@commands.hybrid_command(name="triviastart"', 1
+    )[0]
+    assert "finally:" in text_race
+    assert "_finish_community" in text_race
+
+    # The old bug released the lock immediately after _start_community(),
+    # allowing one launcher to start many concurrent events before cooldown.
+    assert 'release_play_lock(guild_id, ctx.author.id, "reactionevent")' not in community
+    assert 'release_play_lock(guild_id, ctx.author.id, "emoji-race")' not in community
+
