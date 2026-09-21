@@ -94,7 +94,7 @@ PUBLIC_COMMANDS = frozenset({
     "permissions",
     # Hubs et profils membre (anciennement fail-closed par oubli)
     "home", "gamehub", "economyhub", "checkin", "progress", "profilecard",
-    "achievements", "challenges", "missions", "gamelobby", "matchmake",
+    "achievements", "achievements-v21", "challenges", "missions", "gamelobby", "matchmake",
     "market", "market-buy", "market-sell", "market-cancel", "market-find",
     "market-history", "market-my", "transactions", "shopwindow",
     "sentrix-plus", "sentrixpro",
@@ -113,6 +113,7 @@ OWNER_ONLY_COMMANDS = frozenset({
     # Diagnostic technique compact (+health, alias corediag) : métriques globales au
     # processus, jamais scopées par serveur.
     "health", "corediag",
+    "dblstatus", "dblsync", "topggstatus", "topggsync",
 })
 
 # ---------------------------------------------------------------- NIVEAU 4
@@ -132,6 +133,7 @@ GUILD_OWNER_COMMANDS = frozenset({
     "reset-levels",         # remet a zero l'XP de TOUS les membres
     "represet",             # remet a zero la reputation de TOUS les membres
     "proofreset",           # efface toutes les preuves de verification
+    "immunity",              # propriétaire du serveur (owner global bypass plus haut)
     # Diffusion privee a l'ensemble du serveur
     "dm",                   # ecrit a UN membre au nom du serveur
 })
@@ -282,11 +284,11 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         # Classees explicitement : elles tombaient en fail-closed, donc admin
         # par accident plutot que par declaration.
         "whitelist", "unwhitelist",
-        "antispam", "antilink", "antiinvite", "antimention", "anticaps",
+        "antispam", "antilink", "antilink-strict", "antiinvite", "antimention", "anticaps",
         "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
         "antinuke", "antinuke-whitelist-add", "antinuke-whitelist-remove",
         "antinuke-whitelist-list", "lockdown-server", "unlock-server",
-        "automod-status", "security-check", "automod-escalation",
+        "automod-status", "automod-native-sync", "security-check", "automod-escalation",
         "automod-exempt-role-add", "automod-exempt-role-remove",
         "automod-history", "security-level", "blacklist-add",
         "blacklist-remove", "blacklist-list", "blacklist-user",
@@ -506,7 +508,7 @@ def module_for_command(name: str) -> str | None:
             return "economy"
         if name in {"stats", "me", "level", "rank", "leaderboard-levels",
                     "level-roles", "profile", "set-bio", "rep", "reputation",
-                    "repleaderboard", "voice-time", "progress", "achievements",
+                    "repleaderboard", "voice-time", "progress", "achievements", "achievements-v21",
                     "profilecard"}:
             return "levels"
         if name in {"sentrix", "ask", "chat", "chat-reset", "summarize",
