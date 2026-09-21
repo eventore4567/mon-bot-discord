@@ -137,7 +137,8 @@ ACTIONS: dict[str, ActionSpec] = {
         "demander l'ouverture d'une application locale via SentriX Desktop",
     ),
     "security.antispam": ActionSpec("security.antispam", "antispam", ("state",), (), None, "medium", description="activer ou désactiver l'anti-spam"),
-    "security.antilink": ActionSpec("security.antilink", "antilink", ("state",), (), None, "medium", description="activer ou désactiver le blocage des liens"),
+    "security.antilink": ActionSpec("security.antilink", "antilink", ("state",), (), None, "medium", description="activer ou désactiver le blocage normal des liens"),
+    "security.antilink_strict": ActionSpec("security.antilink_strict", "antilink-strict", ("state",), (), None, "medium", description="bloquer absolument tous les liens partout, même whitelistés ou dans les salons ignorés"),
     "security.antiinvite": ActionSpec("security.antiinvite", "antiinvite", ("state",), (), None, "medium", description="activer ou désactiver le blocage des invitations"),
     "security.antiraid": ActionSpec("security.antiraid", "antiraid", ("state",), (), None, "medium", description="activer ou désactiver l'anti-raid"),
     "security.antinuke": ActionSpec("security.antinuke", "antinuke", ("state",), (), None, "high", description="activer ou désactiver l'anti-nuke"),
@@ -446,6 +447,13 @@ def _security_toggle_intent(normalized: str) -> tuple[str, str] | None:
             normalized,
         ):
             state = "off"
+
+    if intent == "security.antilink" and state == "on":
+        if re.search(
+            r"\b(?:tout|tous|toute|toutes|absolument|partout|strict|aucun|meme|même)\b",
+            normalized,
+        ):
+            intent = "security.antilink_strict"
 
     return (intent, state) if state is not None else None
 
