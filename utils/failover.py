@@ -158,12 +158,20 @@ class SentriXFailoverCoordinator:
         a changé d'état, utile pour distinguer redéploiement, vrai failover et perte de lease.
         """
         old_state = self.state
+        normalized_reason = str(reason or "unspecified")[:240]
+
+        # Le poll passif repasse ici toutes les quelques secondes. Ne pas transformer
+        # "standby -> standby" en faux événement ni réécrire l'heure de transition.
+        if old_state == new_state and self.last_transition_reason == normalized_reason:
+            return
+
         if old_state != new_state:
             self.previous_state = old_state
             self.state = new_state
             self.transition_count += 1
+
         self.last_transition_at = time.time()
-        self.last_transition_reason = str(reason or "unspecified")[:240]
+        self.last_transition_reason = normalized_reason
         logger.info(
             "HA: transition %s -> %s reason=%s role=%s count=%s",
             old_state,
