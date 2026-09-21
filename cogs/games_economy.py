@@ -1064,26 +1064,34 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
     async def _start_community(self, ctx: commands.Context, game_name: str, cooldown: int = 60) -> tuple[bool, str, str | None]:
         return await _precheck(self.bot, ctx, game_name, cooldown)
 
+    async def _finish_community(self, guild_id: int, user_id: int, game_name: str) -> None:
+        """Toujours libérer le verrou de manche puis démarrer le cooldown du lanceur."""
+        game_rewards.release_play_lock(guild_id, user_id, game_name)
+        await game_rewards.touch_cooldown(self.bot, guild_id, user_id, game_name)
+
     async def _run_text_race(self, ctx: commands.Context, game_name: str, title: str, prompt: str, answer: str, window: int, reward: int):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await self._start_community(ctx, game_name)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f'{prompt}\n🏁 Premier(e) à répondre correctement dans ce salon gagne ! ({window}s)')))
-
-        def check(m):
-            return m.channel.id == ctx.channel.id and not m.author.bot and m.content.strip().lower() == answer
 
         try:
-            msg = await self.bot.wait_for("message", check=check, timeout=window)
-        except asyncio.TimeoutError:
-            await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, game_name)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f"⏱️ Personne n'a trouvé. La réponse était **{answer}**.", kind='warning')))
-        await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, game_name)
-        game_reward = await game_rewards.reward_game_winner(self.bot, guild_id, msg.author.id, game_name, reward, sid, result="win")
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f'🏆 {msg.author.mention} a trouvé en premier !' + _reward_line(game_reward), kind='success')))
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f'{prompt}\n🏁 Premier(e) à répondre correctement dans ce salon gagne ! ({window}s)')))
 
+            def check(m):
+                return m.channel.id == ctx.channel.id and not m.author.bot and m.content.strip().lower() == answer
+
+            try:
+                msg = await self.bot.wait_for("message", check=check, timeout=window)
+            except asyncio.TimeoutError:
+                return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f"⏱️ Personne n'a trouvé. La réponse était **{answer}**.", kind='warning')))
+
+            game_reward = await game_rewards.reward_game_winner(
+                self.bot, guild_id, msg.author.id, game_name, reward, sid, result="win"
+            )
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f'🏆 {msg.author.mention} a trouvé en premier !' + _reward_line(game_reward), kind='success')))
+        finally:
+            await self._finish_community(guild_id, ctx.author.id, game_name)
     @commands.hybrid_command(name="triviastart", description="Lancer une question de culture générale communautaire.", with_app_command=False)
     async def triviastart(self, ctx: commands.Context):
         question, answer = game_rewards.secure_pick(COMMUNITY_TRIVIA)
@@ -1114,36 +1122,36 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         started, err, sid = await self._start_community(ctx, "reactionevent")
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, "reactionevent")
-        msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='⚡ Un bouton va apparaître, soyez le/la plus rapide !')))
-        await asyncio.sleep(random.uniform(3.0, 8.0))
-        view = _CommunityRaceButtonView()
-        await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='🔴 **CLIQUEZ MAINTENANT !**')), view))
-        await view.wait()
-        await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "reactionevent")
-        if view.winner is None:
-            return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description="⏱️ Personne n'a cliqué à temps.")))
-        reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "reactionevent", 25, sid, result="win")
-        await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description=f'🏆 {view.winner.mention} a été le/la plus rapide !' + _reward_line(reward), kind='success')))
-
+        try:
+            msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='⚡ Un bouton va apparaître, soyez le/la plus rapide !')))
+            await asyncio.sleep(random.uniform(3.0, 8.0))
+            view = _CommunityRaceButtonView()
+            await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='🔴 **CLIQUEZ MAINTENANT !**')), view))
+            await view.wait()
+            if view.winner is None:
+                return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description="⏱️ Personne n'a cliqué à temps.")))
+            reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "reactionevent", 25, sid, result="win")
+            return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description=f'🏆 {view.winner.mention} a été le/la plus rapide !' + _reward_line(reward), kind='success')))
+        finally:
+            await self._finish_community(guild_id, ctx.author.id, "reactionevent")
     @commands.hybrid_command(name="emoji-race", description="Lancer une course à l'emoji : cliquez sur le bon emoji en premier.", with_app_command=False)
     async def emoji_race(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await self._start_community(ctx, "emoji-race")
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, "emoji-race")
-        pool = ["🍒", "🍋", "🍊", "🍇", "💎"]
-        target = game_rewards.secure_pick(pool)
-        view = _EmojiRaceView(pool, target)
-        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description=f'🎯 Cliquez sur **{target}** — premier(e) à cliquer sur le bon emoji gagne ! (15s)')), view))
-        await view.wait()
-        await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "emoji-race")
-        if view.winner is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description="⏱️ Personne n'a trouvé à temps.")))
-        reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "emoji-race", 20, sid, result="win")
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description=f'🏆 {view.winner.mention} a trouvé le bon emoji en premier !' + _reward_line(reward), kind='success')))
-
+        try:
+            pool = ["🍒", "🍋", "🍊", "🍇", "💎"]
+            target = game_rewards.secure_pick(pool)
+            view = _EmojiRaceView(pool, target)
+            await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description=f'🎯 Cliquez sur **{target}** — premier(e) à cliquer sur le bon emoji gagne ! (15s)')), view))
+            await view.wait()
+            if view.winner is None:
+                return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description="⏱️ Personne n'a trouvé à temps.")))
+            reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "emoji-race", 20, sid, result="win")
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Course à l'emoji", description=f'🏆 {view.winner.mention} a trouvé le bon emoji en premier !' + _reward_line(reward), kind='success')))
+        finally:
+            await self._finish_community(guild_id, ctx.author.id, "emoji-race")
     @commands.hybrid_command(name="lastmessage", description="Lancer un défi 'dernier message gagne' dans ce salon.", with_app_command=False)
     @app_commands.describe(duree="Durée en secondes (30 à 120, défaut 45)")
     async def lastmessage(self, ctx: commands.Context, duree: int = 45):
@@ -1152,21 +1160,23 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         started, err, sid = await self._start_community(ctx, "lastmessage", cooldown=90)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, "lastmessage")
         if ctx.channel.id in self._lastmessage_state:
-            await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "lastmessage")
+            await self._finish_community(guild_id, ctx.author.id, "lastmessage")
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description='⚠️ Un défi est déjà en cours dans ce salon.', kind='warning')))
-        self._lastmessage_state[ctx.channel.id] = {"last_author": None}
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=f"💬 Le dernier membre à écrire dans ce salon d'ici **{duree}s** remporte la récompense !")))
-        await asyncio.sleep(duree)
-        state = self._lastmessage_state.pop(ctx.channel.id, {})
-        await game_rewards.touch_cooldown(self.bot, guild_id, ctx.author.id, "lastmessage")
-        winner = state.get("last_author")
-        if winner is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description="⏱️ Personne n'a écrit — pas de gagnant.")))
-        reward = await game_rewards.reward_game_winner(self.bot, guild_id, winner.id, "lastmessage", 25, sid, result="win")
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=f'🏆 {winner.mention} a écrit le dernier message !' + _reward_line(reward), kind='success')))
 
+        self._lastmessage_state[ctx.channel.id] = {"last_author": None}
+        try:
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=f"💬 Le dernier membre à écrire dans ce salon d'ici **{duree}s** remporte la récompense !")))
+            await asyncio.sleep(duree)
+            state = self._lastmessage_state.pop(ctx.channel.id, {})
+            winner = state.get("last_author")
+            if winner is None:
+                return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description="⏱️ Personne n'a écrit — pas de gagnant.")))
+            reward = await game_rewards.reward_game_winner(self.bot, guild_id, winner.id, "lastmessage", 25, sid, result="win")
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=f'🏆 {winner.mention} a écrit le dernier message !' + _reward_line(reward), kind='success')))
+        finally:
+            self._lastmessage_state.pop(ctx.channel.id, None)
+            await self._finish_community(guild_id, ctx.author.id, "lastmessage")
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot:
