@@ -39,6 +39,25 @@ jobs:
       - name: Compile sweep tooling
         run: python -m py_compile tools/command_sweep.py tools/sentrix_e2e_harness.py tools/permission_audit_sweep.py cogs/command_health.py
 
+      - name: Critical runtime regression tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          OPENAI_API_KEY: ""
+          POSTGRES_URL: ""
+          REDIS_URL: ""
+        run: |
+          python -m pytest -q \
+            tests/test_games_runtime_core.py \
+            tests/test_ai_command_router.py \
+            tests/test_automod_live_matrix.py \
+            tests/test_ticket_atomic_actions.py \
+            tests/test_ticket_rating_persistence.py \
+            tests/test_economy_race_conditions.py \
+            tests/test_services_economy.py \
+            tests/test_services_tickets.py \
+            tests/test_ha_transition_observability.py \
+            tests/test_ha_sigterm_failover.py
+
       - name: Sweep every command (strict on technical errors)
         env:
           DISCORD_TOKEN: "ci.fake.token"
