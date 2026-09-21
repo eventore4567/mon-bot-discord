@@ -1184,7 +1184,7 @@ async def parse_action_plan(
         user_id=user_id,
         command="sentrix-action-plan",
         web_search=False,
-        max_output_tokens=900,
+        max_output_tokens=650,
     )
     if not result.ok:
         return ()
