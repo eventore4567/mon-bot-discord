@@ -7,7 +7,7 @@ import pytest
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
-from utils import ai_actions
+from utils import ai_actions, ai_service
 from cogs.ai import Ai
 
 
@@ -597,4 +597,58 @@ def test_natural_message_handler_never_fails_silently():
     source = (Path(__file__).resolve().parents[1] / "cogs" / "ai.py").read_text(encoding="utf-8")
     assert "Action naturelle SentriX en erreur" in source
     assert "Je n’ai pas pu exécuter cette action à cause d’une erreur interne." in source
+
+def test_turbo_router_skips_normal_conversations():
+    assert ai_actions.looks_action_request("salut comment tu vas") is False
+    assert ai_actions.looks_action_request("comment créer un rôle sur discord ?") is False
+    assert ai_actions.looks_action_request("tu peux créer un rôle Staff stp") is True
+    assert ai_actions.looks_action_request("stp configure les logs") is True
+
+
+@pytest.mark.asyncio
+async def test_parse_action_does_not_call_ai_for_normal_chat(monkeypatch):
+    called = False
+
+    async def fake_classifier(*args, **kwargs):
+        nonlocal called
+        called = True
+        return None
+
+    monkeypatch.setattr(ai_actions, "classify_with_ai", fake_classifier)
+    parsed = await ai_actions.parse_action(
+        "salut raconte moi une blague",
+        guild_id=1,
+        channel_id=2,
+        user_id=3,
+    )
+    assert parsed is None
+    assert called is False
+
+
+def test_turbo_model_selection_is_adaptive():
+    assert ai_service.pick_model("salut") == ai_service.MODEL_LUNA
+    assert ai_service.pick_model("aide moi à debug ce script python") == ai_service.MODEL_TERRA
+    assert ai_service.pick_model(
+        "fais un audit complet de cette architecture, analyse ce repo et optimise tout"
+    ) == ai_service.MODEL_SOL
+
+
+def test_turbo_runtime_source_keeps_permission_backend_in_charge():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "ai.py").read_text(encoding="utf-8")
+    candidate_block = source.split("def _command_candidates", 1)[1].split(
+        "@staticmethod\n    def _arguments_grounded_in_question", 1
+    )[0]
+    assert "OWNER_ONLY_COMMANDS" not in candidate_block
+    assert "if not action_like and not multi_action" in source
+    assert "self._command_index" in source
+
+
+def test_ai_context_turbo_skips_internal_router_context():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "ai_context_v9.py").read_text(encoding="utf-8")
+    assert "sentrix-action-router" in source
+    assert "sentrix-command-router" in source
+    assert "_CONTEXT_CACHE_TTL" in source
+    assert "_optional_table_exists" in source
 
