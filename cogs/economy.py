@@ -23,10 +23,11 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, stats_service, design_system, helpers
+from utils import embeds, checks, stats_service, design_system
 # « panels » designe deja les panneaux de roles/boutique ici.
 from utils import sentrix_panels as sx_panels
 from database.db import now
+from services import economy as economy_service
 
 DAILY_AMOUNT = 200
 WEEKLY_AMOUNT = 1000
@@ -382,46 +383,72 @@ class Economy(commands.Cog, name="Economy"):
     @commands.hybrid_command(name="rob", description="Tenter de voler un autre membre.")
     @app_commands.describe(membre="Le membre à voler")
     async def rob(self, ctx: commands.Context, membre: discord.Member):
+        if ctx.guild is None:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         if membre.id == ctx.author.id:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
         if membre.bot:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
-        # Cooldown, vérification des soldes et écriture vivent dans UNE transaction
-        # protégée. Le cooldown persiste donc après un redéploiement Railway.
-        result = await self.bot.db.attempt_rob(
+
+        # Source de vérité unique : transaction, cooldown, amende, journal et rollback
+        # sont tous gérés dans services/economy.py. Aucun monkeypatch runtime nécessaire.
+        kind, value = await economy_service.atomic_rob(
+            self.bot.db,
             ctx.guild.id,
             ctx.author.id,
             membre.id,
-            cooldown=ROB_COOLDOWN,
         )
-        if result["outcome"] == "cooldown":
-            remaining = max(1, int(result.get("remaining", 1)))
+        if kind == "cooldown":
+            minutes = max(1, (int(value) + 59) // 60)
             return await sx_panels.envoyer(
                 ctx,
                 sx_panels.depuis_embed(
-                    embeds.warning(
-                        f'Vous devez encore attendre **{helpers.format_duration(remaining)}** avant de retenter un vol.'
-                    )
+                    embeds.warning(f'Vous devez attendre encore **{minutes} min** avant de retenter un vol.')
                 ),
             )
-        if result["outcome"] == "retry":
+        if kind == "poor":
             return await sx_panels.envoyer(
                 ctx,
                 sx_panels.depuis_embed(
-                    embeds.warning("Le solde de la cible a changé pendant la tentative. Réessayez.")
+                    embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")
                 ),
             )
-        if result["outcome"] == "too_poor":
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
-        if result["outcome"] == "success":
-            amount = result["amount"]
-            await self.bot.db.log_transaction(ctx.guild.id, membre.id, ctx.author.id, "rob", amount, "Vol réussi")
-            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'🕵️ Vous avez volé **{stats_service.format_number(amount)} 🪙** à {membre.display_name} !')))
-        else:
-            penalty = result["penalty"]
-            await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "rob_fail", penalty, "Vol raté, amende")
-            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f"🚨 Vous avez été attrapé et payé **{stats_service.format_number(penalty)} 🪙** d'amende !")))
-
+        if kind == "retry":
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(
+                    embeds.warning("Le solde de la cible vient de changer. Réessayez.")
+                ),
+            )
+        if kind == "success":
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(
+                    embeds.success(f'Vous avez volé **{stats_service.format_number(value)} 🪙** à {membre.display_name}.')
+                ),
+            )
+        if kind == "failed":
+            if value:
+                return await sx_panels.envoyer(
+                    ctx,
+                    sx_panels.depuis_embed(
+                        embeds.error(
+                            f"Vous avez été attrapé : **{stats_service.format_number(value)} 🪙** d'amende."
+                        )
+                    ),
+                )
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(
+                    embeds.error("Vous avez été attrapé, mais votre portefeuille était déjà vide.")
+                ),
+            )
+        return await sx_panels.envoyer(
+            ctx,
+            sx_panels.depuis_embed(
+                embeds.error("Le vol n'a pas pu être traité. Réessayez.")
+            ),
+        )
     @commands.hybrid_command(name="pay", description="Transférer de l'argent à un autre membre.")
     @app_commands.describe(membre="Le membre à qui envoyer", montant="Le montant à envoyer (ou 'all' pour tout envoyer)")
     async def pay(self, ctx: commands.Context, membre: discord.Member, montant: str):
