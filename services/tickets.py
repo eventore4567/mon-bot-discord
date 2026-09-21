@@ -48,6 +48,7 @@ des booléens — jamais testées directement avant ce lot.
 """
 from __future__ import annotations
 
+import io
 import logging
 
 import discord
@@ -55,6 +56,32 @@ import discord
 from utils import log_service
 
 logger = logging.getLogger("bot.tickets")
+
+
+async def fetch_transcript_text(channel: discord.TextChannel) -> str:
+    """Build the plain-text transcript used by close/manual transcript flows."""
+    lines: list[str] = []
+    async for msg in channel.history(limit=2000, oldest_first=True):
+        lines.append(
+            f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author} ({msg.author.id}): {msg.content}"
+        )
+        for attachment in msg.attachments:
+            lines.append(f"  [Pièce jointe] {attachment.url}")
+    return "\n".join(lines)
+
+
+def transcript_file(channel: discord.TextChannel, text: str) -> discord.File:
+    """Create a fresh Discord file object from already-fetched transcript text."""
+    return discord.File(
+        io.BytesIO(text.encode("utf-8")),
+        filename=f"transcript-{channel.name}.txt",
+    )
+
+
+async def generate_transcript(channel: discord.TextChannel) -> discord.File:
+    """Fetch channel history once and return a sendable transcript file."""
+    text = await fetch_transcript_text(channel)
+    return transcript_file(channel, text)
 
 
 async def safe_ticket_log(bot, guild: discord.Guild, log_type: str, embed: discord.Embed, **kwargs) -> bool:
