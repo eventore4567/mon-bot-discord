@@ -1,18 +1,57 @@
 """Production V9: contexte serveur minimal et sûr pour les réponses IA."""
 
 import logging
+import time
 
 from discord.ext import commands
 
 logger = logging.getLogger("bot.ai-context-v9")
 _PATCHED = False
 
+# Contexte serveur très court : réutilisé pendant quelques secondes afin qu'une même
+# demande ne relise pas la base plusieurs fois (routeur + réponse finale + éventuel outil).
+_CONTEXT_CACHE_TTL = 20.0
+_CONTEXT_CACHE: dict[tuple[int, int | None], tuple[float, str]] = {}
+_OPTIONAL_TABLE_CACHE: dict[str, tuple[float, bool]] = {}
+_NO_CONTEXT_COMMANDS = frozenset({
+    "sentrix-action-router",
+    "sentrix-action-plan",
+    "sentrix-command-router",
+    "sentrix-command-classifier",
+})
+
+
+async def _optional_table_exists(bot: commands.Bot, table: str) -> bool:
+    now = time.monotonic()
+    cached = _OPTIONAL_TABLE_CACHE.get(table)
+    if cached is not None and now < cached[0]:
+        return cached[1]
+    try:
+        row = await bot.db.fetchone(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+            (table,),
+        )
+        exists = row is not None
+    except Exception:
+        exists = False
+    _OPTIONAL_TABLE_CACHE[table] = (now + 600.0, exists)
+    return exists
+
 
 async def build_server_context(bot: commands.Bot, guild_id: int | None, channel_id: int | None) -> str:
-    """Construit un contexte utile sans exposer de secrets ni aspirer le serveur entier."""
+    """Construit un contexte utile, avec cache court et sans requêtes SQL inutiles."""
     if not guild_id:
         return ""
-    guild = bot.get_guild(int(guild_id))
+
+    gid = int(guild_id)
+    cid = int(channel_id) if channel_id else None
+    key = (gid, cid)
+    now = time.monotonic()
+    cached = _CONTEXT_CACHE.get(key)
+    if cached is not None and now < cached[0]:
+        return cached[1]
+
+    guild = bot.get_guild(gid)
     if guild is None:
         return ""
 
@@ -41,20 +80,31 @@ async def build_server_context(bot: commands.Bot, guild_id: int | None, channel_
         except Exception:
             logger.debug("Contexte ticket indisponible.", exc_info=True)
 
-    # Cette table est optionnelle : si le centre Engagement n'a encore enregistré aucun
-    # regroupement, l'IA continue simplement sans cette ligne de contexte.
-    try:
-        rows = await bot.db.fetchall(
-            "SELECT issue_label,occurrences FROM production_issue_clusters "
-            "WHERE guild_id=? ORDER BY occurrences DESC,last_seen DESC LIMIT 3",
-            (guild.id,),
-        )
-        if rows:
-            lines.append("Problèmes support fréquents: " + ", ".join(f"{row['issue_label']} ({row['occurrences']})" for row in rows))
-    except Exception:
-        logger.warning("Étape non critique ignorée dans build_server_context", exc_info=True)
+    # Table réellement optionnelle : vérifier son existence une fois toutes les 10 min.
+    # Avant, une installation sans cette table produisait une exception SQL à CHAQUE appel IA.
+    if await _optional_table_exists(bot, "production_issue_clusters"):
+        try:
+            rows = await bot.db.fetchall(
+                "SELECT issue_label,occurrences FROM production_issue_clusters "
+                "WHERE guild_id=? ORDER BY occurrences DESC,last_seen DESC LIMIT 3",
+                (guild.id,),
+            )
+            if rows:
+                lines.append(
+                    "Problèmes support fréquents: "
+                    + ", ".join(f"{row['issue_label']} ({row['occurrences']})" for row in rows)
+                )
+        except Exception:
+            logger.debug("Contexte support optionnel indisponible.", exc_info=True)
 
-    return "\n".join(lines)[:1200]
+    result = "\n".join(lines)[:1200]
+    _CONTEXT_CACHE[key] = (now + _CONTEXT_CACHE_TTL, result)
+    if len(_CONTEXT_CACHE) > 1000:
+        cutoff = now
+        for cache_key, (expires, _value) in list(_CONTEXT_CACHE.items()):
+            if expires <= cutoff:
+                _CONTEXT_CACHE.pop(cache_key, None)
+    return result
 
 
 def install(bot: commands.Bot) -> None:
@@ -68,6 +118,11 @@ def install(bot: commands.Bot) -> None:
         return
 
     async def generate_with_context(*args, **kwargs):
+        # Les routeurs internes ont besoin d'un JSON minuscule, pas du contexte serveur.
+        # Cela supprime des requêtes DB et réduit leurs prompts.
+        if kwargs.get("command") in _NO_CONTEXT_COMMANDS:
+            return await current(*args, **kwargs)
+
         context = await build_server_context(bot, kwargs.get("guild_id"), kwargs.get("channel_id"))
         if context:
             instructions = kwargs.get("instructions", ai_service.SYSTEM_PROMPT)
