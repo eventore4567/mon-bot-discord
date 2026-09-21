@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import time
 import types
 
 import discord
@@ -277,40 +276,16 @@ def _install_tickets(bot: commands.Bot) -> bool:
     return True
 
 
-class _ExpiringPlayLockRegistry:
-    """Même API que game_rewards.PlayLockRegistry, mais une exception ne bloque pas à vie."""
-
-    def __init__(self, ttl: float = _GAME_LOCK_TTL_SECONDS):
-        self.ttl = float(ttl)
-        self._locked: dict[tuple[int, int, str], float] = {}
-
-    def _prune(self, current: float | None = None):
-        current = time.monotonic() if current is None else current
-        stale = [key for key, stamp in self._locked.items() if current - stamp >= self.ttl]
-        for key in stale:
-            self._locked.pop(key, None)
-
-    def try_acquire(self, guild_id: int, user_id: int, game_name: str) -> bool:
-        current = time.monotonic()
-        self._prune(current)
-        key = (int(guild_id), int(user_id), str(game_name))
-        if key in self._locked:
-            return False
-        self._locked[key] = current
-        return True
-
-    def release(self, guild_id: int, user_id: int, game_name: str):
-        self._locked.pop((int(guild_id), int(user_id), str(game_name)), None)
-
-
 def _install_games(bot: commands.Bot) -> bool:
+    """Verify that the canonical game service has stale-lock recovery enabled."""
     from utils import game_rewards
-    if isinstance(getattr(game_rewards, "_registry", None), _ExpiringPlayLockRegistry):
-        return True
-    game_rewards._registry = _ExpiringPlayLockRegistry()
-    bot._sentrix_integrity_game_locks = True
-    return True
 
+    registry = getattr(game_rewards, "_registry", None)
+    ready = isinstance(registry, game_rewards.PlayLockRegistry) and float(
+        getattr(registry, "ttl", 0.0) or 0.0
+    ) > 0.0
+    bot._sentrix_integrity_game_locks = bool(ready)
+    return bool(ready)
 
 def _install_runtime_registry_audit(bot: commands.Bot) -> bool:
     if getattr(bot, "_sentrix_integrity_registry_audit", False):
