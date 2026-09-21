@@ -334,6 +334,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self._censor_webhooks: dict[int, discord.Webhook] = {}
         self.exempt_roles_cache: dict[int, set[int]] = {}
         self.ignored_channels_cache: dict[int, set[int]] = {}
+        self.immunity_overrides_cache: dict[tuple[int, int], bool | None] = {}
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
         # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
@@ -404,6 +405,18 @@ class AutoMod(commands.Cog, name="Automod"):
             self.exempt_roles_cache[guild_id] = {r["role_id"] for r in rows}
         return self.exempt_roles_cache[guild_id]
 
+    async def get_immunity_override_cached(self, guild_id: int, user_id: int) -> bool | None:
+        key = (guild_id, user_id)
+        if key not in self.immunity_overrides_cache:
+            row = await self.bot.db.fetchone(
+                "SELECT enabled FROM user_immunity_settings WHERE guild_id = ? AND user_id = ?",
+                (guild_id, user_id),
+            )
+            self.immunity_overrides_cache[key] = (
+                bool(int(row["enabled"])) if row is not None else None
+            )
+        return self.immunity_overrides_cache[key]
+
     async def get_ignored_channels_cached(self, guild_id: int) -> set[int]:
         if guild_id not in self.ignored_channels_cache:
             rows = await self.bot.db.fetchall("SELECT channel_id FROM ignored_channels WHERE guild_id = ?", (guild_id,))
@@ -411,15 +424,14 @@ class AutoMod(commands.Cog, name="Automod"):
         return self.ignored_channels_cache[guild_id]
 
     async def is_automod_exempt(self, member: discord.abc.User) -> bool:
-        """Vrai uniquement pour les exemptions sûres : propriétaire du serveur,
-        propriétaire du bot, ou rôle explicitement autorisé avec
-        +automod-exempt-role-add. Les administrateurs et modérateurs ordinaires restent
-        protégés, car leur compte peut lui aussi être compromis."""
+        """Détermine l'immunité AutoMod avec un override personnel explicite."""
         if not isinstance(member, discord.Member):
             return False
-        # La sécurité doit aussi protéger contre un compte staff/admin compromis.
-        # Seuls le propriétaire du serveur, le propriétaire du bot et les rôles
-        # explicitement ajoutés à la liste d'exemption échappent aux filtres.
+
+        override = await self.get_immunity_override_cached(member.guild.id, member.id)
+        if override is not None:
+            return override
+
         if member.id == member.guild.owner_id or member.id in config.OWNER_IDS:
             return True
         exempt_ids = await self.get_exempt_roles_cached(member.guild.id)
@@ -714,13 +726,88 @@ class AutoMod(commands.Cog, name="Automod"):
             name="Test conseillé",
             value=(
                 "Utilisez `+security-level eleve`, puis testez avec un compte qui n'est pas "
-                "propriétaire du serveur. Le propriétaire reste toujours exempté pour éviter "
-                "qu'un mauvais réglage ne le bloque."
+                "propriétaire du serveur, sauf si celui-ci a volontairement désactivé "
+                "son immunité avec +immunity off."
             ),
             inline=False,
         )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
+    @commands.hybrid_command(
+        name="immunity",
+        aliases=["immunite"],
+        description="Activer ou désactiver votre immunité personnelle SentriX.",
+        with_app_command=False,
+    )
+    async def personal_immunity(self, ctx: commands.Context, etat: str = "status"):
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("Cette commande s’utilise dans un serveur.")),
+            )
+
+        allowed = ctx.author.id == ctx.guild.owner_id or await checks.is_verified_bot_owner(ctx)
+        if not allowed:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.error("Seul le propriétaire du serveur ou le propriétaire vérifié de SentriX peut modifier sa propre immunité.")
+                ),
+            )
+
+        normalized = _sans_accents(str(etat or "")).casefold().strip()
+        key = (ctx.guild.id, ctx.author.id)
+        if normalized in {"status", "statut", "etat"}:
+            override = await self.get_immunity_override_cached(*key)
+            enabled = True if override is None else override
+            state = "active" if enabled else "désactivée"
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.info(f"Votre immunité SentriX est actuellement {state}.")),
+            )
+
+        if normalized in {"on", "active", "activer", "1", "oui"}:
+            enabled = True
+        elif normalized in {"off", "desactive", "desactiver", "0", "non"}:
+            enabled = False
+        else:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("Utilisez +immunity on ou +immunity off.")),
+            )
+
+        await self.bot.db.execute(
+            """
+            INSERT INTO user_immunity_settings (guild_id, user_id, enabled, updated_at)
+            VALUES (?, ?, ?, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                enabled=excluded.enabled,
+                updated_at=excluded.updated_at
+            """,
+            (ctx.guild.id, ctx.author.id, 1 if enabled else 0),
+        )
+        self.immunity_overrides_cache[key] = enabled
+
+        if enabled:
+            description = "Immunité SentriX activée. AutoMod vous ignore de nouveau selon les règles d’immunité habituelles."
+        else:
+            description = (
+                "Immunité SentriX désactivée. AutoMod vous traite maintenant comme un membre normal : "
+                "mots et liens interdits, spam et sanctions automatiques peuvent vous concerner. "
+                "Les limites natives de Discord et la hiérarchie des rôles restent applicables."
+            )
+
+        await self.log_action(
+            ctx.guild,
+            embeds.log_entry(
+                "Immunité personnelle SentriX modifiée",
+                config.COLOR_WARNING if not enabled else config.COLOR_SUCCESS,
+                cible=ctx.author,
+                cible_label="Membre",
+                raison="Immunité activée" if enabled else "Immunité désactivée",
+            ),
+        )
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(description)))
     @commands.hybrid_command(name="automod-escalation", description="Activer/désactiver l'escalade automatique des sanctions AutoMod.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver l'escalade")
     @app_commands.choices(etat=TOGGLE_CHOICES)
