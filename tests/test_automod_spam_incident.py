@@ -294,9 +294,7 @@ def test_content_policy_wrapper_accepts_censored_content_and_honors_immunity_off
 def test_normalize_link_text_repairs_split_scheme_and_separates_concatenated_urls():
     raw = "https:/ /discord.gg/GgYzEFSshttps://discord.gg/Another"
     normalized = automod_module._normalize_link_text(raw)
-    assert "https://discord.gg/ggyze fss".replace(" ", "") not in normalized  # sanity: no accidental spacing inside code
-    assert "https://discord.gg/ggyze" in normalized
-    assert " https://discord.gg/another" in normalized
+    assert normalized == "https://discord.gg/ggyzefss https://discord.gg/another"
 
 
 def test_targeted_blocked_link_matches_when_same_url_is_glued_to_another_url():
