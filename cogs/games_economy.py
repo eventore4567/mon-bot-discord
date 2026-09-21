@@ -150,6 +150,70 @@ async def _finish(bot, ctx: commands.Context, game_name: str, session_id: str, r
     return await game_rewards.reward_game_winner(bot, guild_id, ctx.author.id, game_name, base_amount, session_id, result="win")
 
 
+async def _precheck_duel(
+    bot,
+    ctx: commands.Context,
+    game_name: str,
+    opponent: discord.Member,
+    cooldown: int,
+) -> tuple[bool, str, str | None]:
+    """Prépare les DEUX participants d'un duel.
+
+    Avant ce helper, seul l'initiateur passait les rôles/salons/cooldowns et le verrou
+    était relâché immédiatement : un adversaire interdit pouvait jouer et les duels
+    pouvaient être spammés sans cooldown réel.
+    """
+    started, reason, session_id = await _precheck(bot, ctx, game_name, cooldown)
+    if not started:
+        return False, reason, None
+
+    guild_id = ctx.guild.id
+    opponent_roles = {r.id for r in getattr(opponent, "roles", [])}
+    ok, reason = await game_rewards.is_game_enabled(
+        bot,
+        guild_id,
+        game_name,
+        ctx.channel.id,
+        opponent_roles,
+    )
+    if not ok:
+        game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
+        return False, f"Adversaire non autorisé : {reason}", None
+
+    allowed, remaining = await game_rewards.check_cooldown(
+        bot,
+        guild_id,
+        opponent.id,
+        game_name,
+        cooldown,
+    )
+    if not allowed:
+        game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
+        return False, f"L'adversaire doit encore attendre **{remaining}s** pour ce jeu.", None
+
+    if not game_rewards.acquire_play_lock(guild_id, opponent.id, game_name):
+        game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
+        return False, "L'adversaire a déjà une manche de ce jeu en cours.", None
+
+    return True, "", session_id
+
+
+async def _finish_duel(
+    bot,
+    guild_id: int,
+    game_name: str,
+    p1: discord.Member,
+    p2: discord.Member,
+) -> None:
+    """Libère les deux verrous et démarre le cooldown des deux participants."""
+    game_rewards.release_play_lock(guild_id, p1.id, game_name)
+    game_rewards.release_play_lock(guild_id, p2.id, game_name)
+    await asyncio.gather(
+        game_rewards.touch_cooldown(bot, guild_id, p1.id, game_name),
+        game_rewards.touch_cooldown(bot, guild_id, p2.id, game_name),
+    )
+
+
 # =============================================================================
 # JEUX RAPIDES
 # =============================================================================
@@ -488,10 +552,10 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel', description=invalid, kind='danger')))
-        started, err, sid = await _precheck(self.bot, ctx, "duel", 15)
+        started, err, sid = await _precheck_duel(self.bot, ctx, "duel", adversaire, 15)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel', description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, "duel")  # le verrou individuel ne s'applique pas aux duels à 2
+  # le verrou individuel ne s'applique pas aux duels à 2
         view = _RPSDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel — Pierre-feuille-ciseaux', description=f'⚔️ {ctx.author.mention} défie {adversaire.mention} !\nCliquez sur le bouton pour faire votre choix EN PRIVÉ.')), view))
         view.message = msg
@@ -503,10 +567,10 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=invalid, kind='danger')))
-        started, err, sid = await _precheck(self.bot, ctx, "numberduel", 15)
+        started, err, sid = await _precheck_duel(self.bot, ctx, "numberduel", adversaire, 15)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, "numberduel")
+
         view = _NumberDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=f'🔢 {ctx.author.mention} vs {adversaire.mention}\nLe bot a choisi un nombre secret entre 1 et 100. Cliquez pour proposer le vôtre EN PRIVÉ.')), view))
         view.message = msg
@@ -518,10 +582,10 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de quiz', description=invalid, kind='danger')))
-        started, err, sid = await _precheck(self.bot, ctx, "quizduel", 15)
+        started, err, sid = await _precheck_duel(self.bot, ctx, "quizduel", adversaire, 15)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de quiz', description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, "quizduel")
+
         question, answer = game_rewards.secure_pick(WORDGAME_CLUES)
         view = _QuizDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid, answer=answer)
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de quiz', description=f'❓ {ctx.author.mention} vs {adversaire.mention}\n**{question}**\nCliquez pour répondre EN PRIVÉ.')), view))
@@ -534,15 +598,16 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=invalid, kind='danger')))
-        started, err, sid = await _precheck(self.bot, ctx, "reactionduel", 15)
+        started, err, sid = await _precheck_duel(self.bot, ctx, "reactionduel", adversaire, 15)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, "reactionduel")
+
         msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=f'⚡ {ctx.author.mention} vs {adversaire.mention}\n⏳ Préparez-vous...')))
         await asyncio.sleep(random.uniform(2.0, 6.0))
         view = _ReactionDuelView(p1=ctx.author, p2=adversaire)
         await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description='🔴 **MAINTENANT !**')), view))
         await view.wait()
+        await _finish_duel(self.bot, guild_id, "reactionduel", ctx.author, adversaire)
         if view.winner is None:
             await game_rewards.reward_game_winner(self.bot, guild_id, ctx.author.id, "reactionduel", 0, sid, result="draw")
             return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description="⏱️ Personne n'a cliqué à temps.")))
@@ -556,10 +621,10 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=invalid, kind='danger')))
-        started, err, sid = await _precheck(self.bot, ctx, "connect4", 15)
+        started, err, sid = await _precheck_duel(self.bot, ctx, "connect4", adversaire, 15)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=err, kind='warning')))
-        game_rewards.release_play_lock(guild_id, ctx.author.id, "connect4")
+
         view = ConnectFourView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=view.render(f'Au tour de {ctx.author.mention} (🔴)'))), view))
         view.message = msg
@@ -604,6 +669,7 @@ class _RPSDuelView(discord.ui.View):
         if self._settled or self.message is None:
             return
         self._settled = True
+        await _finish_duel(self.cog.bot, self.guild_id, "duel", self.p1, self.p2)
         for child in self.children:
             child.disabled = True
         try:
@@ -615,6 +681,7 @@ class _RPSDuelView(discord.ui.View):
         if self._settled or len(self.choices) < 2:
             return
         self._settled = True
+        await _finish_duel(self.cog.bot, self.guild_id, "duel", self.p1, self.p2)
         c1, c2 = self.choices[self.p1.id], self.choices[self.p2.id]
         if c1 == c2:
             winner = None
@@ -683,6 +750,7 @@ class _NumberDuelView(discord.ui.View):
         if self._settled or self.message is None:
             return
         self._settled = True
+        await _finish_duel(self.cog.bot, self.guild_id, "numberduel", self.p1, self.p2)
         for child in self.children:
             child.disabled = True
         try:
@@ -701,6 +769,7 @@ class _NumberDuelView(discord.ui.View):
         if self._settled or len(self.choices) < 2:
             return
         self._settled = True
+        await _finish_duel(self.cog.bot, self.guild_id, "numberduel", self.p1, self.p2)
         n1, n2 = self.choices[self.p1.id], self.choices[self.p2.id]
         d1, d2 = abs(n1 - self.target), abs(n2 - self.target)
         for child in self.children:
@@ -749,6 +818,7 @@ class _QuizDuelView(discord.ui.View):
         if self._settled or self.message is None:
             return
         self._settled = True
+        await _finish_duel(self.cog.bot, self.guild_id, "quizduel", self.p1, self.p2)
         for child in self.children:
             child.disabled = True
         try:
@@ -767,6 +837,7 @@ class _QuizDuelView(discord.ui.View):
         if self._settled or len(self.choices) < 2:
             return
         self._settled = True
+        await _finish_duel(self.cog.bot, self.guild_id, "quizduel", self.p1, self.p2)
         (a1, t1), (a2, t2) = self.choices[self.p1.id], self.choices[self.p2.id]
         c1, c2 = a1 == self.answer, a2 == self.answer
         for child in self.children:
@@ -919,6 +990,7 @@ class ConnectFourView(discord.ui.View):
             for child in self.children:
                 child.disabled = True
             self._settled = True
+            await _finish_duel(self.cog.bot, self.guild_id, "connect4", self.p1, self.p2)
             winner = self.current
             reward = await game_rewards.reward_game_winner(self.cog.bot, self.guild_id, winner.id, "connect4", 40, self.session_id, result="win")
             await panels.editer(
@@ -931,6 +1003,7 @@ class ConnectFourView(discord.ui.View):
             return
         if self._is_full():
             self._settled = True
+            await _finish_duel(self.cog.bot, self.guild_id, "connect4", self.p1, self.p2)
             await game_rewards.reward_game_winner(self.cog.bot, self.guild_id, self.p1.id, "connect4", 0, self.session_id, result="draw")
             await panels.editer(interaction.response, panels.avec_composants(self.panneau("🤝 Match nul, plateau plein !"), self))
             return
@@ -948,6 +1021,7 @@ class ConnectFourView(discord.ui.View):
         if self._settled or self.message is None:
             return
         self._settled = True
+        await _finish_duel(self.cog.bot, self.guild_id, "connect4", self.p1, self.p2)
         for child in self.children:
             child.disabled = True
         try:
