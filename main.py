@@ -328,6 +328,10 @@ INTENTS = discord.Intents.default()
 INTENTS.members = True
 INTENTS.message_content = True
 INTENTS.voice_states = True
+# Nécessaire pour que SentriX reçoive les créations/modifications et exécutions
+# de règles Discord AutoMod qu'il synchronise (anti-liens natif notamment).
+INTENTS.auto_moderation_configuration = True
+INTENTS.auto_moderation_execution = True
 
 
 class SentriXContext(commands.Context):
