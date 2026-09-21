@@ -388,3 +388,50 @@ def test_main_enables_discord_automod_gateway_intents():
     assert "INTENTS.auto_moderation_configuration = True" in source
     assert "INTENTS.auto_moderation_execution = True" in source
 
+@pytest.mark.asyncio
+async def test_native_blacklist_rule_is_created_for_blocked_words():
+    db = SimpleNamespace(
+        fetchall=AsyncMock(return_value=[{"word": "spamword"}, {"word": "autre"}]),
+        fetchone=AsyncMock(return_value=None),
+    )
+    bot = SimpleNamespace(db=db)
+    cog = AutoMod(bot)
+    guild = SimpleNamespace(
+        id=321,
+        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
+        fetch_automod_rules=AsyncMock(return_value=[]),
+        create_automod_rule=AsyncMock(),
+    )
+
+    assert await cog._sync_native_blacklist_rule(guild) is True
+    guild.create_automod_rule.assert_awaited_once()
+    kwargs = guild.create_automod_rule.await_args.kwargs
+    assert kwargs["name"] == automod_module.NATIVE_BLACKLIST_RULE_NAME
+    assert kwargs["trigger"].keyword_filter == ["autre", "spamword"]
+    assert kwargs["actions"][0].custom_message == automod_module.NATIVE_BLACKLIST_CUSTOM_MESSAGE
+    assert kwargs["exempt_roles"] == []
+    assert kwargs["exempt_channels"] == []
+
+
+@pytest.mark.asyncio
+async def test_native_blacklist_rule_is_removed_when_no_words_remain():
+    existing = SimpleNamespace(
+        name=automod_module.NATIVE_BLACKLIST_RULE_NAME,
+        id=778,
+        delete=AsyncMock(),
+    )
+    db = SimpleNamespace(
+        fetchall=AsyncMock(return_value=[]),
+        fetchone=AsyncMock(return_value=None),
+    )
+    bot = SimpleNamespace(db=db)
+    cog = AutoMod(bot)
+    guild = SimpleNamespace(
+        id=321,
+        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
+        fetch_automod_rules=AsyncMock(return_value=[existing]),
+    )
+
+    assert await cog._sync_native_blacklist_rule(guild) is True
+    existing.delete.assert_awaited_once()
+
