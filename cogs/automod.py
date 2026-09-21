@@ -1154,25 +1154,89 @@ class AutoMod(commands.Cog, name="Automod"):
     @checks.is_owner_or_admin_for("securite")
     async def automod_native_sync(self, ctx: commands.Context):
         await self._sync_native_suite(ctx.guild)
+
         try:
             rules = await ctx.guild.fetch_automod_rules()
-            sentrix_rules = [r for r in rules if str(r.name).startswith("SentriX • ")]
-            names = "\n".join(f"• {r.name}" for r in sentrix_rules) or "Aucune règle native active."
-            await panels.envoyer(
-                ctx,
-                panels.depuis_embed(
-                    embeds.success(
-                        f"AutoMod Discord synchronisé : **{len(sentrix_rules)}** règle(s) SentriX active(s).\n{names}"
-                    )
-                ),
-            )
         except (discord.Forbidden, discord.HTTPException):
-            await panels.envoyer(
+            return await panels.envoyer(
                 ctx,
                 panels.depuis_embed(
                     embeds.error("Synchronisation terminée, mais Discord refuse la lecture des règles AutoMod.")
                 ),
             )
+
+        sentrix_rules = [r for r in rules if str(r.name).startswith("SentriX • ")]
+        names = "\n".join(f"• {r.name}" for r in sentrix_rules) or "• Aucune règle native active sur ce serveur."
+
+        conf = await self.bot.db.get_automod(ctx.guild.id)
+        word_rows = await self.bot.db.fetchall(
+            "SELECT word FROM blacklist_words WHERE guild_id = ? LIMIT 1001",
+            (ctx.guild.id,),
+        )
+        link_rows = await self.bot.db.fetchall(
+            "SELECT value FROM blacklist_links WHERE guild_id = ? LIMIT 1001",
+            (ctx.guild.id,),
+        )
+
+        enabled_labels: list[str] = []
+        if conf:
+            if conf["antilink"]:
+                enabled_labels.append("Anti-liens total")
+            elif conf["antiinvite"]:
+                enabled_labels.append("Anti-invitations")
+            if conf["antiscam"]:
+                enabled_labels.append("Anti-arnaque")
+            if conf["antimention"]:
+                enabled_labels.append("Anti-mentions")
+            if conf["antiinsult"]:
+                enabled_labels.append("Contenu sensible")
+        if word_rows:
+            enabled_labels.append(f"Mots interdits ({len(word_rows)})")
+        if link_rows:
+            enabled_labels.append(f"Liens ciblés ({len(link_rows)})")
+
+        local_state = (
+            ", ".join(enabled_labels)
+            if enabled_labels
+            else "Aucune protection native SentriX n'est activée/configurée ici."
+        )
+
+        # Diagnostic global du bot. On lit les règles en parallèle mais avec une limite
+        # de concurrence pour éviter une rafale sur l'API Discord.
+        semaphore = asyncio.Semaphore(4)
+
+        async def count_for_guild(guild: discord.Guild) -> int:
+            async with semaphore:
+                try:
+                    guild_rules = await guild.fetch_automod_rules()
+                except (discord.Forbidden, discord.HTTPException):
+                    return 0
+                return sum(
+                    1 for rule in guild_rules
+                    if str(getattr(rule, "name", "")).startswith("SentriX • ")
+                )
+
+        counts = await asyncio.gather(
+            *(count_for_guild(guild) for guild in list(self.bot.guilds))
+        )
+        global_total = sum(counts)
+
+        description = (
+            f"**Ce serveur : {len(sentrix_rules)} règle(s) native(s)**\n"
+            f"{names}\n\n"
+            f"**Configuration détectée ici :** {local_state}\n\n"
+            f"**Total SentriX sur {len(self.bot.guilds)} serveur(s) : {global_total} règle(s) AutoMod native(s).**"
+        )
+        if not sentrix_rules:
+            description += (
+                "\n\nLe **0** n'est pas un échec de synchronisation : il signifie que ce serveur "
+                "n'a actuellement aucune protection SentriX qui nécessite une règle AutoMod native."
+            )
+
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(embeds.success(description)),
+        )
 
     @commands.hybrid_command(
         name="security-check",
