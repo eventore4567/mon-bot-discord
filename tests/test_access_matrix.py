@@ -429,3 +429,30 @@ class NormalisationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+class RemainingRuntimeClassificationTests(unittest.TestCase):
+    def test_runtime_commands_are_no_longer_fail_closed(self):
+        expected = {
+            "achievements-v21": "public",
+            "antilink-strict": "categorie:securite",
+            "automod-native-sync": "categorie:securite",
+            "immunity": "guild-owner",
+            "dblstatus": "owner-global",
+            "dblsync": "owner-global",
+            "topggstatus": "owner-global",
+            "topggsync": "owner-global",
+        }
+        actual = {name: M.access_tier(name) for name in expected}
+        self.assertEqual(actual, expected)
+
+    def test_immunity_matches_command_body_owner_policy(self):
+        backend = FakeBackend()
+        self.assertFalse(decide(backend, administrator(), "immunity").allowed)
+        self.assertTrue(decide(backend, guild_owner(), "immunity").allowed)
+        self.assertTrue(decide(backend, global_owner(), "immunity").allowed)
+
+    def test_native_automod_sync_is_admin_security_action(self):
+        backend = FakeBackend()
+        self.assertFalse(decide(backend, member(), "automod-native-sync").allowed)
+        self.assertTrue(decide(backend, administrator(), "automod-native-sync").allowed)
+
