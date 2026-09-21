@@ -11,7 +11,7 @@ class _FakeBot:
         return list(self._commands)
 
 
-def _cmd(name, *, aliases=(), description="", signature="", hidden=False, enabled=True):
+def _cmd(name, *, aliases=(), description="", signature="", hidden=False, enabled=True, has_params=False):
     return SimpleNamespace(
         qualified_name=name,
         name=name.split(" ", 1)[0],
@@ -21,6 +21,7 @@ def _cmd(name, *, aliases=(), description="", signature="", hidden=False, enable
         signature=signature,
         hidden=hidden,
         enabled=enabled,
+        clean_params={"arg": object()} if has_params else {},
     )
 
 
@@ -151,4 +152,59 @@ def test_confirmation_policy_keeps_safe_commands_immediate():
     assert not ai_command_router.command_needs_confirmation("+help", "+")
     assert not ai_command_router.command_needs_confirmation("+clear 20", "+")
     assert not ai_command_router.command_needs_confirmation("+profile", "+")
+
+def test_natural_command_mapping_handles_setup_help_and_images():
+    bot = _FakeBot([])
+
+    assert ai_command_router.natural_command_line(
+        bot, "ouvre moi setup", "+", has_attachment=False
+    ) == "+setup"
+    assert ai_command_router.natural_command_line(
+        bot, "affiche les commandes aide", "+", has_attachment=False
+    ) == "+help"
+    assert ai_command_router.natural_command_line(
+        bot, "fais une image de dragon dans l'espace", "+", has_attachment=False
+    ) == "+image dragon dans l'espace"
+
+
+def test_natural_command_mapping_handles_emoji_attachment_and_pasted_emoji():
+    bot = _FakeBot([])
+
+    assert ai_command_router.natural_command_line(
+        bot, "ajoute cet emoji", "+", has_attachment=True
+    ) == "+addemoji emoji"
+    assert ai_command_router.natural_command_line(
+        bot,
+        "supprime emoji <:test:123456789012345678>",
+        "+",
+        has_attachment=False,
+    ) == "+deleteemoji <:test:123456789012345678>"
+
+
+def test_natural_command_mapping_uses_loaded_command_and_keeps_arguments():
+    ban = _cmd("ban", aliases=["bannir"], has_params=True)
+    bot = _FakeBot([ban])
+
+    assert ai_command_router.natural_command_line(
+        bot,
+        "ban @Tomioka spam",
+        "+",
+        has_attachment=False,
+    ) == "+ban @Tomioka spam"
+
+
+def test_natural_command_mapping_does_not_turn_normal_chat_into_command():
+    setup = _cmd("setup")
+    bot = _FakeBot([setup])
+
+    assert ai_command_router.natural_command_line(
+        bot,
+        "je trouve le setup joli",
+        "+",
+        has_attachment=False,
+    ) is None
+
+
+def test_normalize_request_is_accent_insensitive():
+    assert ai_command_router.normalize_request("CRÉE un Émoji") == "cree un emoji"
 
