@@ -318,15 +318,38 @@ class Minigames(commands.Cog, name="Minigames"):
         invalid = game_rewards.validate_opponent(ctx.author, adversaire)
         if invalid:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Adversaire invalide', description=invalid, kind='danger')))
-        if ctx.guild is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Morpion', description='🎮 Les mini-jeux ne sont disponibles que sur un serveur.', kind='warning')))
-        ok, reason = await game_rewards.is_game_enabled(self.bot, ctx.guild.id, "tictactoe", ctx.channel.id)
-        if not ok:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Morpion', description=reason, kind='warning')))
-        session_id = game_rewards.new_session_id("tictactoe")
+
+        started, err, session_id = await self._start(ctx, "tictactoe", cooldown=15)
+        if not started:
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Morpion', description=err, kind='warning')))
+
+        # Les restrictions de rôles +gamesetup valent aussi pour l'adversaire invité.
+        opponent_roles = {r.id for r in getattr(adversaire, "roles", [])}
+        opponent_ok, opponent_reason = await game_rewards.is_game_enabled(
+            self.bot,
+            ctx.guild.id,
+            "tictactoe",
+            ctx.channel.id,
+            opponent_roles,
+        )
+        if not opponent_ok:
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "tictactoe")
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await self._embed(
+                        guild_id,
+                        title='Morpion',
+                        description=f"Adversaire non autorisé : {opponent_reason}",
+                        kind='warning',
+                    )
+                ),
+            )
+
         view = TicTacToeView(ctx.author, adversaire, cog=self, session_id=session_id)
         e = await self._embed(guild_id, title="Morpion", description=f"{ctx.author.mention} (○) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
-        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
+        view.message = msg
 
     @commands.hybrid_command(name="hangman", description="Jouer au pendu.", with_app_command=False)
     async def hangman(self, ctx: commands.Context):
@@ -507,10 +530,50 @@ class TicTacToeView(discord.ui.View):
         self.board = [[None] * 3 for _ in range(3)]
         self.cog = cog
         self.session_id = session_id
+        self.message: discord.Message | None = None
         self._settled = False
         for y in range(3):
             for x in range(3):
                 self.add_item(TicTacToeButton(x, y))
+
+    async def _close_session(self) -> int | None:
+        """Ferme exactement une fois le verrou/cooldown de la manche."""
+        if self._settled or self.cog is None:
+            return None
+        self._settled = True
+        guild = getattr(self.player_x, "guild", None)
+        guild_id = getattr(guild, "id", None)
+        if guild_id is None:
+            return None
+
+        game_rewards.release_play_lock(guild_id, self.player_x.id, "tictactoe")
+        # Les deux joueurs ont participé : le cooldown empêche les invitations en boucle.
+        await game_rewards.touch_cooldown(self.cog.bot, guild_id, self.player_x.id, "tictactoe")
+        await game_rewards.touch_cooldown(self.cog.bot, guild_id, self.player_o.id, "tictactoe")
+        return guild_id
+
+    async def on_timeout(self):
+        guild_id = await self._close_session()
+        if guild_id is None:
+            return
+        if self.session_id is not None:
+            await game_rewards.reward_game_winner(
+                self.cog.bot,
+                guild_id,
+                self.player_x.id,
+                "tictactoe",
+                0,
+                self.session_id,
+                result="draw",
+                metadata={"reason": "timeout"},
+            )
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
 
     def check_winner(self):
         b = self.board
@@ -528,27 +591,36 @@ class TicTacToeView(discord.ui.View):
         return all(cell is not None for row in self.board for cell in row)
 
     async def _reward_winner(self, winner: discord.Member):
-        """Crédite le gagnant du duel (récompense réelle, via game_rewards) — l'adversaire
-        ne reçoit rien, aucune mise n'est prélevée à personne (pas de pari entre joueurs)."""
-        if self._settled or self.cog is None or self.session_id is None:
+        """Crédite le gagnant puis ferme verrou + cooldown pour les deux joueurs."""
+        if self.cog is None or self.session_id is None:
             return
-        self._settled = True
-        guild_id = self.player_x.guild.id if hasattr(self.player_x, "guild") and self.player_x.guild else None
+        guild_id = await self._close_session()
         if guild_id is None:
             return
         await game_rewards.reward_game_winner(
-            self.cog.bot, guild_id, winner.id, "tictactoe", REWARD_TICTACTOE, self.session_id, result="win",
+            self.cog.bot,
+            guild_id,
+            winner.id,
+            "tictactoe",
+            REWARD_TICTACTOE,
+            self.session_id,
+            result="win",
         )
 
     async def _finish_draw(self):
-        if self._settled or self.cog is None or self.session_id is None:
+        if self.cog is None or self.session_id is None:
             return
-        self._settled = True
-        guild_id = self.player_x.guild.id if hasattr(self.player_x, "guild") and self.player_x.guild else None
+        guild_id = await self._close_session()
         if guild_id is None:
             return
         await game_rewards.reward_game_winner(
-            self.cog.bot, guild_id, self.player_x.id, "tictactoe", 0, self.session_id, result="draw",
+            self.cog.bot,
+            guild_id,
+            self.player_x.id,
+            "tictactoe",
+            0,
+            self.session_id,
+            result="draw",
         )
 
 
