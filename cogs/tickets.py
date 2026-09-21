@@ -22,7 +22,6 @@ toujours de view_channel=False pour @everyone, quoi qu'il arrive.
 """
 
 import asyncio
-import io
 import json
 import logging
 import re
@@ -34,6 +33,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from services.tickets import count_genuinely_open_tickets
+from services import tickets as tickets_service
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as sx_panels
 from database.db import now
@@ -1327,23 +1327,13 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- FERMETURE
 
     async def _fetch_transcript_text(self, channel: discord.TextChannel) -> str:
-        lines = []
-        async for msg in channel.history(limit=2000, oldest_first=True):
-            lines.append(f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author} ({msg.author.id}): {msg.content}")
-            for att in msg.attachments:
-                lines.append(f"    [pièce jointe] {att.url}")
-        return "\n".join(lines) or "Aucun message."
+        return await tickets_service.fetch_transcript_text(channel)
 
     def _transcript_file(self, channel: discord.TextChannel, text: str) -> discord.File:
-        # Un discord.File ne peut servir qu'à UN SEUL envoi (son contenu est "consommé"
-        # après le premier .send()) : on doit donc en recréer un pour chaque destinataire,
-        # mais à partir du même texte déjà récupéré, plutôt que de relire tout l'historique.
-        return discord.File(io.BytesIO(text.encode("utf-8")), filename=f"transcript-{channel.name}.txt")
+        return tickets_service.transcript_file(channel, text)
 
     async def generate_transcript(self, channel: discord.TextChannel) -> discord.File:
-        text = await self._fetch_transcript_text(channel)
-        return self._transcript_file(channel, text)
-
+        return await tickets_service.generate_transcript(channel)
     async def close_ticket(self, interaction: discord.Interaction, ticket_id: int, reason: str):
         ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
         if not ticket:
