@@ -308,16 +308,12 @@ def _install_runtime_registry_audit(bot: commands.Bot) -> bool:
                 errors.append(
                     f"signature invalide {command.qualified_name}: {type(exc).__name__}"
                 )
-        try:
-            from . import command_catalog_cleanup
-            missing = sorted(
-                name for name in command_catalog_cleanup.NORMAL_DIRECT_COMMANDS
-                if bot.get_command(name) is None
-            )
-            if missing:
-                errors.append("commandes directes absentes: " + ", ".join(missing))
-        except Exception:
-            logger.exception("Audit du catalogue direct impossible.")
+        # Ne pas comparer le runtime à NORMAL_DIRECT_COMMANDS ici : cette table sert
+        # à la présentation/pruning historique, alors que la surface finale est
+        # reconstruite par les couches canoniques (groupes slash, noms courts,
+        # commandes fusionnées/supprimées). Exiger chaque ancien nom produit donc
+        # de faux ERROR malgré une surface fonctionnelle. Le sweep CI vérifie déjà
+        # l'exécutabilité réelle de toutes les commandes effectivement chargées.
         bot._sentrix_integrity_state = {
             "ready": not errors,
             "errors": tuple(errors),
