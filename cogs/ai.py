@@ -48,7 +48,16 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from utils import embeds, checks, design_system, ai_service, ai_actions, access_matrix, log_service
+from utils import (
+    embeds,
+    checks,
+    design_system,
+    ai_service,
+    ai_actions,
+    ai_command_router,
+    access_matrix,
+    log_service,
+)
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.ai")
@@ -2109,55 +2118,14 @@ class Ai(commands.Cog, name="Ai"):
                 pass
 
     def _command_candidates(self, question: str) -> list[commands.Command]:
-        """Préfiltre vite les commandes réellement chargées avant le classifieur IA.
-
-        L'index est construit une seule fois par process. Les permissions ne sont PAS
-        filtrées ici : permission_guard/access_matrix décide au moment de l'exécution.
-        Ainsi, si l'auteur possède réellement le droit d'utiliser une commande, le
-        langage naturel peut aussi l'atteindre.
-        """
-        normalized = ai_actions.normalize_text(question)
-        tokens = {t for t in re.findall(r"[a-z0-9_-]{2,}", normalized) if len(t) >= 2}
-
+        """Fast prefilter of loaded commands, delegated to the dedicated router module."""
         if self._command_index is None:
-            index: list[tuple[commands.Command, str, set[str]]] = []
-            for command in self.bot.walk_commands():
-                if getattr(command, "hidden", False) or not getattr(command, "enabled", True):
-                    continue
-                qualified = str(getattr(command, "qualified_name", "") or "").strip()
-                if not qualified:
-                    continue
-                root = qualified.split(" ", 1)[0].casefold()
-                # Empêche uniquement une récursion vers les commandes IA elles-mêmes.
-                if access_matrix.module_for_command(root) == "ai":
-                    continue
-                aliases = " ".join(str(a) for a in getattr(command, "aliases", ()) or ())
-                description = str(
-                    getattr(command, "description", "") or getattr(command, "help", "") or ""
-                )
-                signature = str(getattr(command, "signature", "") or "")
-                qualified_norm = ai_actions.normalize_text(qualified)
-                haystack = ai_actions.normalize_text(
-                    f"{qualified} {aliases} {description} {signature}"
-                )
-                command_tokens = set(re.findall(r"[a-z0-9_-]{2,}", haystack))
-                index.append((command, qualified_norm, command_tokens))
-            self._command_index = index
-
-        rows: list[tuple[float, commands.Command]] = []
-        import difflib
-        for command, qualified_norm, command_tokens in self._command_index:
-            overlap = len(tokens & command_tokens)
-            ratio = difflib.SequenceMatcher(a=normalized, b=qualified_norm).ratio() if normalized else 0.0
-            direct = 4.0 if qualified_norm and qualified_norm in normalized else 0.0
-            score = overlap * 2.0 + ratio * 3.0 + direct
-            if score >= 1.2:
-                rows.append((score, command))
-
-        rows.sort(key=lambda item: item[0], reverse=True)
-        # 20 candidats gardent une bonne couverture tout en réduisant fortement le prompt
-        # du routeur Luna par rapport à l'ancien catalogue de 28.
-        return [command for _, command in rows[:20]]
+            self._command_index = ai_command_router.build_command_index(self.bot)
+        return ai_command_router.rank_command_candidates(
+            self._command_index,
+            question,
+            limit=20,
+        )
 
     @staticmethod
     def _arguments_grounded_in_question(question: str, arguments: str) -> bool:
