@@ -38,6 +38,7 @@ def _cog(*, conf: dict) -> AutoMod:
     cog.automod_cache[1] = {**_ALL_OFF, **conf}
     cog.ignored_channels_cache[1] = set()
     cog.blacklist_words_cache[1] = []
+    cog.blacklist_links_cache[1] = []
     cog.blacklist_users_cache[1] = set()
     cog.exempt_roles_cache[1] = set()
     cog.whitelist_domains_cache[1] = []
@@ -145,17 +146,24 @@ async def test_un_nouvel_incident_apres_la_fenetre_est_de_nouveau_traite():
 
 
 @pytest.mark.asyncio
-async def test_avertissement_public_est_un_texte_court_temporaire():
+async def test_avertissement_lien_est_un_embed_compact_temporaire():
     cog = _cog(conf={"antilink": 1, "escalation": 0})
     member = _member()
     message = _message(member, 1, "regarde https://exemple.com")
+    cog._repost_censored = AsyncMock(return_value=True)
+    fake_notice = SimpleNamespace(delete=AsyncMock())
     with patch.object(panels, "texte_court", AsyncMock()) as court, \
-         patch.object(panels, "envoyer", AsyncMock()) as envoyer, \
+         patch.object(panels, "envoyer", AsyncMock(return_value=fake_notice)) as envoyer, \
          patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
         await cog.on_message(message)
         await asyncio.sleep(0.05)
-    envoyer.assert_not_awaited()
-    assert court.await_args.kwargs.get("supprimer_apres") == 6
+    court.assert_not_awaited()
+    assert envoyer.await_count == 1
+    fake_notice.delete.assert_awaited_once_with(delay=8)
+    cog._repost_censored.assert_awaited_once()
+    censored = cog._repost_censored.await_args.args[1]
+    assert "https://exemple.com" not in censored
+    assert "lien censuré" in censored
     member.timeout.assert_not_awaited()  # un lien n'est pas du spam : pas de mute direct
 
 
@@ -181,3 +189,43 @@ def test_automod_schema_persists_strict_link_mode():
     source = (Path(__file__).resolve().parents[1] / "database" / "db.py").read_text(encoding="utf-8")
     assert "antilink_strict INTEGER DEFAULT 0" in source
     assert '"antilink_strict": "INTEGER DEFAULT 0"' in source
+
+def test_censure_clone_masque_mot_interdit_sans_toucher_au_reste():
+    result = automod_module._compose_censored_content(
+        "salut idiot comment ça va",
+        blocked_word="idiot",
+    )
+    assert result == "salut ████ (mot censuré) comment ça va"
+    assert "idiot" not in result
+
+
+def test_censure_clone_masque_lien_et_mot_dans_le_meme_message():
+    result = automod_module._compose_censored_content(
+        "idiot regarde https://evil.example/path maintenant",
+        blocked_word="idiot",
+        links=True,
+    )
+    assert result is not None
+    assert "idiot" not in result
+    assert "evil.example" not in result
+    assert "mot censuré" in result
+    assert "lien censuré" in result
+
+
+def test_censure_clone_refuse_de_republier_si_le_terme_detecte_ne_peut_pas_etre_masque():
+    # La détection de production ignore les accents ; si le texte brut ne peut pas être
+    # masqué avec certitude, le clone doit être abandonné plutôt que fuiter le terme.
+    assert automod_module._compose_censored_content(
+        "contenu quelconque",
+        blocked_word="terme-absent",
+    ) is None
+
+
+def test_censure_webhook_affiche_explicitement_un_nom_sentrix():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "automod.py").read_text(encoding="utf-8")
+    assert 'name="SentriX Censure"' in source
+    assert '"username": username' in source
+    assert '"avatar_url": avatar' in source
+    assert "AllowedMentions.none()" in source
+
