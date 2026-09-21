@@ -20,6 +20,7 @@ def main() -> int:
     # à tort depuis cette extraction, sans que personne ne le remarque puisqu'il
     # n'était jamais exécuté en CI.
     economy_path = ROOT / "services" / "economy.py"
+    game_rewards_path = ROOT / "utils" / "game_rewards.py"
 
     if not integrity_path.exists():
         errors.append("cogs/integrity_hardening.py absent")
@@ -41,7 +42,6 @@ def main() -> int:
             "Moderation.check_tempactions",
             "Cette action est réservée au staff du ticket.",
             "status='supprime' WHERE id=? AND status='ferme'",
-            "_ExpiringPlayLockRegistry",
             '"new_commands": 0',
         )
         for marker in required_markers:
@@ -55,6 +55,20 @@ def main() -> int:
             for marker in ("AND quantity>=1", "AND cash>=?", "AND bank>=?"):
                 if marker not in economy_text:
                     errors.append(f"garantie d'intégrité économie absente (services/economy.py): {marker}")
+
+        # Les verrous anti-parties parallèles sont maintenant durcis à la source
+        # dans utils/game_rewards.py, plus par remplacement runtime.
+        if not game_rewards_path.exists():
+            errors.append("utils/game_rewards.py absent")
+        else:
+            game_text = game_rewards_path.read_text(encoding="utf-8")
+            for marker in ("class PlayLockRegistry", "self.ttl", "time.monotonic()", "_prune"):
+                if marker not in game_text:
+                    errors.append(
+                        f"garantie d'intégrité jeux absente (utils/game_rewards.py): {marker}"
+                    )
+            if "game_rewards._registry =" in text:
+                errors.append("le runtime remplace encore le registre de verrous de jeux")
 
         if tree is not None:
             public_decorators = 0
@@ -88,7 +102,7 @@ def main() -> int:
         print(f"ECHEC INTEGRITE: {len(errors)} problème(s)")
         return 1
 
-    print("OK INTEGRITE: pruning, économie, modération, tickets et jeux durcis; 0 nouvelle commande")
+    print("OK INTEGRITE: pruning, économie, modération, tickets et jeux durcis à la source; 0 nouvelle commande")
     return 0
 
 
