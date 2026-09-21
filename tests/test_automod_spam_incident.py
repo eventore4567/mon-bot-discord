@@ -26,7 +26,7 @@ from utils import sentrix_panels as panels  # noqa: E402
 
 _ALL_OFF = {
     key: 0 for key in (
-        "antispam", "antilink", "antiinvite", "antimention", "anticaps", "antiemoji",
+        "antispam", "antilink", "antilink_strict", "antiinvite", "antimention", "anticaps", "antiemoji",
         "antiscam", "antiraid", "antibot", "antiaccount", "antinuke", "escalation",
     )
 }
@@ -157,3 +157,27 @@ async def test_avertissement_public_est_un_texte_court_temporaire():
     envoyer.assert_not_awaited()
     assert court.await_args.kwargs.get("supprimer_apres") == 6
     member.timeout.assert_not_awaited()  # un lien n'est pas du spam : pas de mute direct
+
+
+
+@pytest.mark.asyncio
+async def test_antilink_strict_ignore_whitelist_et_salon_ignore():
+    cog = _cog(conf={"antilink": 1, "antilink_strict": 1, "escalation": 0})
+    member = _member()
+    message = _message(member, 1, "https://exemple.com")
+    # Le mode strict doit passer AVANT ces exemptions.
+    cog.ignored_channels_cache[1] = {55}
+    cog.whitelist_domains_cache[1] = ["exemple.com"]
+
+    with patch.object(panels, "texte_court", AsyncMock()),          patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
+        await cog.on_message(message)
+        await asyncio.sleep(0.03)
+
+    assert message.delete.await_count == 1
+
+
+def test_automod_schema_persists_strict_link_mode():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "database" / "db.py").read_text(encoding="utf-8")
+    assert "antilink_strict INTEGER DEFAULT 0" in source
+    assert '"antilink_strict": "INTEGER DEFAULT 0"' in source
