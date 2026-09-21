@@ -151,3 +151,9 @@ def test_empty_active_state_has_a_dedicated_message():
     source = Path(giveaway_center.__file__).read_text(encoding="utf-8")
     assert "Aucun giveaway actif sur ce serveur." in source
     assert "async def _has_active" in source
+
+def test_giveaway_list_no_longer_steals_canonical_giveaways_alias():
+    from cogs import common_command_names
+
+    assert common_command_names.PREFERRED_COMMAND_NAMES.get("giveaway-list") != "giveaways"
+
