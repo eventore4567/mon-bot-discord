@@ -263,68 +263,13 @@ class SentriXV22(commands.Cog):
             serialized_create._sentrix_v22 = True
             tickets_cog.create_ticket = types.MethodType(serialized_create, tickets_cog)
 
-        if not getattr(tickets_cog.btn_claim, "_sentrix_v22", False):
-            async def atomic_claim(this, interaction: discord.Interaction, ticket):
-                cursor = await self.bot.db.execute(
-                    "UPDATE tickets SET claimed_by=? WHERE id=? AND guild_id=? AND status='ouvert' AND claimed_by IS NULL",
-                    (interaction.user.id, ticket["id"], interaction.guild.id),
-                )
-                if getattr(cursor, "rowcount", 0) < 1:
-                    current = await self.bot.db.fetchone(
-                        "SELECT claimed_by,status FROM tickets WHERE id=? AND guild_id=?",
-                        (ticket["id"], interaction.guild.id),
-                    )
-                    if current and current["status"] == "ouvert" and current["claimed_by"]:
-                        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning(f"Ce ticket est déjà pris en charge par <@{int(current['claimed_by'])}>.")), ephemere=True)
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est plus disponible.")), ephemere=True)
-                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f'{interaction.user.mention} a pris en charge ce ticket.')))
-            atomic_claim._sentrix_v22 = True
-            tickets_cog.btn_claim = types.MethodType(atomic_claim, tickets_cog)
-
-        if not getattr(tickets_cog.btn_unclaim, "_sentrix_v22", False):
-            async def guarded_unclaim(this, interaction: discord.Interaction, ticket):
-                current = await self.bot.db.fetchone(
-                    "SELECT claimed_by,status FROM tickets WHERE id=? AND guild_id=?",
-                    (ticket["id"], interaction.guild.id),
-                )
-                if not current or current["status"] != "ouvert":
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est plus ouvert.")), ephemere=True)
-                claimed_by = current["claimed_by"]
-                if not claimed_by:
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est pas claim.")), ephemere=True)
-                member = interaction.user
-                can_force = bool(member.guild_permissions.manage_channels or member.id == interaction.guild.owner_id)
-                if int(claimed_by) != member.id and not can_force:
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Seul le staff qui a claim ce ticket (ou un responsable) peut l'abandonner.")), ephemere=True)
-                cursor = await self.bot.db.execute(
-                    "UPDATE tickets SET claimed_by=NULL WHERE id=? AND guild_id=? AND status='ouvert' AND claimed_by=?",
-                    (ticket["id"], interaction.guild.id, claimed_by),
-                )
-                if getattr(cursor, "rowcount", 0) < 1:
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('La prise en charge vient de changer. Actualisez le ticket.')), ephemere=True)
-                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Prise en charge annulée.')))
-            guarded_unclaim._sentrix_v22 = True
-            tickets_cog.btn_unclaim = types.MethodType(guarded_unclaim, tickets_cog)
-
-        original_close = tickets_cog.close_ticket
-        if not getattr(original_close, "_sentrix_v22", False):
-            async def serialized_close(this, interaction: discord.Interaction, ticket_id: int, reason: str):
-                lock = self._ticket_close_locks[int(ticket_id)]
-                if lock.locked():
-                    return await _safe_interaction_message(
-                        interaction, embeds.warning("La fermeture de ce ticket est déjà en cours.")
-                    )
-                async with lock:
-                    current = await self.bot.db.fetchone(
-                        "SELECT status FROM tickets WHERE id=? AND guild_id=?",
-                        (ticket_id, interaction.guild.id),
-                    )
-                    if not current or current["status"] != "ouvert":
-                        return await _safe_interaction_message(interaction, embeds.warning("Ce ticket est déjà fermé."))
-                    return await original_close(interaction, ticket_id, clean_reason(reason, maximum=300))
-            serialized_close._sentrix_v22 = True
-            tickets_cog.close_ticket = types.MethodType(serialized_close, tickets_cog)
-
+        # Claim / unclaim / close are already provided by ticket_claim_security.py.
+        # That canonical runtime owns permission changes, compare-and-set DB updates,
+        # transcript/log behavior and rollback when Discord permission edits fail.
+        # V2.2 used to replace those methods again here with narrower callbacks,
+        # silently discarding part of the canonical behavior because V2.2 loads later.
+        # Keep only the cache + start/create serialization above; do not re-patch
+        # claim, unclaim or close at instance level.
     def _install_ai_cache(self):
         from utils import ai_service
         original_get = ai_service.get_settings
