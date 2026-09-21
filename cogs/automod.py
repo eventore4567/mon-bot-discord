@@ -966,6 +966,14 @@ class AutoMod(commands.Cog, name="Automod"):
         link_content = _normalize_link_text(message.content)
         conf = await self.get_automod_cached(message.guild.id)
 
+        # Immunité personnelle explicite ON : aucun filtre AutoMod ne s'applique.
+        # OFF ne court-circuite rien et l'utilisateur est traité comme un membre normal.
+        personal_immunity = await self.get_immunity_override_cached(
+            message.guild.id, message.author.id
+        )
+        if personal_immunity is True:
+            return
+
         # Détections prioritaires pouvant être combinées dans un seul avertissement.
         # Exemple : un même message contient à la fois un mot interdit ET un lien interdit.
         words = await self.get_blacklist_words_cached(message.guild.id)
