@@ -165,6 +165,14 @@ CREATE TABLE IF NOT EXISTS blacklist_users (
     PRIMARY KEY (guild_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS blacklist_links (
+    guild_id INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    created_by INTEGER,
+    created_at INTEGER,
+    PRIMARY KEY (guild_id, value)
+);
+
 CREATE TABLE IF NOT EXISTS whitelist_domains (
     guild_id INTEGER,
     domain TEXT,
