@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS automod_settings (
     guild_id INTEGER PRIMARY KEY,
     antispam INTEGER DEFAULT 0,
     antilink INTEGER DEFAULT 0,
+    antilink_strict INTEGER DEFAULT 0,
     antiinvite INTEGER DEFAULT 0,
     antimention INTEGER DEFAULT 0,
     anticaps INTEGER DEFAULT 0,
@@ -1041,6 +1042,9 @@ GUILD_CONFIG_NEW_COLUMNS = {
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
 # a été ajoutée après la création initiale de la table.
 AUTOMOD_SETTINGS_NEW_COLUMNS = {
+    # Anti-liens strict : bloque réellement tous les liens, y compris dans les salons
+    # ignorés, pour le staff et sans appliquer la whitelist de domaines.
+    "antilink_strict": "INTEGER DEFAULT 0",
     # Escalade automatique OFF tant qu'un administrateur ne l'a pas activée.
     "escalation": "INTEGER DEFAULT 0",
     # Filtre multilingue d'insultes : un filtre comme les autres, désactivé par défaut.
