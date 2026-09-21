@@ -205,9 +205,6 @@ async def test_duel_precheck_validates_opponent_roles_cooldown_and_lock(monkeypa
     assert reason == ""
     assert sid == "sid-1"
     enabled.assert_awaited_once()
-    cooldown.assert_awaited_once_with(
-        pytest.ANY if hasattr(pytest, "ANY") else enabled,  # never evaluated below
-    ) if False else None
     assert cooldown.await_args.args[1:] == (10, 2, "duel", 15)
 
 
