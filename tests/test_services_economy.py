@@ -298,5 +298,48 @@ class CanonicalRobWiringTests(unittest.TestCase):
         self.assertNotIn("_replace_command_callback", source)
 
 
+class CanonicalEconomyWiringTests(unittest.TestCase):
+    def test_atomic_commands_live_in_canonical_economy_cog(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "economy.py"
+        ).read_text(encoding="utf-8")
+
+        sell = source.split('name="sell"', 1)[1].split('name="gamble"', 1)[0]
+        gamble = source.split('name="gamble"', 1)[1].split(
+            "async def _deposit_to_bank", 1
+        )[0]
+        bank = source.split("async def _deposit_to_bank", 1)[1].split(
+            'name="give-money"', 1
+        )[0]
+        grant = source.split('name="give-money"', 1)[1].split(
+            "@commands.hybrid_command", 1
+        )[0]
+
+        self.assertIn("economy_service.atomic_sell", sell)
+        self.assertIn("economy_service.atomic_gamble", gamble)
+        self.assertIn("economy_service.atomic_bank_transfer", bank)
+        self.assertIn("montant) <= 0", grant)
+
+    def test_integrity_layer_no_longer_replaces_economy_commands(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "integrity_hardening.py"
+        ).read_text(encoding="utf-8")
+        block = source.split("def _install_economy", 1)[1].split(
+            "def _install_moderation", 1
+        )[0]
+
+        self.assertNotIn("safe_deposit", block)
+        self.assertNotIn("safe_withdraw", block)
+        self.assertNotIn("safe_sell", block)
+        self.assertNotIn("safe_gamble", block)
+        self.assertNotIn("positive_grant", block)
+        self.assertNotIn("_replace_callback", source)
+        self.assertIn("safe_purchase", block)
+
+
 if __name__ == "__main__":
     unittest.main()
