@@ -341,5 +341,21 @@ class CanonicalEconomyWiringTests(unittest.TestCase):
         self.assertIn("safe_purchase", block)
 
 
+class IntegrityRuntimeAuditTests(unittest.TestCase):
+    def test_runtime_audit_does_not_require_stale_direct_command_catalog(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "integrity_hardening.py"
+        ).read_text(encoding="utf-8")
+        audit = source.split("def _install_runtime_registry_audit", 1)[1].split(
+            "def install", 1
+        )[0]
+
+        self.assertNotIn("NORMAL_DIRECT_COMMANDS", audit)
+        self.assertNotIn("commandes directes absentes", audit)
+        self.assertIn("commands_checked", audit)
+
+
 if __name__ == "__main__":
     unittest.main()
