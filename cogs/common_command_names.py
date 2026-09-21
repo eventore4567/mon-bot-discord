@@ -41,7 +41,6 @@ PREFERRED_COMMAND_NAMES: dict[str, str] = {
     "bot-status": "status",
     "server-growth": "growth",
     "command-stats": "cmdstats",
-    "giveaway-list": "giveaways",
     "giveaway-create": "gcreate",
     "giveaway-end": "gend",
     "giveaway-reroll": "greroll",
