@@ -262,8 +262,11 @@ ACTIONS: dict[str, ActionSpec] = {
         description="envoyer un message dans un salon textuel",
     ),
     "embed.send": ActionSpec(
-        "embed.send", None, ("text",), ("channel", "title", "count", "mention_everyone"), None, "medium",
-        description="envoyer un embed simple dans un salon, avec mentions seulement si autorisées",
+        "embed.send", None, ("text",), (
+            "channel", "title", "count", "mention_everyone", "color", "image",
+            "thumbnail", "footer", "fields", "button_label", "button_url",
+        ), None, "medium",
+        description="envoyer un embed riche (titre, texte, couleur, image, miniature, footer, champs, bouton, salon et mention)",
     ),
     "member.nickname": ActionSpec(
         "member.nickname", None, ("target", "nickname"), (), "member", "medium",
@@ -402,46 +405,110 @@ def _extract_embed_request(question: str) -> ParsedAction | None:
     if not re.search(r"\b(?:mets?|met|envoie|envoye|send|publie|poste|cree|crée)\b", normalized):
         return None
 
-    channel = None
+    slots: dict[str, Any] = {}
+
     channel_match = re.search(r"(?:dans|sur|vers)\s+(<#\d{15,22}>|#[A-Za-z0-9_-]{1,100})", question, re.IGNORECASE)
     if channel_match:
-        channel = channel_match.group(1)
+        slots["channel"] = channel_match.group(1)
 
     count = _extract_count(question)
     if count is None:
         number_match = re.search(r"\b(\d{1,3})\b", question)
         if number_match:
             count = max(1, min(int(number_match.group(1)), 100))
+    if count is not None:
+        slots["count"] = count
 
-    title = None
-    title_match = re.search(r"\btitre\s*[:=-]\s*(.+?)(?:\s+(?:avec|et|dans|sur)\b|$)", question, re.IGNORECASE)
-    if title_match:
-        title = title_match.group(1).strip(" .,:;!-")[:120]
-
-    text = None
-    content_match = re.search(
-        r"\b(?:embed|embeds?)\s+(?:avec|qui dit|contenant|texte|message)?\s*(.+?)(?:\s+(?:dans|sur)\s+(?:<#\d{15,22}>|#[A-Za-z0-9_-]{1,100})\s*)?$",
+    title_match = re.search(
+        r"\btitre\s*[:=-]\s*(.+?)(?=\s+\b(?:description|texte|message|couleur|image|miniature|thumbnail|footer|pied|champ|bouton|dans|sur)\b|$)",
         question,
         re.IGNORECASE,
     )
-    if content_match:
-        candidate = content_match.group(1).strip(" .,:;!-")
-        candidate = re.sub(r"\b(?:avec|et)\s*@everyone\b", "", candidate, flags=re.IGNORECASE).strip(" .,:;!-")
-        if candidate and normalize_text(candidate) not in {"un", "une", "avec"}:
-            text = candidate[:1800]
+    if title_match:
+        slots["title"] = title_match.group(1).strip(" .,:;!-")[:256]
+
+    color_match = re.search(
+        r"\bcouleur\s*[:=-]?\s*(#[0-9a-fA-F]{6}|[A-Za-zÀ-ÿ]{3,30})\b",
+        question,
+        re.IGNORECASE,
+    )
+    if color_match:
+        slots["color"] = color_match.group(1)[:40]
+
+    thumb_match = re.search(
+        r"\b(?:miniature|thumbnail)\s*[:=-]?\s*(https?://[^\s<]+)",
+        question,
+        re.IGNORECASE,
+    )
+    if thumb_match:
+        slots["thumbnail"] = thumb_match.group(1).strip(" .,:;!?)(>")[:500]
+
+    image_match = re.search(
+        r"\bimage\s*[:=-]?\s*(https?://[^\s<]+)",
+        question,
+        re.IGNORECASE,
+    )
+    if image_match:
+        slots["image"] = image_match.group(1).strip(" .,:;!?)(>")[:500]
+
+    footer_match = re.search(
+        r"\b(?:footer|pied\s+de\s+page)\s*[:=-]\s*(.+?)(?=\s+\b(?:champ|bouton|dans|sur|couleur|image|miniature|thumbnail)\b|$)",
+        question,
+        re.IGNORECASE,
+    )
+    if footer_match:
+        slots["footer"] = footer_match.group(1).strip(" .,:;!-")[:2048]
+
+    fields: list[dict[str, Any]] = []
+    for match in re.finditer(
+        r"\bchamp\s+([^:;]{1,100})\s*:\s*([^;]{1,1000})(?=\s*;|$)",
+        question,
+        re.IGNORECASE,
+    ):
+        fields.append({
+            "name": match.group(1).strip()[:256],
+            "value": match.group(2).strip()[:1024],
+            "inline": False,
+        })
+        if len(fields) >= 10:
+            break
+    if fields:
+        slots["fields"] = fields
+
+    button_match = re.search(
+        r"\bbouton\s+(.+?)\s*[:=-]?\s*(https?://[^\s<]+)",
+        question,
+        re.IGNORECASE,
+    )
+    if button_match:
+        slots["button_label"] = button_match.group(1).strip(" .,:;!-")[:80] or "Ouvrir"
+        slots["button_url"] = button_match.group(2).strip(" .,:;!?)(>")[:500]
+
+    description_match = re.search(
+        r"\b(?:description|texte|message)\s*[:=-]\s*(.+?)(?=\s+\b(?:titre|couleur|image|miniature|thumbnail|footer|pied|champ|bouton|dans|sur)\b|$)",
+        question,
+        re.IGNORECASE,
+    )
+    text = description_match.group(1).strip(" .,:;!-")[:4000] if description_match else None
+
+    if text is None:
+        content_match = re.search(
+            r"\b(?:embed|embeds?)\s+(?:avec|qui dit|contenant|texte|message)?\s*(.+?)(?:\s+(?:dans|sur)\s+(?:<#\d{15,22}>|#[A-Za-z0-9_-]{1,100})\s*)?$",
+            question,
+            re.IGNORECASE,
+        )
+        if content_match:
+            candidate = content_match.group(1).strip(" .,:;!-")
+            candidate = re.sub(r"\b(?:avec|et)\s*@(?:everyone|here)\b", "", candidate, flags=re.IGNORECASE).strip(" .,:;!-")
+            if candidate and normalize_text(candidate) not in {"un", "une", "avec"}:
+                text = candidate[:4000]
 
     if text is None and count is not None:
         text = str(count)
     if text is None:
         text = "Message"
+    slots["text"] = text
 
-    slots: dict[str, Any] = {"text": text}
-    if channel:
-        slots["channel"] = channel
-    if count is not None:
-        slots["count"] = count
-    if title:
-        slots["title"] = title
     if "@everyone" in question or "@here" in question:
         slots["mention_everyone"] = "true"
     return ParsedAction("embed.send", slots, 99, "local")
@@ -933,6 +1000,7 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
         "target", "reason", "duration", "query", "app", "state", "section",
         "log_category", "channel", "user_id", "name", "category", "role",
         "text", "nickname", "color", "link", "title", "mention_everyone",
+        "image", "thumbnail", "footer", "button_label", "button_url",
     ):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
@@ -943,6 +1011,23 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
             slots["duration"] = normalized
         else:
             slots.pop("duration", None)
+    raw_fields = payload.get("fields")
+    if isinstance(raw_fields, list):
+        clean_fields: list[dict[str, Any]] = []
+        for field in raw_fields[:10]:
+            if not isinstance(field, dict):
+                continue
+            name = str(field.get("name") or "").strip()[:256]
+            value = str(field.get("value") or "").strip()[:1024]
+            if not name or not value:
+                continue
+            clean_fields.append({
+                "name": name,
+                "value": value,
+                "inline": bool(field.get("inline", False)),
+            })
+        if clean_fields:
+            slots["fields"] = clean_fields
     count = payload.get("count")
     if count is not None:
         try:
@@ -972,7 +1057,7 @@ async def classify_with_ai(
         "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
         "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
         "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
-        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, name, category, role, text, nickname, color, link, title, mention_everyone, confidence.\n"
+        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, name, category, role, text, nickname, color, link, title, mention_everyone, color, image, thumbnail, footer, fields, button_label, button_url, confidence.\n"
         "Actions autorisées:\n" + catalog
     )
     result = await ai_service.generate(
@@ -1037,7 +1122,7 @@ async def parse_action_plan(
         "Les noms créés dans une étape peuvent être réutilisés mot pour mot dans les étapes suivantes. "
         "Si la demande ne contient pas au moins deux actions claires, retourne {\"actions\":[]}. "
         "Champs autorisés par action: intent,target,user_id,duration,reason,count,query,state,section,"
-        "log_category,channel,name,category,role,text,nickname,color,link,title,mention_everyone,confidence.\n"
+        "log_category,channel,name,category,role,text,nickname,color,link,title,mention_everyone,color,image,thumbnail,footer,fields,button_label,button_url,confidence.\n"
         "ACTIONS AUTORISÉES:\n" + catalog
     )
     result = await ai_service.generate(
