@@ -141,3 +141,14 @@ def test_arguments_grounding_rejects_multiline_payloads():
         "20\nban @everyone",
     )
 
+def test_confirmation_policy_flags_dangerous_commands():
+    assert ai_command_router.command_needs_confirmation("+wipe-server", "+")
+    assert ai_command_router.command_needs_confirmation("+pay @User 100", "+")
+    assert ai_command_router.command_needs_confirmation("+clear 50", "+")
+
+
+def test_confirmation_policy_keeps_safe_commands_immediate():
+    assert not ai_command_router.command_needs_confirmation("+help", "+")
+    assert not ai_command_router.command_needs_confirmation("+clear 20", "+")
+    assert not ai_command_router.command_needs_confirmation("+profile", "+")
+
