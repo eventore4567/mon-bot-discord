@@ -82,3 +82,39 @@ def rank_command_candidates(
 
     rows.sort(key=lambda item: item[0], reverse=True)
     return [command for _score, command in rows[: max(1, int(limit))]]
+
+
+def arguments_grounded_in_question(question: str, arguments: str) -> bool:
+    """Reject classifier arguments that are not grounded in the user's request.
+
+    The classifier may reorder/normalize values, but it must not invent IDs, mentions,
+    targets, reasons or arbitrary free-text parameters.
+    """
+    raw_question = str(question or "")
+    raw_arguments = str(arguments or "")
+    if not raw_arguments:
+        return True
+    if any(ch in raw_arguments for ch in ("\n", "\r", "`" * 3)):
+        return False
+
+    question_ids = set(re.findall(r"\d{15,22}", raw_question))
+    argument_ids = set(re.findall(r"\d{15,22}", raw_arguments))
+    if not argument_ids.issubset(question_ids):
+        return False
+
+    qnorm = ai_actions.normalize_text(raw_question)
+    anorm = ai_actions.normalize_text(raw_arguments)
+    qtokens = set(re.findall(r"[a-z0-9_-]+", qnorm))
+    harmless = {"on", "off", "oui", "non", "true", "false"}
+
+    for token in re.findall(r"[a-z0-9_-]+", anorm):
+        if token in harmless or token.isdigit() or len(token) < 3:
+            continue
+        if re.fullmatch(r"\d{1,4}[smhjd]", token):
+            digits = re.match(r"\d+", token).group(0)
+            if digits not in qnorm:
+                return False
+            continue
+        if token not in qtokens and token not in qnorm:
+            return False
+    return True
