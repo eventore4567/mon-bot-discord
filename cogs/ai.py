@@ -1430,6 +1430,47 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("Discord a refusé la modification de ce rôle. Vérifiez la hiérarchie.")
             return True
 
+        if intent == "security.block_link":
+            if not (actor.guild_permissions.manage_guild or actor.guild_permissions.manage_messages):
+                await reply("Vous n’avez pas la permission **Gérer le serveur** ou **Gérer les messages**.")
+                return True
+            if not me.guild_permissions.manage_messages:
+                await reply("Il me manque la permission **Gérer les messages** pour appliquer l’anti-liens.")
+                return True
+            raw_link = str(action.slots.get("link") or "").strip()
+            if action.source in {"ai", "plan"} and not self._native_slot_grounded(message, raw_link):
+                await reply("Je ne veux pas inventer le lien. Collez le lien ou domaine à bloquer dans la demande.")
+                return True
+            if not raw_link:
+                await reply("Lien ou domaine manquant.")
+                return True
+            try:
+                await self.bot.db.set_automod(guild.id, "antilink", 1)
+                await self.bot.db.set_automod(guild.id, "antilink_strict", 1)
+                automod = self.bot.get_cog("Automod")
+                if automod is not None:
+                    cache = getattr(automod, "automod_cache", None)
+                    if isinstance(cache, dict):
+                        cache.pop(guild.id, None)
+                    await automod.log_action(
+                        guild,
+                        embeds.warning(
+                            "Lien censuré via action naturelle",
+                            f"Demandeur : {actor.mention} (`{actor.id}`)\nLien/domaine : `{raw_link[:250]}`\nMode : anti-liens strict activé",
+                        ),
+                    )
+                logger.info(
+                    "Action naturelle security.block_link guild=%s actor=%s link=%r strict=on",
+                    guild.id,
+                    actor.id,
+                    raw_link,
+                )
+                await reply("Anti-liens strict activé pour censurer ce lien.")
+            except Exception:
+                logger.exception("Action naturelle security.block_link impossible.")
+                await reply("Je n’ai pas pu appliquer cette règle anti-liens.")
+            return True
+
         if intent == "message.send":
             if not actor.guild_permissions.manage_messages:
                 await reply("Vous n’avez pas la permission **Gérer les messages** pour me faire parler dans un autre salon.")
@@ -1454,6 +1495,61 @@ class Ai(commands.Cog, name="Ai"):
             text = str(action.slots.get("text") or "").strip()[:1900]
             await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
             await reply(f"Message envoyé dans **#{channel.name}**.")
+            return True
+
+        if intent == "embed.send":
+            if not actor.guild_permissions.manage_messages:
+                await reply("Vous n’avez pas la permission **Gérer les messages** pour envoyer un embed avec SentriX.")
+                return True
+            raw_channel = str(action.slots.get("channel") or "").strip()
+            if raw_channel:
+                channel, ambiguous = self._resolve_native_channel(guild, raw_channel, voice=False)
+                if ambiguous:
+                    await reply("Plusieurs salons correspondent. Mentionnez directement le salon.")
+                    return True
+                if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                    await reply("Je ne trouve pas ce salon textuel.")
+                    return True
+            else:
+                channel = message.channel
+            actor_perms = channel.permissions_for(actor)
+            bot_perms = channel.permissions_for(me)
+            if not (actor_perms.view_channel and actor_perms.send_messages):
+                await reply("Vous n’avez pas accès en écriture à ce salon.")
+                return True
+            if not (bot_perms.view_channel and bot_perms.send_messages and bot_perms.embed_links):
+                await reply("Je ne peux pas envoyer d’embed dans ce salon.")
+                return True
+            wants_everyone = str(action.slots.get("mention_everyone") or "").casefold() in {"1", "true", "yes", "oui", "on"} or "@everyone" in message.content or "@here" in message.content
+            if wants_everyone and not actor_perms.mention_everyone:
+                await reply("Vous n’avez pas la permission **Mentionner @everyone, @here et tous les rôles**.")
+                return True
+            if wants_everyone and not bot_perms.mention_everyone:
+                await reply("Il me manque la permission **Mentionner @everyone, @here et tous les rôles** dans ce salon.")
+                return True
+            text = str(action.slots.get("text") or "").strip()[:1800]
+            title = str(action.slots.get("title") or "SentriX").strip()[:120] or "SentriX"
+            count = action.slots.get("count")
+            if count is not None and text == str(count):
+                text = f"Valeur : **{int(count)}**"
+            embed = discord.Embed(title=title, description=text, colour=discord.Colour(config.COLOR_PRIMARY))
+            embed.set_footer(text=f"SentriX • demandé par {actor.display_name}")
+            content = "@everyone" if wants_everyone and "@everyone" in message.content else ("@here" if wants_everyone and "@here" in message.content else None)
+            await channel.send(
+                content=content,
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(everyone=wants_everyone, roles=False, users=False),
+            )
+            logger.info(
+                "Action naturelle embed.send guild=%s actor=%s channel=%s everyone=%s title=%r chars=%s",
+                guild.id,
+                actor.id,
+                getattr(channel, "id", None),
+                wants_everyone,
+                title,
+                len(text),
+            )
+            await reply(f"Embed envoyé dans **#{getattr(channel, 'name', 'ce salon')}**.")
             return True
 
         if intent == "member.nickname":
@@ -1850,7 +1946,7 @@ class Ai(commands.Cog, name="Ai"):
             await self._ask_for_missing_action_slot(message, action, missing[0], member=member)
             return True
 
-        if action.intent.startswith(("voice.", "channel.", "category.", "role.", "message.", "member.")):
+        if action.intent.startswith(("voice.", "channel.", "category.", "role.", "message.", "member.", "embed.", "security.block_link")):
             handled = await self._execute_native_action(message, action, member=member)
             if handled:
                 self._pending_actions.pop(self._pending_key(message), None)
@@ -2776,4 +2872,3 @@ class Ai(commands.Cog, name="Ai"):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Ai(bot))
-

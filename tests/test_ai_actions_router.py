@@ -524,3 +524,28 @@ def test_plain_antilink_request_stays_non_strict():
     assert parsed.intent == "security.antilink"
     assert parsed.slots["state"] == "on"
     assert ai_actions.build_command_line(parsed, prefix="+") == "+antilink on"
+
+
+def test_natural_block_specific_link_is_direct_automod_action():
+    parsed = ai_actions.local_parse("SentriX censure ce lien https://evil.example/path")
+    assert parsed is not None
+    assert parsed.intent == "security.block_link"
+    assert parsed.slots["link"] == "https://evil.example/path"
+    assert ai_actions.build_command_line(parsed, prefix="+") is None
+
+
+def test_music_like_you_want_chooses_safe_default_query():
+    parsed = ai_actions.local_parse("SentriX mets de la musique comme tu veux")
+    assert parsed is not None
+    assert parsed.intent == "music.play"
+    assert parsed.slots["query"] == "playlist chill populaire"
+
+
+def test_natural_embed_with_everyone_is_direct_action():
+    parsed = ai_actions.local_parse("SentriX mets un embed avec 10 et @everyone")
+    assert parsed is not None
+    assert parsed.intent == "embed.send"
+    assert parsed.slots["text"] == "10"
+    assert parsed.slots["count"] == 10
+    assert parsed.slots["mention_everyone"] == "true"
+    assert ai_actions.build_command_line(parsed, prefix="+") is None

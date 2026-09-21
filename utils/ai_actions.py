@@ -142,6 +142,10 @@ ACTIONS: dict[str, ActionSpec] = {
     "security.antiinvite": ActionSpec("security.antiinvite", "antiinvite", ("state",), (), None, "medium", description="activer ou désactiver le blocage des invitations"),
     "security.antiraid": ActionSpec("security.antiraid", "antiraid", ("state",), (), None, "medium", description="activer ou désactiver l'anti-raid"),
     "security.antinuke": ActionSpec("security.antinuke", "antinuke", ("state",), (), None, "high", description="activer ou désactiver l'anti-nuke"),
+    "security.block_link": ActionSpec(
+        "security.block_link", None, ("link",), (), None, "medium",
+        description="bloquer directement un lien ou domaine précis via AutoMod strict",
+    ),
     "economy.balance": ActionSpec(
         "economy.balance", "balance", (), ("target",), "member", "low",
         description="afficher le solde d'un membre",
@@ -256,6 +260,10 @@ ACTIONS: dict[str, ActionSpec] = {
     "message.send": ActionSpec(
         "message.send", None, ("channel", "text"), (), None, "medium",
         description="envoyer un message dans un salon textuel",
+    ),
+    "embed.send": ActionSpec(
+        "embed.send", None, ("text",), ("channel", "title", "count", "mention_everyone"), None, "medium",
+        description="envoyer un embed simple dans un salon, avec mentions seulement si autorisées",
     ),
     "member.nickname": ActionSpec(
         "member.nickname", None, ("target", "nickname"), (), "member", "medium",
@@ -374,6 +382,69 @@ def _extract_count(question: str) -> int | None:
     if not match:
         return None
     return max(1, min(int(match.group(1)), 100))
+
+
+def _extract_link_or_domain(question: str) -> str | None:
+    match = re.search(
+        r"\b(?:https?|hxxps?)://[^\s<]+|\bwww\.[^\s<]+|(?<![\w@])(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}\b",
+        str(question or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return match.group(0).strip(" .,;!?)(")[:300]
+
+
+def _extract_embed_request(question: str) -> ParsedAction | None:
+    normalized = normalize_text(question)
+    if "embed" not in normalized and "embeds" not in normalized:
+        return None
+    if not re.search(r"\b(?:mets?|met|envoie|envoye|send|publie|poste|cree|crée)\b", normalized):
+        return None
+
+    channel = None
+    channel_match = re.search(r"(?:dans|sur|vers)\s+(<#\d{15,22}>|#[A-Za-z0-9_-]{1,100})", question, re.IGNORECASE)
+    if channel_match:
+        channel = channel_match.group(1)
+
+    count = _extract_count(question)
+    if count is None:
+        number_match = re.search(r"\b(\d{1,3})\b", question)
+        if number_match:
+            count = max(1, min(int(number_match.group(1)), 100))
+
+    title = None
+    title_match = re.search(r"\btitre\s*[:=-]\s*(.+?)(?:\s+(?:avec|et|dans|sur)\b|$)", question, re.IGNORECASE)
+    if title_match:
+        title = title_match.group(1).strip(" .,:;!-")[:120]
+
+    text = None
+    content_match = re.search(
+        r"\b(?:embed|embeds?)\s+(?:avec|qui dit|contenant|texte|message)?\s*(.+?)(?:\s+(?:dans|sur)\s+(?:<#\d{15,22}>|#[A-Za-z0-9_-]{1,100})\s*)?$",
+        question,
+        re.IGNORECASE,
+    )
+    if content_match:
+        candidate = content_match.group(1).strip(" .,:;!-")
+        candidate = re.sub(r"\b(?:avec|et)\s*@everyone\b", "", candidate, flags=re.IGNORECASE).strip(" .,:;!-")
+        if candidate and normalize_text(candidate) not in {"un", "une", "avec"}:
+            text = candidate[:1800]
+
+    if text is None and count is not None:
+        text = str(count)
+    if text is None:
+        text = "Message"
+
+    slots: dict[str, Any] = {"text": text}
+    if channel:
+        slots["channel"] = channel
+    if count is not None:
+        slots["count"] = count
+    if title:
+        slots["title"] = title
+    if "@everyone" in question or "@here" in question:
+        slots["mention_everyone"] = "true"
+    return ParsedAction("embed.send", slots, 99, "local")
 
 
 def _extract_target(question: str) -> str | None:
@@ -525,6 +596,7 @@ def is_bare_action_candidate(text: str) -> bool:
         "active l anti", "active anti", "desactive l anti", "desactive anti",
         "bloque ", "censure ", "interdit ", "interdis ", "filtre ", "empeche ", "empêche ",
         "protege ", "protège ", "autorise ", "permet ", "debloque ", "débloque ",
+        "censure ce lien", "censure le lien", "bloque ce lien", "bloque le lien",
         "configure les logs", "configure mes logs", "mets les logs",
         "rejoins le vocal", "rejoint le vocal", "rejoin le vocal", "regoin une voc", "reg une voc",
         "quitte le vocal", "joue ", "jouer ", "play ", "mets la musique", "met la musique",
@@ -534,6 +606,7 @@ def is_bare_action_candidate(text: str) -> bool:
         "cree un salon textuel", "crée un salon textuel", "cree un role", "crée un role",
         "cree une categorie", "crée une catégorie", "crée une categorie",
         "donne acces aux tickets", "donne l acces aux tickets", "ajoute acces aux tickets",
+        "mets un embed", "met un embed", "envoie un embed", "cree un embed", "crée un embed",
     )
     return any(gate.startswith(prefix) for prefix in strong_starts)
 
@@ -545,6 +618,17 @@ def local_parse(question: str) -> ParsedAction | None:
 
     # -------- actions Discord natives fréquentes --------
     # Les fautes usuelles sont volontairement tolérées ici : le modèle reste le repli.
+    embed_action = _extract_embed_request(question)
+    if embed_action is not None:
+        return embed_action
+
+    link = _extract_link_or_domain(question)
+    if link and re.search(
+        r"\b(?:censure|censurer|bloque|bloquer|interdit|interdire|filtre|filtrer|supprime|retire)\b",
+        normalized,
+    ) and ("lien" in normalized or "link" in normalized or link.casefold() in question.casefold()):
+        return ParsedAction("security.block_link", {"link": link}, 99, "local")
+
     voice_words = ("vocal", "vocale", "voc", "voice", "vc")
     has_voice_word = any(re.search(rf"\b{re.escape(word)}\b", normalized) for word in voice_words)
     if has_voice_word:
@@ -703,13 +787,8 @@ def local_parse(question: str) -> ParsedAction | None:
         return ParsedAction("music.stop", {}, 99, "local")
     if music_context and re.search(r"\b(?:melange|mélange|shuffle)\b", normalized):
         return ParsedAction("music.shuffle", {}, 99, "local")
-    if music_context and re.search(r"\b(?:file|queue|attente)\b", normalized):
-        return ParsedAction("music.queue", {}, 98, "local")
-    if music_context and re.search(r"\b(?:encours|en cours|nowplaying|quel(?:le)? .*joue)\b", normalized):
-        return ParsedAction("music.nowplaying", {}, 98, "local")
-
     volume = re.search(
-        r"\b(?:volume|son)\s*(?:a|à|sur)?\s*(\d{1,3})(?:\s*%)?\b",
+        r"\b(?:volume|son)\b(?:\s+(?:de|du|la|le|musique|music|son))*\s*(?:a|à|sur)?\s*(\d{1,3})(?:\s*%)?\b",
         normalized,
     )
     if volume and music_context:
@@ -719,6 +798,11 @@ def local_parse(question: str) -> ParsedAction | None:
             99,
             "local",
         )
+
+    if music_context and re.search(r"\b(?:file|queue|attente)\b", normalized):
+        return ParsedAction("music.queue", {}, 98, "local")
+    if music_context and re.search(r"\b(?:encours|en cours|nowplaying|quel(?:le)? .*joue)\b", normalized):
+        return ParsedAction("music.nowplaying", {}, 98, "local")
 
     play_match = re.search(
         r"\b(joue|jouer|play|lance|mets|met)\s+(?:(?:moi\s+)?(?:la\s+)?"
@@ -730,9 +814,19 @@ def local_parse(question: str) -> ParsedAction | None:
         verb = normalize_text(play_match.group(1))
         if verb in {"joue", "jouer", "play"} or music_context:
             query = play_match.group(2).strip(" .,:;!-")
+            query = re.sub(
+                r"^(?:de\s+)?(?:la\s+)?(?:musique|music|chanson|titre|morceau|son|track)\s+",
+                "",
+                query,
+                flags=re.IGNORECASE,
+            ).strip(" .,:;!-")
             # Mots purement génériques => SentriX demande le titre au lieu d'inventer.
-            if normalize_text(query) in {"musique", "music", "un son", "une chanson", "un titre", "un morceau"}:
-                query = ""
+            if normalize_text(query) in {
+                "musique", "music", "un son", "une chanson", "un titre", "un morceau",
+                "comme tu veux", "ce que tu veux", "n importe quoi", "n'importe quoi",
+                "quelque chose", "un truc bien",
+            }:
+                query = "playlist chill populaire"
             return ParsedAction(
                 "music.play",
                 {"query": query[:500]} if query else {},
@@ -838,7 +932,7 @@ def _validate_ai_payload(payload: dict[str, Any] | None) -> ParsedAction | None:
     for key in (
         "target", "reason", "duration", "query", "app", "state", "section",
         "log_category", "channel", "user_id", "name", "category", "role",
-        "text", "nickname", "color",
+        "text", "nickname", "color", "link", "title", "mention_everyone",
     ):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
@@ -878,7 +972,7 @@ async def classify_with_ai(
         "SentriX claire, retourne {\"intent\": null, \"confidence\": 0}. "
         "N'invente jamais un utilisateur, un ID, une durée, une raison ou un nombre. "
         "Préserve le texte de la cible tel que l'utilisateur l'a écrit. "
-        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, name, category, role, text, nickname, color, confidence.\n"
+        "Champs autorisés: intent, target, user_id, duration, reason, count, query, app, state, section, log_category, channel, name, category, role, text, nickname, color, link, title, mention_everyone, confidence.\n"
         "Actions autorisées:\n" + catalog
     )
     result = await ai_service.generate(
@@ -943,7 +1037,7 @@ async def parse_action_plan(
         "Les noms créés dans une étape peuvent être réutilisés mot pour mot dans les étapes suivantes. "
         "Si la demande ne contient pas au moins deux actions claires, retourne {\"actions\":[]}. "
         "Champs autorisés par action: intent,target,user_id,duration,reason,count,query,state,section,"
-        "log_category,channel,name,category,role,text,nickname,color,confidence.\n"
+        "log_category,channel,name,category,role,text,nickname,color,link,title,mention_everyone,confidence.\n"
         "ACTIONS AUTORISÉES:\n" + catalog
     )
     result = await ai_service.generate(
@@ -1046,7 +1140,11 @@ def missing_prompt(intent: str, slot: str, *, target: discord.Member | None = No
     if slot == "role":
         return "Quel rôle voulez-vous utiliser ?"
     if slot == "text":
+        if intent == "embed.send":
+            return "Quel contenu voulez-vous mettre dans l’embed ?"
         return "Quel message voulez-vous envoyer ?"
+    if slot == "link":
+        return "Quel lien ou domaine voulez-vous bloquer ?"
     if slot == "nickname":
         return "Quel nouveau pseudo voulez-vous donner à ce membre ?"
     if slot == "color":
