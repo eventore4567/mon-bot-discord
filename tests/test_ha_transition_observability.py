@@ -113,3 +113,18 @@ def test_transition_helper_counts_state_changes_and_keeps_previous_state():
     assert coord.transition_count == 2
     assert coord.last_transition_reason == "redis_unavailable"
     assert coord.last_transition_at >= first_time
+
+def test_same_passive_poll_does_not_create_a_fake_transition():
+    coord = SentriXFailoverCoordinator()
+    coord.state = "standby"
+    coord.previous_state = "starting"
+    coord.last_transition_reason = "lease_held_by_other"
+    coord.transition_count = 1
+    original_time = coord.last_transition_at
+
+    coord._transition("standby", "lease_held_by_other")
+
+    assert coord.transition_count == 1
+    assert coord.previous_state == "starting"
+    assert coord.last_transition_at == original_time
+
