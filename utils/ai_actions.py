@@ -702,7 +702,7 @@ def looks_action_request(text: str) -> bool:
     polite = bool(re.match(
         r"^(?:stp\s+|svp\s+|s il te plait\s+|tu peux\s+|peux tu\s+|"
         r"est ce que tu peux\s+|je veux que tu\s+|j aimerais que tu\s+|"
-        r"vas y\s+|go\s+)?",
+        r"vas y\s+|go\s+)",
         normalized,
     ))
     action_verb = re.search(
@@ -717,8 +717,8 @@ def looks_action_request(text: str) -> bool:
     if not action_verb:
         return False
 
-    # Plus le verbe est proche du début, plus il s'agit d'une instruction.
-    return polite and action_verb.start() <= 48
+    # Une formulation polie explicite peut placer le verbe un peu plus loin.
+    return polite and action_verb.start() <= 80
 
 
 def local_parse(question: str) -> ParsedAction | None:
