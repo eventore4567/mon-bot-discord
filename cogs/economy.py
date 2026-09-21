@@ -959,51 +959,67 @@ class Economy(commands.Cog, name="Economy"):
     @commands.hybrid_command(name="sell", description="Vendre un article de votre inventaire.", with_app_command=False)
     @app_commands.describe(objet="Le nom de l'objet à vendre")
     async def sell(self, ctx: commands.Context, *, objet: str):
-        row = await self.bot.db.fetchone(
-            "SELECT * FROM inventory WHERE guild_id = ? AND user_id = ? AND item_name = ?", (ctx.guild.id, ctx.author.id, objet)
+        if ctx.guild is None:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
+        item_name = str(objet or "").strip()
+        if not item_name:
+            return await sx_panels.envoyer(
+                ctx, sx_panels.depuis_embed(embeds.error("Indiquez l'objet à vendre."))
+            )
+        status, price = await economy_service.atomic_sell(
+            self.bot.db, ctx.guild.id, ctx.author.id, item_name
         )
-        if not row or row["quantity"] < 1:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne possédez pas cet objet.')))
-        item = await self.bot.db.fetchone("SELECT * FROM shop_items WHERE guild_id = ? AND name = ?", (ctx.guild.id, objet))
-        price = int(item["price"] * 0.5) if item else 10
-        await self.bot.db.execute(
-            "UPDATE inventory SET quantity = quantity - 1 WHERE guild_id = ? AND user_id = ? AND item_name = ?",
-            (ctx.guild.id, ctx.author.id, objet),
+        if status == "ok":
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(
+                    embeds.success(
+                        f"**{item_name}** vendu pour **{stats_service.format_number(price)}** 🪙."
+                    )
+                ),
+            )
+        if status in {"missing", "changed"}:
+            return await sx_panels.envoyer(
+                ctx, sx_panels.depuis_embed(embeds.error("Vous ne possédez pas cet objet."))
+            )
+        return await sx_panels.envoyer(
+            ctx, sx_panels.depuis_embed(embeds.error("Vente temporairement indisponible."))
         )
-        await self.bot.db.add_balance(ctx.guild.id, ctx.author.id, price)
-        await self.bot.db.log_transaction(ctx.guild.id, None, ctx.author.id, "sell", price, f"Vente : {objet}")
-        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'Vous avez vendu **{objet}** pour {stats_service.format_number(price)} 🪙.')))
-
     @commands.hybrid_command(name="gamble", description="Miser de l'argent au casino (50% de chance).")
     @app_commands.describe(montant="Le montant à miser")
     async def gamble(self, ctx: commands.Context, montant: int):
-        if montant <= 0:
+        if ctx.guild is None:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
+        if int(montant) <= 0:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Le montant doit être positif.')))
         won = random.random() < 0.5
-        # gamble() vérifie le solde ET débite/crédite dans la même section critique
-        # (database/db.py::_economy_lock) : deux mises concurrentes ne peuvent plus
-        # rendre le solde négatif (vérifié par exécution avant ce correctif).
-        staked = await self.bot.db.gamble(ctx.guild.id, ctx.author.id, montant, won)
-        if not staked:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Vous n'avez pas assez d'argent.")))
+        status = await economy_service.atomic_gamble(
+            self.bot.db, ctx.guild.id, ctx.author.id, int(montant), win=won
+        )
+        if status == "insufficient":
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Solde insuffisant.')))
+        if status != "ok":
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Casino temporairement indisponible.')))
+        amount_text = stats_service.format_number(int(montant))
         if won:
-            await self.bot.db.log_transaction(ctx.guild.id, None, ctx.author.id, "gamble_win", montant, "Casino")
-            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'🎰 Vous avez gagné **{stats_service.format_number(montant)} 🪙** !')))
-        else:
-            await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, None, "gamble_loss", montant, "Casino")
-            await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'🎰 Vous avez perdu **{stats_service.format_number(montant)} 🪙**.')))
-
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'Vous gagnez **{amount_text}** 🪙.')))
+        return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Vous perdez **{amount_text}** 🪙.')))
     async def _deposit_to_bank(self, ctx: commands.Context, montant: str):
-        """Transfère un montant du portefeuille vers la banque.
-
-        move_cash_bank() résout 'all'/le montant ET vérifie/écrit dans la même
-        section critique (database/db.py::_economy_lock) : deux dépôts concurrents
-        ne peuvent plus dupliquer d'argent (cash négatif, banque créditée deux fois —
-        vérifié par exécution avant ce correctif)."""
-        amount = await self.bot.db.move_cash_bank(ctx.guild.id, ctx.author.id, montant, direction="deposit")
-        if amount is None:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide. Utilisez un nombre positif ou `all`.')))
-        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{stats_service.format_number(amount)} 🪙 transférés dans votre banque. Cet argent ne peut pas être volé.')))
+        if ctx.guild is None:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
+        status, amount = await economy_service.atomic_bank_transfer(
+            self.bot.db, ctx.guild.id, ctx.author.id, montant, deposit=True
+        )
+        if status == "ok":
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(
+                    embeds.success(f'**{stats_service.format_number(amount)}** 🪙 déposés en banque.')
+                ),
+            )
+        if status in {"invalid", "changed"}:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
+        return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
 
     @commands.hybrid_command(name="deposit", description="Déposer de l'argent à la banque (ou 'all').", with_app_command=False)
     @app_commands.describe(montant="Le montant à déposer (ou 'all')")
@@ -1013,10 +1029,21 @@ class Economy(commands.Cog, name="Economy"):
     @commands.hybrid_command(name="withdraw", description="Retirer de l'argent de la banque (ou 'all').", with_app_command=False)
     @app_commands.describe(montant="Le montant à retirer (ou 'all')")
     async def withdraw(self, ctx: commands.Context, montant: str):
-        amount = await self.bot.db.move_cash_bank(ctx.guild.id, ctx.author.id, montant, direction="withdraw")
-        if amount is None:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide.')))
-        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'💵 {stats_service.format_number(amount)} 🪙 retirés de la banque.')))
+        if ctx.guild is None:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
+        status, amount = await economy_service.atomic_bank_transfer(
+            self.bot.db, ctx.guild.id, ctx.author.id, montant, deposit=False
+        )
+        if status == "ok":
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(
+                    embeds.success(f'**{stats_service.format_number(amount)}** 🪙 retirés de la banque.')
+                ),
+            )
+        if status in {"invalid", "changed"}:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
+        return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
 
     @commands.hybrid_command(
         name="banque",
@@ -1041,11 +1068,12 @@ class Economy(commands.Cog, name="Economy"):
         e.add_field(name="🏦 Banque", value=f"{stats_service.format_number(stats['bank'])} 🪙", inline=True)
         e.add_field(name="💎 Total", value=f"**{stats_service.format_number(stats['total_money'])}** 🪙", inline=True)
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(e))
-
     @commands.hybrid_command(name="give-money", description="[Admin] Donner de l'argent à un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé", montant="Le montant à donner")
     @checks.is_owner_or_admin_for("economie")
     async def give_money(self, ctx: commands.Context, membre: discord.Member, montant: int):
+        if int(montant) <= 0:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Le montant doit être supérieur à 0.')))
         await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
         await self.bot.db.add_balance(ctx.guild.id, membre.id, montant)
         await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, membre.id, "admin_grant", montant, "Ajout manuel (staff)")
