@@ -653,3 +653,16 @@ def test_ai_context_turbo_skips_internal_router_context():
     assert "_CONTEXT_CACHE_TTL" in source
     assert "_optional_table_exists" in source
 
+def test_natural_personal_immunity_toggle():
+    off = ai_actions.local_parse("SentriX désactive mon immunité")
+    assert off is not None
+    assert off.intent == "security.immunity"
+    assert off.slots["state"] == "off"
+    assert ai_actions.build_command_line(off, prefix="+") == "+immunity off"
+
+    on = ai_actions.local_parse("SentriX active mon immunité")
+    assert on is not None
+    assert on.intent == "security.immunity"
+    assert on.slots["state"] == "on"
+    assert ai_actions.build_command_line(on, prefix="+") == "+immunity on"
+
