@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import functools
 import logging
 import time
 import types
@@ -18,8 +17,7 @@ from collections import defaultdict
 import discord
 from discord.ext import commands
 
-from services import economy as economy_service
-from utils import embeds, stats_service
+from utils import embeds
 from utils import sentrix_panels as panels
 from utils.v22_rules import (
     clean_reason,
@@ -60,7 +58,6 @@ class SentriXV22(commands.Cog):
     async def cog_load(self):
         await self._install_database_tuning()
         self._install_shared_parsers()
-        self._install_economy_hardening()
         self._install_moderation_hardening()
         self._install_ticket_hardening()
         self._install_ai_cache()
@@ -71,7 +68,7 @@ class SentriXV22(commands.Cog):
             "new_commands": 0,
             "installed_at": int(time.time()),
             "features": [
-                "stats-query-collapse", "persistent-atomic-rob", "moderation-guards",
+                "stats-query-collapse", "canonical-atomic-rob", "moderation-guards",
                 "ticket-concurrency", "ai-settings-cache", "game-settings-cache",
                 "sqlite-tuning", "friendly-arguments",
             ],
@@ -120,48 +117,8 @@ class SentriXV22(commands.Cog):
             friendly_amount._sentrix_v22 = True
             economy_module._parse_amount = friendly_amount
 
-    @staticmethod
-    def _replace_command_callback(command, callback, marker: str):
-        if command is None or getattr(command, marker, False):
-            return False
-        params = command.params.copy()
-        callback = functools.wraps(command.callback)(callback)
-        command.callback = callback
-        command.params = params
-        setattr(command, marker, True)
-        return True
-
-    def _install_economy_hardening(self):
-        command = self.bot.get_command("rob")
-        if command is None or getattr(command, "_sentrix_v22_atomic_rob", False):
-            return
-
-        async def atomic_rob(economy_cog, ctx: commands.Context, membre: discord.Member):
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
-            if membre.id == ctx.author.id:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
-            if membre.bot:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
-
-            kind, value = await economy_service.atomic_rob(self.bot.db, ctx.guild.id, ctx.author.id, membre.id)
-            if kind == "cooldown":
-                minutes = max(1, (int(value) + 59) // 60)
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous devez attendre encore **{minutes} min** avant de retenter un vol.')))
-            if kind == "poor":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
-            if kind == "retry":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Le solde de la cible vient de changer. Réessayez.')))
-            if kind == "success":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous avez volé **{stats_service.format_number(value)} 🪙** à {membre.display_name}.')))
-            if kind == "failed":
-                if value:
-                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Vous avez été attrapé : **{stats_service.format_number(value)} 🪙** d'amende.")))
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous avez été attrapé, mais votre portefeuille était déjà vide.')))
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le vol n'a pas pu être traité. Réessayez.")))
-
-        self._replace_command_callback(command, atomic_rob, "_sentrix_v22_atomic_rob")
-
+    # +rob est désormais canonique dans cogs/economy.py et délègue directement à
+    # services/economy.atomic_rob(). V2.2 ne remplace plus le callback de commande.
     def _install_moderation_hardening(self):
         """Borne le MP de sanction historique à 2,5 s.
 
