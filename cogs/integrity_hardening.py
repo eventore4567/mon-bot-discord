@@ -99,82 +99,10 @@ def _install_economy(bot: commands.Bot) -> bool:
     if economy is None:
         return False
 
-    async def safe_deposit(this, ctx: commands.Context, montant: str):
-        if ctx.guild is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-        status, amount = await economy_service.atomic_bank_transfer(
-            bot.db, ctx.guild.id, ctx.author.id, montant, deposit=True
-        )
-        if status == "ok":
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{stats_service.format_number(amount)}** 🪙 déposés en banque.')))
-        if status in {"invalid", "changed"}:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
-        return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
-
-    safe_deposit._sentrix_integrity = True
-    economy._deposit_to_bank = types.MethodType(safe_deposit, economy)
-
-    withdraw = bot.get_command("withdraw")
-    if withdraw is not None:
-        async def safe_withdraw(cog, ctx: commands.Context, montant: str):
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-            status, amount = await economy_service.atomic_bank_transfer(
-                bot.db, ctx.guild.id, ctx.author.id, montant, deposit=False
-            )
-            if status == "ok":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{stats_service.format_number(amount)}** 🪙 retirés de la banque.')))
-            if status in {"invalid", "changed"}:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
-        _replace_callback(withdraw, safe_withdraw, "_sentrix_integrity_atomic")
-
-    sell = bot.get_command("sell")
-    if sell is not None:
-        async def safe_sell(cog, ctx: commands.Context, *, objet: str):
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-            item_name = str(objet or "").strip()
-            if not item_name:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez l'objet à vendre.")))
-            status, price = await economy_service.atomic_sell(bot.db, ctx.guild.id, ctx.author.id, item_name)
-            if status == "ok":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{item_name}** vendu pour **{stats_service.format_number(price)}** 🪙.')))
-            if status in {"missing", "changed"}:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne possèdes pas cet objet.')))
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vente temporairement indisponible.')))
-        _replace_callback(sell, safe_sell, "_sentrix_integrity_atomic")
-
-    gamble = bot.get_command("gamble")
-    if gamble is not None:
-        async def safe_gamble(cog, ctx: commands.Context, montant: int):
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-            if int(montant) <= 0:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être positif.')))
-            win = secrets.randbelow(2) == 0
-            status = await economy_service.atomic_gamble(bot.db, ctx.guild.id, ctx.author.id, int(montant), win=win)
-            if status == "insufficient":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Solde insuffisant.')))
-            if status != "ok":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Casino temporairement indisponible.')))
-            amount_text = stats_service.format_number(int(montant))
-            if win:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous gagnez **{amount_text}** 🪙.')))
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Vous perds **{amount_text}** 🪙.')))
-        _replace_callback(gamble, safe_gamble, "_sentrix_integrity_atomic")
-
-    give_money = bot.get_command("give-money")
-    if give_money is not None:
-        original_give = give_money.callback
-
-        async def positive_grant(cog, ctx: commands.Context, membre: discord.Member, montant: int):
-            if int(montant) <= 0:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être supérieur à 0.')))
-            return await original_give(cog, ctx, membre, int(montant))
-
-        _replace_callback(give_money, positive_grant, "_sentrix_integrity_positive_grant")
-
+    # Les opérations banque / sell / gamble / rob / give-money sont désormais
+    # atomiques directement dans cogs/economy.py + services/economy.py.
+    # Cette couche conserve uniquement le rollback/remboursement d’un achat
+    # d’objet si l’écriture d’inventaire échoue.
     original_purchase = economy._purchase_item
     if not getattr(original_purchase, "_sentrix_integrity_refund", False):
         async def safe_purchase(this, ctx: commands.Context, item):
