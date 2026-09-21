@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -173,25 +174,38 @@ def validate_opponent(author, opponent) -> str | None:
 
 
 class PlayLockRegistry:
-    """Empêche un même joueur de faire tourner deux manches du MÊME jeu en même temps (ex:
-    lancer +dice deux fois d'un coup avant que la première réponse n'arrive). Un verrou par
-    (guild_id, user_id, game_name), en mémoire — c'est une protection anti-spam de manches
-    simultanées, pas une source de vérité (celle-ci reste toujours la contrainte UNIQUE de
-    game_session_id en base pour l'anti-double-récompense)."""
+    """In-memory anti-parallel lock with automatic stale-lock recovery.
 
-    def __init__(self):
-        self._locked: set[tuple[int, int, str]] = set()
+    Persistent cooldowns and unique reward session IDs remain the source of truth.
+    This registry only prevents two simultaneous rounds of the same game for one user.
+    A TTL ensures that an unexpected exception/process path can never block a player
+    forever until the next Railway restart.
+    """
+
+    def __init__(self, ttl: float = 1800.0):
+        self.ttl = float(ttl)
+        self._locked: dict[tuple[int, int, str], float] = {}
+
+    def _prune(self, current: float | None = None) -> None:
+        current = time.monotonic() if current is None else current
+        stale = [
+            key for key, stamp in self._locked.items()
+            if current - stamp >= self.ttl
+        ]
+        for key in stale:
+            self._locked.pop(key, None)
 
     def try_acquire(self, guild_id: int, user_id: int, game_name: str) -> bool:
-        key = (guild_id, user_id, game_name)
+        current = time.monotonic()
+        self._prune(current)
+        key = (int(guild_id), int(user_id), str(game_name))
         if key in self._locked:
             return False
-        self._locked.add(key)
+        self._locked[key] = current
         return True
 
-    def release(self, guild_id: int, user_id: int, game_name: str):
-        self._locked.discard((guild_id, user_id, game_name))
-
+    def release(self, guild_id: int, user_id: int, game_name: str) -> None:
+        self._locked.pop((int(guild_id), int(user_id), str(game_name)), None)
 
 _registry = PlayLockRegistry()
 
