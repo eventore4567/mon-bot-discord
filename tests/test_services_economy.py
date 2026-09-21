@@ -352,7 +352,7 @@ class IntegrityRuntimeAuditTests(unittest.TestCase):
             "def install", 1
         )[0]
 
-        self.assertNotIn("NORMAL_DIRECT_COMMANDS", audit)
+        self.assertNotIn("command_catalog_cleanup.NORMAL_DIRECT_COMMANDS", audit)
         self.assertNotIn("commandes directes absentes", audit)
         self.assertIn("commands_checked", audit)
 
