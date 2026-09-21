@@ -2,8 +2,7 @@
 
 Ce module corrige des risques transversaux confirmés pendant l'audit A→Z :
 - pruning de commandes sûr face aux alias ;
-- transactions économie sérialisées (vente, casino, banque) ;
-- remboursement d'un achat si l'inventaire ne peut pas être crédité ;
+- achat boutique remboursé si l'inventaire ne peut pas être crédité ;
 - hiérarchie uniforme sur les actions de modération restantes ;
 - boutons de tickets réellement réservés au staff ;
 - suppression de ticket marquée en base uniquement après suppression Discord ;
@@ -15,10 +14,8 @@ leurs paramètres afin de ne pas casser +help, les convertisseurs discord.py ou 
 from __future__ import annotations
 
 import asyncio
-import functools
 import inspect
 import logging
-import secrets
 import time
 import types
 
@@ -26,24 +23,12 @@ import discord
 from discord.ext import commands
 
 from database.db import now
-from services import economy as economy_service
 from utils import embeds, stats_service
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.integrity-hardening")
 
 _GAME_LOCK_TTL_SECONDS = 1800.0
-
-
-def _replace_callback(command, callback, marker: str) -> bool:
-    if command is None or getattr(command, marker, False):
-        return False
-    params = command.params.copy()
-    callback = functools.wraps(command.callback)(callback)
-    command.callback = callback
-    command.params = params
-    setattr(command, marker, True)
-    return True
 
 
 def _install_safe_pruning(bot: commands.Bot) -> bool:
