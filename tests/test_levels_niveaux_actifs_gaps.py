@@ -63,13 +63,26 @@ class _FakeMember:
     display_avatar = SimpleNamespace(url="https://example.com/a.png")
 
 
-def _make_cog(*, niveaux_actifs: bool):
+def _make_cog(*, niveaux_actifs: bool, economie_active: bool = True):
     bot = SimpleNamespace(db=SimpleNamespace(
-        get_stats_settings=AsyncMock(return_value={"color": 0x123456, "footer": "SentriX"}),
+        get_stats_settings=AsyncMock(return_value={
+            "color": 0x123456,
+            "footer": "SentriX",
+            "title_stats": "Stats de {display_name}",
+            "show_messages": True,
+            "show_voice": False,
+            "show_economy": True,
+            "show_reputation": False,
+            "show_join_date": False,
+            "show_next_role": True,
+            "buttons_visible": True,
+            "economy_emoji": "coin",
+        }),
     ))
     cog = Levels.__new__(Levels)
     cog.bot = bot
     cog._niveaux_actifs = AsyncMock(return_value=niveaux_actifs)
+    cog._economie_active = AsyncMock(return_value=economie_active)
     return cog
 
 
@@ -92,17 +105,17 @@ class BuildLevelEmbedTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BuildRanksEmbedTests(unittest.IsolatedAsyncioTestCase):
-    async def test_masque_le_rang_de_niveau_quand_desactive(self):
+    async def test_masque_completement_le_rang_de_niveau_quand_desactive(self):
         cog = _make_cog(niveaux_actifs=False)
         with patch("cogs.levels.stats_service.get_member_statistics", AsyncMock(return_value=_fake_stats())), \
              patch("cogs.levels.stats_service.get_category_ranks", AsyncMock(return_value=_fake_ranks())):
             embed = await cog.build_ranks_embed(_FakeGuild(), _FakeMember())
 
-        xp_field = next(f for f in embed.fields if f.name == "XP / Niveau")
-        self.assertEqual(xp_field.value, "Désactivé sur ce serveur")
+        noms = [f.name for f in embed.fields]
+        self.assertNotIn("XP / Niveau", noms)
 
-    async def test_les_autres_classements_restent_affiches_quand_desactive(self):
-        cog = _make_cog(niveaux_actifs=False)
+    async def test_les_autres_classements_restent_affiches_si_leurs_modules_sont_actifs(self):
+        cog = _make_cog(niveaux_actifs=False, economie_active=True)
         with patch("cogs.levels.stats_service.get_member_statistics", AsyncMock(return_value=_fake_stats())), \
              patch("cogs.levels.stats_service.get_category_ranks", AsyncMock(return_value=_fake_ranks())):
             embed = await cog.build_ranks_embed(_FakeGuild(), _FakeMember())
@@ -110,6 +123,16 @@ class BuildRanksEmbedTests(unittest.IsolatedAsyncioTestCase):
         champs = {f.name: f.value for f in embed.fields}
         self.assertEqual(champs["Messages"], "#5")
         self.assertEqual(champs["Économie"], "#2")
+
+    async def test_masque_aussi_economie_quand_module_inactif(self):
+        cog = _make_cog(niveaux_actifs=False, economie_active=False)
+        with patch("cogs.levels.stats_service.get_member_statistics", AsyncMock(return_value=_fake_stats())), \
+             patch("cogs.levels.stats_service.get_category_ranks", AsyncMock(return_value=_fake_ranks())):
+            embed = await cog.build_ranks_embed(_FakeGuild(), _FakeMember())
+
+        noms = [f.name for f in embed.fields]
+        self.assertNotIn("XP / Niveau", noms)
+        self.assertNotIn("Économie", noms)
 
     async def test_affiche_le_rang_de_niveau_quand_actifs(self):
         cog = _make_cog(niveaux_actifs=True)
@@ -148,6 +171,44 @@ class LeaderboardLevelsCommandTests(unittest.IsolatedAsyncioTestCase):
 
         cog.bot.db.fetchall.assert_awaited_once()
         ctx.send.assert_awaited()
+
+
+class StatsDisabledModulesVisibilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stats_ne_montre_ni_niveaux_ni_economie_si_inactifs(self):
+        cog = _make_cog(niveaux_actifs=False, economie_active=False)
+        stats = _fake_stats(
+            wallet=123,
+            bank=456,
+            total_money=579,
+            voice_time=0,
+            reputation=0,
+            joined_at=None,
+        )
+        with patch("cogs.levels.stats_service.get_member_statistics", AsyncMock(return_value=stats)):
+            embed = await cog.build_stats_embed(_FakeGuild(), _FakeMember())
+
+        noms = [f.name for f in embed.fields]
+        self.assertNotIn("📈 Niveau", noms)
+        self.assertNotIn("📈 Niveaux", noms)
+        self.assertNotIn("✨ Progression", noms)
+        self.assertNotIn("🎭 Prochain rôle", noms)
+        self.assertNotIn("💰 Économie", noms)
+
+    def test_vue_stats_retire_les_boutons_des_modules_inactifs(self):
+        cog = _make_cog(niveaux_actifs=False, economie_active=False)
+        view = __import__("cogs.levels", fromlist=["StatsView"]).StatsView(
+            cog,
+            _FakeGuild(),
+            _FakeMember(),
+            author_id=1,
+            levels_enabled=False,
+            economy_enabled=False,
+        )
+        custom_ids = {getattr(child, "custom_id", None) for child in view.children}
+        self.assertNotIn("statsnav:level", custom_ids)
+        self.assertNotIn("statsnav:eco", custom_ids)
+        self.assertIn("statsnav:stats", custom_ids)
+        self.assertIn("statsnav:rank", custom_ids)
 
 
 if __name__ == "__main__":
