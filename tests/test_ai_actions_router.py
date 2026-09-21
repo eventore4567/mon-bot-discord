@@ -549,3 +549,39 @@ def test_natural_embed_with_everyone_is_direct_action():
     assert parsed.slots["count"] == 10
     assert parsed.slots["mention_everyone"] == "true"
     assert ai_actions.build_command_line(parsed, prefix="+") is None
+
+def test_specific_link_action_is_targeted_not_global_strict():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "ai.py").read_text(encoding="utf-8")
+    block = source.split('if intent == "security.block_link":', 1)[1].split('if intent == "message.send":', 1)[0]
+    assert "blacklist_links" in block
+    assert 'set_automod(guild.id, "antilink_strict", 1)' not in block
+    assert 'set_automod(guild.id, "antilink", 1)' not in block
+
+
+def test_targeted_link_matcher_does_not_match_lookalike_domain():
+    from cogs.automod import _blocked_link_hit
+    rules = ["example.com"]
+    assert _blocked_link_hit("https://example.com/path", rules) == "example.com"
+    assert _blocked_link_hit("http://example.com", rules) == "example.com"
+    assert _blocked_link_hit("https://evil-example.com/path", rules) is None
+    assert _blocked_link_hit("https://sub.example.com/path", rules) is None
+
+
+def test_rich_natural_embed_extracts_visual_options():
+    parsed = ai_actions.local_parse(
+        "SentriX envoie un embed titre: Règlement description: Lis bien "
+        "couleur #ff0000 image https://cdn.example.com/a.png "
+        "miniature https://cdn.example.com/t.png footer: SentriX "
+        "champ Règle 1: Pas de spam; bouton Site: https://example.com dans #general"
+    )
+    assert parsed is not None
+    assert parsed.intent == "embed.send"
+    assert parsed.slots["title"] == "Règlement"
+    assert parsed.slots["color"] == "#ff0000"
+    assert parsed.slots["image"].startswith("https://")
+    assert parsed.slots["thumbnail"].startswith("https://")
+    assert parsed.slots["footer"] == "SentriX"
+    assert parsed.slots["fields"][0]["name"] == "Règle 1"
+    assert parsed.slots["button_url"] == "https://example.com"
+
