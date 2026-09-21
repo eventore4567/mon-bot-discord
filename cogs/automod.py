@@ -137,7 +137,7 @@ def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
 
 
 TOGGLE_FIELDS = [
-    "antispam", "antilink", "antiinvite", "antimention", "anticaps",
+    "antispam", "antilink", "antilink_strict", "antiinvite", "antimention", "anticaps",
     "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "antiinsult",
 ]
 
@@ -146,6 +146,7 @@ TOGGLE_FIELDS = [
 AUTOMOD_TOGGLE_LABELS = {
     "antispam": "Anti-spam (messages répétés)",
     "antilink": "Anti-liens (tous les formats)",
+    "antilink_strict": "Anti-liens strict (tous les liens, partout)",
     "antiinvite": "Anti-invitations Discord",
     "antimention": "Anti-mentions massives",
     "anticaps": "Anti-majuscules (SPAM CAPS)",
@@ -324,6 +325,10 @@ class AutoMod(commands.Cog, name="Automod"):
     async def toggle(self, ctx: commands.Context, field: str, etat: str):
         value = 1 if etat == "on" else 0
         await self.bot.db.set_automod(ctx.guild.id, field, value)
+        if field == "antilink" and not value:
+            await self.bot.db.set_automod(ctx.guild.id, "antilink_strict", 0)
+        if field == "antilink_strict" and value:
+            await self.bot.db.set_automod(ctx.guild.id, "antilink", 1)
         self.automod_cache.pop(ctx.guild.id, None)
         state_text = "ACTIF" if value else "INACTIF"
         label = "L'escalade automatique" if field == "escalation" else f"Le filtre **{AUTOMOD_TOGGLE_LABELS.get(field, field)}**"
@@ -344,6 +349,17 @@ class AutoMod(commands.Cog, name="Automod"):
     @checks.is_owner_or_admin_for("securite")
     async def antilink(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antilink", etat)
+
+    @commands.hybrid_command(
+        name="antilink-strict",
+        description="Bloquer absolument tous les liens partout sur le serveur.",
+        with_app_command=False,
+    )
+    @app_commands.describe(etat="Activer ou désactiver le mode strict")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin_for("securite")
+    async def antilink_strict(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "antilink_strict", etat)
 
     @commands.hybrid_command(name="antiinvite", description="Activer/désactiver le blocage des invitations Discord.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
@@ -713,21 +729,30 @@ class AutoMod(commands.Cog, name="Automod"):
         if message.author.bot or not message.guild:
             return
 
-        # Correction : un salon mis en "ignoré" via /ignorechannel n'était en réalité
-        # JAMAIS respecté par AutoMod (seules certaines commandes le vérifiaient) — les
-        # filtres continuaient de supprimer des messages dans un salon censé être exempté.
+        content_lower = message.content.lower()
+        link_content = _normalize_link_text(message.content)
+        conf = await self.get_automod_cached(message.guild.id)
+
+        # Mode strict : absolument tous les liens sont supprimés, y compris dans les
+        # salons ignorés, pour le staff/admin et même si le domaine est whitelisté.
+        if (
+            conf
+            and conf.get("antilink")
+            and conf.get("antilink_strict")
+            and LINK_RE.search(link_content)
+        ):
+            return await self._delete_and_warn(
+                message,
+                "Lien interdit : mode anti-liens strict actif.",
+                "antilink",
+            )
+
+        # Les autres filtres continuent de respecter les salons ignorés.
         ignored = await self.get_ignored_channels_cached(message.guild.id)
         if message.channel.id in ignored:
             return
 
-        # Correction : la liste noire de MOTS doit s'appliquer à TOUT LE MONDE, y compris
-        # le staff/les administrateurs — contrairement aux autres filtres (spam, liens...)
-        # qui exemptent volontairement le staff pour ne pas gêner la modération. Avant, ce
-        # test passait APRÈS is_automod_exempt() : un admin qui testait "+blacklist-add mot"
-        # puis tapait le mot lui-même voyait le message ne JAMAIS être supprimé, donnant
-        # l'impression trompeuse que le filtre ne marchait pas du tout.
-        content_lower = message.content.lower()
-        link_content = _normalize_link_text(message.content)
+        # La liste noire de MOTS s'applique à tout le monde.
         words = await self.get_blacklist_words_cached(message.guild.id)
         if self._blacklist_hit(words, message.content):
             return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
@@ -735,7 +760,6 @@ class AutoMod(commands.Cog, name="Automod"):
         if await self.is_automod_exempt(message.author):
             return
 
-        conf = await self.get_automod_cached(message.guild.id)
         if not conf:
             return
 
