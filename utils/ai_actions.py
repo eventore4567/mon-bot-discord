@@ -706,19 +706,25 @@ def looks_action_request(text: str) -> bool:
         normalized,
     ))
     action_verb = re.search(
-        r"\b(?:ban|bannis|bannir|tempban|warn|avertis|mute|unmute|kick|expulse|"
-        r"clear|purge|supprime|efface|cree|creer|crée|créer|ajoute|retire|enleve|"
-        r"renomme|configure|active|desactive|bloque|censure|interdit|autorise|"
-        r"rejoint|quitte|connecte|deconnecte|joue|play|pause|skip|stop|mets|met|"
-        r"envoie|publie|donne|deplace|change|ouvre|lance|ferme|lock|unlock|"
-        r"cache|affiche|montre)\b",
+        r"\b(?:fais|fait|execute|exécute|utilise|ban|bannis|bannir|tempban|warn|"
+        r"avertis|mute|unmute|kick|expulse|clear|purge|supprime|efface|cree|creer|"
+        r"crée|créer|ajoute|retire|enleve|renomme|configure|active|desactive|bloque|"
+        r"censure|interdit|autorise|rejoint|quitte|connecte|deconnecte|joue|play|"
+        r"pause|skip|stop|mets|met|envoie|publie|donne|deplace|change|ouvre|lance|"
+        r"ferme|lock|unlock|cache|affiche|montre)\b",
         normalized,
     )
     if not action_verb:
         return False
 
-    # Une formulation polie explicite peut placer le verbe un peu plus loin.
-    return polite and action_verb.start() <= 80
+    direct = bool(re.match(
+        r"^(?:fais|fait|execute|exécute|utilise|cree|creer|crée|créer|ajoute|"
+        r"retire|enleve|configure|mets|met|envoie|publie|donne|change|ouvre|"
+        r"lance|ferme|active|desactive|bloque|censure|autorise)\b",
+        normalized,
+    ))
+    # Une instruction directe ou une formulation polie explicite passe au routeur.
+    return direct or (polite and action_verb.start() <= 80)
 
 
 def local_parse(question: str) -> ParsedAction | None:
