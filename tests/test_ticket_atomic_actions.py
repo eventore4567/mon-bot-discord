@@ -113,3 +113,18 @@ def test_active_ticket_security_patch_is_also_compare_and_set():
     assert "WHERE id=? AND status='ouvert'" in close
     assert "rowcount" in close
 
+def test_v22_does_not_override_canonical_ticket_callbacks_anymore():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "sentrix_v22.py"
+    ).read_text(encoding="utf-8")
+    block = source.split("def _install_ticket_hardening", 1)[1].split(
+        "def _install_ai_cache", 1
+    )[0]
+
+    assert "tickets_cog.btn_claim = types.MethodType" not in block
+    assert "tickets_cog.btn_unclaim = types.MethodType" not in block
+    assert "tickets_cog.close_ticket = types.MethodType" not in block
+    assert "ticket_claim_security.py" in block
+
