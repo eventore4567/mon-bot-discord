@@ -21,6 +21,7 @@ import discord  # noqa: E402
 
 from cogs import automod as automod_module  # noqa: E402
 from cogs.automod import AutoMod  # noqa: E402
+from services import moderation as moderation_service  # noqa: E402
 from utils import sentrix_panels as panels  # noqa: E402
 
 
@@ -258,4 +259,27 @@ def test_immunity_schema_is_persisted():
     source = (Path(__file__).resolve().parents[1] / "database" / "db.py").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS user_immunity_settings" in source
     assert "PRIMARY KEY (guild_id, user_id)" in source
+
+@pytest.mark.asyncio
+async def test_immunity_off_allows_explicit_self_sanction_when_discord_allows_it():
+    member = _member()
+    bot = SimpleNamespace(
+        db=SimpleNamespace(fetchone=AsyncMock(return_value={"enabled": 0}))
+    )
+    assert await moderation_service._hierarchy_error(
+        bot, member.guild, member, member
+    ) is None
+
+
+@pytest.mark.asyncio
+async def test_immunity_on_blocks_sentrix_sanctions():
+    member = _member()
+    bot = SimpleNamespace(
+        db=SimpleNamespace(fetchone=AsyncMock(return_value={"enabled": 1}))
+    )
+    error = await moderation_service._hierarchy_error(
+        bot, member.guild, member, member
+    )
+    assert error is not None
+    assert "immunité SentriX" in error
 
