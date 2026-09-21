@@ -104,6 +104,8 @@ SCAM_KEYWORDS = [
 # pour les admins/Gérer le serveur, que Discord exempte toujours de ses règles natives.
 NATIVE_ANTILINK_RULE_NAME = "SentriX • Anti-liens"
 NATIVE_ANTILINK_CUSTOM_MESSAGE = "Les liens sont interdits sur ce serveur."
+NATIVE_BLACKLIST_RULE_NAME = "SentriX • Mots interdits"
+NATIVE_BLACKLIST_CUSTOM_MESSAGE = "Ce contenu est bloqué par ce serveur."
 NATIVE_ANTILINK_REGEX_PATTERNS = (
     r"(?i)\b(?:https?|hxxps?)://[^\s<]+",
     r"(?i)\bwww\.[^\s<]+",
@@ -399,6 +401,7 @@ class AutoMod(commands.Cog, name="Automod"):
             await self.bot.wait_until_ready()
             for guild in list(self.bot.guilds):
                 await self._sync_native_antilink_rule(guild)
+                await self._sync_native_blacklist_rule(guild)
                 # Petit étalement pour éviter une rafale de requêtes au démarrage.
                 await asyncio.sleep(0.15)
         except asyncio.CancelledError:
@@ -508,10 +511,101 @@ class AutoMod(commands.Cog, name="Automod"):
                 )
                 return False
 
+    async def _sync_native_blacklist_rule(self, guild: discord.Guild) -> bool:
+        """Expose les mots interdits SentriX à Discord AutoMod natif.
+
+        Discord accepte jusqu'à 1000 mots-clés dans une règle. Au-delà, le moteur local
+        SentriX continue de couvrir la liste complète.
+        """
+        lock = self._native_antilink_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            me = guild.me
+            if me is None or not me.guild_permissions.manage_guild:
+                return False
+
+            rows = await self.bot.db.fetchall(
+                "SELECT word FROM blacklist_words WHERE guild_id = ? ORDER BY word",
+                (guild.id,),
+            )
+            keywords: list[str] = []
+            seen: set[str] = set()
+            for row in rows or ():
+                value = str(row["word"] or "").strip()
+                if not value or len(value) > 60:
+                    continue
+                folded = value.casefold()
+                if folded in seen:
+                    continue
+                seen.add(folded)
+                keywords.append(value)
+                if len(keywords) >= 1000:
+                    break
+
+            try:
+                rules = await guild.fetch_automod_rules()
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Lecture règle Discord AutoMod mots interdits impossible guild=%s",
+                    guild.id,
+                    exc_info=True,
+                )
+                return False
+
+            sentrix_rules = [r for r in rules if r.name == NATIVE_BLACKLIST_RULE_NAME]
+            rule = sentrix_rules[0] if sentrix_rules else None
+            for duplicate in sentrix_rules[1:]:
+                try:
+                    await duplicate.delete(reason="SentriX: suppression doublon mots interdits")
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+
+            if not keywords:
+                if rule is not None:
+                    try:
+                        await rule.delete(reason="SentriX: aucun mot interdit configuré")
+                    except (discord.Forbidden, discord.HTTPException):
+                        return False
+                return True
+
+            trigger = discord.AutoModTrigger(keyword_filter=keywords)
+            actions = [
+                discord.AutoModRuleAction(custom_message=NATIVE_BLACKLIST_CUSTOM_MESSAGE)
+            ]
+            try:
+                if rule is None:
+                    await guild.create_automod_rule(
+                        name=NATIVE_BLACKLIST_RULE_NAME,
+                        event_type=discord.AutoModRuleEventType.message_send,
+                        trigger=trigger,
+                        actions=actions,
+                        enabled=True,
+                        exempt_roles=[],
+                        exempt_channels=[],
+                        reason="SentriX: synchronisation mots interdits",
+                    )
+                else:
+                    await rule.edit(
+                        trigger=trigger,
+                        actions=actions,
+                        enabled=True,
+                        exempt_roles=[],
+                        exempt_channels=[],
+                        reason="SentriX: synchronisation mots interdits",
+                    )
+                return True
+            except (discord.Forbidden, discord.HTTPException, ValueError):
+                logger.warning(
+                    "Synchronisation Discord AutoMod mots interdits impossible guild=%s",
+                    guild.id,
+                    exc_info=True,
+                )
+                return False
+
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
-        # Serveur neuf : si un état anti-liens a été préconfiguré, crée la règle native.
+        # Serveur neuf : réconcilie les protections natives disponibles.
         await self._sync_native_antilink_rule(guild)
+        await self._sync_native_blacklist_rule(guild)
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
         # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
@@ -1049,6 +1143,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "INSERT INTO blacklist_words (guild_id, word) VALUES (?, ?)", (ctx.guild.id, mot.lower())
         )
         self.blacklist_words_cache.pop(ctx.guild.id, None)
+        await self._sync_native_blacklist_rule(ctx.guild)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le mot `{mot}` a été ajouté à la liste noire.')))
 
     @commands.hybrid_command(name="blacklist-remove", description="Retirer un mot de la liste noire.", with_app_command=False)
@@ -1059,6 +1154,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "DELETE FROM blacklist_words WHERE guild_id = ? AND word = ?", (ctx.guild.id, mot.lower())
         )
         self.blacklist_words_cache.pop(ctx.guild.id, None)
+        await self._sync_native_blacklist_rule(ctx.guild)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le mot `{mot}` a été retiré de la liste noire.')))
 
     @commands.hybrid_command(name="blacklist-list", description="Afficher la liste des mots interdits.")
