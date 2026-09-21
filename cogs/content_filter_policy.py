@@ -83,16 +83,40 @@ def _patch_automod(bot: commands.Bot) -> None:
     # blacklist de mots qui est volontairement évaluée avant is_automod_exempt() dans le
     # listener historique.
     original_delete_and_warn = automod._delete_and_warn
+    original_maybe_escalate = automod._maybe_escalate
+
+    async def _owner_immunity_is_off(_self, message_or_member) -> bool:
+        guild = getattr(message_or_member, "guild", None)
+        author = getattr(message_or_member, "author", None)
+        member = author or message_or_member
+        if guild is None or member is None or member.id != guild.owner_id:
+            return False
+        try:
+            override = await _self.get_immunity_override_cached(guild.id, member.id)
+        except Exception:
+            override = None
+        return override is False
 
     async def owner_safe_delete_and_warn(
         _self,
         message: discord.Message,
         reason: str,
         filter_name: str = "automod",
+        *,
+        censored_content: str | None = None,
     ):
-        if message.guild is not None and message.author.id == message.guild.owner_id:
+        if (
+            message.guild is not None
+            and message.author.id == message.guild.owner_id
+            and not await _owner_immunity_is_off(_self, message)
+        ):
             return None
-        return await original_delete_and_warn(message, reason, filter_name)
+        return await original_delete_and_warn(
+            message,
+            reason,
+            filter_name,
+            censored_content=censored_content,
+        )
 
     automod._delete_and_warn = MethodType(owner_safe_delete_and_warn, automod)
 
@@ -105,6 +129,16 @@ def _patch_automod(bot: commands.Bot) -> None:
         member: discord.Member,
         reason: str,
     ) -> tuple[str | None, int]:
+        # Si le propriétaire a volontairement mis son immunité sur OFF, il passe
+        # par le moteur AutoMod normal, y compris l'escalade configurée.
+        if member.id == guild.owner_id:
+            try:
+                override = await _self.get_immunity_override_cached(guild.id, member.id)
+            except Exception:
+                override = None
+            if override is False:
+                return await original_maybe_escalate(guild, member, reason)
+
         key = (guild.id, member.id)
         now_ts = time.time()
         hits = _self.infraction_tracker.setdefault(key, [])
@@ -125,7 +159,11 @@ def _patch_automod(bot: commands.Bot) -> None:
         *,
         detection_kind: str,
     ):
-        if message.guild is not None and message.author.id == message.guild.owner_id:
+        if (
+            message.guild is not None
+            and message.author.id == message.guild.owner_id
+            and not await _owner_immunity_is_off(_self, message)
+        ):
             return None
         detail = reason or "Contenu offensant détecté par le filtre multilingue."
         return await _self._delete_and_warn(message, detail, "multilingual_toxicity")
@@ -133,7 +171,7 @@ def _patch_automod(bot: commands.Bot) -> None:
     automod._delete_and_timeout = MethodType(delete_only_toxicity, automod)
 
     logger.info(
-        "Politique contenu activée : propriétaire immunisé, filtres en suppression seule, anti-nuke inchangé."
+        "Politique contenu activée : immunité propriétaire pilotable, filtres suppression seule sauf propriétaire immunité OFF, anti-nuke inchangé."
     )
 
 
