@@ -197,5 +197,73 @@ class UnclaimDecisionTests(unittest.TestCase):
         self.assertEqual(decision, "ok")
 
 
+class TranscriptServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_transcript_text_reads_history_once_and_includes_attachments(self):
+        class _History:
+            def __init__(self, items):
+                self.items = items
+
+            def __aiter__(self):
+                self._iter = iter(self.items)
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self._iter)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        msg = SimpleNamespace(
+            created_at=datetime(2026, 9, 21, 20, 15, tzinfo=timezone.utc),
+            author=SimpleNamespace(id=42, __str__=lambda self: "Tomioka"),
+            content="Bonjour",
+            attachments=[SimpleNamespace(url="https://cdn.example/test.png")],
+        )
+
+        class _Channel:
+            name = "ticket-test"
+
+            def history(self, *, limit, oldest_first):
+                self.request = (limit, oldest_first)
+                return _History([msg])
+
+        channel = _Channel()
+        text = await tickets_service.fetch_transcript_text(channel)
+
+        self.assertEqual(channel.request, (2000, True))
+        self.assertIn("Bonjour", text)
+        self.assertIn("(42)", text)
+        self.assertIn("[Pièce jointe] https://cdn.example/test.png", text)
+
+    async def test_generate_transcript_returns_named_utf8_file(self):
+        class _History:
+            def __aiter__(self):
+                self.done = False
+                return self
+
+            async def __anext__(self):
+                if self.done:
+                    raise StopAsyncIteration
+                self.done = True
+                return SimpleNamespace(
+                    created_at=datetime(2026, 9, 21, 20, 15, tzinfo=timezone.utc),
+                    author=SimpleNamespace(id=7, __str__=lambda self: "User"),
+                    content="Message test",
+                    attachments=[],
+                )
+
+        class _Channel:
+            name = "support-123"
+
+            def history(self, *, limit, oldest_first):
+                return _History()
+
+        file = await tickets_service.generate_transcript(_Channel())
+        self.assertEqual(file.filename, "transcript-support-123.txt")
+        file.fp.seek(0)
+        payload = file.fp.read().decode("utf-8")
+        self.assertIn("Message test", payload)
+
+
 if __name__ == "__main__":
     unittest.main()
