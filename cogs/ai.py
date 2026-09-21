@@ -2245,7 +2245,7 @@ class Ai(commands.Cog, name="Ai"):
             user_id=message.author.id,
             command="sentrix-command-router",
             web_search=False,
-            max_output_tokens=180,
+            max_output_tokens=140,
         )
         if not result.ok:
             return None
