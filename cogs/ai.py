@@ -41,7 +41,6 @@ import logging
 import re
 import time
 import traceback
-import unicodedata
 
 import discord
 from discord import app_commands
@@ -811,8 +810,7 @@ class Ai(commands.Cog, name="Ai"):
 
     @staticmethod
     def _normalize_request(text: str) -> str:
-        normalized = unicodedata.normalize("NFKD", text)
-        return "".join(char for char in normalized if not unicodedata.combining(char)).lower().strip()
+        return ai_command_router.normalize_request(text)
 
     def _natural_command_line(
         self,
@@ -821,109 +819,12 @@ class Ai(commands.Cog, name="Ai"):
         *,
         has_attachment: bool,
     ) -> str | None:
-        """Transforme une demande naturelle explicite en commande préfixée existante."""
-        normalized = self._normalize_request(question)
-        action_intent = bool(re.search(
-            r"\b(ouvre|affiche|lance|execute|fais|fait|utilise|ajoute|cree|genere|dessine|importe|"
-            r"supprime|enleve|retire|mets|configure)\b",
-            normalized,
-        ))
-
-        image_intent = bool(
-            re.search(r"\b(image|photo|illustration|dessin)\b", normalized)
-            and re.search(r"\b(fais|fait|cree|genere|dessine)\b", normalized)
+        return ai_command_router.natural_command_line(
+            self.bot,
+            question,
+            prefix,
+            has_attachment=has_attachment,
         )
-        if image_intent:
-            tail = re.split(
-                r"\b(?:image|photo|illustration|dessin)\b",
-                question,
-                maxsplit=1,
-                flags=re.IGNORECASE,
-            )[-1]
-            tail = re.sub(
-                r"^\s*(?:de|du|d['’]|avec|sur|representant|qui represente)\s*",
-                "",
-                tail,
-                flags=re.IGNORECASE,
-            ).strip(" :,-")
-            return f"{prefix}image" + (f" {tail}" if tail else "")
-
-        if action_intent and re.search(r"\b(setup|configuration)\b", normalized):
-            return f"{prefix}setup"
-        if action_intent and re.search(r"\b(help|aide|commandes)\b", normalized):
-            return f"{prefix}help"
-
-        emoji_action = any(word in normalized for word in ("emoji", "emogi", "amogi"))
-        pasted_emoji = re.search(r"<a?:[A-Za-z0-9_]{2,32}:[0-9]+>", question)
-        named_emoji = re.search(r"[:;]([A-Za-z0-9_]{2,32}):", question)
-        direct_url = re.search(r"https://\S+", question)
-
-        if emoji_action and re.search(r"\b(ajoute|cree|importe)\b", normalized):
-            if pasted_emoji:
-                return f"{prefix}addemoji {pasted_emoji.group(0)}"
-            if named_emoji:
-                command = f"{prefix}addemoji {named_emoji.group(1)}"
-                if direct_url:
-                    command += f" {direct_url.group(0)}"
-                return command
-            tail = re.split(r"\b(?:emoji|emogi|amogi)\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
-            tail = re.sub(r"^\s*(?:nomme|appele|appelé|avec|de|moi)\s+", "", tail, flags=re.IGNORECASE).strip()
-            if tail:
-                return f"{prefix}addemoji {tail}"
-            if has_attachment:
-                return f"{prefix}addemoji emoji"
-
-        if emoji_action and re.search(r"\b(supprime|enleve|retire)\b", normalized):
-            if pasted_emoji:
-                return f"{prefix}deleteemoji {pasted_emoji.group(0)}"
-            if named_emoji:
-                return f"{prefix}deleteemoji {named_emoji.group(1)}"
-            tail = re.split(r"\b(?:emoji|emogi|amogi)\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
-            target = tail.strip(" :;,")
-            if target:
-                return f"{prefix}deleteemoji {target}"
-
-        candidates = []
-        excluded = {"ai", "sentrix", "chat", "ask"}
-        for command in self.bot.walk_commands():
-            if command.qualified_name in excluded:
-                continue
-            triggers = [command.qualified_name]
-            parent = command.qualified_name.rsplit(" ", 1)[0] if " " in command.qualified_name else ""
-            triggers.extend(f"{parent} {alias}".strip() for alias in command.aliases)
-            for trigger in triggers:
-                trigger_normalized = self._normalize_request(trigger)
-                match = re.search(
-                    rf"(?<![\w-]){re.escape(trigger_normalized)}(?![\w-])",
-                    normalized,
-                )
-                if match:
-                    candidates.append((len(trigger_normalized), match, command))
-
-        for _, match, command in sorted(candidates, key=lambda item: item[0], reverse=True):
-            direct_request = match.start() == 0 or normalized.startswith("commande ")
-            if not action_intent and not direct_request:
-                continue
-            trailing = question[match.end():].strip()
-            while trailing:
-                cleaned = re.sub(
-                    r"^(?:avec|sur|pour|de|du|la|le|les|moi)\s+",
-                    "",
-                    trailing,
-                    count=1,
-                    flags=re.IGNORECASE,
-                )
-                if cleaned == trailing:
-                    break
-                trailing = cleaned.strip()
-            if not command.clean_params:
-                trailing = ""
-            command_line = f"{prefix}{command.qualified_name}"
-            if trailing:
-                command_line += f" {trailing}"
-            return command_line
-        return None
-
     async def _invoke_command_line(self, message: discord.Message, command_line: str) -> bool:
         """Exécute UNE commande existante sans modifier le message Discord d'origine.
 
