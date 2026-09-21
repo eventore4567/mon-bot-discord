@@ -33,7 +33,12 @@ _ALL_OFF = {
 
 
 def _cog(*, conf: dict) -> AutoMod:
-    bot = SimpleNamespace(db=SimpleNamespace(log_automod_action=AsyncMock()))
+    bot = SimpleNamespace(
+        db=SimpleNamespace(
+            log_automod_action=AsyncMock(),
+            fetchone=AsyncMock(return_value=None),
+        )
+    )
     cog = AutoMod(bot)
     cog.automod_cache[1] = {**_ALL_OFF, **conf}
     cog.ignored_channels_cache[1] = set()
@@ -228,4 +233,29 @@ def test_censure_webhook_affiche_explicitement_un_nom_sentrix():
     assert '"username": username' in source
     assert '"avatar_url": avatar' in source
     assert "AllowedMentions.none()" in source
+
+@pytest.mark.asyncio
+async def test_immunity_off_treats_verified_owner_like_normal_member():
+    cog = _cog(conf={"antispam": 0})
+    member = _member()
+    cog.immunity_overrides_cache[(1, 7)] = False
+    with patch.object(automod_module.config, "OWNER_IDS", {7}):
+        assert await cog.is_automod_exempt(member) is False
+
+
+@pytest.mark.asyncio
+async def test_immunity_on_skips_even_strict_antilink():
+    cog = _cog(conf={"antilink": 1, "antilink_strict": 1, "escalation": 0})
+    member = _member()
+    cog.immunity_overrides_cache[(1, 7)] = True
+    message = _message(member, 1, "https://exemple.com")
+    await cog.on_message(message)
+    message.delete.assert_not_awaited()
+
+
+def test_immunity_schema_is_persisted():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "database" / "db.py").read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS user_immunity_settings" in source
+    assert "PRIMARY KEY (guild_id, user_id)" in source
 
