@@ -86,3 +86,30 @@ def test_rating_callback_verifies_ticket_owner_and_prevents_overwrite():
     assert 'int(ticket["user_id"]) != interaction.user.id' in block
     assert "rating IS NULL" in block
     assert "déjà noté" in block
+
+def test_active_ticket_security_patch_is_also_compare_and_set():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "ticket_claim_security.py"
+    ).read_text(encoding="utf-8")
+
+    claim = source.split("async def secure_claim", 1)[1].split(
+        "async def secure_unclaim", 1
+    )[0]
+    assert "claimed_by IS NULL" in claim
+    assert "claimed_by = ?" in claim
+    assert "rowcount" in claim
+
+    unclaim = source.split("async def secure_unclaim", 1)[1].split(
+        "tickets.Tickets.log_action", 1
+    )[0]
+    assert "status = 'ouvert' AND claimed_by = ?" in unclaim
+    assert "rowcount" in unclaim
+
+    close = source.split("async def secure_close_ticket", 1)[1].split(
+        "async def secure_claim", 1
+    )[0]
+    assert "WHERE id=? AND status='ouvert'" in close
+    assert "rowcount" in close
+
