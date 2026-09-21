@@ -126,6 +126,34 @@ class _Incident:
     infractions: int = 0
 
 
+def _normalize_blocked_link_rule(value: str) -> str:
+    raw = _normalize_link_text(str(value or "")).strip().strip("<>()[]{}.,;!?")
+    raw = re.sub(r"^(?:https?|hxxps?)://", "", raw, flags=re.IGNORECASE)
+    raw = raw.rstrip("/")
+    return raw.casefold()
+
+
+def _blocked_link_hit(content: str, rules: list[str]) -> str | None:
+    """Retourne la règle ciblée qui correspond au message, sans activer l'anti-liens global.
+
+    Le schéma est volontairement retiré pour que http/https/hxxps désignent la même cible.
+    La borne gauche évite qu'un domaine ciblé "example.com" corresponde à
+    "evil-example.com" ou "sub.example.com" par simple sous-chaîne.
+    """
+    if not rules:
+        return None
+    normalized = _normalize_link_text(content)
+    normalized = re.sub(r"\b(?:https?|hxxps?)://", "", normalized, flags=re.IGNORECASE)
+    for stored in rules:
+        rule = _normalize_blocked_link_rule(stored)
+        if not rule:
+            continue
+        pattern = rf"(?<![\w.-]){re.escape(rule)}(?=$|[/?#\s<>()\[\]{{}},.;!?])"
+        if re.search(pattern, normalized, re.IGNORECASE):
+            return stored
+    return None
+
+
 def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
     """Vérifie qu'un domaine autorisé apparaît vraiment comme domaine dans le message,
     pas juste comme sous-chaîne. Avant, whitelister "yt.com" aurait aussi laissé passer
@@ -193,6 +221,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # qu'une commande change un réglage.
         self.automod_cache: dict[int, dict] = {}
         self.blacklist_words_cache: dict[int, list[str]] = {}
+        self.blacklist_links_cache: dict[int, list[str]] = {}
         self.blacklist_users_cache: dict[int, set[int]] = {}
         self.whitelist_domains_cache: dict[int, list[str]] = {}
         self.exempt_roles_cache: dict[int, set[int]] = {}
@@ -239,6 +268,15 @@ class AutoMod(commands.Cog, name="Automod"):
             if re.search(motif, texte):
                 return word
         return None
+
+    async def get_blacklist_links_cached(self, guild_id: int) -> list[str]:
+        if guild_id not in self.blacklist_links_cache:
+            rows = await self.bot.db.fetchall(
+                "SELECT value FROM blacklist_links WHERE guild_id = ? ORDER BY value",
+                (guild_id,),
+            )
+            self.blacklist_links_cache[guild_id] = [str(r["value"]) for r in rows if r["value"]]
+        return self.blacklist_links_cache[guild_id]
 
     async def get_blacklist_users_cached(self, guild_id: int) -> set:
         if guild_id not in self.blacklist_users_cache:
@@ -732,6 +770,18 @@ class AutoMod(commands.Cog, name="Automod"):
         content_lower = message.content.lower()
         link_content = _normalize_link_text(message.content)
         conf = await self.get_automod_cached(message.guild.id)
+
+        # Règles ciblées : « SentriX censure ce lien » ajoute uniquement cette cible.
+        # Elles fonctionnent même si l'anti-liens global est désactivé et ne transforment
+        # jamais silencieusement le serveur en mode strict.
+        blocked_links = await self.get_blacklist_links_cached(message.guild.id)
+        blocked_hit = _blocked_link_hit(link_content, blocked_links)
+        if blocked_hit:
+            return await self._delete_and_warn(
+                message,
+                "Lien ciblé interdit par la liste noire du serveur.",
+                "blacklist_link",
+            )
 
         # Mode strict : absolument tous les liens sont supprimés, y compris dans les
         # salons ignorés, pour le staff/admin et même si le domaine est whitelisté.
