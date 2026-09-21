@@ -1542,7 +1542,7 @@ class Ai(commands.Cog, name="Ai"):
             if count is not None and text == str(count):
                 text = f"Valeur : **{int(count)}**"
 
-            colour = discord.Colour(config.COLOR_PRIMARY)
+            colour = discord.Colour(config.COLOR_BRAND)
             raw_colour = str(action.slots.get("color") or "").strip()
             if raw_colour:
                 parsed_colour = self._parse_native_colour(raw_colour)
@@ -2415,7 +2415,26 @@ class Ai(commands.Cog, name="Ai"):
         if not question:
             question = "Salut, comment tu vas ?"
 
-        if await self._invoke_natural_command(message, question, prefix):
+        try:
+            if await self._invoke_natural_command(message, question, prefix):
+                return
+        except Exception:
+            # Une action naturelle ne doit JAMAIS disparaître silencieusement : le détail
+            # reste dans les logs, mais l'utilisateur reçoit immédiatement une réponse.
+            logger.exception(
+                "Action naturelle SentriX en erreur guild=%s user=%s",
+                message.guild.id,
+                message.author.id,
+            )
+            try:
+                await message.reply(
+                    "Je n’ai pas pu exécuter cette action à cause d’une erreur interne. "
+                    "L’erreur a été journalisée.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                pass
             return
 
         async with message.channel.typing():
