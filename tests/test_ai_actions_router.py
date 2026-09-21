@@ -494,12 +494,12 @@ def test_natural_voice_leave_is_a_real_native_action():
 
 
 
-def test_natural_security_goal_executes_antilink():
+def test_natural_security_goal_executes_strict_antilink():
     parsed = ai_actions.local_parse("censure tout les lien du serv")
     assert parsed is not None
-    assert parsed.intent == "security.antilink"
+    assert parsed.intent == "security.antilink_strict"
     assert parsed.slots["state"] == "on"
-    assert ai_actions.build_command_line(parsed, prefix="+") == "+antilink on"
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+antilink-strict on"
 
 
 def test_natural_security_goal_can_disable_antilink():
@@ -515,3 +515,12 @@ def test_natural_security_goal_executes_antiinvite():
     assert parsed is not None
     assert parsed.intent == "security.antiinvite"
     assert parsed.slots["state"] == "on"
+
+
+
+def test_plain_antilink_request_stays_non_strict():
+    parsed = ai_actions.local_parse("active anti lien")
+    assert parsed is not None
+    assert parsed.intent == "security.antilink"
+    assert parsed.slots["state"] == "on"
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+antilink on"
