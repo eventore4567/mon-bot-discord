@@ -1581,10 +1581,35 @@ class Database:
 
     async def set_automod(self, guild_id: int, field: str, value: int):
         await self.ensure_guild(guild_id)
-        await self.execute(
-            f"UPDATE automod_settings SET {field} = ? WHERE guild_id = ?",
-            (value, guild_id),
-        )
+        value = 1 if int(value) else 0
+
+        # Depuis V2026.09, "anti-liens" est strict par définition : activer le filtre
+        # bloque tous les liens. L'ancien interrupteur antilink_strict reste accepté
+        # pour compatibilité, mais les deux valeurs sont toujours synchronisées.
+        if field in {"antilink", "antilink_strict"}:
+            await self.execute(
+                "UPDATE automod_settings SET antilink = ?, antilink_strict = ? WHERE guild_id = ?",
+                (value, value, guild_id),
+            )
+        else:
+            await self.execute(
+                f"UPDATE automod_settings SET {field} = ? WHERE guild_id = ?",
+                (value, guild_id),
+            )
+
+        # Le cog AutoMod installe ce hook à chaud : toute écriture, y compris Dashboard
+        # ou IA naturelle, invalide le cache et resynchronise la règle AutoMod native.
+        hook = getattr(self, "_sentrix_automod_change_hook", None)
+        if callable(hook):
+            try:
+                await hook(int(guild_id), str(field), value)
+            except Exception:
+                logger.warning(
+                    "Hook AutoMod après set_automod impossible guild=%s field=%s",
+                    guild_id,
+                    field,
+                    exc_info=True,
+                )
 
     # ---------- Historique AutoMod (audit + statistiques) ----------
 
