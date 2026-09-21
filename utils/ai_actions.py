@@ -1119,7 +1119,7 @@ async def classify_with_ai(
         user_id=user_id,
         command="sentrix-action-router",
         web_search=False,
-        max_output_tokens=220,
+        max_output_tokens=160,
     )
     if not result.ok:
         return None
