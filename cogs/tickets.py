@@ -560,10 +560,44 @@ class TicketRatingButton(
         return cls(int(match["value"]), int(match["ticket_id"]))
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.client.db.execute(
-            "UPDATE tickets SET rating = ? WHERE id = ?", (self.value, self.ticket_id)
+        ticket = await interaction.client.db.fetchone(
+            "SELECT id, user_id, status, rating FROM tickets WHERE id = ?",
+            (self.ticket_id,),
         )
-        await interaction.response.edit_message(content=f"Merci pour votre note : {'⭐' * self.value}", view=None)
+        if not ticket:
+            return await interaction.response.send_message(
+                "Ce ticket n'existe plus.",
+                ephemeral=True,
+            )
+        if int(ticket["user_id"]) != interaction.user.id:
+            return await interaction.response.send_message(
+                "Seul le créateur de ce ticket peut le noter.",
+                ephemeral=True,
+            )
+        if ticket["status"] == "ouvert":
+            return await interaction.response.send_message(
+                "Ce ticket est encore ouvert.",
+                ephemeral=True,
+            )
+        if ticket["rating"] is not None:
+            return await interaction.response.send_message(
+                "Vous avez déjà noté ce ticket.",
+                ephemeral=True,
+            )
+
+        cur = await interaction.client.db.execute(
+            "UPDATE tickets SET rating = ? WHERE id = ? AND rating IS NULL",
+            (self.value, self.ticket_id),
+        )
+        if getattr(cur, "rowcount", 0) != 1:
+            return await interaction.response.send_message(
+                "La note a déjà été enregistrée.",
+                ephemeral=True,
+            )
+        await interaction.response.edit_message(
+            content=f"Merci pour votre note : {'⭐' * self.value}",
+            view=None,
+        )
 
 
 class RatingView(discord.ui.View):
@@ -1195,8 +1229,41 @@ class Tickets(commands.Cog):
         await self.bot.db.execute("UPDATE tickets SET last_activity_at = ? WHERE id = ?", (now(), ticket_id))
 
     async def btn_claim(self, interaction: discord.Interaction, ticket):
-        await self.bot.db.execute("UPDATE tickets SET claimed_by = ? WHERE id = ?", (interaction.user.id, ticket["id"]))
-        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'🙋 {interaction.user.mention} a pris en charge ce ticket.')))
+        cur = await self.bot.db.execute(
+            "UPDATE tickets SET claimed_by = ? "
+            "WHERE id = ? AND status = 'ouvert' AND claimed_by IS NULL",
+            (interaction.user.id, ticket["id"]),
+        )
+        if getattr(cur, "rowcount", 0) == 1:
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(
+                    embeds.success(f'🙋 {interaction.user.mention} a pris en charge ce ticket.')
+                ),
+            )
+
+        current = await self.bot.db.fetchone(
+            "SELECT claimed_by, status FROM tickets WHERE id = ?",
+            (ticket["id"],),
+        )
+        if not current or current["status"] != "ouvert":
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(embeds.error("Ce ticket n'est plus ouvert.")),
+                ephemere=True,
+            )
+        claimant = current["claimed_by"]
+        if claimant == interaction.user.id:
+            message = "Vous avez déjà pris en charge ce ticket."
+        elif claimant:
+            message = f"Ce ticket est déjà pris en charge par <@{claimant}>."
+        else:
+            message = "Impossible de prendre en charge ce ticket pour le moment."
+        await sx_panels.envoyer(
+            interaction.response,
+            sx_panels.depuis_embed(embeds.info(message)),
+            ephemere=True,
+        )
 
     async def btn_unclaim(self, interaction: discord.Interaction, ticket):
         await self.bot.db.execute("UPDATE tickets SET claimed_by = NULL WHERE id = ?", (ticket["id"],))
@@ -1287,9 +1354,20 @@ class Tickets(commands.Cog):
         ticket_type = await self.get_type(ticket["type_id"]) if ticket["type_id"] else None
         conf = await self.bot.db.get_guild_config(interaction.guild.id)
 
-        await self.bot.db.execute(
-            "UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 WHERE id = ?", (now(), ticket_id)
+        close_cursor = await self.bot.db.execute(
+            "UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 "
+            "WHERE id = ? AND status = 'ouvert'",
+            (now(), ticket_id),
         )
+        if getattr(close_cursor, "rowcount", 0) != 1:
+            try:
+                await interaction.response.send_message(
+                    "Ce ticket est déjà fermé ou n'est plus disponible.",
+                    ephemeral=True,
+                )
+            except discord.InteractionResponded:
+                pass
+            return
         owner = interaction.guild.get_member(ticket["user_id"])
         if owner:
             overwrite = channel.overwrites_for(owner)
