@@ -118,3 +118,30 @@ def arguments_grounded_in_question(question: str, arguments: str) -> bool:
         if token not in qtokens and token not in qnorm:
             return False
     return True
+
+
+def command_needs_confirmation(command_line: str, prefix: str) -> bool:
+    """Return whether a routed existing command requires explicit confirmation."""
+    raw = str(command_line or "")
+    if raw.startswith(prefix):
+        raw = raw[len(prefix):]
+    parts = raw.strip().split()
+    if not parts:
+        return False
+
+    root = parts[0].casefold()
+    dangerous = set(access_matrix.GUILD_OWNER_COMMANDS) | {
+        "delete-channel", "deleteemoji", "massrole", "roleall",
+        "blacklist-user", "blacklist-users", "lockdown-server", "panic",
+        "pay", "give-money", "bot-leave", "reset-logs-all",
+    }
+    if root in dangerous or root.startswith((
+        "wipe", "reset", "restore", "delete-", "mass"
+    )):
+        return True
+    if root == "clear" and len(parts) > 1:
+        try:
+            return int(parts[1]) >= 50
+        except ValueError:
+            return False
+    return False
