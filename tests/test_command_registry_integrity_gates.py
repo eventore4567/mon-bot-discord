@@ -75,3 +75,12 @@ def test_integrity_gate_verifie_bien_les_garanties_economie_dans_leur_nouvel_emp
     assert "AND cash>=?" in source
     assert "AND bank>=?" in source
     assert "AND quantity>=1" in source
+
+def test_integrity_gate_verifie_les_verrous_de_jeux_dans_le_service_canonique():
+    source = (RACINE / "tools" / "integrity_gate.py").read_text(encoding="utf-8")
+    assert "utils" in source and "game_rewards.py" in source
+    assert "class PlayLockRegistry" in source
+    assert "self.ttl" in source
+    assert "time.monotonic()" in source
+    assert "game_rewards._registry =" in source
+
