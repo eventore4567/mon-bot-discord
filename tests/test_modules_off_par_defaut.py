@@ -10,6 +10,7 @@ import asyncio
 import os
 import tempfile
 import unittest
+from unittest.mock import AsyncMock
 from types import SimpleNamespace
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
@@ -90,6 +91,24 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         await system_features.set_system_feature(self.db, NEW_GUILD, "economy", False)
         self.assertTrue(await system_features.is_system_enabled(self.db, NEW_GUILD, "levels"))
         self.assertFalse(await system_features.is_system_enabled(self.db, NEW_GUILD, "economy"))
+
+
+
+    async def test_antilink_est_toujours_strict_et_notifie_le_hook_runtime(self):
+        hook = AsyncMock()
+        self.db._sentrix_automod_change_hook = hook
+
+        await self.db.set_automod(NEW_GUILD, "antilink", 1)
+        conf = await self.db.get_automod(NEW_GUILD)
+        self.assertEqual(int(conf["antilink"]), 1)
+        self.assertEqual(int(conf["antilink_strict"]), 1)
+        hook.assert_awaited_with(NEW_GUILD, "antilink", 1)
+
+        await self.db.set_automod(NEW_GUILD, "antilink_strict", 0)
+        conf = await self.db.get_automod(NEW_GUILD)
+        self.assertEqual(int(conf["antilink"]), 0)
+        self.assertEqual(int(conf["antilink_strict"]), 0)
+        hook.assert_awaited_with(NEW_GUILD, "antilink_strict", 0)
 
     # ------------------------------------------------------------ bienvenue / départ
     async def test_bienvenue_et_depart_sont_deux_modules(self):
