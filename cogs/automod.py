@@ -1579,6 +1579,8 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         if personal_immunity is True:
             return
+        if personal_immunity is None and await self.is_automod_exempt(message.author):
+            return
 
         # Détections prioritaires pouvant être combinées dans un seul avertissement.
         # Exemple : un même message contient à la fois un mot interdit ET un lien interdit.
@@ -1635,9 +1637,6 @@ class AutoMod(commands.Cog, name="Automod"):
                     message.content, blocked_word=blocked_word
                 ),
             )
-
-        if await self.is_automod_exempt(message.author):
-            return
 
         if not conf:
             return
