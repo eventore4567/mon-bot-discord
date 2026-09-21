@@ -213,16 +213,23 @@ async def _hierarchy_error(
     target: discord.Member,
 ) -> str | None:
     """Hiérarchie SentriX avec prise en compte de l'immunité personnelle."""
-    if actor.id == target.id:
-        try:
-            row = await bot.db.fetchone(
-                "SELECT enabled FROM user_immunity_settings WHERE guild_id = ? AND user_id = ?",
-                (guild.id, target.id),
-            )
-        except Exception:
-            row = None
-        if row is not None and int(row["enabled"]) == 0:
+    try:
+        row = await bot.db.fetchone(
+            "SELECT enabled FROM user_immunity_settings WHERE guild_id = ? AND user_id = ?",
+            (guild.id, target.id),
+        )
+    except Exception:
+        row = None
+
+    if row is not None:
+        enabled = bool(int(row["enabled"]))
+        if enabled:
+            return "Ce membre a activé son immunité SentriX."
+        if actor.id == target.id:
+            # Immunité OFF : une auto-sanction explicite est permise, mais Discord
+            # garde ses limites natives (propriétaire du serveur, rôle du bot, etc.).
             return checks.check_bot_hierarchy(guild, target)
+
     return checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
 
 
