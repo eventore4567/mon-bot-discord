@@ -136,6 +136,7 @@ ACTIONS: dict[str, ActionSpec] = {
         "desktop.open_app", None, ("app",), (), None, "medium", True,
         "demander l'ouverture d'une application locale via SentriX Desktop",
     ),
+    "security.immunity": ActionSpec("security.immunity", "immunity", ("state",), (), None, "medium", description="activer ou désactiver sa propre immunité SentriX"),
     "security.antispam": ActionSpec("security.antispam", "antispam", ("state",), (), None, "medium", description="activer ou désactiver l'anti-spam"),
     "security.antilink": ActionSpec("security.antilink", "antilink", ("state",), (), None, "medium", description="activer ou désactiver le blocage normal des liens"),
     "security.antilink_strict": ActionSpec("security.antilink_strict", "antilink-strict", ("state",), (), None, "medium", description="bloquer absolument tous les liens partout, même whitelistés ou dans les salons ignorés"),
