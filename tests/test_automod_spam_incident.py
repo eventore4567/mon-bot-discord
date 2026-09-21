@@ -435,3 +435,111 @@ async def test_native_blacklist_rule_is_removed_when_no_words_remain():
     assert await cog._sync_native_blacklist_rule(guild) is True
     existing.delete.assert_awaited_once()
 
+@pytest.mark.asyncio
+async def test_native_suite_uses_real_sentrix_features_instead_of_duplicate_badge_rules():
+    db = SimpleNamespace(
+        get_automod=AsyncMock(return_value={
+            "antilink": 0,
+            "antiinvite": 1,
+            "antiscam": 1,
+            "antimention": 1,
+            "antiinsult": 1,
+        }),
+        fetchall=AsyncMock(side_effect=[
+            [],  # blacklist_words
+            [],  # blacklist_links
+        ]),
+        fetchone=AsyncMock(return_value=None),
+    )
+    bot = SimpleNamespace(db=db)
+    cog = AutoMod(bot)
+
+    cog._sync_native_antilink_rule = AsyncMock(return_value=True)
+    cog._sync_native_blacklist_rule = AsyncMock(return_value=True)
+    cog._sync_native_target_links_rule = AsyncMock(return_value=True)
+    cog._sync_native_antiinvite_rule = AsyncMock(return_value=True)
+    cog._sync_native_antiscam_rule = AsyncMock(return_value=True)
+    cog._sync_native_antimention_rule = AsyncMock(return_value=True)
+    cog._sync_native_harmful_rule = AsyncMock(return_value=True)
+
+    guild = SimpleNamespace(id=123)
+    await cog._sync_native_suite(guild)
+
+    cog._sync_native_antilink_rule.assert_awaited_once_with(guild)
+    cog._sync_native_blacklist_rule.assert_awaited_once_with(guild)
+    cog._sync_native_target_links_rule.assert_awaited_once_with(guild)
+    cog._sync_native_antiinvite_rule.assert_awaited_once_with(guild)
+    cog._sync_native_antiscam_rule.assert_awaited_once_with(guild)
+    cog._sync_native_antimention_rule.assert_awaited_once_with(guild)
+    cog._sync_native_harmful_rule.assert_awaited_once_with(guild)
+
+
+@pytest.mark.asyncio
+async def test_native_antiinvite_is_only_needed_when_global_antilink_is_off():
+    db = SimpleNamespace(
+        get_automod=AsyncMock(return_value={"antiinvite": 1, "antilink": 0}),
+        fetchone=AsyncMock(return_value=None),
+    )
+    bot = SimpleNamespace(db=db)
+    cog = AutoMod(bot)
+    cog._upsert_native_rule = AsyncMock(return_value=True)
+    guild = SimpleNamespace(id=1)
+
+    await cog._sync_native_antiinvite_rule(guild)
+    kwargs = cog._upsert_native_rule.await_args.kwargs
+    assert kwargs["name"] == automod_module.NATIVE_ANTIINVITE_RULE_NAME
+    assert kwargs["enabled"] is True
+
+    db.get_automod = AsyncMock(return_value={"antiinvite": 1, "antilink": 1})
+    await cog._sync_native_antiinvite_rule(guild)
+    kwargs = cog._upsert_native_rule.await_args.kwargs
+    assert kwargs["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_native_antiscam_mentions_and_harmful_follow_real_module_state():
+    db = SimpleNamespace(
+        get_automod=AsyncMock(side_effect=[
+            {"antiscam": 1},
+            {"antimention": 1},
+            {"antiinsult": 1},
+        ]),
+        fetchone=AsyncMock(return_value=None),
+    )
+    bot = SimpleNamespace(db=db)
+    cog = AutoMod(bot)
+    cog._upsert_native_rule = AsyncMock(return_value=True)
+    guild = SimpleNamespace(id=1)
+
+    await cog._sync_native_antiscam_rule(guild)
+    scam = cog._upsert_native_rule.await_args.kwargs
+    assert scam["enabled"] is True
+    assert scam["trigger"].keyword_filter
+
+    await cog._sync_native_antimention_rule(guild)
+    mention = cog._upsert_native_rule.await_args.kwargs
+    assert mention["enabled"] is True
+    assert mention["trigger"].mention_limit == 5
+    assert mention["trigger"].mention_raid_protection is True
+
+    await cog._sync_native_harmful_rule(guild)
+    harmful = cog._upsert_native_rule.await_args.kwargs
+    assert harmful["enabled"] is True
+    assert harmful["trigger"].presets.profanity
+    assert harmful["trigger"].presets.sexual_content
+    assert harmful["trigger"].presets.slurs
+
+
+def test_native_suite_has_distinct_useful_rule_names():
+    names = {
+        automod_module.NATIVE_ANTILINK_RULE_NAME,
+        automod_module.NATIVE_BLACKLIST_RULE_NAME,
+        automod_module.NATIVE_TARGET_LINKS_RULE_NAME,
+        automod_module.NATIVE_ANTIINVITE_RULE_NAME,
+        automod_module.NATIVE_ANTISCAM_RULE_NAME,
+        automod_module.NATIVE_ANTIMENTION_RULE_NAME,
+        automod_module.NATIVE_HARMFUL_RULE_NAME,
+    }
+    assert len(names) == 7
+    assert all(name.startswith("SentriX • ") for name in names)
+
