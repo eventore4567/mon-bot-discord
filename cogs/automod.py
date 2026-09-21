@@ -98,6 +98,22 @@ SCAM_KEYWORDS = [
     "double your crypto", "investissement garanti", "steam gift free",
 ]
 
+# Règle Discord AutoMod native créée par SentriX lorsque l'anti-liens est actif.
+# Les motifs sont volontairement compatibles avec le moteur Rust Regex de Discord :
+# pas de lookbehind/lookahead. Le filtre Python ci-dessus reste le filet de sécurité
+# pour les admins/Gérer le serveur, que Discord exempte toujours de ses règles natives.
+NATIVE_ANTILINK_RULE_NAME = "SentriX • Anti-liens"
+NATIVE_ANTILINK_CUSTOM_MESSAGE = "Les liens sont interdits sur ce serveur."
+NATIVE_ANTILINK_REGEX_PATTERNS = (
+    r"(?i)\b(?:https?|hxxps?)://[^\s<]+",
+    r"(?i)\bwww\.[^\s<]+",
+    r"(?i)(?:^|[^a-z0-9_@])(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}(?::[0-9]{2,5})?(?:/[^\s<]*)?",
+    r"(?i)\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?::[0-9]{2,5})?(?:/[^\s<]*)?",
+    r"(?i)\bdiscord\.gg/[^\s<]+",
+    r"(?i)\bdiscord(?:app)?\.com/invite/[^\s<]+",
+    r"(?i)\b[a-z0-9-]+(?:\s*(?:\[\.\]|\(\.\)|\s+dot\s+)\s*[a-z0-9-]+)+\b",
+)
+
 # ---------------------------------------------------------------- ESCALADE DES SANCTIONS
 # Au-delà d'un simple "suppression + avertissement", AutoMod suit désormais le nombre
 # d'infractions d'un même membre sur une fenêtre glissante et escalade automatiquement
@@ -349,6 +365,153 @@ class AutoMod(commands.Cog, name="Automod"):
         self.exempt_roles_cache: dict[int, set[int]] = {}
         self.ignored_channels_cache: dict[int, set[int]] = {}
         self.immunity_overrides_cache: dict[tuple[int, int], bool | None] = {}
+        self._native_antilink_locks: dict[int, asyncio.Lock] = {}
+        self._native_automod_bootstrap_task: asyncio.Task | None = None
+
+        # Toute écriture AutoMod venant des commandes, du Dashboard ou de l'IA passe
+        # par Database.set_automod et arrive ici pour invalider le cache + synchroniser
+        # Discord AutoMod natif.
+        db = getattr(self.bot, "db", None)
+        if db is not None:
+            db._sentrix_automod_change_hook = self._on_automod_setting_changed
+
+    async def cog_load(self) -> None:
+        self._native_automod_bootstrap_task = asyncio.create_task(
+            self._bootstrap_native_automod(),
+            name="sentrix-native-automod-bootstrap",
+        )
+
+    def cog_unload(self) -> None:
+        task = self._native_automod_bootstrap_task
+        if task is not None:
+            task.cancel()
+        db = getattr(self.bot, "db", None)
+        hook = getattr(db, "_sentrix_automod_change_hook", None) if db is not None else None
+        if getattr(hook, "__self__", None) is self:
+            try:
+                delattr(db, "_sentrix_automod_change_hook")
+            except AttributeError:
+                pass
+
+    async def _bootstrap_native_automod(self) -> None:
+        """Réconcilie une fois les règles Discord natives après connexion du bot."""
+        try:
+            await self.bot.wait_until_ready()
+            for guild in list(self.bot.guilds):
+                await self._sync_native_antilink_rule(guild)
+                # Petit étalement pour éviter une rafale de requêtes au démarrage.
+                await asyncio.sleep(0.15)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Bootstrap Discord AutoMod natif impossible")
+
+    async def _on_automod_setting_changed(self, guild_id: int, field: str, value: int) -> None:
+        self.automod_cache.pop(int(guild_id), None)
+        if field not in {"antilink", "antilink_strict"}:
+            return
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return
+        await self._sync_native_antilink_rule(guild)
+
+    async def _sync_native_antilink_rule(self, guild: discord.Guild) -> bool:
+        """Synchronise l'anti-liens SentriX avec Discord AutoMod.
+
+        Retourne True si la règle native est dans l'état demandé. En cas de permission
+        absente, quota AutoMod atteint ou erreur Discord, le filtre SentriX local reste
+        actif : la sécurité ne devient jamais dépendante du moteur natif.
+        """
+        lock = self._native_antilink_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            conf_row = await self.bot.db.get_automod(guild.id)
+            enabled = bool(conf_row and conf_row["antilink"])
+
+            me = guild.me
+            if me is None or not me.guild_permissions.manage_guild:
+                if enabled:
+                    logger.warning(
+                        "AutoMod natif anti-liens non synchronisé guild=%s: permission Gérer le serveur absente",
+                        guild.id,
+                    )
+                return not enabled
+
+            try:
+                rules = await guild.fetch_automod_rules()
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Lecture des règles Discord AutoMod impossible guild=%s",
+                    guild.id,
+                    exc_info=True,
+                )
+                return False
+
+            sentrix_rules = [r for r in rules if r.name == NATIVE_ANTILINK_RULE_NAME]
+            rule = sentrix_rules[0] if sentrix_rules else None
+
+            # Nettoie d'éventuels doublons d'anciennes versions.
+            for duplicate in sentrix_rules[1:]:
+                try:
+                    await duplicate.delete(reason="SentriX: suppression doublon AutoMod anti-liens")
+                except (discord.Forbidden, discord.HTTPException):
+                    logger.warning("Suppression doublon AutoMod impossible guild=%s rule=%s", guild.id, duplicate.id)
+
+            if not enabled:
+                if rule is not None:
+                    try:
+                        await rule.delete(reason="SentriX: anti-liens désactivé")
+                    except (discord.Forbidden, discord.HTTPException):
+                        logger.warning(
+                            "Désactivation règle Discord AutoMod anti-liens impossible guild=%s",
+                            guild.id,
+                            exc_info=True,
+                        )
+                        return False
+                return True
+
+            trigger = discord.AutoModTrigger(
+                regex_patterns=list(NATIVE_ANTILINK_REGEX_PATTERNS),
+            )
+            actions = [
+                discord.AutoModRuleAction(
+                    custom_message=NATIVE_ANTILINK_CUSTOM_MESSAGE,
+                )
+            ]
+
+            try:
+                if rule is None:
+                    await guild.create_automod_rule(
+                        name=NATIVE_ANTILINK_RULE_NAME,
+                        event_type=discord.AutoModRuleEventType.message_send,
+                        trigger=trigger,
+                        actions=actions,
+                        enabled=True,
+                        exempt_roles=[],
+                        exempt_channels=[],
+                        reason="SentriX: anti-liens activé",
+                    )
+                else:
+                    await rule.edit(
+                        trigger=trigger,
+                        actions=actions,
+                        enabled=True,
+                        exempt_roles=[],
+                        exempt_channels=[],
+                        reason="SentriX: synchronisation anti-liens",
+                    )
+                return True
+            except (discord.Forbidden, discord.HTTPException, ValueError):
+                logger.warning(
+                    "Création/synchronisation de la règle Discord AutoMod anti-liens impossible guild=%s",
+                    guild.id,
+                    exc_info=True,
+                )
+                return False
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        # Serveur neuf : si un état anti-liens a été préconfiguré, crée la règle native.
+        await self._sync_native_antilink_rule(guild)
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
         # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
@@ -497,13 +660,11 @@ class AutoMod(commands.Cog, name="Automod"):
     async def toggle(self, ctx: commands.Context, field: str, etat: str):
         value = 1 if etat == "on" else 0
         await self.bot.db.set_automod(ctx.guild.id, field, value)
-        if field == "antilink" and not value:
-            await self.bot.db.set_automod(ctx.guild.id, "antilink_strict", 0)
-        if field == "antilink_strict" and value:
-            await self.bot.db.set_automod(ctx.guild.id, "antilink", 1)
         self.automod_cache.pop(ctx.guild.id, None)
         state_text = "ACTIF" if value else "INACTIF"
         label = "L'escalade automatique" if field == "escalation" else f"Le filtre **{AUTOMOD_TOGGLE_LABELS.get(field, field)}**"
+        if field in {"antilink", "antilink_strict"} and value:
+            label = "Le filtre **Anti-liens (blocage total + Discord AutoMod)**"
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{label} est maintenant {state_text}.')))
 
     # ---------------------------------------------------------------- TOGGLES (10 commandes explicites)
@@ -515,7 +676,7 @@ class AutoMod(commands.Cog, name="Automod"):
     async def antispam(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antispam", etat)
 
-    @commands.hybrid_command(name="antilink", description="Bloquer tous les formats de liens.", with_app_command=False)
+    @commands.hybrid_command(name="antilink", description="Bloquer tous les liens via SentriX + Discord AutoMod.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
     @checks.is_owner_or_admin_for("securite")
@@ -524,7 +685,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(
         name="antilink-strict",
-        description="Bloquer absolument tous les liens partout sur le serveur.",
+        description="Alias de l'anti-liens total SentriX + Discord AutoMod.",
         with_app_command=False,
     )
     @app_commands.describe(etat="Activer ou désactiver le mode strict")
