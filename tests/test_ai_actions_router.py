@@ -603,6 +603,7 @@ def test_turbo_router_skips_normal_conversations():
     assert ai_actions.looks_action_request("comment créer un rôle sur discord ?") is False
     assert ai_actions.looks_action_request("tu peux créer un rôle Staff stp") is True
     assert ai_actions.looks_action_request("stp configure les logs") is True
+    assert ai_actions.looks_action_request("fais un giveaway dans #general") is True
 
 
 @pytest.mark.asyncio
