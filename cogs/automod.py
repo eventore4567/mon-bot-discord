@@ -74,10 +74,24 @@ LINK_RE = re.compile(
 
 
 def _normalize_link_text(content: str) -> str:
-    """Normalise les séparateurs utilisés pour contourner l'anti-lien."""
-    value = content.casefold()
+    """Normalise les séparateurs/obfuscations utilisés pour contourner l'anti-lien.
+
+    Couvre notamment les schémas cassés ("https:/ /site"), les caractères zéro-largeur
+    et plusieurs URLs collées sans espace.
+    """
+    value = str(content or "").casefold()
+    value = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", value)
     value = re.sub(r"\s*(?:\[\.\]|\(\.\)|\bdot\b)\s*", ".", value)
-    return value
+    value = re.sub(
+        r"\b(h(?:tt|xx)p?s?)\s*:\s*/\s*/\s*",
+        lambda m: f"{m.group(1)}://",
+        value,
+        flags=re.IGNORECASE,
+    )
+    # Sépare les schémas concaténés : ".../codehttps://..." devient
+    # ".../code https://..." pour que les matchers puissent traiter chaque URL.
+    value = re.sub(r"(?<!\s)(?=(?:https?|hxxps?)://)", " ", value, flags=re.IGNORECASE)
+    return value.strip()
 SCAM_KEYWORDS = [
     "free nitro", "nitro gratuit", "steamcommunity", "airdrop gratuit", "crypto giveaway",
     "discord nitro free", "gagnez des nitro", "claim your nitro", "gift nitro free",
@@ -134,11 +148,11 @@ def _normalize_blocked_link_rule(value: str) -> str:
 
 
 def _blocked_link_hit(content: str, rules: list[str]) -> str | None:
-    """Retourne la règle ciblée qui correspond au message, sans activer l'anti-liens global.
+    """Retourne la règle ciblée qui correspond au message, y compris URLs concaténées.
 
-    Le schéma est volontairement retiré pour que http/https/hxxps désignent la même cible.
-    La borne gauche évite qu'un domaine ciblé "example.com" corresponde à
-    "evil-example.com" ou "sub.example.com" par simple sous-chaîne.
+    Le schéma est retiré pour que http/https/hxxps désignent la même cible. Les URLs sont
+    d'abord séparées par _normalize_link_text(), ce qui ferme le contournement
+    "lienInterdithttps://autre-lien".
     """
     if not rules:
         return None
