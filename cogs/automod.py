@@ -154,6 +154,111 @@ def _blocked_link_hit(content: str, rules: list[str]) -> str | None:
     return None
 
 
+def _censor_blacklist_word(content: str, word: str | None) -> str | None:
+    """Masque un mot détecté sans republier le terme interdit.
+
+    Retourne None si le texte détecté ne peut pas être retrouvé de façon sûre dans le
+    contenu original (par exemple une variante Unicode trop éloignée) : dans ce cas on
+    préfère ne pas cloner le message plutôt que de republier le terme interdit.
+    """
+    raw_word = str(word or "").strip()
+    if not raw_word:
+        return None
+    prefix = raw_word.endswith("*")
+    base = raw_word[:-1] if prefix else raw_word
+    if not base:
+        return None
+    pattern = (
+        rf"(?<![\w]){re.escape(base)}\w*"
+        if prefix
+        else rf"(?<![\w]){re.escape(base)}(?![\w])"
+    )
+    redacted, count = re.subn(
+        pattern,
+        "████ (mot censuré)",
+        str(content or ""),
+        flags=re.IGNORECASE,
+    )
+    return redacted if count else None
+
+
+def _censor_links(content: str) -> str | None:
+    """Masque les liens visibles d'un message destiné au repost webhook."""
+    redacted, count = LINK_RE.subn("████ (lien censuré)", str(content or ""))
+    return redacted if count else None
+
+
+def _censor_invites(content: str) -> str | None:
+    redacted, count = INVITE_RE.subn("████ (invitation censurée)", str(content or ""))
+    return redacted if count else None
+
+
+def _censor_scam(content: str) -> str | None:
+    redacted = str(content or "")
+    count = 0
+    for keyword in sorted(SCAM_KEYWORDS, key=len, reverse=True):
+        redacted, hits = re.subn(
+            re.escape(keyword),
+            "████ (contenu censuré)",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+        count += hits
+    return redacted if count else None
+
+
+def _compose_censored_content(
+    content: str,
+    *,
+    blocked_word: str | None = None,
+    links: bool = False,
+    invites: bool = False,
+    scam: bool = False,
+) -> str | None:
+    """Construit le texte cloné. None = impossible de censurer sans risque de fuite."""
+    result = str(content or "")
+    changed = False
+
+    if blocked_word:
+        masked = _censor_blacklist_word(result, blocked_word)
+        if masked is None:
+            return None
+        result = masked
+        changed = True
+
+    if invites:
+        masked = _censor_invites(result)
+        if masked is None:
+            return None
+        result = masked
+        changed = True
+
+    if links:
+        masked = _censor_links(result)
+        if masked is None:
+            # Un lien ciblé peut avoir été normalisé depuis une écriture obfusquée
+            # ("site[.]com"). Ne jamais republier le texte original dans ce cas.
+            return None
+        result = masked
+        changed = True
+
+    if scam:
+        masked = _censor_scam(result)
+        if masked is None:
+            return None
+        result = masked
+        changed = True
+
+    if not changed:
+        return None
+    result = result.strip()
+    if not result:
+        return "(contenu censuré)"
+    if len(result) > 1950:
+        result = result[:1947].rstrip() + "..."
+    return result
+
+
 def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
     """Vérifie qu'un domaine autorisé apparaît vraiment comme domaine dans le message,
     pas juste comme sous-chaîne. Avant, whitelister "yt.com" aurait aussi laissé passer
@@ -224,6 +329,9 @@ class AutoMod(commands.Cog, name="Automod"):
         self.blacklist_links_cache: dict[int, list[str]] = {}
         self.blacklist_users_cache: dict[int, set[int]] = {}
         self.whitelist_domains_cache: dict[int, list[str]] = {}
+        # Webhook utilisé pour recréer visuellement un message censuré avec le pseudo
+        # et l'avatar du membre. Discord affiche toujours le badge APP/webhook.
+        self._censor_webhooks: dict[int, discord.Webhook] = {}
         self.exempt_roles_cache: dict[int, set[int]] = {}
         self.ignored_channels_cache: dict[int, set[int]] = {}
 
@@ -784,12 +892,16 @@ class AutoMod(commands.Cog, name="Automod"):
                 message,
                 "Mot interdit et lien interdit détectés.",
                 "blacklist_word_link",
+                censored_content=_compose_censored_content(
+                    message.content, blocked_word=blocked_word, links=True
+                ),
             )
         if blocked_hit:
             return await self._delete_and_warn(
                 message,
                 "Lien ciblé interdit par la liste noire du serveur.",
                 "blacklist_link",
+                censored_content=_compose_censored_content(message.content, links=True),
             )
 
         # Mode strict : absolument tous les liens sont supprimés, y compris dans les
@@ -804,6 +916,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 message,
                 "Lien interdit : mode anti-liens strict actif.",
                 "antilink",
+                censored_content=_compose_censored_content(message.content, links=True),
             )
 
         # Les autres filtres continuent de respecter les salons ignorés.
@@ -813,7 +926,14 @@ class AutoMod(commands.Cog, name="Automod"):
 
         # La liste noire de MOTS s'applique à tout le monde.
         if blocked_word:
-            return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
+            return await self._delete_and_warn(
+                message,
+                "Mot interdit détecté.",
+                "blacklist_word",
+                censored_content=_compose_censored_content(
+                    message.content, blocked_word=blocked_word
+                ),
+            )
 
         if await self.is_automod_exempt(message.author):
             return
@@ -852,15 +972,30 @@ class AutoMod(commands.Cog, name="Automod"):
             return
 
         if conf["antiscam"] and any(k in content_lower for k in SCAM_KEYWORDS):
-            return await self._delete_and_warn(message, "Message d'arnaque potentiel détecté.", "antiscam")
+            return await self._delete_and_warn(
+                message,
+                "Message d'arnaque potentiel détecté.",
+                "antiscam",
+                censored_content=_compose_censored_content(message.content, scam=True),
+            )
 
         if conf["antiinvite"] and INVITE_RE.search(link_content):
-            return await self._delete_and_warn(message, "Lien d'invitation Discord non autorisé.", "antiinvite")
+            return await self._delete_and_warn(
+                message,
+                "Lien d'invitation Discord non autorisé.",
+                "antiinvite",
+                censored_content=_compose_censored_content(message.content, invites=True),
+            )
 
         if conf["antilink"] and LINK_RE.search(link_content):
             allowed = await self.get_whitelist_domains_cached(message.guild.id)
             if not _domain_allowed(link_content, allowed):
-                return await self._delete_and_warn(message, "Lien non autorisé.", "antilink")
+                return await self._delete_and_warn(
+                    message,
+                    "Lien non autorisé.",
+                    "antilink",
+                    censored_content=_compose_censored_content(message.content, links=True),
+                )
 
         if conf["antimention"] and len(message.mentions) >= 5:
             return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
@@ -901,6 +1036,89 @@ class AutoMod(commands.Cog, name="Automod"):
         skip_ids.add(message_id)
         asyncio.get_event_loop().call_later(10, skip_ids.discard, message_id)
 
+    async def _get_censor_webhook(self, channel) -> tuple[discord.Webhook | None, discord.Thread | None]:
+        """Retourne un webhook réutilisable pour le salon, sans jamais contourner Discord."""
+        thread = channel if isinstance(channel, discord.Thread) else None
+        base = channel.parent if thread is not None else channel
+        if not isinstance(base, discord.TextChannel):
+            return None, thread
+
+        me = base.guild.me
+        if me is None:
+            return None, thread
+        perms = base.permissions_for(me)
+        if not (perms.view_channel and perms.send_messages and perms.manage_webhooks):
+            return None, thread
+
+        cached = self._censor_webhooks.get(base.id)
+        if cached is not None:
+            return cached, thread
+
+        try:
+            hooks = await base.webhooks()
+            bot_id = getattr(getattr(self.bot, "user", None), "id", None)
+            hook = next(
+                (
+                    h for h in hooks
+                    if h.name == "SentriX Censure"
+                    and (bot_id is None or getattr(getattr(h, "user", None), "id", None) == bot_id)
+                ),
+                None,
+            )
+            if hook is None:
+                hook = await base.create_webhook(
+                    name="SentriX Censure",
+                    reason="SentriX AutoMod : repost des messages censurés",
+                )
+            self._censor_webhooks[base.id] = hook
+            return hook, thread
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning(
+                "Webhook censure indisponible guild=%s channel=%s",
+                getattr(base.guild, "id", None),
+                getattr(base, "id", None),
+            )
+            return None, thread
+
+    async def _repost_censored(self, message: discord.Message, content: str | None) -> bool:
+        """Recrée le message censuré avec pseudo/avatar d'origine + badge APP Discord."""
+        if not content:
+            return False
+        webhook, thread = await self._get_censor_webhook(message.channel)
+        if webhook is None:
+            return False
+
+        username = str(getattr(message.author, "display_name", None) or message.author.name or "Membre")
+        username = username[:80] or "Membre"
+        avatar = str(getattr(getattr(message.author, "display_avatar", None), "url", "") or "") or None
+        kwargs = {
+            "content": content,
+            "username": username,
+            "avatar_url": avatar,
+            "allowed_mentions": discord.AllowedMentions.none(),
+            "wait": False,
+        }
+        if thread is not None:
+            kwargs["thread"] = thread
+
+        try:
+            await webhook.send(**kwargs)
+            return True
+        except discord.NotFound:
+            # Webhook supprimé manuellement : invalide le cache, la prochaine détection
+            # le recréera proprement.
+            base = message.channel.parent if isinstance(message.channel, discord.Thread) else message.channel
+            self._censor_webhooks.pop(getattr(base, "id", 0), None)
+            return False
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning(
+                "Repost webhook censure impossible guild=%s channel=%s user=%s",
+                message.guild.id,
+                message.channel.id,
+                message.author.id,
+            )
+            return False
+
     @staticmethod
     def _public_automod_message(filter_name: str, reason: str) -> str:
         """Message court visible dans le salon, proche du rendu demandé.
@@ -918,7 +1136,14 @@ class AutoMod(commands.Cog, name="Automod"):
         }
         return labels.get(filter_name, f"votre message a été supprimé : {reason}")
 
-    async def _delete_and_warn(self, message: discord.Message, reason: str, filter_name: str = "automod"):
+    async def _delete_and_warn(
+        self,
+        message: discord.Message,
+        reason: str,
+        filter_name: str = "automod",
+        *,
+        censored_content: str | None = None,
+    ):
         """Supprime le message et traite la détection comme un incident par membre.
 
         Première détection dans la fenêtre : suppression, infraction + escalade
@@ -928,10 +1153,18 @@ class AutoMod(commands.Cog, name="Automod"):
         fenêtre : suppression silencieuse, compteur incrémenté.
         """
         self._mark_xp_skip(message.id)
+        deleted = False
         try:
             await message.delete()
+            deleted = True
         except discord.HTTPException:
             pass
+
+        # Clone façon DraftBot : seulement APRÈS suppression réussie, et uniquement si
+        # le texte a pu être censuré de manière sûre. Sans Gérer les webhooks, on garde
+        # automatiquement le comportement suppression + avertissement.
+        if deleted and censored_content:
+            await self._repost_censored(message, censored_content)
 
         key = (message.guild.id, message.author.id)
         now_ts = time.monotonic()
