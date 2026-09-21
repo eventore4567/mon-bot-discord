@@ -23,7 +23,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, stats_service, design_system
+from utils import embeds, checks, stats_service, design_system, helpers
 # « panels » designe deja les panneaux de roles/boutique ici.
 from utils import sentrix_panels as sx_panels
 from database.db import now
@@ -172,7 +172,6 @@ class ShopCatalogueView(discord.ui.View):
 class Economy(commands.Cog, name="Economy"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.rob_cooldowns: dict[int, int] = {}
 
     async def cog_load(self):
         # Un handler générique suffit pour tous les panneaux, même après redémarrage :
@@ -387,16 +386,31 @@ class Economy(commands.Cog, name="Economy"):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
         if membre.bot:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
-        last = self.rob_cooldowns.get(ctx.author.id, 0)
-        if now() - last < ROB_COOLDOWN:
-            remaining = ROB_COOLDOWN - (now() - last)
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning(f'Vous devez attendre {remaining // 60} minutes avant de retenter un vol.')))
-        self.rob_cooldowns[ctx.author.id] = now()
-        # attempt_rob lit le solde de la victime ET applique le résultat dans la même
-        # section critique (database/db.py::_economy_lock) : deux vols concurrents sur
-        # la même victime ne peuvent plus la voler deux fois (solde négatif possible
-        # avant ce correctif — vérifié par exécution).
-        result = await self.bot.db.attempt_rob(ctx.guild.id, ctx.author.id, membre.id)
+        # Cooldown, vérification des soldes et écriture vivent dans UNE transaction
+        # protégée. Le cooldown persiste donc après un redéploiement Railway.
+        result = await self.bot.db.attempt_rob(
+            ctx.guild.id,
+            ctx.author.id,
+            membre.id,
+            cooldown=ROB_COOLDOWN,
+        )
+        if result["outcome"] == "cooldown":
+            remaining = max(1, int(result.get("remaining", 1)))
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(
+                    embeds.warning(
+                        f'Vous devez encore attendre **{helpers.format_duration(remaining)}** avant de retenter un vol.'
+                    )
+                ),
+            )
+        if result["outcome"] == "retry":
+            return await sx_panels.envoyer(
+                ctx,
+                sx_panels.depuis_embed(
+                    embeds.warning("Le solde de la cible a changé pendant la tentative. Réessayez.")
+                ),
+            )
         if result["outcome"] == "too_poor":
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
         if result["outcome"] == "success":
