@@ -192,9 +192,8 @@ async def atomic_gamble(db, guild_id: int, user_id: int, amount: int, *, win: bo
 
 
 async def atomic_rob(db, guild_id: int, thief_id: int, victim_id: int) -> tuple[str, int]:
-    """Tentative de vol atomique (verrou db._economy_lock), identique au
-    comportement de cogs/sentrix_v22.py::atomic_rob (partie DB uniquement —
-    les vérifications ctx/discord restent dans l'appelant). Retourne
+    """Tentative de vol atomique (verrou db._economy_lock), appelée directement
+    par cogs/economy.py. Les vérifications ctx/Discord restent dans le cog. Retourne
     (statut, valeur) : "cooldown"/secondes_restantes, "poor"/0, "retry"/0,
     "success"/montant_volé, "failed"/amende (0 si portefeuille déjà vide),
     ou "error"/0."""
