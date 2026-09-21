@@ -604,6 +604,10 @@ class Ai(commands.Cog, name="Ai"):
         # Il est volontairement en RAM : ce n'est pas une donnée métier et il expire vite.
         self._pending_actions: dict[tuple[int, int], tuple[float, ai_actions.ParsedAction]] = {}
         self._recent_targets: dict[tuple[int, int], tuple[float, int]] = {}
+        # Turbo IA : évite de relire la même identité créateur et de retokeniser tout le
+        # catalogue de commandes à chaque message naturel.
+        self._creator_cache: tuple[float, object | None] | None = None
+        self._command_index: list[tuple[commands.Command, str, set[str]]] | None = None
         self._cleanup_memory.start()
 
     def cog_unload(self):
@@ -648,9 +652,14 @@ class Ai(commands.Cog, name="Ai"):
         user_id: int | None,
         author_name: str | None = None,
     ) -> str:
-        """Ajoute l'identité du créateur vérifié à toutes les routes IA."""
+        """Ajoute l'identité du créateur vérifié, avec cache court pour réduire la latence."""
         instructions = ai_service.SYSTEM_PROMPT
-        creator = await self.bot.db.get_primary_bot_creator()
+        now = time.monotonic()
+        if self._creator_cache is not None and now < self._creator_cache[0]:
+            creator = self._creator_cache[1]
+        else:
+            creator = await self.bot.db.get_primary_bot_creator()
+            self._creator_cache = (now + 300.0, creator)
         if creator:
             instructions += (
                 f"\n\nLe créateur officiel de SentriX est {creator['display_name']} "
@@ -2097,53 +2106,55 @@ class Ai(commands.Cog, name="Ai"):
                 pass
 
     def _command_candidates(self, question: str) -> list[commands.Command]:
-        """Préfiltre les commandes réellement chargées avant le classifieur IA.
+        """Préfiltre vite les commandes réellement chargées avant le classifieur IA.
 
-        Cela évite d'envoyer tout le catalogue au modèle et, surtout, interdit de
-        sélectionner une commande qui n'existe pas dans ce runtime.
+        L'index est construit une seule fois par process. Les permissions ne sont PAS
+        filtrées ici : permission_guard/access_matrix décide au moment de l'exécution.
+        Ainsi, si l'auteur possède réellement le droit d'utiliser une commande, le
+        langage naturel peut aussi l'atteindre.
         """
         normalized = ai_actions.normalize_text(question)
         tokens = {t for t in re.findall(r"[a-z0-9_-]{2,}", normalized) if len(t) >= 2}
-        rows: list[tuple[float, commands.Command]] = []
-        for command in self.bot.walk_commands():
-            if getattr(command, "hidden", False) or not getattr(command, "enabled", True):
-                continue
-            qualified = str(getattr(command, "qualified_name", "") or "").strip()
-            if not qualified:
-                continue
-            root = qualified.split(" ", 1)[0].casefold()
-            # Les commandes IA ne doivent jamais être rappelées depuis le routeur d'actions :
-            # sinon une demande non reconnue pourrait reboucler vers +ai/+sentrix.
-            if access_matrix.module_for_command(root) == "ai":
-                continue
-            # Les commandes propriétaire GLOBAL restent volontairement hors de portée de
-            # l'interpréteur naturel. Elles gardent leur syntaxe explicite.
-            if root in access_matrix.OWNER_ONLY_COMMANDS:
-                continue
 
-            aliases = " ".join(str(a) for a in getattr(command, "aliases", ()) or ())
-            description = str(
-                getattr(command, "description", "") or getattr(command, "help", "") or ""
-            )
-            signature = str(getattr(command, "signature", "") or "")
-            haystack = ai_actions.normalize_text(
-                f"{qualified} {aliases} {description} {signature}"
-            )
-            command_tokens = set(re.findall(r"[a-z0-9_-]{2,}", haystack))
+        if self._command_index is None:
+            index: list[tuple[commands.Command, str, set[str]]] = []
+            for command in self.bot.walk_commands():
+                if getattr(command, "hidden", False) or not getattr(command, "enabled", True):
+                    continue
+                qualified = str(getattr(command, "qualified_name", "") or "").strip()
+                if not qualified:
+                    continue
+                root = qualified.split(" ", 1)[0].casefold()
+                # Empêche uniquement une récursion vers les commandes IA elles-mêmes.
+                if access_matrix.module_for_command(root) == "ai":
+                    continue
+                aliases = " ".join(str(a) for a in getattr(command, "aliases", ()) or ())
+                description = str(
+                    getattr(command, "description", "") or getattr(command, "help", "") or ""
+                )
+                signature = str(getattr(command, "signature", "") or "")
+                qualified_norm = ai_actions.normalize_text(qualified)
+                haystack = ai_actions.normalize_text(
+                    f"{qualified} {aliases} {description} {signature}"
+                )
+                command_tokens = set(re.findall(r"[a-z0-9_-]{2,}", haystack))
+                index.append((command, qualified_norm, command_tokens))
+            self._command_index = index
+
+        rows: list[tuple[float, commands.Command]] = []
+        import difflib
+        for command, qualified_norm, command_tokens in self._command_index:
             overlap = len(tokens & command_tokens)
-            ratio = 0.0
-            if normalized and qualified:
-                import difflib
-                ratio = difflib.SequenceMatcher(
-                    a=normalized, b=ai_actions.normalize_text(qualified)
-                ).ratio()
-            direct = 4.0 if ai_actions.normalize_text(qualified) in normalized else 0.0
+            ratio = difflib.SequenceMatcher(a=normalized, b=qualified_norm).ratio() if normalized else 0.0
+            direct = 4.0 if qualified_norm and qualified_norm in normalized else 0.0
             score = overlap * 2.0 + ratio * 3.0 + direct
             if score >= 1.2:
                 rows.append((score, command))
 
         rows.sort(key=lambda item: item[0], reverse=True)
-        return [command for _, command in rows[:28]]
+        # 20 candidats gardent une bonne couverture tout en réduisant fortement le prompt
+        # du routeur Luna par rapport à l'ancien catalogue de 28.
+        return [command for _, command in rows[:20]]
 
     @staticmethod
     def _arguments_grounded_in_question(question: str, arguments: str) -> bool:
@@ -2283,7 +2294,7 @@ class Ai(commands.Cog, name="Ai"):
         if not parts:
             return False
         root = parts[0].casefold()
-        dangerous = set(access_matrix.GUILD_OWNER_COMMANDS) | {
+        dangerous = set(access_matrix.GUILD_OWNER_COMMANDS) | set(access_matrix.OWNER_ONLY_COMMANDS) | {
             "delete-channel", "deleteemoji", "massrole", "roleall",
             "blacklist-user", "blacklist-users", "lockdown-server", "panic",
             "pay", "give-money",
@@ -2311,14 +2322,32 @@ class Ai(commands.Cog, name="Ai"):
                 self._remember_pending(message, completed)
                 return await self._handle_parsed_action(message, completed, prefix)
 
-        # 2) Demandes composées : plan borné à 8 actions du registre fermé.
-        plan = await ai_actions.parse_action_plan(
-            question,
-            guild_id=message.guild.id if message.guild else None,
-            channel_id=getattr(message.channel, "id", None),
-            user_id=message.author.id,
-        )
+        action_like = ai_actions.looks_action_request(question)
+        multi_action = ai_actions.looks_multi_action(question)
+
+        # 2) Demandes composées : le planificateur IA ne tourne QUE lorsqu'il y a
+        # réellement plusieurs actions détectées.
+        if multi_action:
+            plan = await ai_actions.parse_action_plan(
+                question,
+                guild_id=message.guild.id if message.guild else None,
+                channel_id=getattr(message.channel, "id", None),
+                user_id=message.author.id,
+            )
+        else:
+            plan = ()
+
         if plan:
+            # Les plans ordinaires s'exécutent immédiatement : pas de clic artificiel.
+            # Confirmation uniquement si une étape l'exige explicitement ou est à haut risque.
+            sensitive = any(
+                action.spec is not None and (action.spec.confirm or action.spec.risk == "high")
+                for action in plan
+            )
+            if not sensitive:
+                await self._execute_action_plan(message, plan, prefix)
+                return True
+
             lines = [
                 f"**{index}.** {ai_actions.describe_action(action)}"
                 for index, action in enumerate(plan, 1)
@@ -2333,8 +2362,7 @@ class Ai(commands.Cog, name="Ai"):
             sent = await message.reply(
                 "J’ai compris une demande en plusieurs étapes :\n\n"
                 + "\n".join(lines)
-                + "\n\nJe vais vérifier les permissions et la hiérarchie à chaque étape. "
-                "Exécuter ce plan ?",
+                + "\n\nUne étape est sensible. Exécuter ce plan ?",
                 view=view,
                 mention_author=False,
                 allowed_mentions=discord.AllowedMentions.none(),
@@ -2342,7 +2370,8 @@ class Ai(commands.Cog, name="Ai"):
             view.message = sent
             return True
 
-        # 3) Routeur strict : heuristiques rapides puis classifieur IA avec registre fermé.
+        # 3) Routeur structuré. Pour une conversation normale, parse_action() reste
+        # entièrement local et n'appelle plus de classifieur IA.
         action = await ai_actions.parse_action(
             question,
             guild_id=message.guild.id if message.guild else None,
@@ -2354,8 +2383,8 @@ class Ai(commands.Cog, name="Ai"):
             if handled:
                 return True
 
-        # 4) Compatibilité : les demandes qui citent explicitement une commande SentriX
-        # existante continuent d'utiliser le routeur historique dynamique.
+        # 4) Compatibilité locale : une demande qui cite clairement une commande existante
+        # peut être exécutée sans appel au modèle.
         command_line = self._natural_command_line(
             question,
             prefix,
@@ -2364,8 +2393,13 @@ class Ai(commands.Cog, name="Ai"):
         if command_line:
             return await self._invoke_command_line(message, command_line)
 
-        # 5) Couverture large : choisit parmi les commandes réellement chargées.
-        # Aucun nom inventé n'est accepté et les commandes global-owner sont exclues.
+        # 5) Une conversation ordinaire part DIRECTEMENT vers la réponse IA.
+        # Avant, elle pouvait subir 1 à 2 appels Luna de routage avant la vraie réponse.
+        if not action_like and not multi_action:
+            return False
+
+        # 6) Couverture large : Luna choisit parmi les commandes réellement chargées.
+        # Les permissions restent vérifiées par le même backend lors de bot.invoke().
         command_line = await self._classify_existing_command(message, question, prefix)
         if not command_line:
             return False
