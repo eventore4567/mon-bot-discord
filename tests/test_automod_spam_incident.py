@@ -283,3 +283,11 @@ async def test_immunity_on_blocks_sentrix_sanctions():
     assert error is not None
     assert "immunité SentriX" in error
 
+def test_content_policy_wrapper_accepts_censored_content_and_honors_immunity_off():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "content_filter_policy.py").read_text(encoding="utf-8")
+    assert "censored_content: str | None = None" in source
+    assert "censored_content=censored_content" in source
+    assert "override is False" in source
+    assert "original_maybe_escalate" in source
+
