@@ -2129,45 +2129,8 @@ class Ai(commands.Cog, name="Ai"):
 
     @staticmethod
     def _arguments_grounded_in_question(question: str, arguments: str) -> bool:
-        """Le classifieur peut réordonner, jamais inventer des paramètres.
-
-        Les tokens significatifs produits doivent être retrouvables dans la demande
-        d'origine. Les IDs/mentions doivent être présents exactement. Ce contrôle
-        n'exécute rien ; il ferme seulement la porte aux paramètres halluciné́s.
-        """
-        raw_question = str(question or "")
-        raw_arguments = str(arguments or "")
-        if not raw_arguments:
-            return True
-        if any(ch in raw_arguments for ch in ("\n", "\r", "```")):
-            return False
-
-        question_ids = set(re.findall(r"\d{15,22}", raw_question))
-        argument_ids = set(re.findall(r"\d{15,22}", raw_arguments))
-        if not argument_ids.issubset(question_ids):
-            return False
-
-        qnorm = ai_actions.normalize_text(raw_question)
-        anorm = ai_actions.normalize_text(raw_arguments)
-        qtokens = set(re.findall(r"[a-z0-9_-]+", qnorm))
-        # Variantes grammaticales/politesse que le modèle est autorisé à omettre,
-        # mais pas à ajouter. Les constantes courtes ci-dessous sont des valeurs de
-        # formulaire usuelles, pas des identifiants ou des cibles.
-        harmless = {"on", "off", "oui", "non", "true", "false"}
-        for token in re.findall(r"[a-z0-9_-]+", anorm):
-            if token in harmless or token.isdigit() or len(token) < 3:
-                continue
-            if re.fullmatch(r"\d{1,4}[smhjd]", token):
-                # Une durée normalisée est admise seulement si son nombre est dans la
-                # demande ; les routes structurées gèrent déjà les conversions complexes.
-                digits = re.match(r"\d+", token).group(0)
-                if digits not in qnorm:
-                    return False
-                continue
-            if token not in qtokens and token not in qnorm:
-                return False
-        return True
-
+        """Compatibility wrapper around the dedicated natural-command router."""
+        return ai_command_router.arguments_grounded_in_question(question, arguments)
     async def _classify_existing_command(
         self,
         message: discord.Message,
