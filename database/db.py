@@ -2156,34 +2156,83 @@ class Database:
             await self._conn.commit()
             return True
 
-    async def attempt_rob(self, guild_id: int, thief_id: int, victim_id: int, *, min_target_cash: int = 50,
-                           success_chance: float = 0.4, max_steal: int = 300,
-                           penalty_range: tuple[int, int] = (20, 100)) -> dict:
-        """Tentative de vol atomique (protégée par _economy_lock) : lit le solde de
-        la victime, tire le succès/échec ET applique le résultat dans la MÊME
-        section critique. Avant ce correctif, deux voleurs pouvaient voler la même
-        victime en même temps (chacun lisait le même solde avant qu'aucun n'écrive),
-        rendant son solde négatif — vérifié par exécution. Retourne un dict :
-        {"outcome": "too_poor"} / {"outcome": "success", "amount": N} /
-        {"outcome": "caught", "penalty": N}."""
+    async def attempt_rob(
+        self,
+        guild_id: int,
+        thief_id: int,
+        victim_id: int,
+        *,
+        min_target_cash: int = 50,
+        success_chance: float = 0.4,
+        max_steal: int = 300,
+        penalty_range: tuple[int, int] = (20, 100),
+        cooldown: int = 3600,
+    ) -> dict:
+        """Tentative de vol atomique, cooldown compris.
+
+        Le cooldown vit dans SQLite (economy.last_rob), donc un redéploiement ne
+        permet plus de contourner l’attente. Une amende est toujours bornée au cash
+        disponible : aucun échec de vol ne peut rendre un portefeuille négatif.
+        """
+        if thief_id == victim_id:
+            return {"outcome": "invalid"}
+
         async with self._economy_lock:
             await self.ensure_economy(guild_id, victim_id)
             await self.ensure_economy(guild_id, thief_id)
-            row = await self.fetchone("SELECT cash FROM economy WHERE guild_id = ? AND user_id = ?", (guild_id, victim_id))
-            victim_cash = row["cash"] if row else 0
+
+            thief = await self.fetchone(
+                "SELECT cash, last_rob FROM economy WHERE guild_id = ? AND user_id = ?",
+                (guild_id, thief_id),
+            )
+            victim = await self.fetchone(
+                "SELECT cash FROM economy WHERE guild_id = ? AND user_id = ?",
+                (guild_id, victim_id),
+            )
+            thief_cash = int(thief["cash"] if thief else 0)
+            victim_cash = int(victim["cash"] if victim else 0)
+            last_rob = int(thief["last_rob"] if thief else 0)
+            now_ts = now()
+
+            remaining = cooldown - (now_ts - last_rob) if last_rob else 0
+            if remaining > 0:
+                return {"outcome": "cooldown", "remaining": remaining}
+
             if victim_cash < min_target_cash:
                 return {"outcome": "too_poor"}
+
+            await self._conn.execute(
+                "UPDATE economy SET last_rob = ? WHERE guild_id = ? AND user_id = ?",
+                (now_ts, guild_id, thief_id),
+            )
+
             if random.random() < success_chance:
                 amount = random.randint(1, min(victim_cash, max_steal))
-                await self._conn.execute("UPDATE economy SET cash = cash - ? WHERE guild_id = ? AND user_id = ?", (amount, guild_id, victim_id))
-                await self._conn.execute("UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?", (amount, guild_id, thief_id))
+                debit = await self._conn.execute(
+                    "UPDATE economy SET cash = cash - ? "
+                    "WHERE guild_id = ? AND user_id = ? AND cash >= ?",
+                    (amount, guild_id, victim_id, amount),
+                )
+                if getattr(debit, "rowcount", 0) != 1:
+                    await self._conn.rollback()
+                    return {"outcome": "retry"}
+                await self._conn.execute(
+                    "UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?",
+                    (amount, guild_id, thief_id),
+                )
                 await self._conn.commit()
                 return {"outcome": "success", "amount": amount}
-            penalty = random.randint(*penalty_range)
-            await self._conn.execute("UPDATE economy SET cash = cash - ? WHERE guild_id = ? AND user_id = ?", (penalty, guild_id, thief_id))
+
+            requested_penalty = random.randint(*penalty_range)
+            penalty = max(0, min(thief_cash, requested_penalty))
+            if penalty > 0:
+                await self._conn.execute(
+                    "UPDATE economy SET cash = cash - ? "
+                    "WHERE guild_id = ? AND user_id = ? AND cash >= ?",
+                    (penalty, guild_id, thief_id, penalty),
+                )
             await self._conn.commit()
             return {"outcome": "caught", "penalty": penalty}
-
     async def move_cash_bank(self, guild_id: int, user_id: int, requested: str, *, direction: str) -> int | None:
         """Dépôt/retrait atomique entre cash et banque (protégé par _economy_lock).
         `requested` est la chaîne brute tapée par l'utilisateur ('150', 'all',
