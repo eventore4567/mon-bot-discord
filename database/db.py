@@ -213,6 +213,14 @@ CREATE TABLE IF NOT EXISTS automod_exempt_roles (
     PRIMARY KEY (guild_id, role_id)
 );
 
+CREATE TABLE IF NOT EXISTS user_immunity_settings (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS antinuke_whitelist (
     guild_id INTEGER,
     user_id INTEGER,
