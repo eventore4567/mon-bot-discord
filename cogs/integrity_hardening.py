@@ -169,19 +169,11 @@ def _install_tickets(bot: commands.Bot) -> bool:
     if tickets is None:
         return False
 
-    original_handle = tickets.handle_control_button
-    if not getattr(original_handle, "_sentrix_integrity_staff", False):
-        async def staff_only_controls(this, interaction: discord.Interaction, key: str):
-            ticket = await this.get_ticket_by_channel(interaction.channel.id)
-            if not ticket:
-                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Ce salon n'est plus un ticket.")), ephemere=True)
-            if not await _ticket_staff_allowed(bot, interaction, ticket):
-                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Cette action est réservée au staff du ticket.')), ephemere=True)
-            return await original_handle(interaction, key)
-
-        staff_only_controls._sentrix_integrity_staff = True
-        tickets.handle_control_button = types.MethodType(staff_only_controls, tickets)
-
+    # ticket_claim_security.py possède déjà la politique canonique des boutons :
+    # claim/unclaim/add/remove/rename/transfer/note/bump = staff, tandis que le
+    # créateur peut fermer SON ticket. Ne jamais re-wrapper handle_control_button
+    # ici avec une règle "staff pour tout", sinon le propriétaire du ticket perd
+    # son droit de fermeture.
     if not getattr(tickets.btn_transfer, "_sentrix_integrity_staff_target", False):
         async def safe_transfer(this, interaction: discord.Interaction, ticket):
             select = discord.ui.UserSelect(placeholder="Choisir un membre du staff")
