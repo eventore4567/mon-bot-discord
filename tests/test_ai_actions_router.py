@@ -491,3 +491,27 @@ def test_natural_voice_leave_is_a_real_native_action():
     assert 'queue.tracks.clear()' in source
     assert 'queue.history.clear()' in source
     assert 'queue.current = None' in source
+
+
+
+def test_natural_security_goal_executes_antilink():
+    parsed = ai_actions.local_parse("censure tout les lien du serv")
+    assert parsed is not None
+    assert parsed.intent == "security.antilink"
+    assert parsed.slots["state"] == "on"
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+antilink on"
+
+
+def test_natural_security_goal_can_disable_antilink():
+    parsed = ai_actions.local_parse("autorise les liens sur le serveur")
+    assert parsed is not None
+    assert parsed.intent == "security.antilink"
+    assert parsed.slots["state"] == "off"
+    assert ai_actions.build_command_line(parsed, prefix="+") == "+antilink off"
+
+
+def test_natural_security_goal_executes_antiinvite():
+    parsed = ai_actions.local_parse("bloque toutes les invitations discord")
+    assert parsed is not None
+    assert parsed.intent == "security.antiinvite"
+    assert parsed.slots["state"] == "on"
