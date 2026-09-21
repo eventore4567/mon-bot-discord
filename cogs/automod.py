@@ -1148,11 +1148,49 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.hybrid_command(
         name="automod-native-sync",
-        description="Synchroniser les protections SentriX avec le vrai AutoMod Discord.",
+        description="Activer puis synchroniser les protections SentriX avec le vrai AutoMod Discord.",
         with_app_command=False,
     )
     @checks.is_owner_or_admin_for("securite")
     async def automod_native_sync(self, ctx: commands.Context):
+        # Cette commande est volontairement opérationnelle, pas seulement diagnostique :
+        # si aucune protection native n'est configurée sur ce serveur, elle active un
+        # socle sûr et utile. L'utilisateur vient explicitement de demander la synchro.
+        conf_before = await self.bot.db.get_automod(ctx.guild.id)
+        word_rows = await self.bot.db.fetchall(
+            "SELECT word FROM blacklist_words WHERE guild_id = ? LIMIT 1001",
+            (ctx.guild.id,),
+        )
+        link_rows = await self.bot.db.fetchall(
+            "SELECT value FROM blacklist_links WHERE guild_id = ? LIMIT 1001",
+            (ctx.guild.id,),
+        )
+
+        had_native_config = bool(
+            (conf_before and (
+                conf_before["antilink"]
+                or conf_before["antiinvite"]
+                or conf_before["antiscam"]
+                or conf_before["antimention"]
+                or conf_before["antiinsult"]
+            ))
+            or word_rows
+            or link_rows
+        )
+
+        auto_enabled: list[str] = []
+        if not had_native_config:
+            # Baseline recommandée : pas d'invention de blacklist personnalisée.
+            # Anti-liens total absorbe déjà les invitations Discord.
+            for field, label in (
+                ("antilink", "Anti-liens total"),
+                ("antiscam", "Anti-arnaque"),
+                ("antimention", "Anti-mentions"),
+                ("antiinsult", "Contenu sensible"),
+            ):
+                await self.bot.db.set_automod(ctx.guild.id, field, 1)
+                auto_enabled.append(label)
+
         await self._sync_native_suite(ctx.guild)
 
         try:
@@ -1161,7 +1199,9 @@ class AutoMod(commands.Cog, name="Automod"):
             return await panels.envoyer(
                 ctx,
                 panels.depuis_embed(
-                    embeds.error("Synchronisation terminée, mais Discord refuse la lecture des règles AutoMod.")
+                    embeds.error(
+                        "Discord refuse la lecture des règles AutoMod. Vérifiez que SentriX possède **Gérer le serveur**."
+                    )
                 ),
             )
 
@@ -1169,6 +1209,7 @@ class AutoMod(commands.Cog, name="Automod"):
         names = "\n".join(f"• {r.name}" for r in sentrix_rules) or "• Aucune règle native active sur ce serveur."
 
         conf = await self.bot.db.get_automod(ctx.guild.id)
+        # Relire après activation automatique.
         word_rows = await self.bot.db.fetchall(
             "SELECT word FROM blacklist_words WHERE guild_id = ? LIMIT 1001",
             (ctx.guild.id,),
@@ -1195,14 +1236,8 @@ class AutoMod(commands.Cog, name="Automod"):
         if link_rows:
             enabled_labels.append(f"Liens ciblés ({len(link_rows)})")
 
-        local_state = (
-            ", ".join(enabled_labels)
-            if enabled_labels
-            else "Aucune protection native SentriX n'est activée/configurée ici."
-        )
+        local_state = ", ".join(enabled_labels) if enabled_labels else "Aucune protection native active."
 
-        # Diagnostic global du bot. On lit les règles en parallèle mais avec une limite
-        # de concurrence pour éviter une rafale sur l'API Discord.
         semaphore = asyncio.Semaphore(4)
 
         async def count_for_guild(guild: discord.Guild) -> int:
@@ -1221,21 +1256,43 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         global_total = sum(counts)
 
-        description = (
-            f"**Ce serveur : {len(sentrix_rules)} règle(s) native(s)**\n"
-            f"{names}\n\n"
-            f"**Configuration détectée ici :** {local_state}\n\n"
-            f"**Total SentriX sur {len(self.bot.guilds)} serveur(s) : {global_total} règle(s) AutoMod native(s).**"
-        )
+        description_parts = [
+            f"**Ce serveur : {len(sentrix_rules)} règle(s) native(s)**",
+            names,
+            "",
+            f"**Protections actives :** {local_state}",
+        ]
+        if auto_enabled:
+            description_parts.extend([
+                "",
+                "**Activées automatiquement par cette commande :** " + ", ".join(auto_enabled),
+            ])
+        description_parts.extend([
+            "",
+            f"**Total SentriX sur {len(self.bot.guilds)} serveur(s) : {global_total} règle(s) AutoMod native(s).**",
+        ])
+
         if not sentrix_rules:
-            description += (
-                "\n\nLe **0** n'est pas un échec de synchronisation : il signifie que ce serveur "
-                "n'a actuellement aucune protection SentriX qui nécessite une règle AutoMod native."
-            )
+            me = ctx.guild.me
+            manage_guild = bool(me and me.guild_permissions.manage_guild)
+            description_parts.extend([
+                "",
+                "**Problème détecté :** les protections sont bien activées dans SentriX, "
+                "mais Discord n'a créé aucune règle native.",
+                f"Permission **Gérer le serveur** pour SentriX : {'oui' if manage_guild else 'non'}.",
+            ])
+
+        logger.info(
+            "AutoMod native sync command guild=%s local_rules=%s global_rules=%s auto_enabled=%s",
+            ctx.guild.id,
+            len(sentrix_rules),
+            global_total,
+            ",".join(auto_enabled) or "none",
+        )
 
         await panels.envoyer(
             ctx,
-            panels.depuis_embed(embeds.success(description)),
+            panels.depuis_embed(embeds.success("\n".join(description_parts))),
         )
 
     @commands.hybrid_command(
