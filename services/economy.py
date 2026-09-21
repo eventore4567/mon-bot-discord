@@ -1,19 +1,14 @@
 """EconomyService — Core V2, Phase 4 (docs/core-v2-plan.md).
 
-sell/withdraw/deposit/banque/gamble/rob are each wrapped by a monkeypatch
-layer that replaces the command actually running in production
-(cogs/integrity_hardening.py::_install_economy for the first five,
-cogs/sentrix_v22.py::_install_economy_hardening for rob) — verified by
-tracing __code__.co_filename/co_firstlineno on a production-identical boot
-(51 extensions), which does not lie the way functools.wraps-copied
-__qualname__ does. See docs/core-v2-audit-economy-atomicity.md for the full
-per-command evidence.
+This module is the transaction layer for economy operations that require atomic
+read/modify/write behavior. The rob command now delegates here directly from
+cogs/economy.py; the historical late V2.2 command monkeypatch has been removed.
+Other legacy economy surfaces may still delegate here through compatibility layers
+while they are migrated gradually.
 
-This extraction changes NO behavior: the five functions below are moved
-verbatim (queries, lock, rollback/commit points, return values all
-unchanged) out of those two cogs and into a plain, Discord-free module so
-they can be tested directly. Both cogs now import and delegate to them
-instead of keeping a private copy.
+The service is deliberately Discord-free: it owns locking, SQL, rollback/commit,
+cooldowns and transaction records, while cogs only validate Discord context and render
+the user-facing response.
 """
 from __future__ import annotations
 
