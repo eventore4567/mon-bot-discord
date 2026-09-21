@@ -223,7 +223,7 @@ async def _hierarchy_error(
             row = None
         if row is not None and int(row["enabled"]) == 0:
             return checks.check_bot_hierarchy(guild, target)
-    return await _hierarchy_error(bot, guild, actor, target)
+    return checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
 
 
 async def _run_sanction_pipeline(
