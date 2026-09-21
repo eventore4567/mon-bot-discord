@@ -2221,27 +2221,7 @@ class Ai(commands.Cog, name="Ai"):
         return line
 
     def _dynamic_command_needs_confirmation(self, command_line: str, prefix: str) -> bool:
-        raw = str(command_line or "")
-        if raw.startswith(prefix):
-            raw = raw[len(prefix):]
-        parts = raw.strip().split()
-        if not parts:
-            return False
-        root = parts[0].casefold()
-        dangerous = set(access_matrix.GUILD_OWNER_COMMANDS) | {
-            "delete-channel", "deleteemoji", "massrole", "roleall",
-            "blacklist-user", "blacklist-users", "lockdown-server", "panic",
-            "pay", "give-money", "bot-leave", "reset-logs-all",
-        }
-        if root in dangerous or root.startswith(("wipe", "reset", "restore", "delete-", "mass")):
-            return True
-        if root == "clear" and len(parts) > 1:
-            try:
-                return int(parts[1]) >= 50
-            except ValueError:
-                return False
-        return False
-
+        return ai_command_router.command_needs_confirmation(command_line, prefix)
     async def _invoke_natural_command(
         self,
         message: discord.Message,
