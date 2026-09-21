@@ -678,6 +678,49 @@ def is_bare_action_candidate(text: str) -> bool:
     return any(gate.startswith(prefix) for prefix in strong_starts)
 
 
+def looks_action_request(text: str) -> bool:
+    """Détecte une vraie demande d'action sans envoyer chaque conversation au routeur IA.
+
+    Les questions explicatives ("comment créer un rôle ?", "c'est quoi un ban ?") restent
+    des conversations normales. Les formulations impératives/polies ("tu peux bannir X",
+    "stp configure les logs", "je veux que tu crées...") passent au moteur d'actions.
+    """
+    normalized = normalize_text(text).strip()
+    if not normalized or len(normalized) > 1800:
+        return False
+    if is_bare_action_candidate(normalized):
+        return True
+
+    # Une question de connaissance ne doit jamais devenir une action par accident.
+    if re.match(
+        r"^(?:comment|pourquoi|c[' ]?est quoi|qu[' ]?est ce que|que veut dire|"
+        r"explique|tu sais|sais tu|est ce que tu sais)\b",
+        normalized,
+    ):
+        return False
+
+    polite = bool(re.match(
+        r"^(?:stp\s+|svp\s+|s il te plait\s+|tu peux\s+|peux tu\s+|"
+        r"est ce que tu peux\s+|je veux que tu\s+|j aimerais que tu\s+|"
+        r"vas y\s+|go\s+)?",
+        normalized,
+    ))
+    action_verb = re.search(
+        r"\b(?:ban|bannis|bannir|tempban|warn|avertis|mute|unmute|kick|expulse|"
+        r"clear|purge|supprime|efface|cree|creer|crée|créer|ajoute|retire|enleve|"
+        r"renomme|configure|active|desactive|bloque|censure|interdit|autorise|"
+        r"rejoint|quitte|connecte|deconnecte|joue|play|pause|skip|stop|mets|met|"
+        r"envoie|publie|donne|deplace|change|ouvre|lance|ferme|lock|unlock|"
+        r"cache|affiche|montre)\b",
+        normalized,
+    )
+    if not action_verb:
+        return False
+
+    # Plus le verbe est proche du début, plus il s'agit d'une instruction.
+    return polite and action_verb.start() <= 48
+
+
 def local_parse(question: str) -> ParsedAction | None:
     normalized = normalize_text(question)
     if not normalized:
@@ -1176,9 +1219,16 @@ async def parse_action(
     channel_id: int | None,
     user_id: int | None,
 ) -> ParsedAction | None:
+    # Fast-path local : la majorité des actions fréquentes ne consomment AUCUN appel IA.
     parsed = local_parse(question)
     if parsed is not None:
         return parsed
+
+    # Important pour la latence : une discussion normale ne passe plus d'abord par un
+    # classifieur d'actions. Elle va directement au moteur conversationnel.
+    if not looks_action_request(question):
+        return None
+
     return await classify_with_ai(
         question, guild_id=guild_id, channel_id=channel_id, user_id=user_id
     )
