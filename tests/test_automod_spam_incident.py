@@ -320,3 +320,71 @@ async def test_antiinvite_catches_repeated_discord_invites_without_spaces():
     message.delete.assert_awaited_once()
     cog._repost_censored.assert_awaited_once()
 
+def test_native_antilink_patterns_fit_discord_limits_and_avoid_unsupported_lookaround():
+    assert 1 <= len(automod_module.NATIVE_ANTILINK_REGEX_PATTERNS) <= 10
+    for pattern in automod_module.NATIVE_ANTILINK_REGEX_PATTERNS:
+        assert len(pattern) <= 260
+        assert "(?<=" not in pattern
+        assert "(?<!" not in pattern
+        assert "(?=" not in pattern
+        assert "(?!" not in pattern
+
+
+@pytest.mark.asyncio
+async def test_native_antilink_rule_is_created_with_block_message_action():
+    db = SimpleNamespace(
+        get_automod=AsyncMock(return_value={"antilink": 1}),
+        fetchone=AsyncMock(return_value=None),
+    )
+    bot = SimpleNamespace(db=db)
+    cog = AutoMod(bot)
+
+    guild = SimpleNamespace(
+        id=123,
+        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
+        fetch_automod_rules=AsyncMock(return_value=[]),
+        create_automod_rule=AsyncMock(),
+    )
+
+    assert await cog._sync_native_antilink_rule(guild) is True
+    guild.create_automod_rule.assert_awaited_once()
+    kwargs = guild.create_automod_rule.await_args.kwargs
+    assert kwargs["name"] == automod_module.NATIVE_ANTILINK_RULE_NAME
+    assert kwargs["event_type"] == discord.AutoModRuleEventType.message_send
+    assert kwargs["enabled"] is True
+    assert kwargs["exempt_roles"] == []
+    assert kwargs["exempt_channels"] == []
+    assert kwargs["trigger"].regex_patterns == list(automod_module.NATIVE_ANTILINK_REGEX_PATTERNS)
+    assert len(kwargs["actions"]) == 1
+    assert kwargs["actions"][0].custom_message == automod_module.NATIVE_ANTILINK_CUSTOM_MESSAGE
+
+
+@pytest.mark.asyncio
+async def test_native_antilink_rule_is_deleted_when_filter_is_off():
+    existing = SimpleNamespace(
+        name=automod_module.NATIVE_ANTILINK_RULE_NAME,
+        id=777,
+        delete=AsyncMock(),
+    )
+    db = SimpleNamespace(
+        get_automod=AsyncMock(return_value={"antilink": 0}),
+        fetchone=AsyncMock(return_value=None),
+    )
+    bot = SimpleNamespace(db=db)
+    cog = AutoMod(bot)
+    guild = SimpleNamespace(
+        id=123,
+        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
+        fetch_automod_rules=AsyncMock(return_value=[existing]),
+    )
+
+    assert await cog._sync_native_antilink_rule(guild) is True
+    existing.delete.assert_awaited_once()
+
+
+def test_main_enables_discord_automod_gateway_intents():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+    assert "INTENTS.auto_moderation_configuration = True" in source
+    assert "INTENTS.auto_moderation_execution = True" in source
+
