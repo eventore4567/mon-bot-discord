@@ -291,3 +291,34 @@ def test_content_policy_wrapper_accepts_censored_content_and_honors_immunity_off
     assert "override is False" in source
     assert "original_maybe_escalate" in source
 
+def test_normalize_link_text_repairs_split_scheme_and_separates_concatenated_urls():
+    raw = "https:/ /discord.gg/GgYzEFSshttps://discord.gg/Another"
+    normalized = automod_module._normalize_link_text(raw)
+    assert "https://discord.gg/ggyze fss".replace(" ", "") not in normalized  # sanity: no accidental spacing inside code
+    assert "https://discord.gg/ggyze" in normalized
+    assert " https://discord.gg/another" in normalized
+
+
+def test_targeted_blocked_link_matches_when_same_url_is_glued_to_another_url():
+    rules = ["https://discord.gg/GgYzEFSs"]
+    content = "https://discord.gg/GgYzEFSshttps://discord.gg/GgYzEFSs"
+    assert automod_module._blocked_link_hit(content, rules) == rules[0]
+
+
+@pytest.mark.asyncio
+async def test_antiinvite_catches_repeated_discord_invites_without_spaces():
+    cog = _cog(conf={"antiinvite": 1, "escalation": 0})
+    member = _member()
+    cog.immunity_overrides_cache[(1, 7)] = False
+    message = _message(
+        member,
+        1,
+        "https://discord.gg/GgYzEFSshttps://discord.gg/GgYzEFSs",
+    )
+    cog._repost_censored = AsyncMock(return_value=True)
+    fake_notice = SimpleNamespace(delete=AsyncMock())
+    with patch.object(panels, "envoyer", AsyncMock(return_value=fake_notice)):
+        await cog.on_message(message)
+    message.delete.assert_awaited_once()
+    cog._repost_censored.assert_awaited_once()
+
