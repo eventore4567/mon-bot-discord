@@ -543,3 +543,10 @@ def test_native_suite_has_distinct_useful_rule_names():
     assert len(names) == 7
     assert all(name.startswith("SentriX • ") for name in names)
 
+def test_native_sync_command_distinguishes_local_and_global_counts():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "automod.py").read_text(encoding="utf-8")
+    assert "**Ce serveur :" in source
+    assert "**Total SentriX sur" in source
+    assert "Le **0** n'est pas un échec de synchronisation" in source
+
