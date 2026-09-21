@@ -771,11 +771,20 @@ class AutoMod(commands.Cog, name="Automod"):
         link_content = _normalize_link_text(message.content)
         conf = await self.get_automod_cached(message.guild.id)
 
+        # Détections prioritaires pouvant être combinées dans un seul avertissement.
+        # Exemple : un même message contient à la fois un mot interdit ET un lien interdit.
+        words = await self.get_blacklist_words_cached(message.guild.id)
+        blocked_word = self._blacklist_hit(words, message.content)
+
         # Règles ciblées : « SentriX censure ce lien » ajoute uniquement cette cible.
-        # Elles fonctionnent même si l'anti-liens global est désactivé et ne transforment
-        # jamais silencieusement le serveur en mode strict.
         blocked_links = await self.get_blacklist_links_cached(message.guild.id)
         blocked_hit = _blocked_link_hit(link_content, blocked_links)
+        if blocked_word and blocked_hit:
+            return await self._delete_and_warn(
+                message,
+                "Mot interdit et lien interdit détectés.",
+                "blacklist_word_link",
+            )
         if blocked_hit:
             return await self._delete_and_warn(
                 message,
@@ -803,8 +812,7 @@ class AutoMod(commands.Cog, name="Automod"):
             return
 
         # La liste noire de MOTS s'applique à tout le monde.
-        words = await self.get_blacklist_words_cached(message.guild.id)
-        if self._blacklist_hit(words, message.content):
+        if blocked_word:
             return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
 
         if await self.is_automod_exempt(message.author):
@@ -893,6 +901,23 @@ class AutoMod(commands.Cog, name="Automod"):
         skip_ids.add(message_id)
         asyncio.get_event_loop().call_later(10, skip_ids.discard, message_id)
 
+    @staticmethod
+    def _public_automod_message(filter_name: str, reason: str) -> str:
+        """Message court visible dans le salon, proche du rendu demandé.
+
+        Le détail technique reste dans les logs ; le salon reçoit seulement la raison
+        utile. On ne republie jamais le contenu interdit ni l'URL supprimée.
+        """
+        labels = {
+            "blacklist_word": "votre message contient un mot interdit sur le serveur.",
+            "blacklist_link": "votre message contient un lien interdit sur le serveur.",
+            "blacklist_word_link": "votre message contient un mot interdit et un lien interdit sur le serveur.",
+            "antilink": "votre message contient un lien interdit sur le serveur.",
+            "antiinvite": "votre message contient une invitation Discord interdite sur le serveur.",
+            "antiscam": "votre message a été bloqué par la protection anti-arnaque.",
+        }
+        return labels.get(filter_name, f"votre message a été supprimé : {reason}")
+
     async def _delete_and_warn(self, message: discord.Message, reason: str, filter_name: str = "automod"):
         """Supprime le message et traite la détection comme un incident par membre.
 
@@ -931,11 +956,24 @@ class AutoMod(commands.Cog, name="Automod"):
         if action:
             await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, action, reason)
 
-        note = f"{message.author.mention}, message supprimé : {reason}"
+        public_text = self._public_automod_message(filter_name, reason)
         if action == "mute":
-            note += f" Exclusion temporaire de {helpers.format_duration(SPAM_TIMEOUT_SECONDS)}."
+            public_text += f" Exclusion temporaire de {helpers.format_duration(SPAM_TIMEOUT_SECONDS)}."
         try:
-            await panels.texte_court(message.channel, note, supprimer_apres=6)
+            if filter_name in {"blacklist_word", "blacklist_link", "blacklist_word_link", "antilink", "antiinvite", "antiscam"}:
+                note = await panels.envoyer(
+                    message.channel,
+                    panels.depuis_embed(
+                        embeds.warning(f"{message.author.mention}, {public_text}")
+                    ),
+                )
+                await note.delete(delay=8)
+            else:
+                await panels.texte_court(
+                    message.channel,
+                    f"{message.author.mention}, {public_text}",
+                    supprimer_apres=6,
+                )
         except discord.HTTPException:
             pass
 
