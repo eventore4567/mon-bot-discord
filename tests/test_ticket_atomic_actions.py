@@ -128,3 +128,23 @@ def test_v22_does_not_override_canonical_ticket_callbacks_anymore():
     assert "tickets_cog.close_ticket = types.MethodType" not in block
     assert "ticket_claim_security.py" in block
 
+def test_integrity_layer_does_not_shadow_canonical_ticket_control_permissions():
+    from pathlib import Path
+
+    integrity = (
+        Path(__file__).resolve().parents[1] / "cogs" / "integrity_hardening.py"
+    ).read_text(encoding="utf-8")
+    security = (
+        Path(__file__).resolve().parents[1] / "cogs" / "ticket_claim_security.py"
+    ).read_text(encoding="utf-8")
+
+    block = integrity.split("def _install_tickets", 1)[1].split(
+        "def _install_games", 1
+    )[0]
+    assert "staff_only_controls" not in block
+    assert "tickets.handle_control_button = types.MethodType" not in block
+
+    assert '_STAFF_ONLY_KEYS = {"claim", "unclaim", "add", "remove", "rename", "transfer", "note", "bump"}' in security
+    assert 'elif key == "close":' in security
+    assert 'interaction.user.id != ticket["user_id"]' in security
+
