@@ -338,3 +338,29 @@ def test_community_games_keep_lock_until_finally_cleanup():
     assert 'release_play_lock(guild_id, ctx.author.id, "reactionevent")' not in community
     assert 'release_play_lock(guild_id, ctx.author.id, "emoji-race")' not in community
 
+def test_play_lock_registry_recovers_stale_lock(monkeypatch):
+    registry = game_rewards.PlayLockRegistry(ttl=10)
+    key = (1, 2, "slots")
+    registry._locked[key] = 100.0
+    monkeypatch.setattr(game_rewards.time, "monotonic", lambda: 111.0)
+
+    assert registry.try_acquire(1, 2, "slots") is True
+    assert key in registry._locked
+    assert registry._locked[key] == 111.0
+
+
+def test_integrity_layer_no_longer_replaces_game_lock_registry():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "integrity_hardening.py"
+    ).read_text(encoding="utf-8")
+
+    assert "class _ExpiringPlayLockRegistry" not in source
+    assert "game_rewards._registry =" not in source
+    block = source.split("def _install_games", 1)[1].split(
+        "def _install_runtime_registry_audit", 1
+    )[0]
+    assert "game_rewards.PlayLockRegistry" in block
+    assert "ttl" in block
+
