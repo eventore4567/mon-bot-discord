@@ -1435,7 +1435,7 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("Vous n’avez pas la permission **Gérer le serveur** ou **Gérer les messages**.")
                 return True
             if not me.guild_permissions.manage_messages:
-                await reply("Il me manque la permission **Gérer les messages** pour appliquer l’anti-liens.")
+                await reply("Il me manque la permission **Gérer les messages** pour appliquer cette règle.")
                 return True
             raw_link = str(action.slots.get("link") or "").strip()
             if action.source in {"ai", "plan"} and not self._native_slot_grounded(message, raw_link):
@@ -1445,27 +1445,29 @@ class Ai(commands.Cog, name="Ai"):
                 await reply("Lien ou domaine manquant.")
                 return True
             try:
-                await self.bot.db.set_automod(guild.id, "antilink", 1)
-                await self.bot.db.set_automod(guild.id, "antilink_strict", 1)
+                await self.bot.db.execute(
+                    "INSERT OR IGNORE INTO blacklist_links (guild_id, value, created_by, created_at) VALUES (?, ?, ?, CAST(strftime('%s','now') AS INTEGER))",
+                    (guild.id, raw_link.casefold(), actor.id),
+                )
                 automod = self.bot.get_cog("Automod")
                 if automod is not None:
-                    cache = getattr(automod, "automod_cache", None)
+                    cache = getattr(automod, "blacklist_links_cache", None)
                     if isinstance(cache, dict):
                         cache.pop(guild.id, None)
                     await automod.log_action(
                         guild,
                         embeds.warning(
-                            "Lien censuré via action naturelle",
-                            f"Demandeur : {actor.mention} (`{actor.id}`)\nLien/domaine : `{raw_link[:250]}`\nMode : anti-liens strict activé",
+                            "Lien ciblé censuré via action naturelle",
+                            f"Demandeur : {actor.mention} (`{actor.id}`)\nLien/domaine : `{raw_link[:250]}`\nMode : règle ciblée uniquement",
                         ),
                     )
                 logger.info(
-                    "Action naturelle security.block_link guild=%s actor=%s link=%r strict=on",
+                    "Action naturelle security.block_link guild=%s actor=%s link=%r mode=targeted",
                     guild.id,
                     actor.id,
                     raw_link,
                 )
-                await reply("Anti-liens strict activé pour censurer ce lien.")
+                await reply("Lien ajouté à la liste noire ciblée.")
             except Exception:
                 logger.exception("Action naturelle security.block_link impossible.")
                 await reply("Je n’ai pas pu appliquer cette règle anti-liens.")
@@ -1512,6 +1514,7 @@ class Ai(commands.Cog, name="Ai"):
                     return True
             else:
                 channel = message.channel
+
             actor_perms = channel.permissions_for(actor)
             bot_perms = channel.permissions_for(me)
             if not (actor_perms.view_channel and actor_perms.send_messages):
@@ -1520,34 +1523,98 @@ class Ai(commands.Cog, name="Ai"):
             if not (bot_perms.view_channel and bot_perms.send_messages and bot_perms.embed_links):
                 await reply("Je ne peux pas envoyer d’embed dans ce salon.")
                 return True
-            wants_everyone = str(action.slots.get("mention_everyone") or "").casefold() in {"1", "true", "yes", "oui", "on"} or "@everyone" in message.content or "@here" in message.content
+
+            wants_everyone = (
+                str(action.slots.get("mention_everyone") or "").casefold() in {"1", "true", "yes", "oui", "on"}
+                or "@everyone" in message.content
+                or "@here" in message.content
+            )
             if wants_everyone and not actor_perms.mention_everyone:
                 await reply("Vous n’avez pas la permission **Mentionner @everyone, @here et tous les rôles**.")
                 return True
             if wants_everyone and not bot_perms.mention_everyone:
                 await reply("Il me manque la permission **Mentionner @everyone, @here et tous les rôles** dans ce salon.")
                 return True
-            text = str(action.slots.get("text") or "").strip()[:1800]
-            title = str(action.slots.get("title") or "SentriX").strip()[:120] or "SentriX"
+
+            text = str(action.slots.get("text") or "").strip()[:4000]
+            title = str(action.slots.get("title") or "SentriX").strip()[:256] or "SentriX"
             count = action.slots.get("count")
             if count is not None and text == str(count):
                 text = f"Valeur : **{int(count)}**"
-            embed = discord.Embed(title=title, description=text, colour=discord.Colour(config.COLOR_PRIMARY))
-            embed.set_footer(text=f"SentriX • demandé par {actor.display_name}")
-            content = "@everyone" if wants_everyone and "@everyone" in message.content else ("@here" if wants_everyone and "@here" in message.content else None)
+
+            colour = discord.Colour(config.COLOR_PRIMARY)
+            raw_colour = str(action.slots.get("color") or "").strip()
+            if raw_colour:
+                parsed_colour = self._parse_native_colour(raw_colour)
+                if parsed_colour is None:
+                    await reply("Couleur d’embed invalide. Utilisez par exemple **rouge** ou **#ff0000**.")
+                    return True
+                colour = parsed_colour
+
+            embed = discord.Embed(
+                title=title,
+                description=text or None,
+                colour=colour,
+            )
+
+            footer = str(action.slots.get("footer") or "").strip()[:2048]
+            embed.set_footer(text=footer or f"SentriX • demandé par {actor.display_name}")
+
+            image = str(action.slots.get("image") or "").strip()
+            thumbnail = str(action.slots.get("thumbnail") or "").strip()
+            for label, url in (("image", image), ("miniature", thumbnail)):
+                if url and not re.match(r"^https?://[^\s<]+$", url, re.IGNORECASE):
+                    await reply(f"URL d’{label} invalide : utilisez un lien http(s) direct.")
+                    return True
+            if image:
+                embed.set_image(url=image[:500])
+            if thumbnail:
+                embed.set_thumbnail(url=thumbnail[:500])
+
+            fields = action.slots.get("fields")
+            if isinstance(fields, list):
+                for field in fields[:10]:
+                    if not isinstance(field, dict):
+                        continue
+                    name = str(field.get("name") or "").strip()[:256]
+                    value = str(field.get("value") or "").strip()[:1024]
+                    if name and value:
+                        embed.add_field(name=name, value=value, inline=bool(field.get("inline", False)))
+
+            view = None
+            button_url = str(action.slots.get("button_url") or "").strip()
+            button_label = str(action.slots.get("button_label") or "Ouvrir").strip()[:80] or "Ouvrir"
+            if button_url:
+                if not re.match(r"^https?://[^\s<]+$", button_url, re.IGNORECASE):
+                    await reply("URL du bouton invalide : utilisez un lien http(s).")
+                    return True
+                view = discord.ui.View(timeout=None)
+                view.add_item(discord.ui.Button(label=button_label, url=button_url[:500]))
+
+            content = (
+                "@everyone" if wants_everyone and "@everyone" in message.content
+                else ("@here" if wants_everyone and "@here" in message.content else None)
+            )
             await channel.send(
                 content=content,
                 embed=embed,
-                allowed_mentions=discord.AllowedMentions(everyone=wants_everyone, roles=False, users=False),
+                view=view,
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=wants_everyone,
+                    roles=False,
+                    users=False,
+                ),
             )
             logger.info(
-                "Action naturelle embed.send guild=%s actor=%s channel=%s everyone=%s title=%r chars=%s",
+                "Action naturelle embed.send guild=%s actor=%s channel=%s everyone=%s title=%r chars=%s fields=%s button=%s",
                 guild.id,
                 actor.id,
                 getattr(channel, "id", None),
                 wants_everyone,
                 title,
                 len(text),
+                len(embed.fields),
+                bool(button_url),
             )
             await reply(f"Embed envoyé dans **#{getattr(channel, 'name', 'ce salon')}**.")
             return True
