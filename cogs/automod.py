@@ -106,6 +106,20 @@ NATIVE_ANTILINK_RULE_NAME = "SentriX • Anti-liens"
 NATIVE_ANTILINK_CUSTOM_MESSAGE = "Les liens sont interdits sur ce serveur."
 NATIVE_BLACKLIST_RULE_NAME = "SentriX • Mots interdits"
 NATIVE_BLACKLIST_CUSTOM_MESSAGE = "Ce contenu est bloqué par ce serveur."
+NATIVE_TARGET_LINKS_RULE_NAME = "SentriX • Liens ciblés"
+NATIVE_TARGET_LINKS_CUSTOM_MESSAGE = "Ce lien est interdit sur ce serveur."
+NATIVE_ANTIINVITE_RULE_NAME = "SentriX • Anti-invitations"
+NATIVE_ANTIINVITE_CUSTOM_MESSAGE = "Les invitations Discord sont interdites sur ce serveur."
+NATIVE_ANTISCAM_RULE_NAME = "SentriX • Anti-arnaque"
+NATIVE_ANTISCAM_CUSTOM_MESSAGE = "Ce message ressemble à une arnaque interdite par ce serveur."
+NATIVE_ANTIMENTION_RULE_NAME = "SentriX • Anti-mentions"
+NATIVE_ANTIMENTION_CUSTOM_MESSAGE = "Ce message contient trop de mentions."
+NATIVE_HARMFUL_RULE_NAME = "SentriX • Contenu sensible"
+NATIVE_HARMFUL_CUSTOM_MESSAGE = "Ce contenu est bloqué par la modération du serveur."
+NATIVE_INVITE_REGEX_PATTERNS = (
+    r"(?i)\bdiscord\.gg/[^\s<]+",
+    r"(?i)\bdiscord(?:app)?\.com/invite/[^\s<]+",
+)
 NATIVE_ANTILINK_REGEX_PATTERNS = (
     r"(?i)\b(?:https?|hxxps?)://[^\s<]+",
     r"(?i)\bwww\.[^\s<]+",
@@ -399,11 +413,23 @@ class AutoMod(commands.Cog, name="Automod"):
         """Réconcilie une fois les règles Discord natives après connexion du bot."""
         try:
             await self.bot.wait_until_ready()
+            total_sentrix_rules = 0
             for guild in list(self.bot.guilds):
-                await self._sync_native_antilink_rule(guild)
-                await self._sync_native_blacklist_rule(guild)
+                await self._sync_native_suite(guild)
+                try:
+                    rules = await guild.fetch_automod_rules()
+                    total_sentrix_rules += sum(
+                        1 for rule in rules if str(getattr(rule, "name", "")).startswith("SentriX • ")
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
                 # Petit étalement pour éviter une rafale de requêtes au démarrage.
                 await asyncio.sleep(0.15)
+            logger.info(
+                "Suite Discord AutoMod native synchronisée : guilds=%s règles_sentrix=%s",
+                len(self.bot.guilds),
+                total_sentrix_rules,
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -411,12 +437,20 @@ class AutoMod(commands.Cog, name="Automod"):
 
     async def _on_automod_setting_changed(self, guild_id: int, field: str, value: int) -> None:
         self.automod_cache.pop(int(guild_id), None)
-        if field not in {"antilink", "antilink_strict"}:
-            return
         guild = self.bot.get_guild(int(guild_id))
         if guild is None:
             return
-        await self._sync_native_antilink_rule(guild)
+
+        if field in {"antilink", "antilink_strict"}:
+            await self._sync_native_antilink_rule(guild)
+        elif field == "antiinvite":
+            await self._sync_native_antiinvite_rule(guild)
+        elif field == "antiscam":
+            await self._sync_native_antiscam_rule(guild)
+        elif field == "antimention":
+            await self._sync_native_antimention_rule(guild)
+        elif field == "antiinsult":
+            await self._sync_native_harmful_rule(guild)
 
     async def _sync_native_antilink_rule(self, guild: discord.Guild) -> bool:
         """Synchronise l'anti-liens SentriX avec Discord AutoMod.
@@ -511,6 +545,159 @@ class AutoMod(commands.Cog, name="Automod"):
                 )
                 return False
 
+    async def _upsert_native_rule(
+        self,
+        guild: discord.Guild,
+        *,
+        name: str,
+        enabled: bool,
+        trigger: discord.AutoModTrigger | None,
+        custom_message: str,
+    ) -> bool:
+        """Crée/modifie/supprime une règle AutoMod SentriX sans doublon."""
+        me = guild.me
+        if me is None or not me.guild_permissions.manage_guild:
+            return False
+
+        try:
+            rules = await guild.fetch_automod_rules()
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+
+        matches = [rule for rule in rules if rule.name == name]
+        rule = matches[0] if matches else None
+        for duplicate in matches[1:]:
+            try:
+                await duplicate.delete(reason=f"SentriX: suppression doublon {name}")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+        if not enabled or trigger is None:
+            if rule is not None:
+                try:
+                    await rule.delete(reason=f"SentriX: désactivation {name}")
+                except (discord.Forbidden, discord.HTTPException):
+                    return False
+            return True
+
+        actions = [discord.AutoModRuleAction(custom_message=custom_message)]
+        try:
+            if rule is None:
+                await guild.create_automod_rule(
+                    name=name,
+                    event_type=discord.AutoModRuleEventType.message_send,
+                    trigger=trigger,
+                    actions=actions,
+                    enabled=True,
+                    exempt_roles=[],
+                    exempt_channels=[],
+                    reason=f"SentriX: activation {name}",
+                )
+            else:
+                await rule.edit(
+                    trigger=trigger,
+                    actions=actions,
+                    enabled=True,
+                    exempt_roles=[],
+                    exempt_channels=[],
+                    reason=f"SentriX: synchronisation {name}",
+                )
+            return True
+        except (discord.Forbidden, discord.HTTPException, ValueError):
+            logger.warning("Synchronisation règle Discord AutoMod impossible guild=%s name=%s", guild.id, name, exc_info=True)
+            return False
+
+    async def _sync_native_target_links_rule(self, guild: discord.Guild) -> bool:
+        rows = await self.bot.db.fetchall(
+            "SELECT value FROM blacklist_links WHERE guild_id = ? ORDER BY value",
+            (guild.id,),
+        )
+        keywords: list[str] = []
+        seen: set[str] = set()
+        for row in rows or ():
+            value = _normalize_blocked_link_rule(str(row["value"] or ""))
+            if not value or len(value) > 60 or value in seen:
+                continue
+            seen.add(value)
+            keywords.append(value)
+            if len(keywords) >= 1000:
+                break
+        trigger = discord.AutoModTrigger(keyword_filter=keywords) if keywords else None
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_TARGET_LINKS_RULE_NAME,
+            enabled=bool(keywords),
+            trigger=trigger,
+            custom_message=NATIVE_TARGET_LINKS_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_antiinvite_rule(self, guild: discord.Guild) -> bool:
+        conf = await self.bot.db.get_automod(guild.id)
+        enabled = bool(conf and conf["antiinvite"] and not conf["antilink"])
+        trigger = discord.AutoModTrigger(regex_patterns=list(NATIVE_INVITE_REGEX_PATTERNS))
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_ANTIINVITE_RULE_NAME,
+            enabled=enabled,
+            trigger=trigger,
+            custom_message=NATIVE_ANTIINVITE_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_antiscam_rule(self, guild: discord.Guild) -> bool:
+        conf = await self.bot.db.get_automod(guild.id)
+        enabled = bool(conf and conf["antiscam"])
+        keywords = [k[:60] for k in SCAM_KEYWORDS if k and len(k) <= 60]
+        trigger = discord.AutoModTrigger(keyword_filter=keywords)
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_ANTISCAM_RULE_NAME,
+            enabled=enabled,
+            trigger=trigger,
+            custom_message=NATIVE_ANTISCAM_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_antimention_rule(self, guild: discord.Guild) -> bool:
+        conf = await self.bot.db.get_automod(guild.id)
+        enabled = bool(conf and conf["antimention"])
+        trigger = discord.AutoModTrigger(
+            mention_limit=5,
+            mention_raid_protection=True,
+        )
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_ANTIMENTION_RULE_NAME,
+            enabled=enabled,
+            trigger=trigger,
+            custom_message=NATIVE_ANTIMENTION_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_harmful_rule(self, guild: discord.Guild) -> bool:
+        conf = await self.bot.db.get_automod(guild.id)
+        enabled = bool(conf and conf["antiinsult"])
+        presets = discord.AutoModPresets(
+            profanity=True,
+            sexual_content=True,
+            slurs=True,
+        )
+        trigger = discord.AutoModTrigger(presets=presets)
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_HARMFUL_RULE_NAME,
+            enabled=enabled,
+            trigger=trigger,
+            custom_message=NATIVE_HARMFUL_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_suite(self, guild: discord.Guild) -> None:
+        """Suite utile : chaque règle correspond à une vraie protection SentriX active/configurée."""
+        await self._sync_native_antilink_rule(guild)
+        await self._sync_native_blacklist_rule(guild)
+        await self._sync_native_target_links_rule(guild)
+        await self._sync_native_antiinvite_rule(guild)
+        await self._sync_native_antiscam_rule(guild)
+        await self._sync_native_antimention_rule(guild)
+        await self._sync_native_harmful_rule(guild)
+
     async def _sync_native_blacklist_rule(self, guild: discord.Guild) -> bool:
         """Expose les mots interdits SentriX à Discord AutoMod natif.
 
@@ -603,9 +790,8 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
-        # Serveur neuf : réconcilie les protections natives disponibles.
-        await self._sync_native_antilink_rule(guild)
-        await self._sync_native_blacklist_rule(guild)
+        # Serveur neuf : réconcilie toutes les protections natives utiles.
+        await self._sync_native_suite(guild)
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
         # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
@@ -959,6 +1145,34 @@ class AutoMod(commands.Cog, name="Automod"):
             mentions = ", ".join(f"<@&{r['role_id']}>" for r in exempt_rows)
             e.add_field(name="Rôles exemptés", value=mentions, inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
+
+    @commands.hybrid_command(
+        name="automod-native-sync",
+        description="Synchroniser les protections SentriX avec le vrai AutoMod Discord.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("securite")
+    async def automod_native_sync(self, ctx: commands.Context):
+        await self._sync_native_suite(ctx.guild)
+        try:
+            rules = await ctx.guild.fetch_automod_rules()
+            sentrix_rules = [r for r in rules if str(r.name).startswith("SentriX • ")]
+            names = "\n".join(f"• {r.name}" for r in sentrix_rules) or "Aucune règle native active."
+            await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.success(
+                        f"AutoMod Discord synchronisé : **{len(sentrix_rules)}** règle(s) SentriX active(s).\n{names}"
+                    )
+                ),
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.error("Synchronisation terminée, mais Discord refuse la lecture des règles AutoMod.")
+                ),
+            )
 
     @commands.hybrid_command(
         name="security-check",
