@@ -40,16 +40,29 @@ async def _snapshot(bot: commands.Bot, guild: discord.Guild, member: discord.Mem
     return await profile_service.build_snapshot(bot, guild, member)
 
 
-async def _niveaux_actifs(bot: commands.Bot, guild_id: int) -> bool:
-    """Réutilise l'unique source de vérité (cogs/levels.py::Levels._niveaux_actifs,
-    qui interroge les DEUX interrupteurs existants) plutôt que d'en dupliquer la
-    logique ici. Si le cog Levels n'est pas chargé, on considère les niveaux actifs
-    — comportement par défaut, cohérent avec le fail-open déjà pratiqué par
-    _niveaux_actifs lui-même quand une de ses propres vérifications échoue."""
+async def _module_actif(bot: commands.Bot, guild_id: int, module: str) -> bool:
+    """Source unique et fail-closed : absent/non configuré = invisible."""
     levels_cog = bot.get_cog("Levels")
-    if levels_cog is None:
-        return True
-    return await levels_cog._niveaux_actifs(guild_id)
+    if levels_cog is not None:
+        if module == "levels" and hasattr(levels_cog, "_niveaux_actifs"):
+            return await levels_cog._niveaux_actifs(guild_id)
+        if module == "economy" and hasattr(levels_cog, "_economie_active"):
+            return await levels_cog._economie_active(guild_id)
+
+    try:
+        from cogs import setup_v2_core
+        return await setup_v2_core.module_enabled(bot, guild_id, module)
+    except Exception:
+        logger.exception("État du module %s indisponible guild=%s", module, guild_id)
+        return False
+
+
+async def _niveaux_actifs(bot: commands.Bot, guild_id: int) -> bool:
+    return await _module_actif(bot, guild_id, "levels")
+
+
+async def _economie_active(bot: commands.Bot, guild_id: int) -> bool:
+    return await _module_actif(bot, guild_id, "economy")
 
 
 def _base(bot: commands.Bot, member: discord.Member, title: str, subtitle: str | None = None) -> discord.Embed:
@@ -70,6 +83,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
     stats = data["stats"]
     progression = data["progression"]
     niveaux_actifs = await _niveaux_actifs(bot, guild.id)
+    economie_active = await _economie_active(bot, guild.id)
 
     if page == "missions":
         embed = _base(bot, member, "Missions du jour", member.display_name)
@@ -141,16 +155,14 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ranks = data["ranks"]
         embed = _base(bot, member, "Classements", member.display_name)
         embed.colour = discord.Colour(premium_style.COLORS["leaderboard"])
-        niveau_ligne = (
-            f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**\n\n" if niveaux_actifs
-            else "Niveau / XP\n**Désactivé sur ce serveur**\n\n"
-        )
-        embed.description = (
-            f"{niveau_ligne}"
-            f"Messages\n**{_rank(ranks.get('message_rank'))}**\n\n"
-            f"Économie\n**{_rank(ranks.get('economy_rank'))}**\n\n"
-            f"Saison\n**{_rank(data['season_rank'])}**"
-        )
+        lines: list[str] = []
+        if niveaux_actifs:
+            lines.append(f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**")
+        lines.append(f"Messages\n**{_rank(ranks.get('message_rank'))}**")
+        if economie_active:
+            lines.append(f"Économie\n**{_rank(ranks.get('economy_rank'))}**")
+        lines.append(f"Saison\n**{_rank(data['season_rank'])}**")
+        embed.description = "\n\n".join(lines)
         return embed
 
     # Vue principale compacte : les métriques restent lisibles sans étirer l'embed.
@@ -176,22 +188,17 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
             ),
             inline=True,
         )
-    else:
+
+    if economie_active:
         embed.add_field(
-            name="Progression",
-            value="Niveaux désactivés sur ce serveur.",
+            name="Économie",
+            value=(
+                f"Portefeuille **{_fmt(wallet)}**\n"
+                f"Banque **{_fmt(bank)}**\n"
+                f"Total **{_fmt(total)}**"
+            ),
             inline=True,
         )
-
-    embed.add_field(
-        name="Économie",
-        value=(
-            f"Portefeuille **{_fmt(wallet)}**\n"
-            f"Banque **{_fmt(bank)}**\n"
-            f"Total **{_fmt(total)}**"
-        ),
-        inline=True,
-    )
     embed.add_field(
         name="Activité",
         value=(
@@ -283,6 +290,8 @@ class CleanProfileView(discord.ui.View):
                 self.guild,
                 data["stats"],
                 settings,
+                show_levels=await _niveaux_actifs(self.bot, self.guild.id),
+                show_economy=await _economie_active(self.bot, self.guild.id),
             )
             file = discord.File(buffer, filename="sentrix-profile.png")
             embed = _base(self.bot, self.member, "Carte de profil", self.member.display_name)
