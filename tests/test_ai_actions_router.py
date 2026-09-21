@@ -585,3 +585,16 @@ def test_rich_natural_embed_extracts_visual_options():
     assert parsed.slots["fields"][0]["name"] == "Règle 1"
     assert parsed.slots["button_url"] == "https://example.com"
 
+def test_natural_embed_uses_existing_brand_colour_constant():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "ai.py").read_text(encoding="utf-8")
+    assert "config.COLOR_PRIMARY" not in source
+    assert "discord.Colour(config.COLOR_BRAND)" in source
+
+
+def test_natural_message_handler_never_fails_silently():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "ai.py").read_text(encoding="utf-8")
+    assert "Action naturelle SentriX en erreur" in source
+    assert "Je n’ai pas pu exécuter cette action à cause d’une erreur interne." in source
+
