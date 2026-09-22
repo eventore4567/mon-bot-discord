@@ -36,7 +36,6 @@ def main() -> int:
         if re.search(r"(?m)^\s*@commands\.(?:command|hybrid_command|group)\b", text):
             errors.append("V2.2 déclare une nouvelle commande alors que cette phase doit uniquement améliorer l'existant")
         markers = (
-            "status='ouvert' AND claimed_by IS NULL",
             "asyncio.wait_for", "AI_SETTINGS_TTL", "GAME_SETTINGS_TTL",
             "TICKET_BUTTON_SETTINGS_TTL", "PRAGMA busy_timeout=5000", '"new_commands": 0',
             "_ticket_create_locks", "await conn.commit()",
@@ -44,6 +43,21 @@ def main() -> int:
         for marker in markers:
             if marker not in text:
                 errors.append(f"invariant V2.2 absent: {marker}")
+
+        # Le claim atomique n'appartient plus à V2.2 : la source de vérité runtime
+        # est cogs/ticket_claim_security.py. Le gate doit vérifier l'invariant là où
+        # il est réellement exécuté, sans forcer le retour d'un ancien monkeypatch.
+        ticket_security = ROOT / "cogs/ticket_claim_security.py"
+        if not ticket_security.exists():
+            errors.append("fichier absent: cogs/ticket_claim_security.py")
+        else:
+            ticket_text = ticket_security.read_text(encoding="utf-8")
+            claim_marker = "status = 'ouvert' AND claimed_by IS NULL"
+            if claim_marker not in ticket_text:
+                errors.append(
+                    "invariant V2.2 absent (cogs/ticket_claim_security.py): "
+                    + claim_marker
+                )
         # La garde de hiérarchie (check_targetable) vit dans le cog canonique : les
         # remplacements de callbacks V2.2 (unmute/warn/ban…) ont été retirés parce que
         # leurs fermetures partageaient une variable réassignée (+unmute exécutait mute).
