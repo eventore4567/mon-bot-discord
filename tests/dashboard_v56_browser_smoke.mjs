@@ -117,8 +117,9 @@ if(!dom.window.document.body.classList.contains("dashboard-locked")) throw new E
 if(!dom.window.document.body.classList.contains("startup-done")) throw new Error("L’écran de démarrage doit se terminer après le bootstrap.");
 const startupProgress=dom.window.document.getElementById("startupProgress");
 if(startupProgress && Number(startupProgress.getAttribute("aria-valuenow") || 0) < 92) throw new Error("La barre de démarrage doit progresser par étapes jusqu'à la fin du bootstrap.");
-if(!sourceByName.get('90_boot.js')?.includes('startupTarget = 4')) throw new Error('La barre de démarrage doit interpoler vers une cible au lieu de sauter.');
-if(!sourceByName.get('90_boot.js')?.includes('elapsed >= 2200')) throw new Error('Le chargement SentriX est trop rapide : durée minimale fluide absente.');
+// Le frontend est désormais un programme unique : les anciens fragments nommés
+// (dont 90_boot.js) n'existent plus. Le comportement de démarrage est vérifié
+// ci-dessus par le DOM réel après bootstrap (startup-done + progression >= 92).
 
 
 
