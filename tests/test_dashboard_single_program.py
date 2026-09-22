@@ -69,9 +69,11 @@ def test_no_periodic_dom_loop():
     ], intervals
     assert "data-sx-tab" not in program
     assert "Element.prototype.animate" not in program
-    # Ces appels sont des transitions ponctuelles : go(), sélection d'un serveur et les
-    # deux états initiaux du profil global. Aucun n'est lancé par une boucle périodique.
-    assert program.count("render({ navigation: true })") == 4
+    # Les transitions de navigation sont ponctuelles. Leur nombre peut évoluer quand un
+    # nouvel écran rejoint le routeur ; ce qui compte ici est qu'aucun minuteur
+    # périodique ne puisse lancer render() ni une animation de page.
+    assert all("render" not in callback for callback, _delay in intervals)
+    assert "render({ navigation: true })" in program
     assert "el.classList.add('page-enter')" in program and "if (animate)" in program
 
 
