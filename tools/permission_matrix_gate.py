@@ -43,6 +43,7 @@ def _source_checks(errors: list[str]) -> None:
     moderation = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
     permission_guard = (ROOT / "cogs" / "permission_guard.py").read_text(encoding="utf-8")
     integrity = (ROOT / "cogs" / "integrity_hardening.py").read_text(encoding="utf-8")
+    ticket_security = (ROOT / "cogs" / "ticket_claim_security.py").read_text(encoding="utf-8")
     tickets = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
 
     for marker in (
@@ -64,10 +65,19 @@ def _source_checks(errors: list[str]) -> None:
 
     for marker in (
         "_ticket_staff_allowed",
-        "Cette action est réservée au staff du ticket.",
         "_sentrix_integrity_staff_target",
     ):
         if marker not in integrity:
+            errors.append(f"protection intégrité ticket absente: {marker}")
+
+    # La décision fine des boutons tickets a été extraite vers la couche canonique
+    # ticket_claim_security.py. Le gate doit suivre cette source réelle au lieu de
+    # chercher l'ancien texte de refus dans integrity_hardening.py.
+    for marker in (
+        "_authorized_staff",
+        "Ce bouton est réservé au staff autorisé de ce ticket.",
+    ):
+        if marker not in ticket_security:
             errors.append(f"protection ticket staff absente: {marker}")
 
     if "handle_control_button" not in tickets:
