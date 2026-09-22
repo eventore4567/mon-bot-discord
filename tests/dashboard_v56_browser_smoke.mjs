@@ -71,6 +71,7 @@ const dom = new JSDOM(html, {
       if(url.pathname==="/api/guilds/1/levels") return method==="PUT" ? response({ok:true,message:"Réglages des niveaux enregistrés."}) : response({ok:true,xp_min:10,xp_max:25,xp_cooldown:60,level_announce_enabled:true,level_keep_old_roles:false,xp_disabled_on_commands:false,xp_excluded_role_ids:[],xp_channel_disabled:[],roles:[{level:5,role_id:"15"}]});
       if(url.pathname==="/api/guilds/1/economy") return method==="PUT" ? response({ok:true,message:"Monnaie enregistrée."}) : response({ok:true,currency_singular:"Pièce",currency_plural:"Pièces",currency_symbol:"🪙",shop:[{id:1,name:"VIP",price:500,description:"",role_id:"15"}],panels:[],gains:{daily:200,weekly:1000,work_cooldown:3600,daily_cooldown:86400}});
       if(url.pathname==="/api/guilds/1/economy/games") return method==="PUT" ? response({ok:true,message:"Réglages des jeux enregistrés."}) : response({ok:true,settings:{enabled:true,disabled_games:[],allowed_channel_ids:[],blocked_channel_ids:[],allowed_role_ids:[],blocked_role_ids:[],daily_limit:50,logs_enabled:true,leaderboard_enabled:true,dm_results:false,compact_mode:false},catalog:[{key:"slots",label:"🎰 Machine à sous",kind:"rapide"}]});
+      if(url.pathname==="/api/guilds/1/music") return response({ok:true,connected:false,voice_channel_id:null,voice_channel_name:null,voice_channels:[{id:"30",name:"Vocal",category:"Serveur",members:0,can_connect:true,can_speak:true}],current:null,playing:false,paused:false,volume:70,queue_total:0,loop:"off",autoplay:false,queue:[],playlists:[]});
       if(url.pathname==="/api/guilds/1/roles/messages") return response({ok:true,items:[{id:"555",author:"SentriX",mine:true,text:"Choisissez vos rôles",created_at:1700000000,reactions:2}]});
       if(url.pathname==="/api/guilds/1/roles") return response({ok:true,notification_roles:[{id:"15",name:"Ping annonces"}],notification_panels:[],reaction_panels:[],reaction_roles:[]});
       if(url.pathname==="/api/guilds/1/verification-v6") return response({ok:true,configured:true,published:false,captcha_enabled:true,channel_id:"22",role_id:"15",title:"Vérification",rules_text:"1. Respectez les membres.",image_url:null,jump_url:null});
@@ -178,7 +179,7 @@ railServer.click();
 await sleep(300);
 if(!requests.map(x=>x.path).includes("/api/guilds/1")) throw new Error("Le clic serveur ne charge pas sa configuration.");
 
-const expectedTabs=["overview","welcome","levels","economy","roles","moderation","security","logs","tickets","games","notifications","automation","embeds","ai","settings","access","invites","backups"];
+const expectedTabs=["overview","welcome","levels","economy","roles","moderation","security","logs","tickets","games","music","notifications","automation","embeds","ai","settings","invites","backups"];
 const actualTabs=[...dom.window.document.querySelectorAll("#navigation button[data-tab]")].map(b=>b.dataset.tab);
 for(const tab of expectedTabs) if(!actualTabs.includes(tab)) throw new Error(`Page unifiée absente après sélection serveur: ${tab}`);
 if(actualTabs.includes("profile")||actualTabs.includes("servers")||actualTabs.includes("preferences")) throw new Error("Les pages globales ne doivent pas encombrer la navigation serveur.");
@@ -190,8 +191,8 @@ const checks=[
   ["levels","general","#lvSave"], ["levels","levelup",'[data-setting="level_channel"]'], ["levels","roles","#lvRoleAdd"], ["levels","avance","#lvExRoles"],
   ["economy","general","#ecSave"], ["economy","boutique","#shopAdd"], ["economy","jeux","#gmEnabled"], ["economy","gains",".kpi"], ["roles","autoroles",'[data-setting="autorole"]'], ["roles","interactifs","#reactionPanelCreate"], ["roles","avance",'[data-setting="mod_role"]'],
   ["moderation","","#sanctionList"], ["security","protections","[data-automod]"], ["security","verification","#verifyRules"],
-  ["logs","",'[data-log-channel]'], ["tickets","","#ticketSave"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
-  ["settings","",'[data-setting="prefix"]'], ["access","","#commandList"], ["embeds","","#embedSend"], ["ai","","[data-ai]"],
+  ["logs","",'[data-log-channel]'], ["tickets","","#ticketSave"], ["music","player","#musicVoice"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
+  ["settings","",'[data-setting="prefix"]'], ["embeds","","#embedSend"], ["ai","","[data-ai]"],
   ["invites","invites",".card"], ["backups","backups","#opsExport"], ["backups","history","[data-rollback]"],
 ];
 for(const [tab,sub,selector] of checks){
