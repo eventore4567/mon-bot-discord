@@ -77,6 +77,31 @@ async function moduleHead(key, copy, title) {
   return `<section class="card full"><div class="card-head"><div><h2>${esc(title || pageMeta(state.page)[0])}</h2>${copy ? `<p>${esc(copy)}</p>` : ''}</div><div class="toolbar">${badge(code)}${toggle}</div></div>${problem}</section>`;
 }
 
+function overviewServerBar() {
+  const g = state.guild?.guild || {};
+  const a = state.guild?.automod || {};
+  const protectionCount = AUTOMOD.filter(([key]) => Boolean(a[key])).length;
+  const openTickets = Number(metrics().open_tickets || 0);
+  const memberCount = Number(g.members || 0);
+  const icon = g.icon_url
+    ? `<img src="${esc(g.icon_url)}" alt="">`
+    : esc(String(g.name || 'S').slice(0, 2).toUpperCase());
+  return `<section class="overview-server-bar full" aria-label="Résumé du serveur">
+    <div class="overview-server-main">
+      <span class="server-icon">${icon}</span>
+      <div class="overview-server-copy">
+        <strong>${esc(g.name || 'Serveur')}</strong>
+        <span class="overview-status"><i aria-hidden="true"></i>SentriX actif</span>
+      </div>
+    </div>
+    <div class="overview-server-stats" aria-label="Statistiques rapides">
+      <span class="overview-stat"><b>${number(memberCount)}</b><small>membres</small></span>
+      <span class="overview-stat"><b>${number(openTickets)}</b><small>${openTickets === 1 ? 'ticket' : 'tickets'}</small></span>
+      <span class="overview-stat"><b>${number(protectionCount)}</b><small>${protectionCount === 1 ? 'protection' : 'protections'}</small></span>
+    </div>
+  </section>`;
+}
+
 async function renderOverview() {
   const d = await diagnostics();
   const mods = d.modules || {};
@@ -84,7 +109,7 @@ async function renderOverview() {
   const cards = OVERVIEW_CARDS.map(c => moduleCard(c, mods[c.key])).join('');
   const onboarding = !configured ? `<section class="card full"><div class="card-head"><div><h2>Bienvenue dans SentriX</h2><p>Configurez les fonctions principales de votre serveur en quelques étapes. Rien n’est modifié avant la dernière étape.</p></div><button class="btn primary" type="button" id="startWizard">Commencer</button></div></section>` : '';
   const problems = (d.invalid_resources || []).length;
-  content().innerHTML = `<div class="grid">${onboarding}${problems ? `<div class="notice warn full">${plural(problems, 'ressource', 'ressources')} à corriger (salon ou rôle supprimé). <button class="btn link" type="button" data-go="diagnostic">Voir</button></div>` : ''}<div class="module-grid full">${cards}</div></div>`;
+  content().innerHTML = `<div class="grid">${overviewServerBar()}${onboarding}${problems ? `<div class="notice warn full">${plural(problems, 'ressource', 'ressources')} à corriger (salon ou rôle supprimé). <button class="btn link" type="button" data-go="diagnostic">Voir</button></div>` : ''}<div class="module-grid full">${cards}</div></div>`;
   bindModuleButtons();
   renderNav();
   const w = $('startWizard'); if (w) w.onclick = openWizard;
