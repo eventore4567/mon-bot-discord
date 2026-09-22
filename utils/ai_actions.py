@@ -557,6 +557,7 @@ def _security_toggle_intent(normalized: str) -> tuple[str, str] | None:
     répondre avec une commande à taper au lieu d'exécuter l'action.
     """
     families = (
+        ("security.immunity", ("immunite", "immunity")),
         ("security.antispam", ("anti spam", "antispam", "spam")),
         ("security.antilink", ("anti lien", "antilink", "liens", "lien", "links", "link")),
         ("security.antiinvite", ("anti invite", "antiinvite", "invitations discord", "invites discord")),
