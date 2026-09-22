@@ -207,7 +207,7 @@ def _keyword_present(text: str, keyword: str) -> bool:
     fois « bug ». Sans cette frontière, une simple demande Python atteignait
     artificiellement quatre mots-clés et basculait sur Sol.
     """
-    return re.search(rf"(?<!\\w){re.escape(keyword)}(?!\\w)", text) is not None
+    return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text) is not None
 
 
 def is_advanced_request(text: str) -> bool:
