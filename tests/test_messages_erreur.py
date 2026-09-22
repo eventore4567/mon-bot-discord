@@ -108,8 +108,9 @@ def test_l_erreur_generique_donne_une_reference_sans_mentir_sur_l_etat():
 def test_les_erreurs_simples_tiennent_en_une_phrase():
     ctx = _FauxCtx()
     param = type("P", (), {"name": "membre", "displayed_name": "membre"})()
-    assert erreurs._texte_erreur_prefix(ctx, commands.MissingRequiredArgument(param)).startswith("Usage : `+")
-    assert erreurs._texte_erreur_prefix(ctx, commands.BadArgument("x")).startswith("Argument invalide")
+    manquant = erreurs._texte_erreur_prefix(ctx, commands.MissingRequiredArgument(param))
+    assert "« membre »" in manquant and "Usage : `+" in manquant
+    assert erreurs._texte_erreur_prefix(ctx, commands.BadArgument("x")).startswith("L'argument")
     assert "1 et 100" in erreurs._texte_erreur_prefix(ctx, commands.RangeError(500, minimum=1, maximum=100))
     assert erreurs._texte_erreur_prefix(ctx, RuntimeError("boum")) is None
 

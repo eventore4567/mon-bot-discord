@@ -44,6 +44,7 @@ def _static_checks(errors: list[str]) -> None:
     response_path = ROOT / "cogs" / "command_response_guard.py"
     minigames_path = ROOT / "cogs" / "minigames.py"
     quality_path = ROOT / "cogs" / "runtime_quality_v25.py"
+    game_rewards_path = ROOT / "utils" / "game_rewards.py"
 
     for path in (hygiene_path, integrity_path, ai_path, response_path, minigames_path, quality_path):
         if not path.exists():
@@ -71,12 +72,18 @@ def _static_checks(errors: list[str]) -> None:
 
     if integrity_path.exists():
         text = integrity_path.read_text(encoding="utf-8")
-        for marker in (
-            "_ticket_staff_allowed",
-            "_ExpiringPlayLockRegistry",
-        ):
-            if marker not in text:
-                errors.append(f"protection intégrité absente: {marker}")
+        if "_ticket_staff_allowed" not in text:
+            errors.append("protection intégrité absente: _ticket_staff_allowed")
+
+    # Core V2 : le verrou des mini-jeux vit désormais dans le registre canonique
+    # utils/game_rewards.py au lieu d'une classe runtime privée d'integrity_hardening.
+    if not game_rewards_path.exists():
+        errors.append("fichier requis absent: utils/game_rewards.py")
+    else:
+        game_text = game_rewards_path.read_text(encoding="utf-8")
+        for marker in ("class PlayLockRegistry", "self.ttl", "time.monotonic()", "_prune"):
+            if marker not in game_text:
+                errors.append(f"protection intégrité jeux absente (utils/game_rewards.py): {marker}")
 
     # Core V2, Phase 4 : les garanties atomiques économie (_economy_lock, quantity/
     # cash/bank>=?) ont été extraites de cogs/integrity_hardening.py vers

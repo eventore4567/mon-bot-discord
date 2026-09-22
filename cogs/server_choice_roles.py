@@ -262,7 +262,10 @@ async def publish_or_refresh(
 @commands.guild_only()
 @checks.is_owner_or_admin()
 async def _massrole_all_members(
-    _verification_cog,
+    self,  # le cog Verification, lié par _install_massrole_global : nommé « self » pour que
+           # la surface slash (V101 _callback_needs_cog) ne l'expose pas comme une option
+           # obligatoire « verification_cog » (audit permissions 20/09/2026 : /roles masse
+           # était inutilisable).
     ctx: commands.Context,
     action: str,
     role: discord.Role,

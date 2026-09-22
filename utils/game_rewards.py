@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -173,25 +174,38 @@ def validate_opponent(author, opponent) -> str | None:
 
 
 class PlayLockRegistry:
-    """Empêche un même joueur de faire tourner deux manches du MÊME jeu en même temps (ex:
-    lancer +dice deux fois d'un coup avant que la première réponse n'arrive). Un verrou par
-    (guild_id, user_id, game_name), en mémoire — c'est une protection anti-spam de manches
-    simultanées, pas une source de vérité (celle-ci reste toujours la contrainte UNIQUE de
-    game_session_id en base pour l'anti-double-récompense)."""
+    """In-memory anti-parallel lock with automatic stale-lock recovery.
 
-    def __init__(self):
-        self._locked: set[tuple[int, int, str]] = set()
+    Persistent cooldowns and unique reward session IDs remain the source of truth.
+    This registry only prevents two simultaneous rounds of the same game for one user.
+    A TTL ensures that an unexpected exception/process path can never block a player
+    forever until the next Railway restart.
+    """
+
+    def __init__(self, ttl: float = 1800.0):
+        self.ttl = float(ttl)
+        self._locked: dict[tuple[int, int, str], float] = {}
+
+    def _prune(self, current: float | None = None) -> None:
+        current = time.monotonic() if current is None else current
+        stale = [
+            key for key, stamp in self._locked.items()
+            if current - stamp >= self.ttl
+        ]
+        for key in stale:
+            self._locked.pop(key, None)
 
     def try_acquire(self, guild_id: int, user_id: int, game_name: str) -> bool:
-        key = (guild_id, user_id, game_name)
+        current = time.monotonic()
+        self._prune(current)
+        key = (int(guild_id), int(user_id), str(game_name))
         if key in self._locked:
             return False
-        self._locked.add(key)
+        self._locked[key] = current
         return True
 
-    def release(self, guild_id: int, user_id: int, game_name: str):
-        self._locked.discard((guild_id, user_id, game_name))
-
+    def release(self, guild_id: int, user_id: int, game_name: str) -> None:
+        self._locked.pop((int(guild_id), int(user_id), str(game_name)), None)
 
 _registry = PlayLockRegistry()
 
@@ -220,11 +234,32 @@ async def reward_game_winner(
     bot, guild_id: int, user_id: int, game_name: str, base_amount: int, session_id: str,
     result: str = "win", metadata: dict | None = None,
 ) -> GameReward:
-    """Point d'entrée UNIQUE pour créditer une récompense de mini-jeu. Applique les réglages
-    du serveur (+gamesetup), puis délègue à Database.record_game_reward() pour l'écriture
-    atomique + la protection anti-double-récompense (contrainte UNIQUE sur session_id)."""
+    """Point d'entrée UNIQUE pour créditer une récompense de mini-jeu.
+
+    La limite quotidienne est vérifiée ICI, pas seulement dans les commandes rapides :
+    les duels, jeux communautaires, vues à boutons et futures commandes ne peuvent donc
+    plus contourner +gamesetup par un chemin de récompense direct.
+    """
     metadata = metadata or {}
     settings = await get_settings(bot, guild_id)
+
+    if result == "win" and base_amount > 0:
+        limit = int(settings.get("daily_limit", 0) or 0)
+        if limit > 0:
+            played = await bot.db.count_game_rewards_today(guild_id, user_id)
+            if played >= limit:
+                return GameReward(
+                    success=False,
+                    game_name=game_name,
+                    session_id=session_id,
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    amount=0,
+                    result=result,
+                    reason="daily_limit",
+                    metadata={**metadata, "daily_limit": limit, "played_today": played},
+                )
+
     final_amount = compute_reward(settings, base_amount) if result == "win" else 0
     ok, display_id_or_reason, credited = await bot.db.record_game_reward(
         guild_id, user_id, game_name, session_id, result, final_amount, json.dumps(metadata),

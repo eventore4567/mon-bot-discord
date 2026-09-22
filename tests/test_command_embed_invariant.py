@@ -98,5 +98,62 @@ class CommandEmbedInvariantTests(unittest.TestCase):
         )
 
 
+    def test_shared_command_ui_has_no_decorative_divider(self):
+        panels = (ROOT / "utils" / "sentrix_panels.py").read_text(encoding="utf-8")
+        embeds = (ROOT / "utils" / "embeds.py").read_text(encoding="utf-8")
+        errors = (ROOT / "cogs" / "final_error_embed_v5.py").read_text(encoding="utf-8")
+
+        assert "conteneur.add_item(discord.ui.Separator())" not in panels
+        assert 'BAR = ""' in embeds
+        assert 'BAR = ""' in errors
+        assert 'return f"{BAR}\\n{body}"' not in embeds
+
+    def test_success_is_never_inferred_as_error_for_a_completed_delete(self):
+        from utils import embeds as sx_embeds
+
+        self.assertEqual(
+            sx_embeds._kind_from_text("Action effectuée", "Messages supprimés."),
+            "success",
+        )
+        card = sx_embeds.success("Configuration enregistrée.")
+        self.assertEqual(card.title, "Succès")
+        self.assertEqual(card.colour.value, sx_embeds.COLOR_SUCCESS)
+
+
+
+    def test_all_command_renderers_are_divider_free(self):
+        files = {
+            "embeds": ROOT / "utils" / "embeds.py",
+            "runtime": ROOT / "utils" / "sentrix_runtime.py",
+            "cleanup": ROOT / "utils" / "sentrix_visual_cleanup.py",
+            "style_v2": ROOT / "utils" / "command_style_v2.py",
+            "wide": ROOT / "utils" / "wide_compact_v6.py",
+            "ping": ROOT / "utils" / "ping_final_style.py",
+            "log_compact": ROOT / "utils" / "log_compact_final.py",
+            "panels": ROOT / "utils" / "sentrix_panels.py",
+            "visuals": ROOT / "utils" / "command_visuals.py",
+            "errors": ROOT / "cogs" / "final_error_embed_v5.py",
+        }
+        sources = {name: path.read_text(encoding="utf-8") for name, path in files.items()}
+
+        assert 'BAR = ""' in sources["embeds"]
+        assert 'BAR = ""' in sources["runtime"]
+        assert 'PANEL_BAR = ""' in sources["cleanup"]
+        assert 'BAR = ""' in sources["style_v2"]
+        assert 'LONG_BAR = ""' in sources["wide"]
+        assert 'PANEL_BAR = ""' in sources["ping"]
+        assert 'PANEL_BAR = ""' in sources["log_compact"]
+        assert "conteneur.add_item(discord.ui.Separator())" not in sources["panels"]
+        assert "container.add_item(_small_separator())" not in sources["visuals"]
+        assert 'BAR = ""' in sources["errors"]
+
+    def test_final_transport_strips_legacy_drawn_dividers(self):
+        from cogs import final_interaction_policy as policy
+
+        raw = "--------\nTexte utile\n━━━━━━━━━━━━\nSuite"
+        self.assertEqual(policy._strip_drawn_dividers(raw), "Texte utile\nSuite")
+
+
+
 if __name__ == "__main__":
     unittest.main()

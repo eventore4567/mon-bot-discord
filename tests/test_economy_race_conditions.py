@@ -117,5 +117,89 @@ class EconomyRaceConditionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bal["cash"], 10)
 
 
+    async def test_rob_cooldown_est_persiste_en_base(self):
+        thief_id, victim_id = 300, 301
+        await self._set_cash(thief_id, 100)
+        await self._set_cash(victim_id, 500)
+
+        first = await self.db.attempt_rob(
+            self.guild_id,
+            thief_id,
+            victim_id,
+            success_chance=1.0,
+            cooldown=3600,
+        )
+        self.assertEqual(first["outcome"], "success")
+
+        second = await self.db.attempt_rob(
+            self.guild_id,
+            thief_id,
+            victim_id,
+            success_chance=1.0,
+            cooldown=3600,
+        )
+        self.assertEqual(second["outcome"], "cooldown")
+        self.assertGreater(second["remaining"], 0)
+
+        row = await self.db.fetchone(
+            "SELECT last_rob FROM economy WHERE guild_id = ? AND user_id = ?",
+            (self.guild_id, thief_id),
+        )
+        self.assertGreater(int(row["last_rob"]), 0)
+
+    async def test_rob_echec_ne_peut_jamais_rendre_le_voleur_negatif(self):
+        thief_id, victim_id = 302, 303
+        await self._set_cash(thief_id, 10)
+        await self._set_cash(victim_id, 500)
+
+        result = await self.db.attempt_rob(
+            self.guild_id,
+            thief_id,
+            victim_id,
+            success_chance=0.0,
+            penalty_range=(100, 100),
+            cooldown=0,
+        )
+
+        self.assertEqual(result["outcome"], "caught")
+        self.assertEqual(result["penalty"], 10)
+        bal = await self.db.get_balance(self.guild_id, thief_id)
+        self.assertEqual(bal["cash"], 0)
+
+    async def test_daily_concurrent_ne_peut_etre_reclame_quune_fois(self):
+        user_id = 304
+        results = await asyncio.gather(
+            self.db.claim_timed_reward(
+                self.guild_id, user_id, "last_daily", 200, 86400, "daily"
+            ),
+            self.db.claim_timed_reward(
+                self.guild_id, user_id, "last_daily", 200, 86400, "daily"
+            ),
+        )
+
+        self.assertEqual(sum(1 for ok, _remaining in results if ok), 1)
+        bal = await self.db.get_balance(self.guild_id, user_id)
+        self.assertEqual(bal["cash"], 200)
+
+    async def test_achat_role_concurrent_ne_debite_quune_fois(self):
+        user_id = 305
+        await self._set_cash(user_id, 1000)
+        cur = await self.db.execute(
+            "INSERT INTO shop_items (guild_id, name, price, role_id) VALUES (?, ?, ?, ?)",
+            (self.guild_id, "VIP", 400, 999),
+        )
+        item_id = cur.lastrowid
+
+        results = await asyncio.gather(
+            self.db.purchase_shop_item(self.guild_id, user_id, item_id),
+            self.db.purchase_shop_item(self.guild_id, user_id, item_id),
+        )
+        statuses = sorted(status for status, _item in results)
+
+        self.assertEqual(statuses, ["already_owned", "ok"])
+        bal = await self.db.get_balance(self.guild_id, user_id)
+        self.assertEqual(bal["cash"], 600)
+
+
 if __name__ == "__main__":
     unittest.main()

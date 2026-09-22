@@ -252,7 +252,6 @@ class CommandPanelView(discord.ui.LayoutView):
         body = "\n\n".join(body_parts).strip()
 
         if body:
-            container.add_item(_small_separator())
             container.add_item(discord.ui.TextDisplay(body[:3900]))
 
         image_url = getattr(getattr(embed, "image", None), "url", None) if embed else None
@@ -267,7 +266,6 @@ class CommandPanelView(discord.ui.LayoutView):
         footer = _clean_text(getattr(getattr(embed, "footer", None), "text", None), limit=300) if embed else ""
         if not footer:
             footer = "SentriX"
-        container.add_item(_small_separator())
         container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
         self.add_item(container)

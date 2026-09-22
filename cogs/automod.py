@@ -74,15 +74,61 @@ LINK_RE = re.compile(
 
 
 def _normalize_link_text(content: str) -> str:
-    """Normalise les séparateurs utilisés pour contourner l'anti-lien."""
-    value = content.casefold()
+    """Normalise les séparateurs/obfuscations utilisés pour contourner l'anti-lien.
+
+    Couvre notamment les schémas cassés ("https:/ /site"), les caractères zéro-largeur
+    et plusieurs URLs collées sans espace.
+    """
+    value = str(content or "").casefold()
+    value = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", value)
     value = re.sub(r"\s*(?:\[\.\]|\(\.\)|\bdot\b)\s*", ".", value)
-    return value
+    value = re.sub(
+        r"\b(h(?:tt|xx)p?s?)\s*:\s*/\s*/\s*",
+        lambda m: f"{m.group(1)}://",
+        value,
+        flags=re.IGNORECASE,
+    )
+    # Sépare les schémas concaténés : ".../codehttps://..." devient
+    # ".../code https://..." pour que les matchers puissent traiter chaque URL.
+    value = re.sub(r"(?<!\s)(?=(?:https?|hxxps?)://)", " ", value, flags=re.IGNORECASE)
+    return value.strip()
 SCAM_KEYWORDS = [
     "free nitro", "nitro gratuit", "steamcommunity", "airdrop gratuit", "crypto giveaway",
     "discord nitro free", "gagnez des nitro", "claim your nitro", "gift nitro free",
     "double your crypto", "investissement garanti", "steam gift free",
 ]
+
+# Règle Discord AutoMod native créée par SentriX lorsque l'anti-liens est actif.
+# Les motifs sont volontairement compatibles avec le moteur Rust Regex de Discord :
+# pas de lookbehind/lookahead. Le filtre Python ci-dessus reste le filet de sécurité
+# pour les admins/Gérer le serveur, que Discord exempte toujours de ses règles natives.
+NATIVE_ANTILINK_RULE_NAME = "SentriX • Anti-liens"
+NATIVE_ANTILINK_CUSTOM_MESSAGE = "Les liens sont interdits sur ce serveur."
+NATIVE_BLACKLIST_RULE_NAME = "SentriX • Mots interdits"
+NATIVE_BLACKLIST_CUSTOM_MESSAGE = "Ce contenu est bloqué par ce serveur."
+NATIVE_TARGET_LINKS_RULE_NAME = "SentriX • Liens ciblés"
+NATIVE_TARGET_LINKS_CUSTOM_MESSAGE = "Ce lien est interdit sur ce serveur."
+NATIVE_ANTIINVITE_RULE_NAME = "SentriX • Anti-invitations"
+NATIVE_ANTIINVITE_CUSTOM_MESSAGE = "Les invitations Discord sont interdites sur ce serveur."
+NATIVE_ANTISCAM_RULE_NAME = "SentriX • Anti-arnaque"
+NATIVE_ANTISCAM_CUSTOM_MESSAGE = "Ce message ressemble à une arnaque interdite par ce serveur."
+NATIVE_ANTIMENTION_RULE_NAME = "SentriX • Anti-mentions"
+NATIVE_ANTIMENTION_CUSTOM_MESSAGE = "Ce message contient trop de mentions."
+NATIVE_HARMFUL_RULE_NAME = "SentriX • Contenu sensible"
+NATIVE_HARMFUL_CUSTOM_MESSAGE = "Ce contenu est bloqué par la modération du serveur."
+NATIVE_INVITE_REGEX_PATTERNS = (
+    r"(?i)\bdiscord\.gg/[^\s<]+",
+    r"(?i)\bdiscord(?:app)?\.com/invite/[^\s<]+",
+)
+NATIVE_ANTILINK_REGEX_PATTERNS = (
+    r"(?i)\b(?:https?|hxxps?)://[^\s<]+",
+    r"(?i)\bwww\.[^\s<]+",
+    r"(?i)(?:^|[^a-z0-9_@])(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}(?::[0-9]{2,5})?(?:/[^\s<]*)?",
+    r"(?i)\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?::[0-9]{2,5})?(?:/[^\s<]*)?",
+    r"(?i)\bdiscord\.gg/[^\s<]+",
+    r"(?i)\bdiscord(?:app)?\.com/invite/[^\s<]+",
+    r"(?i)\b[a-z0-9-]+(?:\s*(?:\[\.\]|\(\.\)|\s+dot\s+)\s*[a-z0-9-]+)+\b",
+)
 
 # ---------------------------------------------------------------- ESCALADE DES SANCTIONS
 # Au-delà d'un simple "suppression + avertissement", AutoMod suit désormais le nombre
@@ -126,6 +172,139 @@ class _Incident:
     infractions: int = 0
 
 
+def _normalize_blocked_link_rule(value: str) -> str:
+    raw = _normalize_link_text(str(value or "")).strip().strip("<>()[]{}.,;!?")
+    raw = re.sub(r"^(?:https?|hxxps?)://", "", raw, flags=re.IGNORECASE)
+    raw = raw.rstrip("/")
+    return raw.casefold()
+
+
+def _blocked_link_hit(content: str, rules: list[str]) -> str | None:
+    """Retourne la règle ciblée qui correspond au message, y compris URLs concaténées.
+
+    Le schéma est retiré pour que http/https/hxxps désignent la même cible. Les URLs sont
+    d'abord séparées par _normalize_link_text(), ce qui ferme le contournement
+    "lienInterdithttps://autre-lien".
+    """
+    if not rules:
+        return None
+    normalized = _normalize_link_text(content)
+    normalized = re.sub(r"\b(?:https?|hxxps?)://", "", normalized, flags=re.IGNORECASE)
+    for stored in rules:
+        rule = _normalize_blocked_link_rule(stored)
+        if not rule:
+            continue
+        pattern = rf"(?<![\w.-]){re.escape(rule)}(?=$|[/?#\s<>()\[\]{{}},.;!?])"
+        if re.search(pattern, normalized, re.IGNORECASE):
+            return stored
+    return None
+
+
+def _censor_blacklist_word(content: str, word: str | None) -> str | None:
+    """Masque un mot détecté sans republier le terme interdit.
+
+    Retourne None si le texte détecté ne peut pas être retrouvé de façon sûre dans le
+    contenu original (par exemple une variante Unicode trop éloignée) : dans ce cas on
+    préfère ne pas cloner le message plutôt que de republier le terme interdit.
+    """
+    raw_word = str(word or "").strip()
+    if not raw_word:
+        return None
+    prefix = raw_word.endswith("*")
+    base = raw_word[:-1] if prefix else raw_word
+    if not base:
+        return None
+    pattern = (
+        rf"(?<![\w]){re.escape(base)}\w*"
+        if prefix
+        else rf"(?<![\w]){re.escape(base)}(?![\w])"
+    )
+    redacted, count = re.subn(
+        pattern,
+        "████ (mot censuré)",
+        str(content or ""),
+        flags=re.IGNORECASE,
+    )
+    return redacted if count else None
+
+
+def _censor_links(content: str) -> str | None:
+    """Masque les liens visibles d'un message destiné au repost webhook."""
+    redacted, count = LINK_RE.subn("████ (lien censuré)", str(content or ""))
+    return redacted if count else None
+
+
+def _censor_invites(content: str) -> str | None:
+    redacted, count = INVITE_RE.subn("████ (invitation censurée)", str(content or ""))
+    return redacted if count else None
+
+
+def _censor_scam(content: str) -> str | None:
+    redacted = str(content or "")
+    count = 0
+    for keyword in sorted(SCAM_KEYWORDS, key=len, reverse=True):
+        redacted, hits = re.subn(
+            re.escape(keyword),
+            "████ (contenu censuré)",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+        count += hits
+    return redacted if count else None
+
+
+def _compose_censored_content(
+    content: str,
+    *,
+    blocked_word: str | None = None,
+    links: bool = False,
+    invites: bool = False,
+    scam: bool = False,
+) -> str | None:
+    """Construit le texte cloné. None = impossible de censurer sans risque de fuite."""
+    result = str(content or "")
+    changed = False
+
+    if blocked_word:
+        masked = _censor_blacklist_word(result, blocked_word)
+        if masked is None:
+            return None
+        result = masked
+        changed = True
+
+    if invites:
+        masked = _censor_invites(result)
+        if masked is None:
+            return None
+        result = masked
+        changed = True
+
+    if links:
+        masked = _censor_links(result)
+        if masked is None:
+            # Un lien ciblé peut avoir été normalisé depuis une écriture obfusquée
+            # ("site[.]com"). Ne jamais republier le texte original dans ce cas.
+            return None
+        result = masked
+        changed = True
+
+    if scam:
+        masked = _censor_scam(result)
+        if masked is None:
+            return None
+        result = masked
+        changed = True
+
+    if not changed:
+        return None
+    result = result.strip()
+    if not result:
+        return "(contenu censuré)"
+    if len(result) > 1950:
+        result = result[:1947].rstrip() + "..."
+    return result
+
+
 def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
     """Vérifie qu'un domaine autorisé apparaît vraiment comme domaine dans le message,
     pas juste comme sous-chaîne. Avant, whitelister "yt.com" aurait aussi laissé passer
@@ -137,7 +316,7 @@ def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
 
 
 TOGGLE_FIELDS = [
-    "antispam", "antilink", "antiinvite", "antimention", "anticaps",
+    "antispam", "antilink", "antilink_strict", "antiinvite", "antimention", "anticaps",
     "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "antiinsult",
 ]
 
@@ -146,6 +325,7 @@ TOGGLE_FIELDS = [
 AUTOMOD_TOGGLE_LABELS = {
     "antispam": "Anti-spam (messages répétés)",
     "antilink": "Anti-liens (tous les formats)",
+    "antilink_strict": "Anti-liens strict (tous les liens, partout)",
     "antiinvite": "Anti-invitations Discord",
     "antimention": "Anti-mentions massives",
     "anticaps": "Anti-majuscules (SPAM CAPS)",
@@ -192,10 +372,427 @@ class AutoMod(commands.Cog, name="Automod"):
         # qu'une commande change un réglage.
         self.automod_cache: dict[int, dict] = {}
         self.blacklist_words_cache: dict[int, list[str]] = {}
+        self.blacklist_links_cache: dict[int, list[str]] = {}
         self.blacklist_users_cache: dict[int, set[int]] = {}
         self.whitelist_domains_cache: dict[int, list[str]] = {}
+        # Webhook utilisé pour recréer visuellement un message censuré avec le pseudo
+        # et l'avatar du membre. Discord affiche toujours le badge APP/webhook.
+        self._censor_webhooks: dict[int, discord.Webhook] = {}
         self.exempt_roles_cache: dict[int, set[int]] = {}
         self.ignored_channels_cache: dict[int, set[int]] = {}
+        self.immunity_overrides_cache: dict[tuple[int, int], bool | None] = {}
+        self._native_antilink_locks: dict[int, asyncio.Lock] = {}
+        self._native_automod_bootstrap_task: asyncio.Task | None = None
+
+        # Toute écriture AutoMod venant des commandes, du Dashboard ou de l'IA passe
+        # par Database.set_automod et arrive ici pour invalider le cache + synchroniser
+        # Discord AutoMod natif.
+        db = getattr(self.bot, "db", None)
+        if db is not None:
+            db._sentrix_automod_change_hook = self._on_automod_setting_changed
+
+    async def cog_load(self) -> None:
+        self._native_automod_bootstrap_task = asyncio.create_task(
+            self._bootstrap_native_automod(),
+            name="sentrix-native-automod-bootstrap",
+        )
+
+    def cog_unload(self) -> None:
+        task = self._native_automod_bootstrap_task
+        if task is not None:
+            task.cancel()
+        db = getattr(self.bot, "db", None)
+        hook = getattr(db, "_sentrix_automod_change_hook", None) if db is not None else None
+        if getattr(hook, "__self__", None) is self:
+            try:
+                delattr(db, "_sentrix_automod_change_hook")
+            except AttributeError:
+                pass
+
+    async def _bootstrap_native_automod(self) -> None:
+        """Réconcilie une fois les règles Discord natives après connexion du bot."""
+        try:
+            await self.bot.wait_until_ready()
+            total_sentrix_rules = 0
+            for guild in list(self.bot.guilds):
+                await self._sync_native_suite(guild)
+                try:
+                    rules = await guild.fetch_automod_rules()
+                    total_sentrix_rules += sum(
+                        1 for rule in rules if str(getattr(rule, "name", "")).startswith("SentriX • ")
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+                # Petit étalement pour éviter une rafale de requêtes au démarrage.
+                await asyncio.sleep(0.15)
+            logger.info(
+                "Suite Discord AutoMod native synchronisée : guilds=%s règles_sentrix=%s",
+                len(self.bot.guilds),
+                total_sentrix_rules,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Bootstrap Discord AutoMod natif impossible")
+
+    async def _on_automod_setting_changed(self, guild_id: int, field: str, value: int) -> None:
+        self.automod_cache.pop(int(guild_id), None)
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return
+
+        if field in {"antilink", "antilink_strict"}:
+            await self._sync_native_antilink_rule(guild)
+        elif field == "antiinvite":
+            await self._sync_native_antiinvite_rule(guild)
+        elif field == "antiscam":
+            await self._sync_native_antiscam_rule(guild)
+        elif field == "antimention":
+            await self._sync_native_antimention_rule(guild)
+        elif field == "antiinsult":
+            await self._sync_native_harmful_rule(guild)
+
+    async def _sync_native_antilink_rule(self, guild: discord.Guild) -> bool:
+        """Synchronise l'anti-liens SentriX avec Discord AutoMod.
+
+        Retourne True si la règle native est dans l'état demandé. En cas de permission
+        absente, quota AutoMod atteint ou erreur Discord, le filtre SentriX local reste
+        actif : la sécurité ne devient jamais dépendante du moteur natif.
+        """
+        lock = self._native_antilink_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            conf_row = await self.bot.db.get_automod(guild.id)
+            enabled = bool(conf_row and conf_row["antilink"])
+
+            me = guild.me
+            if me is None or not me.guild_permissions.manage_guild:
+                if enabled:
+                    logger.warning(
+                        "AutoMod natif anti-liens non synchronisé guild=%s: permission Gérer le serveur absente",
+                        guild.id,
+                    )
+                return not enabled
+
+            try:
+                rules = await guild.fetch_automod_rules()
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Lecture des règles Discord AutoMod impossible guild=%s",
+                    guild.id,
+                    exc_info=True,
+                )
+                return False
+
+            sentrix_rules = [r for r in rules if r.name == NATIVE_ANTILINK_RULE_NAME]
+            rule = sentrix_rules[0] if sentrix_rules else None
+
+            # Nettoie d'éventuels doublons d'anciennes versions.
+            for duplicate in sentrix_rules[1:]:
+                try:
+                    await duplicate.delete(reason="SentriX: suppression doublon AutoMod anti-liens")
+                except (discord.Forbidden, discord.HTTPException):
+                    logger.warning("Suppression doublon AutoMod impossible guild=%s rule=%s", guild.id, duplicate.id)
+
+            if not enabled:
+                if rule is not None:
+                    try:
+                        await rule.delete(reason="SentriX: anti-liens désactivé")
+                    except (discord.Forbidden, discord.HTTPException):
+                        logger.warning(
+                            "Désactivation règle Discord AutoMod anti-liens impossible guild=%s",
+                            guild.id,
+                            exc_info=True,
+                        )
+                        return False
+                return True
+
+            trigger = discord.AutoModTrigger(
+                regex_patterns=list(NATIVE_ANTILINK_REGEX_PATTERNS),
+            )
+            actions = [
+                discord.AutoModRuleAction(
+                    custom_message=NATIVE_ANTILINK_CUSTOM_MESSAGE,
+                )
+            ]
+
+            try:
+                if rule is None:
+                    await guild.create_automod_rule(
+                        name=NATIVE_ANTILINK_RULE_NAME,
+                        event_type=discord.AutoModRuleEventType.message_send,
+                        trigger=trigger,
+                        actions=actions,
+                        enabled=True,
+                        exempt_roles=[],
+                        exempt_channels=[],
+                        reason="SentriX: anti-liens activé",
+                    )
+                else:
+                    await rule.edit(
+                        trigger=trigger,
+                        actions=actions,
+                        enabled=True,
+                        exempt_roles=[],
+                        exempt_channels=[],
+                        reason="SentriX: synchronisation anti-liens",
+                    )
+                return True
+            except (discord.Forbidden, discord.HTTPException, ValueError):
+                logger.warning(
+                    "Création/synchronisation de la règle Discord AutoMod anti-liens impossible guild=%s",
+                    guild.id,
+                    exc_info=True,
+                )
+                return False
+
+    async def _upsert_native_rule(
+        self,
+        guild: discord.Guild,
+        *,
+        name: str,
+        enabled: bool,
+        trigger: discord.AutoModTrigger | None,
+        custom_message: str,
+    ) -> bool:
+        """Crée/modifie/supprime une règle AutoMod SentriX sans doublon."""
+        me = guild.me
+        if me is None or not me.guild_permissions.manage_guild:
+            return False
+
+        try:
+            rules = await guild.fetch_automod_rules()
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+
+        matches = [rule for rule in rules if rule.name == name]
+        rule = matches[0] if matches else None
+        for duplicate in matches[1:]:
+            try:
+                await duplicate.delete(reason=f"SentriX: suppression doublon {name}")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
+        if not enabled or trigger is None:
+            if rule is not None:
+                try:
+                    await rule.delete(reason=f"SentriX: désactivation {name}")
+                except (discord.Forbidden, discord.HTTPException):
+                    return False
+            return True
+
+        actions = [discord.AutoModRuleAction(custom_message=custom_message)]
+        try:
+            if rule is None:
+                await guild.create_automod_rule(
+                    name=name,
+                    event_type=discord.AutoModRuleEventType.message_send,
+                    trigger=trigger,
+                    actions=actions,
+                    enabled=True,
+                    exempt_roles=[],
+                    exempt_channels=[],
+                    reason=f"SentriX: activation {name}",
+                )
+            else:
+                await rule.edit(
+                    trigger=trigger,
+                    actions=actions,
+                    enabled=True,
+                    exempt_roles=[],
+                    exempt_channels=[],
+                    reason=f"SentriX: synchronisation {name}",
+                )
+            return True
+        except (discord.Forbidden, discord.HTTPException, ValueError):
+            logger.warning("Synchronisation règle Discord AutoMod impossible guild=%s name=%s", guild.id, name, exc_info=True)
+            return False
+
+    async def _sync_native_target_links_rule(self, guild: discord.Guild) -> bool:
+        rows = await self.bot.db.fetchall(
+            "SELECT value FROM blacklist_links WHERE guild_id = ? ORDER BY value",
+            (guild.id,),
+        )
+        keywords: list[str] = []
+        seen: set[str] = set()
+        for row in rows or ():
+            value = _normalize_blocked_link_rule(str(row["value"] or ""))
+            if not value or len(value) > 60 or value in seen:
+                continue
+            seen.add(value)
+            keywords.append(value)
+            if len(keywords) >= 1000:
+                break
+        trigger = discord.AutoModTrigger(keyword_filter=keywords) if keywords else None
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_TARGET_LINKS_RULE_NAME,
+            enabled=bool(keywords),
+            trigger=trigger,
+            custom_message=NATIVE_TARGET_LINKS_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_antiinvite_rule(self, guild: discord.Guild) -> bool:
+        conf = await self.bot.db.get_automod(guild.id)
+        enabled = bool(conf and conf["antiinvite"] and not conf["antilink"])
+        trigger = discord.AutoModTrigger(regex_patterns=list(NATIVE_INVITE_REGEX_PATTERNS))
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_ANTIINVITE_RULE_NAME,
+            enabled=enabled,
+            trigger=trigger,
+            custom_message=NATIVE_ANTIINVITE_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_antiscam_rule(self, guild: discord.Guild) -> bool:
+        conf = await self.bot.db.get_automod(guild.id)
+        enabled = bool(conf and conf["antiscam"])
+        keywords = [k[:60] for k in SCAM_KEYWORDS if k and len(k) <= 60]
+        trigger = discord.AutoModTrigger(keyword_filter=keywords)
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_ANTISCAM_RULE_NAME,
+            enabled=enabled,
+            trigger=trigger,
+            custom_message=NATIVE_ANTISCAM_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_antimention_rule(self, guild: discord.Guild) -> bool:
+        conf = await self.bot.db.get_automod(guild.id)
+        enabled = bool(conf and conf["antimention"])
+        trigger = discord.AutoModTrigger(
+            mention_limit=5,
+            mention_raid_protection=True,
+        )
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_ANTIMENTION_RULE_NAME,
+            enabled=enabled,
+            trigger=trigger,
+            custom_message=NATIVE_ANTIMENTION_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_harmful_rule(self, guild: discord.Guild) -> bool:
+        conf = await self.bot.db.get_automod(guild.id)
+        enabled = bool(conf and conf["antiinsult"])
+        presets = discord.AutoModPresets(
+            profanity=True,
+            sexual_content=True,
+            slurs=True,
+        )
+        trigger = discord.AutoModTrigger(presets=presets)
+        return await self._upsert_native_rule(
+            guild,
+            name=NATIVE_HARMFUL_RULE_NAME,
+            enabled=enabled,
+            trigger=trigger,
+            custom_message=NATIVE_HARMFUL_CUSTOM_MESSAGE,
+        )
+
+    async def _sync_native_suite(self, guild: discord.Guild) -> None:
+        """Suite utile : chaque règle correspond à une vraie protection SentriX active/configurée."""
+        await self._sync_native_antilink_rule(guild)
+        await self._sync_native_blacklist_rule(guild)
+        await self._sync_native_target_links_rule(guild)
+        await self._sync_native_antiinvite_rule(guild)
+        await self._sync_native_antiscam_rule(guild)
+        await self._sync_native_antimention_rule(guild)
+        await self._sync_native_harmful_rule(guild)
+
+    async def _sync_native_blacklist_rule(self, guild: discord.Guild) -> bool:
+        """Expose les mots interdits SentriX à Discord AutoMod natif.
+
+        Discord accepte jusqu'à 1000 mots-clés dans une règle. Au-delà, le moteur local
+        SentriX continue de couvrir la liste complète.
+        """
+        lock = self._native_antilink_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            me = guild.me
+            if me is None or not me.guild_permissions.manage_guild:
+                return False
+
+            rows = await self.bot.db.fetchall(
+                "SELECT word FROM blacklist_words WHERE guild_id = ? ORDER BY word",
+                (guild.id,),
+            )
+            keywords: list[str] = []
+            seen: set[str] = set()
+            for row in rows or ():
+                value = str(row["word"] or "").strip()
+                if not value or len(value) > 60:
+                    continue
+                folded = value.casefold()
+                if folded in seen:
+                    continue
+                seen.add(folded)
+                keywords.append(value)
+                if len(keywords) >= 1000:
+                    break
+            keywords.sort(key=str.casefold)
+
+            try:
+                rules = await guild.fetch_automod_rules()
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Lecture règle Discord AutoMod mots interdits impossible guild=%s",
+                    guild.id,
+                    exc_info=True,
+                )
+                return False
+
+            sentrix_rules = [r for r in rules if r.name == NATIVE_BLACKLIST_RULE_NAME]
+            rule = sentrix_rules[0] if sentrix_rules else None
+            for duplicate in sentrix_rules[1:]:
+                try:
+                    await duplicate.delete(reason="SentriX: suppression doublon mots interdits")
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+
+            if not keywords:
+                if rule is not None:
+                    try:
+                        await rule.delete(reason="SentriX: aucun mot interdit configuré")
+                    except (discord.Forbidden, discord.HTTPException):
+                        return False
+                return True
+
+            trigger = discord.AutoModTrigger(keyword_filter=keywords)
+            actions = [
+                discord.AutoModRuleAction(custom_message=NATIVE_BLACKLIST_CUSTOM_MESSAGE)
+            ]
+            try:
+                if rule is None:
+                    await guild.create_automod_rule(
+                        name=NATIVE_BLACKLIST_RULE_NAME,
+                        event_type=discord.AutoModRuleEventType.message_send,
+                        trigger=trigger,
+                        actions=actions,
+                        enabled=True,
+                        exempt_roles=[],
+                        exempt_channels=[],
+                        reason="SentriX: synchronisation mots interdits",
+                    )
+                else:
+                    await rule.edit(
+                        trigger=trigger,
+                        actions=actions,
+                        enabled=True,
+                        exempt_roles=[],
+                        exempt_channels=[],
+                        reason="SentriX: synchronisation mots interdits",
+                    )
+                return True
+            except (discord.Forbidden, discord.HTTPException, ValueError):
+                logger.warning(
+                    "Synchronisation Discord AutoMod mots interdits impossible guild=%s",
+                    guild.id,
+                    exc_info=True,
+                )
+                return False
+
+    @commands.Cog.listener()
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        # Serveur neuf : réconcilie toutes les protections natives utiles.
+        await self._sync_native_suite(guild)
 
     async def log_action(self, guild: discord.Guild, embed: discord.Embed):
         # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
@@ -239,6 +836,15 @@ class AutoMod(commands.Cog, name="Automod"):
                 return word
         return None
 
+    async def get_blacklist_links_cached(self, guild_id: int) -> list[str]:
+        if guild_id not in self.blacklist_links_cache:
+            rows = await self.bot.db.fetchall(
+                "SELECT value FROM blacklist_links WHERE guild_id = ? ORDER BY value",
+                (guild_id,),
+            )
+            self.blacklist_links_cache[guild_id] = [str(r["value"]) for r in rows if r["value"]]
+        return self.blacklist_links_cache[guild_id]
+
     async def get_blacklist_users_cached(self, guild_id: int) -> set:
         if guild_id not in self.blacklist_users_cache:
             rows = await self.bot.db.fetchall("SELECT user_id FROM blacklist_users WHERE guild_id = ?", (guild_id,))
@@ -257,6 +863,18 @@ class AutoMod(commands.Cog, name="Automod"):
             self.exempt_roles_cache[guild_id] = {r["role_id"] for r in rows}
         return self.exempt_roles_cache[guild_id]
 
+    async def get_immunity_override_cached(self, guild_id: int, user_id: int) -> bool | None:
+        key = (guild_id, user_id)
+        if key not in self.immunity_overrides_cache:
+            row = await self.bot.db.fetchone(
+                "SELECT enabled FROM user_immunity_settings WHERE guild_id = ? AND user_id = ?",
+                (guild_id, user_id),
+            )
+            self.immunity_overrides_cache[key] = (
+                bool(int(row["enabled"])) if row is not None else None
+            )
+        return self.immunity_overrides_cache[key]
+
     async def get_ignored_channels_cached(self, guild_id: int) -> set[int]:
         if guild_id not in self.ignored_channels_cache:
             rows = await self.bot.db.fetchall("SELECT channel_id FROM ignored_channels WHERE guild_id = ?", (guild_id,))
@@ -264,15 +882,14 @@ class AutoMod(commands.Cog, name="Automod"):
         return self.ignored_channels_cache[guild_id]
 
     async def is_automod_exempt(self, member: discord.abc.User) -> bool:
-        """Vrai uniquement pour les exemptions sûres : propriétaire du serveur,
-        propriétaire du bot, ou rôle explicitement autorisé avec
-        +automod-exempt-role-add. Les administrateurs et modérateurs ordinaires restent
-        protégés, car leur compte peut lui aussi être compromis."""
+        """Détermine l'immunité AutoMod avec un override personnel explicite."""
         if not isinstance(member, discord.Member):
             return False
-        # La sécurité doit aussi protéger contre un compte staff/admin compromis.
-        # Seuls le propriétaire du serveur, le propriétaire du bot et les rôles
-        # explicitement ajoutés à la liste d'exemption échappent aux filtres.
+
+        override = await self.get_immunity_override_cached(member.guild.id, member.id)
+        if override is not None:
+            return override
+
         if member.id == member.guild.owner_id or member.id in config.OWNER_IDS:
             return True
         exempt_ids = await self.get_exempt_roles_cached(member.guild.id)
@@ -327,6 +944,8 @@ class AutoMod(commands.Cog, name="Automod"):
         self.automod_cache.pop(ctx.guild.id, None)
         state_text = "ACTIF" if value else "INACTIF"
         label = "L'escalade automatique" if field == "escalation" else f"Le filtre **{AUTOMOD_TOGGLE_LABELS.get(field, field)}**"
+        if field in {"antilink", "antilink_strict"} and value:
+            label = "Le filtre **Anti-liens (blocage total + Discord AutoMod)**"
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{label} est maintenant {state_text}.')))
 
     # ---------------------------------------------------------------- TOGGLES (10 commandes explicites)
@@ -338,12 +957,23 @@ class AutoMod(commands.Cog, name="Automod"):
     async def antispam(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antispam", etat)
 
-    @commands.hybrid_command(name="antilink", description="Bloquer tous les formats de liens.", with_app_command=False)
+    @commands.hybrid_command(name="antilink", description="Bloquer tous les liens via SentriX + Discord AutoMod.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
     @app_commands.choices(etat=TOGGLE_CHOICES)
     @checks.is_owner_or_admin_for("securite")
     async def antilink(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antilink", etat)
+
+    @commands.hybrid_command(
+        name="antilink-strict",
+        description="Alias de l'anti-liens total SentriX + Discord AutoMod.",
+        with_app_command=False,
+    )
+    @app_commands.describe(etat="Activer ou désactiver le mode strict")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin_for("securite")
+    async def antilink_strict(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "antilink_strict", etat)
 
     @commands.hybrid_command(name="antiinvite", description="Activer/désactiver le blocage des invitations Discord.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver ce filtre")
@@ -518,6 +1148,157 @@ class AutoMod(commands.Cog, name="Automod"):
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
+        name="automod-native-sync",
+        description="Activer puis synchroniser les protections SentriX avec le vrai AutoMod Discord.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("securite")
+    async def automod_native_sync(self, ctx: commands.Context):
+        # Cette commande est volontairement opérationnelle, pas seulement diagnostique :
+        # si aucune protection native n'est configurée sur ce serveur, elle active un
+        # socle sûr et utile. L'utilisateur vient explicitement de demander la synchro.
+        conf_before = await self.bot.db.get_automod(ctx.guild.id)
+        word_rows = await self.bot.db.fetchall(
+            "SELECT word FROM blacklist_words WHERE guild_id = ? LIMIT 1001",
+            (ctx.guild.id,),
+        )
+        link_rows = await self.bot.db.fetchall(
+            "SELECT value FROM blacklist_links WHERE guild_id = ? LIMIT 1001",
+            (ctx.guild.id,),
+        )
+
+        had_native_config = bool(
+            (conf_before and (
+                conf_before["antilink"]
+                or conf_before["antiinvite"]
+                or conf_before["antiscam"]
+                or conf_before["antimention"]
+                or conf_before["antiinsult"]
+            ))
+            or word_rows
+            or link_rows
+        )
+
+        auto_enabled: list[str] = []
+        if not had_native_config:
+            # Baseline recommandée : pas d'invention de blacklist personnalisée.
+            # Anti-liens total absorbe déjà les invitations Discord.
+            for field, label in (
+                ("antilink", "Anti-liens total"),
+                ("antiscam", "Anti-arnaque"),
+                ("antimention", "Anti-mentions"),
+                ("antiinsult", "Contenu sensible"),
+            ):
+                await self.bot.db.set_automod(ctx.guild.id, field, 1)
+                auto_enabled.append(label)
+
+        await self._sync_native_suite(ctx.guild)
+
+        try:
+            rules = await ctx.guild.fetch_automod_rules()
+        except (discord.Forbidden, discord.HTTPException):
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.error(
+                        "Discord refuse la lecture des règles AutoMod. Vérifiez que SentriX possède **Gérer le serveur**."
+                    )
+                ),
+            )
+
+        sentrix_rules = [r for r in rules if str(r.name).startswith("SentriX • ")]
+        names = "\n".join(f"• {r.name}" for r in sentrix_rules) or "• Aucune règle native active sur ce serveur."
+
+        conf = await self.bot.db.get_automod(ctx.guild.id)
+        # Relire après activation automatique.
+        word_rows = await self.bot.db.fetchall(
+            "SELECT word FROM blacklist_words WHERE guild_id = ? LIMIT 1001",
+            (ctx.guild.id,),
+        )
+        link_rows = await self.bot.db.fetchall(
+            "SELECT value FROM blacklist_links WHERE guild_id = ? LIMIT 1001",
+            (ctx.guild.id,),
+        )
+
+        enabled_labels: list[str] = []
+        if conf:
+            if conf["antilink"]:
+                enabled_labels.append("Anti-liens total")
+            elif conf["antiinvite"]:
+                enabled_labels.append("Anti-invitations")
+            if conf["antiscam"]:
+                enabled_labels.append("Anti-arnaque")
+            if conf["antimention"]:
+                enabled_labels.append("Anti-mentions")
+            if conf["antiinsult"]:
+                enabled_labels.append("Contenu sensible")
+        if word_rows:
+            enabled_labels.append(f"Mots interdits ({len(word_rows)})")
+        if link_rows:
+            enabled_labels.append(f"Liens ciblés ({len(link_rows)})")
+
+        local_state = ", ".join(enabled_labels) if enabled_labels else "Aucune protection native active."
+
+        semaphore = asyncio.Semaphore(4)
+
+        async def count_for_guild(guild: discord.Guild) -> int:
+            async with semaphore:
+                try:
+                    guild_rules = await guild.fetch_automod_rules()
+                except (discord.Forbidden, discord.HTTPException):
+                    return 0
+                return sum(
+                    1 for rule in guild_rules
+                    if str(getattr(rule, "name", "")).startswith("SentriX • ")
+                )
+
+        counts = await asyncio.gather(
+            *(count_for_guild(guild) for guild in list(self.bot.guilds))
+        )
+        global_total = sum(counts)
+
+        description_parts = [
+            f"**Ce serveur : {len(sentrix_rules)} règle(s) native(s)**",
+            names,
+            "",
+            f"**Protections actives :** {local_state}",
+        ]
+        if auto_enabled:
+            description_parts.extend([
+                "",
+                "**Activées automatiquement par cette commande :** " + ", ".join(auto_enabled),
+            ])
+        description_parts.extend([
+            "",
+            f"**Total SentriX sur {len(self.bot.guilds)} serveur(s) : {global_total} règle(s) AutoMod native(s).**",
+        ])
+
+        if not sentrix_rules:
+            me = ctx.guild.me
+            manage_guild = bool(me and me.guild_permissions.manage_guild)
+            description_parts.extend([
+                "",
+                "**Problème détecté :** les protections sont bien activées dans SentriX, "
+                "mais Discord n'a créé aucune règle native.",
+                "Le **0** n'est pas un échec de synchronisation en soi : il signifie "
+                "qu'aucune règle native SentriX n'est actuellement visible sur ce serveur.",
+                f"Permission **Gérer le serveur** pour SentriX : {'oui' if manage_guild else 'non'}.",
+            ])
+
+        logger.info(
+            "AutoMod native sync command guild=%s local_rules=%s global_rules=%s auto_enabled=%s",
+            ctx.guild.id,
+            len(sentrix_rules),
+            global_total,
+            ",".join(auto_enabled) or "none",
+        )
+
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(embeds.success("\n".join(description_parts))),
+        )
+
+    @commands.hybrid_command(
         name="security-check",
         description="Diagnostiquer la configuration et les permissions du système de sécurité.",
         with_app_command=False,
@@ -552,13 +1333,88 @@ class AutoMod(commands.Cog, name="Automod"):
             name="Test conseillé",
             value=(
                 "Utilisez `+security-level eleve`, puis testez avec un compte qui n'est pas "
-                "propriétaire du serveur. Le propriétaire reste toujours exempté pour éviter "
-                "qu'un mauvais réglage ne le bloque."
+                "propriétaire du serveur, sauf si celui-ci a volontairement désactivé "
+                "son immunité avec +immunity off."
             ),
             inline=False,
         )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
+    @commands.hybrid_command(
+        name="immunity",
+        aliases=["immunite"],
+        description="Activer ou désactiver votre immunité personnelle SentriX.",
+        with_app_command=False,
+    )
+    async def personal_immunity(self, ctx: commands.Context, etat: str = "status"):
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("Cette commande s’utilise dans un serveur.")),
+            )
+
+        allowed = ctx.author.id == ctx.guild.owner_id or await checks.is_verified_bot_owner(ctx)
+        if not allowed:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.error("Seul le propriétaire du serveur ou le propriétaire vérifié de SentriX peut modifier sa propre immunité.")
+                ),
+            )
+
+        normalized = _sans_accents(str(etat or "")).casefold().strip()
+        key = (ctx.guild.id, ctx.author.id)
+        if normalized in {"status", "statut", "etat"}:
+            override = await self.get_immunity_override_cached(*key)
+            enabled = True if override is None else override
+            state = "active" if enabled else "désactivée"
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.info(f"Votre immunité SentriX est actuellement {state}.")),
+            )
+
+        if normalized in {"on", "active", "activer", "1", "oui"}:
+            enabled = True
+        elif normalized in {"off", "desactive", "desactiver", "0", "non"}:
+            enabled = False
+        else:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("Utilisez +immunity on ou +immunity off.")),
+            )
+
+        await self.bot.db.execute(
+            """
+            INSERT INTO user_immunity_settings (guild_id, user_id, enabled, updated_at)
+            VALUES (?, ?, ?, CAST(strftime('%s','now') AS INTEGER))
+            ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                enabled=excluded.enabled,
+                updated_at=excluded.updated_at
+            """,
+            (ctx.guild.id, ctx.author.id, 1 if enabled else 0),
+        )
+        self.immunity_overrides_cache[key] = enabled
+
+        if enabled:
+            description = "Immunité SentriX activée. AutoMod vous ignore de nouveau selon les règles d’immunité habituelles."
+        else:
+            description = (
+                "Immunité SentriX désactivée. AutoMod vous traite maintenant comme un membre normal : "
+                "mots et liens interdits, spam et sanctions automatiques peuvent vous concerner. "
+                "Les limites natives de Discord et la hiérarchie des rôles restent applicables."
+            )
+
+        await self.log_action(
+            ctx.guild,
+            embeds.log_entry(
+                "Immunité personnelle SentriX modifiée",
+                config.COLOR_WARNING if not enabled else config.COLOR_SUCCESS,
+                cible=ctx.author,
+                cible_label="Membre",
+                raison="Immunité activée" if enabled else "Immunité désactivée",
+            ),
+        )
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(description)))
     @commands.hybrid_command(name="automod-escalation", description="Activer/désactiver l'escalade automatique des sanctions AutoMod.", with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver l'escalade")
     @app_commands.choices(etat=TOGGLE_CHOICES)
@@ -625,6 +1481,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "INSERT INTO blacklist_words (guild_id, word) VALUES (?, ?)", (ctx.guild.id, mot.lower())
         )
         self.blacklist_words_cache.pop(ctx.guild.id, None)
+        await self._sync_native_blacklist_rule(ctx.guild)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le mot `{mot}` a été ajouté à la liste noire.')))
 
     @commands.hybrid_command(name="blacklist-remove", description="Retirer un mot de la liste noire.", with_app_command=False)
@@ -635,6 +1492,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "DELETE FROM blacklist_words WHERE guild_id = ? AND word = ?", (ctx.guild.id, mot.lower())
         )
         self.blacklist_words_cache.pop(ctx.guild.id, None)
+        await self._sync_native_blacklist_rule(ctx.guild)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le mot `{mot}` a été retiré de la liste noire.')))
 
     @commands.hybrid_command(name="blacklist-list", description="Afficher la liste des mots interdits.")
@@ -713,29 +1571,76 @@ class AutoMod(commands.Cog, name="Automod"):
         if message.author.bot or not message.guild:
             return
 
-        # Correction : un salon mis en "ignoré" via /ignorechannel n'était en réalité
-        # JAMAIS respecté par AutoMod (seules certaines commandes le vérifiaient) — les
-        # filtres continuaient de supprimer des messages dans un salon censé être exempté.
+        content_lower = message.content.lower()
+        link_content = _normalize_link_text(message.content)
+        conf = await self.get_automod_cached(message.guild.id)
+
+        # Immunité personnelle explicite ON : aucun filtre AutoMod ne s'applique.
+        # OFF ne court-circuite rien et l'utilisateur est traité comme un membre normal.
+        personal_immunity = await self.get_immunity_override_cached(
+            message.guild.id, message.author.id
+        )
+        if personal_immunity is True:
+            return
+        if personal_immunity is None and await self.is_automod_exempt(message.author):
+            return
+
+        # Détections prioritaires pouvant être combinées dans un seul avertissement.
+        # Exemple : un même message contient à la fois un mot interdit ET un lien interdit.
+        words = await self.get_blacklist_words_cached(message.guild.id)
+        blocked_word = self._blacklist_hit(words, message.content)
+
+        # Règles ciblées : « SentriX censure ce lien » ajoute uniquement cette cible.
+        blocked_links = await self.get_blacklist_links_cached(message.guild.id)
+        blocked_hit = _blocked_link_hit(link_content, blocked_links)
+        if blocked_word and blocked_hit:
+            return await self._delete_and_warn(
+                message,
+                "Mot interdit et lien interdit détectés.",
+                "blacklist_word_link",
+                censored_content=_compose_censored_content(
+                    message.content, blocked_word=blocked_word, links=True
+                ),
+            )
+        if blocked_hit:
+            return await self._delete_and_warn(
+                message,
+                "Lien ciblé interdit par la liste noire du serveur.",
+                "blacklist_link",
+                censored_content=_compose_censored_content(message.content, links=True),
+            )
+
+        # Mode strict : absolument tous les liens sont supprimés, y compris dans les
+        # salons ignorés, pour le staff/admin et même si le domaine est whitelisté.
+        if (
+            conf
+            and conf.get("antilink")
+            and conf.get("antilink_strict")
+            and LINK_RE.search(link_content)
+        ):
+            return await self._delete_and_warn(
+                message,
+                "Lien interdit : mode anti-liens strict actif.",
+                "antilink",
+                censored_content=_compose_censored_content(message.content, links=True),
+            )
+
+        # Les autres filtres continuent de respecter les salons ignorés.
         ignored = await self.get_ignored_channels_cached(message.guild.id)
         if message.channel.id in ignored:
             return
 
-        # Correction : la liste noire de MOTS doit s'appliquer à TOUT LE MONDE, y compris
-        # le staff/les administrateurs — contrairement aux autres filtres (spam, liens...)
-        # qui exemptent volontairement le staff pour ne pas gêner la modération. Avant, ce
-        # test passait APRÈS is_automod_exempt() : un admin qui testait "+blacklist-add mot"
-        # puis tapait le mot lui-même voyait le message ne JAMAIS être supprimé, donnant
-        # l'impression trompeuse que le filtre ne marchait pas du tout.
-        content_lower = message.content.lower()
-        link_content = _normalize_link_text(message.content)
-        words = await self.get_blacklist_words_cached(message.guild.id)
-        if self._blacklist_hit(words, message.content):
-            return await self._delete_and_warn(message, "Mot interdit détecté.", "blacklist_word")
+        # La liste noire de MOTS s'applique à tout le monde.
+        if blocked_word:
+            return await self._delete_and_warn(
+                message,
+                "Mot interdit détecté.",
+                "blacklist_word",
+                censored_content=_compose_censored_content(
+                    message.content, blocked_word=blocked_word
+                ),
+            )
 
-        if await self.is_automod_exempt(message.author):
-            return
-
-        conf = await self.get_automod_cached(message.guild.id)
         if not conf:
             return
 
@@ -770,15 +1675,30 @@ class AutoMod(commands.Cog, name="Automod"):
             return
 
         if conf["antiscam"] and any(k in content_lower for k in SCAM_KEYWORDS):
-            return await self._delete_and_warn(message, "Message d'arnaque potentiel détecté.", "antiscam")
+            return await self._delete_and_warn(
+                message,
+                "Message d'arnaque potentiel détecté.",
+                "antiscam",
+                censored_content=_compose_censored_content(message.content, scam=True),
+            )
 
         if conf["antiinvite"] and INVITE_RE.search(link_content):
-            return await self._delete_and_warn(message, "Lien d'invitation Discord non autorisé.", "antiinvite")
+            return await self._delete_and_warn(
+                message,
+                "Lien d'invitation Discord non autorisé.",
+                "antiinvite",
+                censored_content=_compose_censored_content(message.content, invites=True),
+            )
 
         if conf["antilink"] and LINK_RE.search(link_content):
             allowed = await self.get_whitelist_domains_cached(message.guild.id)
             if not _domain_allowed(link_content, allowed):
-                return await self._delete_and_warn(message, "Lien non autorisé.", "antilink")
+                return await self._delete_and_warn(
+                    message,
+                    "Lien non autorisé.",
+                    "antilink",
+                    censored_content=_compose_censored_content(message.content, links=True),
+                )
 
         if conf["antimention"] and len(message.mentions) >= 5:
             return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
@@ -819,7 +1739,114 @@ class AutoMod(commands.Cog, name="Automod"):
         skip_ids.add(message_id)
         asyncio.get_event_loop().call_later(10, skip_ids.discard, message_id)
 
-    async def _delete_and_warn(self, message: discord.Message, reason: str, filter_name: str = "automod"):
+    async def _get_censor_webhook(self, channel) -> tuple[discord.Webhook | None, discord.Thread | None]:
+        """Retourne un webhook réutilisable pour le salon, sans jamais contourner Discord."""
+        thread = channel if isinstance(channel, discord.Thread) else None
+        base = channel.parent if thread is not None else channel
+        if not isinstance(base, discord.TextChannel):
+            return None, thread
+
+        me = base.guild.me
+        if me is None:
+            return None, thread
+        perms = base.permissions_for(me)
+        if not (perms.view_channel and perms.send_messages and perms.manage_webhooks):
+            return None, thread
+
+        cached = self._censor_webhooks.get(base.id)
+        if cached is not None:
+            return cached, thread
+
+        try:
+            hooks = await base.webhooks()
+            bot_id = getattr(getattr(self.bot, "user", None), "id", None)
+            hook = next(
+                (
+                    h for h in hooks
+                    if h.name == "SentriX Censure"
+                    and (bot_id is None or getattr(getattr(h, "user", None), "id", None) == bot_id)
+                ),
+                None,
+            )
+            if hook is None:
+                hook = await base.create_webhook(
+                    name="SentriX Censure",
+                    reason="SentriX AutoMod : repost des messages censurés",
+                )
+            self._censor_webhooks[base.id] = hook
+            return hook, thread
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning(
+                "Webhook censure indisponible guild=%s channel=%s",
+                getattr(base.guild, "id", None),
+                getattr(base, "id", None),
+            )
+            return None, thread
+
+    async def _repost_censored(self, message: discord.Message, content: str | None) -> bool:
+        """Recrée le message censuré avec pseudo/avatar d'origine + badge APP Discord."""
+        if not content:
+            return False
+        webhook, thread = await self._get_censor_webhook(message.channel)
+        if webhook is None:
+            return False
+
+        username = str(getattr(message.author, "display_name", None) or message.author.name or "Membre")
+        username = username[:80] or "Membre"
+        avatar = str(getattr(getattr(message.author, "display_avatar", None), "url", "") or "") or None
+        kwargs = {
+            "content": content,
+            "username": username,
+            "avatar_url": avatar,
+            "allowed_mentions": discord.AllowedMentions.none(),
+            "wait": False,
+        }
+        if thread is not None:
+            kwargs["thread"] = thread
+
+        try:
+            await webhook.send(**kwargs)
+            return True
+        except discord.NotFound:
+            # Webhook supprimé manuellement : invalide le cache, la prochaine détection
+            # le recréera proprement.
+            base = message.channel.parent if isinstance(message.channel, discord.Thread) else message.channel
+            self._censor_webhooks.pop(getattr(base, "id", 0), None)
+            return False
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning(
+                "Repost webhook censure impossible guild=%s channel=%s user=%s",
+                message.guild.id,
+                message.channel.id,
+                message.author.id,
+            )
+            return False
+
+    @staticmethod
+    def _public_automod_message(filter_name: str, reason: str) -> str:
+        """Message court visible dans le salon, proche du rendu demandé.
+
+        Le détail technique reste dans les logs ; le salon reçoit seulement la raison
+        utile. On ne republie jamais le contenu interdit ni l'URL supprimée.
+        """
+        labels = {
+            "blacklist_word": "votre message contient un mot interdit sur le serveur.",
+            "blacklist_link": "votre message contient un lien interdit sur le serveur.",
+            "blacklist_word_link": "votre message contient un mot interdit et un lien interdit sur le serveur.",
+            "antilink": "votre message contient un lien interdit sur le serveur.",
+            "antiinvite": "votre message contient une invitation Discord interdite sur le serveur.",
+            "antiscam": "votre message a été bloqué par la protection anti-arnaque.",
+        }
+        return labels.get(filter_name, f"votre message a été supprimé : {reason}")
+
+    async def _delete_and_warn(
+        self,
+        message: discord.Message,
+        reason: str,
+        filter_name: str = "automod",
+        *,
+        censored_content: str | None = None,
+    ):
         """Supprime le message et traite la détection comme un incident par membre.
 
         Première détection dans la fenêtre : suppression, infraction + escalade
@@ -829,10 +1856,18 @@ class AutoMod(commands.Cog, name="Automod"):
         fenêtre : suppression silencieuse, compteur incrémenté.
         """
         self._mark_xp_skip(message.id)
+        deleted = False
         try:
             await message.delete()
+            deleted = True
         except discord.HTTPException:
             pass
+
+        # Clone façon DraftBot : seulement APRÈS suppression réussie, et uniquement si
+        # le texte a pu être censuré de manière sûre. Sans Gérer les webhooks, on garde
+        # automatiquement le comportement suppression + avertissement.
+        if deleted and censored_content:
+            await self._repost_censored(message, censored_content)
 
         key = (message.guild.id, message.author.id)
         now_ts = time.monotonic()
@@ -857,11 +1892,24 @@ class AutoMod(commands.Cog, name="Automod"):
         if action:
             await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, action, reason)
 
-        note = f"{message.author.mention}, message supprimé : {reason}"
+        public_text = self._public_automod_message(filter_name, reason)
         if action == "mute":
-            note += f" Exclusion temporaire de {helpers.format_duration(SPAM_TIMEOUT_SECONDS)}."
+            public_text += f" Exclusion temporaire de {helpers.format_duration(SPAM_TIMEOUT_SECONDS)}."
         try:
-            await panels.texte_court(message.channel, note, supprimer_apres=6)
+            if filter_name in {"blacklist_word", "blacklist_link", "blacklist_word_link", "antilink", "antiinvite", "antiscam"}:
+                note = await panels.envoyer(
+                    message.channel,
+                    panels.depuis_embed(
+                        embeds.warning(f"{message.author.mention}, {public_text}")
+                    ),
+                )
+                await note.delete(delay=8)
+            else:
+                await panels.texte_court(
+                    message.channel,
+                    f"{message.author.mention}, {public_text}",
+                    supprimer_apres=6,
+                )
         except discord.HTTPException:
             pass
 

@@ -180,23 +180,52 @@ _COMPLEX_KEYWORDS = (
     "preuve", "raisonnement", "étape par étape", "compare en détail", "architecture",
 )
 
+_ADVANCED_KEYWORDS = (
+    "refactor", "refonte complète", "architecture complète", "audit complet",
+    "analyse ce repo", "analyse ce dépôt", "debug complexe", "race condition",
+    "concurrence", "haute disponibilité", "failover", "migration complète",
+    "optimise tout", "optimiser tout", "performance globale", "sécurité complète",
+)
+
 
 def is_complex_request(text: str, *, forced: bool = False) -> bool:
-    """Heuristique de sélection Terra (défaut) / Sol (demandes complexes uniquement) — ne
-    force jamais Sol pour une question simple, afin de garder un coût raisonnable."""
+    """Terra seulement lorsque Luna risque de manquer de précision."""
     if forced:
         return True
     if not text:
         return False
-    if len(text) > 600:
+    if len(text) > 650:
         return True
     lowered = text.lower()
     return any(kw in lowered for kw in _COMPLEX_KEYWORDS)
 
 
+def _keyword_present(text: str, keyword: str) -> bool:
+    """Compte un mot/une expression comme une unité, sans sous-chaîne imbriquée.
+
+    Exemple : « debug » correspond à « debug », mais ne doit pas compter une seconde
+    fois « bug ». Sans cette frontière, une simple demande Python atteignait
+    artificiellement quatre mots-clés et basculait sur Sol.
+    """
+    return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text) is not None
+
+
+def is_advanced_request(text: str) -> bool:
+    """Réserve Sol aux demandes réellement difficiles, pour ne pas ralentir le reste."""
+    if not text:
+        return False
+    lowered = text.lower()
+    if len(text) > 1800:
+        return True
+    advanced_hits = sum(1 for kw in _ADVANCED_KEYWORDS if _keyword_present(lowered, kw))
+    complex_hits = sum(1 for kw in _COMPLEX_KEYWORDS if _keyword_present(lowered, kw))
+    has_code_block = "\x60\x60\x60" in text
+    return advanced_hits >= 1 or (has_code_block and complex_hits >= 2) or complex_hits >= 4
+
+
 def pick_model(text: str, *, forced_advanced: bool = False) -> str:
-    """Luna répond aux demandes courantes, Terra aux analyses et Sol au code forcé."""
-    if forced_advanced:
+    """Turbo adaptatif : Luna rapide, Terra précis, Sol uniquement pour le très difficile."""
+    if forced_advanced or is_advanced_request(text):
         return MODEL_SOL
     return MODEL_TERRA if is_complex_request(text) else MODEL_LUNA
 
@@ -741,7 +770,7 @@ async def generate(
         "reasoning": {"effort": reasoning_effort},
         "max_output_tokens": (
             max_output_tokens if max_output_tokens is not None
-            else 600 if model_key == MODEL_LUNA else (1200 if model_key == MODEL_TERRA else 2500)
+            else 450 if model_key == MODEL_LUNA else (1000 if model_key == MODEL_TERRA else 1800)
         ),
     }
     if previous_response_id:

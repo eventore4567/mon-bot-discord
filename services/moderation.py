@@ -206,6 +206,33 @@ async def _apply_mute_role(bot: Any, guild: discord.Guild, target: discord.Membe
         logger.debug("Badge de mute non synchronisé (guild=%s membre=%s).", guild.id, target.id, exc_info=True)
 
 
+async def _hierarchy_error(
+    bot: Any,
+    guild: discord.Guild,
+    actor: discord.Member,
+    target: discord.Member,
+) -> str | None:
+    """Hiérarchie SentriX avec prise en compte de l'immunité personnelle."""
+    try:
+        row = await bot.db.fetchone(
+            "SELECT enabled FROM user_immunity_settings WHERE guild_id = ? AND user_id = ?",
+            (guild.id, target.id),
+        )
+    except Exception:
+        row = None
+
+    if row is not None:
+        enabled = bool(int(row["enabled"]))
+        if enabled:
+            return "Ce membre a activé son immunité SentriX."
+        if actor.id == target.id:
+            # Immunité OFF : une auto-sanction explicite est permise, mais Discord
+            # garde ses limites natives (propriétaire du serveur, rôle du bot, etc.).
+            return checks.check_bot_hierarchy(guild, target)
+
+    return checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
+
+
 async def _run_sanction_pipeline(
     bot: Any,
     *,
@@ -239,7 +266,7 @@ async def _run_sanction_pipeline(
     avant l'appel : cette fonction ne refait que ce qu'il reste à valider —
     la hiérarchie entre l'auteur/le bot et la cible.
     """
-    hierarchy_error = checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
+    hierarchy_error = await _hierarchy_error(bot, guild, actor, target)
     if hierarchy_error:
         return SanctionOutcome(executed=False, hierarchy_error=hierarchy_error)
 
@@ -384,7 +411,7 @@ async def mute(
     ban()/kick(), où il l'est déjà avant l'appel), donc cette étape de rendu
     est confiée à l'appelant plutôt que dupliquée ici.
     """
-    hierarchy_error = checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
+    hierarchy_error = await _hierarchy_error(bot, guild, actor, target)
     if hierarchy_error:
         return SanctionOutcome(executed=False, hierarchy_error=hierarchy_error)
 
@@ -451,7 +478,7 @@ async def tempban(
     28 jours, juste un bannissement classique dont la levée est reprogrammée
     par check_tempactions ; le code existant n'en imposait pas non plus.
     """
-    hierarchy_error = checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
+    hierarchy_error = await _hierarchy_error(bot, guild, actor, target)
     if hierarchy_error:
         return SanctionOutcome(executed=False, hierarchy_error=hierarchy_error)
 
@@ -564,7 +591,7 @@ async def warn(
     ``actor`` — comportement existant conservé à l'identique : ce n'est pas
     le modérateur qui décide ce bannissement, c'est le seuil configuré.
     """
-    hierarchy_error = checks.check_hierarchy(actor, target) or checks.check_bot_hierarchy(guild, target)
+    hierarchy_error = await _hierarchy_error(bot, guild, actor, target)
     if hierarchy_error:
         return WarnOutcome(executed=False, hierarchy_error=hierarchy_error)
 

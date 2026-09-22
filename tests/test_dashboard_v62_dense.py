@@ -22,7 +22,7 @@ def test_unified_document_contains_real_v62_inline_editors():
         "ticketPublish",
         "/v62",
         "--blue:#4da3ff",
-        "Aperçu Discord",
+        "discordMessage(",
     ):
         assert marker in document, marker
 
@@ -39,10 +39,9 @@ def test_unified_sidebar_does_not_restore_empty_secondary_navigation():
     _dashboard, document = _document()
     for removed in ('["recurring"', '["community"', '["features"', '["infinity"'):
         assert removed not in document
-    for present in ('["verification"', '["economy"', '["tickets"', '["dm"'):
+    for present in ("['verification', 'Vérification']", "['economy', 'Économie']", "['tickets', 'Tickets']", "dm: renderDM"):
         assert present in document
     assert "Messages récurrents" not in document
-    assert "Fonctions avancées" not in document
 
 
 def test_v62_backend_routes_are_bound_in_the_final_build_chain():

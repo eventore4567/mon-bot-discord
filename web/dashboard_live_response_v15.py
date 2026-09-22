@@ -159,7 +159,7 @@ def install(dashboard) -> bool:
     dashboard.handle_index = live_index
     dashboard.INDEX_HTML = patch_html(str(getattr(dashboard, "INDEX_HTML", "") or ""))
     ok = MARKER in dashboard.INDEX_HTML and "CAPTCHA V96 RÉEL" in dashboard.INDEX_HTML and "Réactions automatiques" in dashboard.INDEX_HTML
-    logger.warning("Dashboard Live Response V15 installed=%s: /app response-time native authority armed.", ok)
+    logger.info("Dashboard Live Response V15 installed=%s: /app response-time native authority armed.", ok)
     return ok
 
 

@@ -107,13 +107,40 @@ def _remember_plain_interaction(interaction: discord.Interaction | None) -> None
                 _PLAIN_WEBHOOK_TOKENS.pop(key, None)
 
 
+_DRAWN_DIVIDER_RE = re.compile(
+    r"(?m)^[ \t]*(?:[-━─═—–_=•·┄┈┉┅┇]{6,})[ \t]*(?:\n|$)"
+)
+
+
+def _strip_drawn_dividers(value: Any) -> str:
+    """Dernier filet de sécurité : aucune vieille barre décorative dans une commande."""
+    text = str(value or "").replace("\r", "")
+    text = _DRAWN_DIVIDER_RE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def _clean_embed(
     embed: discord.Embed | None,
     *,
     root: str = "",
     bot: Any = None,
 ) -> discord.Embed | None:
-    return sentrix_embeds.style_existing(embed, root=root, bot=bot)
+    result = sentrix_embeds.style_existing(embed, root=root, bot=bot)
+    if not isinstance(result, discord.Embed):
+        return result
+
+    if result.description is not None:
+        result.description = _strip_drawn_dividers(result.description) or None
+
+    for index, field in enumerate(list(result.fields)):
+        value = _strip_drawn_dividers(field.value)
+        result.set_field_at(
+            index,
+            name=field.name,
+            value=value or "Aucune information.",
+            inline=field.inline,
+        )
+    return result
 
 
 def _title_for_text(text: str) -> str:
@@ -425,16 +452,49 @@ def _install_context_send() -> None:
 
     async def context_send(self: commands.Context, *args, **kwargs):
         root = _root_name(getattr(self, "command", None)) or _COMMAND_ROOT.get()
+        interaction = getattr(self, "interaction", None)
+
         if _plain_root(root):
+            if interaction is not None and panels.reponse_differee_a_finaliser(interaction):
+                charge = dict(kwargs)
+                if args and charge.get("content") is None:
+                    charge["content"] = args[0]
+                try:
+                    result = await interaction.edit_original_response(
+                        **panels.kwargs_edition_reponse_differee(charge)
+                    )
+                    panels.marquer_reponse_differee_finalisee(interaction)
+                    _mark_context_response(self, result)
+                    return result
+                except (discord.NotFound, discord.HTTPException):
+                    logger.debug("Réponse différée texte non éditable, repli Context.send.", exc_info=True)
             result = await base(self, *args, **kwargs)
             _mark_context_response(self, result)
             return result
+
         pages = _payload_pages(
             args, kwargs, root=root, bot=getattr(self, "bot", None)
         )
         first = None
-        for page_args, page_kwargs in pages:
-            result = await base(self, *page_args, **page_kwargs)
+        for index, (page_args, page_kwargs) in enumerate(pages):
+            if (
+                index == 0
+                and interaction is not None
+                and panels.reponse_differee_a_finaliser(interaction)
+            ):
+                charge = dict(page_kwargs)
+                if page_args and charge.get("content") is None:
+                    charge["content"] = page_args[0]
+                try:
+                    result = await interaction.edit_original_response(
+                        **panels.kwargs_edition_reponse_differee(charge)
+                    )
+                    panels.marquer_reponse_differee_finalisee(interaction)
+                except (discord.NotFound, discord.HTTPException):
+                    logger.debug("Réponse différée commande non éditable, repli Context.send.", exc_info=True)
+                    result = await base(self, *page_args, **page_kwargs)
+            else:
+                result = await base(self, *page_args, **page_kwargs)
             if first is None:
                 first = result
         _mark_context_response(self, first)
@@ -630,7 +690,9 @@ def _install_followups() -> None:
 
 
 async def _permission_denial(interaction: discord.Interaction, decision) -> None:
-    text = str(getattr(decision, "reason", None) or "Vous n'avez pas accès à cette commande.")
+    # decision.message : la raison seule pour un module coupé / un MP / une liste noire,
+    # l'en-tête « pas accès » uniquement pour un vrai refus de permission.
+    text = str(getattr(decision, "message", None) or getattr(decision, "reason", None) or "Vous n'avez pas accès à cette commande.")
     panel = sentrix_embeds.error(text)
     try:
         if interaction.response.is_done():
@@ -652,13 +714,18 @@ def _slash_error_embed(error: BaseException) -> discord.Embed:
             f"Cette commande est en recharge. Réessayez dans {max(1, round(error.retry_after))} s."
         )
     if isinstance(error, discord.app_commands.MissingPermissions):
-        return sentrix_embeds.error("Vous n'avez pas les permissions nécessaires pour cette commande.")
+        from utils.error_texts import missing_permissions_text
+        return sentrix_embeds.error(missing_permissions_text(error.missing_permissions))
     if isinstance(error, discord.app_commands.BotMissingPermissions):
-        return sentrix_embeds.error("SentriX n'a pas les permissions nécessaires pour terminer cette action.")
+        from utils.error_texts import bot_missing_permissions_text
+        return sentrix_embeds.error(bot_missing_permissions_text(error.missing_permissions))
     if isinstance(original, discord.Forbidden):
         return sentrix_embeds.error("Discord a refusé cette action. Vérifiez les permissions du bot.")
-    if isinstance(error, discord.app_commands.CheckFailure):
-        return sentrix_embeds.error("Vous n'avez pas accès à cette commande.")
+    if isinstance(error, discord.app_commands.CheckFailure) or isinstance(original, commands.CheckFailure):
+        from utils.error_texts import CHECK_FALLBACK, check_failure_message
+        # Le message du check (système d'argent coupé, propriétaire…) est conservé ;
+        # jamais « pas accès » pour un check muet.
+        return sentrix_embeds.error(check_failure_message(error) or check_failure_message(original) or CHECK_FALLBACK)
     return sentrix_embeds.error("Cette commande a rencontré un problème technique.")
 
 

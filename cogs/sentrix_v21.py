@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import commands
 
+from utils import checks
 from utils import design_system, embeds, stats_service
 from utils import sentrix_panels as panels
 from utils import helpers
@@ -457,7 +458,7 @@ class SentriXV21(commands.Cog):
         await panels.envoyer(ctx, panels.depuis_embed(embed))
 
     @commands.hybrid_command(name="systemstatus", aliases=["botstatus"], description="Afficher la santé technique de SentriX.", with_app_command=False)
-    @commands.has_permissions(manage_guild=True)
+    @checks.has_permission("manage_guild")
     @commands.cooldown(2, 10, commands.BucketType.guild)
     async def systemstatus(self, ctx: commands.Context):
         runtime = self.bot.get_cog("ProductionObservabilityV9")

@@ -1,11 +1,13 @@
-"""Profil SentriX lisible et distinct des statistiques personnelles.
+"""Profil communautaire SentriX.
 
-`+profile` / `+profil` ouvre le profil communautaire interactif.
-`+me` reste une commande distincte et affiche uniquement les statistiques personnelles.
+`/me` ouvre le profil communautaire interactif.
+`+profile` / `+profil` sont supprimées.
+`+me` reste une commande préfixée distincte pour les statistiques personnelles.
 """
 from __future__ import annotations
 
 import functools
+import logging
 
 import discord
 from discord.ext import commands
@@ -16,6 +18,7 @@ from . import community_v3, community_v31
 from utils import sentrix_panels as panels
 
 CARD_COLOUR = premium_style.COLORS["profile"]
+logger = logging.getLogger("bot.profile-runtime")
 
 
 def _fmt(value) -> str:
@@ -37,16 +40,29 @@ async def _snapshot(bot: commands.Bot, guild: discord.Guild, member: discord.Mem
     return await profile_service.build_snapshot(bot, guild, member)
 
 
-async def _niveaux_actifs(bot: commands.Bot, guild_id: int) -> bool:
-    """Réutilise l'unique source de vérité (cogs/levels.py::Levels._niveaux_actifs,
-    qui interroge les DEUX interrupteurs existants) plutôt que d'en dupliquer la
-    logique ici. Si le cog Levels n'est pas chargé, on considère les niveaux actifs
-    — comportement par défaut, cohérent avec le fail-open déjà pratiqué par
-    _niveaux_actifs lui-même quand une de ses propres vérifications échoue."""
+async def _module_actif(bot: commands.Bot, guild_id: int, module: str) -> bool:
+    """Source unique et fail-closed : absent/non configuré = invisible."""
     levels_cog = bot.get_cog("Levels")
-    if levels_cog is None:
-        return True
-    return await levels_cog._niveaux_actifs(guild_id)
+    if levels_cog is not None:
+        if module == "levels" and hasattr(levels_cog, "_niveaux_actifs"):
+            return await levels_cog._niveaux_actifs(guild_id)
+        if module == "economy" and hasattr(levels_cog, "_economie_active"):
+            return await levels_cog._economie_active(guild_id)
+
+    try:
+        from cogs import setup_v2_core
+        return await setup_v2_core.module_enabled(bot, guild_id, module)
+    except Exception:
+        logger.exception("État du module %s indisponible guild=%s", module, guild_id)
+        return False
+
+
+async def _niveaux_actifs(bot: commands.Bot, guild_id: int) -> bool:
+    return await _module_actif(bot, guild_id, "levels")
+
+
+async def _economie_active(bot: commands.Bot, guild_id: int) -> bool:
+    return await _module_actif(bot, guild_id, "economy")
 
 
 def _base(bot: commands.Bot, member: discord.Member, title: str, subtitle: str | None = None) -> discord.Embed:
@@ -67,6 +83,7 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
     stats = data["stats"]
     progression = data["progression"]
     niveaux_actifs = await _niveaux_actifs(bot, guild.id)
+    economie_active = await _economie_active(bot, guild.id)
 
     if page == "missions":
         embed = _base(bot, member, "Missions du jour", member.display_name)
@@ -138,16 +155,14 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ranks = data["ranks"]
         embed = _base(bot, member, "Classements", member.display_name)
         embed.colour = discord.Colour(premium_style.COLORS["leaderboard"])
-        niveau_ligne = (
-            f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**\n\n" if niveaux_actifs
-            else "Niveau / XP\n**Désactivé sur ce serveur**\n\n"
-        )
-        embed.description = (
-            f"{niveau_ligne}"
-            f"Messages\n**{_rank(ranks.get('message_rank'))}**\n\n"
-            f"Économie\n**{_rank(ranks.get('economy_rank'))}**\n\n"
-            f"Saison\n**{_rank(data['season_rank'])}**"
-        )
+        lines: list[str] = []
+        if niveaux_actifs:
+            lines.append(f"Niveau / XP\n**{_rank(ranks.get('xp_rank'))}**")
+        lines.append(f"Messages\n**{_rank(ranks.get('message_rank'))}**")
+        if economie_active:
+            lines.append(f"Économie\n**{_rank(ranks.get('economy_rank'))}**")
+        lines.append(f"Saison\n**{_rank(data['season_rank'])}**")
+        embed.description = "\n\n".join(lines)
         return embed
 
     # Vue principale compacte : les métriques restent lisibles sans étirer l'embed.
@@ -173,22 +188,17 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
             ),
             inline=True,
         )
-    else:
+
+    if economie_active:
         embed.add_field(
-            name="Progression",
-            value="Niveaux désactivés sur ce serveur.",
+            name="Économie",
+            value=(
+                f"Portefeuille **{_fmt(wallet)}**\n"
+                f"Banque **{_fmt(bank)}**\n"
+                f"Total **{_fmt(total)}**"
+            ),
             inline=True,
         )
-
-    embed.add_field(
-        name="Économie",
-        value=(
-            f"Portefeuille **{_fmt(wallet)}**\n"
-            f"Banque **{_fmt(bank)}**\n"
-            f"Total **{_fmt(total)}**"
-        ),
-        inline=True,
-    )
     embed.add_field(
         name="Activité",
         value=(
@@ -198,13 +208,16 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         ),
         inline=True,
     )
+    account_lines = [
+        f"Créé {_date(member.created_at)}",
+        f"Arrivé {_date(member.joined_at)}",
+        f"Réputation **{_fmt(stats.get('reputation'))}**",
+    ]
+    if data.get("birthday"):
+        account_lines.append(f"Anniversaire **{data['birthday']}**")
     embed.add_field(
         name="Compte",
-        value=(
-            f"Créé {_date(member.created_at)}\n"
-            f"Arrivé {_date(member.joined_at)}\n"
-            f"Réputation **{_fmt(stats.get('reputation'))}**"
-        ),
+        value="\n".join(account_lines),
         inline=True,
     )
     badges = profile_service.compute_badges(member, stats, progression)
@@ -213,6 +226,8 @@ async def build_page(bot: commands.Bot, guild: discord.Guild, member: discord.Me
         value=" · ".join(badges) if badges else "Aucun badge",
         inline=True,
     )
+    if data.get("background") and str(data["background"]).startswith("https://"):
+        embed.set_image(url=str(data["background"]))
     return embed
 
 
@@ -239,7 +254,7 @@ class CleanProfileView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
             return True
-        await interaction.response.send_message('Ouvrez votre propre profil avec `+profil`.', ephemeral=True)
+        await interaction.response.send_message('Ouvrez votre propre profil avec `/me`.', ephemeral=True)
         return False
 
     async def _show(self, interaction: discord.Interaction, page: str):
@@ -275,6 +290,8 @@ class CleanProfileView(discord.ui.View):
                 self.guild,
                 data["stats"],
                 settings,
+                show_levels=await _niveaux_actifs(self.bot, self.guild.id),
+                show_economy=await _economie_active(self.bot, self.guild.id),
             )
             file = discord.File(buffer, filename="sentrix-profile.png")
             embed = _base(self.bot, self.member, "Carte de profil", self.member.display_name)
@@ -344,37 +361,66 @@ def _install_me(bot: commands.Bot) -> None:
     command._sentrix_personal_stats_v18 = True
 
 
+async def send_profile_slash(
+    bot: commands.Bot,
+    interaction: discord.Interaction,
+    membre: discord.Member | None = None,
+) -> None:
+    """Implémentation native de /me.
+
+    On diffère immédiatement la réponse avant les lectures DB afin d'éviter l'expiration
+    Discord à 3 secondes qui provoquait l'erreur générique observée avec /profile.
+    """
+    if interaction.guild is None:
+        if interaction.response.is_done():
+            await interaction.followup.send("Cette commande fonctionne uniquement sur un serveur.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Cette commande fonctionne uniquement sur un serveur.", ephemeral=True)
+        return
+
+    if not interaction.response.is_done():
+        await interaction.response.defer(thinking=True)
+
+    member = membre
+    if member is None:
+        if isinstance(interaction.user, discord.Member):
+            member = interaction.user
+        else:
+            member = interaction.guild.get_member(interaction.user.id)
+            if member is None:
+                try:
+                    member = await interaction.guild.fetch_member(interaction.user.id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    await interaction.followup.send(
+                        "Impossible de récupérer votre profil Discord pour le moment.",
+                        ephemeral=True,
+                    )
+                    return
+
+    try:
+        view = CleanProfileView(bot, interaction.guild, member, interaction.user.id)
+        embed = await build_page(bot, interaction.guild, member, interaction.user.id, "overview")
+        message = await interaction.followup.send(embed=embed, view=view, wait=True)
+        view.message = message
+    except Exception:
+        logger.exception(
+            "Échec /me guild=%s user=%s target=%s",
+            getattr(interaction.guild, "id", None),
+            getattr(interaction.user, "id", None),
+            getattr(member, "id", None),
+        )
+        try:
+            await interaction.followup.send(
+                "Le profil est temporairement indisponible. Réessayez dans quelques instants.",
+                ephemeral=True,
+            )
+        except discord.HTTPException:
+            pass
+
+
 def install(bot: commands.Bot) -> None:
     _keep_me_in_final_catalog()
     _install_me(bot)
-
-    command = bot.get_command("profile")
-    if command is None or getattr(command, "_sentrix_oxyde_profile", False):
-        return
-
-    # Utilise le transport discord.py brut pour préserver exactement cette carte, sans que
-    # premium_style_runtime ne rajoute des titres/footers/champs historiques.
-    try:
-        from . import premium_style_runtime
-        raw_context_send = premium_style_runtime._ORIGINALS.get("context_send") or commands.Context.send
-    except Exception:
-        raw_context_send = commands.Context.send
-
-    async def profile_callback(cog, ctx: commands.Context, membre: discord.Member = None):
-        if ctx.guild is None:
-            return await ctx.send("Cette commande fonctionne uniquement sur un serveur.")
-        member = membre or ctx.author
-        view = CleanProfileView(bot, ctx.guild, member, ctx.author.id)
-        embed = await build_page(bot, ctx.guild, member, ctx.author.id, "overview")
-        message = await raw_context_send(ctx, embed=embed, view=view)
-        view.message = message
-
-    params = command.params.copy()
-    profile_callback = functools.wraps(command.callback)(profile_callback)
-    command.callback = profile_callback
-    command.params = params
-    command._sentrix_oxyde_profile = True
-
 
 async def setup(bot: commands.Bot) -> None:
     install(bot)

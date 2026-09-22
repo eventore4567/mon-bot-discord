@@ -21,6 +21,8 @@ _BOT = None
 _INSTALLED = False
 _EVENT_TASK: asyncio.Task | None = None
 _CACHE: dict[tuple[int, str], tuple[float, dict]] = {}
+_TABLES_READY_DB_ID: int | None = None
+_TABLES_LOCK: asyncio.Lock | None = None
 
 FEATURES = (
     "automations", "recruitment", "temp_voice", "surveillance", "staff_planning",
@@ -54,43 +56,66 @@ def _dumps(value) -> str:
 
 
 async def ensure_tables(bot=None) -> None:
+    """Create V37 schema once per live Database object.
+
+    This helper sits on several hot paths (messages, joins, voice state, event loop).
+    Re-running CREATE TABLE IF NOT EXISTS on every event was functionally safe but
+    caused avoidable SQLite locks and 250–300 ms runtime warnings. Setup still calls
+    this function at boot; later calls become an O(1) fast path.
+    """
+    global _TABLES_READY_DB_ID, _TABLES_LOCK
+
     bot = bot or _BOT
     if bot is None or not getattr(bot, "db", None):
         return
-    statements = [
-        """CREATE TABLE IF NOT EXISTS feature_suite_configs (
-            guild_id INTEGER NOT NULL, feature TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
-            data_json TEXT NOT NULL DEFAULT '{}', updated_by INTEGER, updated_at INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (guild_id, feature)
-        )""",
-        """CREATE TABLE IF NOT EXISTS feature_suite_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, kind TEXT NOT NULL,
-            name TEXT NOT NULL, data_json TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
-            created_by INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-        )""",
-        """CREATE INDEX IF NOT EXISTS idx_feature_suite_items_guild_kind
-            ON feature_suite_items(guild_id, kind, enabled)""",
-        """CREATE TABLE IF NOT EXISTS feature_suite_watchlist (
-            guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, level TEXT NOT NULL DEFAULT 'normal',
-            reason TEXT NOT NULL DEFAULT '', added_by INTEGER, created_at INTEGER NOT NULL,
-            PRIMARY KEY (guild_id, user_id)
-        )""",
-        """CREATE TABLE IF NOT EXISTS feature_suite_sticky_roles (
-            guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, roles_json TEXT NOT NULL DEFAULT '[]',
-            updated_at INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id)
-        )""",
-        """CREATE TABLE IF NOT EXISTS feature_suite_temp_voice (
-            channel_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, owner_id INTEGER NOT NULL,
-            created_at INTEGER NOT NULL
-        )""",
-        """CREATE TABLE IF NOT EXISTS feature_suite_applications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, form_item_id INTEGER,
-            user_id INTEGER NOT NULL, answers_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'pending',
-            review_note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-        )""",
-    ]
-    for sql in statements:
-        await bot.db.execute(sql)
+
+    db_id = id(bot.db)
+    if _TABLES_READY_DB_ID == db_id:
+        return
+
+    if _TABLES_LOCK is None:
+        _TABLES_LOCK = asyncio.Lock()
+
+    async with _TABLES_LOCK:
+        if _TABLES_READY_DB_ID == db_id:
+            return
+
+        statements = [
+            """CREATE TABLE IF NOT EXISTS feature_suite_configs (
+                guild_id INTEGER NOT NULL, feature TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+                data_json TEXT NOT NULL DEFAULT '{}', updated_by INTEGER, updated_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (guild_id, feature)
+            )""",
+            """CREATE TABLE IF NOT EXISTS feature_suite_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, kind TEXT NOT NULL,
+                name TEXT NOT NULL, data_json TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+                created_by INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+            )""",
+            """CREATE INDEX IF NOT EXISTS idx_feature_suite_items_guild_kind
+                ON feature_suite_items(guild_id, kind, enabled)""",
+            """CREATE TABLE IF NOT EXISTS feature_suite_watchlist (
+                guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, level TEXT NOT NULL DEFAULT 'normal',
+                reason TEXT NOT NULL DEFAULT '', added_by INTEGER, created_at INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, user_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS feature_suite_sticky_roles (
+                guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, roles_json TEXT NOT NULL DEFAULT '[]',
+                updated_at INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id)
+            )""",
+            """CREATE TABLE IF NOT EXISTS feature_suite_temp_voice (
+                channel_id INTEGER PRIMARY KEY, guild_id INTEGER NOT NULL, owner_id INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS feature_suite_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER NOT NULL, form_item_id INTEGER,
+                user_id INTEGER NOT NULL, answers_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'pending',
+                review_note TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+            )""",
+        ]
+        for sql in statements:
+            await bot.db.execute(sql)
+
+        _TABLES_READY_DB_ID = db_id
 
 
 async def get_config(guild_id: int, feature: str, *, fresh: bool = False) -> dict:

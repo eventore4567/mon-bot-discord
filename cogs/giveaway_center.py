@@ -51,6 +51,31 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
             )
         return await ctx.invoke(commande, *args, **kwargs)
 
+    async def _has_active(self, ctx: commands.Context) -> bool:
+        """Vrai si au moins un giveaway encore actif existe sur ce serveur."""
+        v2 = self._v2()
+        if v2 is not None:
+            await v2.ensure_schema()
+            row = await self.bot.db.fetchone(
+                "SELECT 1 FROM giveaways_v2 WHERE guild_id=? AND status='actif' LIMIT 1",
+                (ctx.guild.id,),
+            )
+            if row is not None:
+                return True
+        try:
+            row = await self.bot.db.fetchone(
+                "SELECT 1 FROM giveaways WHERE guild_id=? AND status='actif' LIMIT 1",
+                (ctx.guild.id,),
+            )
+            return row is not None
+        except Exception:
+            return False
+
+    async def _no_active(self, ctx: commands.Context):
+        return await ctx.send(
+            embed=embeds.info("Aucun giveaway actif sur ce serveur.", title="Giveaway")
+        )
+
     async def _list_active(self, ctx: commands.Context):
         """Point unique pour `+giveaway` et `+giveaway list`.
 
@@ -85,7 +110,7 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
             )
         await ctx.send(embed=embeds.info("\n".join(lines), title="Giveaways actifs"))
 
-    @commands.group(name="giveaway", aliases=["giveaways", "concours"], invoke_without_command=True)
+    @commands.group(name="giveaway", aliases=["giveaways"], invoke_without_command=True)
     @commands.guild_only()
     async def giveaway(self, ctx: commands.Context):
         """Centre des giveaways. Sans sous-commande, affiche ceux en cours."""
@@ -109,6 +134,8 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
     @checks.is_owner_or_admin()
     async def giveaway_end(self, ctx: commands.Context, message_id: str):
         """Terminer immédiatement un giveaway V2 ou historique."""
+        if not await self._has_active(ctx):
+            return await self._no_active(ctx)
         try:
             numeric_id = int(message_id)
         except ValueError:
@@ -135,6 +162,8 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
     @checks.is_owner_or_admin()
     async def giveaway_cancel(self, ctx: commands.Context, message_id: str):
         """Annuler un giveaway V2 ou historique."""
+        if not await self._has_active(ctx):
+            return await self._no_active(ctx)
         try:
             numeric_id = int(message_id)
         except ValueError:

@@ -2,8 +2,7 @@
 
 Ce module corrige des risques transversaux confirmés pendant l'audit A→Z :
 - pruning de commandes sûr face aux alias ;
-- transactions économie sérialisées (vente, casino, banque) ;
-- remboursement d'un achat si l'inventaire ne peut pas être crédité ;
+- achat boutique remboursé si l'inventaire ne peut pas être crédité ;
 - hiérarchie uniforme sur les actions de modération restantes ;
 - boutons de tickets réellement réservés au staff ;
 - suppression de ticket marquée en base uniquement après suppression Discord ;
@@ -15,35 +14,20 @@ leurs paramètres afin de ne pas casser +help, les convertisseurs discord.py ou 
 from __future__ import annotations
 
 import asyncio
-import functools
 import inspect
 import logging
-import secrets
-import time
 import types
 
 import discord
 from discord.ext import commands
 
 from database.db import now
-from services import economy as economy_service
 from utils import embeds, stats_service
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.integrity-hardening")
 
 _GAME_LOCK_TTL_SECONDS = 1800.0
-
-
-def _replace_callback(command, callback, marker: str) -> bool:
-    if command is None or getattr(command, marker, False):
-        return False
-    params = command.params.copy()
-    callback = functools.wraps(command.callback)(callback)
-    command.callback = callback
-    command.params = params
-    setattr(command, marker, True)
-    return True
 
 
 def _install_safe_pruning(bot: commands.Bot) -> bool:
@@ -99,82 +83,10 @@ def _install_economy(bot: commands.Bot) -> bool:
     if economy is None:
         return False
 
-    async def safe_deposit(this, ctx: commands.Context, montant: str):
-        if ctx.guild is None:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-        status, amount = await economy_service.atomic_bank_transfer(
-            bot.db, ctx.guild.id, ctx.author.id, montant, deposit=True
-        )
-        if status == "ok":
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{stats_service.format_number(amount)}** 🪙 déposés en banque.')))
-        if status in {"invalid", "changed"}:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
-        return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
-
-    safe_deposit._sentrix_integrity = True
-    economy._deposit_to_bank = types.MethodType(safe_deposit, economy)
-
-    withdraw = bot.get_command("withdraw")
-    if withdraw is not None:
-        async def safe_withdraw(cog, ctx: commands.Context, montant: str):
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-            status, amount = await economy_service.atomic_bank_transfer(
-                bot.db, ctx.guild.id, ctx.author.id, montant, deposit=False
-            )
-            if status == "ok":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{stats_service.format_number(amount)}** 🪙 retirés de la banque.')))
-            if status in {"invalid", "changed"}:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
-        _replace_callback(withdraw, safe_withdraw, "_sentrix_integrity_atomic")
-
-    sell = bot.get_command("sell")
-    if sell is not None:
-        async def safe_sell(cog, ctx: commands.Context, *, objet: str):
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-            item_name = str(objet or "").strip()
-            if not item_name:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez l'objet à vendre.")))
-            status, price = await economy_service.atomic_sell(bot.db, ctx.guild.id, ctx.author.id, item_name)
-            if status == "ok":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{item_name}** vendu pour **{stats_service.format_number(price)}** 🪙.')))
-            if status in {"missing", "changed"}:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne possèdes pas cet objet.')))
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vente temporairement indisponible.')))
-        _replace_callback(sell, safe_sell, "_sentrix_integrity_atomic")
-
-    gamble = bot.get_command("gamble")
-    if gamble is not None:
-        async def safe_gamble(cog, ctx: commands.Context, montant: int):
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-            if int(montant) <= 0:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être positif.')))
-            win = secrets.randbelow(2) == 0
-            status = await economy_service.atomic_gamble(bot.db, ctx.guild.id, ctx.author.id, int(montant), win=win)
-            if status == "insufficient":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Solde insuffisant.')))
-            if status != "ok":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Casino temporairement indisponible.')))
-            amount_text = stats_service.format_number(int(montant))
-            if win:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous gagnez **{amount_text}** 🪙.')))
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Vous perds **{amount_text}** 🪙.')))
-        _replace_callback(gamble, safe_gamble, "_sentrix_integrity_atomic")
-
-    give_money = bot.get_command("give-money")
-    if give_money is not None:
-        original_give = give_money.callback
-
-        async def positive_grant(cog, ctx: commands.Context, membre: discord.Member, montant: int):
-            if int(montant) <= 0:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Le montant doit être supérieur à 0.')))
-            return await original_give(cog, ctx, membre, int(montant))
-
-        _replace_callback(give_money, positive_grant, "_sentrix_integrity_positive_grant")
-
+    # Les opérations banque / sell / gamble / rob / give-money sont désormais
+    # atomiques directement dans cogs/economy.py + services/economy.py.
+    # Cette couche conserve uniquement le rollback/remboursement d’un achat
+    # d’objet si l’écriture d’inventaire échoue.
     original_purchase = economy._purchase_item
     if not getattr(original_purchase, "_sentrix_integrity_refund", False):
         async def safe_purchase(this, ctx: commands.Context, item):
@@ -257,19 +169,11 @@ def _install_tickets(bot: commands.Bot) -> bool:
     if tickets is None:
         return False
 
-    original_handle = tickets.handle_control_button
-    if not getattr(original_handle, "_sentrix_integrity_staff", False):
-        async def staff_only_controls(this, interaction: discord.Interaction, key: str):
-            ticket = await this.get_ticket_by_channel(interaction.channel.id)
-            if not ticket:
-                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Ce salon n'est plus un ticket.")), ephemere=True)
-            if not await _ticket_staff_allowed(bot, interaction, ticket):
-                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Cette action est réservée au staff du ticket.')), ephemere=True)
-            return await original_handle(interaction, key)
-
-        staff_only_controls._sentrix_integrity_staff = True
-        tickets.handle_control_button = types.MethodType(staff_only_controls, tickets)
-
+    # ticket_claim_security.py possède déjà la politique canonique des boutons :
+    # claim/unclaim/add/remove/rename/transfer/note/bump = staff, tandis que le
+    # créateur peut fermer SON ticket. Ne jamais re-wrapper handle_control_button
+    # ici avec une règle "staff pour tout", sinon le propriétaire du ticket perd
+    # son droit de fermeture.
     if not getattr(tickets.btn_transfer, "_sentrix_integrity_staff_target", False):
         async def safe_transfer(this, interaction: discord.Interaction, ticket):
             select = discord.ui.UserSelect(placeholder="Choisir un membre du staff")
@@ -364,40 +268,16 @@ def _install_tickets(bot: commands.Bot) -> bool:
     return True
 
 
-class _ExpiringPlayLockRegistry:
-    """Même API que game_rewards.PlayLockRegistry, mais une exception ne bloque pas à vie."""
-
-    def __init__(self, ttl: float = _GAME_LOCK_TTL_SECONDS):
-        self.ttl = float(ttl)
-        self._locked: dict[tuple[int, int, str], float] = {}
-
-    def _prune(self, current: float | None = None):
-        current = time.monotonic() if current is None else current
-        stale = [key for key, stamp in self._locked.items() if current - stamp >= self.ttl]
-        for key in stale:
-            self._locked.pop(key, None)
-
-    def try_acquire(self, guild_id: int, user_id: int, game_name: str) -> bool:
-        current = time.monotonic()
-        self._prune(current)
-        key = (int(guild_id), int(user_id), str(game_name))
-        if key in self._locked:
-            return False
-        self._locked[key] = current
-        return True
-
-    def release(self, guild_id: int, user_id: int, game_name: str):
-        self._locked.pop((int(guild_id), int(user_id), str(game_name)), None)
-
-
 def _install_games(bot: commands.Bot) -> bool:
+    """Verify that the canonical game service has stale-lock recovery enabled."""
     from utils import game_rewards
-    if isinstance(getattr(game_rewards, "_registry", None), _ExpiringPlayLockRegistry):
-        return True
-    game_rewards._registry = _ExpiringPlayLockRegistry()
-    bot._sentrix_integrity_game_locks = True
-    return True
 
+    registry = getattr(game_rewards, "_registry", None)
+    ready = isinstance(registry, game_rewards.PlayLockRegistry) and float(
+        getattr(registry, "ttl", 0.0) or 0.0
+    ) > 0.0
+    bot._sentrix_integrity_game_locks = bool(ready)
+    return bool(ready)
 
 def _install_runtime_registry_audit(bot: commands.Bot) -> bool:
     if getattr(bot, "_sentrix_integrity_registry_audit", False):
@@ -420,16 +300,12 @@ def _install_runtime_registry_audit(bot: commands.Bot) -> bool:
                 errors.append(
                     f"signature invalide {command.qualified_name}: {type(exc).__name__}"
                 )
-        try:
-            from . import command_catalog_cleanup
-            missing = sorted(
-                name for name in command_catalog_cleanup.NORMAL_DIRECT_COMMANDS
-                if bot.get_command(name) is None
-            )
-            if missing:
-                errors.append("commandes directes absentes: " + ", ".join(missing))
-        except Exception:
-            logger.exception("Audit du catalogue direct impossible.")
+        # Ne pas comparer le runtime à l'ancienne liste de commandes directes : elle sert
+        # à la présentation/pruning historique, alors que la surface finale est
+        # reconstruite par les couches canoniques (groupes slash, noms courts,
+        # commandes fusionnées/supprimées). Exiger chaque ancien nom produit donc
+        # de faux ERROR malgré une surface fonctionnelle. Le sweep CI vérifie déjà
+        # l'exécutabilité réelle de toutes les commandes effectivement chargées.
         bot._sentrix_integrity_state = {
             "ready": not errors,
             "errors": tuple(errors),

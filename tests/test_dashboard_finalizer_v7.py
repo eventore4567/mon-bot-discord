@@ -1,4 +1,5 @@
 from pathlib import Path
+import pytest
 
 
 def test_dashboard_finalizer_runs_once_in_shared_build_boundary():
@@ -23,6 +24,7 @@ def test_dashboard_finalizer_runs_once_in_shared_build_boundary():
         assert "product_boot._install_embed_dashboard_finish =" not in source
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_dashboard_finalizer_requires_all_production_ui_markers():
     source = Path("sentrix_dashboard_finalizer_v7.py").read_text(encoding="utf-8")
     for marker in (

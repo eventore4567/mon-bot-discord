@@ -1,16 +1,11 @@
-"""services/economy.py — sell/withdraw/deposit/gamble/rob sont chacun
-enveloppés par un patch qui remplace la commande réellement exécutée en
-production (cogs/integrity_hardening.py pour les quatre premiers,
-cogs/sentrix_v22.py pour rob) — confirmé en traçant __code__.co_filename/
-co_firstlineno sur un boot identique à la production (51 extensions), qui ne
-ment jamais contrairement à __qualname__ (recopié par functools.wraps d'une
-couche à l'autre). Voir docs/core-v2-audit-economy-atomicity.md.
+"""Tests transactionnels de services/economy.py.
 
-Ces fonctions ont été déplacées telles quelles (aucun changement de
-comportement) hors de ces deux cogs pour devenir testables directement,
-contre une vraie base SQLite en mémoire plutôt que des mocks — le but même de
-ce module est l'atomicité transactionnelle, qu'un mock de connexion ne peut
-pas vérifier fidèlement."""
+Les tests utilisent une vraie base SQLite en mémoire afin de vérifier les garanties
+qui comptent réellement ici : sérialisation par verrou, absence de double dépense,
+rollback, cooldown persistant et soldes jamais négatifs. Le rob appelle désormais
+ce service directement depuis cogs/economy.py ; aucun monkeypatch V2.2 ne doit le
+remplacer en production.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -279,6 +274,87 @@ class AtomicRobTests(unittest.IsolatedAsyncioTestCase):
         kind, value = await economy.atomic_rob(self.db, 1, 10, 20)
         self.assertEqual(kind, "poor")
         self.assertEqual(value, 0)
+
+
+class CanonicalRobWiringTests(unittest.TestCase):
+    def test_economy_command_delegates_to_atomic_service(self):
+        from pathlib import Path
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "economy.py"
+        ).read_text(encoding="utf-8")
+        block = source.split('name="rob"', 1)[1].split(
+            "@commands.hybrid_command", 1
+        )[0]
+        self.assertIn("economy_service.atomic_rob", block)
+        self.assertNotIn("attempt_rob(", block)
+
+    def test_v22_no_longer_replaces_rob_callback(self):
+        from pathlib import Path
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "sentrix_v22.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("_sentrix_v22_atomic_rob", source)
+        self.assertNotIn("_install_economy_hardening", source)
+        self.assertNotIn("_replace_command_callback", source)
+
+
+class CanonicalEconomyWiringTests(unittest.TestCase):
+    def test_atomic_commands_live_in_canonical_economy_cog(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "economy.py"
+        ).read_text(encoding="utf-8")
+
+        sell = source.split('name="sell"', 1)[1].split('name="gamble"', 1)[0]
+        gamble = source.split('name="gamble"', 1)[1].split(
+            "async def _deposit_to_bank", 1
+        )[0]
+        bank = source.split("async def _deposit_to_bank", 1)[1].split(
+            'name="give-money"', 1
+        )[0]
+        grant = source.split('name="give-money"', 1)[1].split(
+            "@commands.hybrid_command", 1
+        )[0]
+
+        self.assertIn("economy_service.atomic_sell", sell)
+        self.assertIn("economy_service.atomic_gamble", gamble)
+        self.assertIn("economy_service.atomic_bank_transfer", bank)
+        self.assertIn("montant) <= 0", grant)
+
+    def test_integrity_layer_no_longer_replaces_economy_commands(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "integrity_hardening.py"
+        ).read_text(encoding="utf-8")
+        block = source.split("def _install_economy", 1)[1].split(
+            "def _install_moderation", 1
+        )[0]
+
+        self.assertNotIn("safe_deposit", block)
+        self.assertNotIn("safe_withdraw", block)
+        self.assertNotIn("safe_sell", block)
+        self.assertNotIn("safe_gamble", block)
+        self.assertNotIn("positive_grant", block)
+        self.assertNotIn("_replace_callback", source)
+        self.assertIn("safe_purchase", block)
+
+
+class IntegrityRuntimeAuditTests(unittest.TestCase):
+    def test_runtime_audit_does_not_require_stale_direct_command_catalog(self):
+        from pathlib import Path
+
+        source = (
+            Path(__file__).resolve().parents[1] / "cogs" / "integrity_hardening.py"
+        ).read_text(encoding="utf-8")
+        audit = source.split("def _install_runtime_registry_audit", 1)[1].split(
+            "def install", 1
+        )[0]
+
+        self.assertNotIn("command_catalog_cleanup.NORMAL_DIRECT_COMMANDS", audit)
+        self.assertNotIn("commandes directes absentes", audit)
+        self.assertIn("commands_checked", audit)
 
 
 if __name__ == "__main__":

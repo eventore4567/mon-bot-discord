@@ -87,7 +87,7 @@ async def _profile_snapshot(bot: commands.Bot, guild: discord.Guild, member: dis
     settings = await bot.db.get_stats_settings(guild.id)
     design = await bot.db.get_design_settings(guild.id)
     bio_row = await bot.db.fetchone(
-        "SELECT bio FROM profiles WHERE guild_id=? AND user_id=?",
+        "SELECT bio,birthday,background FROM profiles WHERE guild_id=? AND user_id=?",
         (guild.id, member.id),
     )
     ranks = await stats_service.get_category_ranks(bot, guild.id, stats)
@@ -104,6 +104,8 @@ async def _profile_snapshot(bot: commands.Bot, guild: discord.Guild, member: dis
         "settings": settings,
         "design": design,
         "bio": bio_row["bio"] if bio_row and bio_row["bio"] else None,
+        "birthday": bio_row["birthday"] if bio_row and bio_row["birthday"] else None,
+        "background": bio_row["background"] if bio_row and bio_row["background"] else None,
         "ranks": ranks,
         "season_rank": season_rank,
     }
@@ -273,6 +275,10 @@ async def build_profile_page(
         value=data["bio"] or "Aucune bio définie — utilise `+set-bio` pour en ajouter une.",
         inline=False,
     )
+    if data.get("birthday"):
+        embed.add_field(name="🎂 Anniversaire", value=str(data["birthday"]), inline=True)
+    if data.get("background") and str(data["background"]).startswith("https://"):
+        embed.set_image(url=str(data["background"]))
     return embed
 
 

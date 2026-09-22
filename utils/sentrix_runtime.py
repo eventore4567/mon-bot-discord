@@ -22,8 +22,8 @@ from . import embeds as sx
 from . import log_service
 
 _INSTALLED = False
-BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-CHANGE_BAR = BAR
+BAR = ""
+CHANGE_BAR = ""
 
 # Palette semantique : referencee depuis config, source unique. Ces constantes
 # ecrasent celles de utils/embeds.py au demarrage — c'est donc CETTE palette que le
@@ -100,7 +100,7 @@ def _base(
     body = _strip_bars(body)
     embed = discord.Embed(
         title=safe_title,
-        description=f"{BAR}\n{body}" if body else BAR,
+        description=body or None,
         colour=discord.Colour(_base_colour(safe_title, body, colour, kind)),
         timestamp=datetime.now(timezone.utc) if timestamp else None,
     )
@@ -235,14 +235,14 @@ def _log_embed(
             continue
         if key in _AFTER_FIELDS:
             clean_value = _strip_bars(value)
-            details.append((name, f"{CHANGE_BAR}\n{clean_value}" if saw_before else clean_value))
+            details.append((name, clean_value))
             continue
         if requested is True:
             metadata.append(f"**{name} :** {_one_line(value)}")
         else:
             details.append((name, value))
 
-    parts = [BAR]
+    parts = []
     if body:
         parts.append(body)
     parts.extend(metadata)

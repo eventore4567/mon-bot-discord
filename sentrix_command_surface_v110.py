@@ -62,9 +62,8 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "channelinfo": "channelinfo",
     "membercount": "membercount",
 
-    # Niveaux / profil — /level et /leaderboard sont des conventions répandues.
+    # Niveaux — /level et /leaderboard sont des conventions répandues.
     "level": "level",
-    "profile": "profile",
     "leaderboard-levels": "leaderboard",
     "set-xp": "setxp",
     "add-xp": "addxp",
@@ -247,7 +246,7 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
         slash, command, native = built
         tree.add_command(slash, override=True)
         direct_report[f"/{slash.name}"] = {
-            "original": str(command.qualified_name),
+            "original": str(command.qualified_name) if command is not None else source_name,
             "native_options": bool(native),
         }
         installed += 1

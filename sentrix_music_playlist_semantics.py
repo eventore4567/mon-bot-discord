@@ -305,7 +305,7 @@ def _patch_playlist_commands(bot, music_cog) -> None:
             command.help = description
 
     music_cog._sentrix_playlist_semantics = True
-    logger.warning("Playlists canoniques actives : sauvegarder/importer/charger + gestion complete.")
+    logger.info("Playlists canoniques actives : sauvegarder/importer/charger + gestion complete.")
 
 
 def install() -> None:

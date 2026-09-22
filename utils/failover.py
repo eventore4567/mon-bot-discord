@@ -130,6 +130,12 @@ class SentriXFailoverCoordinator:
         self.owner_id = ":".join(bit for bit in replica_bits if bit)[:220]
 
         self.state = "disabled" if not self.enabled else "starting"
+        self.previous_state: str | None = None
+        self.last_transition_at: float = time.time()
+        self.last_transition_reason: str = (
+            "ha_disabled" if not self.enabled else "boot_starting"
+        )
+        self.transition_count: int = 0
         self.current_owner: str | None = None
         self.last_error: str | None = None
         self.leader_since: float | None = None
@@ -143,6 +149,37 @@ class SentriXFailoverCoordinator:
     @property
     def is_leader(self) -> bool:
         return self.enabled and self.state == "leader"
+
+    def _transition(self, new_state: str, reason: str) -> None:
+        """Centralise les changements d'état HA pour les rendre auditables.
+
+        Cette méthode n'influence jamais l'élection elle-même : Redis reste l'unique
+        source de vérité du leadership. Elle expose seulement quand/pourquoi l'instance
+        a changé d'état, utile pour distinguer redéploiement, vrai failover et perte de lease.
+        """
+        old_state = self.state
+        normalized_reason = str(reason or "unspecified")[:240]
+
+        # Le poll passif repasse ici toutes les quelques secondes. Ne pas transformer
+        # "standby -> standby" en faux événement ni réécrire l'heure de transition.
+        if old_state == new_state and self.last_transition_reason == normalized_reason:
+            return
+
+        if old_state != new_state:
+            self.previous_state = old_state
+            self.state = new_state
+            self.transition_count += 1
+
+        self.last_transition_at = time.time()
+        self.last_transition_reason = normalized_reason
+        logger.info(
+            "HA: transition %s -> %s reason=%s role=%s count=%s",
+            old_state,
+            self.state,
+            self.last_transition_reason,
+            self.role,
+            self.transition_count,
+        )
 
     async def _connect(self) -> None:
         if not self.enabled:
@@ -226,22 +263,29 @@ class SentriXFailoverCoordinator:
             ex=self.ttl_seconds,
         )
         if acquired:
-            self.state = "leader"
             self.current_owner = self.owner_id
             self.last_error = None
             self.leader_since = time.monotonic()
             self._dernier_leader_lu = await self._lire_dernier_leader()
+            if self._dernier_leader_lu is None:
+                transition_reason = "initial_lease_acquire"
+            elif self._dernier_leader_lu == self.service_id:
+                transition_reason = "same_service_restart"
+            else:
+                transition_reason = f"takeover_from:{self._dernier_leader_lu}"
+            self._transition("leader", transition_reason)
             await self._marquer_dernier_leader()
             logger.warning(
-                "HA: leadership acquis role=%s lease=%ss owner=%s",
+                "HA: leadership acquis role=%s lease=%ss owner=%s reason=%s",
                 self.role,
                 self.ttl_seconds,
                 self.owner_id,
+                transition_reason,
             )
             return True
 
         self.current_owner = await self._redis.get(self.lock_key)
-        self.state = "standby"
+        self._transition("standby", "lease_held_by_other")
         if self.role == "primary":
             # On signale notre attente au leader en place. La cle expire vite : si ce
             # primary meurt, le secours cesse aussitot de croire qu'on l'attend.
@@ -291,12 +335,12 @@ class SentriXFailoverCoordinator:
                         acquired_immediately=first_attempt and waited < 2.5,
                     )
             except FailoverConfigurationError:
-                self.state = "error"
+                self._transition("error", "configuration_error")
                 raise
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.state = "blocked"
+                self._transition("blocked", "redis_unavailable")
                 self.current_owner = None
                 self.last_error = f"{type(exc).__name__}: {exc}"[:500]
                 logger.warning("HA: Redis indisponible, SentriX reste en attente: %s", self.last_error)
@@ -342,7 +386,7 @@ class SentriXFailoverCoordinator:
                     # On ne prend jamais la place de force : preempter le leader ferait
                     # tourner deux instances pendant la bascule.
                     if self.doit_ceder_la_place() and await self.un_primary_attend():
-                        self.state = "yielding"
+                        self._transition("yielding", "yield_to_waiting_primary")
                         logger.warning(
                             "HA: un primary attend la place — le secours la rend apres "
                             "%.0fs de service (snapshot final puis liberation du lease).",
@@ -355,7 +399,7 @@ class SentriXFailoverCoordinator:
                         return
                     continue
 
-                self.state = "lost"
+                self._transition("lost", "lease_renewal_failed")
                 self.current_owner = None
                 logger.critical(
                     "HA: lease perdu ou Redis inaccessible. Fermeture Discord immédiate pour "
@@ -394,7 +438,7 @@ class SentriXFailoverCoordinator:
             )
             released = bool(int(result or 0))
             if released:
-                self.state = "released"
+                self._transition("released", "lease_released")
                 self.current_owner = None
                 logger.info("HA: lease libéré proprement.")
             return released
@@ -425,13 +469,18 @@ class SentriXFailoverCoordinator:
         return {
             "enabled": self.enabled,
             "state": self.state,
+            "previous_state": self.previous_state,
             "role": self.role,
             "leader": self.is_leader,
+            "leader_is_standby": bool(self.is_leader and self.role == "standby"),
             "lock_key": self.lock_key if self.enabled else None,
             "owner": self.owner_id if self.enabled else None,
             "current_owner": self.current_owner,
             "ttl_seconds": self.ttl_seconds if self.enabled else None,
             "renew_seconds": self.renew_seconds if self.enabled else None,
             "leader_for_seconds": leader_for,
+            "last_transition_at": round(self.last_transition_at, 3),
+            "last_transition_reason": self.last_transition_reason,
+            "transition_count": self.transition_count,
             "error": self.last_error,
         }

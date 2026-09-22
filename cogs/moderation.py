@@ -948,11 +948,11 @@ class Moderation(commands.Cog):
     # ---------------------------------------------------------------- SALON
 
     @commands.hybrid_command(name="clear", description="Supprimer un nombre de messages dans le salon.")
-    @app_commands.describe(nombre="Nombre de messages à supprimer (1-100)")
+    @app_commands.describe(nombre="Nombre de messages à supprimer (2 à 100)")
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("manage_messages",), target="channel_target")
-    async def clear(self, ctx: commands.Context, nombre: commands.Range[int, 1, 100]):
+    async def clear(self, ctx: commands.Context, nombre: commands.Range[int, 2, 100]):
         """Implémentation UNIQUE de +clear / /clear.
 
         Historique : trois implémentations coexistaient (ce corps, cogs/help_clear_fix_v80
@@ -962,7 +962,7 @@ class Moderation(commands.Cog):
         identifiants purgés sont marqués pour que le journal « Messages » ne reçoive
         pas N cartes individuelles avant le récapitulatif.
         """
-        requested = max(1, min(int(nombre), 100))
+        requested = max(2, min(int(nombre), 100))
         if ctx.interaction is not None and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(ephemeral=True)
 

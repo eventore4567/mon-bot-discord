@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from web import dashboard_unified_runtime_bridge_v10 as bridge
+import pytest
 
 
 def test_bridge_exposes_unified_v2_lexical_runtime():
@@ -42,6 +43,7 @@ def test_bridge_is_safe_noop_for_non_unified_ci_boots():
     assert "__sentrixUnifiedRuntimeV10" not in dashboard.INDEX_HTML
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_finalizer_requires_runtime_bridge_before_v9_when_unified_present():
     source = open("sentrix_dashboard_finalizer_v7.py", encoding="utf-8").read()
     assert "dashboard_unified_runtime_bridge_v10.install(dashboard)" in source

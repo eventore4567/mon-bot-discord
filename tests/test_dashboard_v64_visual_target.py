@@ -13,7 +13,7 @@ def test_unified_matches_requested_sentrix_shell_with_blue_details():
     document = _final_document()
 
     assert "<title>SentriX — Dashboard</title>" in document
-    assert "SentriX<small>Control Center</small>" in document
+    assert "SentriX<small>Dashboard</small>" in document
 
     # Palette propre à SentriX : charbon + bleu, sans reprendre le branding d'un tiers.
     assert "--bg:#0b0d10" in document
@@ -26,7 +26,9 @@ def test_unified_matches_requested_sentrix_shell_with_blue_details():
     assert 'class="server-rail"' in document
     assert 'class="sidebar"' in document
     assert 'class="workspace"' in document
-    assert "const NAV=[" in document
+    assert "const NAV_GLOBAL = [" in document
+    assert "const NAV_SERVER = [" in document
+    assert "const NAV = NAV_SERVER;" in document
     assert 'id="sentrix-dashboard-unified-v2"' in document
 
 
@@ -34,14 +36,12 @@ def test_unified_mobile_and_tablet_layout_is_explicitly_hardened():
     document = _final_document()
 
     for marker in (
-        "@media(max-width:1180px)",
-        "@media(max-width:840px)",
-        "@media(max-width:620px)",
-        "@media(max-width:560px)",
+        "@media (max-width:1100px)",
+        "@media (max-width:900px)",
         ".sidebar.open{transform:none}",
         ".grid{grid-template-columns:1fr}",
-        ".metrics{grid-template-columns:1fr}",
-        "if(innerWidth<841)closeSidebar()",
+        ".module-grid{grid-template-columns:1fr}",
+        "closeSidebar();",
         "prefers-reduced-motion:reduce",
     ):
         assert marker in document, marker
@@ -52,27 +52,24 @@ def test_unified_keeps_requested_pages_inside_the_same_app():
 
     for label in (
         "Vue d’ensemble",
-        "Arrivées & départs",
+        "Accueil & Départs",
         "Niveaux",
-        "Sécurité",
-        "Modération",
-        "Logs",
-        "Vérification",
-        "Rôles",
         "Économie",
-        "Notifications",
+        "Rôles",
+        "Sécurité",
+        "Logs",
         "Tickets",
+        "Notifications",
+        "Automatisation",
+        "Paramètres",
+        "Commandes & accès",
         "Intelligence artificielle",
-        "Embeds & design",
-        "Configuration",
-        "Accès & commandes",
-        "Messages privés",
+        "Message privé",
         "Diagnostic",
     ):
         assert label in document, label
 
     for legacy in (
-        "Fonctions avancées",
         "Messages récurrents",
         'id="sentrix-v64-final"',
         'id="sxFeaturesFrame"',

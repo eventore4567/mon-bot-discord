@@ -47,14 +47,13 @@ def test_final_unified_dashboard_uses_bounded_macos_style_loader():
     assert _install_unified_document(dashboard)
     html = dashboard.INDEX_HTML
 
-    assert 'id="sentrixProgressHud"' in html
-    assert 'role="status"' in html
-    assert "function beginBusy" in html
-    assert "state.busyTimeout=setTimeout" in html
-    assert "function endBusy" in html
+    # Barre de progression fine, différée de 350 ms, jamais plein écran.
+    assert 'id="progress"' in html
+    assert "function progressStart" in html
+    assert "function progressEnd" in html
+    assert ", 350);" in html
     assert "prefers-reduced-motion:reduce" in html
-    assert "Chargement du serveur" in html
-    assert "Ouverture de la section" in html
+    assert "loading-screen" not in html
     assert "sxLoadingExperience" not in html
     assert "sxDirectLoader" not in html
     assert "sentrixLoadingFetch" not in html
@@ -66,10 +65,9 @@ def test_final_unified_dashboard_excludes_background_polls_from_loader():
     assert _install_unified_document(dashboard)
     html = dashboard.INDEX_HTML
 
-    assert "function isBackgroundRequest" in html
-    assert "path==='/health'" in html
-    assert "path==='/api/public'" in html
-    assert "path==='/live/metrics'" in html
+    assert "function isBackground" in html
+    assert "'/api/public', '/health', '/ready'" in html
+    assert "endsWith('/live/metrics')" in html
     assert "api('/api/public')" in html
     assert "window.fetch =" not in html
 
@@ -80,11 +78,11 @@ def test_final_unified_dashboard_does_not_clear_content_on_section_render():
     assert _install_unified_document(dashboard)
     html = dashboard.INDEX_HTML
 
-    assert "$('content').innerHTML=loading();setPage()" not in html
-    assert "return withBusy('Ouverture de la section" in html
-    assert "},500);state.busyTimeout" in html
-    assert ".app.sx-navigating #content{opacity:1}" in html
-    assert "case'dm':await window.sentrixRenderDM();break;" in html
+    # Le contenu précédent reste affiché pendant le chargement d'une page ; le squelette
+    # n'apparaît que si la zone est vide (premier serveur).
+    assert "if (!content().children.length) content().innerHTML = '<div class=\"skeleton\"" in html
+    assert "el.setAttribute('aria-busy', 'true')" in html
+    assert "dm: renderDM" in html
 
 
 def test_railway_entrypoints_do_not_stack_dashboard_finalizers():

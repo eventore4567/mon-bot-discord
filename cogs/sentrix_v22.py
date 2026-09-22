@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import copy
-import functools
 import logging
 import time
 import types
@@ -18,8 +17,7 @@ from collections import defaultdict
 import discord
 from discord.ext import commands
 
-from services import economy as economy_service
-from utils import embeds, stats_service
+from utils import embeds
 from utils import sentrix_panels as panels
 from utils.v22_rules import (
     clean_reason,
@@ -60,7 +58,6 @@ class SentriXV22(commands.Cog):
     async def cog_load(self):
         await self._install_database_tuning()
         self._install_shared_parsers()
-        self._install_economy_hardening()
         self._install_moderation_hardening()
         self._install_ticket_hardening()
         self._install_ai_cache()
@@ -71,7 +68,7 @@ class SentriXV22(commands.Cog):
             "new_commands": 0,
             "installed_at": int(time.time()),
             "features": [
-                "stats-query-collapse", "persistent-atomic-rob", "moderation-guards",
+                "stats-query-collapse", "canonical-atomic-rob", "moderation-guards",
                 "ticket-concurrency", "ai-settings-cache", "game-settings-cache",
                 "sqlite-tuning", "friendly-arguments",
             ],
@@ -120,48 +117,8 @@ class SentriXV22(commands.Cog):
             friendly_amount._sentrix_v22 = True
             economy_module._parse_amount = friendly_amount
 
-    @staticmethod
-    def _replace_command_callback(command, callback, marker: str):
-        if command is None or getattr(command, marker, False):
-            return False
-        params = command.params.copy()
-        callback = functools.wraps(command.callback)(callback)
-        command.callback = callback
-        command.params = params
-        setattr(command, marker, True)
-        return True
-
-    def _install_economy_hardening(self):
-        command = self.bot.get_command("rob")
-        if command is None or getattr(command, "_sentrix_v22_atomic_rob", False):
-            return
-
-        async def atomic_rob(economy_cog, ctx: commands.Context, membre: discord.Member):
-            if ctx.guild is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
-            if membre.id == ctx.author.id:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas vous voler vous-même.')))
-            if membre.bot:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas voler un bot.')))
-
-            kind, value = await economy_service.atomic_rob(self.bot.db, ctx.guild.id, ctx.author.id, membre.id)
-            if kind == "cooldown":
-                minutes = max(1, (int(value) + 59) // 60)
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f'Vous devez attendre encore **{minutes} min** avant de retenter un vol.')))
-            if kind == "poor":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"{membre.display_name} n'a pas assez d'argent liquide à voler.")))
-            if kind == "retry":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Le solde de la cible vient de changer. Réessayez.')))
-            if kind == "success":
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vous avez volé **{stats_service.format_number(value)} 🪙** à {membre.display_name}.')))
-            if kind == "failed":
-                if value:
-                    return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Vous avez été attrapé : **{stats_service.format_number(value)} 🪙** d'amende.")))
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous avez été attrapé, mais votre portefeuille était déjà vide.')))
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le vol n'a pas pu être traité. Réessayez.")))
-
-        self._replace_command_callback(command, atomic_rob, "_sentrix_v22_atomic_rob")
-
+    # +rob est désormais canonique dans cogs/economy.py et délègue directement à
+    # services/economy.atomic_rob(). V2.2 ne remplace plus le callback de commande.
     def _install_moderation_hardening(self):
         """Borne le MP de sanction historique à 2,5 s.
 
@@ -263,68 +220,13 @@ class SentriXV22(commands.Cog):
             serialized_create._sentrix_v22 = True
             tickets_cog.create_ticket = types.MethodType(serialized_create, tickets_cog)
 
-        if not getattr(tickets_cog.btn_claim, "_sentrix_v22", False):
-            async def atomic_claim(this, interaction: discord.Interaction, ticket):
-                cursor = await self.bot.db.execute(
-                    "UPDATE tickets SET claimed_by=? WHERE id=? AND guild_id=? AND status='ouvert' AND claimed_by IS NULL",
-                    (interaction.user.id, ticket["id"], interaction.guild.id),
-                )
-                if getattr(cursor, "rowcount", 0) < 1:
-                    current = await self.bot.db.fetchone(
-                        "SELECT claimed_by,status FROM tickets WHERE id=? AND guild_id=?",
-                        (ticket["id"], interaction.guild.id),
-                    )
-                    if current and current["status"] == "ouvert" and current["claimed_by"]:
-                        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning(f"Ce ticket est déjà pris en charge par <@{int(current['claimed_by'])}>.")), ephemere=True)
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est plus disponible.")), ephemere=True)
-                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f'{interaction.user.mention} a pris en charge ce ticket.')))
-            atomic_claim._sentrix_v22 = True
-            tickets_cog.btn_claim = types.MethodType(atomic_claim, tickets_cog)
-
-        if not getattr(tickets_cog.btn_unclaim, "_sentrix_v22", False):
-            async def guarded_unclaim(this, interaction: discord.Interaction, ticket):
-                current = await self.bot.db.fetchone(
-                    "SELECT claimed_by,status FROM tickets WHERE id=? AND guild_id=?",
-                    (ticket["id"], interaction.guild.id),
-                )
-                if not current or current["status"] != "ouvert":
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est plus ouvert.")), ephemere=True)
-                claimed_by = current["claimed_by"]
-                if not claimed_by:
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning("Ce ticket n'est pas claim.")), ephemere=True)
-                member = interaction.user
-                can_force = bool(member.guild_permissions.manage_channels or member.id == interaction.guild.owner_id)
-                if int(claimed_by) != member.id and not can_force:
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Seul le staff qui a claim ce ticket (ou un responsable) peut l'abandonner.")), ephemere=True)
-                cursor = await self.bot.db.execute(
-                    "UPDATE tickets SET claimed_by=NULL WHERE id=? AND guild_id=? AND status='ouvert' AND claimed_by=?",
-                    (ticket["id"], interaction.guild.id, claimed_by),
-                )
-                if getattr(cursor, "rowcount", 0) < 1:
-                    return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('La prise en charge vient de changer. Actualisez le ticket.')), ephemere=True)
-                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Prise en charge annulée.')))
-            guarded_unclaim._sentrix_v22 = True
-            tickets_cog.btn_unclaim = types.MethodType(guarded_unclaim, tickets_cog)
-
-        original_close = tickets_cog.close_ticket
-        if not getattr(original_close, "_sentrix_v22", False):
-            async def serialized_close(this, interaction: discord.Interaction, ticket_id: int, reason: str):
-                lock = self._ticket_close_locks[int(ticket_id)]
-                if lock.locked():
-                    return await _safe_interaction_message(
-                        interaction, embeds.warning("La fermeture de ce ticket est déjà en cours.")
-                    )
-                async with lock:
-                    current = await self.bot.db.fetchone(
-                        "SELECT status FROM tickets WHERE id=? AND guild_id=?",
-                        (ticket_id, interaction.guild.id),
-                    )
-                    if not current or current["status"] != "ouvert":
-                        return await _safe_interaction_message(interaction, embeds.warning("Ce ticket est déjà fermé."))
-                    return await original_close(interaction, ticket_id, clean_reason(reason, maximum=300))
-            serialized_close._sentrix_v22 = True
-            tickets_cog.close_ticket = types.MethodType(serialized_close, tickets_cog)
-
+        # Claim / unclaim / close are already provided by ticket_claim_security.py.
+        # That canonical runtime owns permission changes, compare-and-set DB updates,
+        # transcript/log behavior and rollback when Discord permission edits fail.
+        # V2.2 used to replace those methods again here with narrower callbacks,
+        # silently discarding part of the canonical behavior because V2.2 loads later.
+        # Keep only the cache + start/create serialization above; do not re-patch
+        # claim, unclaim or close at instance level.
     def _install_ai_cache(self):
         from utils import ai_service
         original_get = ai_service.get_settings

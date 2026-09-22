@@ -7,6 +7,8 @@ def test_canonical_roots_are_human_readable():
     assert ROOTS["config"] == "configuration"
     assert ROOTS["game"] == "jeux"
     assert ROOTS["level"] == "niveaux"
+    assert ROOTS["giveaway"] == "giveaway"
+    assert "concours" not in ROOTS.values()
 
 
 def test_music_names_do_not_leak_into_moderation_names():

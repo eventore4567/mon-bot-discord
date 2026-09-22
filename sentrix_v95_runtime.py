@@ -304,7 +304,25 @@ def _serialize_value(value) -> str:
         return value.mention
     if hasattr(value, "value") and not isinstance(value, (str, int, float)):
         value = value.value
-    return shlex.quote(str(value))
+    return _quote_for_string_view(str(value))
+
+
+def _quote_for_string_view(text: str) -> str:
+    """Cite une valeur pour le parseur préfixe de discord.py (StringView).
+
+    ``shlex.quote`` entourait la valeur d'apostrophes ASCII (``'<@&123>'``) que
+    StringView ne reconnaît PAS comme des guillemets : une mention ou un texte avec
+    espaces tapé dans une option slash libre arrivait avec ses apostrophes, un
+    ``Greedy[Role]`` ne consommait rien et l'option suivante (``price``) recevait la
+    mention (« Converting to int failed », /shoprole ajouter). StringView comprend
+    les guillemets doubles avec ``\"`` échappé : on n'utilise que ceux-là.
+    """
+    if text == "":
+        return '""'
+    needs_quotes = any(ch.isspace() for ch in text) or '"' in text or text[0] in "'‘’“”„«»「」"
+    if not needs_quotes:
+        return text
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _argument_text(command: commands.Command, option_names: tuple[str, ...], kwargs: dict) -> str:
@@ -381,6 +399,78 @@ async def _invoke_original(
             bot.dispatch("command_completion", ctx)
 
 
+_OPTION_HINTS = {
+    "membre": "Membre concerné : sélectionnez-le dans Discord.",
+    "member": "Membre concerné : sélectionnez-le dans Discord.",
+    "utilisateur": "Utilisateur concerné : sélectionnez-le dans Discord.",
+    "user": "Utilisateur concerné : sélectionnez-le dans Discord.",
+    "role": "Rôle concerné : sélectionnez-le dans Discord.",
+    "salon": "Salon concerné : sélectionnez-le dans Discord.",
+    "channel": "Salon concerné : sélectionnez-le dans Discord.",
+    "raison": "Raison de l’action. Exemple : spam répété.",
+    "reason": "Raison de l’action. Exemple : spam répété.",
+    "duree": "Durée attendue. Exemples : 10m, 2h, 3j.",
+    "duration": "Durée attendue. Exemples : 10m, 2h, 3j.",
+    "nombre": "Nombre à utiliser ; respectez les limites indiquées.",
+    "count": "Nombre à utiliser ; respectez les limites indiquées.",
+    "amount": "Montant ou quantité à utiliser.",
+    "montant": "Montant ou quantité à utiliser.",
+    "message_id": "ID du message Discord concerné.",
+    "message": "Message ou texte à utiliser pour cette action.",
+    "texte": "Texte à utiliser pour cette action.",
+    "url": "Lien complet commençant par https://.",
+    "lien": "Lien complet commençant par https://.",
+    "nom": "Nom à utiliser pour cette action.",
+    "name": "Nom à utiliser pour cette action.",
+}
+
+
+def _option_descriptions(command: commands.Command, option_names: tuple[str, ...]) -> dict[str, str]:
+    """Conserve les descriptions natives et complète les anciennes commandes.
+
+    Les surfaces V95/V110 recréent les slash depuis les callbacks préfixés ; sans cette
+    copie, Discord n'affichait souvent que le nom de l'option (ex. « nombre ») sans dire
+    quoi saisir.
+    """
+    if option_names == ("arguments",):
+        return {"arguments": "Arguments de la commande, dans le même ordre que la version préfixée."}
+
+    natives: dict[str, str] = {}
+    app_command = getattr(command, "app_command", None)
+    for item in list(getattr(app_command, "parameters", ()) or ()):
+        name = str(getattr(item, "name", "") or "").strip()
+        description = str(getattr(item, "description", "") or "").strip()
+        if name and description and description.casefold() not in {"…", "no description provided"}:
+            natives[name] = description[:100]
+
+    try:
+        raw_params = list(command.clean_params.items())
+    except Exception:
+        raw_params = []
+
+    descriptions: dict[str, str] = {}
+    for (raw_name, parameter), exposed in zip(raw_params, option_names):
+        description = natives.get(raw_name)
+        if not description:
+            description = str(getattr(parameter, "description", "") or "").strip()
+        if not description:
+            annotation = getattr(parameter, "annotation", None)
+            if isinstance(annotation, commands.Range):
+                minimum, maximum = annotation.min, annotation.max
+                if minimum is not None and maximum is not None:
+                    description = f"Valeur comprise entre {minimum} et {maximum}."
+                elif minimum is not None:
+                    description = f"Valeur minimale : {minimum}."
+                elif maximum is not None:
+                    description = f"Valeur maximale : {maximum}."
+        if not description:
+            description = _OPTION_HINTS.get(raw_name.casefold())
+        if not description:
+            description = f"Valeur à fournir pour « {raw_name.replace('_', ' ')} »."
+        descriptions[exposed] = re.sub(r"\s+", " ", description).strip()[:100]
+    return descriptions
+
+
 def _make_callback(bot: commands.Bot, command: commands.Command):
     signature, native, option_names = _build_signature(command)
 
@@ -391,6 +481,11 @@ def _make_callback(bot: commands.Bot, command: commands.Command):
     callback.__qualname__ = callback.__name__
     callback.__signature__ = signature
     callback.__annotations__ = {"interaction": discord.Interaction}
+
+    descriptions = _option_descriptions(command, option_names)
+    if descriptions:
+        callback = app_commands.describe(**descriptions)(callback)
+
     callback._sentrix_original_command = str(command.qualified_name)
     callback._sentrix_native_options = native
     return callback, native

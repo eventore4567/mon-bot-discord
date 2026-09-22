@@ -115,7 +115,8 @@ def test_compact_errors_are_plain_sentences():
         commands.BucketType.user,
     )
 
-    assert fix._short_error(cooldown) == "Cette commande est en cooldown. Réessaie dans 3 s."
+    # Texte partagé avec le préfixe (utils/error_texts.py) : même phrase sur les deux transports.
+    assert fix._short_error(cooldown) == "Commande en attente : réessayez dans 3 s."
     assert "embed" not in fix._short_error(commands.BadArgument("bad")).casefold()
 
 
@@ -271,3 +272,101 @@ def test_invoke_native_journalise_le_diagnostic_meme_sans_desaccord(caplog):
 
     asyncio.run(run())
     assert any("Diagnostic sanction (native)" in record.message for record in caplog.records)
+
+
+def test_compact_error_preserve_botpermission_reason():
+    from utils.checks import BotPermissionError
+    error = BotPermissionError(
+        "Le **système d'argent est désactivé** sur ce serveur. "
+        "Les soldes, récompenses et boutiques sont actuellement bloqués."
+    )
+    rendered = fix._short_error(error)
+    assert "système d'argent est désactivé" in rendered
+    assert "Tu n’as pas la permission" not in rendered
+
+
+def test_compact_error_names_exact_missing_permission():
+    error = commands.MissingPermissions(["manage_messages"])
+    rendered = fix._short_error(error)
+    assert "Gérer les messages" in rendered
+    assert "permission" in rendered
+
+
+def test_compact_error_names_exact_bot_missing_permission():
+    error = commands.BotMissingPermissions(["manage_roles"])
+    rendered = fix._short_error(error)
+    assert "Gérer les rôles" in rendered
+    assert "SentriX" in rendered
+
+
+
+def test_generated_slash_options_get_helpful_descriptions():
+    async def clear(ctx, nombre: commands.Range[int, 2, 100]):
+        return None
+
+    command = commands.Command(clear, name="clear")
+    _signature, _native, option_names = v95._build_signature(command)
+    descriptions = v95._option_descriptions(command, option_names)
+
+    assert "nombre" in descriptions
+    assert "2" in descriptions["nombre"]
+    assert "100" in descriptions["nombre"]
+
+
+def test_generated_slash_unknown_option_still_gets_a_phrase():
+    async def custom(ctx, valeur_speciale: str):
+        return None
+
+    command = commands.Command(custom, name="custom")
+    _signature, _native, option_names = v95._build_signature(command)
+    descriptions = v95._option_descriptions(command, option_names)
+
+    assert descriptions["valeur_speciale"].startswith("Valeur à fournir")
+
+
+
+def test_deferred_slash_result_uses_original_response_once():
+    from types import SimpleNamespace
+    from utils import sentrix_panels as panels
+
+    token = "slash-prefix-parity-test"
+    panels._REPONSES_DIFFEREES_FINALISEES.pop(token, None)
+
+    response = SimpleNamespace(
+        type=discord.InteractionResponseType.deferred_channel_message,
+        is_done=lambda: True,
+    )
+    interaction = SimpleNamespace(token=token, id=123, response=response)
+
+    assert panels.reponse_differee_a_finaliser(interaction) is True
+    panels.marquer_reponse_differee_finalisee(interaction)
+    assert panels.reponse_differee_a_finaliser(interaction) is False
+    panels._REPONSES_DIFFEREES_FINALISEES.pop(token, None)
+
+
+def test_deferred_slash_edit_payload_keeps_same_result_content():
+    from utils import sentrix_panels as panels
+
+    marker = object()
+    payload = panels.kwargs_edition_reponse_differee({
+        "content": "2 message(s) supprimé(s).",
+        "ephemeral": True,
+        "delete_after": 4,
+        "files": [marker],
+    })
+
+    assert payload["content"] == "2 message(s) supprimé(s)."
+    assert "ephemeral" not in payload
+    assert "delete_after" not in payload
+    assert payload["attachments"] == [marker]
+
+
+def test_final_context_transport_finalizes_deferred_slash_before_followup():
+    from pathlib import Path
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "final_interaction_policy.py"
+    ).read_text(encoding="utf-8")
+
+    assert "panels.reponse_differee_a_finaliser(interaction)" in source
+    assert "interaction.edit_original_response(" in source
+    assert "panels.marquer_reponse_differee_finalisee(interaction)" in source

@@ -44,7 +44,7 @@ def install(dashboard) -> bool:
     dashboard.INDEX_HTML = html
     remaining = [bad for bad in _REPLACEMENTS if bad in html]
     ok = not remaining and MARKER in html
-    logger.warning("Growth Control V12 syntax guard installed=%s replacements=%s remaining=%s", ok, changed, len(remaining))
+    logger.info("Growth Control V12 syntax guard installed=%s replacements=%s remaining=%s", ok, changed, len(remaining))
     return ok
 
 

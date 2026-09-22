@@ -64,7 +64,7 @@ async def run() -> int:
             "balance": ("solde", "balance"),
             "shop": ("boutique", "shop"),
             "level": ("niveau", "level"),
-            "profile": ("profil", "profile"),
+            "stats": ("statistiques", "stats"),
             "poll": ("sondage", "poll"),
             "weather": ("meteo", "weather"),
             "translate": ("traduire", "translate"),

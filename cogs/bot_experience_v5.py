@@ -365,7 +365,11 @@ def _install_unknown_command_hints(bot: commands.Bot) -> None:
         else:
             text = f"Commande `{prefix}{requested}` inconnue. Utilise `{prefix}help` pour voir les commandes disponibles."
         try:
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(text)))
+            await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.warning(text)),
+                delete_after=8,
+            )
         except discord.HTTPException:
             pass
 

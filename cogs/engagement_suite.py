@@ -314,12 +314,18 @@ class EngagementSuite(commands.Cog):
         self._message_points_at: dict[tuple[int, int], float] = {}
         self._voice_started: dict[tuple[int, int], float] = {}
         self._recent_messages: dict[tuple[int, int], deque[tuple[float, str]]] = defaultdict(lambda: deque(maxlen=8))
+        self._settings_ready: set[int] = set()
+        self._members_ready: set[tuple[int, int]] = set()
 
     async def ensure_settings(self, guild_id: int) -> None:
+        guild_id = int(guild_id)
+        if guild_id in self._settings_ready:
+            return
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO engagement_settings (guild_id,updated_at) VALUES (?,?)",
-            (int(guild_id), now()),
+            (guild_id, now()),
         )
+        self._settings_ready.add(guild_id)
 
     async def get_settings(self, guild_id: int) -> dict[str, Any]:
         await self.ensure_settings(guild_id)
@@ -368,10 +374,14 @@ class EngagementSuite(commands.Cog):
         return await self.get_settings(guild.id)
 
     async def _ensure_member(self, guild_id: int, user_id: int, *, joined_at: int = 0) -> None:
+        key = (int(guild_id), int(user_id))
+        if key in self._members_ready:
+            return
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO engagement_members (guild_id,user_id,joined_at,last_seen_at) VALUES (?,?,?,?)",
-            (int(guild_id), int(user_id), int(joined_at or 0), now()),
+            (key[0], key[1], int(joined_at or 0), now()),
         )
+        self._members_ready.add(key)
 
     async def set_preferred_language(self, guild_id: int, user_id: int, language: str) -> None:
         await self._ensure_member(guild_id, user_id)

@@ -22,7 +22,6 @@ toujours de view_channel=False pour @everyone, quoi qu'il arrive.
 """
 
 import asyncio
-import io
 import json
 import logging
 import re
@@ -33,7 +32,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cogs.ticket_constants import (
+    BUTTON_STYLE_NAMES,
+    BUTTON_STYLES,
+    CUSTOM_COMPONENT_EMOJI_RE,
+    DEFAULT_BUTTON_STYLE,
+    DEFAULT_ENABLED_BUTTONS,
+    STAFF_BUTTONS,
+    TEXT_STYLES,
+)
 from services.tickets import count_genuinely_open_tickets
+from services import tickets as tickets_service
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as sx_panels
 from database.db import now
@@ -43,34 +52,6 @@ from database.db import now
 # pour retrouver précisément quelle interaction a échoué, avec quel custom_id, et combien
 # de temps le traitement a pris avant/après la réponse à Discord).
 logger = logging.getLogger("bot.tickets")
-
-TEXT_STYLES = {"court": discord.TextStyle.short, "long": discord.TextStyle.paragraph}
-BUTTON_STYLES = {
-    "bleu": discord.ButtonStyle.primary,
-    "gris": discord.ButtonStyle.secondary,
-    "vert": discord.ButtonStyle.success,
-    "rouge": discord.ButtonStyle.danger,
-}
-BUTTON_STYLE_NAMES = list(BUTTON_STYLES.keys())
-DEFAULT_BUTTON_STYLE = "bleu"
-
-# Les 9 boutons staff configurables : clé interne -> (libellé par défaut, emoji par défaut).
-# L'ordre ici est aussi l'ordre d'affichage par défaut dans le salon de ticket.
-STAFF_BUTTONS = {
-    "claim": ("Prendre en charge", "🙋"),
-    "unclaim": ("Abandonner", "↩️"),
-    "add": ("Ajouter un membre", "➕"),
-    "remove": ("Retirer un membre", "➖"),
-    "rename": ("Renommer", "✏️"),
-    "transfer": ("Transférer", "🔀"),
-    "note": ("Ajouter une note", "📝"),
-    "bump": ("Relancer", "🔔"),
-    "close": ("Fermer", "🔒"),
-}
-DEFAULT_ENABLED_BUTTONS = {"claim", "add", "remove", "rename", "note", "close"}
-
-
-CUSTOM_COMPONENT_EMOJI_RE = re.compile(r"^<a?:[A-Za-z0-9_]{2,32}:[0-9]{15,22}>$")
 
 
 def parse_component_emoji(value: str | None, bot=None):
@@ -560,10 +541,44 @@ class TicketRatingButton(
         return cls(int(match["value"]), int(match["ticket_id"]))
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.client.db.execute(
-            "UPDATE tickets SET rating = ? WHERE id = ?", (self.value, self.ticket_id)
+        ticket = await interaction.client.db.fetchone(
+            "SELECT id, user_id, status, rating FROM tickets WHERE id = ?",
+            (self.ticket_id,),
         )
-        await interaction.response.edit_message(content=f"Merci pour votre note : {'⭐' * self.value}", view=None)
+        if not ticket:
+            return await interaction.response.send_message(
+                "Ce ticket n'existe plus.",
+                ephemeral=True,
+            )
+        if int(ticket["user_id"]) != interaction.user.id:
+            return await interaction.response.send_message(
+                "Seul le créateur de ce ticket peut le noter.",
+                ephemeral=True,
+            )
+        if ticket["status"] == "ouvert":
+            return await interaction.response.send_message(
+                "Ce ticket est encore ouvert.",
+                ephemeral=True,
+            )
+        if ticket["rating"] is not None:
+            return await interaction.response.send_message(
+                "Vous avez déjà noté ce ticket.",
+                ephemeral=True,
+            )
+
+        cur = await interaction.client.db.execute(
+            "UPDATE tickets SET rating = ? WHERE id = ? AND rating IS NULL",
+            (self.value, self.ticket_id),
+        )
+        if getattr(cur, "rowcount", 0) != 1:
+            return await interaction.response.send_message(
+                "La note a déjà été enregistrée.",
+                ephemeral=True,
+            )
+        await interaction.response.edit_message(
+            content=f"Merci pour votre note : {'⭐' * self.value}",
+            view=None,
+        )
 
 
 class RatingView(discord.ui.View):
@@ -1195,8 +1210,41 @@ class Tickets(commands.Cog):
         await self.bot.db.execute("UPDATE tickets SET last_activity_at = ? WHERE id = ?", (now(), ticket_id))
 
     async def btn_claim(self, interaction: discord.Interaction, ticket):
-        await self.bot.db.execute("UPDATE tickets SET claimed_by = ? WHERE id = ?", (interaction.user.id, ticket["id"]))
-        await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'🙋 {interaction.user.mention} a pris en charge ce ticket.')))
+        cur = await self.bot.db.execute(
+            "UPDATE tickets SET claimed_by = ? "
+            "WHERE id = ? AND status = 'ouvert' AND claimed_by IS NULL",
+            (interaction.user.id, ticket["id"]),
+        )
+        if getattr(cur, "rowcount", 0) == 1:
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(
+                    embeds.success(f'🙋 {interaction.user.mention} a pris en charge ce ticket.')
+                ),
+            )
+
+        current = await self.bot.db.fetchone(
+            "SELECT claimed_by, status FROM tickets WHERE id = ?",
+            (ticket["id"],),
+        )
+        if not current or current["status"] != "ouvert":
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(embeds.error("Ce ticket n'est plus ouvert.")),
+                ephemere=True,
+            )
+        claimant = current["claimed_by"]
+        if claimant == interaction.user.id:
+            message = "Vous avez déjà pris en charge ce ticket."
+        elif claimant:
+            message = f"Ce ticket est déjà pris en charge par <@{claimant}>."
+        else:
+            message = "Impossible de prendre en charge ce ticket pour le moment."
+        await sx_panels.envoyer(
+            interaction.response,
+            sx_panels.depuis_embed(embeds.info(message)),
+            ephemere=True,
+        )
 
     async def btn_unclaim(self, interaction: discord.Interaction, ticket):
         await self.bot.db.execute("UPDATE tickets SET claimed_by = NULL WHERE id = ?", (ticket["id"],))
@@ -1260,23 +1308,13 @@ class Tickets(commands.Cog):
     # ---------------------------------------------------------------- FERMETURE
 
     async def _fetch_transcript_text(self, channel: discord.TextChannel) -> str:
-        lines = []
-        async for msg in channel.history(limit=2000, oldest_first=True):
-            lines.append(f"[{msg.created_at:%Y-%m-%d %H:%M}] {msg.author} ({msg.author.id}): {msg.content}")
-            for att in msg.attachments:
-                lines.append(f"    [pièce jointe] {att.url}")
-        return "\n".join(lines) or "Aucun message."
+        return await tickets_service.fetch_transcript_text(channel)
 
     def _transcript_file(self, channel: discord.TextChannel, text: str) -> discord.File:
-        # Un discord.File ne peut servir qu'à UN SEUL envoi (son contenu est "consommé"
-        # après le premier .send()) : on doit donc en recréer un pour chaque destinataire,
-        # mais à partir du même texte déjà récupéré, plutôt que de relire tout l'historique.
-        return discord.File(io.BytesIO(text.encode("utf-8")), filename=f"transcript-{channel.name}.txt")
+        return tickets_service.transcript_file(channel, text)
 
     async def generate_transcript(self, channel: discord.TextChannel) -> discord.File:
-        text = await self._fetch_transcript_text(channel)
-        return self._transcript_file(channel, text)
-
+        return await tickets_service.generate_transcript(channel)
     async def close_ticket(self, interaction: discord.Interaction, ticket_id: int, reason: str):
         ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
         if not ticket:
@@ -1287,9 +1325,20 @@ class Tickets(commands.Cog):
         ticket_type = await self.get_type(ticket["type_id"]) if ticket["type_id"] else None
         conf = await self.bot.db.get_guild_config(interaction.guild.id)
 
-        await self.bot.db.execute(
-            "UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 WHERE id = ?", (now(), ticket_id)
+        close_cursor = await self.bot.db.execute(
+            "UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 "
+            "WHERE id = ? AND status = 'ouvert'",
+            (now(), ticket_id),
         )
+        if getattr(close_cursor, "rowcount", 0) != 1:
+            try:
+                await interaction.response.send_message(
+                    "Ce ticket est déjà fermé ou n'est plus disponible.",
+                    ephemeral=True,
+                )
+            except discord.InteractionResponded:
+                pass
+            return
         owner = interaction.guild.get_member(ticket["user_id"])
         if owner:
             overwrite = channel.overwrites_for(owner)

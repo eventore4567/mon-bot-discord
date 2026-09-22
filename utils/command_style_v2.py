@@ -51,7 +51,7 @@ COLORS: dict[str, int] = {
 }
 
 CHAT_ROOTS = frozenset({"sentrix", "ai", "chat", "ask"})
-BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+BAR = ""
 _CUSTOM_EMOJI_RE = re.compile(r"<a?:[A-Za-z0-9_~]+:\d+>")
 _SENTRIX_PREFIX = re.compile(r"^(?:SENTRIX|ODBOUG)\s*(?:/|•|—|-)\s*", re.I)
 _SPACE_RE = re.compile(r"[ \t]{2,}")
@@ -153,7 +153,6 @@ def _enrich_ping(embed: discord.Embed, command: Any) -> None:
 
     embed.title = "Ping"
     embed.description = (
-        f"{BAR}\n"
         f"**Latence**  {latency_ms} ms   •   **Qualité**  {quality}   `{quality_bar}`"
     )
     embed.clear_fields()
@@ -184,11 +183,8 @@ def style_embed(
     resolved_kind = kind or premium_style.infer_kind(embed)
 
     embed.title = _display_title(getattr(embed, "title", None), resolved_category)
-    body = _normal_text(embed.description, limit=3970) if embed.description is not None else ""
-    if body.startswith(BAR):
-        embed.description = body
-    else:
-        embed.description = f"{BAR}\n{body}" if body else BAR
+    body = _normal_text(embed.description, limit=4096) if embed.description is not None else ""
+    embed.description = body or None
 
     state_colour = COLORS.get(resolved_kind)
     category_colour = premium_style.COLORS.get(

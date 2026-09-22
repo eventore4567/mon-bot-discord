@@ -309,10 +309,16 @@ def install(bot: commands.Bot) -> None:
 
         conf = await self.bot.db.get_guild_config(guild.id)
         closed_at = tickets.now()
-        await self.bot.db.execute(
-            "UPDATE tickets SET status='ferme', closed_at=?, locked=1 WHERE id=?",
+        close_cursor = await self.bot.db.execute(
+            "UPDATE tickets SET status='ferme', closed_at=?, locked=1 "
+            "WHERE id=? AND status='ouvert'",
             (closed_at, ticket_id),
         )
+        if getattr(close_cursor, "rowcount", 0) != 1:
+            return await _private_reply(
+                interaction,
+                tickets.embeds.warning("Ce ticket est déjà fermé ou n'est plus disponible."),
+            )
 
         owner = guild.get_member(int(ticket["user_id"]))
         if owner:
@@ -413,6 +419,38 @@ def install(bot: commands.Bot) -> None:
 
         await interaction.response.defer()
 
+        # Réservation compare-and-set AVANT de toucher aux permissions Discord : deux
+        # clics simultanés ne peuvent plus se voler la prise en charge.
+        if current_id:
+            claim_cursor = await self.bot.db.execute(
+                "UPDATE tickets SET claimed_by = ?, last_activity_at = ? "
+                "WHERE id = ? AND status = 'ouvert' AND claimed_by = ?",
+                (member.id, tickets.now(), ticket["id"], int(current_id)),
+            )
+        else:
+            claim_cursor = await self.bot.db.execute(
+                "UPDATE tickets SET claimed_by = ?, last_activity_at = ? "
+                "WHERE id = ? AND status = 'ouvert' AND claimed_by IS NULL",
+                (member.id, tickets.now(), ticket["id"]),
+            )
+
+        if getattr(claim_cursor, "rowcount", 0) != 1:
+            latest = await self.bot.db.fetchone(
+                "SELECT claimed_by, status FROM tickets WHERE id = ?",
+                (ticket["id"],),
+            )
+            if not latest or latest["status"] != "ouvert":
+                message = "Ce ticket n'est plus ouvert."
+            elif latest["claimed_by"]:
+                message = f"Ce ticket vient d'être pris en charge par <@{int(latest['claimed_by'])}>."
+            else:
+                message = "La prise en charge a changé. Réessayez."
+            return await panels.envoyer(
+                interaction.followup,
+                panels.depuis_embed(tickets.embeds.warning(message)),
+                ephemere=True,
+            )
+
         old_member = guild.get_member(int(current_id)) if current_id else None
         if old_member and old_member.id != member.id:
             await _remove_claimant_override(channel, old_member, int(ticket["user_id"]))
@@ -421,13 +459,35 @@ def install(bot: commands.Bot) -> None:
         try:
             await _grant_claimant(channel, member)
         except discord.Forbidden:
-            return await panels.envoyer(interaction.followup, panels.depuis_embed(tickets.embeds.error("SentriX n'a pas la permission de modifier les accès de ce ticket.")), ephemere=True)
+            # Revenir à l'état DB précédent si Discord refuse les permissions.
+            if current_id:
+                await self.bot.db.execute(
+                    "UPDATE tickets SET claimed_by = ? WHERE id = ? AND claimed_by = ?",
+                    (int(current_id), ticket["id"], member.id),
+                )
+            else:
+                await self.bot.db.execute(
+                    "UPDATE tickets SET claimed_by = NULL WHERE id = ? AND claimed_by = ?",
+                    (ticket["id"], member.id),
+                )
+            await _set_staff_role_visibility(self, channel, ticket, visible=True)
+            return await panels.envoyer(
+                interaction.followup,
+                panels.depuis_embed(
+                    tickets.embeds.error("SentriX n'a pas la permission de modifier les accès de ce ticket.")
+                ),
+                ephemere=True,
+            )
 
-        await self.bot.db.execute(
-            "UPDATE tickets SET claimed_by = ?, last_activity_at = ? WHERE id = ?",
-            (member.id, tickets.now(), ticket["id"]),
+        await panels.envoyer(
+            interaction.followup,
+            panels.depuis_embed(
+                tickets.embeds.success(
+                    f"{member.mention} a pris en charge ce ticket. "
+                    "L'accès est maintenant réservé au créateur, au membre en charge et aux Administrateurs."
+                )
+            ),
         )
-        await panels.envoyer(interaction.followup, panels.depuis_embed(tickets.embeds.success(f"{member.mention} a pris en charge ce ticket. L'accès est maintenant réservé au créateur, au membre en charge et aux Administrateurs.")))
 
     async def secure_unclaim(self, interaction: discord.Interaction, ticket):
         guild = interaction.guild
@@ -449,14 +509,30 @@ def install(bot: commands.Bot) -> None:
             return await panels.envoyer(interaction.response, panels.depuis_embed(tickets.embeds.error('Seul le membre en charge ou un Administrateur peut abandonner ce ticket.')), ephemere=True)
 
         await interaction.response.defer()
+
+        unclaim_cursor = await self.bot.db.execute(
+            "UPDATE tickets SET claimed_by = NULL, last_activity_at = ? "
+            "WHERE id = ? AND status = 'ouvert' AND claimed_by = ?",
+            (tickets.now(), ticket["id"], int(current_id)),
+        )
+        if getattr(unclaim_cursor, "rowcount", 0) != 1:
+            return await panels.envoyer(
+                interaction.followup,
+                panels.depuis_embed(
+                    tickets.embeds.warning("La prise en charge a déjà changé. Actualisez le ticket.")
+                ),
+                ephemere=True,
+            )
+
         claimant = guild.get_member(int(current_id))
         await _remove_claimant_override(channel, claimant, int(ticket["user_id"]))
         await _set_staff_role_visibility(self, channel, ticket, visible=True)
-        await self.bot.db.execute(
-            "UPDATE tickets SET claimed_by = NULL, last_activity_at = ? WHERE id = ?",
-            (tickets.now(), ticket["id"]),
+        await panels.envoyer(
+            interaction.followup,
+            panels.depuis_embed(
+                tickets.embeds.success("Prise en charge annulée. L'accès du rôle staff a été rétabli.")
+            ),
         )
-        await panels.envoyer(interaction.followup, panels.depuis_embed(tickets.embeds.success("Prise en charge annulée. L'accès du rôle staff a été rétabli.")))
 
     # Important : ``create_ticket`` appelle ``self.log_action`` dynamiquement. Installer
     # d'abord le transport sûr suffit donc à empêcher le faux message rouge après succès.

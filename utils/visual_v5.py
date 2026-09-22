@@ -148,6 +148,8 @@ def _render_card_sync(
     stats: dict[str, Any],
     settings: dict[str, Any],
     level_up: int | None,
+    show_levels: bool,
+    show_economy: bool,
 ) -> io.BytesIO:
     try:
         background = Image.open(CARD_BACKGROUND).convert("RGBA")
@@ -169,7 +171,8 @@ def _render_card_sync(
     accent = _hex_rgb(int(settings.get("primary_color", 0x6C5CE7)))
     secondary = _hex_rgb(int(settings.get("secondary_color", 0x4C7DFF)))
     draw.rounded_rectangle((34, 32, 1166, 368), radius=34, fill=(6, 10, 36, 150), outline=(*accent, 210), width=3)
-    draw.rounded_rectangle((315, 286, 1110, 320), radius=17, fill=(15, 20, 55, 210))
+    if show_levels:
+        draw.rounded_rectangle((315, 286, 1110, 320), radius=17, fill=(15, 20, 55, 210))
 
     avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
     avatar = ImageOps.fit(avatar, (222, 222), method=Image.Resampling.LANCZOS)
@@ -190,16 +193,27 @@ def _render_card_sync(
     draw.text((340, 75), title, font=title_font, fill=(250, 251, 255, 255))
     label = "NOUVEAU NIVEAU" if level_up is not None else "PROFIL SENTRIX"
     draw.text((342, 45), label, font=_font(20, bold=True), fill=(*secondary, 255))
-    draw.text((342, 143), f"Niveau {level}  •  Rang {rank}", font=_font(28, bold=True), fill=(213, 222, 255, 255))
+    if show_levels:
+        draw.text((342, 143), f"Niveau {level}  •  Rang {rank}", font=_font(28, bold=True), fill=(213, 222, 255, 255))
+    else:
+        draw.text((342, 143), "Profil membre", font=_font(28, bold=True), fill=(213, 222, 255, 255))
     draw.text((342, 196), f"{guild_name}", font=_font(21), fill=(170, 181, 220, 255))
 
-    bar_left, bar_top, bar_right, bar_bottom = 340, 286, 1110, 320
-    progress_right = bar_left + round((bar_right - bar_left) * ratio)
-    if progress_right > bar_left:
-        draw.rounded_rectangle((bar_left, bar_top, progress_right, bar_bottom), radius=17, fill=(*accent, 245))
-    draw.text((342, 332), f"{current_xp:,} / {required_xp:,} XP".replace(",", " "), font=_font(20, bold=True), fill=(235, 238, 255, 255))
-    draw.text((620, 332), f"Messages  {int(stats.get('message_count', 0) or 0):,}".replace(",", " "), font=_font(20), fill=(194, 203, 235, 255))
-    draw.text((910, 332), f"Économie  {int(stats.get('total_money', 0) or 0):,}".replace(",", " "), font=_font(20), fill=(194, 203, 235, 255))
+    if show_levels:
+        bar_left, bar_top, bar_right, bar_bottom = 340, 286, 1110, 320
+        progress_right = bar_left + round((bar_right - bar_left) * ratio)
+        if progress_right > bar_left:
+            draw.rounded_rectangle((bar_left, bar_top, progress_right, bar_bottom), radius=17, fill=(*accent, 245))
+        draw.text((342, 332), f"{current_xp:,} / {required_xp:,} XP".replace(",", " "), font=_font(20, bold=True), fill=(235, 238, 255, 255))
+        message_x = 620
+        economy_x = 910
+    else:
+        message_x = 342
+        economy_x = 700
+
+    draw.text((message_x, 332), f"Messages  {int(stats.get('message_count', 0) or 0):,}".replace(",", " "), font=_font(20), fill=(194, 203, 235, 255))
+    if show_economy:
+        draw.text((economy_x, 332), f"Économie  {int(stats.get('total_money', 0) or 0):,}".replace(",", " "), font=_font(20), fill=(194, 203, 235, 255))
 
     output = io.BytesIO()
     canvas.convert("RGB").save(output, format="PNG", optimize=True)
@@ -214,6 +228,8 @@ async def render_member_card(
     settings: dict[str, Any],
     *,
     level_up: int | None = None,
+    show_levels: bool = True,
+    show_economy: bool = True,
 ) -> io.BytesIO:
     # On demande au CDN Discord une vraie version PNG de la PP. ``format='png'`` est
     # important : pour une PP animée, ``static_format='png'`` conservait encore le GIF,
@@ -261,6 +277,8 @@ async def render_member_card(
             stats or {},
             settings or theme_settings("sentrix"),
             level_up,
+            show_levels,
+            show_economy,
         )
     except Exception:
         # Une donnée de profil exotique ou un avatar illisible ne doit jamais condamner
@@ -283,4 +301,6 @@ async def render_member_card(
             fallback_stats,
             theme_settings("sentrix"),
             level_up,
+            show_levels,
+            show_economy,
         )

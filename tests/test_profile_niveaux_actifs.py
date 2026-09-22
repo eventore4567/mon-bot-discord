@@ -49,11 +49,15 @@ class _FakeMember:
 
 
 class _FakeLevelsCog:
-    def __init__(self, actifs: bool):
+    def __init__(self, actifs: bool, economie: bool = True):
         self._actifs = actifs
+        self._economie = economie
 
     async def _niveaux_actifs(self, guild_id):
         return self._actifs
+
+    async def _economie_active(self, guild_id):
+        return self._economie
 
 
 def _fake_bot(*, levels_cog=None):
@@ -72,8 +76,8 @@ class OverviewPageTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(profile_oxyde_runtime, "_snapshot", AsyncMock(return_value=_fake_snapshot_data())):
             embed = await profile_oxyde_runtime.build_page(bot, guild, member, member.id, "overview")
 
-        progression = next(f for f in embed.fields if f.name == "Progression")
-        self.assertEqual(progression.value, "Niveaux désactivés sur ce serveur.")
+        noms = [f.name for f in embed.fields]
+        self.assertNotIn("Progression", noms)
 
     async def test_affiche_la_progression_quand_actifs(self):
         bot = _fake_bot(levels_cog=_FakeLevelsCog(True))
@@ -102,6 +106,19 @@ class OverviewPageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Compte", noms)
 
 
+    async def test_masque_economie_quand_module_inactif(self):
+        bot = _fake_bot(levels_cog=_FakeLevelsCog(True, economie=False))
+        guild = SimpleNamespace(id=555)
+        member = _FakeMember()
+
+        with patch.object(profile_oxyde_runtime, "_snapshot", AsyncMock(return_value=_fake_snapshot_data())):
+            embed = await profile_oxyde_runtime.build_page(bot, guild, member, member.id, "overview")
+
+        noms = [f.name for f in embed.fields]
+        self.assertIn("Progression", noms)
+        self.assertNotIn("Économie", noms)
+
+
 class RankingsPageTests(unittest.IsolatedAsyncioTestCase):
     async def test_masque_le_rang_de_niveau_quand_desactive(self):
         bot = _fake_bot(levels_cog=_FakeLevelsCog(False))
@@ -111,7 +128,7 @@ class RankingsPageTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(profile_oxyde_runtime, "_snapshot", AsyncMock(return_value=_fake_snapshot_data())):
             embed = await profile_oxyde_runtime.build_page(bot, guild, member, member.id, "rankings")
 
-        self.assertIn("Niveau / XP\n**Désactivé sur ce serveur**", embed.description)
+        self.assertNotIn("Niveau / XP", embed.description)
         self.assertNotIn("**#3**", embed.description)
 
     async def test_affiche_le_rang_de_niveau_quand_actifs(self):
@@ -135,19 +152,31 @@ class RankingsPageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Messages\n**#7**", embed.description)
 
 
-class FailOpenTests(unittest.IsolatedAsyncioTestCase):
-    async def test_sans_cog_levels_charge_les_niveaux_sont_consideres_actifs(self):
-        """Fail-open, cohérent avec le comportement de _niveaux_actifs lui-même
-        (cogs/levels.py) quand une de ses propres vérifications échoue."""
-        bot = _fake_bot(levels_cog=None)
+    async def test_masque_rang_economie_quand_module_inactif(self):
+        bot = _fake_bot(levels_cog=_FakeLevelsCog(True, economie=False))
         guild = SimpleNamespace(id=555)
         member = _FakeMember()
 
         with patch.object(profile_oxyde_runtime, "_snapshot", AsyncMock(return_value=_fake_snapshot_data())):
+            embed = await profile_oxyde_runtime.build_page(bot, guild, member, member.id, "rankings")
+
+        self.assertIn("Niveau / XP\n**#3**", embed.description)
+        self.assertNotIn("Économie", embed.description)
+
+
+class FailClosedTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sans_source_module_chargee_les_modules_restent_invisibles(self):
+        bot = _fake_bot(levels_cog=None)
+        guild = SimpleNamespace(id=555)
+        member = _FakeMember()
+
+        with patch.object(profile_oxyde_runtime, "_snapshot", AsyncMock(return_value=_fake_snapshot_data())), \
+             patch("cogs.setup_v2_core.module_enabled", AsyncMock(return_value=False)):
             embed = await profile_oxyde_runtime.build_page(bot, guild, member, member.id, "overview")
 
-        progression = next(f for f in embed.fields if f.name == "Progression")
-        self.assertIn("Niveau", progression.value)
+        noms = [f.name for f in embed.fields]
+        self.assertNotIn("Progression", noms)
+        self.assertNotIn("Économie", noms)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ import types
 import typing
 
 import discord
+from discord.ext import commands
 from discord import app_commands
 
 import sentrix_v95_runtime as v95
@@ -34,6 +35,16 @@ def _unwrap_optional_safe(annotation):
 def _native_annotation_safe(annotation):
     """Convertit une annotation legacy vers un type App Command sans hash() fragile."""
     annotation = _unwrap_optional_safe(annotation)
+    # commands.Range[int, 0, 100] (hybride) et app_commands.Range : option numérique
+    # bornée. Sans ceci, /volume ou /seek exposaient un champ TEXTE libre et toute
+    # valeur non numérique finissait en « option invalide » (audit permissions 20/09/2026).
+    if isinstance(annotation, commands.Range):
+        try:
+            return app_commands.Range[annotation.annotation, annotation.min, annotation.max]
+        except Exception:
+            return annotation.annotation
+    if isinstance(annotation, app_commands.transformers.RangeTransformer):
+        return annotation
     supported = (
         str,
         int,

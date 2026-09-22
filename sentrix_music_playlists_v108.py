@@ -435,7 +435,7 @@ async def install_on_music_cog(bot, music_cog) -> None:
     _install_finish_ping(music_cog)
     _install_playlist_group(bot, music_cog)
     music_cog._sentrix_music_v108_installed = True
-    logger.warning("Musique V108 active : ping de fin + playlists persistantes.")
+    logger.info("Musique V108 active : ping de fin + playlists persistantes.")
 
 
 __all__ = [

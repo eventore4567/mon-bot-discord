@@ -32,7 +32,7 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "sentrix", "image", "ai-translate", "chat-reset",
     "balance", "daily", "work", "pay", "inventory", "banque",
     "economyleaderboard", "leaderboard-money",
-    "me", "level", "set-xp", "add-xp", "set-level-role", "remove-level-role",
+    "level", "stats", "set-xp", "add-xp", "set-level-role", "remove-level-role",
     "reset-levels",
     "ticket", "giveaway", "giveaway-reroll",
     # Le nouveau moteur expose pause/skip/stop sous le groupe /music. Seul +play
@@ -56,6 +56,9 @@ PRIVATE_OWNER_COMMANDS = frozenset({
 # rester ni en préfixe, ni en slash, ni être réinjectées par les couches de restauration.
 EXPLICITLY_REMOVED_COMMANDS = frozenset({
     "blacklist-add", "blacklist-users",
+    # Ancien alias du profil retiré : +stats est la surface préfixe canonique et
+    # la carte profil vit dans la surface slash/dashboard.
+    "me",
 })
 
 # Nouveau système transverse : visible dans +help sans le classer dans les anciennes
@@ -146,7 +149,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # traité différemment de daily/work sans raison documentée).
     "economy", "rob", "buy", "sell", "gamble", "deposit", "withdraw",
     "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
-    "stats", "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
+    "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
     "voice-time", "level-roles",
     # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
     "addemoji", "deleteemoji", "emoji-list",

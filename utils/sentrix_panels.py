@@ -240,7 +240,6 @@ class Panneau(discord.ui.LayoutView):
             rendu = section.rendu()
             if not rendu:
                 continue
-            conteneur.add_item(discord.ui.Separator())
             conteneur.add_item(discord.ui.TextDisplay(rendu[:_LIMITE_BLOC]))
 
         # 4 — pied de page en petit, comme la signature d'un document.
@@ -250,7 +249,6 @@ class Panneau(discord.ui.LayoutView):
             # prend toute la largeur sous le texte plutot qu'une vignette d'angle.
             contenu = discord.ui.MediaGallery()
             contenu.add_item(media=str(image))
-            conteneur.add_item(discord.ui.Separator())
             conteneur.add_item(contenu)
 
         if pied:
@@ -259,7 +257,6 @@ class Panneau(discord.ui.LayoutView):
         # 5 — navigation, DANS le conteneur pour rester sous l'accent de couleur.
         rangees = _rangees(boutons)
         if rangees:
-            conteneur.add_item(discord.ui.Separator())
             for rangee in rangees:
                 conteneur.add_item(rangee)
 
@@ -409,6 +406,13 @@ async def envoyer(
         # par l'interaction parente, faute d'accesseur public.
         parent = getattr(destination, "_parent", None)
         if parent is not None:
+            if reponse_differee_a_finaliser(parent):
+                try:
+                    result = await parent.edit_original_response(**kwargs_edition_reponse_differee(kwargs))
+                    marquer_reponse_differee_finalisee(parent)
+                    return result
+                except (discord.NotFound, discord.HTTPException):
+                    logger.debug("Edition du panneau différé impossible, repli follow-up.", exc_info=True)
             return await parent.followup.send(**kwargs)
         raise RuntimeError(
             "Reponse d'interaction deja envoyee et followup inaccessible."
@@ -422,6 +426,13 @@ async def envoyer(
             kwargs["ephemeral"] = True
         if not interaction.response.is_done():
             return _message_envoye(await interaction.response.send_message(**kwargs))
+        if reponse_differee_a_finaliser(interaction):
+            try:
+                result = await interaction.edit_original_response(**kwargs_edition_reponse_differee(kwargs))
+                marquer_reponse_differee_finalisee(interaction)
+                return result
+            except (discord.NotFound, discord.HTTPException):
+                logger.debug("Edition du panneau différé impossible, repli follow-up.", exc_info=True)
         return await interaction.followup.send(**kwargs)
 
     # Webhook (interaction.followup), Messageable (ctx, salon, membre).
@@ -434,7 +445,7 @@ async def envoyer(
     return await destination.send(**kwargs)
 
 
-_BARRE_DESSINEE = _re.compile(r"[━─—]{6,}")
+_BARRE_DESSINEE = _re.compile(r"[-━─—]{6,}")
 
 
 def _sans_barre(texte: str) -> str:
@@ -625,7 +636,6 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
 
     rangees = _rangees_d_items(enfants)
     if rangees:
-        conteneur.add_item(discord.ui.Separator())
         for rangee in rangees:
             conteneur.add_item(rangee)
 
@@ -720,6 +730,60 @@ _MENTIONS_AUCUNE = discord.AllowedMentions.none()
 # unified_command_panels) : pendant un envoi de texte_court, le texte reste du texte.
 TEXTE_BRUT: contextvars.ContextVar[bool] = contextvars.ContextVar("sentrix_texte_brut", default=False)
 
+# Une commande slash peut defer() avant son vrai résultat. Historiquement, le premier
+# ctx.send()/panels.envoyer() partait ensuite en follow-up, ce qui laissait la réponse
+# différée séparée du vrai résultat. Le préfixe +, lui, n'avait qu'UNE réponse finale.
+# Ce registre permet à / d'utiliser le message différé comme réponse finale, une seule fois.
+_REPONSES_DIFFEREES_FINALISEES: dict[str, float] = {}
+
+
+def _cle_interaction(interaction: Any) -> str:
+    token = str(getattr(interaction, "token", "") or "")
+    if token:
+        return token
+    return str(getattr(interaction, "id", id(interaction)))
+
+
+def reponse_differee_a_finaliser(interaction: Any) -> bool:
+    if interaction is None:
+        return False
+    response = getattr(interaction, "response", None)
+    if response is None or not bool(response.is_done()):
+        return False
+    response_type = getattr(response, "type", None)
+    deferred_types = {
+        discord.InteractionResponseType.deferred_channel_message,
+        discord.InteractionResponseType.deferred_message_update,
+    }
+    if response_type not in deferred_types:
+        return False
+    return _cle_interaction(interaction) not in _REPONSES_DIFFEREES_FINALISEES
+
+
+def marquer_reponse_differee_finalisee(interaction: Any) -> None:
+    import time as _time
+
+    _REPONSES_DIFFEREES_FINALISEES[_cle_interaction(interaction)] = _time.monotonic()
+    if len(_REPONSES_DIFFEREES_FINALISEES) > 2048:
+        cutoff = _time.monotonic() - 1800
+        for key, stamp in list(_REPONSES_DIFFEREES_FINALISEES.items()):
+            if stamp < cutoff:
+                _REPONSES_DIFFEREES_FINALISEES.pop(key, None)
+
+
+def kwargs_edition_reponse_differee(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Adapte un payload send()/followup vers edit_original_response()."""
+    charge = dict(kwargs)
+    charge.pop("ephemeral", None)  # fixé au moment du defer(), non modifiable ensuite
+    charge.pop("delete_after", None)
+    fichiers = charge.pop("files", None)
+    fichier = charge.pop("file", None)
+    if fichier is not None:
+        fichiers = [*(fichiers or []), fichier]
+    if fichiers:
+        charge["attachments"] = list(fichiers)
+    return charge
+
 
 async def texte_court(
     destination: Any,
@@ -758,6 +822,13 @@ async def _envoyer_texte(destination: Any, kwargs: dict[str, Any], *, ephemere: 
         parent = getattr(destination, "_parent", None)
         if parent is None:
             raise RuntimeError("Reponse d'interaction deja envoyee et followup inaccessible.")
+        if reponse_differee_a_finaliser(parent):
+            try:
+                result = await parent.edit_original_response(**kwargs_edition_reponse_differee(kwargs))
+                marquer_reponse_differee_finalisee(parent)
+                return result
+            except (discord.NotFound, discord.HTTPException):
+                logger.debug("Edition de la réponse différée impossible, repli follow-up.", exc_info=True)
         return await parent.followup.send(**kwargs)
 
     interaction = getattr(destination, "interaction", None) or (
@@ -768,6 +839,13 @@ async def _envoyer_texte(destination: Any, kwargs: dict[str, Any], *, ephemere: 
             kwargs["ephemeral"] = True
         if not interaction.response.is_done():
             return _message_envoye(await interaction.response.send_message(**kwargs))
+        if reponse_differee_a_finaliser(interaction):
+            try:
+                result = await interaction.edit_original_response(**kwargs_edition_reponse_differee(kwargs))
+                marquer_reponse_differee_finalisee(interaction)
+                return result
+            except (discord.NotFound, discord.HTTPException):
+                logger.debug("Edition de la réponse différée impossible, repli follow-up.", exc_info=True)
         return await interaction.followup.send(**kwargs)
 
     # Webhook (followup) ou Messageable (ctx préfixe, salon, membre).

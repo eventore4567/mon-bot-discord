@@ -211,7 +211,15 @@ class VerificationPanelView(discord.ui.View):
             return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Service indisponible', "La vérification SentriX n'est pas chargée pour le moment.", state='error')), ephemere=True)
         starter = getattr(cog, "start_human_verification", None)
         if not callable(starter):
-            return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Service de vérification indisponible', "Le moteur actif ne fournit pas le démarrage manuel.", state='error')), ephemere=True)
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(_status_embed(
+                    'Service de vérification indisponible',
+                    "Le moteur actif ne fournit pas encore le démarrage manuel. Réessayez après actualisation du panneau.",
+                    state='error',
+                )),
+                ephemere=True,
+            )
         await starter(interaction)
 
     @discord.ui.button(
@@ -233,7 +241,15 @@ class VerificationPanelView(discord.ui.View):
             last_start.pop(key, None)
         starter = getattr(cog, "start_human_verification", None)
         if not callable(starter):
-            return await panels.envoyer(interaction.response, panels.depuis_embed(_status_embed('Service de vérification indisponible', "Le moteur actif ne fournit pas le démarrage manuel.", state='error')), ephemere=True)
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(_status_embed(
+                    'Service de vérification indisponible',
+                    "Le moteur actif ne fournit pas encore le démarrage manuel. Réessayez après actualisation du panneau.",
+                    state='error',
+                )),
+                ephemere=True,
+            )
         await starter(interaction)
 
     @discord.ui.button(

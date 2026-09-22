@@ -133,7 +133,7 @@ def install(dashboard) -> bool:
 
     dashboard.INDEX_HTML = patch_html(str(getattr(dashboard, "INDEX_HTML", "") or ""))
     ok = JS_MARKER in dashboard.INDEX_HTML and MARKER in dashboard.INDEX_HTML and '["product","Centre avancé","PX"]' in dashboard.INDEX_HTML
-    logger.warning("Dashboard Product UI V18 installed=%s: one advanced control-center page.", ok)
+    logger.info("Dashboard Product UI V18 installed=%s: one advanced control-center page.", ok)
     return ok
 
 

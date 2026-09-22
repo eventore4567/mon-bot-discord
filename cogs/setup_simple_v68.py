@@ -55,6 +55,13 @@ def _has_native_permission(author: Any, guild: Any, permission: str) -> bool:
 
 
 def _category_for(name: str) -> str | None:
+    # Une sous-commande déclarée plus stricte que son groupe (« giveaway create »,
+    # « sentrixpro lockdown ») porte sa catégorie dans SUBCOMMAND_TIERS : sans cette
+    # ligne elle tombait en fail-closed (Administrateur) alors que la matrice et +help
+    # annoncent « Gérer le serveur ».
+    declared = matrix.SUBCOMMAND_TIERS.get(name)
+    if declared:
+        return declared
     for category, names in matrix.CATEGORY_COMMANDS.items():
         if name in names:
             return category
@@ -116,12 +123,7 @@ async def secure_evaluate_v68(
 
     module = matrix.module_for_command(name)
     if module and not await backend.module_enabled(guild_id, module):
-        label = matrix.MODULE_LABELS.get(module, module)
-        return _deny(
-            f"Le module **{label}** est désactivé sur ce serveur. "
-            "Un administrateur peut le réactiver dans `+setup` ou `/setup`.",
-            f"module:{module}:off",
-        )
+        return _deny(matrix.module_disabled_message(module), f"module:{module}:off")
 
     if module == "ai" and name not in matrix.AI_ALWAYS_ALLOWED:
         features = await backend.ai_features(guild_id)

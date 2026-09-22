@@ -26,7 +26,7 @@ class HelpVisibilityBatchTests(unittest.TestCase):
             "server-audit", "server-health", "server-growth", "server-managed",
             "economy", "rob", "buy", "sell", "gamble", "deposit", "withdraw",
             "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
-            "stats", "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
+            "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
             "voice-time", "level-roles",
             "addemoji", "deleteemoji", "emoji-list",
         }
@@ -34,9 +34,9 @@ class HelpVisibilityBatchTests(unittest.TestCase):
         self.assertEqual(missing, set(), f"toujours absentes : {missing}")
 
     def test_aucune_de_ces_commandes_ne_consomme_le_budget_slash(self):
-        """Non-régression : la visibilité +help ne doit jamais entraîner
-        l'éligibilité slash (NORMAL_DIRECT_COMMANDS est plafonné à exactement 100,
-        déjà saturé — voir tools/command_runtime_audit.py)."""
+        """Non-régression : ce lot d'orphelines reste +help uniquement.
+        +stats a quitté ce lot : c'est désormais la surface profil canonique et une
+        commande directe, donc elle est testée avec NORMAL_DIRECT_COMMANDS ailleurs."""
         overlap = HELP_VISIBLE_EXTRA_COMMANDS & NORMAL_DIRECT_COMMANDS
         self.assertEqual(overlap, set())
 

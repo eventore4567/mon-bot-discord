@@ -64,10 +64,18 @@ ARGUMENT_ERRORS = frozenset({
 })
 
 # ----------------------------------------------------------------- génération d'arguments
+_SWEEP_BOT = None  # bot booté, pour résoudre les commandes d'origine (option « arguments »)
 
 
 def _text_for(name: str) -> str:
     key = name.casefold()
+    # Option texte libre qui attend en réalité une mention (Greedy[Role], Greedy[Member]…).
+    if key in ("role", "roles", "rôle") or key.startswith("role"):
+        return f"<@&{harness.PING_ROLE_ID}>"
+    if any(k in key for k in ("membre", "member", "user", "utilisateur", "cible", "target", "adversaire")):
+        return f"<@{harness.TARGET_ID}>"
+    if any(k in key for k in ("salon", "channel")):
+        return f"<#{harness.CID}>"
     if any(k in key for k in ("duree", "durée", "duration", "temps", "delai", "délai", "time")):
         return "10m"
     if any(k in key for k in ("raison", "reason", "motif")):
@@ -221,7 +229,27 @@ def slash_invocation(command: app_commands.Command) -> tuple[str, list, list[str
     """(racine, options imbriquées, paramètres non générables) pour une commande slash feuille."""
     leaf_options: list[dict] = []
     missing: list[str] = []
-    for param in command.parameters:
+    params = list(command.parameters)
+    if len(params) == 1 and params[0].name == "arguments":
+        # Surface V95 « texte libre » : on rejoue les mêmes arguments que le préfixe.
+        source = getattr(getattr(command, "callback", None), "_sentrix_original_command", None)
+        from discord.ext import commands as _commands
+        bot_command = None
+        try:
+            import sentrix_v95_runtime as _v95  # noqa: F401
+        except Exception:
+            pass
+        text = ""
+        if source and _SWEEP_BOT is not None:
+            bot_command = _SWEEP_BOT.get_command(str(source))
+        if isinstance(bot_command, _commands.Command):
+            invocation, missing_prefix = prefix_invocation(bot_command)
+            text = " ".join(invocation.split(" ")[bot_command.qualified_name.count(" ") + 1:])
+            missing.extend(missing_prefix)
+        if text:
+            leaf_options.append({"name": "arguments", "type": 3, "value": text})
+        params = []
+    for param in params:
         if not param.required:
             continue
         option = slash_option(param)
@@ -346,6 +374,8 @@ async def sweep(*, only: list[str], include_owner: bool, timeout: float, transpo
 
     bot = await harness.boot()
     guild = await harness.setup_world(bot)
+    global _SWEEP_BOT
+    _SWEEP_BOT = bot
 
     capture = _ErrorCapture()
     logging.getLogger().addHandler(capture)

@@ -72,10 +72,11 @@ class RuntimeResponseTransportTests(unittest.TestCase):
         )
         self.assertIn("interaction.edit_original_response", refresh)
 
-    def test_final_error_owner_replaces_existing_prefix_response(self):
+    def test_final_error_owner_preserves_existing_prefix_response(self):
         source = (ROOT / "cogs" / "final_error_embed_v5.py").read_text(encoding="utf-8")
         self.assertIn('getattr(ctx, "_sentrix_response_sent", False)', source)
-        self.assertIn("await _replace_prefix_response(ctx, panel)", source)
+        self.assertNotIn("await _replace_prefix_response(ctx, panel)", source)
+        self.assertIn("réponse déjà envoyée conservée", source)
         self.assertIn("await raw_edit(interaction, content=None, embeds=[], view=panneau", source)
 
 

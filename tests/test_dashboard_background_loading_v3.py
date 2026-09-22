@@ -1,3 +1,13 @@
+"""Couche historique : le garde de chargement V3 n'est plus injecté dans /app.
+
+Le programme unique (tests/test_dashboard_single_program.py) n'interroge plus /api/public
+en boucle et ne montre aucune barre de progression pour les requêtes d'arrière-plan.
+Fichier conservé jusqu'à la suppression des anciennes couches (lot 7 de la refonte).
+"""
+import pytest
+
+pytest.skip("Couche V3 retirée du programme /app (refonte 2026-09, lot 1) ; suppression au lot 7.", allow_module_level=True)
+
 from sentrix_dashboard_finalizer_v7 import _stabilize_background_loading
 
 

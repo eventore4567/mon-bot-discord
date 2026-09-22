@@ -21,7 +21,7 @@ logger = logging.getLogger("bot.wide-compact-v6")
 
 
 # 42 caractères : grande visuellement, mais sans débordement sur les cartes compactes.
-LONG_BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+LONG_BAR = ""
 _BANNER_URL = str(getattr(sx, "SENTRIX_BANNER_URL", "") or "")
 _INSTALLED = False
 _SEPARATOR_LINE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]+$")
@@ -53,9 +53,7 @@ def _strip_legacy_separators(value: Any) -> str:
 
 
 def _with_bar(value: Any, limit: int = 4096) -> str:
-    body = _strip_legacy_separators(value)
-    text = f"{LONG_BAR}\n{body}" if body else LONG_BAR
-    return sx.clip(text, limit)
+    return sx.clip(_strip_legacy_separators(value), limit)
 
 
 def _one_line(value: Any, limit: int = 150) -> str:

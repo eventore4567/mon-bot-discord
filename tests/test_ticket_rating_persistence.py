@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
@@ -72,6 +73,7 @@ class TicketRatingPersistenceTests(unittest.IsolatedAsyncioTestCase):
 
         fake_interaction.client = MagicMock()
         fake_interaction.client.db = self.db
+        fake_interaction.user = SimpleNamespace(id=1)
         fake_interaction.response = MagicMock()
         fake_interaction.response.edit_message = AsyncMock()
 
@@ -80,6 +82,44 @@ class TicketRatingPersistenceTests(unittest.IsolatedAsyncioTestCase):
         row = await self.db.fetchone("SELECT rating FROM tickets WHERE id = ?", (ticket_id,))
         self.assertEqual(row["rating"], 5)
         fake_interaction.response.edit_message.assert_awaited_once()
+
+
+    async def test_un_autre_membre_ne_peut_pas_noter_le_ticket(self):
+        ticket_id = await self._insert_ticket()
+        button = TicketRatingButton(5, ticket_id)
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.client = MagicMock()
+        interaction.client.db = self.db
+        interaction.user = SimpleNamespace(id=999)
+        interaction.response = MagicMock()
+        interaction.response.send_message = AsyncMock()
+        interaction.response.edit_message = AsyncMock()
+
+        await button.callback(interaction)
+
+        row = await self.db.fetchone("SELECT rating FROM tickets WHERE id = ?", (ticket_id,))
+        self.assertIsNone(row["rating"])
+        interaction.response.send_message.assert_awaited_once()
+        interaction.response.edit_message.assert_not_awaited()
+
+    async def test_la_note_ne_peut_pas_etre_ecrasee_apres_le_premier_vote(self):
+        ticket_id = await self._insert_ticket()
+        await self.db.execute("UPDATE tickets SET rating = 4 WHERE id = ?", (ticket_id,))
+        button = TicketRatingButton(1, ticket_id)
+        interaction = MagicMock(spec=discord.Interaction)
+        interaction.client = MagicMock()
+        interaction.client.db = self.db
+        interaction.user = SimpleNamespace(id=1)
+        interaction.response = MagicMock()
+        interaction.response.send_message = AsyncMock()
+        interaction.response.edit_message = AsyncMock()
+
+        await button.callback(interaction)
+
+        row = await self.db.fetchone("SELECT rating FROM tickets WHERE id = ?", (ticket_id,))
+        self.assertEqual(row["rating"], 4)
+        interaction.response.send_message.assert_awaited_once()
+        interaction.response.edit_message.assert_not_awaited()
 
     def test_ratingview_construit_bien_5_boutons_dynamiques(self):
         view = RatingView.__new__(RatingView)

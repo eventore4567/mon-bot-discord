@@ -17,6 +17,7 @@ import asyncio
 import functools
 import inspect
 import logging
+import re
 import time
 import types
 from typing import Any
@@ -26,6 +27,7 @@ from discord.ext import commands
 logger = logging.getLogger("bot.music-persistence")
 
 _RETRY_SECONDS = 30
+_VOICE_ABNORMAL_CLOSE_CODE = 1006
 _TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS music_voice_sessions (
     guild_id INTEGER PRIMARY KEY,
@@ -44,6 +46,7 @@ class PersistentVoiceState:
         self._restore_lock = asyncio.Lock()
         self._closed = False
         self._watchdog_task: asyncio.Task | None = None
+        self._last_abnormal_disconnect_at: dict[int, float] = {}
 
     async def ensure_schema(self) -> None:
         if self._schema_ready:
@@ -197,11 +200,21 @@ class PersistentVoiceState:
 
                 try:
                     queue.voice_client = await voice_channel.connect(timeout=30, reconnect=True)
-                    logger.warning(
-                        "connexion vocale persistante restaurée -> guild=%s channel=%s",
-                        guild_id,
-                        voice_channel.id,
-                    )
+                    abnormal_at = self._last_abnormal_disconnect_at.pop(guild_id, None)
+                    if abnormal_at is not None:
+                        logger.warning(
+                            "connexion vocale restaurée après fermeture websocket %s -> guild=%s channel=%s délai=%.1fs",
+                            _VOICE_ABNORMAL_CLOSE_CODE,
+                            guild_id,
+                            voice_channel.id,
+                            max(0.0, time.monotonic() - abnormal_at),
+                        )
+                    else:
+                        logger.warning(
+                            "connexion vocale persistante restaurée -> guild=%s channel=%s",
+                            guild_id,
+                            voice_channel.id,
+                        )
                 except Exception as exc:
                     # Permissions, réseau ou Discord indisponible : on conserve l'épingle
                     # et on réessaie indéfiniment tant que /music leave n'est pas appelé.
@@ -211,6 +224,54 @@ class PersistentVoiceState:
                         voice_channel.id,
                         str(exc)[:180],
                     )
+                    if guild_id in self._last_abnormal_disconnect_at:
+                        logger.info(
+                            "reprise vocale %s toujours en attente -> guild=%s channel=%s",
+                            _VOICE_ABNORMAL_CLOSE_CODE,
+                            guild_id,
+                            voice_channel.id,
+                        )
+
+    async def note_gateway_disconnect(self, guild_id: int, *, code: int | None, reason: str = "") -> None:
+        await self.ensure_schema()
+        if int(code or 0) == _VOICE_ABNORMAL_CLOSE_CODE:
+            self._last_abnormal_disconnect_at[int(guild_id)] = time.monotonic()
+            logger.warning(
+                "fermeture websocket voix %s détectée -> guild=%s reason=%s ; reprise sûre programmée",
+                _VOICE_ABNORMAL_CLOSE_CODE,
+                guild_id,
+                reason[:160] if reason else "n/a",
+            )
+            await self.restore_all()
+            return
+        logger.info(
+            "déconnexion gateway voix observée -> guild=%s code=%s reason=%s",
+            guild_id,
+            code,
+            reason[:160] if reason else "n/a",
+        )
+
+    async def on_socket_response(self, payload: Any) -> None:
+        if not isinstance(payload, dict):
+            return
+        event_type = payload.get("t")
+        data = payload.get("d") or {}
+        if event_type not in {"VOICE_SERVER_UPDATE", "VOICE_STATE_UPDATE"} or not isinstance(data, dict):
+            return
+        guild_id = data.get("guild_id")
+        if guild_id is None:
+            return
+        code = data.get("code")
+        reason = str(data.get("reason") or data.get("close_reason") or "")
+        if code is None and reason:
+            match = re.search(r"\b1006\b", reason)
+            code = _VOICE_ABNORMAL_CLOSE_CODE if match else None
+        if code is None:
+            return
+        try:
+            await self.note_gateway_disconnect(int(guild_id), code=int(code), reason=reason)
+        except (TypeError, ValueError):
+            return
 
     async def on_ready(self) -> None:
         await self.restore_all()
@@ -325,6 +386,7 @@ def install_on_cog(bot: commands.Bot, cog: Any) -> PersistentVoiceState:
     # a coupé la connexion. Une déconnexion externe ne vaut jamais "leave".
     bot.add_listener(state.on_ready, "on_ready")
     bot.add_listener(state.on_voice_state_update, "on_voice_state_update")
+    bot.add_listener(state.on_socket_response, "on_socket_response")
 
     original_unload = getattr(cog, "cog_unload", None)
 
@@ -333,6 +395,7 @@ def install_on_cog(bot: commands.Bot, cog: Any) -> PersistentVoiceState:
         try:
             bot.remove_listener(state.on_ready, "on_ready")
             bot.remove_listener(state.on_voice_state_update, "on_voice_state_update")
+            bot.remove_listener(state.on_socket_response, "on_socket_response")
         except Exception:
             pass
         if callable(original_unload):
@@ -341,7 +404,7 @@ def install_on_cog(bot: commands.Bot, cog: Any) -> PersistentVoiceState:
 
     cog.cog_unload = _cog_unload_persistent
     state.start()
-    logger.warning(
+    logger.info(
         "Musique V104 voix persistante active : aucun départ automatique ; "
         "reconnexion après restart/failover jusqu'à /music leave."
     )

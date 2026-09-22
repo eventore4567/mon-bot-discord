@@ -20,7 +20,7 @@ concurrency:
 jobs:
   sweep:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,7 +37,28 @@ jobs:
           pip install -r requirements.txt
 
       - name: Compile sweep tooling
-        run: python -m py_compile tools/command_sweep.py tools/sentrix_e2e_harness.py cogs/command_health.py
+        run: python -m py_compile tools/command_sweep.py tools/sentrix_e2e_harness.py tools/permission_audit_sweep.py cogs/command_health.py
+
+      - name: Critical runtime regression tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          OPENAI_API_KEY: ""
+          POSTGRES_URL: ""
+          REDIS_URL: ""
+        run: |
+          python -m pytest -q \
+            tests/test_games_runtime_core.py \
+            tests/test_ai_command_router.py \
+            tests/test_automod_live_matrix.py \
+            tests/test_ticket_atomic_actions.py \
+            tests/test_ticket_rating_persistence.py \
+            tests/test_economy_race_conditions.py \
+            tests/test_services_economy.py \
+            tests/test_services_tickets.py \
+            tests/test_access_matrix.py \
+            tests/test_giveaway_center.py \
+            tests/test_ha_transition_observability.py \
+            tests/test_ha_sigterm_failover.py
 
       - name: Sweep every command (strict on technical errors)
         env:
@@ -47,10 +68,21 @@ jobs:
           REDIS_URL: ""
         run: python tools/command_sweep.py --strict --out reports/command_sweep
 
-      - name: Publish report
+      - name: Audit permissions × messages de refus (strict)
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          OPENAI_API_KEY: ""
+          POSTGRES_URL: ""
+          REDIS_URL: ""
+          SENTRIX_SHORT_SLASH_NAMES: "1"
+        run: python tools/permission_audit_sweep.py --strict --out reports/permission_audit
+
+      - name: Publish reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: command-sweep-report
-          path: reports/command_sweep.*
+          path: |
+            reports/command_sweep.*
+            reports/permission_audit.*
           if-no-files-found: warn

@@ -26,7 +26,7 @@ SENTRIX_BANNER_URL = (
 )
 FOOTER_TEXT = SENTRIX_FOOTER
 FOOTER_ICON: str | None = None
-BAR = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+BAR = ""
 
 # Ces six constantes etaient une copie locale de config.COLOR_*, et les deux copies
 # avaient diverge. On lit maintenant la source unique. Les noms restent exportes tels
@@ -133,7 +133,7 @@ def _kind_from_text(title: Any, description: Any = "") -> str:
         return "success"
     if any(word in text for word in (
         "erreur", "impossible", "introuvable", "refus", "interdit", "échoué",
-        "echoue", "banni", "bannissement", "supprimé", "supprime",
+        "echoue", "échec", "echec",
     )):
         return "danger"
     if any(word in text for word in (
@@ -145,6 +145,7 @@ def _kind_from_text(title: Any, description: Any = "") -> str:
         "succès", "succes", "effectuée", "effectuee", "effectué", "effectue",
         "réussi", "reussi", "créé", "cree", "ajouté", "ajoute", "activé",
         "active", "enregistré", "enregistre", "terminé", "termine",
+        "supprimé", "supprime", "annulé", "annule", "effectuée", "effectuee",
     )):
         return "success"
     if any(word in text for word in ("information", "statut", "ping", "profil", "aide")):
@@ -166,10 +167,8 @@ def _colour(kind: str | None = None, fallback: int | None = None) -> int:
 
 
 def _panel_description(description: Any, *, clean: bool = True) -> str:
-    body = clean_multiline_ui_text(description, 3970) if clean else clip(description, 3970)
-    if body.startswith(BAR):
-        return body
-    return f"{BAR}\n{body}" if body else BAR
+    """Description sans barre décorative : le contenu commence directement."""
+    return clean_multiline_ui_text(description, 4096) if clean else clip(description, 4096)
 
 
 def _footer(embed: discord.Embed, text: str | None = None) -> discord.Embed:
@@ -225,7 +224,7 @@ _CANONICAL_BASE = _base
 # le fallback en ignorant le kind, un succes, une erreur et un avertissement sortaient
 # EXACTEMENT de la meme couleur violette. Sur les ~290 commandes qui passent par ce
 # module, rien ne distinguait visuellement une reussite d'un echec.
-def success(description: str, title: str = "Action effectuée") -> discord.Embed:
+def success(description: str, title: str = "Succès") -> discord.Embed:
     return _base(title, description, kind="success")
 
 

@@ -62,6 +62,7 @@ def test_recovery_fallback_is_guarded_and_bad_config_cannot_start_http():
             "SESSION_COOKIE", "_session", "_require_session", "_require_csrf",
             "handle_index", "handle_health", "handle_login", "handle_callback", "handle_logout",
             "handle_public", "handle_me", "handle_guilds", "handle_guild", "handle_update_guild",
+            "handle_welcome_get", "handle_welcome_put", "handle_welcome_test",
             "handle_create_social_notification", "handle_delete_social_notification", "handle_sanctions",
             "handle_sanction_action", "security_headers",
         )})

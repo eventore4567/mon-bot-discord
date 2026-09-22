@@ -220,7 +220,13 @@ def _argument_text(command: commands.Command, option_names: tuple[str, ...], kwa
     for (original, parameter), exposed in zip(params, option_names):
         value = kwargs.get(exposed)
         required = _is_required(parameter)
-        if value is None and not required:
+        default = getattr(parameter, "default", inspect.Parameter.empty)
+        # Une option facultative laissée vide arrive avec sa valeur PAR DÉFAUT (0, "",
+        # False…), pas seulement None : la traiter comme fournie déclenchait « ne peut
+        # pas être fournie après une option facultative laissée vide » sur /pro goal
+        # action:list (reward_money=0 par défaut) — commande inutilisable en slash.
+        omitted = value is None or (not required and default is not inspect.Parameter.empty and value == default)
+        if omitted and not required:
             gap = True
             continue
         if value is None:

@@ -1,7 +1,9 @@
 from web import dashboard_product_ui_v18
 from web import dashboard_unified_v2
+import pytest
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_v18_patches_native_unified_v2_once():
     html = dashboard_product_ui_v18.patch_html(dashboard_unified_v2.INDEX_HTML)
 
@@ -15,6 +17,7 @@ def test_v18_patches_native_unified_v2_once():
     assert dashboard_product_ui_v18.patch_html(html) == html
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_v18_keeps_single_sidebar_destination():
     html = dashboard_product_ui_v18.patch_html(dashboard_unified_v2.INDEX_HTML)
     assert html.count('["product","Centre avancé","PX"]') == 1

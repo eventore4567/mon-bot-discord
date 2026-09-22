@@ -165,12 +165,46 @@ async def test_restore_keeps_pin_when_connection_temporarily_fails():
     assert await state.is_pinned(123) is True
 
 
+@pytest.mark.asyncio
+async def test_websocket_1006_disconnect_keeps_pin_and_restores_voice():
+    channel = FakeVoiceChannel(456)
+    guild = FakeGuild(123, channel)
+    bot = FakeBot(guild)
+    cog = FakeCog()
+    state = PersistentVoiceState(bot, cog)
+
+    await state.remember(123, 456, None)
+    await state.note_gateway_disconnect(123, code=1006, reason="abnormal websocket closure 1006")
+
+    assert channel.connect_calls == 1
+    assert await state.is_pinned(123) is True
+    assert state._last_abnormal_disconnect_at == {}
+
+
+@pytest.mark.asyncio
+async def test_socket_payload_1006_text_is_treated_as_abnormal_voice_close():
+    channel = FakeVoiceChannel(456)
+    guild = FakeGuild(123, channel)
+    bot = FakeBot(guild)
+    cog = FakeCog()
+    state = PersistentVoiceState(bot, cog)
+
+    await state.remember(123, 456, None)
+    await state.on_socket_response(
+        {"t": "VOICE_STATE_UPDATE", "d": {"guild_id": "123", "reason": "gateway closed with 1006"}}
+    )
+
+    assert channel.connect_calls == 1
+    assert await state.is_pinned(123) is True
+
+
 def test_runtime_contract_has_no_inactivity_leave_and_unpins_only_on_music_leave():
     source = open("sentrix_music_voice_persistence.py", encoding="utf-8").read()
     assert "_never_disconnect_for_inactivity" in source
     assert "cog._schedule_disconnect =" in source
     assert 'bot.get_command("music leave")' in source
     assert "await state.forget(int(ctx.guild.id))" in source
+    assert 'bot.add_listener(state.on_socket_response, "on_socket_response")' in source
     assert "reconnexion après restart/failover jusqu'à /music leave" in source
 
 

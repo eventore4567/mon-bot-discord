@@ -9,9 +9,11 @@ les protections existantes :
 - seuil strict par défaut : 1888/2000 ;
 - aucune collecte d'IP, d'appareil ou d'information hors de l'API Discord.
 
-Le score n'invente pas « 1000 facteurs ». Il agrège des preuves Discord réellement
-observables et le challenge interactif déjà présent. Les preuves du challenge ont le
-poids principal afin qu'un humain légitime puisse passer sans profilage opaque.
+V71 exécute désormais le moteur adaptatif V5 complet pendant le challenge : les
+14 contrôles de passerelle et les 40 signaux V5 sont réellement évalués, soit
+54 contrôles observables au total. Les contrôles corrélés restent regroupés et
+plafonnés : SentriX n'invente pas des centaines de pseudo-facteurs juste pour
+gonfler un compteur.
 """
 from __future__ import annotations
 
@@ -36,6 +38,9 @@ logger = logging.getLogger("bot.security-verification-v71")
 
 RUNTIME_MARKER = "Sécurité V71"
 SCORE_MAX = 2000
+GATEWAY_CHECK_COUNT = 14
+ADAPTIVE_SIGNAL_COUNT = 40
+TOTAL_REAL_CHECKS = GATEWAY_CHECK_COUNT + ADAPTIVE_SIGNAL_COUNT
 DEFAULT_SCORE_THRESHOLD = 1888
 MIN_SCORE_THRESHOLD = 1600
 MAX_SCORE_THRESHOLD = 1999
@@ -537,9 +542,9 @@ async def _verification_embed(view) -> discord.Embed:
     panel.add_field(
         name="PREUVES ANALYSÉES",
         value=(
-            "Séquence interactive · code unique · calcul unique · Membership Screening · compte humain · "
-            "cohérence du compte Discord · ancienneté · temps depuis l'arrivée · timeout · rôles de vérification · "
-            "tentatives récentes · avatar · cohérence Snowflake."
+            f"**{TOTAL_REAL_CHECKS} contrôles réels** : challenge humain, Membership Screening, identité Discord, "
+            "cohérence Snowflake, ancienneté, session, rôles et privilèges, historique sécurité, "
+            "contexte anti-raid, comportement précoce et confiance."
         ),
         inline=False,
     )
@@ -721,12 +726,35 @@ class SecurityVerificationRuntimeV71:
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
-    def _score(self, engine: Any, member: discord.Member, state: Any, code: str, math_answer: str, cfg: dict[str, Any]) -> tuple[int, dict[str, bool]]:
+    async def _score(
+        self,
+        engine: Any,
+        member: discord.Member,
+        state: Any,
+        code: str,
+        math_answer: str,
+        cfg: dict[str, Any],
+    ) -> tuple[int, dict[str, bool | None]]:
+        """Évalue toute la passerelle + les 40 signaux adaptatifs V5.
+
+        Le score public 0..2000 conserve exactement les poids V71 historiques pour
+        éviter de changer brutalement les seuils déjà configurés. En parallèle, V5
+        exécute réellement ses 40 signaux (historique, raid, comportement, rôles,
+        identité, session, confiance...). Un échec critique V5 bloque la validation
+        même si le score V71 brut dépasse le seuil.
+        """
         now = discord.utils.utcnow()
         age_seconds = max(0, int((now - member.created_at).total_seconds()))
         joined_seconds = max(0, int((now - member.joined_at).total_seconds())) if member.joined_at else 0
         timeout_until = getattr(member, "timed_out_until", None)
         timed_out = bool(timeout_until and timeout_until > now)
+
+        # Le moteur V5 contient les requêtes d'historique les plus coûteuses.
+        # On le lance avant les contrôles locaux pour qu'ils soient évalués en parallèle.
+        adaptive_task = None
+        collect_factors = getattr(engine, "collect_factors", None)
+        if callable(collect_factors):
+            adaptive_task = asyncio.create_task(collect_factors(member))
 
         try:
             snowflake_ok = abs((discord.utils.snowflake_time(member.id) - member.created_at).total_seconds()) <= 300
@@ -736,13 +764,11 @@ class SecurityVerificationRuntimeV71:
         failures = getattr(engine, "_failures", {}).get((member.guild.id, member.id), [])
         recent_failures = [stamp for stamp in failures if time.time() - float(stamp) <= 600]
 
-        conf = None
-        # config is already cached in the challenge flow; role checks can use names safely
         unverified_present = any(role.name == "Non vérifié" for role in member.roles)
         verified_preassigned = any(role.name == "Vérifié" for role in member.roles)
         role_state_ok = unverified_present and not verified_preassigned
 
-        checks = {
+        gateway_checks: dict[str, bool | None] = {
             "sequence": bool(getattr(state, "sequence_done", False)),
             "code": secrets.compare_digest(str(code).strip(), str(getattr(state, "code", "")).strip()),
             "math": secrets.compare_digest(str(math_answer).strip(), str(getattr(state, "math_answer", "")).strip()),
@@ -758,6 +784,9 @@ class SecurityVerificationRuntimeV71:
             "age_7d": age_seconds >= 7 * 86400,
             "avatar": getattr(member, "avatar", None) is not None,
         }
+        if len(gateway_checks) != GATEWAY_CHECK_COUNT:
+            raise RuntimeError(f"Contrat passerelle cassé: {len(gateway_checks)}/{GATEWAY_CHECK_COUNT}")
+
         weights = {
             "sequence": 350,
             "code": 300,
@@ -774,8 +803,53 @@ class SecurityVerificationRuntimeV71:
             "age_7d": 50,
             "avatar": 50,
         }
-        score = sum(weight for name, weight in weights.items() if checks[name])
-        return int(score), checks
+        score = int(sum(weight for name, weight in weights.items() if gateway_checks[name] is True))
+
+        adaptive_checks: dict[str, bool | None] = {}
+        critical_failure = False
+        if adaptive_task is not None:
+            try:
+                factors = await adaptive_task
+                if len(factors) != ADAPTIVE_SIGNAL_COUNT:
+                    raise RuntimeError(
+                        f"Moteur adaptatif incomplet: {len(factors)}/{ADAPTIVE_SIGNAL_COUNT}"
+                    )
+                for factor in factors:
+                    key = f"adaptive:{getattr(factor, 'key', 'unknown')}"
+                    available = bool(getattr(factor, "available", True))
+                    passed = getattr(factor, "passed", None)
+                    adaptive_checks[key] = bool(passed) if available and passed is not None else None
+                    if (
+                        bool(getattr(factor, "critical", False))
+                        and available
+                        and passed is False
+                    ):
+                        critical_failure = True
+            except Exception:
+                logger.exception(
+                    "V71: moteur adaptatif V5 indisponible guild=%s user=%s",
+                    member.guild.id,
+                    member.id,
+                )
+                # Fail closed : une panne du moteur de preuves ne doit pas être confondue
+                # avec 40 contrôles réussis.
+                adaptive_checks = {
+                    f"adaptive:unavailable:{index}": None
+                    for index in range(ADAPTIVE_SIGNAL_COUNT)
+                }
+                critical_failure = True
+        else:
+            adaptive_checks = {
+                f"adaptive:unavailable:{index}": None
+                for index in range(ADAPTIVE_SIGNAL_COUNT)
+            }
+            critical_failure = True
+
+        checks = {**gateway_checks, **adaptive_checks}
+        if len(checks) != TOTAL_REAL_CHECKS:
+            raise RuntimeError(f"Contrat preuves cassé: {len(checks)}/{TOTAL_REAL_CHECKS}")
+        checks["_adaptive_critical_ok"] = not critical_failure
+        return score, checks
 
     async def patch_engine(self) -> None:
         engine = self.bot.get_cog("HoneypotVerification")
@@ -841,13 +915,17 @@ class SecurityVerificationRuntimeV71:
                     getattr(_self, "_challenges", {}).pop(key, None)
                     return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('La vérification a été désactivée pendant cette session.')), ephemere=True)
 
-                score, checks = runtime._score(_self, interaction.user, state, code, math_answer, cfg)
-                if score < cfg["verification_threshold"]:
+                score, checks = await runtime._score(_self, interaction.user, state, code, math_answer, cfg)
+                adaptive_ok = checks.pop("_adaptive_critical_ok", False)
+                if score < cfg["verification_threshold"] or not adaptive_ok:
                     record_failure = getattr(_self, "_record_failure", None)
                     if callable(record_failure):
                         await record_failure(interaction.guild.id, interaction.user.id)
                     getattr(_self, "_challenges", {}).pop(key, None)
-                    failed = [name for name, passed in checks.items() if not passed and name not in {"age_7d", "avatar"}]
+                    failed = [
+                        name for name, passed in checks.items()
+                        if passed is False and name not in {"age_7d", "avatar"}
+                    ]
                     await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning(f"Vérification incomplète : **{score}/{SCORE_MAX}** (seuil **{cfg['verification_threshold']}**).\nVotre accès reste verrouillé. Relancez une nouvelle session après avoir rempli les conditions Discord." + (f"\nContrôles à revoir : `{', '.join(failed[:5])}`" if failed else ''))), ephemere=True)
                     return
 
@@ -882,7 +960,7 @@ class SecurityVerificationRuntimeV71:
                 title="Passerelle de vérification",
                 description=(
                     "### Accès temporairement verrouillé\n"
-                    "SentriX valide plusieurs preuves Discord et le challenge humain avant d'ouvrir le serveur.\n\n"
+                    f"SentriX exécute **{TOTAL_REAL_CHECKS} contrôles réels** (passerelle + moteur adaptatif) avant d'ouvrir le serveur.\n\n"
                     f"**Score requis : {cfg['verification_threshold']}/{SCORE_MAX}** · compte minimum : "
                     f"**{cfg['verification_min_account_age_minutes']} min**."
                 ),
@@ -892,8 +970,8 @@ class SecurityVerificationRuntimeV71:
             panel.add_field(
                 name="Contrôles",
                 value=(
-                    "Membership Screening · séquence anti-automatisation · code unique · calcul unique · "
-                    "ancienneté · cohérence Discord · état des rôles · tentatives récentes · timeout · score de confiance"
+                    "Challenge humain · identité Discord · Membership Screening · ancienneté · rôles et privilèges · "
+                    "historique sécurité · contexte anti-raid · comportement précoce · confiance · score adaptatif V5"
                 ),
                 inline=False,
             )

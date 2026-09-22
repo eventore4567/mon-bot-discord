@@ -60,3 +60,9 @@ def test_collision_suffix_is_readable() -> None:
     assert second == "leaderboard-2"
     assert third == "leaderboard-3"
     assert len(used) == 3
+
+
+
+def test_me_and_profile_are_not_public_direct_slash_commands() -> None:
+    assert "profile" not in surface.STANDARD_DIRECT_SLASH
+    assert "me" not in surface.STANDARD_DIRECT_SLASH.values()

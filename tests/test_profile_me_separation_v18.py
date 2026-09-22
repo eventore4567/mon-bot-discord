@@ -9,39 +9,28 @@ def _profile_source() -> str:
     return (ROOT / "cogs" / "profile_oxyde_runtime.py").read_text(encoding="utf-8")
 
 
-def test_profile_runtime_is_loaded_in_production():
+def test_profile_runtime_is_not_loaded_in_production():
     boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
-    assert 'bot_main.EXTENSIONS.append("cogs.profile_oxyde_runtime")' in boot
+    assert 'bot_main.EXTENSIONS.append("cogs.profile_oxyde_runtime")' not in boot
 
 
-def test_profile_runtime_is_a_real_extension():
-    source = _profile_source()
-    assert "async def setup(bot: commands.Bot)" in source
-    assert "install(bot)" in source
+def test_plus_me_is_removed():
+    levels = (ROOT / "cogs" / "levels.py").read_text(encoding="utf-8")
+    assert '@commands.hybrid_command(name="me"' not in levels
+    assert "async def _legacy_me(" in levels
 
 
-def test_me_is_kept_out_of_duplicate_pruning():
-    source = _profile_source()
-    assert 'duplicates.discard("me")' in source
-    assert "bot_main.PRUNED_COMMANDS" in source
+def test_profile_and_me_are_absent_from_direct_slash_surface():
+    surface = (ROOT / "sentrix_command_surface_v110.py").read_text(encoding="utf-8")
+    assert '"profile": "me"' not in surface
+    assert '"profile": "profile"' not in surface
 
 
-def test_me_is_personal_stats_not_profile():
-    source = _profile_source()
-    start = source.index("async def me_callback")
-    end = source.index("def install", start)
-    callback = source[start:end]
-    assert "cog._send_stats(ctx, ctx.author)" in callback
-    assert "CleanProfileView" not in callback
-    assert "build_page" not in callback
-
-
-def test_profile_and_profil_keep_community_profile_surface():
+def test_profilecard_is_the_documented_public_profile():
     aliases = (ROOT / "cogs" / "common_command_names.py").read_text(encoding="utf-8")
-    source = _profile_source()
-    assert '"profile": ("profil",)' in aliases
-    assert "CleanProfileView" in source
-    assert 'build_page(bot, ctx.guild, member, ctx.author.id, "overview")' in source
+    boot = (ROOT / "railway_boot.py").read_text(encoding="utf-8")
+    assert '"profilecard": "carte"' in aliases
+    assert "/outils profilecard" in boot
 
 
 def test_profile_overview_is_compact_inline_grid():
@@ -75,3 +64,12 @@ def test_profile_secondary_pages_are_spaced_too():
     assert '"\\n\\n".join(cleaned)' in source
     assert 'f"Progression\\n**{state}**\\n\\n"' in source
     assert 'f"Palier\\n**{progression[\'tier\']}**\\n\\n"' in source
+
+
+
+def test_profilecard_has_plus_command_and_french_alias():
+    source = (ROOT / "cogs" / "sentrix_v2.py").read_text(encoding="utf-8")
+    assert '@commands.hybrid_command(name="profilecard", aliases=["profilcard"]' in source
+    assert "with_app_command=False" in source
+    aliases = (ROOT / "cogs" / "common_command_names.py").read_text(encoding="utf-8")
+    assert '"profilecard": "carte"' in aliases

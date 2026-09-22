@@ -610,7 +610,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         view = HomeView(self, ctx.guild, ctx.author, await self.can_staff_context(ctx))
         view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await self.build_home_embed(ctx.guild, ctx.author)), view))
 
-    @commands.hybrid_command(name="profilecard", description="Afficher une carte de profil V2.", with_app_command=False)
+    @commands.hybrid_command(name="profilecard", aliases=["profilcard"], description="Afficher une carte de profil V2.", with_app_command=False)
     async def profilecard(self, ctx, membre: discord.Member = None):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         await panels.envoyer(ctx, panels.depuis_embed(await self.build_profile_embed(ctx.guild, membre or ctx.author)))

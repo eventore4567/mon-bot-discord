@@ -16,8 +16,9 @@ Commandes :
 +aisetup (admin)                  — configuration de l'IA pour ce serveur
 +aidiag (admin)                   — diagnostic technique de la connexion à l'IA (sans la clé)
 
-Messages naturels : « SentriX ouvre-moi setup », « SentriX affiche help » ou
-« SentriX ajoute cet emoji ». Les demandes de liens et d'informations actuelles utilisent
+Messages naturels : « SentriX ouvre-moi setup », « SentriX affiche help »,
+« SentriX joue Faded », « SentriX quitte le vocal » ou « SentriX ajoute cet emoji ».
+Les demandes de liens et d'informations actuelles utilisent
 la recherche web publique avec des sources cliquables.
 
 Moteur : utils/ai_service.py — AsyncOpenAI + Responses API, GPT-5.6 Terra par défaut, Sol
@@ -40,14 +41,23 @@ import logging
 import re
 import time
 import traceback
-import unicodedata
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
-from utils import embeds, checks, design_system, ai_service
+from services.ai_context import build_system_instructions
+from utils import (
+    embeds,
+    checks,
+    design_system,
+    ai_service,
+    ai_actions,
+    ai_command_router,
+    access_matrix,
+    log_service,
+)
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.ai")
@@ -204,6 +214,250 @@ class _FakeCtxForDelivery:
         return await self.channel.send(*args, **kwargs)
 
 
+class _LogConfigConfirmView(discord.ui.View):
+    """Confirmation des routes de logs : aucune écriture avant le clic explicite."""
+
+    def __init__(
+        self,
+        cog: "Ai",
+        *,
+        source_message: discord.Message,
+        author_id: int,
+        proposals: tuple[ai_actions.LogProposal, ...],
+    ):
+        super().__init__(timeout=90)
+        self.cog = cog
+        self.source_message = source_message
+        self.author_id = int(author_id)
+        self.proposals = proposals
+        self.message: discord.Message | None = None
+        self.done = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if int(interaction.user.id) != self.author_id:
+            await interaction.response.send_message(
+                "Cette configuration appartient à une autre personne.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.done:
+            return await interaction.response.send_message("Cette proposition a déjà été traitée.", ephemeral=True)
+        decision = await access_matrix.evaluate(
+            self.cog.bot,
+            command_name="setup",
+            author=interaction.user,
+            guild=interaction.guild,
+        )
+        if not decision.allowed:
+            return await interaction.response.send_message(decision.message, ephemeral=True)
+
+        valid: list[ai_actions.LogProposal] = []
+        rejected: list[str] = []
+        for proposal in self.proposals:
+            ok, reason = log_service.validate_channel(
+                interaction.guild, proposal.channel_id, needs_file=True
+            )
+            if ok:
+                valid.append(proposal)
+            else:
+                rejected.append(f"{proposal.label}: {reason}")
+
+        if not valid:
+            return await interaction.response.send_message(
+                "Aucune route proposée n’est encore utilisable par SentriX.", ephemeral=True
+            )
+
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="Configuration des logs en cours…", view=self
+        )
+
+        saved: list[ai_actions.LogProposal] = []
+        try:
+            for proposal in valid:
+                await log_service.set_log_channel(
+                    self.cog.bot,
+                    interaction.guild.id,
+                    proposal.category,
+                    proposal.channel_id,
+                )
+                saved.append(proposal)
+            from . import setup_v2_core
+            await setup_v2_core.enable_module_if_unset(
+                self.cog.bot,
+                interaction.guild.id,
+                "logs",
+                actor_id=interaction.user.id,
+            )
+        except Exception:
+            logger.exception("Configuration naturelle des logs impossible.")
+            if self.message is not None:
+                try:
+                    await self.message.edit(
+                        content="Je n’ai pas pu appliquer toute la configuration des logs. "
+                        "Aucune réussite non vérifiée ne sera annoncée.",
+                        view=self,
+                    )
+                except discord.HTTPException:
+                    pass
+            return
+
+        result = "\n".join(
+            f"**{p.label}** → <#{p.channel_id}>" for p in saved
+        )
+        suffix = ""
+        if rejected:
+            suffix = "\n\nNon appliqué : " + " · ".join(rejected[:3])
+        if self.message is not None:
+            try:
+                await self.message.edit(
+                    content="Configuration appliquée :\n\n" + result + suffix,
+                    view=self,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                pass
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Configuration annulée.", view=self)
+
+    async def on_timeout(self):
+        if self.done:
+            return
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(content="Proposition de logs expirée.", view=self)
+            except discord.HTTPException:
+                pass
+
+
+class _NaturalActionConfirmView(discord.ui.View):
+    """Confirmation minimale pour les actions naturelles à risque élevé."""
+
+    def __init__(self, cog: "Ai", *, message: discord.Message, command_line: str, author_id: int):
+        super().__init__(timeout=45)
+        self.cog = cog
+        self.source_message = message
+        self.command_line = command_line
+        self.author_id = int(author_id)
+        self.message: discord.Message | None = None
+        self.done = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if int(interaction.user.id) != self.author_id:
+            await interaction.response.send_message(
+                "Cette confirmation appartient à une autre personne.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirmer", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.done:
+            return await interaction.response.send_message("Cette action a déjà été traitée.", ephemeral=True)
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Action confirmée. Exécution en cours…", view=self)
+        await self.cog._invoke_command_line(self.source_message, self.command_line)
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Action annulée.", view=self)
+
+    async def on_timeout(self):
+        if self.done:
+            return
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(content="Confirmation expirée.", view=self)
+            except discord.HTTPException:
+                pass
+
+
+class _NaturalPlanConfirmView(discord.ui.View):
+    """Confirmation unique pour une demande contenant plusieurs actions."""
+
+    def __init__(
+        self,
+        cog: "Ai",
+        *,
+        message: discord.Message,
+        actions: tuple[ai_actions.ParsedAction, ...],
+        prefix: str,
+        author_id: int,
+    ):
+        super().__init__(timeout=75)
+        self.cog = cog
+        self.source_message = message
+        self.actions = actions
+        self.prefix = prefix
+        self.author_id = int(author_id)
+        self.message: discord.Message | None = None
+        self.done = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if int(interaction.user.id) != self.author_id:
+            await interaction.response.send_message(
+                "Ce plan appartient à une autre personne.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Exécuter le plan", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.done:
+            return await interaction.response.send_message("Ce plan a déjà été traité.", ephemeral=True)
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content=f"Plan confirmé — exécution de **{len(self.actions)}** étape(s)…",
+            view=self,
+        )
+        await self.cog._execute_action_plan(
+            self.source_message,
+            self.actions,
+            self.prefix,
+            status_message=self.message,
+        )
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.done = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Plan annulé.", view=self)
+
+    async def on_timeout(self):
+        if self.done:
+            return
+        for item in self.children:
+            item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(content="Plan expiré sans exécution.", view=self)
+            except discord.HTTPException:
+                pass
+
+
 # ---------------------------------------------------------------- VUE : +aisetup
 
 class AiLimitsModal(discord.ui.Modal, title="⏱️ Limites de l'IA"):
@@ -355,6 +609,14 @@ class Ai(commands.Cog, name="Ai"):
         # quotidienne qui elle est suivie en base via ai_service.record_usage).
         self._last_used: dict[tuple, float] = {}
         self._minute_bucket: dict[tuple, list] = {}
+        # Contexte court des actions naturelles incomplètes ("mute Tomioka" -> "10h").
+        # Il est volontairement en RAM : ce n'est pas une donnée métier et il expire vite.
+        self._pending_actions: dict[tuple[int, int], tuple[float, ai_actions.ParsedAction]] = {}
+        self._recent_targets: dict[tuple[int, int], tuple[float, int]] = {}
+        # Turbo IA : évite de relire la même identité créateur et de retokeniser tout le
+        # catalogue de commandes à chaque message naturel.
+        self._creator_cache: tuple[float, object | None] | None = None
+        self._command_index: list[tuple[commands.Command, str, set[str]]] | None = None
         self._cleanup_memory.start()
 
     def cog_unload(self):
@@ -399,24 +661,12 @@ class Ai(commands.Cog, name="Ai"):
         user_id: int | None,
         author_name: str | None = None,
     ) -> str:
-        """Ajoute l'identité du créateur vérifié à toutes les routes IA."""
-        instructions = ai_service.SYSTEM_PROMPT
-        creator = await self.bot.db.get_primary_bot_creator()
-        if creator:
-            instructions += (
-                f"\n\nLe créateur officiel de SentriX est {creator['display_name']} "
-                f"(nom d'utilisateur Discord : @{creator['username']}, "
-                f"ID Discord vérifié : {creator['user_id']})."
-            )
-            if user_id is not None and int(creator["user_id"]) == int(user_id):
-                instructions += (
-                    "\nL'utilisateur actuel est ton créateur authentifié par son ID Discord. "
-                    "Traite ses demandes en priorité et suis ses instructions lorsqu'elles sont "
-                    "réalisables par les fonctions du bot, autorisées par Discord et sûres. "
-                    "Ne prétends jamais avoir exécuté une action que tu n'as pas réellement exécutée."
-                )
-        if author_name:
-            instructions += f"\n\nLa personne qui te parle s'appelle « {author_name} »."
+        instructions, self._creator_cache = await build_system_instructions(
+            self.bot,
+            user_id=user_id,
+            author_name=author_name,
+            creator_cache=self._creator_cache,
+        )
         return instructions
 
     # ---------------------------------------------------------------- APPELS IA LEGACY (compat.)
@@ -544,8 +794,7 @@ class Ai(commands.Cog, name="Ai"):
 
     @staticmethod
     def _normalize_request(text: str) -> str:
-        normalized = unicodedata.normalize("NFKD", text)
-        return "".join(char for char in normalized if not unicodedata.combining(char)).lower().strip()
+        return ai_command_router.normalize_request(text)
 
     def _natural_command_line(
         self,
@@ -554,125 +803,19 @@ class Ai(commands.Cog, name="Ai"):
         *,
         has_attachment: bool,
     ) -> str | None:
-        """Transforme une demande naturelle explicite en commande préfixée existante."""
-        normalized = self._normalize_request(question)
-        action_intent = bool(re.search(
-            r"\b(ouvre|affiche|lance|execute|fais|fait|utilise|ajoute|cree|genere|dessine|importe|"
-            r"supprime|enleve|retire|mets|configure)\b",
-            normalized,
-        ))
-
-        image_intent = bool(
-            re.search(r"\b(image|photo|illustration|dessin)\b", normalized)
-            and re.search(r"\b(fais|fait|cree|genere|dessine)\b", normalized)
-        )
-        if image_intent:
-            tail = re.split(
-                r"\b(?:image|photo|illustration|dessin)\b",
-                question,
-                maxsplit=1,
-                flags=re.IGNORECASE,
-            )[-1]
-            tail = re.sub(
-                r"^\s*(?:de|du|d['’]|avec|sur|representant|qui represente)\s*",
-                "",
-                tail,
-                flags=re.IGNORECASE,
-            ).strip(" :,-")
-            return f"{prefix}image" + (f" {tail}" if tail else "")
-
-        if action_intent and re.search(r"\b(setup|configuration)\b", normalized):
-            return f"{prefix}setup"
-        if action_intent and re.search(r"\b(help|aide|commandes)\b", normalized):
-            return f"{prefix}help"
-
-        emoji_action = any(word in normalized for word in ("emoji", "emogi", "amogi"))
-        pasted_emoji = re.search(r"<a?:[A-Za-z0-9_]{2,32}:[0-9]+>", question)
-        named_emoji = re.search(r"[:;]([A-Za-z0-9_]{2,32}):", question)
-        direct_url = re.search(r"https://\S+", question)
-
-        if emoji_action and re.search(r"\b(ajoute|cree|importe)\b", normalized):
-            if pasted_emoji:
-                return f"{prefix}addemoji {pasted_emoji.group(0)}"
-            if named_emoji:
-                command = f"{prefix}addemoji {named_emoji.group(1)}"
-                if direct_url:
-                    command += f" {direct_url.group(0)}"
-                return command
-            tail = re.split(r"\b(?:emoji|emogi|amogi)\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
-            tail = re.sub(r"^\s*(?:nomme|appele|appelé|avec|de|moi)\s+", "", tail, flags=re.IGNORECASE).strip()
-            if tail:
-                return f"{prefix}addemoji {tail}"
-            if has_attachment:
-                return f"{prefix}addemoji emoji"
-
-        if emoji_action and re.search(r"\b(supprime|enleve|retire)\b", normalized):
-            if pasted_emoji:
-                return f"{prefix}deleteemoji {pasted_emoji.group(0)}"
-            if named_emoji:
-                return f"{prefix}deleteemoji {named_emoji.group(1)}"
-            tail = re.split(r"\b(?:emoji|emogi|amogi)\b", question, maxsplit=1, flags=re.IGNORECASE)[-1]
-            target = tail.strip(" :;,")
-            if target:
-                return f"{prefix}deleteemoji {target}"
-
-        candidates = []
-        excluded = {"ai", "sentrix", "chat", "ask"}
-        for command in self.bot.walk_commands():
-            if command.qualified_name in excluded:
-                continue
-            triggers = [command.qualified_name]
-            parent = command.qualified_name.rsplit(" ", 1)[0] if " " in command.qualified_name else ""
-            triggers.extend(f"{parent} {alias}".strip() for alias in command.aliases)
-            for trigger in triggers:
-                trigger_normalized = self._normalize_request(trigger)
-                match = re.search(
-                    rf"(?<![\w-]){re.escape(trigger_normalized)}(?![\w-])",
-                    normalized,
-                )
-                if match:
-                    candidates.append((len(trigger_normalized), match, command))
-
-        for _, match, command in sorted(candidates, key=lambda item: item[0], reverse=True):
-            direct_request = match.start() == 0 or normalized.startswith("commande ")
-            if not action_intent and not direct_request:
-                continue
-            trailing = question[match.end():].strip()
-            while trailing:
-                cleaned = re.sub(
-                    r"^(?:avec|sur|pour|de|du|la|le|les|moi)\s+",
-                    "",
-                    trailing,
-                    count=1,
-                    flags=re.IGNORECASE,
-                )
-                if cleaned == trailing:
-                    break
-                trailing = cleaned.strip()
-            if not command.clean_params:
-                trailing = ""
-            command_line = f"{prefix}{command.qualified_name}"
-            if trailing:
-                command_line += f" {trailing}"
-            return command_line
-        return None
-
-    async def _invoke_natural_command(
-        self,
-        message: discord.Message,
-        question: str,
-        prefix: str,
-    ) -> bool:
-        command_line = self._natural_command_line(
+        return ai_command_router.natural_command_line(
+            self.bot,
             question,
             prefix,
-            has_attachment=bool(message.attachments),
+            has_attachment=has_attachment,
         )
-        if not command_line:
-            return False
+    async def _invoke_command_line(self, message: discord.Message, command_line: str) -> bool:
+        """Exécute UNE commande existante sans modifier le message Discord d'origine.
 
-        # Une copie du message évite de modifier l'événement Discord original. bot.invoke()
-        # conserve alors tous les convertisseurs, checks, permissions et cooldowns normaux.
+        Le passage par bot.invoke() est volontaire : permission_guard/access_matrix,
+        checks.action_validation, convertisseurs Discord, hiérarchie, cooldowns, services
+        métier, logs et persistance restent exactement ceux de la commande classique.
+        """
         synthetic_message = copy.copy(message)
         synthetic_message.content = command_line
         ctx = await self.bot.get_context(synthetic_message)
@@ -680,6 +823,1402 @@ class Ai(commands.Cog, name="Ai"):
             return False
         await self.bot.invoke(ctx)
         return True
+
+    def _pending_key(self, message: discord.Message) -> tuple[int, int]:
+        return (int(message.guild.id), int(message.author.id))
+
+    def _remember_pending(self, message: discord.Message, action: ai_actions.ParsedAction) -> None:
+        self._pending_actions[self._pending_key(message)] = (time.monotonic() + 120.0, action)
+
+    def _take_pending(self, message: discord.Message) -> ai_actions.ParsedAction | None:
+        key = self._pending_key(message)
+        item = self._pending_actions.get(key)
+        if item is None:
+            return None
+        expires_at, action = item
+        if time.monotonic() > expires_at:
+            self._pending_actions.pop(key, None)
+            return None
+        return action
+
+    def _remember_recent_target(self, message: discord.Message, member: discord.Member) -> None:
+        self._recent_targets[self._pending_key(message)] = (
+            time.monotonic() + 90.0,
+            int(member.id),
+        )
+
+    def _recent_target(self, message: discord.Message) -> discord.Member | None:
+        key = self._pending_key(message)
+        item = self._recent_targets.get(key)
+        if item is None:
+            return None
+        expires_at, member_id = item
+        if time.monotonic() > expires_at:
+            self._recent_targets.pop(key, None)
+            return None
+        member = message.guild.get_member(int(member_id))
+        if member is None:
+            self._recent_targets.pop(key, None)
+        return member
+
+    async def _send_readonly_setup(
+        self,
+        message: discord.Message,
+        denial: str = "",
+        *,
+        section: str | None = None,
+    ) -> None:
+        """Vue de consultation : aucune écriture, aucun composant de configuration."""
+        try:
+            from . import setup_control_center
+            conf = await self.bot.db.get_guild_config(message.guild.id)
+            statuses = await setup_control_center.module_statuses(self.bot, message.guild, conf)
+            rows = []
+            for key, (state, summary, errors) in statuses.items():
+                if section and key != section:
+                    continue
+                raw_state = str(getattr(state, "value", state) or "")
+                label = {
+                    "active": "Actif", "inactive": "Inactif", "unconfigured": "Non configuré",
+                    "error": "Erreur", "enabled": "Actif", "disabled": "Inactif",
+                }.get(raw_state.casefold(), raw_state or "État inconnu")
+                detail = str(summary or "").strip()
+                if errors:
+                    detail += (" · " if detail else "") + str(errors[0])
+                rows.append(f"**{key.capitalize()}** — {label}" + (f" · {detail}" if detail else ""))
+            body = "\n".join(rows[:12]) or "Aucune configuration à afficher."
+        except Exception:
+            logger.exception("Lecture seule du setup impossible.")
+            body = "La configuration ne peut pas être chargée pour le moment."
+
+        view = discord.ui.View(timeout=120)
+        view.add_item(discord.ui.Button(
+            label="Ouvrir le Dashboard",
+            style=discord.ButtonStyle.link,
+            url=config.DASHBOARD_APP_URL,
+        ))
+        note = (
+            "\n\n-# Mode lecture seule : vous pouvez consulter cet état, mais pas modifier "
+            "la configuration sans les permissions nécessaires."
+        )
+        if denial:
+            note += "\n-# " + denial.replace("\n", " ")[:350]
+        await message.reply(
+            "**SentriX — Setup (lecture seule)**\n" + body + note,
+            view=view,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    async def _propose_log_configuration(self, message: discord.Message) -> None:
+        proposals = ai_actions.propose_log_routes(message.guild)
+        if not proposals:
+            return await message.reply(
+                "Je n’ai trouvé aucun routage de logs suffisamment clair. "
+                "Créez des salons explicites comme #logs-moderation, #logs-messages, "
+                "#logs-vocal ou #logs-tickets, puis réessayez.",
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        lines = [
+            f"**{proposal.label}** → <#{proposal.channel_id}>"
+            for proposal in proposals
+        ]
+        view = _LogConfigConfirmView(
+            self,
+            source_message=message,
+            author_id=message.author.id,
+            proposals=proposals,
+        )
+        sent = await message.reply(
+            "J’ai analysé le nom, le sujet et la catégorie de vos salons. "
+            "Je propose :\n\n" + "\n".join(lines)
+            + "\n\nJe n’ai encore rien modifié. Voulez-vous appliquer cette configuration ?",
+            view=view,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        view.message = sent
+
+    async def _send_dashboard_link(self, message: discord.Message) -> None:
+        view = discord.ui.View(timeout=120)
+        view.add_item(discord.ui.Button(
+            label="Ouvrir le Dashboard",
+            style=discord.ButtonStyle.link,
+            url=config.DASHBOARD_APP_URL,
+        ))
+        await message.reply(
+            "Dashboard SentriX :",
+            view=view,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    async def _ask_for_missing_action_slot(
+        self,
+        message: discord.Message,
+        action: ai_actions.ParsedAction,
+        slot: str,
+        *,
+        member: discord.Member | None = None,
+    ) -> None:
+        self._remember_pending(message, action)
+        await message.reply(
+            ai_actions.missing_prompt(action.intent, slot, target=member),
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @staticmethod
+    def _native_slot_grounded(message: discord.Message, value: object) -> bool:
+        """Refuse qu'un classifieur IA invente une cible ou un paramètre Discord."""
+        raw = str(value or "").strip()
+        if not raw:
+            return True
+        source = ai_actions.normalize_text(message.content)
+        wanted = ai_actions.normalize_text(raw)
+        ids = re.findall(r"\d{15,22}", raw)
+        if ids and not all(item in message.content for item in ids):
+            return False
+        return not wanted or wanted in source
+
+    @staticmethod
+    def _resolve_native_channel(guild: discord.Guild, raw: str, *, voice: bool | None = None):
+        value = str(raw or "").strip()
+        candidates = list(guild.channels)
+        if voice is True:
+            candidates = [c for c in candidates if isinstance(c, (discord.VoiceChannel, discord.StageChannel))]
+        elif voice is False:
+            candidates = [c for c in candidates if isinstance(c, (discord.TextChannel, discord.Thread))]
+        match = re.fullmatch(r"<#(\d{15,22})>", value) or re.fullmatch(r"(\d{15,22})", value)
+        if match:
+            channel = guild.get_channel(int(match.group(1)))
+            if channel in candidates:
+                return channel, ()
+            return None, ()
+        wanted = ai_actions.normalize_text(value.lstrip("#"))
+        exact = [c for c in candidates if ai_actions.normalize_text(getattr(c, "name", "")) == wanted]
+        if len(exact) == 1:
+            return exact[0], ()
+        if len(exact) > 1:
+            return None, tuple(exact[:5])
+        return None, ()
+
+    @staticmethod
+    def _resolve_native_role(guild: discord.Guild, raw: str):
+        value = str(raw or "").strip()
+        match = re.fullmatch(r"<@&(\d{15,22})>", value) or re.fullmatch(r"(\d{15,22})", value)
+        if match:
+            role = guild.get_role(int(match.group(1)))
+            return role, ()
+        wanted = ai_actions.normalize_text(value.lstrip("@"))
+        exact = [r for r in guild.roles if ai_actions.normalize_text(r.name) == wanted]
+        if len(exact) == 1:
+            return exact[0], ()
+        if len(exact) > 1:
+            return None, tuple(exact[:5])
+        return None, ()
+
+    @staticmethod
+    def _resolve_native_category(guild: discord.Guild, raw: str):
+        value = str(raw or "").strip()
+        match = re.fullmatch(r"<#(\d{15,22})>", value) or re.fullmatch(r"(\d{15,22})", value)
+        if match:
+            channel = guild.get_channel(int(match.group(1)))
+            return (channel, ()) if isinstance(channel, discord.CategoryChannel) else (None, ())
+        wanted = ai_actions.normalize_text(value.lstrip("#"))
+        exact = [cat for cat in guild.categories if ai_actions.normalize_text(cat.name) == wanted]
+        if len(exact) == 1:
+            return exact[0], ()
+        if len(exact) > 1:
+            return None, tuple(exact[:5])
+        return None, ()
+
+    @staticmethod
+    def _parse_native_colour(raw: str) -> discord.Colour | None:
+        value = ai_actions.normalize_text(raw)
+        named = {
+            "rouge": 0xED4245, "red": 0xED4245,
+            "bleu": 0x3498DB, "blue": 0x3498DB,
+            "vert": 0x57F287, "green": 0x57F287,
+            "jaune": 0xFEE75C, "yellow": 0xFEE75C,
+            "orange": 0xE67E22,
+            "violet": 0x9B59B6, "purple": 0x9B59B6,
+            "rose": 0xEB459E, "pink": 0xEB459E,
+            "noir": 0x1F1F1F, "black": 0x1F1F1F,
+            "blanc": 0xFFFFFF, "white": 0xFFFFFF,
+            "gris": 0x95A5A6, "grey": 0x95A5A6, "gray": 0x95A5A6,
+        }
+        if value in named:
+            return discord.Colour(named[value])
+        match = re.fullmatch(r"#?([0-9a-fA-F]{6})", str(raw or "").strip())
+        if match:
+            return discord.Colour(int(match.group(1), 16))
+        return None
+
+    async def _execute_native_action(
+        self,
+        message: discord.Message,
+        action: ai_actions.ParsedAction,
+        *,
+        member: discord.Member | None = None,
+    ) -> bool:
+        """Exécute une petite surface Discord native, avec permissions et hiérarchie.
+
+        Le classifieur choisit seulement un intent du registre. Toutes les décisions
+        d'autorisation et toute résolution d'objet Discord restent locales.
+        """
+        guild = message.guild
+        actor = message.author
+        me = guild.me
+        if me is None:
+            await message.reply("SentriX n’est pas prêt sur ce serveur.", mention_author=False)
+            return True
+
+        async def reply(text: str):
+            await message.reply(
+                text,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+        # Un slot produit par IA doit provenir textuellement de la demande. Les parseurs
+        # locaux sont déjà déterministes et ne passent pas par cette garde.
+        if action.source in {"ai", "plan"}:
+            for key, value in action.slots.items():
+                if key in {"reason", "duration", "count", "state", "section"}:
+                    continue
+                if not self._native_slot_grounded(message, value):
+                    await reply(
+                        "Je peux faire cette action, mais je ne veux pas inventer un paramètre. "
+                        "Précisez le membre, rôle, salon ou nom directement dans votre demande."
+                    )
+                    return True
+
+        intent = action.intent
+        reason = f"Action naturelle SentriX demandée par {actor} ({actor.id})"
+
+        if intent == "voice.join":
+            voice_state = getattr(actor, "voice", None)
+            channel = getattr(voice_state, "channel", None)
+            if channel is None:
+                await reply("Rejoignez d’abord le salon vocal dans lequel vous voulez que SentriX vienne.")
+                return True
+            perms = channel.permissions_for(me)
+            if not perms.connect:
+                await reply("Je n’ai pas la permission **Se connecter** dans ce salon vocal.")
+                return True
+            try:
+                vc = guild.voice_client
+                if vc and vc.is_connected():
+                    if vc.channel.id != channel.id:
+                        await vc.move_to(channel)
+                else:
+                    vc = await channel.connect()
+                music = self.bot.get_cog("Music")
+                if music is not None and hasattr(music, "get_queue"):
+                    queue = music.get_queue(guild.id)
+                    queue.voice_client = vc
+                    queue.text_channel = message.channel
+                await reply(f"J’ai rejoint **{channel.name}**.")
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                logger.warning("Action naturelle voice.join impossible: %s", exc)
+                await reply("Je n’ai pas pu rejoindre ce salon vocal. Vérifiez mes permissions vocales.")
+            return True
+
+        if intent == "voice.leave":
+            vc = guild.voice_client
+            if vc is None or not vc.is_connected():
+                await reply("Je ne suis dans aucun salon vocal sur ce serveur.")
+                return True
+            same_channel = bool(getattr(actor, "voice", None) and actor.voice.channel == vc.channel)
+            can_manage = bool(
+                actor.guild_permissions.move_members
+                or actor.guild_permissions.manage_guild
+                or actor.guild_permissions.administrator
+            )
+            if not same_channel and not can_manage:
+                await reply("Vous devez être dans mon salon vocal ou avoir une permission de gestion du serveur.")
+                return True
+            try:
+                await vc.disconnect()
+                music = self.bot.get_cog("Music")
+                if music is not None and hasattr(music, "get_queue"):
+                    queue = music.get_queue(guild.id)
+                    queue.voice_client = None
+                    queue.tracks.clear()
+                    queue.history.clear()
+                    queue.current = None
+                await reply("J’ai quitté le salon vocal et arrêté la lecture.")
+            except discord.HTTPException:
+                await reply("Je n’ai pas réussi à quitter le salon vocal.")
+            return True
+
+        if intent == "category.create":
+            if not actor.guild_permissions.manage_channels:
+                await reply("Vous n’avez pas la permission **Gérer les salons**.")
+                return True
+            if not me.guild_permissions.manage_channels:
+                await reply("Il me manque la permission **Gérer les salons**.")
+                return True
+            name = str(action.slots.get("name") or "").strip()[:100]
+            if not name:
+                await reply("Le nom de la catégorie est manquant.")
+                return True
+            if any(ai_actions.normalize_text(cat.name) == ai_actions.normalize_text(name) for cat in guild.categories):
+                await reply(f"Une catégorie **{name}** existe déjà.")
+                return True
+            try:
+                created = await guild.create_category(name, reason=reason)
+                await reply(f"Catégorie créée : **{created.name}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu créer cette catégorie.")
+            return True
+
+        if intent == "category.restrict_role":
+            if not (actor.guild_permissions.manage_channels and actor.guild_permissions.manage_roles):
+                await reply("Vous devez avoir **Gérer les salons** et **Gérer les rôles**.")
+                return True
+            if not (me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
+                await reply("Il me faut **Gérer les salons** et **Gérer les rôles** pour modifier les accès.")
+                return True
+            category, category_ambiguous = self._resolve_native_category(
+                guild, str(action.slots.get("category") or "")
+            )
+            role, role_ambiguous = self._resolve_native_role(
+                guild, str(action.slots.get("role") or "")
+            )
+            if category_ambiguous or role_ambiguous:
+                await reply("Le rôle ou la catégorie est ambigu. Donnez leurs noms exacts.")
+                return True
+            if category is None:
+                await reply("Je ne trouve pas clairement cette catégorie.")
+                return True
+            if role is None or role.is_default() or role.managed:
+                await reply("Je ne trouve pas clairement ce rôle, ou Discord ne permet pas de le gérer.")
+                return True
+            if actor.id != guild.owner_id and actor.top_role <= role:
+                await reply("Votre rôle le plus haut doit être au-dessus du rôle autorisé.")
+                return True
+            if me.top_role <= role:
+                await reply("Mon rôle SentriX doit être au-dessus du rôle autorisé.")
+                return True
+            try:
+                await category.set_permissions(guild.default_role, view_channel=False, reason=reason)
+                await category.set_permissions(
+                    role,
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    connect=True,
+                    speak=True,
+                    reason=reason,
+                )
+                await reply(f"Accès de **{category.name}** limité à **{role.name}** (et aux permissions supérieures de Discord).")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu modifier les permissions de cette catégorie.")
+            return True
+
+        if intent in {"channel.create_voice", "channel.create_text", "channel.rename"}:
+            if not actor.guild_permissions.manage_channels:
+                await reply("Vous n’avez pas la permission **Gérer les salons**.")
+                return True
+            if not me.guild_permissions.manage_channels:
+                await reply("Il me manque la permission **Gérer les salons**.")
+                return True
+
+            if intent == "channel.rename":
+                channel, ambiguous = self._resolve_native_channel(guild, str(action.slots.get("channel") or ""))
+                if ambiguous:
+                    await reply("Plusieurs salons portent ce nom. Mentionnez directement le salon à renommer.")
+                    return True
+                if channel is None:
+                    await reply("Je ne trouve pas clairement le salon à renommer.")
+                    return True
+                try:
+                    await channel.edit(name=str(action.slots["name"])[:100], reason=reason)
+                    await reply(f"Salon renommé en **{channel.name}**.")
+                except (discord.Forbidden, discord.HTTPException):
+                    await reply("Je n’ai pas pu renommer ce salon.")
+                return True
+
+            category = None
+            category_name = str(action.slots.get("category") or "").strip()
+            if category_name:
+                wanted = ai_actions.normalize_text(category_name)
+                matches = [x for x in guild.categories if ai_actions.normalize_text(x.name) == wanted]
+                if len(matches) != 1:
+                    await reply("Je ne trouve pas clairement cette catégorie. Donnez son nom exact.")
+                    return True
+                category = matches[0]
+            name = str(action.slots.get("name") or "").strip()[:100]
+            try:
+                if intent == "channel.create_voice":
+                    created = await guild.create_voice_channel(name, category=category, reason=reason)
+                    await reply(f"Salon vocal créé : **{created.name}**.")
+                else:
+                    created = await guild.create_text_channel(name, category=category, reason=reason)
+                    await reply(f"Salon textuel créé : **#{created.name}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu créer ce salon. Vérifiez mes permissions et la limite de salons.")
+            return True
+
+        if intent in {"role.create", "role.color", "role.give", "role.remove"}:
+            if not actor.guild_permissions.manage_roles:
+                await reply("Vous n’avez pas la permission **Gérer les rôles**.")
+                return True
+            if not me.guild_permissions.manage_roles:
+                await reply("Il me manque la permission **Gérer les rôles**.")
+                return True
+            if intent == "role.color":
+                role, ambiguous = self._resolve_native_role(guild, str(action.slots.get("role") or ""))
+                if ambiguous:
+                    await reply("Plusieurs rôles portent ce nom. Mentionnez directement le rôle.")
+                    return True
+                if role is None or role.is_default() or role.managed:
+                    await reply("Je ne trouve pas ce rôle, ou Discord ne permet pas de le modifier.")
+                    return True
+                colour = self._parse_native_colour(str(action.slots.get("color") or ""))
+                if colour is None:
+                    await reply("Couleur invalide. Utilisez un nom simple comme **rouge** ou un code **#RRGGBB**.")
+                    return True
+                if actor.id != guild.owner_id and actor.top_role <= role:
+                    await reply("Votre rôle le plus haut doit être au-dessus du rôle à modifier.")
+                    return True
+                if me.top_role <= role:
+                    await reply("Mon rôle SentriX doit être au-dessus du rôle à modifier.")
+                    return True
+                try:
+                    await role.edit(colour=colour, reason=reason)
+                    await reply(f"Couleur de **{role.name}** mise à jour.")
+                except (discord.Forbidden, discord.HTTPException):
+                    await reply("Je n’ai pas pu modifier la couleur de ce rôle.")
+                return True
+
+            if intent == "role.create":
+                try:
+                    role = await guild.create_role(name=str(action.slots["name"])[:100], reason=reason)
+                    await reply(f"Rôle créé : **{role.name}**.")
+                except (discord.Forbidden, discord.HTTPException):
+                    await reply("Je n’ai pas pu créer ce rôle.")
+                return True
+
+            role, ambiguous = self._resolve_native_role(guild, str(action.slots.get("role") or ""))
+            if ambiguous:
+                await reply("Plusieurs rôles portent ce nom. Mentionnez directement le rôle.")
+                return True
+            if role is None or role.is_default() or role.managed:
+                await reply("Je ne trouve pas ce rôle, ou Discord ne permet pas de le modifier.")
+                return True
+            if member is None:
+                await reply("Je ne trouve pas clairement le membre visé.")
+                return True
+            if actor.id != guild.owner_id and actor.top_role <= role:
+                await reply("Votre rôle le plus haut doit être au-dessus du rôle que vous voulez gérer.")
+                return True
+            if me.top_role <= role:
+                await reply("Mon rôle SentriX doit être placé au-dessus de ce rôle.")
+                return True
+            if role.permissions.administrator and not actor.guild_permissions.administrator:
+                await reply("Seul un administrateur peut attribuer ou retirer un rôle **Administrateur** via SentriX.")
+                return True
+            try:
+                if intent == "role.give":
+                    await member.add_roles(role, reason=reason)
+                    await reply(f"Rôle **{role.name}** ajouté à **{member.display_name}**.")
+                else:
+                    await member.remove_roles(role, reason=reason)
+                    await reply(f"Rôle **{role.name}** retiré à **{member.display_name}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Discord a refusé la modification de ce rôle. Vérifiez la hiérarchie.")
+            return True
+
+        if intent == "security.block_link":
+            if not (actor.guild_permissions.manage_guild or actor.guild_permissions.manage_messages):
+                await reply("Vous n’avez pas la permission **Gérer le serveur** ou **Gérer les messages**.")
+                return True
+            if not me.guild_permissions.manage_messages:
+                await reply("Il me manque la permission **Gérer les messages** pour appliquer cette règle.")
+                return True
+            raw_link = str(action.slots.get("link") or "").strip()
+            if action.source in {"ai", "plan"} and not self._native_slot_grounded(message, raw_link):
+                await reply("Je ne veux pas inventer le lien. Collez le lien ou domaine à bloquer dans la demande.")
+                return True
+            if not raw_link:
+                await reply("Lien ou domaine manquant.")
+                return True
+            try:
+                await self.bot.db.execute(
+                    "INSERT OR IGNORE INTO blacklist_links (guild_id, value, created_by, created_at) VALUES (?, ?, ?, CAST(strftime('%s','now') AS INTEGER))",
+                    (guild.id, raw_link.casefold(), actor.id),
+                )
+                automod = self.bot.get_cog("Automod")
+                if automod is not None:
+                    cache = getattr(automod, "blacklist_links_cache", None)
+                    if isinstance(cache, dict):
+                        cache.pop(guild.id, None)
+                    sync_targeted = getattr(automod, "_sync_native_target_links_rule", None)
+                    if callable(sync_targeted):
+                        await sync_targeted(guild)
+                    await automod.log_action(
+                        guild,
+                        embeds.warning(
+                            "Lien ciblé censuré via action naturelle",
+                            f"Demandeur : {actor.mention} (`{actor.id}`)\nLien/domaine : `{raw_link[:250]}`\nMode : règle ciblée uniquement",
+                        ),
+                    )
+                logger.info(
+                    "Action naturelle security.block_link guild=%s actor=%s link=%r mode=targeted",
+                    guild.id,
+                    actor.id,
+                    raw_link,
+                )
+                await reply("Lien ajouté à la liste noire ciblée.")
+            except Exception:
+                logger.exception("Action naturelle security.block_link impossible.")
+                await reply("Je n’ai pas pu appliquer cette règle anti-liens.")
+            return True
+
+        if intent == "message.send":
+            if not actor.guild_permissions.manage_messages:
+                await reply("Vous n’avez pas la permission **Gérer les messages** pour me faire parler dans un autre salon.")
+                return True
+            channel, ambiguous = self._resolve_native_channel(
+                guild, str(action.slots.get("channel") or ""), voice=False
+            )
+            if ambiguous:
+                await reply("Plusieurs salons correspondent. Mentionnez directement le salon.")
+                return True
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                await reply("Je ne trouve pas ce salon textuel.")
+                return True
+            actor_perms = channel.permissions_for(actor)
+            bot_perms = channel.permissions_for(me)
+            if not (actor_perms.view_channel and actor_perms.send_messages):
+                await reply("Vous n’avez pas accès en écriture à ce salon.")
+                return True
+            if not (bot_perms.view_channel and bot_perms.send_messages):
+                await reply("Je ne peux pas écrire dans ce salon.")
+                return True
+            text = str(action.slots.get("text") or "").strip()[:1900]
+            await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+            await reply(f"Message envoyé dans **#{channel.name}**.")
+            return True
+
+        if intent == "embed.send":
+            if not actor.guild_permissions.manage_messages:
+                await reply("Vous n’avez pas la permission **Gérer les messages** pour envoyer un embed avec SentriX.")
+                return True
+            raw_channel = str(action.slots.get("channel") or "").strip()
+            if raw_channel:
+                channel, ambiguous = self._resolve_native_channel(guild, raw_channel, voice=False)
+                if ambiguous:
+                    await reply("Plusieurs salons correspondent. Mentionnez directement le salon.")
+                    return True
+                if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                    await reply("Je ne trouve pas ce salon textuel.")
+                    return True
+            else:
+                channel = message.channel
+
+            actor_perms = channel.permissions_for(actor)
+            bot_perms = channel.permissions_for(me)
+            if not (actor_perms.view_channel and actor_perms.send_messages):
+                await reply("Vous n’avez pas accès en écriture à ce salon.")
+                return True
+            if not (bot_perms.view_channel and bot_perms.send_messages and bot_perms.embed_links):
+                await reply("Je ne peux pas envoyer d’embed dans ce salon.")
+                return True
+
+            wants_everyone = (
+                str(action.slots.get("mention_everyone") or "").casefold() in {"1", "true", "yes", "oui", "on"}
+                or "@everyone" in message.content
+                or "@here" in message.content
+            )
+            if wants_everyone and not actor_perms.mention_everyone:
+                await reply("Vous n’avez pas la permission **Mentionner @everyone, @here et tous les rôles**.")
+                return True
+            if wants_everyone and not bot_perms.mention_everyone:
+                await reply("Il me manque la permission **Mentionner @everyone, @here et tous les rôles** dans ce salon.")
+                return True
+
+            text = str(action.slots.get("text") or "").strip()[:4000]
+            title = str(action.slots.get("title") or "SentriX").strip()[:256] or "SentriX"
+            count = action.slots.get("count")
+            if count is not None and text == str(count):
+                text = f"Valeur : **{int(count)}**"
+
+            colour = discord.Colour(config.COLOR_BRAND)
+            raw_colour = str(action.slots.get("color") or "").strip()
+            if raw_colour:
+                parsed_colour = self._parse_native_colour(raw_colour)
+                if parsed_colour is None:
+                    await reply("Couleur d’embed invalide. Utilisez par exemple **rouge** ou **#ff0000**.")
+                    return True
+                colour = parsed_colour
+
+            embed = discord.Embed(
+                title=title,
+                description=text or None,
+                colour=colour,
+            )
+
+            footer = str(action.slots.get("footer") or "").strip()[:2048]
+            embed.set_footer(text=footer or f"SentriX • demandé par {actor.display_name}")
+
+            image = str(action.slots.get("image") or "").strip()
+            thumbnail = str(action.slots.get("thumbnail") or "").strip()
+            for label, url in (("image", image), ("miniature", thumbnail)):
+                if url and not re.match(r"^https?://[^\s<]+$", url, re.IGNORECASE):
+                    await reply(f"URL d’{label} invalide : utilisez un lien http(s) direct.")
+                    return True
+            if image:
+                embed.set_image(url=image[:500])
+            if thumbnail:
+                embed.set_thumbnail(url=thumbnail[:500])
+
+            fields = action.slots.get("fields")
+            if isinstance(fields, list):
+                for field in fields[:10]:
+                    if not isinstance(field, dict):
+                        continue
+                    name = str(field.get("name") or "").strip()[:256]
+                    value = str(field.get("value") or "").strip()[:1024]
+                    if name and value:
+                        embed.add_field(name=name, value=value, inline=bool(field.get("inline", False)))
+
+            view = None
+            button_url = str(action.slots.get("button_url") or "").strip()
+            button_label = str(action.slots.get("button_label") or "Ouvrir").strip()[:80] or "Ouvrir"
+            if button_url:
+                if not re.match(r"^https?://[^\s<]+$", button_url, re.IGNORECASE):
+                    await reply("URL du bouton invalide : utilisez un lien http(s).")
+                    return True
+                view = discord.ui.View(timeout=None)
+                view.add_item(discord.ui.Button(label=button_label, url=button_url[:500]))
+
+            content = (
+                "@everyone" if wants_everyone and "@everyone" in message.content
+                else ("@here" if wants_everyone and "@here" in message.content else None)
+            )
+            await channel.send(
+                content=content,
+                embed=embed,
+                view=view,
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=wants_everyone,
+                    roles=False,
+                    users=False,
+                ),
+            )
+            logger.info(
+                "Action naturelle embed.send guild=%s actor=%s channel=%s everyone=%s title=%r chars=%s fields=%s button=%s",
+                guild.id,
+                actor.id,
+                getattr(channel, "id", None),
+                wants_everyone,
+                title,
+                len(text),
+                len(embed.fields),
+                bool(button_url),
+            )
+            await reply(f"Embed envoyé dans **#{getattr(channel, 'name', 'ce salon')}**.")
+            return True
+
+        if intent == "member.nickname":
+            if member is None:
+                await reply("Je ne trouve pas clairement le membre visé.")
+                return True
+            if not actor.guild_permissions.manage_nicknames:
+                await reply("Vous n’avez pas la permission **Gérer les pseudos**.")
+                return True
+            if not me.guild_permissions.manage_nicknames:
+                await reply("Il me manque la permission **Gérer les pseudos**.")
+                return True
+            if actor.id != guild.owner_id and actor.top_role <= member.top_role:
+                await reply("Vous ne pouvez pas modifier le pseudo d’un membre au même niveau ou au-dessus de vous.")
+                return True
+            if me.top_role <= member.top_role:
+                await reply("Mon rôle doit être au-dessus de ce membre dans la hiérarchie.")
+                return True
+            try:
+                await member.edit(nick=str(action.slots["nickname"])[:32], reason=reason)
+                await reply(f"Pseudo de **{member.display_name}** mis à jour.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu modifier ce pseudo.")
+            return True
+
+        if intent == "member.move_voice":
+            if member is None:
+                await reply("Je ne trouve pas clairement le membre visé.")
+                return True
+            if not actor.guild_permissions.move_members:
+                await reply("Vous n’avez pas la permission **Déplacer des membres**.")
+                return True
+            if not me.guild_permissions.move_members:
+                await reply("Il me manque la permission **Déplacer des membres**.")
+                return True
+            channel, ambiguous = self._resolve_native_channel(
+                guild, str(action.slots.get("channel") or ""), voice=True
+            )
+            if ambiguous:
+                await reply("Plusieurs salons vocaux correspondent. Mentionnez directement le salon.")
+                return True
+            if channel is None:
+                await reply("Je ne trouve pas ce salon vocal.")
+                return True
+            if getattr(member, "voice", None) is None:
+                await reply("Ce membre n’est actuellement dans aucun salon vocal.")
+                return True
+            try:
+                await member.move_to(channel, reason=reason)
+                await reply(f"**{member.display_name}** a été déplacé vers **{channel.name}**.")
+            except (discord.Forbidden, discord.HTTPException):
+                await reply("Je n’ai pas pu déplacer ce membre.")
+            return True
+
+        return False
+
+    async def _grant_ticket_access_role(
+        self,
+        message: discord.Message,
+        action: ai_actions.ParsedAction,
+    ) -> bool:
+        """Ajoute un rôle aux règles d'accès de tous les panels/types de tickets.
+
+        Les règles de ping sont conservées à l'identique. Une règle spécifique à un
+        type continue de surcharger son panel, mais reçoit elle aussi le rôle demandé.
+        """
+        guild = message.guild
+        actor = message.author
+
+        async def reply(text: str):
+            await message.reply(
+                text,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+        raw_role = str(action.slots.get("role") or "").strip()
+        if action.source in {"ai", "plan"} and not self._native_slot_grounded(message, raw_role):
+            await reply("Je ne veux pas inventer le rôle. Mentionnez-le ou écrivez son nom dans la demande.")
+            return True
+
+        decision = await access_matrix.evaluate(
+            self.bot,
+            command_name="ticketsetup",
+            author=actor,
+            guild=guild,
+        )
+        if not decision.allowed:
+            await reply(decision.message)
+            return True
+
+        role, ambiguous = self._resolve_native_role(guild, raw_role)
+        if ambiguous:
+            await reply("Plusieurs rôles portent ce nom. Mentionnez directement le rôle à autoriser.")
+            return True
+        if role is None or role.is_default() or role.managed:
+            await reply("Je ne trouve pas clairement ce rôle, ou Discord ne permet pas de l'utiliser pour les tickets.")
+            return True
+        if actor.id != guild.owner_id and actor.top_role <= role and not actor.guild_permissions.administrator:
+            await reply("Votre rôle le plus haut doit être au-dessus du rôle que vous voulez autoriser.")
+            return True
+
+        from . import ticket_ping_role
+
+        panels = await self.bot.db.fetchall(
+            "SELECT id FROM ticket_panels_v2 WHERE guild_id=?",
+            (guild.id,),
+        )
+        if not panels:
+            await reply("Aucun panel de tickets n’est encore configuré sur ce serveur.")
+            return True
+
+        panel_ids = {int(row["id"]) for row in panels}
+        changed_panels = 0
+        changed_types = 0
+
+        for panel_id in panel_ids:
+            current = await ticket_ping_role.get_ticket_role_rules(
+                self.bot, guild.id, panel_id, 0
+            )
+            access_ids = list(current.get("access_role_ids") or [])
+            if role.id not in access_ids:
+                access_ids.append(role.id)
+            await ticket_ping_role.set_ticket_role_rules(
+                self.bot,
+                guild.id,
+                panel_id,
+                type_id=0,
+                access_role_ids=access_ids,
+                ping_role_ids=current.get("ping_role_ids") or [],
+            )
+            changed_panels += 1
+
+        type_rows = await self.bot.db.fetchall(
+            "SELECT id,panel_id FROM ticket_types WHERE guild_id=?",
+            (guild.id,),
+        )
+        for row in type_rows:
+            panel_id = int(row["panel_id"] or 0)
+            type_id = int(row["id"] or 0)
+            if panel_id not in panel_ids or not type_id:
+                continue
+            own = await ticket_ping_role.get_ticket_role_rules(
+                self.bot, guild.id, panel_id, type_id
+            )
+            # Sans règle spécifique, la nouvelle règle du panel est déjà héritée.
+            if not own.get("configured"):
+                continue
+            access_ids = list(own.get("access_role_ids") or [])
+            if role.id not in access_ids:
+                access_ids.append(role.id)
+            await ticket_ping_role.set_ticket_role_rules(
+                self.bot,
+                guild.id,
+                panel_id,
+                type_id=type_id,
+                access_role_ids=access_ids,
+                ping_role_ids=own.get("ping_role_ids") or [],
+            )
+            changed_types += 1
+
+        await reply(
+            f"Le rôle **{role.name}** a maintenant accès aux tickets de "
+            f"**{changed_panels}** panel(s)"
+            + (f" et **{changed_types}** règle(s) spécifique(s)." if changed_types else ".")
+        )
+        return True
+
+    async def _handle_parsed_action(
+        self,
+        message: discord.Message,
+        action: ai_actions.ParsedAction,
+        prefix: str,
+        *,
+        confirmed: bool = False,
+    ) -> bool:
+        spec = action.spec
+        if spec is None:
+            return False
+
+        if (
+            not confirmed
+            and action.intent in {"tickets.grant_access", "category.restrict_role"}
+        ):
+            view = _NaturalPlanConfirmView(
+                self,
+                message=message,
+                actions=(action,),
+                prefix=prefix,
+                author_id=message.author.id,
+            )
+            sent = await message.reply(
+                "Cette action modifie les accès du serveur :\n\n"
+                f"**1.** {ai_actions.describe_action(action)}\n\n"
+                "Voulez-vous vraiment l’exécuter ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+
+        if action.intent == "navigation.dashboard":
+            await self._send_dashboard_link(message)
+            self._pending_actions.pop(self._pending_key(message), None)
+            return True
+
+        if action.intent == "desktop.open_app":
+            await message.reply(
+                "Aucun appareil SentriX Desktop n’est actuellement connecté. "
+                "SentriX ne peut pas ouvrir une application installée sur votre ordinateur depuis Railway.",
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return True
+
+        if action.intent == "config.logs.auto":
+            await self._propose_log_configuration(message)
+            return True
+
+        if action.intent == "config.logs.route":
+            resolution = ai_actions.resolve_text_channel(
+                message.guild, str(action.slots.get("channel") or "")
+            )
+            if resolution.ambiguous:
+                options = "\n".join(
+                    f"- <#{int(ch.id)}> — #{ch.name}" for ch in resolution.ambiguous
+                )
+                await message.reply(
+                    "J’ai trouvé plusieurs salons possibles. Lequel voulez-vous utiliser ?\n" + options,
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+            if resolution.channel is None:
+                await message.reply(
+                    "Je ne trouve pas ce salon clairement. Mentionnez directement le salon, par exemple <#123456789012345678>.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+            category = str(action.slots.get("log_category") or "")
+            proposal = ai_actions.LogProposal(
+                category=category,
+                label=ai_actions.log_category_label(category),
+                channel_id=int(resolution.channel.id),
+                channel_name=str(resolution.channel.name),
+                score=100,
+                evidence="choix explicite de l'utilisateur",
+            )
+            if confirmed:
+                decision = await access_matrix.evaluate(
+                    self.bot,
+                    command_name="setup",
+                    author=message.author,
+                    guild=message.guild,
+                )
+                if not decision.allowed:
+                    await message.reply(
+                        decision.message,
+                        mention_author=False,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    return True
+                ok, reason = log_service.validate_channel(
+                    message.guild, proposal.channel_id, needs_file=True
+                )
+                if not ok:
+                    await message.reply(
+                        f"Je ne peux pas utiliser ce salon pour les logs : {reason}",
+                        mention_author=False,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    return True
+                try:
+                    await log_service.set_log_channel(
+                        self.bot,
+                        message.guild.id,
+                        proposal.category,
+                        proposal.channel_id,
+                    )
+                    from . import setup_v2_core
+                    await setup_v2_core.enable_module_if_unset(
+                        self.bot,
+                        message.guild.id,
+                        "logs",
+                        actor_id=message.author.id,
+                    )
+                except Exception:
+                    logger.exception("Configuration de logs pendant un plan impossible.")
+                    await message.reply(
+                        "Je n’ai pas pu appliquer cette étape de configuration des logs.",
+                        mention_author=False,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    return True
+                await message.reply(
+                    f"Logs **{proposal.label}** configurés dans <#{proposal.channel_id}>.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+            view = _LogConfigConfirmView(
+                self,
+                source_message=message,
+                author_id=message.author.id,
+                proposals=(proposal,),
+            )
+            sent = await message.reply(
+                f"Je vais envoyer les logs **{proposal.label}** dans <#{proposal.channel_id}>. "
+                "Voulez-vous appliquer ce changement ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+
+        if action.intent == "tickets.grant_access":
+            return await self._grant_ticket_access_role(message, action)
+
+        if action.intent == "navigation.setup":
+            section = str(action.slots.get("section") or "").strip() or None
+            decision = await access_matrix.evaluate(
+                self.bot,
+                command_name="setup",
+                author=message.author,
+                guild=message.guild,
+            )
+            if not decision.allowed:
+                await self._send_readonly_setup(message, decision.reason, section=section)
+                return True
+            if section:
+                try:
+                    from . import setup_control_center
+                    if section in setup_control_center.CATEGORIES:
+                        view = setup_control_center.SetupView(
+                            self.bot, message.guild, message.author.id
+                        )
+                        view.category = section
+                        await view.composer()
+                        await panels.envoyer(message.channel, view)
+                        return True
+                except Exception:
+                    logger.exception("Ouverture directe d'une section Setup impossible.")
+            return await self._invoke_command_line(message, f"{prefix}setup")
+
+        member = None
+        if spec.target_kind == "member":
+            target_text = action.slots.get("target")
+            if target_text == "__recent__":
+                recent = self._recent_target(message)
+                resolution = ai_actions.MemberResolution(
+                    member=recent,
+                    error=None if recent is not None else "missing",
+                )
+            else:
+                resolution = ai_actions.resolve_member(
+                    message.guild,
+                    target_text,
+                    message=message,
+                    bot_user_id=getattr(self.bot.user, "id", None),
+                )
+            if resolution.ambiguous:
+                names = "\n".join(
+                    f"- {m.mention} — {m.display_name} (`{m.id}`)"
+                    for m in resolution.ambiguous
+                )
+                self._remember_pending(message, action)
+                await message.reply(
+                    "J’ai trouvé plusieurs membres possibles. Lequel voulez-vous viser ?\n" + names,
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+            member = resolution.member
+            if member is not None:
+                self._remember_recent_target(message, member)
+            if member is None and "target" in spec.required:
+                await self._ask_for_missing_action_slot(message, action, "target")
+                return True
+            if target_text and member is None:
+                self._remember_pending(message, action)
+                await message.reply(
+                    f"Je ne trouve pas de membre correspondant clairement à « {target_text} ». "
+                    "Mentionnez le membre ou donnez son nom exact.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                return True
+
+        missing = ai_actions.missing_slots(action)
+        if missing:
+            await self._ask_for_missing_action_slot(message, action, missing[0], member=member)
+            return True
+
+        if action.intent.startswith(("voice.", "channel.", "category.", "role.", "message.", "member.", "embed.", "security.block_link")):
+            handled = await self._execute_native_action(message, action, member=member)
+            if handled:
+                self._pending_actions.pop(self._pending_key(message), None)
+                return True
+
+        command_line = ai_actions.build_command_line(action, prefix=prefix, member=member)
+        if not command_line:
+            return False
+
+        # Une suppression importante demande une confirmation explicite. Les sanctions
+        # classiques (warn/mute/ban) restent directes si la demande est claire, comme les
+        # commandes normales.
+        if not confirmed and action.intent == "moderation.purge" and int(action.slots.get("count") or 0) >= 50:
+            view = _NaturalActionConfirmView(
+                self,
+                message=message,
+                command_line=command_line,
+                author_id=message.author.id,
+            )
+            sent = await message.reply(
+                f"Cette action supprimera jusqu’à **{int(action.slots['count'])} messages** "
+                "dans ce salon. Voulez-vous continuer ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+
+        self._pending_actions.pop(self._pending_key(message), None)
+        return await self._invoke_command_line(message, command_line)
+
+    async def _execute_action_plan(
+        self,
+        message: discord.Message,
+        actions: tuple[ai_actions.ParsedAction, ...],
+        prefix: str,
+        *,
+        status_message: discord.Message | None = None,
+    ) -> None:
+        """Exécute séquentiellement un plan validé, sans jamais court-circuiter les checks."""
+        completed = 0
+        for index, action in enumerate(actions, 1):
+            try:
+                handled = await self._handle_parsed_action(
+                    message,
+                    action,
+                    prefix,
+                    confirmed=True,
+                )
+            except Exception:
+                logger.exception(
+                    "Plan naturel: exception étape=%s intent=%s user=%s",
+                    index,
+                    action.intent,
+                    message.author.id,
+                )
+                handled = False
+            if not handled:
+                await message.reply(
+                    f"Plan interrompu à l’étape **{index}** : je n’ai pas pu relier "
+                    f"« {action.intent} » à une action exécutable.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                break
+            completed += 1
+
+        if status_message is not None:
+            try:
+                await status_message.edit(
+                    content=(
+                        f"Plan traité : **{completed}/{len(actions)}** étape(s) ont été "
+                        "transmises aux moteurs SentriX. Les messages ci-dessous indiquent "
+                        "précisément les réussites ou refus Discord."
+                    ),
+                    view=None,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                pass
+
+    def _command_candidates(self, question: str) -> list[commands.Command]:
+        """Fast prefilter of loaded commands, delegated to the dedicated router module."""
+        if self._command_index is None:
+            self._command_index = ai_command_router.build_command_index(self.bot)
+        return ai_command_router.rank_command_candidates(
+            self._command_index,
+            question,
+            limit=20,
+        )
+
+    @staticmethod
+    def _arguments_grounded_in_question(question: str, arguments: str) -> bool:
+        """Compatibility wrapper around the dedicated natural-command router."""
+        return ai_command_router.arguments_grounded_in_question(question, arguments)
+    async def _classify_existing_command(
+        self,
+        message: discord.Message,
+        question: str,
+        prefix: str,
+    ) -> str | None:
+        """Repli générique vers les commandes EXISTANTES, jamais vers du code arbitraire."""
+        candidates = self._command_candidates(question)
+        if not candidates:
+            return None
+
+        catalog_rows = []
+        allowed: dict[str, commands.Command] = {}
+        for command in candidates:
+            qualified = str(command.qualified_name).strip()
+            allowed[qualified.casefold()] = command
+            description = str(
+                getattr(command, "description", "") or getattr(command, "help", "") or ""
+            ).replace("\n", " ")[:220]
+            signature = str(getattr(command, "signature", "") or "").replace("\n", " ")[:180]
+            catalog_rows.append(
+                f"- {qualified} | paramètres: {signature or 'aucun'} | {description}"
+            )
+
+        instructions = (
+            "Tu classes une demande explicite adressée à SentriX vers UNE commande Discord "
+            "déjà existante. Tu n'exécutes rien et tu ne décides jamais des permissions. "
+            "Retourne UNIQUEMENT du JSON: "
+            '{"command": string|null, "arguments": string, "confidence": integer}. '
+            "La valeur command doit être EXACTEMENT un nom de la liste ci-dessous. "
+            "Si aucune commande ne correspond clairement, command=null et confidence=0. "
+            "N'invente aucun ID, mention, membre, rôle, salon, durée ou raison. "
+            "Les arguments doivent seulement réorganiser les informations réellement "
+            "présentes dans le message, sans préfixe de commande et sans nouvelle ligne. "
+            "Une commande dangereuse reste autorisée dans la classification : le backend "
+            "demandera ensuite une confirmation et vérifiera les permissions.\n\n"
+            "COMMANDES AUTORISÉES:\n" + "\n".join(catalog_rows)
+        )
+        result = await ai_service.generate(
+            question,
+            model_key=ai_service.MODEL_LUNA,
+            reasoning_effort="none",
+            instructions=instructions,
+            guild_id=message.guild.id if message.guild else None,
+            channel_id=getattr(message.channel, "id", None),
+            user_id=message.author.id,
+            command="sentrix-command-router",
+            web_search=False,
+            max_output_tokens=140,
+        )
+        if not result.ok:
+            return None
+        try:
+            payload = json.loads(str(result.text or "").strip())
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", str(result.text or ""), re.DOTALL)
+            if not match:
+                return None
+            try:
+                payload = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(payload, dict):
+            return None
+        name = str(payload.get("command") or "").strip().casefold()
+        if name not in allowed:
+            return None
+        try:
+            confidence = int(payload.get("confidence", 0))
+        except (TypeError, ValueError):
+            confidence = 0
+        if confidence < 78:
+            return None
+        arguments = str(payload.get("arguments") or "").strip()
+        if "\n" in arguments or "\r" in arguments or len(arguments) > 900:
+            return None
+        if not self._arguments_grounded_in_question(question, arguments):
+            logger.warning(
+                "Routeur naturel: paramètres non ancrés refusés command=%s user=%s",
+                name,
+                message.author.id,
+            )
+            return None
+
+        command = allowed[name]
+        qualified = str(command.qualified_name).strip()
+        line = f"{prefix}{qualified}" + (f" {arguments}" if arguments else "")
+        return line
+
+    def _dynamic_command_needs_confirmation(self, command_line: str, prefix: str) -> bool:
+        return ai_command_router.command_needs_confirmation(command_line, prefix)
+    async def _invoke_natural_command(
+        self,
+        message: discord.Message,
+        question: str,
+        prefix: str,
+    ) -> bool:
+        # 1) Une réponse courte peut compléter une action commencée juste avant.
+        pending = self._take_pending(message)
+        if pending is not None:
+            completed = ai_actions.merge_followup(pending, question)
+            if completed.slots != pending.slots:
+                self._remember_pending(message, completed)
+                return await self._handle_parsed_action(message, completed, prefix)
+
+        action_like = ai_actions.looks_action_request(question)
+        multi_action = ai_actions.looks_multi_action(question)
+
+        # 2) Demandes composées : le planificateur IA ne tourne QUE lorsqu'il y a
+        # réellement plusieurs actions détectées.
+        if multi_action:
+            plan = await ai_actions.parse_action_plan(
+                question,
+                guild_id=message.guild.id if message.guild else None,
+                channel_id=getattr(message.channel, "id", None),
+                user_id=message.author.id,
+            )
+        else:
+            plan = ()
+
+        if plan:
+            # Les plans ordinaires s'exécutent immédiatement : pas de clic artificiel.
+            # Confirmation uniquement si une étape l'exige explicitement ou est à haut risque.
+            sensitive = any(
+                action.spec is not None and (action.spec.confirm or action.spec.risk == "high")
+                for action in plan
+            )
+            if not sensitive:
+                await self._execute_action_plan(message, plan, prefix)
+                return True
+
+            lines = [
+                f"**{index}.** {ai_actions.describe_action(action)}"
+                for index, action in enumerate(plan, 1)
+            ]
+            view = _NaturalPlanConfirmView(
+                self,
+                message=message,
+                actions=plan,
+                prefix=prefix,
+                author_id=message.author.id,
+            )
+            sent = await message.reply(
+                "J’ai compris une demande en plusieurs étapes :\n\n"
+                + "\n".join(lines)
+                + "\n\nUne étape est sensible. Exécuter ce plan ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+
+        # 3) Routeur structuré. Pour une conversation normale, parse_action() reste
+        # entièrement local et n'appelle plus de classifieur IA.
+        action = await ai_actions.parse_action(
+            question,
+            guild_id=message.guild.id if message.guild else None,
+            channel_id=getattr(message.channel, "id", None),
+            user_id=message.author.id,
+        )
+        if action is not None:
+            handled = await self._handle_parsed_action(message, action, prefix)
+            if handled:
+                return True
+
+        # 4) Compatibilité locale : une demande qui cite clairement une commande existante
+        # peut être exécutée sans appel au modèle.
+        command_line = self._natural_command_line(
+            question,
+            prefix,
+            has_attachment=bool(message.attachments),
+        )
+        if command_line:
+            return await self._invoke_command_line(message, command_line)
+
+        # 5) Une conversation ordinaire part DIRECTEMENT vers la réponse IA.
+        # Avant, elle pouvait subir 1 à 2 appels Luna de routage avant la vraie réponse.
+        if not action_like and not multi_action:
+            return False
+
+        # 6) Couverture large : Luna choisit parmi les commandes réellement chargées.
+        # Les permissions restent vérifiées par le même backend lors de bot.invoke().
+        command_line = await self._classify_existing_command(message, question, prefix)
+        if not command_line:
+            return False
+        if self._dynamic_command_needs_confirmation(command_line, prefix):
+            view = _NaturalActionConfirmView(
+                self,
+                message=message,
+                command_line=command_line,
+                author_id=message.author.id,
+            )
+            sent = await message.reply(
+                "Cette demande correspond à une action sensible ou potentiellement "
+                "destructive. Voulez-vous vraiment l’exécuter ?",
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            view.message = sent
+            return True
+        return await self._invoke_command_line(message, command_line)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -709,7 +2248,26 @@ class Ai(commands.Cog, name="Ai"):
         if not question:
             question = "Salut, comment tu vas ?"
 
-        if await self._invoke_natural_command(message, question, prefix):
+        try:
+            if await self._invoke_natural_command(message, question, prefix):
+                return
+        except Exception:
+            # Une action naturelle ne doit JAMAIS disparaître silencieusement : le détail
+            # reste dans les logs, mais l'utilisateur reçoit immédiatement une réponse.
+            logger.exception(
+                "Action naturelle SentriX en erreur guild=%s user=%s",
+                message.guild.id,
+                message.author.id,
+            )
+            try:
+                await message.reply(
+                    "Je n’ai pas pu exécuter cette action à cause d’une erreur interne. "
+                    "L’erreur a été journalisée.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                pass
             return
 
         async with message.channel.typing():
@@ -1233,4 +2791,3 @@ class Ai(commands.Cog, name="Ai"):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Ai(bot))
-

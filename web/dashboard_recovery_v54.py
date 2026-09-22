@@ -303,6 +303,9 @@ def _build_core_app(dashboard, bot) -> web.Application:
     app.router.add_get("/api/guilds", dashboard.handle_guilds)
     app.router.add_get("/api/guilds/{guild_id}", dashboard.handle_guild)
     app.router.add_put("/api/guilds/{guild_id}/settings", dashboard.handle_update_guild)
+    app.router.add_get("/api/guilds/{guild_id}/welcome", dashboard.handle_welcome_get)
+    app.router.add_put("/api/guilds/{guild_id}/welcome", dashboard.handle_welcome_put)
+    app.router.add_post("/api/guilds/{guild_id}/welcome/test", dashboard.handle_welcome_test)
     app.router.add_post(
         "/api/guilds/{guild_id}/notifications",
         dashboard.handle_create_social_notification,
@@ -319,6 +322,11 @@ def _build_core_app(dashboard, bot) -> web.Application:
         "/api/guilds/{guild_id}/sanctions/{user_id}/{action}",
         dashboard.handle_sanction_action,
     )
+    from .dashboard_api_community import register as register_community_routes
+    from .dashboard_api_music import register as register_music_routes
+
+    register_community_routes(app, dashboard)
+    register_music_routes(app, dashboard)
     return app
 
 

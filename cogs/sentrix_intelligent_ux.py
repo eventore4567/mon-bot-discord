@@ -21,7 +21,7 @@ from discord.ext import commands
 
 import config
 from database.db import now
-from utils import embeds
+from utils import embeds, ai_actions
 from utils.instance_identity import wake_words
 from utils import sentrix_panels as panels
 from utils.intelligent_ux import (
@@ -343,6 +343,14 @@ def _install_natural_router(bot: commands.Bot) -> bool:
     if ai_cog is None:
         return False
 
+    # Le routeur moderne vit désormais dans cogs.ai::_invoke_natural_command :
+    # registre strict, paramètres manquants, résolution sûre, confirmations et repli
+    # dynamique sur le catalogue réel. Ne pas poser un second interpréteur devant lui.
+    if callable(getattr(ai_cog, "_invoke_natural_command", None)):
+        bot._sentrix_intelligent_router_ready = True
+        logger.info("SentriX V2.4 : routeur naturel délégué au registre canonique cogs.ai.")
+        return True
+
     current = ai_cog.send_sentrix_reply
     if getattr(current, "_sentrix_intelligent_ux_v24", False):
         return True
@@ -448,54 +456,33 @@ def _install_primary_ai_listener_guard(bot: commands.Bot) -> bool:
 
         question = _extract_explicit_question(bot, message)
         if question is None:
-            return await primary(message)
+            # Forme courte volontairement prise en charge : « ban Tomioka », « mute
+            # Tomioka 2h », « ouvre setup »… Seulement les impératifs déterministes
+            # fortement typés passent ici. Le classifieur IA large n'est JAMAIS lancé
+            # sur une conversation Discord ordinaire.
+            if not ai_actions.is_bare_action_candidate(content):
+                return await primary(message)
+            question = content
 
-        # 1) Actions V2.4 structurées (pay, modération, profil, économie, etc.).
-        plan = parse_natural_action(question)
-        if plan is not None:
-            if not _claim_natural_message(bot, message.id):
-                return
-            try:
-                await _handle_plan(bot, message, plan)
-            except Exception:
-                logger.exception("V2.4 : action naturelle interceptée en échec.")
-                await _send_reply(
-                    message,
-                    embed=embeds.error(
-                        "Je n'ai pas pu terminer cette action. Aucune autre réponse IA n'a été envoyée.",
-                        title="Action interrompue",
-                    ),
-                )
+        # Routeur unique : cogs.ai possède désormais l'interprétation et l'exécution.
+        # On l'appelle avant toute réponse conversationnelle. S'il ne reconnaît aucune
+        # action, le message redevient une question IA normale.
+        try:
+            invoked = await ai_cog._invoke_natural_command(message, question, prefix)
+        except Exception:
+            logger.exception("V2.4 : routeur canonique naturel en échec.")
+            invoked = False
+        if invoked:
+            _claim_natural_message(bot, message.id)
             return
 
-        # 2) Toutes les autres commandes existantes reconnues en langage naturel.
-        # _natural_command_line() s'appuie sur bot.walk_commands(), donc une nouvelle
-        # commande existante est automatiquement couverte sans modifier cette garde.
-        command_line = ai_cog._natural_command_line(
-            question,
-            prefix,
-            has_attachment=bool(getattr(message, "attachments", None)),
-        )
-        if command_line:
-            if not _claim_natural_message(bot, message.id):
-                return
-            try:
-                invoked = await ai_cog._invoke_natural_command(message, question, prefix)
-            except Exception:
-                logger.exception("V2.4 : commande naturelle globale en échec.")
-                invoked = False
-            if not invoked:
-                await _send_reply(
-                    message,
-                    embed=embeds.warning(
-                        "J'ai reconnu une commande SentriX, mais elle n'est pas disponible actuellement.",
-                        title="Commande indisponible",
-                    ),
-                )
-            return
-
-        # 3) Ce n'est pas une commande : une seule vraie réponse IA est autorisée.
-        return await primary(message)
+        async with message.channel.typing():
+            return await ai_cog.send_sentrix_reply(
+                message.channel,
+                message.author,
+                question,
+                reply_to=message,
+            )
 
     guarded_ai_on_message._sentrix_v24_primary_guard = True
     bot.add_listener(guarded_ai_on_message, "on_message")

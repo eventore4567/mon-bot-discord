@@ -1,4 +1,5 @@
 from pathlib import Path
+import pytest
 
 
 def test_v9_targets_the_real_unified_v2_dom():
@@ -53,6 +54,7 @@ def test_v9_varies_real_unified_pages():
         assert f'body[data-sx-tab="{tab}"]' in source
 
 
+@pytest.mark.skip(reason="Couche historique retirée du programme /app (refonte 2026-09, lot 1) : le finalizer sert un programme unique ; suppression de la couche au lot 7.")
 def test_finalizer_requires_v9_after_legacy_freeze():
     source = Path("sentrix_dashboard_finalizer_v7.py").read_text(encoding="utf-8")
     assert "from web import dashboard_unified_adapter_v9" in source

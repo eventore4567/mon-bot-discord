@@ -90,7 +90,7 @@ def _can_reply_unknown(bot: commands.Bot, ctx: commands.Context) -> bool:
     return True
 
 
-async def _send_plain(ctx: commands.Context, text: str):
+async def _send_plain(ctx: commands.Context, text: str, *, delete_after: float | None = None):
     """Envoie du vrai texte Discord sans passer par la conversion globale en embed.
 
     La politique visuelle finale remplace Context.send et convertit normalement tout texte
@@ -98,7 +98,8 @@ async def _send_plain(ctx: commands.Context, text: str):
     on appelle donc le transport Discord original conservé par le wrapper final.
     """
     sender = getattr(commands.Context.send, "_sentrix_original", commands.Context.send)
-    return await sender(ctx, text)
+    kwargs = {"delete_after": float(delete_after)} if delete_after is not None else {}
+    return await sender(ctx, text, **kwargs)
 
 
 async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: commands.CommandError) -> bool:
@@ -134,7 +135,7 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
             text = f"Commande introuvable. Essayez {rendered}."
         else:
             text = "Commande introuvable. Utilisez `/help` pour voir les commandes disponibles."
-        await _send_plain(ctx, text)
+        await _send_plain(ctx, text, delete_after=8)
         return True
 
     if isinstance(base, commands.MissingRequiredArgument):

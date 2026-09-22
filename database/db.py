@@ -165,6 +165,14 @@ CREATE TABLE IF NOT EXISTS blacklist_users (
     PRIMARY KEY (guild_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS blacklist_links (
+    guild_id INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    created_by INTEGER,
+    created_at INTEGER,
+    PRIMARY KEY (guild_id, value)
+);
+
 CREATE TABLE IF NOT EXISTS whitelist_domains (
     guild_id INTEGER,
     domain TEXT,
@@ -175,6 +183,7 @@ CREATE TABLE IF NOT EXISTS automod_settings (
     guild_id INTEGER PRIMARY KEY,
     antispam INTEGER DEFAULT 0,
     antilink INTEGER DEFAULT 0,
+    antilink_strict INTEGER DEFAULT 0,
     antiinvite INTEGER DEFAULT 0,
     antimention INTEGER DEFAULT 0,
     anticaps INTEGER DEFAULT 0,
@@ -202,6 +211,14 @@ CREATE TABLE IF NOT EXISTS automod_exempt_roles (
     guild_id INTEGER,
     role_id INTEGER,
     PRIMARY KEY (guild_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS user_immunity_settings (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS antinuke_whitelist (
@@ -1041,6 +1058,9 @@ GUILD_CONFIG_NEW_COLUMNS = {
 # Même principe que GUILD_CONFIG_NEW_COLUMNS, mais pour automod_settings : "escalation"
 # a été ajoutée après la création initiale de la table.
 AUTOMOD_SETTINGS_NEW_COLUMNS = {
+    # Anti-liens strict : bloque réellement tous les liens, y compris dans les salons
+    # ignorés, pour le staff et sans appliquer la whitelist de domaines.
+    "antilink_strict": "INTEGER DEFAULT 0",
     # Escalade automatique OFF tant qu'un administrateur ne l'a pas activée.
     "escalation": "INTEGER DEFAULT 0",
     # Filtre multilingue d'insultes : un filtre comme les autres, désactivé par défaut.
@@ -1561,10 +1581,35 @@ class Database:
 
     async def set_automod(self, guild_id: int, field: str, value: int):
         await self.ensure_guild(guild_id)
-        await self.execute(
-            f"UPDATE automod_settings SET {field} = ? WHERE guild_id = ?",
-            (value, guild_id),
-        )
+        value = 1 if int(value) else 0
+
+        # Depuis V2026.09, "anti-liens" est strict par définition : activer le filtre
+        # bloque tous les liens. L'ancien interrupteur antilink_strict reste accepté
+        # pour compatibilité, mais les deux valeurs sont toujours synchronisées.
+        if field in {"antilink", "antilink_strict"}:
+            await self.execute(
+                "UPDATE automod_settings SET antilink = ?, antilink_strict = ? WHERE guild_id = ?",
+                (value, value, guild_id),
+            )
+        else:
+            await self.execute(
+                f"UPDATE automod_settings SET {field} = ? WHERE guild_id = ?",
+                (value, guild_id),
+            )
+
+        # Le cog AutoMod installe ce hook à chaud : toute écriture, y compris Dashboard
+        # ou IA naturelle, invalide le cache et resynchronise la règle AutoMod native.
+        hook = getattr(self, "_sentrix_automod_change_hook", None)
+        if callable(hook):
+            try:
+                await hook(int(guild_id), str(field), value)
+            except Exception:
+                logger.warning(
+                    "Hook AutoMod après set_automod impossible guild=%s field=%s",
+                    guild_id,
+                    field,
+                    exc_info=True,
+                )
 
     # ---------- Historique AutoMod (audit + statistiques) ----------
 
@@ -2111,34 +2156,83 @@ class Database:
             await self._conn.commit()
             return True
 
-    async def attempt_rob(self, guild_id: int, thief_id: int, victim_id: int, *, min_target_cash: int = 50,
-                           success_chance: float = 0.4, max_steal: int = 300,
-                           penalty_range: tuple[int, int] = (20, 100)) -> dict:
-        """Tentative de vol atomique (protégée par _economy_lock) : lit le solde de
-        la victime, tire le succès/échec ET applique le résultat dans la MÊME
-        section critique. Avant ce correctif, deux voleurs pouvaient voler la même
-        victime en même temps (chacun lisait le même solde avant qu'aucun n'écrive),
-        rendant son solde négatif — vérifié par exécution. Retourne un dict :
-        {"outcome": "too_poor"} / {"outcome": "success", "amount": N} /
-        {"outcome": "caught", "penalty": N}."""
+    async def attempt_rob(
+        self,
+        guild_id: int,
+        thief_id: int,
+        victim_id: int,
+        *,
+        min_target_cash: int = 50,
+        success_chance: float = 0.4,
+        max_steal: int = 300,
+        penalty_range: tuple[int, int] = (20, 100),
+        cooldown: int = 3600,
+    ) -> dict:
+        """Tentative de vol atomique, cooldown compris.
+
+        Le cooldown vit dans SQLite (economy.last_rob), donc un redéploiement ne
+        permet plus de contourner l’attente. Une amende est toujours bornée au cash
+        disponible : aucun échec de vol ne peut rendre un portefeuille négatif.
+        """
+        if thief_id == victim_id:
+            return {"outcome": "invalid"}
+
         async with self._economy_lock:
             await self.ensure_economy(guild_id, victim_id)
             await self.ensure_economy(guild_id, thief_id)
-            row = await self.fetchone("SELECT cash FROM economy WHERE guild_id = ? AND user_id = ?", (guild_id, victim_id))
-            victim_cash = row["cash"] if row else 0
+
+            thief = await self.fetchone(
+                "SELECT cash, last_rob FROM economy WHERE guild_id = ? AND user_id = ?",
+                (guild_id, thief_id),
+            )
+            victim = await self.fetchone(
+                "SELECT cash FROM economy WHERE guild_id = ? AND user_id = ?",
+                (guild_id, victim_id),
+            )
+            thief_cash = int(thief["cash"] if thief else 0)
+            victim_cash = int(victim["cash"] if victim else 0)
+            last_rob = int(thief["last_rob"] if thief else 0)
+            now_ts = now()
+
+            remaining = cooldown - (now_ts - last_rob) if last_rob else 0
+            if remaining > 0:
+                return {"outcome": "cooldown", "remaining": remaining}
+
             if victim_cash < min_target_cash:
                 return {"outcome": "too_poor"}
+
+            await self._conn.execute(
+                "UPDATE economy SET last_rob = ? WHERE guild_id = ? AND user_id = ?",
+                (now_ts, guild_id, thief_id),
+            )
+
             if random.random() < success_chance:
                 amount = random.randint(1, min(victim_cash, max_steal))
-                await self._conn.execute("UPDATE economy SET cash = cash - ? WHERE guild_id = ? AND user_id = ?", (amount, guild_id, victim_id))
-                await self._conn.execute("UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?", (amount, guild_id, thief_id))
+                debit = await self._conn.execute(
+                    "UPDATE economy SET cash = cash - ? "
+                    "WHERE guild_id = ? AND user_id = ? AND cash >= ?",
+                    (amount, guild_id, victim_id, amount),
+                )
+                if getattr(debit, "rowcount", 0) != 1:
+                    await self._conn.rollback()
+                    return {"outcome": "retry"}
+                await self._conn.execute(
+                    "UPDATE economy SET cash = cash + ? WHERE guild_id = ? AND user_id = ?",
+                    (amount, guild_id, thief_id),
+                )
                 await self._conn.commit()
                 return {"outcome": "success", "amount": amount}
-            penalty = random.randint(*penalty_range)
-            await self._conn.execute("UPDATE economy SET cash = cash - ? WHERE guild_id = ? AND user_id = ?", (penalty, guild_id, thief_id))
+
+            requested_penalty = random.randint(*penalty_range)
+            penalty = max(0, min(thief_cash, requested_penalty))
+            if penalty > 0:
+                await self._conn.execute(
+                    "UPDATE economy SET cash = cash - ? "
+                    "WHERE guild_id = ? AND user_id = ? AND cash >= ?",
+                    (penalty, guild_id, thief_id, penalty),
+                )
             await self._conn.commit()
             return {"outcome": "caught", "penalty": penalty}
-
     async def move_cash_bank(self, guild_id: int, user_id: int, requested: str, *, direction: str) -> int | None:
         """Dépôt/retrait atomique entre cash et banque (protégé par _economy_lock).
         `requested` est la chaîne brute tapée par l'utilisateur ('150', 'all',

@@ -53,13 +53,32 @@ class StatsView(discord.ui.View):
     les clics que de l'auteur de la commande ou d'un membre du staff, répond de façon
     privée à tout le monde d'autre, et désactive ses boutons à l'expiration."""
 
-    def __init__(self, cog: "Levels", guild: discord.Guild, member: discord.Member, author_id: int, timeout: float = 120):
+    def __init__(
+        self,
+        cog: "Levels",
+        guild: discord.Guild,
+        member: discord.Member,
+        author_id: int,
+        *,
+        levels_enabled: bool = True,
+        economy_enabled: bool = True,
+        timeout: float = 120,
+    ):
         super().__init__(timeout=timeout)
         self.cog = cog
         self.guild = guild
         self.member = member
         self.author_id = author_id
         self.message: discord.Message | None = None
+
+        # Un module désactivé/non configuré n'apparaît même pas dans l'interface.
+        for child in list(self.children):
+            custom_id = getattr(child, "custom_id", None)
+            if custom_id == "statsnav:level" and not levels_enabled:
+                self.remove_item(child)
+            elif custom_id == "statsnav:eco" and not economy_enabled:
+                self.remove_item(child)
+
         self._set_active("stats")
 
     def _set_active(self, page: str):
@@ -860,20 +879,21 @@ class Levels(commands.Cog, name="Levels"):
 
     # -------------------------------------------------------------- Embeds centralisés
 
-    async def _niveaux_actifs(self, guild_id: int) -> bool:
-        """Le système de niveaux est-il actif sur ce serveur ?
-
-        Source unique : module_settings (via setup_v2_core). +level-system, /setup et le
-        Dashboard écrivent tous au même endroit ; sans ligne, le module n'est pas
-        configuré donc inactif. Une erreur de lecture coupe plutôt que d'ouvrir.
-        """
+    async def _module_actif(self, guild_id: int, module: str) -> bool:
+        """Source unique des états de modules pour toutes les surfaces de statistiques."""
         from cogs import setup_v2_core
 
         try:
-            return await setup_v2_core.module_enabled(self.bot, guild_id, "levels")
+            return await setup_v2_core.module_enabled(self.bot, guild_id, module)
         except Exception:
-            logger.exception("Lecture de l'état du module niveaux impossible guild=%s", guild_id)
+            logger.exception("Lecture de l'état du module %s impossible guild=%s", module, guild_id)
             return False
+
+    async def _niveaux_actifs(self, guild_id: int) -> bool:
+        return await self._module_actif(guild_id, "levels")
+
+    async def _economie_active(self, guild_id: int) -> bool:
+        return await self._module_actif(guild_id, "economy")
 
     @staticmethod
     def _next_role_text(stats: dict) -> str:
@@ -887,6 +907,8 @@ class Levels(commands.Cog, name="Levels"):
     async def build_stats_embed(self, guild: discord.Guild, member: discord.Member, settings_override: dict | None = None) -> discord.Embed:
         settings = settings_override or await self.bot.db.get_stats_settings(guild.id)
         stats = await stats_service.get_member_statistics(self.bot, guild, member)
+        levels_enabled = await self._niveaux_actifs(guild.id)
+        economy_enabled = await self._economie_active(guild.id)
         eco_emoji = settings.get("economy_emoji", "🪙")
         e = discord.Embed(
             title=settings["title_stats"].format(display_name=member.display_name),
@@ -895,25 +917,24 @@ class Levels(commands.Cog, name="Levels"):
             timestamp=discord.utils.utcnow(),
         )
         e.set_thumbnail(url=member.display_avatar.url)
-        if await self._niveaux_actifs(guild.id):
+        if levels_enabled:
             e.add_field(name="📈 Niveau", value=f"Niveau {stats['current_level']}", inline=True)
             e.add_field(
                 name="🏆 Classement",
                 value=(f"#{stats['rank']}" if stats["is_ranked"] else "Non classé"),
                 inline=True,
             )
-        else:
-            e.add_field(name="📈 Niveaux", value="Désactivés sur ce serveur", inline=True)
         if settings.get("show_messages", True):
             e.add_field(name="💬 Messages", value=stats_service.format_number(stats["message_count"]), inline=True)
-        e.add_field(
-            name="✨ Progression",
-            value=f"{stats_service.format_number(stats['current_level_xp'])}/{stats_service.format_number(stats['required_xp'])} XP — {stats['progress_pct']}%",
-            inline=False,
-        )
+        if levels_enabled:
+            e.add_field(
+                name="✨ Progression",
+                value=f"{stats_service.format_number(stats['current_level_xp'])}/{stats_service.format_number(stats['required_xp'])} XP — {stats['progress_pct']}%",
+                inline=False,
+            )
         if settings.get("show_voice", True):
             e.add_field(name="🔊 Temps vocal", value=stats_service.format_duration(stats["voice_time"]), inline=True)
-        if settings.get("show_economy", True):
+        if economy_enabled and settings.get("show_economy", True):
             e.add_field(
                 name="💰 Économie",
                 value=(
@@ -931,7 +952,7 @@ class Levels(commands.Cog, name="Levels"):
                 value=f"<t:{int(stats['joined_at'].timestamp())}:D>" if stats["joined_at"] else "Inconnu",
                 inline=True,
             )
-        if settings.get("show_next_role", True):
+        if levels_enabled and settings.get("show_next_role", True):
             e.add_field(name="🎭 Prochain rôle", value=self._next_role_text(stats), inline=False)
         e.set_footer(text=settings.get("footer", DEFAULT_STATS_SETTINGS["footer"]))
         return e
@@ -1033,6 +1054,15 @@ class Levels(commands.Cog, name="Levels"):
 
     async def build_economy_embed(self, guild: discord.Guild, member: discord.Member) -> discord.Embed:
         settings = await self.bot.db.get_stats_settings(guild.id)
+        if not await self._economie_active(guild.id):
+            e = discord.Embed(
+                title=f"Économie de {member.display_name}",
+                description="Le module Économie n'est pas actif sur ce serveur.",
+                color=settings["color"],
+                timestamp=discord.utils.utcnow(),
+            )
+            e.set_thumbnail(url=member.display_avatar.url)
+            return e
         stats = await stats_service.get_member_statistics(self.bot, guild, member)
         ranks = await stats_service.get_category_ranks(self.bot, guild.id, stats)
         eco_emoji = settings.get("economy_emoji", "🪙")
@@ -1064,14 +1094,15 @@ class Levels(commands.Cog, name="Levels"):
         ranks = await stats_service.get_category_ranks(self.bot, guild.id, stats)
         e = discord.Embed(title=f"🏆 Classement de {member.display_name}", color=settings["color"], timestamp=discord.utils.utcnow())
         e.set_thumbnail(url=member.display_avatar.url)
-        if await self._niveaux_actifs(guild.id):
+        levels_enabled = await self._niveaux_actifs(guild.id)
+        economy_enabled = await self._economie_active(guild.id)
+        if levels_enabled:
             xp_rank_value = f"#{ranks['xp_rank']}" if stats["is_ranked"] else "Non classé"
-        else:
-            xp_rank_value = "Désactivé sur ce serveur"
-        e.add_field(name="XP / Niveau", value=xp_rank_value, inline=True)
+            e.add_field(name="XP / Niveau", value=xp_rank_value, inline=True)
         e.add_field(name="Messages", value=f"#{ranks['message_rank']}", inline=True)
         e.add_field(name="Temps vocal", value=f"#{ranks['voice_rank']}", inline=True)
-        e.add_field(name="Économie", value=f"#{ranks['economy_rank']}", inline=True)
+        if economy_enabled:
+            e.add_field(name="Économie", value=f"#{ranks['economy_rank']}", inline=True)
         e.add_field(name="Réputation", value=f"#{ranks['reputation_rank']}", inline=True)
         e.set_footer(text=settings.get("footer", DEFAULT_STATS_SETTINGS["footer"]))
         return e
@@ -1099,7 +1130,14 @@ class Levels(commands.Cog, name="Levels"):
         except Exception:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Une erreur est survenue en préparant ces statistiques.')))
         if settings.get("buttons_visible", True):
-            view = StatsView(self, ctx.guild, membre, ctx.author.id)
+            view = StatsView(
+                self,
+                ctx.guild,
+                membre,
+                ctx.author.id,
+                levels_enabled=await self._niveaux_actifs(ctx.guild.id),
+                economy_enabled=await self._economie_active(ctx.guild.id),
+            )
             msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
             view.message = msg
         else:
@@ -1110,10 +1148,8 @@ class Levels(commands.Cog, name="Levels"):
     async def stats_cmd(self, ctx: commands.Context, membre: discord.Member = None):
         await self._send_stats(ctx, membre)
 
-    @commands.hybrid_command(name="me", description="Afficher toutes vos statistiques personnelles sur ce serveur.", with_app_command=False)
-    @app_commands.describe(membre="Le membre visé (optionnel)")
-    async def me(self, ctx: commands.Context, membre: discord.Member = None):
-        """Alias historique de /stats — conservé pour ne rien casser côté utilisateurs."""
+    # Ancien alias +me retiré : la carte de profil officielle est /outils profilecard.
+    async def _legacy_me(self, ctx: commands.Context, membre: discord.Member = None):
         await self._send_stats(ctx, membre)
 
     async def _send_level(self, ctx: commands.Context, membre: discord.Member = None):
@@ -1429,9 +1465,10 @@ class Levels(commands.Cog, name="Levels"):
         except discord.HTTPException:
             pass
 
-    @commands.hybrid_command(name="profile", description="Afficher votre profil communautaire.")
-    @app_commands.describe(membre="Le membre visé (optionnel)")
-    async def profile(self, ctx: commands.Context, membre: discord.Member = None):
+    # Ancien rendu conservé temporairement comme helper interne uniquement.
+    # La commande publique +profile/+profil est supprimée ; le profil communautaire
+    # public a été retiré au profit de /outils profilecard.
+    async def _legacy_profile(self, ctx: commands.Context, membre: discord.Member = None):
         # Première commande migrée vers utils/design_system (Phase 2) : contrairement à
         # /stats et /level, /profile n'avait pas de couleur/footer pilotés par
         # +statsconfig — elle peut donc adopter le nouveau système sans rien casser de
