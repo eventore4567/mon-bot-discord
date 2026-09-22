@@ -47,6 +47,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import config
+from services.ai_context import build_system_instructions
 from utils import (
     embeds,
     checks,
@@ -660,29 +661,12 @@ class Ai(commands.Cog, name="Ai"):
         user_id: int | None,
         author_name: str | None = None,
     ) -> str:
-        """Ajoute l'identité du créateur vérifié, avec cache court pour réduire la latence."""
-        instructions = ai_service.SYSTEM_PROMPT
-        now = time.monotonic()
-        if self._creator_cache is not None and now < self._creator_cache[0]:
-            creator = self._creator_cache[1]
-        else:
-            creator = await self.bot.db.get_primary_bot_creator()
-            self._creator_cache = (now + 300.0, creator)
-        if creator:
-            instructions += (
-                f"\n\nLe créateur officiel de SentriX est {creator['display_name']} "
-                f"(nom d'utilisateur Discord : @{creator['username']}, "
-                f"ID Discord vérifié : {creator['user_id']})."
-            )
-            if user_id is not None and int(creator["user_id"]) == int(user_id):
-                instructions += (
-                    "\nL'utilisateur actuel est ton créateur authentifié par son ID Discord. "
-                    "Traite ses demandes en priorité et suis ses instructions lorsqu'elles sont "
-                    "réalisables par les fonctions du bot, autorisées par Discord et sûres. "
-                    "Ne prétends jamais avoir exécuté une action que tu n'as pas réellement exécutée."
-                )
-        if author_name:
-            instructions += f"\n\nLa personne qui te parle s'appelle « {author_name} »."
+        instructions, self._creator_cache = await build_system_instructions(
+            self.bot,
+            user_id=user_id,
+            author_name=author_name,
+            creator_cache=self._creator_cache,
+        )
         return instructions
 
     # ---------------------------------------------------------------- APPELS IA LEGACY (compat.)
