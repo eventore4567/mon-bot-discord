@@ -60,9 +60,13 @@ def test_no_periodic_dom_loop():
     program = _program()
     assert "MutationObserver" not in program
     assert "setInterval(loadPublic" not in program
-    # Un seul minuteur récurrent : les métriques live du bandeau (texte seul, 30 s).
+    # Deux minuteurs réseau légers sont autorisés : santé du dashboard et métriques live.
+    # Aucun des deux ne relance render() ni une animation quand la réponse est saine.
     intervals = re.findall(r"setInterval\(([^,]+),\s*(\d+)\)", program)
-    assert intervals == [("() => liveTick(false)", "30000")], intervals
+    assert intervals == [
+        ("() => dashboardHealthTick()", "30000"),
+        ("() => liveTick(false)", "30000"),
+    ], intervals
     assert "data-sx-tab" not in program
     assert "Element.prototype.animate" not in program
     # Ces appels sont des transitions ponctuelles : go(), sélection d'un serveur et les
