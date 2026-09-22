@@ -191,7 +191,7 @@ const checks=[
   ["levels","general","#lvSave"], ["levels","levelup",'[data-setting="level_channel"]'], ["levels","roles","#lvRoleAdd"], ["levels","avance","#lvExRoles"],
   ["economy","general","#ecSave"], ["economy","boutique","#shopAdd"], ["economy","jeux","#gmEnabled"], ["economy","gains",".kpi"], ["roles","autoroles",'[data-setting="autorole"]'], ["roles","interactifs","#reactionPanelCreate"], ["roles","avance",'[data-setting="mod_role"]'],
   ["moderation","","#sanctionList"], ["security","protections","[data-automod]"], ["security","verification","#verifyRules"],
-  ["logs","",'[data-log-channel]'], ["tickets","","#ticketSave"], ["music","player","#musicVoice"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
+  ["logs","",'[data-log-channel]'], ["tickets","","#ticketCreateOpen"], ["music","player","#musicVoice"], ["notifications","","#notifAdd"], ["automation","","#reactCreate"],
   ["settings","",'[data-setting="prefix"]'], ["embeds","","#embedSend"], ["ai","","[data-ai]"],
   ["invites","invites",".card"], ["backups","backups","#opsExport"], ["backups","history","[data-rollback]"],
 ];
