@@ -65,7 +65,7 @@ import railway_ha_boot as ha_boot  # noqa: E402
 from sentrix_ha_music_drain import install as _install_ha_music_drain  # noqa: E402
 
 _install_ha_music_drain()
-logger.warning("HA music drain : cession planifiée différée pendant une session musique active.")
+logger.info("HA music drain : cession planifiée différée pendant une session musique active.")
 
 
 # V95 doit être branchée explicitement dans le véritable entrypoint Railway. Le précédent
@@ -79,7 +79,7 @@ from sentrix_v95_bootstrap import install as _install_v95_bootstrap  # noqa: E40
 _install_v95_bootstrap()
 if not getattr(app_commands.CommandTree.sync, "_sentrix_v95", False):
     raise RuntimeError("V95 slash non branchée sur CommandTree.sync avant le démarrage Railway.")
-logger.warning("V95 bootstrap explicitement confirmé dans l'entrypoint Railway HA produit.")
+logger.info("V95 bootstrap explicitement confirmé dans l'entrypoint Railway HA produit.")
 
 # V97 corrige la couche d'exécution V95 elle-même : les signatures avec option facultative
 # intermédiaire retombent sur un argument texte sûr, les pièces jointes sont réinjectées dans
@@ -88,7 +88,7 @@ logger.warning("V95 bootstrap explicitement confirmé dans l'entrypoint Railway 
 from sentrix_v97_reliability import install as _install_v97_reliability  # noqa: E402
 
 _install_v97_reliability(dashboard_web)
-logger.warning("V97 fiabilité slash + dashboard Tickets simplifié branchés.")
+logger.info("V97 fiabilité slash + dashboard Tickets simplifié branchés.")
 
 # V99 corrige le transport des sous-commandes slash groupées dans le VERITABLE bootstrap
 # Railway utilisé par la production. Les valeurs déjà transformées par Discord (texte,
@@ -99,7 +99,7 @@ logger.warning("V97 fiabilité slash + dashboard Tickets simplifié branchés.")
 from sentrix_grouped_slash_fix import install as _install_v99_grouped_transport  # noqa: E402
 
 _install_v99_grouped_transport()
-logger.warning("V99 transport slash groupé natif + erreurs compactes branché dans l'entrypoint Railway HA produit.")
+logger.info("V99 transport slash groupé natif + erreurs compactes branché dans l'entrypoint Railway HA produit.")
 
 # V100 corrige les doubles acknowledgements/defer et les éditions d'anciens embeds sur
 # Components V2. Il reste installé avant V101 : V101 ne remplace que la découverte des
@@ -109,7 +109,7 @@ from sentrix_v100_runtime_fix import install as _install_v100_runtime_fix  # noq
 
 _install_v100_defer_fix()
 _install_v100_runtime_fix()
-logger.warning("V100 interactions : defer idempotent, ack unique et compatibilité Components V2 branchés.")
+logger.info("V100 interactions : defer idempotent, ack unique et compatibilité Components V2 branchés.")
 
 # V101 est installé en dernier dans la pile runtime de commandes. Il assainit les
 # signatures publiques à partir de la déclaration réelle du callback, restaure le Cog si
@@ -117,7 +117,7 @@ logger.warning("V100 interactions : defer idempotent, ack unique et compatibilit
 from sentrix_v101_command_runtime import install as _install_v101_command_runtime  # noqa: E402
 
 _install_v101_command_runtime()
-logger.warning("V101 runtime commandes : signatures, liaison Cog et délai IA branchés.")
+logger.info("V101 runtime commandes : signatures, liaison Cog et délai IA branchés.")
 
 # V102 prépare la passerelle musique avant que cogs.music soit chargé. Elle ne crée aucune
 # nouvelle commande : elle remplace uniquement la résolution de source du Cog Music afin
@@ -127,7 +127,7 @@ logger.warning("V101 runtime commandes : signatures, liaison Cog et délai IA br
 from sentrix_music_providers_v102 import install as _install_music_v102  # noqa: E402
 
 _install_music_v102()
-logger.warning("V102 musique : multi-provider branché avant le chargement des Cogs.")
+logger.info("V102 musique : multi-provider branché avant le chargement des Cogs.")
 
 # V98 doit être installé dans CE véritable bootstrap produit, pas uniquement dans un wrapper
 # alternatif. Railway principal et standby utilisent historiquement ce module ; l'installation
@@ -136,7 +136,7 @@ logger.warning("V102 musique : multi-provider branché avant le chargement des C
 from sentrix_v98_slash import install as _install_v98_grouped_slash  # noqa: E402
 
 _install_v98_grouped_slash()
-logger.warning("V98 slash sémantique explicitement branché dans l'entrypoint Railway HA produit.")
+logger.info("V98 slash sémantique explicitement branché dans l'entrypoint Railway HA produit.")
 
 # Surface canonique : cette couche est maintenant installée dans le VRAI bootstrap partagé
 # par primary et standby. Elle ne dépend donc plus d'un wrapper alternatif jamais exécuté.
@@ -145,7 +145,7 @@ logger.warning("V98 slash sémantique explicitement branché dans l'entrypoint R
 from sentrix_canonical_command_surface import install as _install_canonical_surface  # noqa: E402
 
 _install_canonical_surface()
-logger.warning("Surface slash canonique SentriX branchée sur le bootstrap HA réel.")
+logger.info("Surface slash canonique SentriX branchée sur le bootstrap HA réel.")
 
 # Contrats produit finaux : le service qui détient effectivement le lease HA garde les
 # réponses naturelles « sentrix ... » même si ce leader est le standby, et la durée de
@@ -154,7 +154,7 @@ logger.warning("Surface slash canonique SentriX branchée sur le bootstrap HA r�
 from sentrix_product_runtime_contract import install as _install_product_runtime_contract  # noqa: E402
 
 _install_product_runtime_contract()
-logger.warning("Contrats runtime produit : IA passive HA + durée mute requise + URLs IA.")
+logger.info("Contrats runtime produit : IA passive HA + durée mute requise + URLs IA.")
 
 # V108 est installé par le wrapper Bot.add_cog de la passerelle musique V102. Ce second
 # wrapper s'exécute juste après V108 afin de corriger la sémantique playlist sans dupliquer
@@ -163,7 +163,7 @@ logger.warning("Contrats runtime produit : IA passive HA + durée mute requise +
 from sentrix_music_playlist_semantics import install as _install_playlist_semantics  # noqa: E402
 
 _install_playlist_semantics()
-logger.warning("Sémantique playlist sauvegarder/importer/charger branchée après V108.")
+logger.info("Sémantique playlist sauvegarder/importer/charger branchée après V108.")
 
 
 # V96 doit être installée APRES l'import de railway_ha_boot : railway_boot remplace

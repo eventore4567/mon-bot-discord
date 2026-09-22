@@ -373,7 +373,7 @@ def install(dashboard) -> bool:
         dashboard.build_app = build_app_with_growth
 
     ok = CSS_MARKER in dashboard.INDEX_HTML and JS_MARKER in dashboard.INDEX_HTML
-    logger.warning("Dashboard Growth Control V12 installed=%s: stats/invites/auto-reactions/ops/audit/backups/maintenance/webhooks.", ok)
+    logger.info("Dashboard Growth Control V12 installed=%s: stats/invites/auto-reactions/ops/audit/backups/maintenance/webhooks.", ok)
     return ok
 
 

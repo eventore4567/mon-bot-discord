@@ -402,7 +402,7 @@ def install() -> None:
         ("musique", "file"): "Afficher et gérer la file d'attente.",
         ("musique", "playlist"): "Sauvegarder, importer et charger vos playlists.",
     })
-    logger.warning("Surface slash canonique active : noms français, doublons masqués, /musique structuré.")
+    logger.info("Surface slash canonique active : noms français, doublons masqués, /musique structuré.")
 
 
 __all__ = ["install", "ROOTS", "LEAVES", "MUSIC_LEAVES", "PLAYLIST_LEAVES", "SHORT_TARGETS", "SHORT_ROOTS", "SHORT_DIRECT", "short_slash_enabled"]

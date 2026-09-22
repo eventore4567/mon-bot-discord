@@ -404,7 +404,7 @@ def install_on_cog(bot: commands.Bot, cog: Any) -> PersistentVoiceState:
 
     cog.cog_unload = _cog_unload_persistent
     state.start()
-    logger.warning(
+    logger.info(
         "Musique V104 voix persistante active : aucun départ automatique ; "
         "reconnexion après restart/failover jusqu'à /music leave."
     )

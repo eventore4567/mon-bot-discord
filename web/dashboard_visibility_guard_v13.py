@@ -76,7 +76,7 @@ def install(dashboard) -> bool:
         html = html.replace("</body>", JS + "\n</body>", 1)
     dashboard.INDEX_HTML = html
     ok = all(x in html for x in (API_MARKER, CSS_MARKER, JS_MARKER, "CAPTCHA V96 RÉEL", "sxCaptchaV13"))
-    logger.warning("Dashboard Visibility V13 installed=%s: visible CAPTCHA guard (Growth navigation/re-render bridge retired, V15 renders natively).", ok)
+    logger.info("Dashboard Visibility V13 installed=%s: visible CAPTCHA guard (Growth navigation/re-render bridge retired, V15 renders natively).", ok)
     return ok
 
 
