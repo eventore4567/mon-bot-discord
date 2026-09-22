@@ -56,6 +56,9 @@ PRIVATE_OWNER_COMMANDS = frozenset({
 # rester ni en préfixe, ni en slash, ni être réinjectées par les couches de restauration.
 EXPLICITLY_REMOVED_COMMANDS = frozenset({
     "blacklist-add", "blacklist-users",
+    # Ancien alias du profil retiré : +stats est la surface préfixe canonique et
+    # la carte profil vit dans la surface slash/dashboard.
+    "me",
 })
 
 # Nouveau système transverse : visible dans +help sans le classer dans les anciennes
