@@ -200,6 +200,16 @@ def is_complex_request(text: str, *, forced: bool = False) -> bool:
     return any(kw in lowered for kw in _COMPLEX_KEYWORDS)
 
 
+def _keyword_present(text: str, keyword: str) -> bool:
+    """Compte un mot/une expression comme une unité, sans sous-chaîne imbriquée.
+
+    Exemple : « debug » correspond à « debug », mais ne doit pas compter une seconde
+    fois « bug ». Sans cette frontière, une simple demande Python atteignait
+    artificiellement quatre mots-clés et basculait sur Sol.
+    """
+    return re.search(rf"(?<!\\w){re.escape(keyword)}(?!\\w)", text) is not None
+
+
 def is_advanced_request(text: str) -> bool:
     """Réserve Sol aux demandes réellement difficiles, pour ne pas ralentir le reste."""
     if not text:
@@ -207,8 +217,8 @@ def is_advanced_request(text: str) -> bool:
     lowered = text.lower()
     if len(text) > 1800:
         return True
-    advanced_hits = sum(1 for kw in _ADVANCED_KEYWORDS if kw in lowered)
-    complex_hits = sum(1 for kw in _COMPLEX_KEYWORDS if kw in lowered)
+    advanced_hits = sum(1 for kw in _ADVANCED_KEYWORDS if _keyword_present(lowered, kw))
+    complex_hits = sum(1 for kw in _COMPLEX_KEYWORDS if _keyword_present(lowered, kw))
     has_code_block = "\x60\x60\x60" in text
     return advanced_hits >= 1 or (has_code_block and complex_hits >= 2) or complex_hits >= 4
 
