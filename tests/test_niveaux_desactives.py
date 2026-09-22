@@ -22,14 +22,16 @@ def _corps(nom: str, source: str = SOURCE) -> str:
     raise AssertionError(f"{nom} introuvable")
 
 
-def test_un_seul_point_de_verite_pour_l_etat_des_niveaux():
-    """_niveaux_actifs lit UNE seule vérité : module_settings (setup_v2_core), que
-    +level-system, /setup et le Dashboard écrivent tous. Les trois affichages
-    doivent s'appuyer dessus plutôt que de réinventer leur propre logique."""
-    corps = _corps("_niveaux_actifs")
+def test_un_seul_point_de_verite_pour_l_etat_des_modules():
+    """Le helper partagé lit UNE seule vérité : module_settings (setup_v2_core).
+    Niveaux et économie délèguent tous les deux à cette même source sans se couper
+    mutuellement."""
+    corps = _corps("_module_actif")
     assert "setup_v2_core" in corps
     assert "module_enabled" in corps
     assert "system_features" not in corps
+    assert "_module_actif" in _corps("_niveaux_actifs")
+    assert "_module_actif" in _corps("_economie_active")
 
 
 def test_stats_masque_le_niveau_quand_desactive():
