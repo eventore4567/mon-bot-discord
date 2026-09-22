@@ -31,7 +31,7 @@ MEMBER_JOURNEYS = {
     "outils": ("poll", "remind", "translate", "weather", "suggest", "afk"),
     "ia": ("sentrix", "image", "explain", "rewrite", "code"),
     "economie": ("balance", "daily", "weekly", "work", "pay", "shop", "buy", "inventory", "deposit", "withdraw"),
-    "profil": ("level", "profile", "rep", "reputation", "voice-time"),
+    "profil": ("level", "profilecard", "rep", "reputation", "voice-time"),
     "tickets": ("ticket",),
     "evenements": ("giveaway-list", "event-join", "event-list", "tournament-join", "tournament-list"),
     "invites": ("invites", "invite-leaderboard", "invited-by"),
