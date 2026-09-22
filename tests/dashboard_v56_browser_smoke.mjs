@@ -5,6 +5,15 @@ import { JSDOM, VirtualConsole } from "jsdom";
 const htmlPath = process.argv[2];
 if (!htmlPath) throw new Error("usage: node dashboard_v56_browser_smoke.mjs <dashboard.html>");
 const html = fs.readFileSync(htmlPath, "utf8");
+// Les fichiers source restent la source de vérité du bundle unique injecté dans
+// le HTML. Certains contrats statiques ci-dessous inspectent ces sources, sans
+// supposer qu'elles sont encore servies comme plusieurs <script> au navigateur.
+const sourceByName = new Map(
+  ["00_core.js","10_nav.js","30_modules.js","38_tickets.js","41_moderation.js","90_boot.js"].map(name => [
+    name,
+    fs.readFileSync(new URL(`../web/dashboard_ui/js/${name}`, import.meta.url), "utf8"),
+  ]),
+);
 const requests = [];
 const runtimeErrors = [];
 const virtualConsole = new VirtualConsole();
