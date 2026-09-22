@@ -66,11 +66,11 @@ class StructureDUnPanneau(unittest.TestCase):
         self.assertEqual([f.filename for f in self.panneau.fichiers()], ["banner_error.webp"])
         self.assertEqual(self.panneau.to_components()[0]["accent_color"], config.COLOR_ERROR)
 
-    def test_chaque_section_est_precedee_d_un_filet(self):
+    def test_les_sections_restent_sans_filet_decoratif(self):
         types = [i["type"] for i in self.panneau.to_components()[0]["components"]]
         sections = [i for i in self.plat if i["type"] == TEXTE and str(i.get("content", "")).startswith("### ")]
         self.assertEqual(len(sections), 2)
-        self.assertGreaterEqual(types.count(FILET), 2)
+        self.assertEqual(types.count(FILET), 0)
 
     def test_le_mode_aligne_utilise_un_bloc_de_code(self):
         """Discord rend en police proportionnelle : hors bloc de code, rien ne s'aligne."""
