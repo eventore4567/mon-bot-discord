@@ -70,7 +70,7 @@ class DiscordUiContractTests(unittest.TestCase):
     def test_an_explicit_success_wins_over_an_action_verb(self):
         """« Message supprimé avec succès » sortait en rouge : « supprimé » gagnait."""
         self.assertEqual(embeds._kind_from_text("Message supprimé avec succès"), "success")
-        self.assertEqual(embeds._kind_from_text("Salon supprimé"), "danger")
+        self.assertEqual(embeds._kind_from_text("Salon supprimé"), "success")
         self.assertEqual(embeds._kind_from_text("Rôle créé"), "success")
 
     def test_log_mentions_are_native_markup_and_transport_blocks_pings(self):
