@@ -37,15 +37,15 @@ def test_le_remplacement_d_une_reponse_prefixee_programme_sa_suppression():
     assert "delete_after" in _corps("_replace_prefix_response")
 
 
-def test_les_quatre_branches_slash_programment_une_suppression():
+def test_les_branches_slash_qui_envoient_une_erreur_programment_une_suppression():
     corps = _corps("_raw_slash_send")
-    # Deux branches passent par edit_original_response, qui n'a pas
-    # delete_after : la suppression est programmée à la main sur le message
-    # renvoyé, via le helper partagé.
-    assert corps.count("_effacer_plus_tard") == 3
-    # La réponse fraîche (send_message) et le repli webhook portent leur
-    # propre delete_after / programmation.
+    # Réponse différée : edit_original_response ne possède pas delete_after.
+    assert corps.count("_effacer_plus_tard") == 1
+    # Réponse fraîche : send_message gère directement le délai.
     assert "delete_after" in corps
+    # Une vraie réponse déjà envoyée est conservée : aucune erreur tardive ne
+    # remplace un succès ni ne crée un follow-up parasite.
+    assert "résultat utilisateur conservé" in corps
 
 
 def test_le_helper_de_suppression_differee_est_silencieux_sur_l_echec():
