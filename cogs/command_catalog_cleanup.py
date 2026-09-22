@@ -32,7 +32,7 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "sentrix", "image", "ai-translate", "chat-reset",
     "balance", "daily", "work", "pay", "inventory", "banque",
     "economyleaderboard", "leaderboard-money",
-    "me", "level", "set-xp", "add-xp", "set-level-role", "remove-level-role",
+    "level", "set-xp", "add-xp", "set-level-role", "remove-level-role",
     "reset-levels",
     "ticket", "giveaway", "giveaway-reroll",
     # Le nouveau moteur expose pause/skip/stop sous le groupe /music. Seul +play
