@@ -209,7 +209,7 @@ for(const [tab,sub,selector] of checks){
 
 const interactivePathsNow=()=>requests.map(x=>x.path);
 const interactivePaths=requests.map(x=>x.path);
-for(const required of ["/api/guilds/1/welcome","/api/guilds/1/levels","/api/guilds/1/economy","/api/guilds/1/economy/games","/api/guilds/1/roles","/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/setup-tools","/api/guilds/1/verification-v6","/api/guilds/1/logs/config","/api/guilds/1/automation/reactions","/api/guilds/1/ops/overview"]){
+for(const required of ["/api/guilds/1/welcome","/api/guilds/1/levels","/api/guilds/1/economy","/api/guilds/1/economy/games","/api/guilds/1/roles","/api/guilds/1/diagnostics","/api/guilds/1/sanctions","/api/guilds/1/v62","/api/guilds/1/verification-v6","/api/guilds/1/logs/config","/api/guilds/1/automation/reactions","/api/guilds/1/ops/overview","/api/guilds/1/music"]){
   if(!interactivePaths.includes(required)) throw new Error(`Route réelle jamais chargée: ${required}`);
 }
 // Le cache par serveur évite les rechargements : le diagnostic n'est demandé qu'une poignée de fois malgré 22 navigations.
@@ -223,10 +223,16 @@ dom.window.document.querySelector('[data-go="dm"]').click(); await sleep(150);
 if(!dom.window.document.getElementById("dmOneMessage")) throw new Error("La page Message privé doit rester accessible depuis Sanctions.");
 if(!interactivePathsNow().includes("/api/guilds/1/dm/apercu")) throw new Error("Route DM jamais chargée.");
 
-// Tickets : « Publier » ne regarde que le panneau sélectionné (1 type sur le panneau 1 du mock → activé).
+// Tickets : la page commence par la liste des panneaux. Ouvrir le panneau mocké puis
+// vérifier que « Publier » est actif puisque son type est bien rattaché au panneau 1.
 dom.window.document.querySelector('#navigation button[data-tab="tickets"]').click(); await sleep(150);
-if(dom.window.document.getElementById("ticketPublish").disabled) throw new Error("Panneau avec un type : Publier devrait être actif.");
-if(!/1 type/.test(dom.window.document.getElementById("ticketPanelPick").selectedOptions[0].textContent)) throw new Error("Le nombre de types du panneau doit être visible.");
+const panelOpen=dom.window.document.querySelector('[data-ticket-panel-open="1"]');
+if(!panelOpen) throw new Error("Panneau ticket mocké introuvable.");
+if(!/1 type/.test(panelOpen.closest('.ticket-panel-row')?.textContent || "")) throw new Error("Le nombre de types du panneau doit être visible.");
+panelOpen.click(); await sleep(150);
+const ticketPublish=dom.window.document.getElementById("ticketPublish");
+if(!ticketPublish) throw new Error("Éditeur du panneau ticket non ouvert.");
+if(ticketPublish.disabled) throw new Error("Panneau avec un type : Publier devrait être actif.");
 // Liens de migration : jamais visibles pour un non-développeur.
 if(dom.window.document.querySelector('#navigation a[href="/setup-center"]')) throw new Error("Les anciens liens ne doivent pas apparaître pour un utilisateur normal.");
 
