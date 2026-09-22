@@ -341,7 +341,7 @@ if(!moderationSource.includes("if(state.page==='tickets')return;")) throw new Er
 
 // Tickets : les vues courtes doivent remplir proprement le viewport au lieu de
 // laisser un grand vide noir sous la dernière carte.
-const cssSource = css;
+const cssSource = responsiveCss;
 if(!cssSource.includes('Tickets viewport fill v4')) throw new Error('Le remplissage vertical Tickets est absent.');
 if(!cssSource.includes('.ticket-panels-home,') || !cssSource.includes('.ticket-panel-editor,') || !cssSource.includes('.ticket-actions-page{')) throw new Error('Toutes les vues Tickets doivent partager le fond pleine hauteur.');
 if(!cssSource.includes('min-height:calc(100dvh - var(--top-safe) - 156px)')) throw new Error('Tickets doit remplir la hauteur disponible du viewport.');
