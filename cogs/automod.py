@@ -727,6 +727,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 keywords.append(value)
                 if len(keywords) >= 1000:
                     break
+            keywords.sort(key=str.casefold)
 
             try:
                 rules = await guild.fetch_automod_rules()
@@ -1279,6 +1280,8 @@ class AutoMod(commands.Cog, name="Automod"):
                 "",
                 "**Problème détecté :** les protections sont bien activées dans SentriX, "
                 "mais Discord n'a créé aucune règle native.",
+                "Le **0** n'est pas un échec de synchronisation en soi : il signifie "
+                "qu'aucune règle native SentriX n'est actuellement visible sur ce serveur.",
                 f"Permission **Gérer le serveur** pour SentriX : {'oui' if manage_guild else 'non'}.",
             ])
 
