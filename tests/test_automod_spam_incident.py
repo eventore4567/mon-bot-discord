@@ -183,7 +183,10 @@ async def test_antilink_strict_ignore_whitelist_et_salon_ignore():
     cog.ignored_channels_cache[1] = {55}
     cog.whitelist_domains_cache[1] = ["exemple.com"]
 
-    with patch.object(panels, "texte_court", AsyncMock()),          patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
+    note = SimpleNamespace(delete=AsyncMock())
+    with patch.object(panels, "texte_court", AsyncMock()), \
+         patch.object(panels, "envoyer", AsyncMock(return_value=note)), \
+         patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
         await cog.on_message(message)
         await asyncio.sleep(0.03)
 
