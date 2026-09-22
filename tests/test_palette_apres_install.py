@@ -105,18 +105,18 @@ class PaletteApresInstall(unittest.TestCase):
                     self.m["rendu_embeds"][intention], self.m["config"][intention]
                 )
 
-    def test_design_system_porte_la_barre_d_identite(self):
-        """124 commandes passaient par design_system sans la barre que les autres ont."""
+    def test_design_system_ne_reintroduit_pas_de_barre_decorative(self):
+        """Le style actuel commence directement par le contenu, sans ancienne barre ━."""
         for nom, presente in self.m["barre_design_system"].items():
             with self.subTest(fabrique=nom):
-                self.assertTrue(presente)
+                self.assertFalse(presente)
 
     def test_les_teintes_de_categorie_survivent(self):
         """Une teinte de categorie est une identite voulue, pas un etat : elle reste."""
         cat = self.m["categories"]
         self.assertEqual(cat["moderation"], cat["moderation_attendue"])
         self.assertNotEqual(cat["moderation"], cat["economy"])
-        self.assertTrue(cat["barre"])
+        self.assertFalse(cat["barre"])
 
     def test_aucun_module_ne_redefinit_une_teinte_semantique(self):
         """Toute copie locale finit par diverger. On verifie qu'il n'y en a plus."""
