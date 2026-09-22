@@ -924,8 +924,6 @@ class Levels(commands.Cog, name="Levels"):
                 value=(f"#{stats['rank']}" if stats["is_ranked"] else "Non classé"),
                 inline=True,
             )
-        else:
-            e.add_field(name="📈 Niveaux", value="Désactivés sur ce serveur", inline=True)
         if settings.get("show_messages", True):
             e.add_field(name="💬 Messages", value=stats_service.format_number(stats["message_count"]), inline=True)
         if levels_enabled:
