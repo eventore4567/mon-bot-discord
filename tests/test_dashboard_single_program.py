@@ -77,6 +77,19 @@ def test_no_periodic_dom_loop():
     assert "el.classList.add('page-enter')" in program and "if (animate)" in program
 
 
+def test_overview_keeps_a_compact_server_summary():
+    program = _program()
+    css = (unified.UI_DIR / "app.css").read_text(encoding="utf-8")
+    assert "overviewServerBar()" in program
+    assert "overview-server-bar" in program
+    assert "open_tickets" in program
+    assert "protectionCount" in program
+    assert "SentriX actif" in program
+    assert ".overview-server-bar" in css
+    assert ".overview-server-stats" in css
+    assert "overview-hero" not in program
+
+
 def test_navigation_is_short_and_grouped():
     program = _program()
     global_nav = re.search(r"const NAV_GLOBAL = \[(.*?)\n\];", program, re.S).group(1)
