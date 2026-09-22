@@ -32,6 +32,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cogs.ticket_constants import (
+    BUTTON_STYLE_NAMES,
+    BUTTON_STYLES,
+    CUSTOM_COMPONENT_EMOJI_RE,
+    DEFAULT_BUTTON_STYLE,
+    DEFAULT_ENABLED_BUTTONS,
+    STAFF_BUTTONS,
+    TEXT_STYLES,
+)
 from services.tickets import count_genuinely_open_tickets
 from services import tickets as tickets_service
 from utils import embeds, checks, helpers, design_system
@@ -43,34 +52,6 @@ from database.db import now
 # pour retrouver précisément quelle interaction a échoué, avec quel custom_id, et combien
 # de temps le traitement a pris avant/après la réponse à Discord).
 logger = logging.getLogger("bot.tickets")
-
-TEXT_STYLES = {"court": discord.TextStyle.short, "long": discord.TextStyle.paragraph}
-BUTTON_STYLES = {
-    "bleu": discord.ButtonStyle.primary,
-    "gris": discord.ButtonStyle.secondary,
-    "vert": discord.ButtonStyle.success,
-    "rouge": discord.ButtonStyle.danger,
-}
-BUTTON_STYLE_NAMES = list(BUTTON_STYLES.keys())
-DEFAULT_BUTTON_STYLE = "bleu"
-
-# Les 9 boutons staff configurables : clé interne -> (libellé par défaut, emoji par défaut).
-# L'ordre ici est aussi l'ordre d'affichage par défaut dans le salon de ticket.
-STAFF_BUTTONS = {
-    "claim": ("Prendre en charge", "🙋"),
-    "unclaim": ("Abandonner", "↩️"),
-    "add": ("Ajouter un membre", "➕"),
-    "remove": ("Retirer un membre", "➖"),
-    "rename": ("Renommer", "✏️"),
-    "transfer": ("Transférer", "🔀"),
-    "note": ("Ajouter une note", "📝"),
-    "bump": ("Relancer", "🔔"),
-    "close": ("Fermer", "🔒"),
-}
-DEFAULT_ENABLED_BUTTONS = {"claim", "add", "remove", "rename", "note", "close"}
-
-
-CUSTOM_COMPONENT_EMOJI_RE = re.compile(r"^<a?:[A-Za-z0-9_]{2,32}:[0-9]{15,22}>$")
 
 
 def parse_component_emoji(value: str | None, bot=None):
