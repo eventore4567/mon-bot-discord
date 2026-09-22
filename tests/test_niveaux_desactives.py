@@ -37,7 +37,8 @@ def test_un_seul_point_de_verite_pour_l_etat_des_modules():
 def test_stats_masque_le_niveau_quand_desactive():
     corps = _corps("build_stats_embed")
     assert "self._niveaux_actifs(guild.id)" in corps
-    assert "Désactivés sur ce serveur" in corps
+    assert "if levels_enabled:" in corps
+    assert "Désactivés sur ce serveur" not in corps
 
 
 def test_le_panneau_de_niveau_dit_que_c_est_desactive():
