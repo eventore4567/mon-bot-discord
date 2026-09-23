@@ -737,6 +737,11 @@ __all__ = [
 ]
 
 
+# Référence de secours si une classe discord.ui.Item refuse les attributs dynamiques.
+# Le registre est nettoyé dès que la vue se termine ou expire.
+_VUES_SOURCE_ITEMS: dict[int, discord.ui.View] = {}
+
+
 def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
     """Reloge les composants d'une View existante DANS un panneau Components V2.
 
@@ -758,6 +763,7 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
         return panneau
 
     for item in enfants:
+        _VUES_SOURCE_ITEMS[id(item)] = vue
         try:
             item._sentrix_source_view = vue
         except Exception:
@@ -800,6 +806,8 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
                 vue.stop()
             except Exception:
                 logger.debug("Arrêt de la vue source impossible.", exc_info=True)
+            for item in enfants:
+                _VUES_SOURCE_ITEMS.pop(id(item), None)
 
     panneau.on_timeout = _timeout_bridge
     return panneau
@@ -807,7 +815,11 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
 
 def vue_source(item: discord.ui.Item):
     """Retourne la vue métier d'origine d'un composant relogé dans un Panneau."""
-    return getattr(item, "_sentrix_source_view", None) or getattr(item, "view", None)
+    return (
+        getattr(item, "_sentrix_source_view", None)
+        or _VUES_SOURCE_ITEMS.get(id(item))
+        or getattr(item, "view", None)
+    )
 
 
 def vue_panneau(item: discord.ui.Item):
@@ -829,6 +841,8 @@ def terminer_vue(item: discord.ui.Item) -> None:
                 stop()
             except Exception:
                 logger.debug("Arrêt d'une vue interactive impossible.", exc_info=True)
+    for child in list(getattr(source, "children", ()) or ()):
+        _VUES_SOURCE_ITEMS.pop(id(child), None)
 
 
 def _rangees_d_items(items: Sequence[discord.ui.Item]) -> list[discord.ui.ActionRow]:
