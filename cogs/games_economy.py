@@ -1764,116 +1764,170 @@ class _EmojiRaceButton(discord.ui.Button):
 # même posé) pour rester crédible plutôt que 100% de réussite garantie.
 # =============================================================================
 
+class _SoloChoiceView(discord.ui.View):
+    def __init__(self, author_id: int, choices: list[tuple]):
+        super().__init__(timeout=30)
+        self.author_id = author_id
+        self.selected: tuple | None = None
+        self._lock = asyncio.Lock()
+        for index, choice in enumerate(choices[:3]):
+            emoji, label, chance, multiplier, description = choice
+            self.add_item(
+                _SoloChoiceButton(
+                    index=index, emoji=emoji, label=label, chance=chance,
+                    multiplier=multiplier, description=description,
+                )
+            )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "Cette aventure appartient à un autre joueur.", ephemeral=True
+                )
+            return False
+        return True
+
+
+class _SoloChoiceButton(discord.ui.Button):
+    def __init__(self, *, index: int, emoji: str, label: str, chance: float, multiplier: float, description: str):
+        super().__init__(
+            label=label, emoji=emoji,
+            style=(
+                discord.ButtonStyle.success if index == 0
+                else discord.ButtonStyle.primary if index == 1
+                else discord.ButtonStyle.danger
+            ),
+        )
+        self.choice = (emoji, label, chance, multiplier, description)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: _SoloChoiceView = self.view
+        async with view._lock:
+            if view.selected is not None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Un choix a déjà été enregistré.", ephemeral=True)
+                return
+            view.selected = self.choice
+            for child in view.children:
+                child.disabled = True
+            await interaction.response.edit_message(view=view)
+            view.stop()
+
 class GamesSolo(commands.Cog, name="GamesSolo"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     async def _run_solo(self, ctx: commands.Context, game_name: str):
-        """Manche solo, composee.
-
-        Le resultat tenait en une phrase et un montant. Il manquait les deux
-        informations qu'on cherche juste apres : ou en est mon solde, et quand
-        puis-je rejouer. Les deux sont maintenant des sections, et le delai est
-        un horodatage Discord plutot qu'un nombre de secondes a convertir.
-        """
+        """Jeu solo interactif : trois chemins, trois niveaux de risque et aucun long verrou."""
         titre, cooldown, succes, texte_echec = SOLO_FLAVORS[game_name]
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, game_name, cooldown)
         if not started:
             return await panels.envoyer(
                 ctx,
-                panels.Panneau(
-                    titre=f"SentriX — {titre}",
-                    sous_titre=err,
-                    kind="warning",
-                    sections=[
-                        panels.Section(
-                            "En attendant",
-                            [
-                                panels.Ligne("`+balance`", "Voir votre solde"),
-                                panels.Ligne("`+games`", "Les autres jeux disponibles"),
-                            ],
-                        )
-                    ],
-                    pied="SentriX • Jeux",
-                ),
+                panels.depuis_embed(await _embed(self.bot, guild_id, title=f"SentriX — {titre}", description=err, kind="warning")),
             )
 
-        prochaine = int(time.time()) + int(cooldown)
-        if random.random() < 0.15:
-            await _finish(self.bot, ctx, game_name, sid, "loss", 0)
-            return await panels.envoyer(
-                ctx,
-                panels.Panneau(
-                    titre=f"SentriX — {titre}",
-                    sous_titre=texte_echec,
-                    kind="warning",
-                    sections=[
-                        panels.Section(
-                            "Résultat",
-                            [panels.Ligne("Gain", "**Aucun** pour cette manche")],
-                        ),
-                        panels.Section(
-                            "Prochaine partie",
-                            [panels.Ligne("Disponible", f"<t:{prochaine}:R>")],
-                        ),
-                    ],
-                    pied="SentriX • Jeux",
-                ),
+        difficulty = await _game_difficulty(self.bot, guild_id)
+        choices = list(SOLO_CHOICES[game_name])
+        view = _SoloChoiceView(ctx.author.id, choices)
+        choice_lines = []
+        for emoji, label, chance, multiplier, description in choices:
+            choice_lines.append(
+                f"{emoji} **{label}** · réussite ~{round(chance * 100)}% · butin x{multiplier:g}\n"
+                f"└ {description}"
             )
 
-        montant = random.randint(30, 90)
-        texte = game_rewards.secure_pick(succes)
-        recompense = await _finish(self.bot, ctx, game_name, sid, "win", montant)
-
-        resultat = [panels.Ligne("Issue", "**Réussite**")]
-        if recompense and recompense.success and recompense.amount > 0:
-            resultat.append(
-                panels.Ligne(
-                    "Gagné",
-                    f"**+{stats_service.format_number(recompense.amount)}** 🪙",
-                    indice=f"Référence `{recompense.display_id}`",
-                )
-            )
-        else:
-            # Limite quotidienne atteinte : le dire, plutot que d'afficher une
-            # reussite sans gain et laisser croire a un bug.
-            resultat.append(
-                panels.Ligne(
-                    "Gain",
-                    "**Aucun** — limite quotidienne atteinte",
-                    indice="Les gains repartent demain.",
-                )
-            )
-
-        sections = [
-            panels.Section("Résultat", resultat),
-            panels.Section("Prochaine partie", [panels.Ligne("Disponible", f"<t:{prochaine}:R>")]),
-        ]
-        try:
-            stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
-            sections.insert(
-                1,
-                panels.Section(
-                    "Votre solde",
-                    [panels.Ligne("Total", f"{stats_service.format_number(stats['total_money'])} 🪙")],
-                ),
-            )
-        except Exception:
-            logger.warning("Étape non critique ignorée dans _run_solo", exc_info=True)
-
-        await panels.envoyer(
+        msg = await panels.envoyer(
             ctx,
-            panels.Panneau(
-                titre=f"SentriX — {titre}",
-                sous_titre=texte,
-                kind="economie",
-                vignette=ctx.author.display_avatar.url,
-                sections=sections,
-                pied="SentriX • Jeux",
+            panels.avec_composants(
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot, guild_id, title=f"SentriX — {titre}",
+                        description=(
+                            f"🎮 Difficulté serveur : **{difficulty}**\n"
+                            "Choisissez votre approche : plus le risque monte, plus le butin potentiel augmente.\n\n"
+                            + "\n\n".join(choice_lines)
+                        ),
+                    )
+                ),
+                view,
             ),
         )
+        await view.wait()
 
+        if view.selected is None:
+            game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
+            return await panels.editer(
+                msg,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot, guild_id, title=f"SentriX — {titre}",
+                        description="⏱️ Aucun choix effectué. La manche est annulée, vous pouvez relancer le jeu.",
+                        kind="warning",
+                    )
+                ),
+            )
+
+        emoji, label, base_chance, multiplier, description = view.selected
+        difficulty_key = difficulty.casefold()
+        chance_shift = (
+            0.08 if difficulty_key in {"facile", "easy"}
+            else -0.07 if difficulty_key in {"difficile", "hard"}
+            else 0.0
+        )
+        chance = max(0.15, min(0.95, float(base_chance) + chance_shift))
+        won = random.random() < chance
+
+        if not won:
+            await _finish(self.bot, ctx, game_name, sid, "loss", 0)
+            return await panels.editer(
+                msg,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot, guild_id, title=f"{titre} — échec",
+                        description=(
+                            f"{emoji} **{label}**\n{texte_echec}\n\n"
+                            f"🎲 Chance de réussite : **{round(chance * 100)}%**\n"
+                            "🔁 Vous pouvez rejouer dans quelques secondes."
+                        ),
+                        kind="danger",
+                    )
+                ),
+            )
+
+        base = random.randint(30, 70)
+        amount = max(1, round(base * float(multiplier)))
+        text = game_rewards.secure_pick(succes)
+        reward = await _finish(self.bot, ctx, game_name, sid, "win", amount)
+
+        if reward and reward.success and reward.amount > 0:
+            reward_text = (
+                f"🪙 **+{stats_service.format_number(reward.amount)}** crédités\n"
+                f"Référence `{reward.display_id}`"
+            )
+        else:
+            reward_text = (
+                "🪙 **0 crédit** — limite quotidienne de récompenses atteinte.\n"
+                "La partie reste jouable normalement."
+            )
+
+        await panels.editer(
+            msg,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot, guild_id, title=f"{titre} — réussite",
+                    description=(
+                        f"{emoji} **{label}** · butin x{multiplier:g}\n{text}\n\n"
+                        f"🎲 Chance jouée : **{round(chance * 100)}%**\n"
+                        f"{reward_text}\n\n"
+                        "🔁 Vous pouvez rejouer dans quelques secondes."
+                    ),
+                    kind="success",
+                )
+            ),
+        )
     @commands.hybrid_command(name="adventure", description="Partir à l'aventure pour une récompense (cooldown long).", with_app_command=False)
     async def adventure(self, ctx: commands.Context):
         await self._run_solo(ctx, "adventure")
