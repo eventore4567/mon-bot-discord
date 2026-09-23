@@ -112,7 +112,7 @@ def test_committed_source_banners_are_valid_and_match_the_generator():
     """Ces cinq fichiers sont servis par URL GitHub raw aux réponses de commande :
     un fichier corrompu (cas réel de banner_source_warning.webp) casse l'embed
     sans aucune erreur côté bot."""
-    for state in ("error", "success", "warning", "info", "special"):
+    for state in log_banners.STYLES:
         path = log_banners.BANNER_DIR / f"banner_source_{state}.webp"
         assert path.exists(), state
         payload = path.read_bytes()
@@ -207,3 +207,38 @@ def test_chaque_famille_est_teintee_et_jamais_grise():
             fond = image.convert("RGB").getpixel((300, 18))
         ecart = max(fond) - min(fond)
         assert ecart >= 18, f"{style} : fond trop neutre {fond}"
+
+
+def test_les_deux_chemins_de_banniere_ont_les_memes_familles():
+    """Chemin panneau (pièce jointe) et chemin embed (URL GitHub raw) doivent donner
+    la même couleur : sinon la même commande change d'allure selon la surface."""
+    from utils import command_visuals
+
+    assert set(command_visuals._BANNER_URLS) == set(log_banners.STYLES)
+    assert set(command_visuals._ACCENTS) == set(log_banners.STYLES)
+
+
+def test_les_commandes_en_texte_libre_n_ont_pas_de_banniere():
+    """Un bandeau de 1024x110 au-dessus d'une réponse de l'IA n'ajoute rien."""
+    from types import SimpleNamespace
+
+    from cogs import final_interaction_policy as policy
+    from utils import sentrix_panels as panels
+
+    def panneau_pour(commande: str, cog: str) -> panels.Panneau:
+        jeton = policy._COMMAND_CONTEXT.set(
+            SimpleNamespace(command=SimpleNamespace(qualified_name=commande, cog_name=cog))
+        )
+        try:
+            return panels.Panneau(titre="Réponse", sous_titre="texte", kind="info")
+        finally:
+            policy._COMMAND_CONTEXT.reset(jeton)
+
+    for commande in ("sentrix", "ai", "translate", "summarize"):
+        panneau = panneau_pour(commande, "Ai")
+        assert panneau.avec_banniere is False, commande
+        assert panneau.fichiers() == [], commande
+    # Une commande structurée garde la sienne.
+    structure = panneau_pour("balance", "Economy")
+    assert structure.avec_banniere is True
+    assert [f.filename for f in structure.fichiers()] == [log_banners.nom_fichier("economy")]

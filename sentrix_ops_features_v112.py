@@ -190,7 +190,7 @@ def _add_manage_commands(bot, ops) -> None:
             for name, value in fields:
                 e.add_field(name=name, value=str(value)[:1024], inline=False)
             await panels.envoyer(ctx, panels.depuis_embed(e))
-        manage.add_command(commands.Command(preview_callback, name="preview", help="Prévisualiser une configuration sans la publier."))
+        manage.add_command(commands.Command(preview_callback, name="preview", help="Prévisualiser une configuration sans la publier.", description="Prévisualiser une configuration sans la publier."))
 
     if manage.get_command("permissions") is None:
         async def permissions_callback(ctx: commands.Context, membre: discord.Member | None = None):
@@ -199,7 +199,7 @@ def _add_manage_commands(bot, ops) -> None:
             if membre is None:
                 e.add_field(name="Astuce", value="`+manage permissions @membre` vérifie aussi les deux hiérarchies de rôles.", inline=False)
             await panels.envoyer(ctx, panels.depuis_embed(e))
-        manage.add_command(commands.Command(permissions_callback, name="permissions", help="Expliquer exactement les blocages de permissions."))
+        manage.add_command(commands.Command(permissions_callback, name="permissions", help="Expliquer exactement les blocages de permissions.", description="Expliquer exactement les blocages de permissions."))
 
     if manage.get_command("fixall") is None:
         async def fixall_callback(ctx: commands.Context):
@@ -221,7 +221,7 @@ def _add_manage_commands(bot, ops) -> None:
             if failed:
                 e.add_field(name="À vérifier", value="\n".join(f"• {x}" for x in failed), inline=False)
             await panels.envoyer(ctx, panels.depuis_embed(e))
-        manage.add_command(commands.Command(fixall_callback, name="fixall", help="Appliquer seulement les corrections automatiques sûres."))
+        manage.add_command(commands.Command(fixall_callback, name="fixall", help="Appliquer seulement les corrections automatiques sûres.", description="Appliquer seulement les corrections automatiques sûres."))
 
     if manage.get_command("ignore") is None:
         async def ignore_callback(ctx: commands.Context, code: str):
@@ -232,13 +232,13 @@ def _add_manage_commands(bot, ops) -> None:
             await ops.ignore_health_code(ctx.guild.id, ctx.author.id, code)
             await ops.log_admin_action(ctx.guild.id, ctx.author.id, "health.ignore", target_type="finding", target_id=code, after={"ignored": True})
             await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Le point `{code}` est ignoré dans le score de ce serveur. La fonctionnalité concernée n'est pas désactivée.")))
-        manage.add_command(commands.Command(ignore_callback, name="ignore", help="Ignorer volontairement un point de diagnostic."))
+        manage.add_command(commands.Command(ignore_callback, name="ignore", help="Ignorer volontairement un point de diagnostic.", description="Ignorer volontairement un point de diagnostic."))
 
     if manage.get_command("sanction") is None:
         async def sanction_callback(ctx: commands.Context, membre: discord.Member):
             text = await explain_latest_sanction(ops, ctx.guild.id, membre.id)
             await panels.envoyer(ctx, panels.depuis_embed(embeds.brand("Explication de sanction", text)))
-        manage.add_command(commands.Command(sanction_callback, name="sanction", help="Expliquer la dernière sanction SentriX d'un membre."))
+        manage.add_command(commands.Command(sanction_callback, name="sanction", help="Expliquer la dernière sanction SentriX d'un membre.", description="Expliquer la dernière sanction SentriX d'un membre."))
 
 
 def _instrument_log_changes(bot, ops) -> None:

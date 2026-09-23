@@ -495,13 +495,13 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         await self.bot.db.execute("UPDATE v17_sanction_policy SET enabled=1,updated_at=? WHERE guild_id=?", (now(), ctx.guild.id))
         # Empêche l'ancien seuil unique de bannissement de se déclencher en parallèle.
         await self.bot.db.set_guild_config(ctx.guild.id, "warn_ban_threshold", 0)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success("Sanctions progressives V17 activées. L'ancien seuil unique de ban a été désactivé pour éviter les doubles sanctions.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success("Sanctions progressives activées. L'ancien seuil unique de ban a été désactivé pour éviter les doubles sanctions.")))
 
     @sanctionpolicy.command(name="disable")
     async def sanctionpolicy_disable(self, ctx: commands.Context):
         await self._policy(ctx.guild.id)
         await self.bot.db.execute("UPDATE v17_sanction_policy SET enabled=0,updated_at=? WHERE guild_id=?", (now(), ctx.guild.id))
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Sanctions progressives V17 désactivées.')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Sanctions progressives désactivées.')))
 
     @sanctionpolicy.command(name="set")
     async def sanctionpolicy_set(self, ctx: commands.Context, action: str, warns: app_commands.Range[int, 1, 50], duree: str = "1h"):
@@ -524,7 +524,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
     async def serversnapshot(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT id,label,created_at FROM v17_snapshots WHERE guild_id=? ORDER BY created_at DESC LIMIT 10", (ctx.guild.id,))
         text = "\n".join(f"• **#{r['id']}** {r['label']} — <t:{r['created_at']}:R>" for r in rows) or "Aucun snapshot."
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Snapshots V17')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Sauvegardes de configuration')))
 
     @serversnapshot.command(name="create")
     async def serversnapshot_create(self, ctx: commands.Context, *, nom: str = "manuel"):
@@ -557,7 +557,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                     colour=discord.Colour(int(s.get("colour", 0))),
                     hoist=bool(s.get("hoist", False)),
                     mentionable=bool(s.get("mentionable", False)),
-                    reason=f"Restauration snapshot V17 #{snapshot_id}",
+                    reason=f"Restauration de la sauvegarde #{snapshot_id}",
                 ), attempts=2)
                 role_map[int(saved["id"])] = role
                 created_roles += 1
@@ -572,7 +572,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                 category_map[int(saved["id"])] = existing
                 continue
             try:
-                category = await ctx.guild.create_category(saved.get("name", "Catégorie restaurée")[:100], reason=f"Snapshot V17 #{snapshot_id}")
+                category = await ctx.guild.create_category(saved.get("name", "Catégorie restaurée")[:100], reason=f"Sauvegarde #{snapshot_id}")
                 category_map[int(saved["id"])] = category
                 created_channels += 1
             except discord.HTTPException:
@@ -593,7 +593,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                         topic=saved.get("topic"),
                         slowmode_delay=int(saved.get("slowmode_delay") or 0),
                         nsfw=bool(saved.get("nsfw", False)),
-                        reason=f"Snapshot V17 #{snapshot_id}",
+                        reason=f"Sauvegarde #{snapshot_id}",
                     )
                     created_channels += 1
                 elif kind == "voice":
@@ -602,7 +602,7 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
                         category=category,
                         bitrate=min(int(saved.get("bitrate") or 64000), ctx.guild.bitrate_limit),
                         user_limit=int(saved.get("user_limit") or 0),
-                        reason=f"Snapshot V17 #{snapshot_id}",
+                        reason=f"Sauvegarde #{snapshot_id}",
                     )
                     created_channels += 1
             except discord.HTTPException:
@@ -661,8 +661,8 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
         text = "\n".join(
             f"• {('<@'+str(r['subject_id'])+'>') if r['subject_type']=='user' else ('<@&'+str(r['subject_id'])+'>')} — `{r['action']}`"
             for r in rows[:30]
-        ) or "Aucune règle V17."
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Whitelist anti-nuke V17')))
+        ) or "Aucune règle enregistrée."
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title='Liste de confiance anti-nuke')))
 
     @nukewhitelist.command(name="user")
     async def nukewhitelist_user(self, ctx: commands.Context, membre: discord.Member, action: str = "all"):

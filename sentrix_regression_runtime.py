@@ -499,7 +499,8 @@ class SentriXRegressionRuntime(commands.Cog, name="SentriXRegressionFix"):
         message = await ctx.send(embed=view.embed(), view=view)
         view.message = message
 
-    @rolepanel.command(name="dropdown", aliases=["menu", "deroulant", "déroulant", "select"])
+    @rolepanel.command(name="dropdown", aliases=["menu", "deroulant", "déroulant", "select"],
+                       description="Publier un menu déroulant de rôles à choisir.")
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def rolepanel_dropdown(self, ctx: commands.Context, roles: commands.Greedy[discord.Role]):
@@ -518,7 +519,8 @@ class SentriXRegressionRuntime(commands.Cog, name="SentriXRegressionFix"):
         await _save_panel(self.bot, message, mode="dropdown", role_ids=ids, mappings=[], creator_id=ctx.author.id)
         self.bot.add_view(ExistingDropdownPanel(ctx.guild, ids), message_id=message.id)
 
-    @rolepanel.command(name="reaction", aliases=["reactions", "emoji", "emojis"])
+    @rolepanel.command(name="reaction", aliases=["reactions", "emoji", "emojis"],
+                       description="Publier un panneau de rôles par réaction.")
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def rolepanel_reaction(self, ctx: commands.Context, *, configuration: str = ""):

@@ -577,7 +577,12 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
         self.bot = bot
         self.ops = ops
 
-    @commands.group(name="manage", aliases=["gerer"], invoke_without_command=True)
+    @commands.group(
+        name="manage",
+        aliases=["gerer"],
+        description="Diagnostic et entretien de la configuration du serveur.",
+        invoke_without_command=True,
+    )
     @checks.is_owner_or_admin()
     async def manage(self, ctx: commands.Context):
         e = embeds.brand(
@@ -589,7 +594,7 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
         e.add_field(name="Contrôle", value="`+manage duplicates` • `+manage simulate <sanction|join|verification|ticket|log|raid>` • `+manage ask <question>`", inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @manage.command(name="health")
+    @manage.command(name="health", description="Diagnostic complet de la configuration du serveur.")
     async def manage_health(self, ctx: commands.Context):
         report = await self.ops.health_report(ctx.guild)
         colour = 0x23A559 if report.score >= 75 else (0xF0B232 if report.score >= 50 else 0xF23F43)
@@ -602,7 +607,7 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
             e.add_field(name="Résultat", value="Aucun problème important détecté.", inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @manage.command(name="security")
+    @manage.command(name="security", description="Afficher l'état de sécurité et les corrections proposées.")
     async def manage_security(self, ctx: commands.Context):
         report = await self.ops.health_report(ctx.guild)
         security_findings = tuple(f for f in report.findings if f.code.startswith(("automod.", "botperm.", "hierarchy.", "config.mod-role")))
@@ -615,7 +620,7 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
         view = SecurityFixView(self.ops, ctx.guild.id, ctx.author.id, security_findings)
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
 
-    @manage.command(name="setup")
+    @manage.command(name="setup", description="Afficher ce qu'il reste à configurer sur ce serveur.")
     async def manage_setup(self, ctx: commands.Context):
         proposal = await self.ops.setup_proposal(ctx.guild)
         e = embeds.brand("Analyse automatique du setup", f"État actuel : **{proposal.score}/100**. Rien n'est modifié tant que tu ne confirmes pas une action.")
@@ -625,13 +630,13 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
         e.add_field(name="Continuer", value="Utilise `+setup` pour ouvrir les panneaux existants. Lance `+manage snapshot avant-setup` avant un gros changement.", inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @manage.command(name="snapshot")
+    @manage.command(name="snapshot", description="Sauvegarder la configuration SentriX actuelle.")
     async def manage_snapshot(self, ctx: commands.Context, *, label: str = "Snapshot manuel"):
         sid = await self.ops.capture_snapshot(ctx.guild.id, ctx.author.id, label=label, source="manual")
         await self.ops.log_admin_action(ctx.guild.id, ctx.author.id, "config.snapshot", target_type="snapshot", target_id=str(sid), after={"label": label})
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Configuration SentriX sauvegardée : **snapshot #{sid}**. Les 10 versions les plus récentes sont conservées.")))
 
-    @manage.command(name="history")
+    @manage.command(name="history", description="Lister les sauvegardes de configuration disponibles.")
     async def manage_history(self, ctx: commands.Context, limit: int = 10):
         snapshots = await self.ops.list_snapshots(ctx.guild.id, limit=min(limit, 10))
         actions = await self.ops.list_admin_actions(ctx.guild.id, limit=min(limit, 10))
@@ -640,7 +645,7 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
         e.add_field(name="Actions récentes", value="\n".join(f"`#{r['id']}` <t:{r['created_at']}:R> — **{r['action']}** par <@{r['actor_id']}>" for r in actions) or "Aucune action", inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @manage.command(name="rollback")
+    @manage.command(name="rollback", description="Restaurer une sauvegarde de configuration.")
     async def manage_rollback(self, ctx: commands.Context, snapshot_id: int):
         preview = embeds.warning(
             f"Restaurer la configuration SentriX depuis le **snapshot #{snapshot_id}** ?\n\nUn snapshot de sécurité sera créé juste avant. Aucun rôle/salon n'est supprimé par ce rollback.",
@@ -657,7 +662,7 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
             return await panels.editer(msg, panels.depuis_embed(embeds.error("Snapshot introuvable sur ce serveur.")))
         await panels.editer(msg, panels.depuis_embed(embeds.success(f"Snapshot **#{result['restored']}** restauré. Snapshot de sécurité créé juste avant : **#{result['safety_snapshot']}**.")))
 
-    @manage.command(name="duplicates")
+    @manage.command(name="duplicates", description="Repérer les salons et rôles en double.")
     async def manage_duplicates(self, ctx: commands.Context):
         rows = self.ops.duplicate_command_audit()
         e = embeds.neutral("Audit des commandes SentriX")
@@ -666,14 +671,14 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
             e.add_field(name="Premiers résultats", value="\n".join(f"• `{a}` ↔ `{b}` — {reason}" for a, b, reason in rows[:20])[:1024], inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @manage.command(name="incidents")
+    @manage.command(name="incidents", description="Lister les derniers incidents détectés par SentriX.")
     async def manage_incidents(self, ctx: commands.Context):
         rows = list(self.ops.incidents)[-10:]
         e = embeds.neutral("Incidents runtime récents")
         e.description = "\n".join(f"<t:{x['at']}:R> **{x['level']}** `{x['logger']}` — {x['message'][:220]}" for x in reversed(rows)) or "Aucun warning/error capturé depuis l'activation du centre d'opérations."
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @manage.command(name="simulate")
+    @manage.command(name="simulate", description="Simuler un événement pour vérifier la configuration.")
     async def manage_simulate(self, ctx: commands.Context, kind: str):
         try:
             plan = build_simulation(kind, target=str(ctx.author.id))
@@ -684,7 +689,7 @@ class OpsCenter(commands.Cog, name="SentriXOpsV111"):
         e.set_footer(text="DRY-RUN • aucune sanction, aucun salon et aucune donnée utilisateur modifiés")
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @manage.command(name="ask")
+    @manage.command(name="ask", description="Poser une question sur la configuration du serveur.")
     async def manage_ask(self, ctx: commands.Context, *, question: str):
         answer = await self.ops.assistant_answer(ctx.guild, question)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.brand("Assistant administrateur SentriX", answer)))

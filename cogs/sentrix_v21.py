@@ -325,7 +325,7 @@ class SentriXV21(commands.Cog):
     # deja une commande +achievements, vivante et distincte. add_cog() abandonne TOUT le
     # cog des la premiere collision de nom (CommandRegistrationError) — SentriXV21 entier
     # (marche, defis, tout) echouait donc a charger silencieusement, a chaque demarrage.
-    @commands.hybrid_command(name="achievements-v21", aliases=["badges"], description="Afficher tous les succès V2.1.", with_app_command=False)
+    @commands.hybrid_command(name="achievements-v21", aliases=["badges"], description="Afficher tous vos succès débloqués.", with_app_command=False)
     @commands.cooldown(2, 5, commands.BucketType.user)
     async def achievements(self, ctx: commands.Context, membre: discord.Member = None):
         if ctx.guild is None:
@@ -359,7 +359,7 @@ class SentriXV21(commands.Cog):
         )
         await panels.envoyer(ctx, panels.depuis_embed(embed))
 
-    @commands.hybrid_command(name="challenges", aliases=["defis"], description="Afficher les défis de progression V2.1.", with_app_command=False)
+    @commands.hybrid_command(name="challenges", aliases=["defis"], description="Afficher vos défis de progression en cours.", with_app_command=False)
     @commands.cooldown(2, 5, commands.BucketType.user)
     async def challenges(self, ctx: commands.Context, membre: discord.Member = None):
         if ctx.guild is None:

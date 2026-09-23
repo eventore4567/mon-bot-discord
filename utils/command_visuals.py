@@ -22,12 +22,16 @@ _BANNER_RAW_BASE = (
     "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/"
     "main/assets/log_banners"
 )
+# Une URL par famille de bannière : les cinq états, plus les domaines, pour que ce
+# chemin (embed + image distante) donne la même couleur que le chemin panneau
+# (pièce jointe). Les fichiers sont committés et servis par GitHub raw.
 _BANNER_URLS = {
-    "error": f"{_BANNER_RAW_BASE}/banner_source_error.webp",
-    "success": f"{_BANNER_RAW_BASE}/banner_source_success.webp",
-    "warning": f"{_BANNER_RAW_BASE}/banner_source_warning.webp",
-    "info": f"{_BANNER_RAW_BASE}/banner_source_info.webp",
-    "special": f"{_BANNER_RAW_BASE}/banner_source_special.webp",
+    famille: f"{_BANNER_RAW_BASE}/banner_source_{famille}.webp"
+    for famille in (
+        "error", "success", "warning", "info", "special",
+        "moderation", "security", "economy", "config",
+        "levels", "music", "tickets", "games", "ai",
+    )
 }
 _ACCENTS = {
     "error": 0xEF4444,
@@ -35,10 +39,19 @@ _ACCENTS = {
     "warning": 0xF59E0B,
     "info": 0x3B82F6,
     "special": 0x7C3AED,
+    "moderation": 0xF4687C,
+    "security": 0x847CFA,
+    "economy": 0xF8CA60,
+    "config": 0x54DEE4,
+    "levels": 0xAAE45C,
+    "music": 0xFF6CBC,
+    "tickets": 0x3AD6C6,
+    "games": 0xFF9648,
+    "ai": 0xD67CFF,
 }
 
 _DECORATIVE_LINE_RE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]{8,}$")
-_COMMAND_BANNER_RE = re.compile(r"/banner_source_(?:error|success|warning|info|special)\.webp(?:\?.*)?$")
+_COMMAND_BANNER_RE = re.compile(r"/banner_source_[a-z]+\.webp(?:\?.*)?$")
 
 _ERROR_WORDS = (
     "erreur", "impossible", "introuvable", "interdit", "refus", "échou", "echec",
@@ -147,6 +160,20 @@ def resolve_kind(
 
 
 def banner_url(kind: str) -> str:
+    """URL de bannière pour une intention, accordée à la commande en cours.
+
+    « info » ne dit rien du sujet : sur ce chemin aussi, une réponse neutre prend
+    la couleur de son domaine (musique, économie…) au lieu du même bleu partout.
+    """
+    if kind == "info":
+        try:
+            from .sentrix_panels import famille_de_la_commande
+
+            famille = famille_de_la_commande()
+        except Exception:
+            famille = None
+        if famille and famille in _BANNER_URLS:
+            return _BANNER_URLS[famille]
     return _BANNER_URLS.get(kind, _BANNER_URLS["info"])
 
 

@@ -686,7 +686,7 @@ class Economy(commands.Cog, name="Economy"):
         """Configure les rôles achetables avec l'argent du portefeuille."""
         await self._send_shop_setup(ctx)
 
-    @shoprole.command(name="add", aliases=["ajouter"])
+    @shoprole.command(name="add", aliases=["ajouter"], description="Mettre un rôle en vente dans la boutique.")
     @checks.is_owner_or_admin()
     async def shoprole_add(
         self,
@@ -735,7 +735,7 @@ class Economy(commands.Cog, name="Economy"):
         kind = "success" if accepted else "danger"
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(await self._shop_config_embed(ctx.guild.id, 'Boutique mise à jour', '\n\n'.join(description_lines), kind)))
 
-    @shoprole.command(name="remove", aliases=["delete", "retirer"])
+    @shoprole.command(name="remove", aliases=["delete", "retirer"], description="Retirer un rôle de la boutique.")
     @checks.is_owner_or_admin()
     async def shoprole_remove(self, ctx: commands.Context, role: discord.Role):
         cursor = await self.bot.db.execute(
@@ -747,7 +747,7 @@ class Economy(commands.Cog, name="Economy"):
         await self._refresh_shop_panels(ctx.guild)
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{role.mention} a été retiré de la boutique.')))
 
-    @shoprole.command(name="price", aliases=["prix"])
+    @shoprole.command(name="price", aliases=["prix"], description="Changer le prix d'un rôle en vente.")
     @checks.is_owner_or_admin()
     async def shoprole_price(self, ctx: commands.Context, role: discord.Role, price: int):
         if price < 1 or price > 1_000_000_000_000:
@@ -761,7 +761,7 @@ class Economy(commands.Cog, name="Economy"):
         await self._refresh_shop_panels(ctx.guild)
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'Le prix de {role.mention} est maintenant de **{stats_service.format_number(price)} 🪙**.')))
 
-    @shoprole.command(name="list", aliases=["liste"])
+    @shoprole.command(name="list", aliases=["liste"], description="Lister les rôles en vente.")
     @checks.is_owner_or_admin()
     async def shoprole_list(self, ctx: commands.Context):
         await self._send_shop(ctx)

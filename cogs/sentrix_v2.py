@@ -401,7 +401,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         badges = await self.badge_data(guild, member, stats)
         rank = f"#{stats['rank']}" if stats["rank"] else "Non classé"
         e = await self.category_embed(
-            guild.id, "utility", title="SentriX V2 — Centre de contrôle",
+            guild.id, "utility", title="SentriX — Centre de contrôle",
             description="Tout SentriX dans un seul panneau interactif. Utilisez les boutons ci-dessous.",
             user=member, thumbnail=member.display_avatar.url,
         )
@@ -432,7 +432,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         streak = int(row["streak"] if row else 0)
         claimed = bool(row and row["last_day"] == _today())
         next_reward = min(50 + 10 * streak, 150) if row and row["last_day"] == _yesterday() else 50
-        e = await self.category_embed(guild.id, "economy", title="Économie V2", description="Banque, boutique, check-in et marché entre membres.", user=member)
+        e = await self.category_embed(guild.id, "economy", title="Économie du serveur", description="Banque, boutique, check-in et marché entre membres.", user=member)
         e.add_field(name="Portefeuille", value=f"**{_fmt(stats['wallet'])}**", inline=True)
         e.add_field(name="Banque", value=f"**{_fmt(stats['bank'])}**", inline=True)
         e.add_field(name="Total", value=f"**{_fmt(stats['total_money'])}**", inline=True)
@@ -518,7 +518,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         automod = await self.bot.db.get_automod(guild.id)
         keys = ("antispam", "antilink", "antiinvite", "antimention", "anticaps", "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke")
         protections = sum(1 for key in keys if automod and automod[key])
-        e = await self.category_embed(guild.id, "moderation", title="Centre de modération V2", description="Vue opérationnelle des dernières 24 heures. `+modcenter` permet d'agir directement.", user=member)
+        e = await self.category_embed(guild.id, "moderation", title="Centre de modération", description="Vue opérationnelle des dernières 24 heures. `+modcenter` permet d'agir directement.", user=member)
         for label, value in values.items(): e.add_field(name=label, value=f"**{value}**", inline=True)
         e.add_field(name="Protections", value=f"**{protections}/11**", inline=True)
         e.add_field(name="Action rapide", value="Choisissez un membre puis utilisez **Warn**, **Mute** ou **Ban**.", inline=False)
@@ -604,18 +604,18 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         e.add_field(name="Acheter / annuler", value="`+market-buy <id>` · `+market-cancel <id>`", inline=False)
         return e
 
-    @commands.hybrid_command(name="home", aliases=["sentrixhome"], description="Ouvrir le centre de contrôle SentriX V2.", with_app_command=False)
+    @commands.hybrid_command(name="home", aliases=["sentrixhome"], description="Ouvrir le centre de contrôle SentriX.", with_app_command=False)
     async def home(self, ctx):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member): return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         view = HomeView(self, ctx.guild, ctx.author, await self.can_staff_context(ctx))
         view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await self.build_home_embed(ctx.guild, ctx.author)), view))
 
-    @commands.hybrid_command(name="profilecard", aliases=["profilcard"], description="Afficher une carte de profil V2.", with_app_command=False)
+    @commands.hybrid_command(name="profilecard", aliases=["profilcard"], description="Afficher votre carte de profil.", with_app_command=False)
     async def profilecard(self, ctx, membre: discord.Member = None):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         await panels.envoyer(ctx, panels.depuis_embed(await self.build_profile_embed(ctx.guild, membre or ctx.author)))
 
-    @commands.hybrid_command(name="economyhub", description="Ouvrir le hub économie V2.", with_app_command=False)
+    @commands.hybrid_command(name="economyhub", description="Ouvrir le tableau de bord de l'économie du serveur.", with_app_command=False)
     async def economyhub(self, ctx):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         await panels.envoyer(ctx, panels.depuis_embed(await self.build_economy_embed(ctx.guild, ctx.author)))
@@ -641,7 +641,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         await panels.envoyer(ctx, panels.depuis_embed(await self.build_progress_embed(ctx.guild, membre or ctx.author)))
 
-    @commands.hybrid_command(name="checkin", description="Récupérer le check-in quotidien V2.", with_app_command=False)
+    @commands.hybrid_command(name="checkin", description="Récupérer votre récompense de présence quotidienne.", with_app_command=False)
     async def checkin(self, ctx):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         result = await self.claim_checkin(ctx.guild, ctx.author)

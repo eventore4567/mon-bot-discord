@@ -243,7 +243,11 @@ class BotV10(commands.Cog, name="BotV10"):
   if persist: await self.bot.db.execute("INSERT INTO v10_server_audits (guild_id,actor_id,total_score,security_score,configuration_score,moderation_score,operations_score,economy_score,engagement_score,payload_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",(guild.id,actor_id,total,security,configuration,moderation,operations,economy,engagement,json.dumps(payload,ensure_ascii=False),now()))
   return payload
 
- @commands.command(name="server-audit", aliases=["audit-server"])
+ @commands.command(
+     name="server-audit",
+     aliases=["audit-server"],
+     description="Auditer la structure du serveur et proposer des corrections.",
+ )
  @checks.is_owner_or_admin_for("configuration")
  async def server_audit(self, ctx: commands.Context):
   data=await self.server_audit_data(ctx.guild,actor_id=ctx.author.id,persist=True); e=embeds.brand(f"Audit serveur — {data['total_score']}/100","Évaluation factuelle de la configuration; elle n'évalue pas les personnes.")
@@ -298,7 +302,7 @@ class BotV10(commands.Cog, name="BotV10"):
   while queue and queue[0]<current-JOIN_BURST_WINDOW: queue.popleft()
   if len(queue)==JOIN_BURST_THRESHOLD:
    await self.record_signal(member.guild.id,"join_burst",severity="high",target_id=member.id,score=min(100,45+len(queue)*5),details={"joins_60s":len(queue)})
-   try: await helpers.send_log(self.bot,member.guild,"automod",discord.Embed(title="Signal V10 — afflux inhabituel",description=f"**{len(queue)} arrivées** en moins de {int(JOIN_BURST_WINDOW)} secondes. Signal pour revue staff; aucune sanction supplémentaire n'est appliquée par V10.",colour=discord.Colour.orange()))
+   try: await helpers.send_log(self.bot,member.guild,"automod",discord.Embed(title="Afflux inhabituel détecté",description=f"**{len(queue)} arrivées** en moins de {int(JOIN_BURST_WINDOW)} secondes. Signal pour revue staff; aucune sanction supplémentaire n'est appliquée par V10.",colour=discord.Colour.orange()))
    except Exception: pass
 
  async def recent_signals(self,guild_id:int,limit:int=20)->list[dict]: return [dict(r) for r in await self.bot.db.fetchall("SELECT * FROM v10_operational_signals WHERE guild_id=? ORDER BY id DESC LIMIT ?",(guild_id,_clamp(limit,1,50)))]

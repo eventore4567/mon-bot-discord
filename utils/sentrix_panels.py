@@ -191,6 +191,24 @@ def _commande_en_cours() -> tuple[str, str]:
         return "", ""
 
 
+# Commandes dont la réponse EST du texte libre : une réponse de l'IA, une traduction,
+# un résumé. Le contenu y tient tout seul et n'a pas de structure à annoncer — un
+# bandeau de 1024x110 au-dessus de trois lignes écrites par l'IA n'ajoute rien, il
+# éloigne juste la réponse. Ces commandes gardent leur panneau (titre, sections,
+# boutons) mais sans bannière.
+COMMANDES_TEXTE_LIBRE = frozenset({
+    "ai", "ask", "chat", "chat-reset", "sentrix", "summarize", "explain", "rewrite",
+    "fact-check", "improve", "correct", "ai-translate", "code", "image-prompt",
+    "translate", "aitrad",
+})
+
+
+def commande_en_texte_libre() -> bool:
+    """Vrai si la commande en cours répond en texte libre (IA, traduction, résumé)."""
+    nom, _cog = _commande_en_cours()
+    racine = str(nom or "").strip().casefold().lstrip("+/").split(" ")[0]
+    return bool(racine) and racine in COMMANDES_TEXTE_LIBRE
+
 def famille_de_la_commande() -> str | None:
     """Famille de bannière qui va avec la commande en cours, ou None."""
     nom, cog = _commande_en_cours()
@@ -269,7 +287,9 @@ class Panneau(discord.ui.LayoutView):
     ) -> None:
         super().__init__(timeout=None)
         self.kind = kind if kind in INTENTIONS else "info"
-        self.avec_banniere = banniere
+        # Réponse en texte libre (IA, traduction) : pas de bandeau au-dessus du texte.
+        self.avec_banniere = banniere and not commande_en_texte_libre()
+        banniere = self.avec_banniere
         # Une seule décision pour le liseré du conteneur ET la bannière : sur une
         # réponse neutre, les deux prennent la couleur de la commande en cours.
         accent, self.famille = accord_commande(self.kind)
@@ -675,6 +695,8 @@ __all__ = [
     "fichier_banniere",
     "fichier_de_famille",
     "famille_de_la_commande",
+    "commande_en_texte_libre",
+    "COMMANDES_TEXTE_LIBRE",
     "nom_banniere",
 ]
 

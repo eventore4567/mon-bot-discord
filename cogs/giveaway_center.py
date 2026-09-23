@@ -118,7 +118,7 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
 
     @giveaway.command(name="list", aliases=["liste", "en-cours"])
     async def giveaway_list(self, ctx: commands.Context):
-        """Lister ensemble les giveaways V2 et historiques actifs."""
+        """Lister tous les concours en cours sur ce serveur."""
         await self._list_active(ctx)
 
     @giveaway.command(name="create", aliases=["creer", "créer", "nouveau", "start"])
@@ -133,7 +133,7 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
     @giveaway.command(name="end", aliases=["terminer", "fin", "stop"])
     @checks.is_owner_or_admin()
     async def giveaway_end(self, ctx: commands.Context, message_id: str):
-        """Terminer immédiatement un giveaway V2 ou historique."""
+        """Terminer immédiatement un concours et tirer le gagnant."""
         if not await self._has_active(ctx):
             return await self._no_active(ctx)
         try:
@@ -161,7 +161,7 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
     @giveaway.command(name="cancel", aliases=["annuler"])
     @checks.is_owner_or_admin()
     async def giveaway_cancel(self, ctx: commands.Context, message_id: str):
-        """Annuler un giveaway V2 ou historique."""
+        """Annuler un concours sans tirer de gagnant."""
         if not await self._has_active(ctx):
             return await self._no_active(ctx)
         try:
@@ -176,7 +176,7 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
     @giveaway.command(name="blacklist", aliases=["liste-noire", "exclure"])
     @checks.is_owner_or_admin()
     async def giveaway_blacklist(self, ctx: commands.Context, membre: discord.Member):
-        """Empêcher un membre de participer aux giveaways, V2 inclus."""
+        """Empêcher un membre de participer aux concours du serveur."""
         await self._deleguer(ctx, "blacklist", membre=membre)
 
     @giveaway.command(name="unblacklist", aliases=["reautoriser", "réautoriser"])

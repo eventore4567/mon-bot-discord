@@ -204,7 +204,11 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
         msg = await panels.envoyer(ctx, panneau)
         view.message = msg
 
-    @infinit.command(name="status", aliases=["etat", "état"])
+    @infinit.command(
+        name="status",
+        aliases=["etat", "état"],
+        description="Afficher l'état du compteur infini du serveur.",
+    )
     @checks.is_owner_or_admin()
     async def infinit_status(self, ctx: commands.Context):
         row = await self.bot.db.fetchone("SELECT * FROM infinite_counter_config WHERE guild_id=?", (ctx.guild.id,))
@@ -225,14 +229,22 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
             )
         )
 
-    @infinit.command(name="stop", aliases=["off", "desactiver", "désactiver"])
+    @infinit.command(
+        name="stop",
+        aliases=["off", "desactiver", "désactiver"],
+        description="Suspendre le compteur infini.",
+    )
     @checks.is_owner_or_admin()
     async def infinit_stop(self, ctx: commands.Context):
         await self.bot.db.execute("UPDATE infinite_counter_config SET enabled=0,updated_at=? WHERE guild_id=?", (int(time.time()), ctx.guild.id))
         self._invalidate_enabled(ctx.guild.id)
         await ctx.send("Compteur infini désactivé. La progression reste enregistrée.")
 
-    @infinit.command(name="resume", aliases=["on", "reprendre"])
+    @infinit.command(
+        name="resume",
+        aliases=["on", "reprendre"],
+        description="Reprendre le compteur infini.",
+    )
     @checks.is_owner_or_admin()
     async def infinit_resume(self, ctx: commands.Context):
         row = await self.bot.db.fetchone("SELECT 1 FROM infinite_counter_config WHERE guild_id=?", (ctx.guild.id,))

@@ -1363,7 +1363,7 @@ class OfficialSetup(commands.Cog, name="SentriXSetup"):
         await view.composer()
         return await panels.envoyer(target, view)
 
-    @commands.command(name="setup")
+    @commands.command(name="setup", description="Ouvrir le centre de configuration SentriX.")
     async def prefix_setup(self, ctx):
         await self.send_setup(ctx)
 

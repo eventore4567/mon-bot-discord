@@ -13,7 +13,7 @@ def test_new_setup_is_real_runtime_owner():
     setup_source = _source("cogs/setup_control_center.py")
     assert "install_setup_control_center" in init_source
     assert 'bot._sentrix_setup_owner = "cogs.setup_control_center"' in setup_source
-    assert '@commands.command(name="setup")' in setup_source
+    assert '@commands.command(name="setup"' in setup_source  # description ajoutée depuis
     assert '@app_commands.command(name="setup"' in setup_source
 
 

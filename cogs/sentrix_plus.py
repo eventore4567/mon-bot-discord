@@ -728,7 +728,11 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     # SERVER HEALTH
     # ------------------------------------------------------------------
 
-    @commands.command(name="server-health", aliases=["serverhealth"])
+    @commands.command(
+        name="server-health",
+        aliases=["serverhealth"],
+        description="Afficher l'état de santé du serveur (salons, rôles, permissions).",
+    )
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def server_health(self, ctx: commands.Context):

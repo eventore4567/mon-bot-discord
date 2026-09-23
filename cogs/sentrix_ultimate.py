@@ -630,16 +630,21 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     async def before_maintenance(self):
         await self.bot.wait_until_ready()
 
-    @commands.group(name="sentrixpro", aliases=["spro"], invoke_without_command=True)
+    @commands.group(
+        name="sentrixpro",
+        aliases=["spro"],
+        description="Outils avancés SentriX : sécurité, modules, objectifs, résumés.",
+        invoke_without_command=True,
+    )
     @commands.guild_only()
     async def sentrixpro(self, ctx: commands.Context):
-        e = _panneau('SentriX Pro Suite', '', kind="brand")
+        e = _panneau('Outils avancés SentriX', '', kind="brand")
         e.description = "20 systèmes professionnels dans un seul hub.\n\n`+sentrixpro security` • sécurité\n`+sentrixpro live` • serveur en direct\n`+sentrixpro profile [membre]` • profil premium\n`+sentrixpro trust [membre]` • confiance\n`+sentrixpro history @membre` • historique\n`+sentrixpro modules` • modules\n`+sentrixpro help` • toutes les actions"
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @sentrixpro.command(name="help")
+    @sentrixpro.command(name="help", description="Lister les outils avancés de SentriX.")
     async def pro_help(self, ctx: commands.Context):
-        e = _panneau('SentriX Pro — actions', '', kind="brand")
+        e = _panneau('Outils avancés — actions', '', kind="brand")
         e.description = "**Sécurité**\n`security`, `lockdown on|off`, `quarantine-setup [heures]`, `trust [membre]`, `history @membre`, `aimod on|off [alert|delete|timeout]`\n\n**Communauté**\n`profile [membre]`, `badges [membre]`, `season [membre]`, `goal add|list|remove`, `autorole add|list|remove`\n\n**Automatisation**\n`welcome #salon|off`, `digest #salon|off`, `notifications`, `ticket-summary <id>`\n\n**Système**\n`live`, `status`, `modules`, `module enable|disable <nom>`"
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
@@ -654,7 +659,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     # via railway_boot.py, après le seul passage du nettoyeur de décorateurs
     # redondants (cogs/permission_guard.py::_strip_redundant_local_checks, qui ne
     # s'exécute qu'une fois), donc jamais balayé automatiquement.
-    @sentrixpro.command(name="security")
+    @sentrixpro.command(name="security", description="Afficher le score de sécurité du serveur et les protections actives.")
     async def pro_security(self, ctx):
         s = await self._security(ctx.guild)
         e = _panneau("Centre de sécurité", kind="success" if s['score'] >= 75 else "warning")
@@ -664,14 +669,14 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security
     # ci-dessus pour le détail du bug corrigé en retirant ce décorateur local).
-    @sentrixpro.command(name="lockdown")
+    @sentrixpro.command(name="lockdown", description="Verrouiller ou déverrouiller tout le serveur (on / off).")
     async def pro_lockdown(self, ctx, mode: str):
         if mode.casefold() == "on": return await ctx.send("Lockdown activé pour 15 minutes." if await self._start_lockdown(ctx.guild, f"Activation manuelle par {ctx.author}", 900) else "Permissions insuffisantes.")
         if mode.casefold() == "off": await self._stop_lockdown(ctx.guild); return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Verrouillage du serveur', 'Lockdown désactivé.', kind='success')))
         await panels.envoyer(ctx, panels.depuis_embed(_reponse('Verrouillage du serveur', 'Utilisez `lockdown on` ou `lockdown off`.', kind='warning')))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="quarantine-setup")
+    @sentrixpro.command(name="quarantine-setup", description="Préparer la mise en quarantaine des comptes trop récents.")
     async def pro_quarantine(self, ctx, min_account_hours: int = 72):
         hours = _clamp(min_account_hours, 1, 720); guild = ctx.guild
         role = discord.utils.get(guild.roles, name="SentriX Quarantine") or await guild.create_role(name="SentriX Quarantine", colour=discord.Colour.dark_grey(), reason="SentriX anti-alt")
@@ -688,14 +693,14 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         await self._set_module(guild.id, "anti_alt", True)
         await panels.envoyer(ctx, panels.depuis_embed(_reponse('Quarantaine', f'Quarantaine prête. Comptes de moins de {hours} h -> {channel.mention}.', kind='success')))
 
-    @sentrixpro.command(name="trust")
+    @sentrixpro.command(name="trust", description="Afficher le score de confiance d'un membre.")
     async def pro_trust(self, ctx, member: discord.Member | None = None):
         member = member or ctx.author; score = await self._trust(member)
         e = _panneau(f"Confiance — {member.display_name}", f"Score SentriX : **{score}/100**\nNiveau : **{'Élevé' if score >= 80 else 'Moyen' if score >= 55 else 'Faible'}**", kind="success" if score >= 80 else "warning" if score >= 55 else "danger"); e.set_thumbnail(url=member.display_avatar.url)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="history")
+    @sentrixpro.command(name="history", description="Afficher l'historique SentriX d'un membre.")
     async def pro_history(self, ctx, member: discord.Member):
         sanctions = await self.bot.db.fetchall("SELECT case_number,action,reason FROM sanctions WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 8", (ctx.guild.id, member.id))
         tickets = await self.bot.db.fetchall("SELECT id,status FROM tickets WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 5", (ctx.guild.id, member.id))
@@ -708,14 +713,14 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="live")
+    @sentrixpro.command(name="live", description="Afficher l'activité du serveur en direct.")
     async def pro_live(self, ctx):
         d = await self.live_snapshot(ctx.guild)
         e = _panneau('Live Server', f"En ligne : **{d['online_members']}**\nEn vocal : **{d['voice_users']}**\nTickets ouverts : **{d['open_tickets']}**\nSécurité : **{d['security_score']}/100**\nLockdown : **{('ACTIF' if d['lockdown'] else 'inactif')}**\nModules : **{d['modules_enabled']}/{d['modules_total']}**\nLatence : **{d['latency_ms']} ms**", kind="brand")
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="notifications")
+    @sentrixpro.command(name="notifications", description="Afficher l'état des notifications, annonces et résumés.")
     async def pro_notifications(self, ctx):
         try: rows = await self.bot.db.fetchall("SELECT platform,COUNT(*) AS n FROM social_notifications WHERE guild_id=? AND enabled=1 GROUP BY platform", (ctx.guild.id,))
         except Exception: rows = []
@@ -726,7 +731,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="welcome")
+    @sentrixpro.command(name="welcome", description="Choisir le salon d'accueil intelligent (ou off).")
     async def pro_welcome(self, ctx, target: str):
         if target.casefold() == "off": await self._set_module(ctx.guild.id, "smart_welcome", False); return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Accueil intelligent', 'Welcome intelligent désactivé.', kind='success')))
         match = re.search(r"(\d{15,22})", target); channel = ctx.guild.get_channel(int(match.group(1))) if match else None
@@ -734,7 +739,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         await self._set_setting(ctx.guild.id, "smart_welcome_channel", channel.id); await self._set_module(ctx.guild.id, "smart_welcome", True); await panels.envoyer(ctx, panels.depuis_embed(_reponse('Accueil intelligent', f'Welcome intelligent activé dans {channel.mention}.', kind='success')))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="autorole")
+    @sentrixpro.command(name="autorole", description="Donner un rôle automatiquement à partir d'un seuil d'activité.")
     async def pro_autorole(self, ctx, action: str, metric: str | None = None, threshold: int | None = None, role: discord.Role | None = None):
         action = action.casefold()
         if action == "list":
@@ -744,17 +749,17 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             await self.bot.db.execute("INSERT INTO ultimate_autoroles(guild_id,metric,threshold,role_id) VALUES(?,?,?,?)", (ctx.guild.id, metric, int(threshold), role.id)); await self._set_module(ctx.guild.id, "smart_autorole", True); return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Rôles automatiques', f'Règle ajoutée : {metric} >= {threshold} -> {role.mention}.', kind='success')))
         await panels.envoyer(ctx, panels.depuis_embed(_reponse('Rôles automatiques', 'Syntaxe : `autorole add trust 80 @Role`, `autorole list`, `autorole remove <id>`.', kind='warning')))
 
-    @sentrixpro.command(name="profile")
+    @sentrixpro.command(name="profile", description="Afficher la fiche complète d'un membre (niveau, économie, confiance).")
     async def pro_profile(self, ctx, member: discord.Member | None = None):
         member = member or ctx.author; stats = await self._stats(member); trust = await self._trust(member); badges = await self._badges(member)
-        e = _panneau(f'Profil Pro — {member.display_name}', '', kind="brand"); e.set_thumbnail(url=member.display_avatar.url); e.add_field(name="Progression", value=f"Niveau **{stats.get('current_level',0)}**" + (f" • Rang **#{stats.get('rank')}**" if stats.get('rank') else ""), inline=False); e.add_field(name="Activité", value=f"{stats.get('message_count',0)} messages • {stats_service.format_duration(stats.get('voice_time',0))} vocal", inline=False); e.add_field(name="Économie", value=f"{int(stats.get('wallet',0))+int(stats.get('bank',0))} total"); e.add_field(name="Confiance", value=f"{trust}/100"); e.add_field(name="Badges", value=" • ".join(BADGE_LABELS.get(b,b) for b in badges) or "Aucun", inline=False)
+        e = _panneau(f'Profil complet — {member.display_name}', '', kind="brand"); e.set_thumbnail(url=member.display_avatar.url); e.add_field(name="Progression", value=f"Niveau **{stats.get('current_level',0)}**" + (f" • Rang **#{stats.get('rank')}**" if stats.get('rank') else ""), inline=False); e.add_field(name="Activité", value=f"{stats.get('message_count',0)} messages • {stats_service.format_duration(stats.get('voice_time',0))} vocal", inline=False); e.add_field(name="Économie", value=f"{int(stats.get('wallet',0))+int(stats.get('bank',0))} total"); e.add_field(name="Confiance", value=f"{trust}/100"); e.add_field(name="Badges", value=" • ".join(BADGE_LABELS.get(b,b) for b in badges) or "Aucun", inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @sentrixpro.command(name="badges")
+    @sentrixpro.command(name="badges", description="Afficher les badges débloqués par un membre.")
     async def pro_badges(self, ctx, member: discord.Member | None = None):
         member = member or ctx.author; badges = await self._badges(member); await panels.envoyer(ctx, panels.depuis_embed(_panneau(f'Badges — {member.display_name}', '\n'.join((f'• {BADGE_LABELS.get(b, b)}' for b in badges)) or 'Aucun badge débloqué.', kind='brand')))
 
-    @sentrixpro.command(name="season")
+    @sentrixpro.command(name="season", description="Afficher la progression de saison d'un membre.")
     async def pro_season(self, ctx, member: discord.Member | None = None):
         member = member or ctx.author
         try:
@@ -765,7 +770,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         await panels.envoyer(ctx, panels.depuis_embed(_panneau(f'Saison — {member.display_name}', text, kind='brand')))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="goal")
+    @sentrixpro.command(name="goal", description="Créer, lister ou supprimer un objectif de serveur.")
     async def pro_goal(self, ctx, action: str, metric: str | None = None, target: int | None = None, reward_money: int = 0, reward_role: discord.Role | None = None):
         action = action.casefold()
         if action == "list":
@@ -776,28 +781,28 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         await panels.envoyer(ctx, panels.depuis_embed(_reponse('Objectifs du serveur', 'Syntaxe : `goal add messages 10000 [argent] [@role]`, `goal list`, `goal remove <id>`.', kind='warning')))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="aimod")
+    @sentrixpro.command(name="aimod", description="Activer la modération par IA et choisir son action.")
     async def pro_aimod(self, ctx, mode: str, action: str = "alert"):
         action = action.casefold()
         if action not in {"alert","delete","timeout"}: return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modération par IA', 'Action : `alert`, `delete` ou `timeout`.', kind='warning')))
         enabled = mode.casefold() in {"on","enable","1","true"}; await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_ai_mod(guild_id,enabled,action,confidence) VALUES(?,?,?,0.88)", (ctx.guild.id, int(enabled), action)); await self._set_module(ctx.guild.id, "ai_moderation", enabled); await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modération par IA', f"IA de modération {('activée' if enabled else 'désactivée')} • action : {action}.", kind='brand')))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="ticket-summary")
+    @sentrixpro.command(name="ticket-summary", description="Résumer un ticket à partir de son numéro.")
     async def pro_ticket_summary(self, ctx, ticket_id: int):
         row = await self.bot.db.fetchone("SELECT summary FROM ultimate_ticket_summaries WHERE guild_id=? AND ticket_id=?", (ctx.guild.id, ticket_id))
         if not row: return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Résumé de ticket', 'Aucun résumé enregistré pour ce ticket.', kind='warning')))
         await panels.envoyer(ctx, panels.depuis_embed(_panneau(f'Résumé ticket #{ticket_id}', str(_get(row, 'summary'))[:4000], kind='brand')))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="digest")
+    @sentrixpro.command(name="digest", description="Envoyer un résumé quotidien d'activité au staff (ou off).")
     async def pro_digest(self, ctx, target: str):
         if target.casefold() == "off": await self.bot.db.execute("DELETE FROM ultimate_staff_digest WHERE guild_id=?", (ctx.guild.id,)); await self._set_module(ctx.guild.id, "staff_digest", False); return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Résumé d activité', 'Résumé quotidien staff désactivé.', kind='success')))
         match = re.search(r"(\d{15,22})", target); channel = ctx.guild.get_channel(int(match.group(1))) if match else None
         if not isinstance(channel, discord.TextChannel): return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Résumé d activité', 'Mentionnez un salon texte.', kind='warning')))
         await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_staff_digest(guild_id,channel_id,last_day) VALUES(?,?,NULL)", (ctx.guild.id, channel.id)); await self._set_module(ctx.guild.id, "staff_digest", True); await panels.envoyer(ctx, panels.depuis_embed(_reponse('Résumé d activité', f'Résumé staff activé dans {channel.mention} vers 18:00 UTC.', kind='success')))
 
-    @sentrixpro.command(name="status")
+    @sentrixpro.command(name="status", description="Afficher l'état technique de SentriX sur ce serveur.")
     async def pro_status(self, ctx):
         db_ok = True
         try: await self.bot.db.fetchone("SELECT 1 AS ok")
@@ -807,18 +812,18 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="modules")
+    @sentrixpro.command(name="modules", description="Lister les modules avancés et leur état.")
     async def pro_modules(self, ctx):
         lines = [f"{'●' if await self._enabled(ctx.guild.id, key) else '○'} `{key}` — {label}" for key, (label, _) in MODULES.items()]
         await panels.envoyer(ctx, panels.depuis_embed(_panneau('Modules SentriX', '\n'.join(lines)[:4000], kind='brand')))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
-    @sentrixpro.command(name="module")
+    @sentrixpro.command(name="module", description="Activer ou désactiver un module avancé.")
     async def pro_module(self, ctx, action: str, module: str):
         module = module.casefold(); action = action.casefold()
-        if module not in MODULES: return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modules SentriX Pro', 'Module inconnu. Utilisez `+sentrixpro modules`.', kind='warning')))
-        if action not in {"enable","on","1","true","disable","off","0","false"}: return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modules SentriX Pro', 'Utilisez `module enable <nom>` ou `module disable <nom>`.', kind='warning')))
-        enabled = action in {"enable","on","1","true"}; await self._set_module(ctx.guild.id, module, enabled); await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modules SentriX Pro', f"Module **{MODULES[module][0]}** {('activé' if enabled else 'désactivé')}.", kind='brand')))
+        if module not in MODULES: return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modules avancés', 'Module inconnu. Utilisez `+sentrixpro modules`.', kind='warning')))
+        if action not in {"enable","on","1","true","disable","off","0","false"}: return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modules avancés', 'Utilisez `module enable <nom>` ou `module disable <nom>`.', kind='warning')))
+        enabled = action in {"enable","on","1","true"}; await self._set_module(ctx.guild.id, module, enabled); await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modules avancés', f"Module **{MODULES[module][0]}** {('activé' if enabled else 'désactivé')}.", kind='brand')))
 
 
 async def setup(bot: commands.Bot):

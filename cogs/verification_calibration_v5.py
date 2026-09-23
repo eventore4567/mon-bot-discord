@@ -246,7 +246,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
     @commands.command(name="verification-calibration", aliases=["verif-calibration"])
     @commands.guild_only()
     async def verification_calibration(self, ctx: commands.Context) -> None:
-        """Affiche l'avancement et la précision réellement mesurée de V5."""
+        """Affiche la précision réellement mesurée de la vérification automatique."""
         if not await self._staff_allowed(ctx):
             return await panels.envoyer(ctx, _reponse('Calibration de la vérification', "Vous n'avez pas la permission de consulter la calibration.", kind='danger'))
         data = await self.stats()
@@ -256,7 +256,7 @@ class VerificationCalibrationV5(commands.Cog, name=_CALIBRATION_COG):
             else "Pas encore mesurable"
         )
         embed = discord.Embed(
-            title="SentriX • Calibration vérification V5",
+            title="SentriX • Calibration de la vérification",
             description=(
                 "Mesure sur de **vraies arrivées Discord**. La précision n'utilise que "
                 "les échantillons revus par le staff."

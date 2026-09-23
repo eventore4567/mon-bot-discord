@@ -67,7 +67,7 @@ class PermissionsExplain(commands.Cog, name="PermissionsExplain"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_group(name="permissions", description="Diagnostic des permissions SentriX (Core V2).")
+    @commands.hybrid_group(name="permissions", description="Comprendre qui peut utiliser une commande, et pourquoi.")
     async def permissions(self, ctx: commands.Context) -> None:
         if ctx.invoked_subcommand is None:
             await panels.envoyer(
