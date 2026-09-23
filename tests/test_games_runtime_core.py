@@ -541,3 +541,56 @@ def test_adventure_success_is_the_quest_that_grants_temporary_boost():
     assert 'if game_name == "adventure":' in solo
     assert "grant_quest_boost" in solo
     assert "Boost de quête" in solo
+
+
+@pytest.mark.asyncio
+async def test_relocated_highlow_button_updates_source_view_without_attribute_error():
+    """Reproduit exactement le bug vu sur Discord : le bouton vit dans Panneau,
+    mais son état métier (_lock/choice) reste sur _HighLowView."""
+    import discord
+    from utils import sentrix_panels as panels
+
+    source = games_economy._HighLowView(author_id=123)
+    button = source.children[0]
+    panel = panels.avec_composants(panels.Panneau(titre="Plus ou moins"), source)
+
+    response = SimpleNamespace(
+        edit_message=AsyncMock(),
+        send_message=AsyncMock(),
+        is_done=lambda: False,
+    )
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=123),
+        response=response,
+    )
+
+    await button.callback(interaction)
+
+    assert source.choice == "plus_haut"
+    response.edit_message.assert_awaited_once()
+    assert response.edit_message.await_args.kwargs["view"] is panel
+
+
+@pytest.mark.asyncio
+async def test_relocated_solo_choice_button_updates_source_view_without_attribute_error():
+    from utils import sentrix_panels as panels
+
+    choices = [("🧭", "Sûr", 0.9, 0.8, "test")]
+    source = games_economy._SoloChoiceView(author_id=123, choices=choices)
+    button = source.children[0]
+    panel = panels.avec_composants(panels.Panneau(titre="Quête"), source)
+
+    response = SimpleNamespace(
+        edit_message=AsyncMock(),
+        send_message=AsyncMock(),
+        is_done=lambda: False,
+    )
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=123),
+        response=response,
+    )
+
+    await button.callback(interaction)
+
+    assert source.selected == choices[0]
+    assert response.edit_message.await_args.kwargs["view"] is panel
