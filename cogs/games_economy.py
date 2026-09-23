@@ -81,6 +81,11 @@ async def _embed(bot, guild_id: int | None, *, title: str, description: str = No
 def _reward_line(reward: "game_rewards.GameReward | None") -> str:
     if reward and reward.success and reward.amount > 0:
         return f"\n\n🪙 **+{reward.amount}** crédités ! (réf. `{reward.display_id}`)"
+    if reward and reward.reason == "daily_limit":
+        return (
+            "\n\n🪙 **Récompense quotidienne maximale atteinte.** "
+            "La partie reste jouable : seule la monnaie est limitée."
+        )
     return ""
 
 
@@ -175,10 +180,12 @@ async def _finish(bot, ctx: commands.Context, game_name: str, session_id: str, r
     await game_rewards.touch_cooldown(bot, guild_id, ctx.author.id, game_name)
     if result != "win":
         return None
-    allowed, played, limit = await game_rewards.check_daily_limit(bot, guild_id, ctx.author.id)
-    if not allowed:
-        return None
-    return await game_rewards.reward_game_winner(bot, guild_id, ctx.author.id, game_name, base_amount, session_id, result="win")
+    # reward_game_winner est l'unique autorité sur la limite quotidienne. Il retourne
+    # un GameReward(reason="daily_limit") au lieu de faire disparaître l'information :
+    # l'UI peut donc dire clairement que seul l'argent est plafonné, jamais le gameplay.
+    return await game_rewards.reward_game_winner(
+        bot, guild_id, ctx.author.id, game_name, base_amount, session_id, result="win"
+    )
 
 
 async def _precheck_duel(
