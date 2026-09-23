@@ -136,7 +136,10 @@ def test_the_logo_is_exactly_centered():
     haut = log_banners.HEIGHT // 2 - log_banners.LOGO_BOX // 2
     colonnes = [x for x in range(log_banners.WIDTH)
                 if any(alpha.getpixel((x, y)) > 40 for y in range(haut + 2, haut + 12))]
-    lignes = [y for y in range(log_banners.HEIGHT)
+    # Le petit séparateur est centré lui aussi : limiter la mesure à la boîte
+    # verticale du logo évite de prendre ce trait inférieur pour une partie du logo.
+    bas_logo = log_banners.HEIGHT // 2 + log_banners.LOGO_BOX // 2
+    lignes = [y for y in range(max(0, haut), min(log_banners.HEIGHT, bas_logo + 1))
               if any(alpha.getpixel((x, y)) > 40 for x in range(470, 554))]
     centre_x = (min(colonnes) + max(colonnes)) / 2
     centre_y = (min(lignes) + max(lignes)) / 2
