@@ -469,3 +469,25 @@ def test_minesweeper_is_public_and_has_a_real_command():
         command.name == "minesweeper"
         for command in games_economy.GamesRapides.__cog_commands__
     )
+
+
+def test_typing_and_memory_previews_are_not_plain_copyable_text():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+
+    assert "class _PreviewTokensView" in source
+    assert "disabled=True" in source
+
+    memory_block = source.split("async def memory", 1)[1].split(
+        '@commands.hybrid_command(name="reaction"', 1
+    )[0]
+    fast_block = source.split("async def fasttype", 1)[1].split(
+        "async def _run_word_guess", 1
+    )[0]
+    assert "_PreviewTokensView(sequence)" in memory_block
+    assert "_PreviewTokensView(challenge_tokens)" in fast_block
+    assert "Mémorisez les boutons" in memory_block
+    assert "non sélectionnables" in fast_block
