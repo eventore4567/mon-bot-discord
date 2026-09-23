@@ -872,10 +872,16 @@ class _PreviewTokensView(discord.ui.View):
 
     def __init__(self, tokens: list[str]):
         super().__init__(timeout=None)
+        visual_emojis = set(FASTTYPE_EMOJIS) | {
+            item for item in MEMORY_TOKENS if not str(item).isdigit()
+        }
         for index, token in enumerate(tokens[:20]):
+            value = str(token)
+            is_emoji = value in visual_emojis
             self.add_item(
                 discord.ui.Button(
-                    label=str(token)[:80],
+                    label=" " if is_emoji else value[:80],
+                    emoji=value if is_emoji else None,
                     style=discord.ButtonStyle.secondary,
                     disabled=True,
                     row=index // 5,
@@ -905,7 +911,10 @@ class _ReactionSoloView(discord.ui.View):
 
 class _ReactionButton(discord.ui.Button):
     def __init__(self, token: str, *, is_target: bool):
-        super().__init__(label=token, style=discord.ButtonStyle.secondary)
+        parts = str(token).split(maxsplit=1)
+        emoji = parts[0] if len(parts) == 2 else None
+        label = parts[1] if len(parts) == 2 else str(token)
+        super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.secondary)
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
@@ -1900,7 +1909,10 @@ class _CommunityRaceButtonView(discord.ui.View):
 
 class _CommunityRaceButton(discord.ui.Button):
     def __init__(self, token: str, *, is_target: bool):
-        super().__init__(label=token, style=discord.ButtonStyle.secondary)
+        parts = str(token).split(maxsplit=1)
+        emoji = parts[0] if len(parts) == 2 else None
+        label = parts[1] if len(parts) == 2 else str(token)
+        super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.secondary)
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
