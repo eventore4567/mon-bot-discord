@@ -47,9 +47,13 @@ from cogs.games_catalog import (
     COMMUNITY_TRIVIA,
     COMMUNITY_WORDS,
     EMOJI_QUIZ,
+    FASTTYPE_EMOJIS,
     FASTTYPE_PHRASES,
+    FASTTYPE_WORDS,
     GAME_CATALOG,
+    MEMORY_TOKENS,
     RPS_BEATS,
+    SOLO_CHOICES,
     SOLO_FLAVORS,
     WORDGAME_CLUES,
 )
@@ -84,6 +88,66 @@ def _primary_answer(answer) -> str:
     if isinstance(answer, (list, tuple, set)):
         return str(next(iter(answer)))
     return str(answer)
+
+
+def _difficulty_profile(value: str) -> tuple[int, float, int]:
+    """Retourne longueur du défi, temps d'affichage et multiplicateur de récompense."""
+    value = str(value or "normal").casefold()
+    return {
+        "facile": (5, 3.2, 0),
+        "easy": (5, 3.2, 0),
+        "normal": (7, 2.4, 5),
+        "difficile": (9, 1.8, 10),
+        "hard": (9, 1.8, 10),
+    }.get(value, (7, 2.4, 5))
+
+
+async def _game_difficulty(bot, guild_id: int | None) -> str:
+    if guild_id is None:
+        return "normal"
+    try:
+        settings = await game_rewards.get_settings(bot, guild_id)
+        return str(settings.get("default_difficulty") or "normal")
+    except Exception:
+        return "normal"
+
+
+def _make_fasttype_challenge(difficulty: str) -> str:
+    length, _preview, _bonus = _difficulty_profile(difficulty)
+    tokens: list[str] = []
+    # Toujours au moins un mot, un nombre et un emoji.
+    tokens.append(game_rewards.secure_pick(FASTTYPE_WORDS))
+    tokens.append(str(10 + game_rewards.secure_pick(list(range(90)))))
+    tokens.append(game_rewards.secure_pick(FASTTYPE_EMOJIS))
+    while len(tokens) < length:
+        pool_kind = game_rewards.secure_pick(["word", "number", "emoji"])
+        if pool_kind == "word":
+            tokens.append(game_rewards.secure_pick(FASTTYPE_WORDS))
+        elif pool_kind == "number":
+            tokens.append(str(game_rewards.secure_pick(list(range(10)))))
+        else:
+            tokens.append(game_rewards.secure_pick(FASTTYPE_EMOJIS))
+    # Pas de phrase statique : chaque manche est unique.
+    return " ".join(tokens)
+
+
+def _make_memory_sequence(difficulty: str) -> list[str]:
+    length, _preview, _bonus = _difficulty_profile(difficulty)
+    return [game_rewards.secure_pick(MEMORY_TOKENS) for _ in range(length)]
+
+
+def _reaction_round() -> tuple[list[str], str]:
+    """Construit 4 cibles visuelles uniques, dont une seule est correcte."""
+    emojis = ["⚡", "🔥", "💎", "⭐", "🌙", "🎯", "🧊", "🪐"]
+    numbers = ["2", "3", "4", "5", "7", "8", "9"]
+    options: list[str] = []
+    while len(options) < 4:
+        token = f"{game_rewards.secure_pick(emojis)} {game_rewards.secure_pick(numbers)}"
+        if token not in options:
+            options.append(token)
+    target = game_rewards.secure_pick(options)
+    random.shuffle(options)
+    return options, target
 
 
 async def _precheck(bot, ctx: commands.Context, game_name: str, cooldown: int) -> tuple[bool, str, str | None]:
