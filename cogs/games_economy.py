@@ -329,26 +329,97 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         started, err, sid = await _precheck(self.bot, ctx, "memory", 20)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mémoire', description=err, kind='warning')))
-        pool = ["🍒", "🍋", "🍊", "🍇", "💎", "⭐", "🔥", "🌙"]
-        sequence = [game_rewards.secure_pick(pool) for _ in range(5)]
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mémoire', description='Mémorisez cette séquence :\n' + ' '.join(sequence))))
-        await asyncio.sleep(5)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mémoire', description="À vous ! Retapez la séquence dans l'ordre, séparée par des espaces (30 secondes).")))
+
+        difficulty = await _game_difficulty(self.bot, guild_id)
+        sequence = _make_memory_sequence(difficulty)
+        _length, preview_seconds, bonus = _difficulty_profile(difficulty)
+        prompt = await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Mémoire — observez",
+                    description=(
+                        f"🧠 Niveau **{difficulty}** · {len(sequence)} symboles\n"
+                        f"**{'  '.join(sequence)}**\n\n"
+                        "Le code disparaît dans quelques secondes. Ne le copiez pas : "
+                        "il sera remplacé avant que la réponse soit acceptée."
+                    ),
+                )
+            ),
+        )
+        await asyncio.sleep(preview_seconds)
+        await panels.editer(
+            prompt,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Mémoire — à vous",
+                    description=(
+                        "🎯 Retapez maintenant la séquence **dans le même ordre**, "
+                        "avec des espaces. Vous avez **20 secondes**."
+                    ),
+                )
+            ),
+        )
+
+        started_at = time.monotonic()
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
 
         try:
-            msg = await self.bot.wait_for("message", check=check, timeout=30)
+            msg = await self.bot.wait_for("message", check=check, timeout=20)
         except asyncio.TimeoutError:
             await _finish(self.bot, ctx, "memory", sid, "loss", 0)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Temps écoulé', description=f"⏱️ La séquence était : {' '.join(sequence)}", kind='warning')))
+            return await panels.editer(
+                prompt,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Mémoire — temps écoulé",
+                        description=f"⏱️ La séquence était : **{'  '.join(sequence)}**",
+                        kind="warning",
+                    )
+                ),
+            )
+
+        elapsed = time.monotonic() - started_at
         if msg.content.split() == sequence:
-            reward = await _finish(self.bot, ctx, "memory", sid, "win", 30)
-            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Bravo !', description='🧠 Séquence parfaite !' + _reward_line(reward), kind='success')))
-        else:
-            await _finish(self.bot, ctx, "memory", sid, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Raté', description=f"❌ La séquence était : {' '.join(sequence)}", kind='danger')))
+            speed_bonus = max(0, 8 - int(elapsed))
+            reward = await _finish(self.bot, ctx, "memory", sid, "win", 25 + bonus + speed_bonus)
+            return await panels.editer(
+                prompt,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Mémoire — parfait",
+                        description=(
+                            f"🧠 **{len(sequence)}/{len(sequence)}** corrects en **{elapsed:.1f}s**.\n"
+                            f"⚡ Bonus vitesse : **+{speed_bonus}**"
+                        ) + _reward_line(reward),
+                        kind="success",
+                    )
+                ),
+            )
+
+        await _finish(self.bot, ctx, "memory", sid, "loss", 0)
+        await panels.editer(
+            prompt,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Mémoire — raté",
+                    description=f"❌ Bonne séquence : **{'  '.join(sequence)}**",
+                    kind="danger",
+                )
+            ),
+        )
 
     @commands.hybrid_command(name="reaction", description="Cliquez sur le bouton dès qu'il apparaît, le plus vite possible.", with_app_command=False)
     async def reaction(self, ctx: commands.Context):
@@ -356,19 +427,79 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         started, err, sid = await _precheck(self.bot, ctx, "reaction", 15)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description=err, kind='warning')))
-        msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description='⏳ Préparez-vous... le bouton va apparaître.')))
-        await asyncio.sleep(random.uniform(2.0, 5.0))
-        view = _ReactionSoloView(author_id=ctx.author.id)
-        start_time = time.monotonic()
-        await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description='🔴 **MAINTENANT !**')), view))
+
+        options, target = _reaction_round()
+        msg = await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Réaction — préparez-vous",
+                    description=(
+                        f"🎯 Quand les boutons apparaissent, cliquez sur **{target}**.\n"
+                        "Attention : les autres boutons sont des leurres."
+                    ),
+                )
+            ),
+        )
+        await asyncio.sleep(random.uniform(1.8, 4.2))
+
+        view = _ReactionSoloView(author_id=ctx.author.id, options=options, target=target)
+        await panels.editer(
+            msg,
+            panels.avec_composants(
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Réaction — GO",
+                        description=f"⚡ **CIBLE : {target}** · trouvez-la parmi les 4 boutons.",
+                    )
+                ),
+                view,
+            ),
+        )
         await view.wait()
-        elapsed = view.elapsed if view.elapsed is not None else None
-        if elapsed is None:
+
+        if view.correct is None:
             await _finish(self.bot, ctx, "reaction", sid, "loss", 0)
-            return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description="⏱️ Trop lent, personne n'a cliqué à temps.")))
-        amount = 30 if elapsed < 0.6 else 20 if elapsed < 1.2 else 12
+            return await panels.editer(
+                msg,
+                panels.depuis_embed(
+                    await _embed(self.bot, guild_id, title="Réaction — temps écoulé", description="⏱️ Trop lent.", kind="warning")
+                ),
+            )
+        if not view.correct:
+            await _finish(self.bot, ctx, "reaction", sid, "loss", 0)
+            return await panels.editer(
+                msg,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Réaction — mauvais bouton",
+                        description=f"❌ La cible était **{target}**.",
+                        kind="danger",
+                    )
+                ),
+            )
+
+        elapsed = view.elapsed or 0.0
+        amount = 36 if elapsed < 0.55 else 28 if elapsed < 1.0 else 20
         reward = await _finish(self.bot, ctx, "reaction", sid, "win", amount)
-        await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Réaction rapide', description=f'⚡ Cliqué en **{elapsed:.2f}s** !' + _reward_line(reward), kind='success')))
+        await panels.editer(
+            msg,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Réaction — réussi",
+                    description=f"⚡ Bonne cible en **{elapsed:.2f}s** !" + _reward_line(reward),
+                    kind="success",
+                )
+            ),
+        )
 
     @commands.hybrid_command(name="scramble", description="Remettez les lettres d'un mot mélangé dans le bon ordre.", with_app_command=False)
     async def scramble(self, ctx: commands.Context):
@@ -431,25 +562,92 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         started, err, sid = await _precheck(self.bot, ctx, "fasttype", 15)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Retape vite', description=err, kind='warning')))
-        phrase = game_rewards.secure_pick(FASTTYPE_PHRASES)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Retape vite', description=f'⌨️ Retapez exactement :\n```{phrase}```')))
+
+        difficulty = await _game_difficulty(self.bot, guild_id)
+        challenge = _make_fasttype_challenge(difficulty)
+        _length, preview_seconds, bonus = _difficulty_profile(difficulty)
+        msg = await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Retape vite — mémorisez",
+                    description=(
+                        f"⌨️ Niveau **{difficulty}**\n"
+                        f"**{challenge}**\n\n"
+                        f"Le code disparaît dans **{preview_seconds:.1f}s**. "
+                        "La réponse n'est acceptée qu'après sa disparition."
+                    ),
+                )
+            ),
+        )
+        await asyncio.sleep(preview_seconds)
+        await panels.editer(
+            msg,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Retape vite — GO",
+                    description="⚡ Retapez maintenant le code exact. **15 secondes**.",
+                )
+            ),
+        )
         start_time = time.monotonic()
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
 
         try:
-            msg = await self.bot.wait_for("message", check=check, timeout=25)
+            answer = await self.bot.wait_for("message", check=check, timeout=15)
         except asyncio.TimeoutError:
             await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Temps écoulé', description='⏱️ Trop lent.', kind='warning')))
-        if msg.content != phrase:
-            await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Raté', description="❌ Ce n'était pas exact.", kind='danger')))
+            return await panels.editer(
+                msg,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Retape vite — temps écoulé",
+                        description=f"⏱️ Le code était **{challenge}**.",
+                        kind="warning",
+                    )
+                ),
+            )
+
         elapsed = time.monotonic() - start_time
-        amount = 30 if elapsed < 5 else 20 if elapsed < 10 else 12
-        reward = await _finish(self.bot, ctx, "fasttype", sid, "win", amount)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Retape vite', description=f'⚡ Retapé en **{elapsed:.1f}s** !' + _reward_line(reward), kind='success')))
+        if answer.content.strip() != challenge:
+            await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
+            return await panels.editer(
+                msg,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Retape vite — erreur",
+                        description=f"❌ Le code exact était **{challenge}**.",
+                        kind="danger",
+                    )
+                ),
+            )
+
+        speed_bonus = 12 if elapsed < 4 else 7 if elapsed < 7 else 3
+        reward = await _finish(self.bot, ctx, "fasttype", sid, "win", 18 + bonus + speed_bonus)
+        await panels.editer(
+            msg,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Retape vite — terminé",
+                    description=(
+                        f"⚡ Exact en **{elapsed:.1f}s** · bonus vitesse **+{speed_bonus}**"
+                    ) + _reward_line(reward),
+                    kind="success",
+                )
+            ),
+        )
 
 
 async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cooldown: int, mode: str):
