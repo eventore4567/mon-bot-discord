@@ -23,6 +23,7 @@ import discord
 from discord.ext import commands
 
 from utils import ai_service, design_system, embeds, premium_style, stats_service
+from utils import sentrix_panels as panels
 from . import community_v3, community_v31
 
 logger = logging.getLogger("bot.community-v32")
@@ -391,12 +392,13 @@ def _install_ai_recovery(bot: commands.Bot) -> None:
 
         if not result.get("ok"):
             message = strip_decorative_emoji(result.get("error") or "L'IA est momentanément indisponible.")
-            if thinking is not None:
-                try:
-                    return await thinking.edit(content=message, embed=None, view=None)
-                except discord.HTTPException:
-                    pass
-            return await ctx.send(message)
+            with panels.reponse_en_texte_libre():
+                if thinking is not None:
+                    try:
+                        return await thinking.edit(content=message, embed=None, view=None)
+                    except discord.HTTPException:
+                        pass
+                return await ctx.send(message)
 
         answer = strip_decorative_emoji(result.get("text") or "Aucune réponse générée.")
         model_key = result.get("model_key") or ai_service.MODEL_TERRA
@@ -419,22 +421,25 @@ def _install_ai_recovery(bot: commands.Bot) -> None:
             logger.exception("V3.2 : impossible de créer les actions rapides IA.")
             view = None
 
-        if thinking is not None:
-            try:
-                await thinking.edit(content=chunks[0], embed=None, view=view)
-                if view is not None:
-                    view.message = thinking
-            except discord.HTTPException:
+        # Bloc « réponse en texte libre » : ces messages-là n'ont pas de bannière.
+        # Ce qui part APRÈS (carte de mission, montée de niveau) garde la sienne.
+        with panels.reponse_en_texte_libre():
+            if thinking is not None:
+                try:
+                    await thinking.edit(content=chunks[0], embed=None, view=view)
+                    if view is not None:
+                        view.message = thinking
+                except discord.HTTPException:
+                    msg = await ctx.send(chunks[0], view=view)
+                    if view is not None:
+                        view.message = msg
+            else:
                 msg = await ctx.send(chunks[0], view=view)
                 if view is not None:
                     view.message = msg
-        else:
-            msg = await ctx.send(chunks[0], view=view)
-            if view is not None:
-                view.message = msg
 
-        for chunk in chunks[1:]:
-            await ctx.channel.send(chunk)
+            for chunk in chunks[1:]:
+                await ctx.channel.send(chunk)
 
     ai_cog._handle_ai_command = types.MethodType(professional_ai, ai_cog)
     ai_cog._sentrix_v32_ai_handler = True

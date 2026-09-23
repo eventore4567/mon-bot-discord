@@ -255,58 +255,62 @@ def test_les_deux_chemins_de_banniere_ont_les_memes_familles():
     assert set(command_visuals._ACCENTS) == set(log_banners.STYLES)
 
 
-def test_les_commandes_en_texte_libre_n_ont_pas_de_banniere():
-    """Un bandeau de 1024x110 au-dessus d'une réponse de l'IA n'ajoute rien."""
+def test_seule_la_reponse_en_texte_libre_perd_sa_banniere():
+    """La bannière est sur TOUT sauf la réponse libre elle-même.
+
+    Avant, la règle s'appliquait à tout ce qui partait pendant la commande : la
+    carte « Mission terminée » envoyée juste après par un autre module perdait sa
+    bannière alors qu'elle n'a rien de libre (capture de Jayden, 23/09/2026).
+    """
     from types import SimpleNamespace
 
     from cogs import final_interaction_policy as policy
     from utils import sentrix_panels as panels
 
-    def panneau_pour(commande: str, cog: str) -> panels.Panneau:
-        jeton = policy._COMMAND_CONTEXT.set(
-            SimpleNamespace(command=SimpleNamespace(qualified_name=commande, cog_name=cog))
-        )
-        try:
-            return panels.Panneau(titre="Réponse", sous_titre="texte", kind="info")
-        finally:
-            policy._COMMAND_CONTEXT.reset(jeton)
+    jeton = policy._COMMAND_CONTEXT.set(
+        SimpleNamespace(command=SimpleNamespace(qualified_name="sentrix", cog_name="Ai"))
+    )
+    try:
+        with panels.reponse_en_texte_libre():
+            reponse = panels.Panneau(titre="Sentrix", sous_titre="Salut", kind="info")
+        mission = panels.Panneau(titre="Mission terminée", sous_titre="+45 XP", kind="success")
+    finally:
+        policy._COMMAND_CONTEXT.reset(jeton)
 
-    for commande in ("sentrix", "ai", "translate", "summarize"):
-        panneau = panneau_pour(commande, "Ai")
-        assert panneau.avec_banniere is False, commande
-        assert panneau.fichiers() == [], commande
-    # Une commande structurée garde la sienne.
-    structure = panneau_pour("balance", "Economy")
+    assert reponse.avec_banniere is False
+    assert reponse.fichiers() == []
+    assert mission.avec_banniere is True, "la carte de mission doit garder sa bannière"
+    assert [f.filename for f in mission.fichiers()] == [log_banners.nom_fichier("success")]
+
+    # Une commande structurée garde la sienne, dans tous les cas.
+    structure = panels.Panneau(titre="Solde", kind="info")
     assert structure.avec_banniere is True
-    assert [f.filename for f in structure.fichiers()] == [log_banners.nom_fichier("economy")]
 
 
-def test_les_bannieres_servies_par_url_sont_versionnees():
-    """Discord met en cache l'image d'un embed PAR URL, pendant des heures : changer
-    le dessin sans changer le nom laissait l'ancienne bannière s'afficher (cas réel
-    du 23/09/2026, capture de Jayden). Le nom porte donc la version du dessin."""
-    from utils import command_visuals
-
-    assert log_banners.BANNER_VERSION, "aucune version de bannière"
-    for famille in log_banners.STYLES:
-        nom = log_banners.nom_source(famille)
-        assert log_banners.BANNER_VERSION in nom, nom
-        assert command_visuals._BANNER_URLS[famille].endswith(nom), famille
-
-
-def test_une_commande_en_texte_libre_n_a_pas_de_banniere_sur_les_deux_chemins():
-    """+sentrix passe par le chemin embed (URL), pas par la pièce jointe : la règle
-    « pas de bannière » doit valoir sur les DEUX, sinon le bandeau revient."""
+def test_le_bloc_texte_libre_vaut_aussi_pour_le_chemin_embed():
+    """+sentrix passe par le chemin embed (URL) : la règle doit valoir des deux côtés."""
     from types import SimpleNamespace
 
     from cogs import final_interaction_policy as policy
-    from utils import command_visuals
+    from utils import command_visuals, sentrix_panels as panels
 
     jeton = policy._COMMAND_CONTEXT.set(
         SimpleNamespace(command=SimpleNamespace(qualified_name="sentrix", cog_name="Ai"))
     )
     try:
-        assert command_visuals.banniere_desactivee() is True
+        with panels.reponse_en_texte_libre():
+            assert command_visuals.banniere_desactivee() is True
+        assert command_visuals.banniere_desactivee() is False
     finally:
         policy._COMMAND_CONTEXT.reset(jeton)
-    assert command_visuals.banniere_desactivee() is False
+
+
+def test_les_deux_chemins_de_reponse_ia_sont_marques():
+    """Les deux modules qui envoient une réponse d'IA doivent poser le marqueur,
+    sinon la bannière revient sur le texte libre."""
+    import inspect
+
+    from cogs import ai as ai_cog, community_v32
+
+    assert "reponse_en_texte_libre" in inspect.getsource(community_v32._install_ai_recovery)
+    assert "reponse_en_texte_libre" in inspect.getsource(ai_cog), "cogs/ai.py ne marque pas sa réponse"

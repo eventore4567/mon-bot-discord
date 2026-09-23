@@ -30,6 +30,7 @@ message (``attachment://``). Elles ne dépendent donc pas du dépôt distant.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import logging
 import re as _re
@@ -206,8 +207,35 @@ COMMANDES_TEXTE_LIBRE = frozenset({
 })
 
 
+# Marqueur posé autour de l'envoi d'une réponse en texte libre. Sans lui, la règle
+# « pas de bannière » s'appliquait à TOUT ce qui partait pendant la commande — y
+# compris la carte « Mission terminée » envoyée juste après par un autre module,
+# qui perdait sa bannière alors qu'elle n'a rien de libre.
+REPONSE_LIBRE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "sentrix_reponse_texte_libre", default=False
+)
+
+
+@contextlib.contextmanager
+def reponse_en_texte_libre():
+    """Bloc dont les panneaux n'auront pas de bannière (la réponse de l'IA, sa
+    traduction, son résumé). Tout ce qui part en dehors garde la sienne."""
+    jeton = REPONSE_LIBRE.set(True)
+    try:
+        yield
+    finally:
+        REPONSE_LIBRE.reset(jeton)
+
+
 def commande_en_texte_libre() -> bool:
-    """Vrai si la commande en cours répond en texte libre (IA, traduction, résumé)."""
+    """Vrai quand le message en cours d'envoi EST une réponse en texte libre.
+
+    Deux conditions : la commande appartient à la famille texte libre ET on est
+    bien dans l'envoi de sa réponse — pas dans une notification déclenchée au
+    passage (mission, montée de niveau, avertissement…), qui garde sa bannière.
+    """
+    if not REPONSE_LIBRE.get():
+        return False
     nom, _cog = _commande_en_cours()
     racine = str(nom or "").strip().casefold().lstrip("+/").split(" ")[0]
     return bool(racine) and racine in COMMANDES_TEXTE_LIBRE
@@ -699,6 +727,8 @@ __all__ = [
     "fichier_de_famille",
     "famille_de_la_commande",
     "commande_en_texte_libre",
+    "reponse_en_texte_libre",
+    "REPONSE_LIBRE",
     "COMMANDES_TEXTE_LIBRE",
     "nom_banniere",
 ]

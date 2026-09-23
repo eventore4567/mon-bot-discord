@@ -2597,14 +2597,17 @@ class Ai(commands.Cog, name="Ai"):
             return
 
         chunks = ai_service.split_for_discord(answer, limit=1900)
-        if thinking_msg:
-            await thinking_msg.edit(content=chunks[0])
-            remaining = chunks[1:]
-        else:
-            await ctx.send(chunks[0])
-            remaining = chunks[1:]
-        for extra in remaining:
-            await ctx.channel.send(extra)
+        # Réponse en texte libre : pas de bannière sur CES messages. Une notification
+        # envoyée après (mission, niveau) garde la sienne.
+        with panels.reponse_en_texte_libre():
+            if thinking_msg:
+                await thinking_msg.edit(content=chunks[0])
+                remaining = chunks[1:]
+            else:
+                await ctx.send(chunks[0])
+                remaining = chunks[1:]
+            for extra in remaining:
+                await ctx.channel.send(extra)
 
     # ---------- +ai / /ai — groupe avec de vraies sous-commandes ----------
     #
