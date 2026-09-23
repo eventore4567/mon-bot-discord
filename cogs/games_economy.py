@@ -860,7 +860,7 @@ class _ReactionButton(discord.ui.Button):
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
-        view: _ReactionSoloView = self.view
+        view: _ReactionSoloView = panels.vue_source(self)
         async with view._lock:
             if view.correct is not None:
                 if not interaction.response.is_done():
@@ -871,8 +871,8 @@ class _ReactionButton(discord.ui.Button):
             for child in view.children:
                 child.disabled = True
             self.style = discord.ButtonStyle.success if self.is_target else discord.ButtonStyle.danger
-            await interaction.response.edit_message(view=view)
-            view.stop()
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
+            panels.terminer_vue(self)
 
 
 class _MinesweeperView(discord.ui.View):
@@ -958,8 +958,11 @@ class _MinesweeperView(discord.ui.View):
             f"💥 Bombe touchée sur la case **{hit_index + 1}**. Manche perdue.",
             kind="danger",
         )
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.depuis_embed(embed))
         self.stop()
+        panel = getattr(self, "_sentrix_panel_view", None)
+        if panel is not None:
+            panel.stop()
 
     async def settle_win(self, interaction: discord.Interaction) -> None:
         if self._settled:
@@ -994,7 +997,7 @@ class _MinesweeperView(discord.ui.View):
         if self.message is not None:
             try:
                 embed = await self.make_embed("⏱️ Partie expirée.", kind="warning")
-                await self.message.edit(embed=embed, view=self)
+                await panels.editer(self.message, panels.depuis_embed(embed))
             except discord.HTTPException:
                 pass
 
@@ -1009,7 +1012,7 @@ class _MinesweeperButton(discord.ui.Button):
         self.index = index
 
     async def callback(self, interaction: discord.Interaction):
-        view: _MinesweeperView = self.view
+        view: _MinesweeperView = panels.vue_source(self)
         async with view._lock:
             if view._settled or self.index in view.revealed:
                 if not interaction.response.is_done():
@@ -1033,10 +1036,10 @@ class _MinesweeperButton(discord.ui.Button):
             if len(view.revealed) >= view.safe_target:
                 return await view.settle_win(interaction)
 
-            embed = await view.make_embed(
-                f"⛏️ Case sûre. **{around}** bombe(s) autour."
-            )
-            await interaction.response.edit_message(embed=embed, view=view)
+            # Les boutons vivent dans le Panneau Components V2 : leurs labels/styles
+            # changent directement dans cette LayoutView. On accuse réception sans
+            # tenter de réinjecter un embed classique (interdit par Discord).
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
 
 
 class _HighLowView(discord.ui.View):
@@ -1062,7 +1065,7 @@ class _HighLowButton(discord.ui.Button):
         self.choice = choice
 
     async def callback(self, interaction: discord.Interaction):
-        view: _HighLowView = self.view
+        view: _HighLowView = panels.vue_source(self)
         async with view._lock:
             if view.choice is not None:
                 if not interaction.response.is_done():
@@ -1071,8 +1074,8 @@ class _HighLowButton(discord.ui.Button):
             view.choice = self.choice
             for child in view.children:
                 child.disabled = True
-            await interaction.response.edit_message(view=view)
-            view.stop()
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
+            panels.terminer_vue(self)
 
 
 class _ColorQuizView(discord.ui.View):
@@ -1096,12 +1099,12 @@ class _ColorButton(discord.ui.Button):
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
-        view: _ColorQuizView = self.view
+        view: _ColorQuizView = panels.vue_source(self)
         view.correct = self.is_target
         for child in view.children:
             child.disabled = True
-        await interaction.response.edit_message(view=view)
-        view.stop()
+        await interaction.response.edit_message(view=panels.vue_panneau(self))
+        panels.terminer_vue(self)
 
 
 # =============================================================================
@@ -1214,7 +1217,7 @@ class _RPSPickButton(discord.ui.Button):
         self.value = value
 
     async def callback(self, interaction: discord.Interaction):
-        view: _RPSPickView = self.view
+        view: _RPSPickView = panels.vue_source(self)
         view.outer.choices[view.picker.id] = self.value
         for child in view.children:
             child.disabled = True
@@ -1275,7 +1278,7 @@ class _RPSDuelButton(discord.ui.Button):
         super().__init__(label="🎯 Faire mon choix", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
-        view: _RPSDuelView = self.view
+        view: _RPSDuelView = panels.vue_source(self)
         if interaction.user.id not in (view.p1.id, view.p2.id):
             return await interaction.response.send_message("❌ Ce duel ne vous concerne pas.", ephemeral=True)
         if interaction.user.id in view.choices:
@@ -1436,7 +1439,7 @@ class _DuelModalButton(discord.ui.Button):
         super().__init__(label=label, style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
-        await self.view.open_modal(interaction)
+        await panels.vue_source(self).open_modal(interaction)
 
 
 class _ReactionDuelView(discord.ui.View):
@@ -1452,7 +1455,7 @@ class _ReactionDuelButton(discord.ui.Button):
         super().__init__(label="🔴 CLIQUEZ !", style=discord.ButtonStyle.danger)
 
     async def callback(self, interaction: discord.Interaction):
-        view: _ReactionDuelView = self.view
+        view: _ReactionDuelView = panels.vue_source(self)
         if interaction.user.id not in (view.p1.id, view.p2.id):
             return await interaction.response.send_message("❌ Ce duel ne vous concerne pas.", ephemeral=True)
         if view.winner is not None:
@@ -1460,7 +1463,7 @@ class _ReactionDuelButton(discord.ui.Button):
         view.winner = interaction.user
         self.disabled = True
         await interaction.response.defer()
-        view.stop()
+        panels.terminer_vue(self)
 
 
 class ConnectFourView(discord.ui.View):
@@ -1605,7 +1608,7 @@ class _ConnectFourButton(discord.ui.Button):
         self.col = col
 
     async def callback(self, interaction: discord.Interaction):
-        await self.view.play(interaction, self.col)
+        await panels.vue_source(self).play(interaction, self.col)
 
 
 # =============================================================================
@@ -1849,7 +1852,7 @@ class _CommunityRaceButton(discord.ui.Button):
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
-        view: _CommunityRaceButtonView = self.view
+        view: _CommunityRaceButtonView = panels.vue_source(self)
         async with view._lock:
             if view.winner is not None:
                 if not interaction.response.is_done():
@@ -1867,8 +1870,8 @@ class _CommunityRaceButton(discord.ui.Button):
             self.style = discord.ButtonStyle.success
             # edit_message accuse réception immédiatement : le callback ne reste jamais
             # sans ACK et évite l'ancien panneau « Action interrompue ».
-            await interaction.response.edit_message(view=view)
-            view.stop()
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
+            panels.terminer_vue(self)
 
 
 class _EmojiRaceView(discord.ui.View):
@@ -1885,7 +1888,7 @@ class _EmojiRaceButton(discord.ui.Button):
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
-        view: _EmojiRaceView = self.view
+        view: _EmojiRaceView = panels.vue_source(self)
         if view.winner is not None:
             return await interaction.response.send_message("❌ Trop tard.", ephemeral=True)
         if not self.is_target:
@@ -1894,7 +1897,7 @@ class _EmojiRaceButton(discord.ui.Button):
         for child in view.children:
             child.disabled = True
         await interaction.response.defer()
-        view.stop()
+        panels.terminer_vue(self)
 
 
 # =============================================================================
@@ -1942,7 +1945,7 @@ class _SoloChoiceButton(discord.ui.Button):
         self.choice = (emoji, label, chance, multiplier, description)
 
     async def callback(self, interaction: discord.Interaction):
-        view: _SoloChoiceView = self.view
+        view: _SoloChoiceView = panels.vue_source(self)
         async with view._lock:
             if view.selected is not None:
                 if not interaction.response.is_done():
@@ -1951,8 +1954,8 @@ class _SoloChoiceButton(discord.ui.Button):
             view.selected = self.choice
             for child in view.children:
                 child.disabled = True
-            await interaction.response.edit_message(view=view)
-            view.stop()
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
+            panels.terminer_vue(self)
 
 class GamesSolo(commands.Cog, name="GamesSolo"):
     def __init__(self, bot: commands.Bot):
