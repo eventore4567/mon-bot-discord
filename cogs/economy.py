@@ -296,15 +296,36 @@ class Economy(commands.Cog, name="Economy"):
         situation.append(sx_panels.Ligne("Niveau", str(stats.get("current_level", 0))))
         situation.append(sx_panels.Ligne("Messages", nombre(stats.get("message_count", 0))))
 
+        active_boost = await temporary_boosts.get_active_boost(
+            self.bot.db, ctx.guild.id, membre.id
+        )
+        boost_section = []
+        if active_boost is not None:
+            boost_section = [
+                sx_panels.Section(
+                    "Boost de quête actif",
+                    [
+                        sx_panels.Ligne("Argent", f"x{active_boost.money_multiplier:g}"),
+                        sx_panels.Ligne("XP", f"x{active_boost.xp_multiplier:g}"),
+                        sx_panels.Ligne(
+                            "Expire",
+                            f"<t:{active_boost.expires_at}:R>",
+                        ),
+                    ],
+                    aligne=True,
+                )
+            ]
+
         sections = [
             sx_panels.Section("Avoirs", avoirs, aligne=True),
             sx_panels.Section("Sur ce serveur", situation, aligne=True),
+            *boost_section,
             sx_panels.Section(
                 "Gagner plus",
                 [
                     sx_panels.Ligne("`+daily`", "Récompense quotidienne"),
                     sx_panels.Ligne("`+work`", "Travailler, avec un délai entre deux fois"),
-                    sx_panels.Ligne("`+shop`", "Dépenser dans la boutique du serveur"),
+                    sx_panels.Ligne("`+shop`", "Dépenser ce que vous avez déjà"),
                 ],
             ),
         ]
