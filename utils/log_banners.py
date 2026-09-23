@@ -87,7 +87,7 @@ STYLES = tuple(COLORS)
 # meme visuel pese 5 Ko au lieu de 45. Sur un degrade avec logo, la difference ne
 # se voit pas ; sur la bande passante d'un gros serveur, si.
 EXTENSION = "webp"
-_QUALITE_WEBP = 88
+_QUALITE_WEBP = 78
 
 
 def nom_fichier(style: str) -> str:
