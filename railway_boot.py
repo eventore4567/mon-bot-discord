@@ -176,10 +176,10 @@ def _install_discord_readiness_healthcheck() -> None:
 
 
 def _install_sentrix_asset_route() -> None:
-    """Expose la bannière Ping sur le domaine Railway de SentriX.
+    """Expose les bannières SentriX directement sur le domaine Railway.
 
-    Discord charge plus fiablement une image servie directement par l'application que
-    les URLs GitHub raw/attachment utilisées auparavant dans MediaGallery.
+    Les embeds classiques et les Components V2 utilisent ainsi la même génération locale
+    WebP, sans dépendre d'une copie GitHub raw qui peut rester en cache après une refonte.
     """
     current = dashboard_web.build_app
     if getattr(current, "_sentrix_asset_route", False):
@@ -189,10 +189,6 @@ def _install_sentrix_asset_route() -> None:
         app = current(bot)
 
         async def ping_banner(_request):
-            # Cache court + ETag plutôt que 24 h fermes : le fichier garde son nom
-            # quand le dessin change, et une journée de cache laissait l'ANCIENNE
-            # bannière s'afficher chez tout le monde (même cause que le cache
-            # d'embed Discord, corrigé côté URL par un nom versionné).
             chemin = pathlib.Path("assets/sentrix-log-header.png")
             response = aiohttp_web.FileResponse(chemin)
             response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
@@ -203,13 +199,38 @@ def _install_sentrix_asset_route() -> None:
                 pass
             return response
 
+        async def sentrix_banner(request):
+            from utils.log_banners import BANNER_DIR, STYLES, ensure_banners, nom_fichier
+
+            style = str(request.match_info.get("style") or "").casefold()
+            if style not in STYLES:
+                raise aiohttp_web.HTTPNotFound(text="Bannière SentriX inconnue.")
+
+            ensure_banners()
+            chemin = BANNER_DIR / nom_fichier(style)
+            if not chemin.exists():
+                ensure_banners(force=True)
+            if not chemin.exists():
+                raise aiohttp_web.HTTPNotFound(text="Bannière SentriX indisponible.")
+
+            response = aiohttp_web.FileResponse(chemin)
+            response.headers["Content-Type"] = "image/webp"
+            response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
+            try:
+                etat = chemin.stat()
+                response.headers["ETag"] = f'"{int(etat.st_mtime)}-{etat.st_size}"'
+            except OSError:
+                pass
+            return response
+
         app.router.add_get("/assets/sentrix-ping-banner.png", ping_banner)
+        app.router.add_get("/assets/sentrix-banner/{style}.webp", sentrix_banner)
         return app
 
     build_app_with_assets._sentrix_asset_route = True
     build_app_with_assets._sentrix_original = current
     dashboard_web.build_app = build_app_with_assets
-    logger.info("Bannière Ping SentriX exposée via Railway.")
+    logger.info("Bannières SentriX exposées via Railway.")
 
 
 def _install_dashboard_loader_guard_prestart() -> bool:
