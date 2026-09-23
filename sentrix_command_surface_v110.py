@@ -281,13 +281,17 @@ def _command_key(command) -> tuple[str, str]:
 
 def _compact_group_for(command) -> tuple[str, str]:
     qualified, name = _command_key(command)
-    grouped = CANONICAL_GROUPED_NAMES.get(qualified) or CANONICAL_GROUPED_NAMES.get(name)
+    grouped = CANONICAL_GROUPED_NAMES.get(qualified)
+    if grouped is None and command.root_parent is None:
+        grouped = CANONICAL_GROUPED_NAMES.get(name)
     if grouped is not None:
         root_name, leaf = grouped
         return v95._safe_name(root_name), _normalise_public_leaf(leaf)
 
     root_name, original_leaf = _ORIGINAL_GROUP_FOR(command)
-    explicit = COMPACT_COMMAND_NAMES.get(qualified) or COMPACT_COMMAND_NAMES.get(name)
+    explicit = COMPACT_COMMAND_NAMES.get(qualified)
+    if explicit is None and command.root_parent is None:
+        explicit = COMPACT_COMMAND_NAMES.get(name)
     leaf = explicit or original_leaf
     return v95._safe_name(root_name), _normalise_public_leaf(leaf)
 
@@ -297,13 +301,14 @@ def _compact_should_expose(command) -> bool:
         return False
 
     qualified, name = _command_key(command)
-    if qualified in STANDARD_DIRECT_SLASH or name in STANDARD_DIRECT_SLASH:
+    root_level = command.root_parent is None
+    if qualified in STANDARD_DIRECT_SLASH or (root_level and name in STANDARD_DIRECT_SLASH):
         return False
-    if qualified in STANDARD_GROUPED_SLASH or name in STANDARD_GROUPED_SLASH:
+    if qualified in STANDARD_GROUPED_SLASH or (root_level and name in STANDARD_GROUPED_SLASH):
         return False
     if qualified in SUPPRESSED_SLASH_DUPLICATES:
         return False
-    if qualified in CANONICAL_GROUPED_NAMES or name in CANONICAL_GROUPED_NAMES:
+    if qualified in CANONICAL_GROUPED_NAMES or (root_level and name in CANONICAL_GROUPED_NAMES):
         return True
 
     # Les anciennes commandes déjà fusionnées dans les centres Setup/Ticket/Giveaway/
