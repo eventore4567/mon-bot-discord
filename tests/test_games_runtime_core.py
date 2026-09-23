@@ -390,3 +390,82 @@ def test_integrity_layer_no_longer_replaces_game_lock_registry():
     )[0]
     assert "game_rewards.PlayLockRegistry" in block
     assert "ttl" in block
+
+
+@pytest.mark.asyncio
+async def test_long_game_cooldowns_are_capped_to_short_antispam():
+    db = SimpleNamespace(
+        get_game_cooldown_remaining=AsyncMock(return_value=0),
+    )
+    bot = SimpleNamespace(db=db)
+
+    allowed, remaining = await game_rewards.check_cooldown(
+        bot, 1, 2, "mining", 600
+    )
+
+    assert allowed is True
+    assert remaining == 0
+    db.get_game_cooldown_remaining.assert_awaited_once_with(
+        1, 2, "mining", game_rewards.MAX_PLAY_COOLDOWN_SECONDS
+    )
+
+
+def test_fasttype_challenge_always_mixes_word_number_and_emoji():
+    challenge = games_economy._make_fasttype_challenge("normal")
+    tokens = challenge.split()
+
+    assert len(tokens) == 7
+    assert any(token.isdigit() for token in tokens)
+    assert any(token in games_economy.FASTTYPE_WORDS for token in tokens)
+    assert any(token in games_economy.FASTTYPE_EMOJIS for token in tokens)
+
+
+def test_memory_difficulty_changes_sequence_length():
+    assert len(games_economy._make_memory_sequence("facile")) == 5
+    assert len(games_economy._make_memory_sequence("normal")) == 7
+    assert len(games_economy._make_memory_sequence("difficile")) == 9
+
+
+def test_reaction_round_has_four_unique_decoys_and_one_target():
+    options, target = games_economy._reaction_round()
+
+    assert len(options) == 4
+    assert len(set(options)) == 4
+    assert options.count(target) == 1
+    assert all(len(option.split()) == 2 for option in options)
+
+
+def test_every_solo_game_has_three_risk_reward_choices():
+    solo_games = {"adventure", "dungeon", "mining", "fishing", "treasure", "hunt", "explore"}
+    assert solo_games <= set(games_economy.SOLO_CHOICES)
+
+    for game in solo_games:
+        choices = games_economy.SOLO_CHOICES[game]
+        assert len(choices) == 3
+        chances = [choice[2] for choice in choices]
+        multipliers = [choice[3] for choice in choices]
+        assert chances[0] > chances[1] > chances[2]
+        assert multipliers[0] < multipliers[1] < multipliers[2]
+
+
+def test_reactionevent_uses_targeted_safe_button_view():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+    block = source.split("async def reactionevent", 1)[1].split(
+        '@commands.hybrid_command(name="emoji-race"', 1
+    )[0]
+
+    assert "options, target = _reaction_round()" in block
+    assert "_CommunityRaceButtonView(options, target)" in block
+    assert "interaction.response.edit_message(view=view)" in source
+
+
+def test_minesweeper_is_public_and_has_a_real_command():
+    assert "minesweeper" in games_economy.GAME_CATALOG
+    assert any(
+        command.name == "minesweeper"
+        for command in games_economy.GamesRapides.__cog_commands__
+    )
