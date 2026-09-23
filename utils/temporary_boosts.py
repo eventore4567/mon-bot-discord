@@ -11,6 +11,7 @@ La table est créée paresseusement pour ne pas dépendre d'une migration Railwa
 """
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS temporary_boosts (
 """
 
 MAX_DURATION_SECONDS = 30 * 60
+logger = logging.getLogger("bot.temporary-boosts")
 
 
 @dataclass(frozen=True)
@@ -64,13 +66,19 @@ def _row_value(row, key, default):
 
 
 async def get_active_boost(db, guild_id: int, user_id: int, *, now_ts: int | None = None) -> TemporaryBoost | None:
-    await ensure_schema(db)
     now_ts = int(time.time()) if now_ts is None else int(now_ts)
-    row = await db.fetchone(
-        "SELECT guild_id,user_id,money_multiplier,xp_multiplier,expires_at,source "
-        "FROM temporary_boosts WHERE guild_id=? AND user_id=?",
-        (int(guild_id), int(user_id)),
-    )
+    try:
+        await ensure_schema(db)
+        row = await db.fetchone(
+            "SELECT guild_id,user_id,money_multiplier,xp_multiplier,expires_at,source "
+            "FROM temporary_boosts WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        )
+    except Exception:
+        # Un boost est un bonus : une migration indisponible ne doit jamais casser
+        # /daily, l'XP ou un mini-jeu.
+        logger.warning("Lecture du boost temporaire impossible.", exc_info=True)
+        return None
     if row is None:
         return None
 
