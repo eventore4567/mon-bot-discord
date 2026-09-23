@@ -74,7 +74,7 @@ PUBLIC_COMMANDS = frozenset({
     # Mini-jeux
     "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
     "blackjack", "slots", "coinflip", "dice", "luckyroll", "highlow", "memory",
-    "reaction", "scramble", "wordgame", "emojiquiz", "colorquiz", "fasttype",
+    "reaction", "scramble", "wordgame", "emojiquiz", "colorquiz", "fasttype", "minesweeper",
     "duel", "connect4", "numberduel", "reactionduel", "quizduel", "triviastart",
     "wordrace", "reactionevent", "guessrace", "mathrace", "lastmessage",
     "emoji-race", "adventure", "dungeon", "mining", "fishing", "treasure",
