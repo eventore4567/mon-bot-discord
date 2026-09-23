@@ -457,6 +457,11 @@ def normalize_log(source: discord.Embed, *, event_time: datetime | None = None) 
     thumbnail = getattr(source.thumbnail, "url", None)
     if thumbnail:
         panel.set_thumbnail(url=str(thumbnail))
+    image_url = getattr(source.image, "url", None)
+    if image_url:
+        # Les logs de fichiers attachent la copie archivée sous
+        # attachment://<nom>. La normalisation ne doit pas jeter cet aperçu.
+        panel.set_image(url=str(image_url))
     author_name = getattr(source.author, "name", None)
     author_icon = getattr(source.author, "icon_url", None)
     if author_name and not str(author_name).casefold().startswith(("sentrix", "odboug")):
