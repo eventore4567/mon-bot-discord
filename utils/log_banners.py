@@ -62,24 +62,32 @@ LOGO_BOX = 70
 # reconnaissable, une par commande ne le serait plus, et chaque variante est une
 # image de plus a garder coherente.
 COLORS: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
-    # Etats
+    # Etats : ce qui vient de se passer.
     "error": ((255, 82, 98), (168, 30, 58)),
     "success": ((62, 231, 134), (18, 132, 86)),
     "warning": ((255, 198, 74), (188, 104, 20)),
     "info": ((88, 168, 255), (44, 86, 214)),
-    "special": ((186, 118, 255), (94, 48, 200)),
-    # Domaines : une identite propre la ou la teinte d'etat ne dit rien d'utile.
+    "special": ((168, 112, 255), (88, 44, 190)),
+    # Domaines : de quoi parle la commande, quand l'etat ne dit rien d'utile.
+    # Une teinte par domaine, assez ecartees pour se reconnaitre d'un coup d'oeil.
     "moderation": ((244, 104, 124), (132, 30, 58)),  # rouge sourd, distinct de l'erreur
-    "security": ((150, 138, 255), (68, 52, 170)),    # indigo, la couleur des protections
+    "security": ((132, 124, 250), (58, 44, 170)),    # indigo, la couleur des protections
     "economy": ((248, 202, 96), (168, 110, 24)),     # or
     "config": ((84, 222, 228), (26, 116, 150)),      # cyan, les reglages
+    "levels": ((170, 228, 92), (86, 140, 28)),       # vert tilleul, la progression
+    "music": ((255, 108, 188), (162, 34, 122)),      # rose, le lecteur audio
+    "tickets": ((58, 214, 198), (18, 118, 122)),     # turquoise, le support
+    "games": ((255, 150, 72), (176, 74, 16)),        # orange, les mini-jeux
+    "ai": ((214, 124, 255), (120, 46, 190)),         # orchidee, l'assistant
 }
 
-# Fond commun à toutes les familles : c'est le trait et le logo qui portent la
-# couleur, pas le fond. Deux bannières côte à côte restent ainsi de la même
-# famille visuelle, exactement comme les bannières validées banner_source_*.
+# Fond nuit commun, TEINTE a la couleur de la famille : une bannière rouge doit se
+# lire rouge d'un coup d'oeil, pas « gris noir ». Le nuit reste dominant pour que le
+# texte du panneau posé dessous garde son contraste.
 NIGHT = (20, 22, 48)
 NIGHT_EDGE = (12, 13, 30)
+# Part de la couleur profonde de la famille melangee au fond (0 = nuit neutre).
+TINT = 0.34
 
 STYLES = tuple(COLORS)
 
@@ -104,10 +112,23 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
 
 
+def _tinted_night(accent: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Nuit teintée qui garde la TEINTE de la famille.
+
+    Mélanger simplement le bleu nuit avec un vert ou un or donnait un fond gris-bleu
+    ou brunâtre : le canal bleu du fond restait dominant. On atténue donc le nuit sur
+    les canaux que la couleur de la famille n'utilise pas.
+    """
+    fort = max(accent) or 1
+    nuit = [NIGHT[i] * (0.45 + 0.55 * accent[i] / fort) for i in range(3)]
+    return tuple(round(nuit[i] * (1.0 - TINT) + accent[i] * TINT) for i in range(3))
+
+
 def _night_background(accent: tuple[int, int, int]) -> Image.Image:
-    """Fond nuit + halo d'accent centré, calculé en basse résolution puis étiré."""
+    """Fond teinté à la famille + halo d'accent centré, calculé en basse résolution."""
     image = Image.new("RGB", (_GRADIENT_WIDTH, HEIGHT))
     pixels = image.load()
+    teinte = _tinted_night(accent)
     cx, cy = _GRADIENT_WIDTH * 0.5, HEIGHT * 0.5
     rx, ry = _GRADIENT_WIDTH * 0.42, HEIGHT * 1.15
     last_x = max(1, _GRADIENT_WIDTH - 1)
@@ -124,7 +145,7 @@ def _night_background(accent: tuple[int, int, int]) -> Image.Image:
             # Les bords s'assombrissent : le trait lumineux s'y éteint proprement.
             edge = _clamp(abs(xn * 2.0 - 1.0) * 1.35 - 0.35)
             base = [
-                _mix(NIGHT[i], NIGHT_EDGE[i], edge * edge) + round(vertical * 6)
+                _mix(teinte[i], NIGHT_EDGE[i], edge * edge * 0.85) + round(vertical * 6)
                 for i in range(3)
             ]
             dx = (x - cx) / rx
@@ -143,8 +164,10 @@ def _add_glow_lines(image: Image.Image, accent: tuple[int, int, int]) -> Image.I
     la même image reste nette sur un écran de téléphone et lumineuse en grand.
     """
     y = HEIGHT // 2
-    inner = (WIDTH // 2 - LOGO_BOX // 2 - 10, WIDTH // 2 + LOGO_BOX // 2 + 10)
-    outer = (66, WIDTH - 66)
+    inner = (WIDTH // 2 - LOGO_BOX // 2 - 8, WIDTH // 2 + LOGO_BOX // 2 + 8)
+    # Le trait court presque d'un bord a l'autre : il ne s'arrete qu'assez tot pour
+    # s'eteindre proprement au lieu d'etre coupe net par le bord de l'image.
+    outer = (26, WIDTH - 26)
 
     core = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     bloom = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
@@ -274,6 +297,58 @@ def ensure_banners(force: bool = False) -> None:
     _READY = True
 
 
+# Domaine SentriX -> famille de banniere. Le module vient de utils/access_matrix
+# (la source unique qui sait deja a quel module appartient chaque commande) ; les
+# racines ci-dessous couvrent ce qui n'est rattache a aucun module.
+MODULE_FAMILIES: dict[str, str] = {
+    "economy": "economy", "levels": "levels", "ai": "ai", "tickets": "tickets",
+    "moderation": "moderation", "security": "security",
+    "logs": "config", "welcome": "config", "goodbye": "config",
+    "roles": "config", "notifications": "config",
+}
+COG_FAMILIES: dict[str, str] = {
+    "music": "music", "minigames": "games", "gameseconomy": "games",
+    "economy": "economy", "levels": "levels", "stats": "levels", "ai": "ai",
+    "tickets": "tickets", "moderation": "moderation", "automod": "security",
+    "security": "security", "securitytools": "security", "verification": "security",
+    "configuration": "config", "serverbuilder": "config", "notifications": "config",
+    "events": "special", "design": "special", "embedbuilder": "config",
+}
+COMMAND_FAMILIES: dict[str, str] = {
+    # Racines sans module : leur famille est declaree ici plutot que devinee.
+    "play": "music", "music": "music", "nowplaying": "music", "queue": "music",
+    "skip": "music", "stop": "music", "pause": "music", "resume": "music",
+    "volume": "music", "seek": "music", "shuffle": "music", "join": "music", "leave": "music",
+    "giveaway": "special", "concours": "special",
+    "setup": "config", "help": "info", "ping": "info", "sentrix": "info",
+}
+
+
+def family_for_command(name: str = "", cog_name: str = "") -> str | None:
+    """Famille de banniere qui va avec la commande, ou None si rien ne la designe.
+
+    Sert a ce qu'une reponse neutre (ni reussite, ni refus) prenne la couleur de son
+    domaine — +play en rose musique, +balance en or economie — au lieu du bleu
+    d'information generique pour tout le bot.
+    """
+    key = str(name or "").strip().casefold().lstrip("+/")
+    root = key.split(" ")[0]
+    for candidate in (key, root):
+        if candidate in COMMAND_FAMILIES:
+            return COMMAND_FAMILIES[candidate]
+    if root:
+        try:
+            from utils.access_matrix import module_for_command
+
+            module = module_for_command(root)
+        except Exception:
+            module = None
+        if module and module in MODULE_FAMILIES:
+            return MODULE_FAMILIES[module]
+    cog = str(cog_name or "").strip().casefold()
+    return COG_FAMILIES.get(cog)
+
+
 def banner_kind(log_type: str, title: str = "", description: str = "") -> str:
     """Le registre événementiel décide ; le texte n'est qu'un repli."""
     from utils.log_categories import resolve
@@ -298,4 +373,5 @@ except Exception:  # pragma: no cover - dépend de l'environnement de rendu
 __all__ = [
     "BANNER_DIR", "COLORS", "HEIGHT", "LOGO_PATH", "STYLES", "WIDTH",
     "banner_kind", "build_banner", "ensure_banners", "get_banner", "LOGO_BOX", "NIGHT",
+    "family_for_command", "MODULE_FAMILIES", "COG_FAMILIES", "COMMAND_FAMILIES", "TINT",
 ]

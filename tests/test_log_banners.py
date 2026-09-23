@@ -12,7 +12,7 @@ from utils.log_categories import LOG_REGISTRY
 
 
 def test_chaque_famille_fait_1024x110_et_reste_distincte():
-    """Neuf familles : cinq etats, quatre domaines. Toutes doivent differer.
+    """Cinq etats et neuf domaines. Toutes doivent differer.
 
     Le format est WebP depuis que la banniere part en piece jointe a chaque
     reponse de commande et plus seulement dans les journaux : le meme visuel pese
@@ -80,16 +80,17 @@ def test_banner_draws_a_glowing_line_from_each_edge():
     assert liseré_haut > fond, "liseré lumineux en haut absent"
 
 
-def test_banner_keeps_a_night_background_and_an_accent_bar():
-    """Fond nuit commun (c'est le trait et le logo qui portent la couleur) et
-    liseré d'accent sur le bord gauche, comme les bannières validées."""
+def test_banner_keeps_a_readable_background_and_an_accent_bar():
+    """Fond teinté à la famille mais assez sombre pour que le panneau posé dessous
+    reste lisible ; liseré d'accent sur le bord gauche, comme les bannières validées."""
     for style, canal in (("error", 0), ("success", 1), ("info", 2)):
         with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
             rgb = image.convert("RGB")
             fond = rgb.getpixel((300, 15))
             barre = rgb.getpixel((1, 55))
             trait = rgb.getpixel((300, 55))
-        assert max(fond) < 60, f"{style} : le fond doit rester nuit ({fond})"
+        assert sum(fond) / 3 < 70, f"{style} : fond trop clair ({fond})"
+        assert fond[canal] == max(fond), f"{style} : fond pas à la couleur ({fond})"
         assert barre[canal] == max(barre), f"{style} : liseré gauche pas à la couleur ({barre})"
         assert trait[canal] == max(trait), f"{style} : trait pas à la couleur ({trait})"
 
@@ -138,3 +139,71 @@ def test_no_invisible_padding_and_no_hard_rules_in_the_renderer():
         assert forbidden not in source
     # WideLogView doit utiliser Separator(), pas des lignes de tirets en dur.
     assert "discord.ui.Separator" in source
+
+
+def test_la_banniere_prend_la_couleur_de_la_commande_en_cours():
+    """Une réponse neutre doit parler de SON domaine : +play en rose musique,
+    +balance en or économie — pas le même bleu d'information pour tout le bot."""
+    from types import SimpleNamespace
+
+    from cogs import final_interaction_policy as policy
+    from utils import sentrix_panels as panels
+
+    def pour(commande: str, cog: str, kind: str = "info") -> str:
+        jeton = policy._COMMAND_CONTEXT.set(
+            SimpleNamespace(command=SimpleNamespace(qualified_name=commande, cog_name=cog))
+        )
+        try:
+            return panels.nom_banniere(kind)
+        finally:
+            policy._COMMAND_CONTEXT.reset(jeton)
+
+    assert pour("play", "Music") == log_banners.nom_fichier("music")
+    assert pour("balance", "Economy") == log_banners.nom_fichier("economy")
+    assert pour("level", "Levels") == log_banners.nom_fichier("levels")
+    assert pour("ticket", "Tickets") == log_banners.nom_fichier("tickets")
+    assert pour("blackjack", "Minigames") == log_banners.nom_fichier("games")
+    assert pour("ai", "Ai") == log_banners.nom_fichier("ai")
+    # Un état explicite garde sa couleur : une erreur reste rouge, même en musique.
+    assert pour("play", "Music", "danger") == log_banners.nom_fichier("error")
+    assert pour("play", "Music", "success") == log_banners.nom_fichier("success")
+    # Hors commande (log automatique), l'intention demandée est respectée.
+    assert panels.nom_banniere("info") == log_banners.nom_fichier("info")
+
+
+def test_le_panneau_joint_exactement_la_banniere_qu_il_reference():
+    """La galerie référence attachment://<fichier> : si fichiers() re-décidait la
+    famille plus tard (contexte de commande retombé), l'image serait vide."""
+    from types import SimpleNamespace
+
+    from cogs import final_interaction_policy as policy
+    from utils import sentrix_panels as panels
+
+    jeton = policy._COMMAND_CONTEXT.set(
+        SimpleNamespace(command=SimpleNamespace(qualified_name="play", cog_name="Music"))
+    )
+    try:
+        panneau = panels.Panneau(titre="Lecture", kind="info")
+    finally:
+        policy._COMMAND_CONTEXT.reset(jeton)
+
+    assert panneau.famille == "music"
+    fichiers = panneau.fichiers()  # appelé hors contexte, comme à l'envoi réel
+    assert [f.filename for f in fichiers] == [log_banners.nom_fichier("music")]
+
+
+def test_le_liseré_du_conteneur_suit_la_banniere():
+    """Le liseré Discord et la bannière doivent être de la même couleur."""
+    from utils import sentrix_panels as panels
+
+    for famille in log_banners.STYLES:
+        assert famille in panels.ACCENTS_PAR_FAMILLE, famille
+
+
+def test_chaque_famille_est_teintee_et_jamais_grise():
+    """« pas genre un gris noir » : le fond doit porter la couleur de la famille."""
+    for style in ("error", "success", "warning", "music", "economy"):
+        with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
+            fond = image.convert("RGB").getpixel((300, 18))
+        ecart = max(fond) - min(fond)
+        assert ecart >= 18, f"{style} : fond trop neutre {fond}"

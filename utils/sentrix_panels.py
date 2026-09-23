@@ -39,7 +39,9 @@ from typing import Any, Iterable, Sequence
 import discord
 
 import config as _config
-from utils.log_banners import ensure_banners, nom_fichier, BANNER_DIR
+from utils.log_banners import (
+    BANNER_DIR, ensure_banners, family_for_command, nom_fichier,
+)
 
 logger = logging.getLogger("bot.panels")
 
@@ -60,11 +62,22 @@ INTENTIONS: dict[str, tuple[int, str]] = {
     "brand": (int(_config.COLOR_BRAND), "special"),
     "neutral": (int(_config.COLOR_NEUTRAL), "info"),
     # Domaines
-    "moderation": (0xE8546A, "moderation"),
-    "securite": (0x8B7AFF, "security"),
-    "economie": (0xF0BE4E, "economy"),
-    "configuration": (0x40D0D6, "config"),
+    "moderation": (0xF4687C, "moderation"),
+    "securite": (0x847CFA, "security"),
+    "economie": (0xF8CA60, "economy"),
+    "configuration": (0x54DEE4, "config"),
+    "niveaux": (0xAAE45C, "levels"),
+    "musique": (0xFF6CBC, "music"),
+    "tickets": (0x3AD6C6, "tickets"),
+    "jeux": (0xFF9648, "games"),
+    "ia": (0xD67CFF, "ai"),
 }
+
+# Intentions qui ne disent rien du domaine : pour celles-la, la banniere prend la
+# couleur de la commande en cours (+play en rose musique, +balance en or economie)
+# plutot que le meme bleu d'information pour tout le bot. Un etat explicite —
+# reussite, refus, avertissement — garde evidemment sa couleur.
+INTENTIONS_NEUTRES = frozenset({"info", "neutral", "brand"})
 
 # Marqueur de section. Discord ne sait pas tracer de filet horizontal dans un
 # TextDisplay : le Separator du conteneur s'en charge, et cette puce donne au
@@ -160,15 +173,68 @@ class Bouton:
     desactive: bool = False
 
 
+def _commande_en_cours() -> tuple[str, str]:
+    """(nom de la commande, nom du cog) de la commande en train de répondre.
+
+    Le contexte est posé par cogs/final_interaction_policy (préfixe et slash) ;
+    hors commande — un log automatique, par exemple — on ne renvoie rien et la
+    bannière garde la couleur demandée par l'appelant.
+    """
+    try:
+        from cogs.final_interaction_policy import _COMMAND_CONTEXT, _COMMAND_ROOT
+
+        ctx = _COMMAND_CONTEXT.get()
+        commande = getattr(ctx, "command", None) if ctx is not None else None
+        nom = str(getattr(commande, "qualified_name", "") or _COMMAND_ROOT.get() or "")
+        return nom, str(getattr(commande, "cog_name", "") or "")
+    except Exception:
+        return "", ""
+
+
+def famille_de_la_commande() -> str | None:
+    """Famille de bannière qui va avec la commande en cours, ou None."""
+    nom, cog = _commande_en_cours()
+    if not nom and not cog:
+        return None
+    return family_for_command(nom, cog)
+
+
+# Couleur d'accent du conteneur pour une famille de bannière : le liseré Discord et
+# la bannière doivent être de la même couleur, sinon le panneau jure avec sa bannière.
+ACCENTS_PAR_FAMILLE: dict[str, int] = {
+    style: couleur for couleur, style in INTENTIONS.values()
+}
+
+
+def accord_commande(kind: str) -> tuple[int, str]:
+    """(couleur d'accent, famille de bannière) pour une intention donnée."""
+    accent, style = INTENTIONS.get(kind, INTENTIONS["info"])
+    if kind in INTENTIONS_NEUTRES:
+        famille = famille_de_la_commande()
+        if famille:
+            return ACCENTS_PAR_FAMILLE.get(famille, accent), famille
+    return accent, style
+
+
 def nom_banniere(kind: str) -> str:
-    """Fichier de bannière correspondant à l'intention."""
-    _, style = INTENTIONS.get(kind, INTENTIONS["info"])
-    return nom_fichier(style)
+    """Fichier de bannière correspondant à l'intention, accordé à la commande."""
+    return nom_fichier(accord_commande(kind)[1])
 
 
 def fichier_banniere(kind: str) -> discord.File | None:
-    """Bannière prête à joindre. ``None`` si la génération a échoué."""
-    nom = nom_banniere(kind)
+    """Bannière prête à joindre pour une intention. ``None`` si la génération a échoué."""
+    return fichier_de_famille(accord_commande(kind)[1])
+
+
+def fichier_de_famille(famille: str) -> discord.File | None:
+    """Bannière prête à joindre pour une famille déjà décidée.
+
+    Le panneau décide sa famille à la construction et joint CE fichier-là :
+    ré-décider au moment de l'envoi pourrait renvoyer une autre famille (le
+    contexte de commande est alors parfois déjà retombé) et la galerie
+    référencerait une pièce jointe absente — donc une bannière vide.
+    """
+    nom = nom_fichier(famille)
     chemin = BANNER_DIR / nom
     if not chemin.exists():
         try:
@@ -204,7 +270,9 @@ class Panneau(discord.ui.LayoutView):
         super().__init__(timeout=None)
         self.kind = kind if kind in INTENTIONS else "info"
         self.avec_banniere = banniere
-        accent, _ = INTENTIONS[self.kind]
+        # Une seule décision pour le liseré du conteneur ET la bannière : sur une
+        # réponse neutre, les deux prennent la couleur de la commande en cours.
+        accent, self.famille = accord_commande(self.kind)
 
         conteneur = discord.ui.Container(accent_colour=discord.Colour(accent))
 
@@ -212,7 +280,7 @@ class Panneau(discord.ui.LayoutView):
         #     Pas de description= : elle ferait apparaître un badge « ALT » par-dessus.
         if banniere:
             galerie = discord.ui.MediaGallery()
-            galerie.add_item(media=f"attachment://{nom_banniere(self.kind)}")
+            galerie.add_item(media=f"attachment://{nom_fichier(self.famille)}")
             conteneur.add_item(galerie)
 
         # 2 — titre et sous-titre. La vignette, quand il y en a une, se place à
@@ -266,7 +334,7 @@ class Panneau(discord.ui.LayoutView):
         """Pièces jointes à envoyer avec ce panneau."""
         if not self.avec_banniere:
             return []
-        fichier = fichier_banniere(self.kind)
+        fichier = fichier_de_famille(self.famille)
         return [fichier] if fichier is not None else []
 
 
@@ -605,6 +673,8 @@ __all__ = [
     "texte_court",
     "texte_complet",
     "fichier_banniere",
+    "fichier_de_famille",
+    "famille_de_la_commande",
     "nom_banniere",
 ]
 
