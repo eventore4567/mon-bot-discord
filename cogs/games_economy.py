@@ -556,6 +556,52 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             await _finish(self.bot, ctx, "colorquiz", sid, "loss", 0)
             await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description='❌ Mauvaise couleur.', kind='danger')))
 
+    @commands.hybrid_command(
+        name="minesweeper",
+        description="Démineur interactif : ouvrez toutes les cases sûres sans toucher une bombe.",
+        with_app_command=False,
+    )
+    async def minesweeper(self, ctx: commands.Context):
+        guild_id = ctx.guild.id if ctx.guild else None
+        started, err, sid = await _precheck(self.bot, ctx, "minesweeper", 10)
+        if not started:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Démineur",
+                        description=err,
+                        kind="warning",
+                    )
+                ),
+            )
+
+        difficulty = await _game_difficulty(self.bot, guild_id)
+        bomb_count = {
+            "facile": 4,
+            "easy": 4,
+            "normal": 6,
+            "difficile": 8,
+            "hard": 8,
+        }.get(difficulty.casefold(), 6)
+        view = _MinesweeperView(
+            bot=self.bot,
+            ctx=ctx,
+            session_id=sid,
+            bomb_count=bomb_count,
+            difficulty=difficulty,
+        )
+        embed = await view.make_embed(
+            "💣 Ouvrez les cases. Le chiffre indique combien de bombes touchent cette case."
+        )
+        msg = await panels.envoyer(
+            ctx,
+            panels.avec_composants(panels.depuis_embed(embed), view),
+        )
+        view.message = msg
+
     @commands.hybrid_command(name="fasttype", description="Retapez la phrase affichée le plus vite et le plus précisément possible.", with_app_command=False)
     async def fasttype(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
@@ -723,6 +769,170 @@ class _ReactionButton(discord.ui.Button):
             self.style = discord.ButtonStyle.success if self.is_target else discord.ButtonStyle.danger
             await interaction.response.edit_message(view=view)
             view.stop()
+
+
+class _MinesweeperView(discord.ui.View):
+    SIZE = 5
+
+    def __init__(
+        self,
+        *,
+        bot,
+        ctx: commands.Context,
+        session_id: str,
+        bomb_count: int,
+        difficulty: str,
+    ):
+        super().__init__(timeout=90)
+        self.bot = bot
+        self.ctx = ctx
+        self.session_id = session_id
+        self.guild_id = ctx.guild.id
+        self.author_id = ctx.author.id
+        self.bomb_count = max(2, min(int(bomb_count), 10))
+        self.difficulty = difficulty
+        self.bombs = set(random.SystemRandom().sample(range(self.SIZE * self.SIZE), self.bomb_count))
+        self.revealed: set[int] = set()
+        self.message: discord.Message | None = None
+        self._settled = False
+        self._lock = asyncio.Lock()
+
+        for index in range(self.SIZE * self.SIZE):
+            self.add_item(_MinesweeperButton(index))
+
+    @property
+    def safe_target(self) -> int:
+        return self.SIZE * self.SIZE - self.bomb_count
+
+    def adjacent_bombs(self, index: int) -> int:
+        row, col = divmod(index, self.SIZE)
+        total = 0
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if dr == dc == 0:
+                    continue
+                nr, nc = row + dr, col + dc
+                if 0 <= nr < self.SIZE and 0 <= nc < self.SIZE:
+                    total += (nr * self.SIZE + nc) in self.bombs
+        return int(total)
+
+    async def make_embed(self, status: str, *, kind: str = "primary") -> discord.Embed:
+        return await _embed(
+            self.bot,
+            self.guild_id,
+            title=f"Démineur — {self.difficulty}",
+            description=(
+                f"{status}\n\n"
+                f"💣 Bombes : **{self.bomb_count}** · "
+                f"✅ Cases sûres ouvertes : **{len(self.revealed)}/{self.safe_target}**\n"
+                "🔢 0–8 = bombes autour de la case · touchez une bombe et la manche est perdue."
+            ),
+            kind=kind,
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "Ce démineur appartient à un autre joueur.",
+                    ephemeral=True,
+                )
+            return False
+        return True
+
+    async def settle_loss(self, interaction: discord.Interaction, hit_index: int) -> None:
+        if self._settled:
+            return
+        self._settled = True
+        for child in self.children:
+            child.disabled = True
+            if isinstance(child, _MinesweeperButton) and child.index in self.bombs:
+                child.label = "💣"
+                child.style = discord.ButtonStyle.danger
+        await _finish(self.bot, self.ctx, "minesweeper", self.session_id, "loss", 0)
+        embed = await self.make_embed(
+            f"💥 Bombe touchée sur la case **{hit_index + 1}**. Manche perdue.",
+            kind="danger",
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+        self.stop()
+
+    async def settle_win(self, interaction: discord.Interaction) -> None:
+        if self._settled:
+            return
+        self._settled = True
+        for child in self.children:
+            child.disabled = True
+        _length, _preview, difficulty_bonus = _difficulty_profile(self.difficulty)
+        reward = await _finish(
+            self.bot,
+            self.ctx,
+            "minesweeper",
+            self.session_id,
+            "win",
+            40 + difficulty_bonus,
+        )
+        embed = await self.make_embed(
+            "🏆 Grille nettoyée : toutes les cases sûres ont été ouvertes."
+            + _reward_line(reward),
+            kind="success",
+        )
+        await interaction.response.edit_message(embed=embed, view=self)
+        self.stop()
+
+    async def on_timeout(self):
+        if self._settled:
+            return
+        self._settled = True
+        for child in self.children:
+            child.disabled = True
+        await _finish(self.bot, self.ctx, "minesweeper", self.session_id, "loss", 0)
+        if self.message is not None:
+            try:
+                embed = await self.make_embed("⏱️ Partie expirée.", kind="warning")
+                await self.message.edit(embed=embed, view=self)
+            except discord.HTTPException:
+                pass
+
+
+class _MinesweeperButton(discord.ui.Button):
+    def __init__(self, index: int):
+        super().__init__(
+            label="·",
+            style=discord.ButtonStyle.secondary,
+            row=index // _MinesweeperView.SIZE,
+        )
+        self.index = index
+
+    async def callback(self, interaction: discord.Interaction):
+        view: _MinesweeperView = self.view
+        async with view._lock:
+            if view._settled or self.index in view.revealed:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Cette case est déjà ouverte.",
+                        ephemeral=True,
+                    )
+                return
+
+            if self.index in view.bombs:
+                return await view.settle_loss(interaction, self.index)
+
+            view.revealed.add(self.index)
+            around = view.adjacent_bombs(self.index)
+            self.label = str(around) if around else "0"
+            self.disabled = True
+            self.style = (
+                discord.ButtonStyle.primary if around else discord.ButtonStyle.success
+            )
+
+            if len(view.revealed) >= view.safe_target:
+                return await view.settle_win(interaction)
+
+            embed = await view.make_embed(
+                f"⛏️ Case sûre. **{around}** bombe(s) autour."
+            )
+            await interaction.response.edit_message(embed=embed, view=view)
 
 
 class _ColorQuizView(discord.ui.View):
