@@ -42,19 +42,22 @@ GAME_CATALOG = {
 }
 
 WORDGAME_CLUES = [
-    ("Petit animal domestique qui miaule", "chat"),
-    ("Astre autour duquel tourne la Terre", "soleil"),
-    ("Boisson chaude à base de grains torréfiés", "café"),
-    ("Ce que l'on utilise pour écrire au tableau", "craie"),
-    ("Saison la plus froide de l'année", "hiver"),
+    ("Petit animal domestique qui miaule", ("chat",), "easy"),
+    ("Astre autour duquel tourne la Terre", ("soleil",), "easy"),
+    ("Boisson chaude à base de grains torréfiés", ("café", "cafe"), "normal"),
+    ("Ce que l'on utilise pour écrire au tableau", ("craie",), "normal"),
+    ("Saison la plus froide de l'année", ("hiver",), "easy"),
+    ("Objet qui indique le nord sur une carte", ("boussole",), "normal"),
+    ("Suite de choix où chaque décision change la suite", ("aventure",), "hard"),
 ]
 
 EMOJI_QUIZ = [
-    ("🐱🐟", "chat"),
-    ("🌙⭐", "nuit"),
-    ("🔥🐉", "dragon"),
-    ("🏴‍☠️⚓", "pirate"),
-    ("🦁👑", "roi"),
+    ("🐱🐟", ("chat",), "easy"),
+    ("🌙⭐", ("nuit",), "easy"),
+    ("🔥🐉", ("dragon",), "normal"),
+    ("🏴‍☠️⚓", ("pirate",), "normal"),
+    ("🦁👑", ("roi", "lion"), "normal"),
+    ("🧊🏰", ("chateau de glace", "château de glace"), "hard"),
 ]
 
 COLOR_EMOJIS = {"rouge": "🟥", "vert": "🟩", "bleu": "🟦", "jaune": "🟨", "violet": "🟪", "orange": "🟧"}
@@ -69,9 +72,10 @@ FASTTYPE_PHRASES = [
 RPS_BEATS = {"pierre": "ciseaux", "feuille": "pierre", "ciseaux": "feuille"}
 
 COMMUNITY_TRIVIA = [
-    ("Quel est le plus long fleuve du monde ?", "nil"),
-    ("Combien y a-t-il de continents ?", "7"),
-    ("Quelle est la monnaie du Japon ?", "yen"),
+    ("Quel est le plus long fleuve du monde ?", ("nil", "le nil"), "normal"),
+    ("Combien y a-t-il de continents ?", ("7", "sept"), "easy"),
+    ("Quelle est la monnaie du Japon ?", ("yen",), "normal"),
+    ("Quel langage est souvent utilisé pour les bots Discord Python ?", ("python",), "easy"),
 ]
 COMMUNITY_WORDS = ["communauté", "serveur", "discord", "récompense", "aventure"]
 COMMUNITY_MATH_OPS = {"+": lambda a, b: a + b, "-": lambda a, b: a - b}

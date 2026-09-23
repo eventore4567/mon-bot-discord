@@ -304,7 +304,7 @@ class Minigames(commands.Cog, name="Minigames"):
         except asyncio.TimeoutError:
             await self._finish(ctx, "trivia", session_id, "loss", 0)
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{answer}**.', kind='warning')))
-        if msg.content.strip().lower() == answer:
+        if game_rewards.answer_matches(msg.content, answer):
             reward = await self._finish(ctx, "trivia", session_id, "win", REWARD_TRIVIA)
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='●' + self._reward_line(reward), kind='success')))
         else:
@@ -358,7 +358,7 @@ class Minigames(commands.Cog, name="Minigames"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=err, kind='warning')))
 
-        words = ["python", "discord", "ordinateur", "clavier", "programmation", "serveur"]
+        words = ["python", "discord", "ordinateur", "clavier", "programmation", "serveur", "aventure", "reaction"]
         word = random.choice(words)
         guessed = set()
         tries = 6
@@ -375,10 +375,14 @@ class Minigames(commands.Cog, name="Minigames"):
                 await self._finish(ctx, "hangman", session_id, "loss", 0)
                 return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', description=f'⏱️ Le mot était **{word}**.', kind='warning')))
             letter = m.content.lower()
+            if letter in guessed:
+                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'Lettre déjà proposée : **{letter}**\n🎯 `{display}`\nEssais restants : {tries}', kind='warning')))
+                continue
             if letter in word:
                 guessed.add(letter)
                 display = "".join(c if c in guessed else "_" for c in word)
             else:
+                guessed.add(letter)
                 tries -= 1
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'🎯 `{display}`\nEssais restants : {tries}')))
 
