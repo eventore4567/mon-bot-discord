@@ -335,18 +335,20 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         _length, preview_seconds, bonus = _difficulty_profile(difficulty)
         prompt = await panels.envoyer(
             ctx,
-            panels.depuis_embed(
-                await _embed(
-                    self.bot,
-                    guild_id,
-                    title="Mémoire — observez",
-                    description=(
-                        f"🧠 Niveau **{difficulty}** · {len(sequence)} symboles\n"
-                        f"**{'  '.join(sequence)}**\n\n"
-                        "Le code disparaît dans quelques secondes. Ne le copiez pas : "
-                        "il sera remplacé avant que la réponse soit acceptée."
-                    ),
-                )
+            panels.avec_composants(
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Mémoire — observez",
+                        description=(
+                            f"🧠 Niveau **{difficulty}** · {len(sequence)} symboles\n"
+                            "Mémorisez les boutons ci-dessous : ils ne sont pas sélectionnables "
+                            "et disparaissent avant la phase de réponse."
+                        ),
+                    )
+                ),
+                _PreviewTokensView(sequence),
             ),
         )
         await asyncio.sleep(preview_seconds)
@@ -612,20 +614,23 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         difficulty = await _game_difficulty(self.bot, guild_id)
         challenge = _make_fasttype_challenge(difficulty)
         _length, preview_seconds, bonus = _difficulty_profile(difficulty)
+        challenge_tokens = challenge.split()
         msg = await panels.envoyer(
             ctx,
-            panels.depuis_embed(
-                await _embed(
-                    self.bot,
-                    guild_id,
-                    title="Retape vite — mémorisez",
-                    description=(
-                        f"⌨️ Niveau **{difficulty}**\n"
-                        f"**{challenge}**\n\n"
-                        f"Le code disparaît dans **{preview_seconds:.1f}s**. "
-                        "La réponse n'est acceptée qu'après sa disparition."
-                    ),
-                )
+            panels.avec_composants(
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Retape vite — mémorisez",
+                        description=(
+                            f"⌨️ Niveau **{difficulty}** · {len(challenge_tokens)} éléments\n"
+                            f"Les boutons disparaissent dans **{preview_seconds:.1f}s**. "
+                            "Ils sont volontairement non sélectionnables pour éviter le simple copier-coller."
+                        ),
+                    )
+                ),
+                _PreviewTokensView(challenge_tokens),
             ),
         )
         await asyncio.sleep(preview_seconds)
@@ -728,6 +733,22 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
     else:
         await _finish(bot, ctx, game_name, sid, "loss", 0)
         await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Mauvaise réponse', description=f'❌ La réponse était **{_primary_answer(answer)}**.', kind='danger')))
+
+
+class _PreviewTokensView(discord.ui.View):
+    """Affiche un code en boutons désactivés : visible, mais pas sélectionnable/copier-coller."""
+
+    def __init__(self, tokens: list[str]):
+        super().__init__(timeout=None)
+        for index, token in enumerate(tokens[:20]):
+            self.add_item(
+                discord.ui.Button(
+                    label=str(token)[:80],
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                    row=index // 5,
+                )
+            )
 
 
 class _ReactionSoloView(discord.ui.View):
