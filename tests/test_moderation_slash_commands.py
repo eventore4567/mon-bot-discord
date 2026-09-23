@@ -94,12 +94,11 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
-    def test_normal_direct_commands_reste_exactement_a_95(self):
+    def test_normal_direct_commands_reste_exactement_a_96(self):
         """Contrat imposé par tools/command_runtime_audit.py : la surface directe
-        reste volontairement à 95. Elle était à 97 avant le retrait produit explicite
-        de `blacklist-add` et `blacklist-users`; ces deux anciennes commandes ne doivent
-        pas être réintroduites juste pour faire remonter un compteur."""
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 95)
+        contient désormais 96 commandes, car Démineur est un vrai nouveau jeu public.
+        Les retraits produit blacklist-add/blacklist-users restent supprimés."""
+        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 96)
 
 
 if __name__ == "__main__":
