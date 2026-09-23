@@ -20,6 +20,7 @@ GAME_CATALOG = {
     "emojiquiz": ("🧩 Quiz emoji", "rapide"),
     "colorquiz": ("🎨 Quiz couleur", "rapide"),
     "fasttype": ("⌨️ Retape vite", "rapide"),
+    "minesweeper": ("💣 Démineur", "rapide"),
     "duel": ("⚔️ Duel pierre-feuille-ciseaux", "duel"),
     "connect4": ("🔴 Puissance 4", "duel"),
     "numberduel": ("🔢 Duel du nombre secret", "duel"),
@@ -68,6 +69,55 @@ FASTTYPE_PHRASES = [
     "La vitesse récompense les plus rapides.",
     "Discord est une plateforme de communication.",
 ]
+
+# Les défis de vitesse/mémoire mélangent volontairement texte, nombres et symboles
+# afin qu'une manche ne ressemble jamais exactement à la précédente.
+FASTTYPE_WORDS = [
+    "NOVA", "VOLT", "PIXEL", "NEXUS", "ORBIT", "RAPID", "SENTRIX", "COMET",
+]
+FASTTYPE_EMOJIS = ["⚡", "🔥", "💎", "⭐", "🌙", "🎯", "🧊", "🪐"]
+MEMORY_TOKENS = ["1", "2", "3", "4", "7", "8", "9", "⚡", "🔥", "💎", "⭐", "🌙", "🎯"]
+
+# Tous les jeux solo proposent maintenant trois styles de partie. Les pourcentages ne
+# changent pas l'économie globale : ils changent seulement la chance de succès et la
+# récompense de base avant les limites/multiplicateurs existants.
+SOLO_CHOICES = {
+    "adventure": [
+        ("🛡️", "Route sûre", 0.88, 0.75, "Suivre le chemin balisé"),
+        ("🗺️", "Exploration", 0.70, 1.00, "Quitter le sentier pour chercher du butin"),
+        ("🔥", "Zone interdite", 0.46, 1.65, "Prendre le raccourci le plus dangereux"),
+    ],
+    "dungeon": [
+        ("🛡️", "Couloir calme", 0.86, 0.80, "Avancer prudemment"),
+        ("🗝️", "Salle scellée", 0.67, 1.10, "Forcer une porte ancienne"),
+        ("👑", "Boss", 0.42, 1.80, "Affronter directement le gardien"),
+    ],
+    "mining": [
+        ("🪨", "Veine stable", 0.90, 0.70, "Miner près de l'entrée"),
+        ("⛏️", "Galerie profonde", 0.72, 1.00, "Descendre chercher du minerai rare"),
+        ("💥", "Faille instable", 0.45, 1.75, "Creuser dans une zone très riche mais fragile"),
+    ],
+    "fishing": [
+        ("🎣", "Bord du lac", 0.90, 0.70, "Pêcher tranquillement"),
+        ("🌊", "Eaux profondes", 0.70, 1.05, "Viser les grosses prises"),
+        ("🦈", "Zone dangereuse", 0.43, 1.80, "Chercher une prise légendaire"),
+    ],
+    "treasure": [
+        ("🧭", "Carte fiable", 0.86, 0.80, "Suivre les indices connus"),
+        ("🏝️", "Île oubliée", 0.65, 1.15, "Explorer une piste secondaire"),
+        ("💎", "Coffre maudit", 0.38, 2.00, "Tenter le trésor le plus rare"),
+    ],
+    "hunt": [
+        ("🐾", "Piste facile", 0.88, 0.75, "Suivre des traces récentes"),
+        ("🏹", "Grande chasse", 0.68, 1.05, "Chercher une cible plus rare"),
+        ("🐉", "Créature légendaire", 0.40, 1.90, "Prendre tous les risques"),
+    ],
+    "explore": [
+        ("🧭", "Zone connue", 0.90, 0.70, "Cartographier les alentours"),
+        ("🏛️", "Ruines", 0.68, 1.10, "Entrer dans des ruines oubliées"),
+        ("🌀", "Portail inconnu", 0.41, 1.90, "Traverser sans savoir ce qu'il y a derrière"),
+    ],
+}
 
 RPS_BEATS = {"pierre": "ciseaux", "feuille": "pierre", "ciseaux": "feuille"}
 
