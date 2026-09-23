@@ -294,7 +294,8 @@ def canonical_public_name(command: commands.Command) -> str | None:
         import sentrix_command_surface_v110 as surface
         import sentrix_v95_runtime as v95
 
-        for key in (qualified, name):
+        keys = (qualified,) if command.root_parent is not None else (qualified, name)
+        for key in keys:
             direct = surface.STANDARD_DIRECT_SLASH.get(key)
             if direct:
                 return str(direct)
