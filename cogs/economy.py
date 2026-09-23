@@ -23,7 +23,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, stats_service, design_system
+from utils import embeds, checks, stats_service, design_system, temporary_boosts
 # « panels » designe deja les panneaux de roles/boutique ici.
 from utils import sentrix_panels as sx_panels
 from database.db import now
@@ -332,51 +332,92 @@ class Economy(commands.Cog, name="Economy"):
 
     @commands.hybrid_command(name="daily", description="Récupérer votre récompense quotidienne.")
     async def daily(self, ctx: commands.Context):
-        ok, remaining = await self.bot.db.claim_timed_reward(ctx.guild.id, ctx.author.id, "last_daily", DAILY_AMOUNT, DAILY_COOLDOWN, "daily")
+        amount, boost = await temporary_boosts.apply_money_boost(
+            self.bot.db, ctx.guild.id, ctx.author.id, DAILY_AMOUNT
+        )
+        ok, remaining = await self.bot.db.claim_timed_reward(
+            ctx.guild.id, ctx.author.id, "last_daily", amount, DAILY_COOLDOWN, "daily"
+        )
         if not ok:
             return await self._panneau_attente(
                 ctx, titre="SentriX — Récompense quotidienne", restant=remaining, commande="daily"
+            )
+        details = []
+        if boost is not None:
+            details.append(
+                sx_panels.Ligne(
+                    "Boost de quête",
+                    f"Argent x{boost.money_multiplier:g} · encore {max(1, (boost.remaining() + 59) // 60)} min",
+                )
             )
         await self._panneau_gain(
             ctx,
             titre="SentriX — Récompense quotidienne",
             resume=f"Récompense du jour encaissée par {ctx.author.mention}.",
-            montant=DAILY_AMOUNT,
+            montant=amount,
             cooldown=DAILY_COOLDOWN,
+            details=details,
         )
 
     @commands.hybrid_command(name="weekly", description="Récupérer votre récompense hebdomadaire.")
     async def weekly(self, ctx: commands.Context):
-        ok, remaining = await self.bot.db.claim_timed_reward(ctx.guild.id, ctx.author.id, "last_weekly", WEEKLY_AMOUNT, WEEKLY_COOLDOWN, "weekly")
+        amount, boost = await temporary_boosts.apply_money_boost(
+            self.bot.db, ctx.guild.id, ctx.author.id, WEEKLY_AMOUNT
+        )
+        ok, remaining = await self.bot.db.claim_timed_reward(
+            ctx.guild.id, ctx.author.id, "last_weekly", amount, WEEKLY_COOLDOWN, "weekly"
+        )
         if not ok:
             return await self._panneau_attente(
                 ctx, titre="SentriX — Récompense hebdomadaire", restant=remaining, commande="weekly"
+            )
+        details = []
+        if boost is not None:
+            details.append(
+                sx_panels.Ligne(
+                    "Boost de quête",
+                    f"Argent x{boost.money_multiplier:g} · encore {max(1, (boost.remaining() + 59) // 60)} min",
+                )
             )
         await self._panneau_gain(
             ctx,
             titre="SentriX — Récompense hebdomadaire",
             resume=f"Récompense de la semaine encaissée par {ctx.author.mention}.",
-            montant=WEEKLY_AMOUNT,
+            montant=amount,
             cooldown=WEEKLY_COOLDOWN,
+            details=details,
         )
 
     @commands.hybrid_command(name="work", description="Travailler pour gagner de l'argent.")
     async def work(self, ctx: commands.Context):
-        amount = random.randint(WORK_MIN, WORK_MAX)
-        ok, remaining = await self.bot.db.claim_timed_reward(ctx.guild.id, ctx.author.id, "last_work", amount, WORK_COOLDOWN, "work")
+        base_amount = random.randint(WORK_MIN, WORK_MAX)
+        amount, boost = await temporary_boosts.apply_money_boost(
+            self.bot.db, ctx.guild.id, ctx.author.id, base_amount
+        )
+        ok, remaining = await self.bot.db.claim_timed_reward(
+            ctx.guild.id, ctx.author.id, "last_work", amount, WORK_COOLDOWN, "work"
+        )
         if not ok:
             return await self._panneau_attente(
                 ctx, titre="SentriX — Travail", restant=remaining, commande="work"
             )
         metiers = ["développeur", "livreur", "chef cuisinier", "streamer", "modérateur", "vendeur"]
         metier = random.choice(metiers)
+        details = [sx_panels.Ligne("Métier", metier.capitalize())]
+        if boost is not None:
+            details.append(
+                sx_panels.Ligne(
+                    "Boost de quête",
+                    f"Argent x{boost.money_multiplier:g} · +{amount - base_amount} bonus",
+                )
+            )
         await self._panneau_gain(
             ctx,
             titre="SentriX — Travail",
             resume=f"{ctx.author.mention} a travaillé comme **{metier}**.",
             montant=amount,
             cooldown=WORK_COOLDOWN,
-            details=[sx_panels.Ligne("Métier", metier.capitalize())],
+            details=details,
         )
 
     @commands.hybrid_command(name="rob", description="Tenter de voler un autre membre.")
