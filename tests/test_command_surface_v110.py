@@ -3,22 +3,28 @@ from __future__ import annotations
 import sentrix_command_surface_v110 as surface
 
 
-def test_familiar_existing_names_are_preserved() -> None:
+def test_familiar_existing_names_and_user_exceptions_are_preserved() -> None:
     assert "userinfo" not in surface.COMPACT_COMMAND_NAMES
     assert "serverinfo" not in surface.COMPACT_COMMAND_NAMES
-    assert "clearwarnings" not in surface.COMPACT_COMMAND_NAMES
     assert surface.STANDARD_DIRECT_SLASH["userinfo"] == "userinfo"
     assert surface.STANDARD_DIRECT_SLASH["serverinfo"] == "serverinfo"
-    assert surface.STANDARD_DIRECT_SLASH["clearwarnings"] == "clearwarnings"
+    assert surface.STANDARD_DIRECT_SLASH["membercount"] == "members"
+    assert surface.STANDARD_DIRECT_SLASH["set-bio"] == "set-bio"
+    assert surface.STANDARD_DIRECT_SLASH["guess-number"] == "guess-number"
+    assert surface.STANDARD_DIRECT_SLASH["setprefix"] == "setprefix"
+    assert surface.STANDARD_DIRECT_SLASH["welcome-config"] == "welcome-config"
 
 
 def test_core_moderation_uses_common_direct_slash_names() -> None:
-    expected = {
-        "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
-        "clearwarnings", "clear", "lock", "unlock", "slowmode",
+    unchanged = {
+        "ban", "unban", "kick", "mute", "unmute", "warn",
+        "clear", "lock", "unlock", "slowmode",
     }
-    for name in expected:
+    for name in unchanged:
         assert surface.STANDARD_DIRECT_SLASH[name] == name
+    assert surface.STANDARD_DIRECT_SLASH["warnings"] == "warns"
+    assert surface.STANDARD_DIRECT_SLASH["clearwarnings"] == "clearwarns"
+    assert surface.STANDARD_DIRECT_SLASH["nickname"] == "nick"
 
 
 def test_info_level_and_music_use_common_names() -> None:
@@ -35,6 +41,22 @@ def test_info_level_and_music_use_common_names() -> None:
 def test_role_management_uses_role_group() -> None:
     assert surface.STANDARD_GROUPED_SLASH["giverole"] == ("role", "give")
     assert surface.STANDARD_GROUPED_SLASH["removerole"] == ("role", "remove")
+    assert surface.STANDARD_GROUPED_SLASH["roleall"] == ("role", "all")
+    assert surface.STANDARD_GROUPED_SLASH["massrole"] == ("role", "mass")
+
+
+def test_canonical_grouped_names_are_simple_and_stable() -> None:
+    expected = {
+        "economyleaderboard": ("economy", "leaderboard"),
+        "ticketsetup": ("ticket", "setup"),
+        "logsetup": ("logs", "setup"),
+        "aidiag": ("ai", "status"),
+        "server-health": ("server", "health"),
+        "schedule-send": ("schedule", "send"),
+        "voice-lock": ("voice", "lock"),
+    }
+    for source, public in expected.items():
+        assert surface.CANONICAL_GROUPED_NAMES[source] == public
 
 
 def test_roots_are_not_arbitrarily_abbreviated() -> None:
