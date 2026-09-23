@@ -1,7 +1,7 @@
 """Contrat des bannières SentriX (1024x110, style issu de LOG_REGISTRY).
 
-Style unique depuis le 23/09/2026 : fond nuit, trait lumineux venant de chaque bord,
-logo SentriX teinté au centre, liseré d'accent à gauche (voir utils/log_banners.py)."""
+Style unique : fond entièrement transparent, deux traits lumineux colorés et logo
+SentriX teinté au centre. Aucun rectangle, cadre ou fond coloré ne doit être visible."""
 from io import BytesIO
 
 import discord
@@ -64,63 +64,66 @@ def test_every_registry_entry_maps_to_a_generated_banner():
 
 
 def test_banner_draws_a_glowing_line_from_each_edge():
-    """Le trait est le dessin de la bannière : il doit éclairer la mi-hauteur et
-    s'éteindre au bord, sinon il ne reste qu'un rectangle sombre."""
+    """Le trait est le dessin principal et doit ressortir sur un alpha transparent."""
     with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("info")) as image:
-        rgb = image.convert("RGB")
-        gauche = sum(rgb.getpixel((300, 55)))
-        droite = sum(rgb.getpixel((724, 55)))
-        au_dessus = sum(rgb.getpixel((300, 40)))
-        bord = sum(rgb.getpixel((1015, 55)))
-        liseré_haut = sum(rgb.getpixel((300, 0)))
-        fond = sum(rgb.getpixel((300, 15)))
-    assert gauche > au_dessus * 2, "trait gauche absent"
-    assert droite > au_dessus * 2, "trait droit absent"
-    assert bord < gauche / 2, "le trait doit s'éteindre avant le bord"
-    assert liseré_haut > fond, "liseré lumineux en haut absent"
+        alpha = image.convert("RGBA").getchannel("A")
+        gauche = alpha.getpixel((300, 55))
+        droite = alpha.getpixel((724, 55))
+        au_dessus = alpha.getpixel((300, 25))
+        bord = alpha.getpixel((1015, 55))
+    assert gauche > 120, "trait gauche absent"
+    assert droite > 120, "trait droit absent"
+    assert au_dessus == 0, "le fond au-dessus du trait doit rester transparent"
+    assert bord < gauche / 3, "le trait doit s'éteindre avant le bord"
 
 
-def test_banner_keeps_a_readable_background_and_an_accent_bar():
-    """Fond teinté à la famille mais assez sombre pour que le panneau posé dessous
-    reste lisible ; liseré d'accent sur le bord gauche, comme les bannières validées."""
-    for style, canal in (("error", 0), ("success", 1), ("info", 2)):
+def test_banner_background_is_really_transparent():
+    """La couleur ne doit vivre que dans le trait, le logo et leur léger glow."""
+    points = ((8, 8), (300, 15), (724, 15), (1015, 100))
+    for style in ("error", "success", "warning", "music", "economy", "ai"):
         with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
-            rgb = image.convert("RGB")
-            fond = rgb.getpixel((300, 15))
-            barre = rgb.getpixel((1, 55))
-            trait = rgb.getpixel((300, 55))
-        assert sum(fond) / 3 < 70, f"{style} : fond trop clair ({fond})"
-        assert fond[canal] == max(fond), f"{style} : fond pas à la couleur ({fond})"
-        assert barre[canal] == max(barre), f"{style} : liseré gauche pas à la couleur ({barre})"
-        assert trait[canal] == max(trait), f"{style} : trait pas à la couleur ({trait})"
+            rgba = image.convert("RGBA")
+            for point in points:
+                assert rgba.getpixel(point)[3] == 0, f"{style} : fond visible en {point}"
 
 
 def test_the_centered_logo_is_tinted_with_the_family_colour():
-    """Le logo du dépôt est bleu : non teinté, il jurait sur une bannière rouge ou or."""
-    with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("error")) as image:
-        rouge = image.convert("RGB").crop((470, 20, 554, 90))
-    with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("success")) as image:
-        verte = image.convert("RGB").crop((470, 20, 554, 90))
-    r_rouge = sum(p[0] for p in rouge.getdata()) / rouge.width / rouge.height
-    b_rouge = sum(p[2] for p in rouge.getdata()) / rouge.width / rouge.height
-    v_verte = sum(p[1] for p in verte.getdata()) / verte.width / verte.height
-    assert r_rouge > b_rouge * 1.5, "logo de la bannière erreur non teinté en rouge"
-    assert v_verte > b_rouge, "logo de la bannière succès non teinté en vert"
+    """Le logo conserve son alpha et prend la même famille de couleur que le trait."""
+    def visible_average(style: str):
+        with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
+            pixels = [
+                pixel for pixel in image.convert("RGBA").crop((470, 20, 554, 90)).getdata()
+                if pixel[3] > 40
+            ]
+        assert pixels, style
+        return tuple(sum(p[i] for p in pixels) / len(pixels) for i in range(3))
+
+    rouge = visible_average("error")
+    verte = visible_average("success")
+    assert rouge[0] > rouge[2] * 1.35, "logo erreur non teinté en rouge"
+    assert verte[1] > verte[0], "logo succès non teinté en vert"
 
 
-def test_committed_source_banners_are_valid_and_match_the_generator():
-    """Ces cinq fichiers sont servis par URL GitHub raw aux réponses de commande :
-    un fichier corrompu (cas réel de banner_source_warning.webp) casse l'embed
-    sans aucune erreur côté bot."""
-    for state in log_banners.STYLES:
-        path = log_banners.BANNER_DIR / f"banner_source_{state}.webp"
-        assert path.exists(), state
-        payload = path.read_bytes()
-        assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", f"{state} : fichier illisible"
-        with Image.open(BytesIO(payload)) as image:
-            assert image.size == (1024, 110), state
-        assert path.stat().st_size < 12_000, f"{state} : {path.stat().st_size} octets"
+def test_embed_banner_urls_use_the_runtime_generated_assets():
+    """Les embeds classiques et les panneaux doivent partager la même source runtime."""
+    import config
+    from utils import command_visuals
 
+    base = config.DASHBOARD_PUBLIC_URL.rstrip("/")
+    for style in log_banners.STYLES:
+        assert command_visuals._BANNER_URLS[style] == (
+            f"{base}/assets/sentrix-banner/{style}.webp"
+        )
+
+
+def test_command_visuals_never_look_for_png_runtime_banners():
+    from utils import command_visuals
+
+    source = (log_banners.ROOT / "utils" / "command_visuals.py").read_text(encoding="utf-8")
+    assert 'banner_{kind}.png' not in source
+    assert 'sentrix_command_{kind}.png' not in source
+    assert "nom_fichier(family)" in source
+    assert ".webp" in source
 
 def test_banner_uses_the_repository_logo():
     assert log_banners.LOGO_PATH.exists(), "aucun logo resolu"
@@ -200,18 +203,19 @@ def test_le_liseré_du_conteneur_suit_la_banniere():
         assert famille in panels.ACCENTS_PAR_FAMILLE, famille
 
 
-def test_chaque_famille_est_teintee_et_jamais_grise():
-    """« pas genre un gris noir » : le fond doit porter la couleur de la famille."""
+def test_chaque_famille_colore_uniquement_le_trait_et_le_logo():
+    """Changer de famille ne doit jamais réintroduire un rectangle de fond."""
     for style in ("error", "success", "warning", "music", "economy"):
         with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
-            fond = image.convert("RGB").getpixel((300, 18))
-        ecart = max(fond) - min(fond)
-        assert ecart >= 18, f"{style} : fond trop neutre {fond}"
+            rgba = image.convert("RGBA")
+            assert rgba.getpixel((300, 18))[3] == 0, style
+            trait = rgba.getpixel((300, 55))
+        assert trait[3] > 120, f"{style} : trait trop faible"
+        assert max(trait[:3]) - min(trait[:3]) >= 20, f"{style} : trait trop neutre {trait}"
 
 
 def test_les_deux_chemins_de_banniere_ont_les_memes_familles():
-    """Chemin panneau (pièce jointe) et chemin embed (URL GitHub raw) doivent donner
-    la même couleur : sinon la même commande change d'allure selon la surface."""
+    """Pièce jointe et URL Railway doivent exposer les mêmes quatorze familles."""
     from utils import command_visuals
 
     assert set(command_visuals._BANNER_URLS) == set(log_banners.STYLES)
