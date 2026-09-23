@@ -12,6 +12,7 @@ trop tôt.
 
 import asyncio
 import logging
+import pathlib
 import traceback
 
 from aiohttp import web as aiohttp_web
@@ -188,8 +189,18 @@ def _install_sentrix_asset_route() -> None:
         app = current(bot)
 
         async def ping_banner(_request):
-            response = aiohttp_web.FileResponse("assets/sentrix-log-header.png")
-            response.headers["Cache-Control"] = "public, max-age=86400"
+            # Cache court + ETag plutôt que 24 h fermes : le fichier garde son nom
+            # quand le dessin change, et une journée de cache laissait l'ANCIENNE
+            # bannière s'afficher chez tout le monde (même cause que le cache
+            # d'embed Discord, corrigé côté URL par un nom versionné).
+            chemin = pathlib.Path("assets/sentrix-log-header.png")
+            response = aiohttp_web.FileResponse(chemin)
+            response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
+            try:
+                etat = chemin.stat()
+                response.headers["ETag"] = f'"{int(etat.st_mtime)}-{etat.st_size}"'
+            except OSError:
+                pass
             return response
 
         app.router.add_get("/assets/sentrix-ping-banner.png", ping_banner)
