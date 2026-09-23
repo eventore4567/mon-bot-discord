@@ -25,13 +25,120 @@ logger = logging.getLogger("bot.command-surface-v110")
 # arbitrairement (/moderation reste /moderation, /notifications reste /notifications).
 COMPACT_ROOT_NAMES: dict[str, str] = {}
 
-# Renommages réellement justifiés par une convention Discord répandue.
-# Important : userinfo/serverinfo/clearwarnings restent volontairement inchangés.
+# Renommages de feuilles utilisés à l'intérieur des groupes V95.
 COMPACT_COMMAND_NAMES: dict[str, str] = {
-    "nickname": "setnick",
+    # Choix explicite : /economy leaderboard reste la surface argent canonique.
+    "economyleaderboard": "leaderboard",
     "leaderboard-levels": "leaderboard",
+    # Les noms XP déjà validés restent inchangés.
     "set-xp": "setxp",
     "add-xp": "addxp",
+}
+
+# Chemins groupés canoniques. V95 construit ces groupes avec les callbacks historiques ;
+# cette table ne duplique donc aucune logique métier. +help lit la même table via
+# common_command_names, ce qui garantit + et / identiques.
+CANONICAL_GROUPED_NAMES: dict[str, tuple[str, str]] = {
+    # Économie
+    "economyleaderboard": ("economy", "leaderboard"),
+    "give-money": ("economy", "give"),
+    "reset-economy": ("economy", "reset"),
+    "economy-system": ("economy", "setup"),
+    "economy-audit": ("economy", "audit"),
+
+    # Jeux
+    "gamehistory": ("games", "history"),
+    "gameprofile": ("games", "profile"),
+    "gamestats": ("games", "stats"),
+    "gametop": ("games", "top"),
+    "dailygames": ("games", "daily"),
+    "gamelobby": ("games", "lobby"),
+    "numberduel": ("games", "duel-number"),
+    "reactionduel": ("games", "duel-reaction"),
+    "quizduel": ("games", "duel-quiz"),
+    "guessrace": ("games", "race-guess"),
+    "mathrace": ("games", "race-math"),
+    "wordrace": ("games", "race-word"),
+    "reactionevent": ("games", "race-reaction"),
+
+    # Tickets / événements / notifications
+    "ticketsetup": ("ticket", "setup"),
+    "tickettranscript": ("ticket", "transcript"),
+    "ticketstats": ("ticket", "stats"),
+    "ticketstaffstats": ("ticket", "staff-stats"),
+    "ticketreopenwindow": ("ticket", "reopen-window"),
+    "notifs-ping": ("notifications", "ping"),
+    "notifs-list": ("notifications", "list"),
+    "notifs-remove": ("notifications", "remove"),
+    "event-create": ("events", "create"),
+    "event-cancel": ("events", "cancel"),
+    "event-join": ("events", "join"),
+    "event-leave": ("events", "leave"),
+    "event-list": ("events", "list"),
+    "tournament-create": ("events", "tournament-create"),
+    "tournament-start": ("events", "tournament-start"),
+    "tournament-join": ("events", "tournament-join"),
+    "tournament-list": ("events", "tournament-list"),
+
+    # IA
+    "aisetup": ("ai", "setup"),
+    "aidiag": ("ai", "status"),
+    "aicontext": ("ai", "context"),
+    "aimemorychannel": ("ai", "memory"),
+    "airolequota": ("ai", "quota"),
+    "ai-translate": ("ai", "translate"),
+    "chat-reset": ("ai", "reset"),
+
+    # Logs / design
+    "logsetup": ("logs", "setup"),
+    "logs-status": ("logs", "status"),
+    "logevent": ("logs", "event"),
+    "logsearch": ("logs", "search"),
+    "createalllogs": ("logs", "create"),
+    "testlogs": ("logs", "test"),
+    "logs-diag": ("logs", "debug"),
+    "reset-logs-all": ("logs", "reset"),
+    "designsetup": ("design", "setup"),
+    "design-theme": ("design", "theme"),
+    "iconsetup": ("design", "icon"),
+
+    # Serveur / sécurité
+    "server-audit": ("server", "audit"),
+    "server-health": ("server", "health"),
+    "server-growth": ("server", "growth"),
+    "server-managed": ("server", "manage"),
+    "serversnapshot": ("server", "snapshot"),
+    "server-backup": ("server", "backup"),
+    "server-restore": ("server", "restore"),
+    "backup-now": ("server", "backup-now"),
+    "healthcheck": ("server", "healthcheck"),
+    "permission-audit": ("security", "permissions"),
+    "antinuke-config": ("security", "antinuke"),
+    "nukewhitelist": ("security", "whitelist"),
+    "automod-status": ("security", "automod-status"),
+    "automod-history": ("security", "automod-history"),
+    "automod-native-sync": ("security", "automod-sync"),
+    "security-check": ("security", "check"),
+    "security-level": ("security", "level"),
+    "security-repair": ("security", "repair"),
+
+    # Automatisations
+    "schedule-send": ("schedule", "send"),
+    "schedule-list": ("schedule", "list"),
+    "schedule-cancel": ("schedule", "cancel"),
+    "sticky-set": ("sticky", "set"),
+    "sticky-every": ("sticky", "interval"),
+    "sticky-off": ("sticky", "off"),
+    "starboard-setup": ("starboard", "setup"),
+    "starboard-off": ("starboard", "off"),
+    "voicehub-setup": ("voice", "setup"),
+    "voicehub-off": ("voice", "off"),
+    "voice-limit": ("voice", "limit"),
+    "voice-lock": ("voice", "lock"),
+    "voice-unlock": ("voice", "unlock"),
+    "voice-name": ("voice", "name"),
+    "voice-transfer": ("voice", "transfer"),
+    "voice-time": ("voice", "time"),
 }
 
 # Commandes que les grands bots exposent généralement directement à la racine. SentriX
@@ -46,13 +153,14 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "mute": "mute",
     "unmute": "unmute",
     "warn": "warn",
-    "warnings": "warnings",
-    "clearwarnings": "clearwarnings",
+    "warnings": "warns",
+    "clearwarnings": "clearwarns",
     "clear": "clear",
     "lock": "lock",
     "unlock": "unlock",
     "slowmode": "slowmode",
-    "nickname": "setnick",
+    "nickname": "nick",
+    "resetnick": "resetnick",
     "case": "case",
 
     # Informations — userinfo/serverinfo sont déjà des noms très répandus.
@@ -60,7 +168,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "userinfo": "userinfo",
     "serverinfo": "serverinfo",
     "channelinfo": "channelinfo",
-    "membercount": "membercount",
+    "membercount": "members",
 
     # Niveaux — /level et /leaderboard sont des conventions répandues.
     "level": "level",
@@ -80,6 +188,13 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "gamble": "gamble",
     "deposit": "deposit",
     "withdraw": "withdraw",
+    "banque": "bank",
+
+    # Choix explicites conservés tels quels.
+    "set-bio": "set-bio",
+    "guess-number": "guess-number",
+    "setprefix": "setprefix",
+    "welcome-config": "welcome-config",
 
     # Musique — vocabulaire commun aux bots musique majeurs.
     # +play reste la commande préfixée historique ; les autres restent aussi accessibles
@@ -102,6 +217,13 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
+    "roleall": ("role", "all"),
+    "massrole": ("role", "mass"),
+    "rolepanel": ("role", "panel"),
+    "rolepanel-refresh": ("role", "panel-refresh"),
+    "reactionrole-add": ("role", "reaction-add"),
+    "reactionrole-remove": ("role", "reaction-remove"),
+    "reactionrole-list": ("role", "reactions"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
@@ -158,8 +280,13 @@ def _command_key(command) -> tuple[str, str]:
 
 
 def _compact_group_for(command) -> tuple[str, str]:
-    root_name, original_leaf = _ORIGINAL_GROUP_FOR(command)
     qualified, name = _command_key(command)
+    grouped = CANONICAL_GROUPED_NAMES.get(qualified) or CANONICAL_GROUPED_NAMES.get(name)
+    if grouped is not None:
+        root_name, leaf = grouped
+        return v95._safe_name(root_name), _normalise_public_leaf(leaf)
+
+    root_name, original_leaf = _ORIGINAL_GROUP_FOR(command)
     explicit = COMPACT_COMMAND_NAMES.get(qualified) or COMPACT_COMMAND_NAMES.get(name)
     leaf = explicit or original_leaf
     return v95._safe_name(root_name), _normalise_public_leaf(leaf)
@@ -176,6 +303,8 @@ def _compact_should_expose(command) -> bool:
         return False
     if qualified in SUPPRESSED_SLASH_DUPLICATES:
         return False
+    if qualified in CANONICAL_GROUPED_NAMES or name in CANONICAL_GROUPED_NAMES:
+        return True
 
     # Les anciennes commandes déjà fusionnées dans les centres Setup/Ticket/Giveaway/
     # Security ne doivent pas créer un second slash public.
@@ -337,6 +466,7 @@ def install() -> None:
 
 
 __all__ = [
+    "CANONICAL_GROUPED_NAMES",
     "COMPACT_COMMAND_NAMES",
     "COMPACT_ROOT_NAMES",
     "STANDARD_DIRECT_SLASH",
