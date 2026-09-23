@@ -1332,19 +1332,103 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await self._start_community(ctx, "reactionevent")
         if not started:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description=err, kind='warning')))
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Évènement réaction",
+                        description=err,
+                        kind="warning",
+                    )
+                ),
+            )
+
         try:
-            msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='⚡ Un bouton va apparaître, soyez le/la plus rapide !')))
-            await asyncio.sleep(random.uniform(3.0, 8.0))
-            view = _CommunityRaceButtonView()
-            await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description='🔴 **CLIQUEZ MAINTENANT !**')), view))
+            options, target = _reaction_round()
+            msg = await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Évènement réaction — préparez-vous",
+                        description=(
+                            f"🎯 **CIBLE : {target}**\n"
+                            "Mémorisez-la. Quatre boutons apparaîtront après un délai aléatoire.\n"
+                            "Le premier membre qui clique sur la bonne cible gagne."
+                        ),
+                    )
+                ),
+            )
+            await asyncio.sleep(random.uniform(2.0, 5.0))
+
+            view = _CommunityRaceButtonView(options, target)
+            await panels.editer(
+                msg,
+                panels.avec_composants(
+                    panels.depuis_embed(
+                        await _embed(
+                            self.bot,
+                            guild_id,
+                            title="Évènement réaction — GO",
+                            description=(
+                                f"⚡ Trouvez **{target}** parmi les quatre boutons.\n"
+                                "Les mauvaises cibles ne terminent pas la manche."
+                            ),
+                        )
+                    ),
+                    view,
+                ),
+            )
             await view.wait()
+
             if view.winner is None:
-                return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description="⏱️ Personne n'a cliqué à temps.")))
-            reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "reactionevent", 25, sid, result="win")
-            return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Évènement réaction', description=f'🏆 {view.winner.mention} a été le/la plus rapide !' + _reward_line(reward), kind='success')))
+                return await panels.editer(
+                    msg,
+                    panels.depuis_embed(
+                        await _embed(
+                            self.bot,
+                            guild_id,
+                            title="Évènement réaction — terminé",
+                            description=f"⏱️ Personne n'a trouvé **{target}** à temps.",
+                            kind="warning",
+                        )
+                    ),
+                )
+
+            elapsed = view.elapsed or 0.0
+            speed_bonus = 10 if elapsed < 0.7 else 6 if elapsed < 1.3 else 2
+            reward = await game_rewards.reward_game_winner(
+                self.bot,
+                guild_id,
+                view.winner.id,
+                "reactionevent",
+                25 + speed_bonus,
+                sid,
+                result="win",
+                metadata={"elapsed": round(elapsed, 3), "target": target},
+            )
+            return await panels.editer(
+                msg,
+                panels.depuis_embed(
+                    await _embed(
+                        self.bot,
+                        guild_id,
+                        title="Évènement réaction — gagné",
+                        description=(
+                            f"🏆 {view.winner.mention} a trouvé **{target}** en **{elapsed:.2f}s**.\n"
+                            f"⚡ Bonus vitesse : **+{speed_bonus}**"
+                        )
+                        + _reward_line(reward),
+                        kind="success",
+                    )
+                ),
+            )
         finally:
             await self._finish_community(guild_id, ctx.author.id, "reactionevent")
+
     @commands.hybrid_command(name="emoji-race", description="Lancer une course à l'emoji : cliquez sur le bon emoji en premier.", with_app_command=False)
     async def emoji_race(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
