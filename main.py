@@ -485,11 +485,10 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning("Impossible d'enregistrer les boutons de notation tickets :\n" + traceback.format_exc())
 
-        # Boutons "Copier l'ID" des logs (utils/log_service.py::RevealIdButton) : même
-        # mécanisme, custom_id encodant l'ID à réafficher.
+        # Boutons persistants des logs : ID et copie d'invitation.
         try:
-            from utils.log_service import RevealIdButton
-            self.add_dynamic_items(RevealIdButton)
+            from utils.log_service import RevealIdButton, RevealInviteButton
+            self.add_dynamic_items(RevealIdButton, RevealInviteButton)
         except Exception:
             logger.warning("Impossible d'enregistrer les boutons de logs :\n" + traceback.format_exc())
 

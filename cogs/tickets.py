@@ -1128,9 +1128,18 @@ class Tickets(commands.Cog):
             ephemere=True,
         )
 
+        ticket_extra = {
+            "📂 Type": ticket_type["name"],
+            "📌 Salon": channel.mention,
+            "🔢 Numéro": f"#{number}",
+            "🆔 Ticket": f"`{ticket_id}`",
+            "🕒 Ouvert": f"<t:{int(now())}:F>",
+        }
+        if staff_role:
+            ticket_extra["👥 Rôle support"] = staff_role.mention
         log_e = embeds.log_entry(
             "🎫 Ticket ouvert", 0x5865F2, cible=user,
-            extra={"📂 Type": ticket_type["name"], "📌 Salon": channel.mention, "🔢 Numéro": f"#{number}"},
+            extra=ticket_extra,
         )
         await self.log_action(guild, log_e, ticket_type["log_channel_id"])
 
