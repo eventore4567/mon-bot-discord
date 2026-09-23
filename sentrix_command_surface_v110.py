@@ -139,6 +139,85 @@ CANONICAL_GROUPED_NAMES: dict[str, tuple[str, str]] = {
     "voice-name": ("voice", "name"),
     "voice-transfer": ("voice", "transfer"),
     "voice-time": ("voice", "time"),
+    # Hubs visibles : un verbe/une feuille claire au lieu d'une racine ambiguë.
+    "economy": ("economy", "overview"),
+    "security": ("security", "overview"),
+    "ticket": ("ticket", "open"),
+    "giveaway": ("giveaway", "panel"),
+    "giveaway-reroll": ("giveaway", "reroll"),
+    "logs": ("logs", "overview"),
+
+    # Économie / boutique / réputation
+    "buy": ("economy", "buy"),
+    "sell": ("economy", "sell"),
+    "shoppanel": ("economy", "shop-panel"),
+    "shoprole": ("economy", "shop-role"),
+    "rep": ("rep", "give"),
+    "reputation": ("rep", "profile"),
+    "repleaderboard": ("rep", "leaderboard"),
+    "rephistory": ("rep", "history"),
+
+    # Niveaux : les commandes XP directes restent inchangées, le reste est rangé.
+    "level-roles": ("levels", "roles"),
+    "set-level-role": ("levels", "role-add"),
+    "remove-level-role": ("levels", "role-remove"),
+    "reset-levels": ("levels", "reset"),
+
+    # Jeux : une seule racine /games pour éviter 40 racines slash.
+    "adventure": ("games", "adventure"),
+    "blackjack": ("games", "blackjack"),
+    "coinflip": ("games", "coinflip"),
+    "colorquiz": ("games", "colorquiz"),
+    "connect4": ("games", "connect4"),
+    "dice": ("games", "dice"),
+    "duel": ("games", "duel"),
+    "dungeon": ("games", "dungeon"),
+    "emoji-race": ("games", "emoji-race"),
+    "emojiquiz": ("games", "emojiquiz"),
+    "explore": ("games", "explore"),
+    "fasttype": ("games", "fasttype"),
+    "fishing": ("games", "fishing"),
+    "hangman": ("games", "hangman"),
+    "highlow": ("games", "highlow"),
+    "hunt": ("games", "hunt"),
+    "luckyroll": ("games", "luckyroll"),
+    "math-quiz": ("games", "math-quiz"),
+    "memory": ("games", "memory"),
+    "mining": ("games", "mining"),
+    "reaction": ("games", "reaction"),
+    "rps": ("games", "rps"),
+    "scramble": ("games", "scramble"),
+    "slots": ("games", "slots"),
+    "tictactoe": ("games", "tictactoe"),
+    "treasure": ("games", "treasure"),
+    "trivia": ("games", "trivia"),
+    "triviastart": ("games", "trivia-start"),
+    "wordgame": ("games", "wordgame"),
+
+    # Proof
+    "proof": ("proof", "check"),
+    "proofstatus": ("proof", "status"),
+    "proofsetup": ("proof", "setup"),
+    "proofexample": ("proof", "example"),
+    "proofexample-remove": ("proof", "example-remove"),
+    "proofexamples": ("proof", "examples"),
+    "proofpanel": ("proof", "panel"),
+    "proofreset": ("proof", "reset"),
+
+    # Emojis
+    "addemoji": ("emoji", "add"),
+    "deleteemoji": ("emoji", "remove"),
+    "emoji-list": ("emoji", "list"),
+
+    # Administration du bot / configuration
+    "bot-servers": ("bot", "servers"),
+    "bot-leave": ("bot", "leave"),
+    "setstatus": ("bot", "status"),
+    "status-rotate": ("bot", "status-rotate"),
+    "set-bot": ("bot", "profile"),
+    "footer": ("bot", "footer"),
+    "theme": ("bot", "theme"),
+    "setmodrole": ("config", "modrole"),
 }
 
 # Commandes que les grands bots exposent généralement directement à la racine. SentriX
@@ -211,6 +290,11 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "music join": "join",
     "music leave": "leave",
     "music seek": "seek",
+    # Utilitaires simples qui n'ont pas besoin d'un groupe.
+    "afk": "afk",
+    "image": "image",
+    "lastmessage": "lastmessage",
+    "stats": "stats",
 }
 
 # Les rôles sont plus lisibles sous un petit groupe /role que sous des chemins profonds.
