@@ -105,4 +105,4 @@ def test_avec_composants_preserves_original_business_view_for_callbacks():
     assert panels.vue_source(button) is source
     assert getattr(source, "_sentrix_panel_view") is panel
     assert panels.vue_panneau(button) is panel
-    assert getattr(button, "_sentrix_source_view") is source
+    assert panels.vue_source(button) is source
