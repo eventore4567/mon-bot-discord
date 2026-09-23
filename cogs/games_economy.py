@@ -984,8 +984,11 @@ class _MinesweeperView(discord.ui.View):
             + _reward_line(reward),
             kind="success",
         )
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.depuis_embed(embed))
         self.stop()
+        panel = getattr(self, "_sentrix_panel_view", None)
+        if panel is not None:
+            panel.stop()
 
     async def on_timeout(self):
         if self._settled:
