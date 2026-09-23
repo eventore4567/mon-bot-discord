@@ -16,10 +16,10 @@ Anti-triche / anti-double-récompense :
   parallèle (ex: lancer +dice deux fois d'un coup pour tenter de doubler un gain).
 - validate_opponent() interdit tout duel contre soi-même ou contre un bot.
 
-Cooldowns : check_cooldown()/touch_cooldown() sont persistés dans game_cooldowns (table SQL),
-donc ils survivent à un redémarrage du bot (contrainte explicite de Jayden pour les jeux à
-grosse récompense). Pour les jeux rapides (cooldown de quelques secondes), le même mécanisme
-est utilisé — un cooldown en mémoire serait perdu à chaque redéploiement Railway.
+Cooldowns : la limite quotidienne protège les RÉCOMPENSES, tandis que le cooldown ne sert
+plus qu'à empêcher le spam de commandes. Un joueur peut donc rejouer presque immédiatement
+même lorsqu'il ne peut plus gagner de monnaie. Le cooldown anti-spam reste persisté en base
+pour rester cohérent après un redéploiement Railway.
 
 Réglages par serveur (table game_settings, +gamesetup) : voir get_settings()/is_game_enabled().
 """
@@ -53,6 +53,12 @@ DEFAULT_GAME_SETTINGS = {
 
 _JSON_FIELDS = ("disabled_games", "allowed_channel_ids", "blocked_channel_ids", "allowed_role_ids", "blocked_role_ids")
 _BOOL_FIELDS = ("enabled", "logs_enabled", "leaderboard_enabled", "dm_results", "compact_mode")
+
+# Le jeu doit rester disponible à volonté. Les anciennes valeurs de 10 à 1500 secondes
+# servent encore de métadonnées historiques, mais le verrou effectif est borné à 4 s :
+# assez pour éviter le double-spam, jamais assez pour empêcher réellement de jouer.
+MAX_PLAY_COOLDOWN_SECONDS = 4
+
 
 
 @dataclass
@@ -139,11 +145,18 @@ async def is_game_enabled(bot, guild_id: int, game_name: str, channel_id: int | 
 
 
 async def check_cooldown(bot, guild_id: int, user_id: int, game_name: str, cooldown_seconds: int) -> tuple[bool, int]:
-    """(True, 0) si le joueur peut jouer, (False, secondes_restantes) sinon. Le cooldown est
-    persisté en base (game_cooldowns) : il survit à un redémarrage du bot."""
+    """Anti-spam court uniquement.
+
+    Les anciennes commandes peuvent encore demander 10 min ou 25 min : on les borne ici
+    afin que la mécanique de récompense quotidienne ne devienne jamais une interdiction
+    de jouer. La DB garde toujours la protection contre les doubles lancements.
+    """
     if cooldown_seconds <= 0:
         return True, 0
-    remaining = await bot.db.get_game_cooldown_remaining(guild_id, user_id, game_name, cooldown_seconds)
+    effective = min(int(cooldown_seconds), MAX_PLAY_COOLDOWN_SECONDS)
+    remaining = await bot.db.get_game_cooldown_remaining(
+        guild_id, user_id, game_name, effective
+    )
     return (remaining <= 0), remaining
 
 
@@ -348,15 +361,16 @@ def skill_reward(base_amount: int, *, difficulty: str = "normal", attempts: int 
 # diverger, seul l'appel réel dans la commande a un effet, ce dictionnaire ne sert qu'à
 # l'affichage informatif de +dailygames.
 GAME_COOLDOWNS = {
-    "rps": 8, "guess-number": 15, "trivia": 12, "hangman": 20, "math-quiz": 8,
-    "blackjack": 15, "slots": 10,
-    "coinflip": 10, "dice": 10, "luckyroll": 8, "highlow": 12, "memory": 20, "reaction": 15,
-    "scramble": 15, "wordgame": 15, "emojiquiz": 15, "colorquiz": 10, "fasttype": 15,
-    "duel": 15, "numberduel": 15, "quizduel": 15, "reactionduel": 15, "connect4": 15,
-    "triviastart": 60, "wordrace": 60, "mathrace": 60, "guessrace": 60,
-    "reactionevent": 60, "emoji-race": 60, "lastmessage": 90,
-    "adventure": 900, "dungeon": 1200, "mining": 600, "fishing": 600,
-    "treasure": 1500, "hunt": 900, "explore": 1000,
+    # Valeurs affichées à l'utilisateur : le cooldown réel est un anti-spam court.
+    "rps": 4, "guess-number": 4, "trivia": 4, "hangman": 4, "math-quiz": 4,
+    "blackjack": 4, "slots": 4, "minesweeper": 4,
+    "coinflip": 4, "dice": 4, "luckyroll": 4, "highlow": 4, "memory": 4, "reaction": 4,
+    "scramble": 4, "wordgame": 4, "emojiquiz": 4, "colorquiz": 4, "fasttype": 4,
+    "duel": 4, "numberduel": 4, "quizduel": 4, "reactionduel": 4, "connect4": 4,
+    "triviastart": 4, "wordrace": 4, "mathrace": 4, "guessrace": 4,
+    "reactionevent": 4, "emoji-race": 4, "lastmessage": 4,
+    "adventure": 4, "dungeon": 4, "mining": 4, "fishing": 4,
+    "treasure": 4, "hunt": 4, "explore": 4,
 }
 
 
