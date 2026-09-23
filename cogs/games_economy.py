@@ -2111,28 +2111,31 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
 
         boost_text = ""
         if game_name == "adventure":
-            money_boost, xp_boost, duration, rarity = temporary_boosts.quest_boost_for_risk(multiplier)
-            active_boost, granted = await temporary_boosts.grant_quest_boost(
-                self.bot.db,
-                guild_id,
-                ctx.author.id,
-                money_multiplier=money_boost,
-                xp_multiplier=xp_boost,
-                duration_seconds=duration,
-                source=f"quest:{rarity}",
-            )
-            if granted:
-                boost_text = (
-                    f"\n\n🚀 **Boost de quête {rarity} activé !**\n"
-                    f"🪙 Argent **x{active_boost.money_multiplier:g}** · "
-                    f"⭐ XP **x{active_boost.xp_multiplier:g}** · "
-                    f"⏱️ **{max(1, (active_boost.remaining() + 59) // 60)} min**"
+            try:
+                money_boost, xp_boost, duration, rarity = temporary_boosts.quest_boost_for_risk(multiplier)
+                active_boost, granted = await temporary_boosts.grant_quest_boost(
+                    self.bot.db,
+                    guild_id,
+                    ctx.author.id,
+                    money_multiplier=money_boost,
+                    xp_multiplier=xp_boost,
+                    duration_seconds=duration,
+                    source=f"quest:{rarity}",
                 )
-            else:
-                boost_text = (
-                    f"\n\n🚀 Votre boost actuel est déjà aussi fort ou meilleur : "
-                    f"argent x{active_boost.money_multiplier:g} · XP x{active_boost.xp_multiplier:g}."
-                )
+                if granted:
+                    boost_text = (
+                        f"\n\n🚀 **Boost de quête {rarity} activé !**\n"
+                        f"🪙 Argent **x{active_boost.money_multiplier:g}** · "
+                        f"⭐ XP **x{active_boost.xp_multiplier:g}** · "
+                        f"⏱️ **{max(1, (active_boost.remaining() + 59) // 60)} min**"
+                    )
+                else:
+                    boost_text = (
+                        f"\n\n🚀 Votre boost actuel est déjà aussi fort ou meilleur : "
+                        f"argent x{active_boost.money_multiplier:g} · XP x{active_boost.xp_multiplier:g}."
+                    )
+            except Exception:
+                logger.warning("Boost de quête indisponible, résultat du jeu conservé.", exc_info=True)
 
         if reward and reward.success and reward.amount > 0:
             reward_text = (
