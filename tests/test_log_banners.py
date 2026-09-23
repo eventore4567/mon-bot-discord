@@ -82,6 +82,21 @@ def test_banner_draws_a_glowing_line_from_each_edge():
     assert au_dessus < 40, "le trait doit rester fin"
 
 
+def test_banner_has_a_small_centered_separator_below_the_logo():
+    """Petit séparateur demandé : visible au centre, absent sur les côtés et au bord."""
+    with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("games")) as image:
+        alpha = image.convert("RGBA").getchannel("A")
+        y = log_banners.HEIGHT - 5
+        centre = alpha.getpixel((log_banners.WIDTH // 2, y))
+        gauche = alpha.getpixel((300, y))
+        droite = alpha.getpixel((724, y))
+        bas = alpha.getpixel((log_banners.WIDTH // 2, log_banners.HEIGHT - 1))
+
+    assert centre > 80, "séparateur inférieur absent"
+    assert gauche == 0 and droite == 0, "le séparateur doit rester court et centré"
+    assert bas <= 12, "le bas de la bannière doit rester transparent"
+
+
 def test_banner_has_no_background_at_all():
     """« aucun fond visible » : hors du trait, du logo et de leur halo, l'image est
     totalement transparente — sinon Discord affiche un rectangle coloré."""
@@ -129,19 +144,25 @@ def test_the_logo_is_exactly_centered():
     assert abs(centre_y - log_banners.HEIGHT / 2) <= 1, f"logo décalé verticalement ({centre_y})"
 
 
-def test_committed_source_banners_are_valid_and_match_the_generator():
-    """Ces fichiers sont servis par URL GitHub raw aux réponses de commande :
-    un fichier corrompu (cas réel de banner_source_warning.webp) casse l'embed
-    sans aucune erreur côté bot."""
-    for state in log_banners.STYLES:
-        path = log_banners.BANNER_DIR / log_banners.nom_source(state)
-        assert path.exists(), state
-        payload = path.read_bytes()
-        assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", f"{state} : fichier illisible"
-        with Image.open(BytesIO(payload)) as image:
-            assert image.size == (1024, log_banners.HEIGHT), state
-            assert image.mode == "RGBA", f"{state} : pas de couche alpha"
-        assert path.stat().st_size < 12_000, f"{state} : {path.stat().st_size} octets"
+def test_embed_banner_urls_use_runtime_generated_assets():
+    """Les embeds utilisent le même WebP généré que les panneaux, servi par Railway."""
+    import config
+    from utils import command_visuals
+
+    base = config.DASHBOARD_PUBLIC_URL.rstrip("/")
+    for style in log_banners.STYLES:
+        assert command_visuals._BANNER_URLS[style] == (
+            f"{base}/assets/sentrix-banner/{style}.webp?v={log_banners.BANNER_VERSION}"
+        )
+
+
+def test_command_visuals_never_look_for_png_runtime_banners():
+    """Régression : le générateur produit du WebP, donc le renderer ne doit plus chercher du PNG."""
+    source = (log_banners.ROOT / "utils" / "command_visuals.py").read_text(encoding="utf-8")
+    assert 'banner_{kind}.png' not in source
+    assert 'sentrix_command_{kind}.png' not in source
+    assert "nom_fichier(family)" in source
+    assert 'sentrix_command_{family}.webp' in source
 
 
 def test_banner_uses_the_repository_logo():
@@ -247,7 +268,7 @@ def test_une_famille_retiree_ne_reste_pas_sur_le_disque():
 
 
 def test_les_deux_chemins_de_banniere_ont_les_memes_familles():
-    """Chemin panneau (pièce jointe) et chemin embed (URL GitHub raw) doivent donner
+    """Chemin panneau (pièce jointe) et chemin embed (URL runtime) doivent donner
     la même couleur : sinon la même commande change d'allure selon la surface."""
     from utils import command_visuals
 
