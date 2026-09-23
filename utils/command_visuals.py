@@ -11,47 +11,36 @@ import re
 from typing import Any
 
 import discord
+
+import config
 from discord.ext import commands
 
 from . import embeds
-from .log_banners import BANNER_DIR, ensure_banners
+from .log_banners import BANNER_DIR, COLORS, STYLES, ensure_banners, nom_fichier
 
 logger = logging.getLogger("bot.command-visuals")
 
-_BANNER_RAW_BASE = (
-    "https://raw.githubusercontent.com/eventore4567/mon-bot-discord/"
-    "main/assets/log_banners"
-)
-# Une URL par famille de bannière : les cinq états, plus les domaines, pour que ce
-# chemin (embed + image distante) donne la même couleur que le chemin panneau
-# (pièce jointe). Les fichiers sont committés et servis par GitHub raw.
+_BANNER_PUBLIC_BASE = config.DASHBOARD_PUBLIC_URL.rstrip("/")
+# Les embeds classiques chargent la même bannière que les panneaux Components V2,
+# servie directement par Railway après génération runtime. Plus aucun fichier
+# banner_source_* committé ne décide du rendu visible.
 _BANNER_URLS = {
-    famille: f"{_BANNER_RAW_BASE}/banner_source_{famille}.webp"
-    for famille in (
-        "error", "success", "warning", "info", "special",
-        "moderation", "security", "economy", "config",
-        "levels", "music", "tickets", "games", "ai",
-    )
-}
-_ACCENTS = {
-    "error": 0xEF4444,
-    "success": 0x22C55E,
-    "warning": 0xF59E0B,
-    "info": 0x3B82F6,
-    "special": 0x7C3AED,
-    "moderation": 0xF4687C,
-    "security": 0x847CFA,
-    "economy": 0xF8CA60,
-    "config": 0x54DEE4,
-    "levels": 0xAAE45C,
-    "music": 0xFF6CBC,
-    "tickets": 0x3AD6C6,
-    "games": 0xFF9648,
-    "ai": 0xD67CFF,
+    family: f"{_BANNER_PUBLIC_BASE}/assets/sentrix-banner/{family}.webp"
+    for family in STYLES
 }
 
+
+def _accent_int(family: str) -> int:
+    (r, g, b), _legacy_deep = COLORS[family]
+    return (r << 16) | (g << 8) | b
+
+
+_ACCENTS = {family: _accent_int(family) for family in STYLES}
+
 _DECORATIVE_LINE_RE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]{8,}$")
-_COMMAND_BANNER_RE = re.compile(r"/banner_source_[a-z]+\.webp(?:\?.*)?$")
+_COMMAND_BANNER_RE = re.compile(
+    r"(?:/assets/sentrix-banner/[a-z]+\.webp|/banner_source_[a-z]+\.webp)(?:\?.*)?$"
+)
 
 _ERROR_WORDS = (
     "erreur", "impossible", "introuvable", "interdit", "refus", "échou", "echec",
@@ -159,22 +148,23 @@ def resolve_kind(
     return "info"
 
 
-def banner_url(kind: str) -> str:
-    """URL de bannière pour une intention, accordée à la commande en cours.
-
-    « info » ne dit rien du sujet : sur ce chemin aussi, une réponse neutre prend
-    la couleur de son domaine (musique, économie…) au lieu du même bleu partout.
-    """
+def _resolved_family(kind: str) -> str:
+    """Famille visuelle finale pour l'intention et la commande courante."""
     if kind == "info":
         try:
             from .sentrix_panels import famille_de_la_commande
 
-            famille = famille_de_la_commande()
+            family = famille_de_la_commande()
         except Exception:
-            famille = None
-        if famille and famille in _BANNER_URLS:
-            return _BANNER_URLS[famille]
-    return _BANNER_URLS.get(kind, _BANNER_URLS["info"])
+            family = None
+        if family in STYLES:
+            return str(family)
+    return kind if kind in STYLES else "info"
+
+
+def banner_url(kind: str) -> str:
+    """URL de la bannière générée runtime, servie par Railway."""
+    return _BANNER_URLS[_resolved_family(kind)]
 
 
 def _is_command_banner(url: object) -> bool:
@@ -244,10 +234,10 @@ class CommandPanelView(discord.ui.LayoutView):
     ) -> None:
         super().__init__(timeout=None)
 
-        accent = getattr(getattr(embed, "colour", None), "value", None) if embed else None
-        if not accent:
-            accent = _ACCENTS[kind]
-        container = discord.ui.Container(accent_colour=discord.Colour(int(accent)))
+        family = _resolved_family(kind)
+        container = discord.ui.Container(
+            accent_colour=discord.Colour(_ACCENTS[family])
+        )
 
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media=f"attachment://{banner_filename}")
@@ -363,18 +353,19 @@ async def _styled_context_send(self: commands.Context, *args: Any, **kwargs: Any
         return await _ORIGINAL_CONTEXT_SEND(self, native_content, **native_kwargs)
 
     kind = resolve_kind(self, embed=embed, content=content)
+    family = _resolved_family(kind)
     ensure_banners()
-    banner_path = BANNER_DIR / f"banner_{kind}.png"
+    banner_path = BANNER_DIR / nom_fichier(family)
     if not banner_path.exists():
         ensure_banners(force=True)
 
-    banner_filename = f"sentrix_command_{kind}.png"
+    banner_filename = f"sentrix_command_{family}.webp"
     try:
         layout = CommandPanelView(
             self,
             content=content,
             embed=embed,
-            kind=kind,
+            kind=family,
             banner_filename=banner_filename,
         )
         banner_file = discord.File(str(banner_path), filename=banner_filename)
