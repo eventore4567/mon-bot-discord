@@ -121,6 +121,10 @@ CANONICAL_GROUPED_NAMES: dict[str, tuple[str, str]] = {
     "security-check": ("security", "check"),
     "security-level": ("security", "level"),
     "security-repair": ("security", "repair"),
+    "antinuke": ("security", "antinuke"),
+    "antiraid": ("security", "antiraid"),
+    "panic": ("security", "panic"),
+    "syncbl": ("security", "sync-blacklist"),
 
     # Automatisations
     "schedule-send": ("schedule", "send"),
