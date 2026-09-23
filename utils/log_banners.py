@@ -218,7 +218,9 @@ def ensure_banners(force: bool = False) -> None:
         if path.exists() and not force:
             continue
         try:
-            build_banner(style).save(path, "WEBP", lossless=True, method=6)
+            build_banner(style).save(
+                path, "WEBP", quality=_QUALITE_WEBP, method=6
+            )
         except Exception:
             logger.exception("Génération de la bannière %s impossible.", style)
     _READY = True
