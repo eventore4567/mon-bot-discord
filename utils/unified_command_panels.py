@@ -197,9 +197,13 @@ class UnifiedCommandPanel(discord.ui.LayoutView):
 
         # Banner + body live in the SAME container. This is the key invariant: never
         # create a second Discord embed solely to display the SentriX banner.
-        gallery = discord.ui.MediaGallery()
-        gallery.add_item(media=visuals.banner_url(kind))
-        container.add_item(gallery)
+        # Réponse en texte libre (IA, traduction) : aucune bannière, comme sur le
+        # chemin panneau — sinon +sentrix gardait un bandeau alors que la règle
+        # existait déjà côté pièce jointe.
+        if not panels.commande_en_texte_libre():
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=visuals.banner_url(kind))
+            container.add_item(gallery)
 
         title = _clean(getattr(embed, "title", None) if embed else None, limit=220) or title_fallback or "SentriX"
         header = f"## {title}"

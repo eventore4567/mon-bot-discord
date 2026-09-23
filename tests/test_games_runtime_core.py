@@ -156,6 +156,20 @@ def test_play_lock_registry_never_allows_same_game_twice():
     assert registry.try_acquire(1, 2, "slots") is True
 
 
+def test_game_answer_matching_is_accent_and_space_tolerant():
+    assert game_rewards.answer_matches("  CAFÉ  ", ("cafe",))
+    assert game_rewards.answer_matches("Le   Nil", ("nil", "le nil"))
+    assert game_rewards.answer_matches("chateau de glace", ("château de glace",))
+    assert not game_rewards.answer_matches("dragon", ("pirate",))
+
+
+def test_skill_reward_stays_bounded_and_adds_progression():
+    assert game_rewards.skill_reward(20, difficulty="easy") == 17
+    assert game_rewards.skill_reward(20, difficulty="normal") == 20
+    assert game_rewards.skill_reward(20, difficulty="hard") == 26
+    assert game_rewards.skill_reward(1, difficulty="easy") == 1
+
+
 def test_tictactoe_source_uses_shared_start_and_timeout_cleanup():
     from pathlib import Path
 
@@ -289,6 +303,19 @@ def test_all_duel_commands_use_shared_two_player_precheck():
         )[0]
         assert f'_precheck_duel(self.bot, ctx, "{game}", adversaire, 15)' in block
 
+
+def test_text_games_use_tolerant_answer_matching_and_primary_display():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+
+    assert "def _primary_answer" in source
+    assert "game_rewards.answer_matches(msg.content, answer)" in source
+    assert "game_rewards.answer_matches(a1, self.answer)" in source
+    assert "guild_id and self.bot" not in source
+
 @pytest.mark.asyncio
 async def test_finish_community_releases_lock_and_starts_launcher_cooldown(monkeypatch):
     bot = SimpleNamespace()
@@ -363,4 +390,3 @@ def test_integrity_layer_no_longer_replaces_game_lock_registry():
     )[0]
     assert "game_rewards.PlayLockRegistry" in block
     assert "ttl" in block
-

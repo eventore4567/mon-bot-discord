@@ -1,4 +1,4 @@
-"""Contrat des bannières SentriX (1024x64, style issu de LOG_REGISTRY).
+"""Contrat des bannières SentriX (1024xHEIGHT, style issu de LOG_REGISTRY).
 
 Style unique : AUCUN fond. Un trait lumineux part de chaque bord, s'arrête avant le
 logo SentriX centré et teinté, et tout le reste de l'image a un alpha de 0 — le
@@ -26,7 +26,7 @@ def test_chaque_famille_fait_1024x64_et_reste_distincte():
         payloads.append(payload)
         assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", style
         with Image.open(BytesIO(payload)) as image:
-            assert image.size == (1024, 64)
+            assert image.size == (1024, log_banners.HEIGHT)
             assert image.mode == "RGBA", f"{style} : pas de couche alpha"
     assert len(set(payloads)) == len(log_banners.STYLES)
 
@@ -88,9 +88,14 @@ def test_banner_has_no_background_at_all():
     for style in log_banners.STYLES:
         with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
             rgba = image.convert("RGBA")
-            for point in ((0, 0), (1023, 0), (0, 63), (1023, 63), (512, 0), (512, 63),
-                          (200, 8), (800, 56)):
+            bas = log_banners.HEIGHT - 1
+            # Loin du logo : rigoureusement transparent.
+            for point in ((0, 0), (1023, 0), (0, bas), (1023, bas), (200, 6), (800, bas - 6)):
                 assert rgba.getpixel(point)[3] == 0, f"{style} : fond peint en {point}"
+            # Juste au-dessus et au-dessous du logo : le halo peut mourir ici, mais
+            # il doit rester invisible (quelques unités d'alpha sur 255).
+            for point in ((512, 0), (512, bas)):
+                assert rgba.getpixel(point)[3] <= 12, f"{style} : halo trop marqué en {point}"
             opaques = sum(1 for valeur in rgba.getchannel("A").getdata() if valeur > 8)
         part = opaques / (log_banners.WIDTH * log_banners.HEIGHT)
         assert part < 0.25, f"{style} : {part:.0%} de l'image est peinte"
@@ -113,8 +118,9 @@ def test_the_logo_is_exactly_centered():
     """« parfaitement centré » : le dessin doit être symétrique au pixel près."""
     with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("info")) as image:
         alpha = image.convert("RGBA").getchannel("A")
+    haut = log_banners.HEIGHT // 2 - log_banners.LOGO_BOX // 2
     colonnes = [x for x in range(log_banners.WIDTH)
-                if any(alpha.getpixel((x, y)) > 40 for y in range(6, 20))]
+                if any(alpha.getpixel((x, y)) > 40 for y in range(haut + 2, haut + 12))]
     lignes = [y for y in range(log_banners.HEIGHT)
               if any(alpha.getpixel((x, y)) > 40 for x in range(470, 554))]
     centre_x = (min(colonnes) + max(colonnes)) / 2
@@ -128,12 +134,12 @@ def test_committed_source_banners_are_valid_and_match_the_generator():
     un fichier corrompu (cas réel de banner_source_warning.webp) casse l'embed
     sans aucune erreur côté bot."""
     for state in log_banners.STYLES:
-        path = log_banners.BANNER_DIR / f"banner_source_{state}.webp"
+        path = log_banners.BANNER_DIR / log_banners.nom_source(state)
         assert path.exists(), state
         payload = path.read_bytes()
         assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", f"{state} : fichier illisible"
         with Image.open(BytesIO(payload)) as image:
-            assert image.size == (1024, 64), state
+            assert image.size == (1024, log_banners.HEIGHT), state
             assert image.mode == "RGBA", f"{state} : pas de couche alpha"
         assert path.stat().st_size < 12_000, f"{state} : {path.stat().st_size} octets"
 
@@ -146,7 +152,7 @@ def test_banner_uses_the_repository_logo():
 def test_generation_survives_a_missing_logo(tmp_path, monkeypatch):
     monkeypatch.setattr(log_banners, "LOGO_PATH", tmp_path / "absent.png")
     image = log_banners.build_banner("error")
-    assert image.size == (1024, 64)
+    assert image.size == (1024, log_banners.HEIGHT)
 
 
 def test_no_invisible_padding_and_no_hard_rules_in_the_renderer():
@@ -273,3 +279,34 @@ def test_les_commandes_en_texte_libre_n_ont_pas_de_banniere():
     structure = panneau_pour("balance", "Economy")
     assert structure.avec_banniere is True
     assert [f.filename for f in structure.fichiers()] == [log_banners.nom_fichier("economy")]
+
+
+def test_les_bannieres_servies_par_url_sont_versionnees():
+    """Discord met en cache l'image d'un embed PAR URL, pendant des heures : changer
+    le dessin sans changer le nom laissait l'ancienne bannière s'afficher (cas réel
+    du 23/09/2026, capture de Jayden). Le nom porte donc la version du dessin."""
+    from utils import command_visuals
+
+    assert log_banners.BANNER_VERSION, "aucune version de bannière"
+    for famille in log_banners.STYLES:
+        nom = log_banners.nom_source(famille)
+        assert log_banners.BANNER_VERSION in nom, nom
+        assert command_visuals._BANNER_URLS[famille].endswith(nom), famille
+
+
+def test_une_commande_en_texte_libre_n_a_pas_de_banniere_sur_les_deux_chemins():
+    """+sentrix passe par le chemin embed (URL), pas par la pièce jointe : la règle
+    « pas de bannière » doit valoir sur les DEUX, sinon le bandeau revient."""
+    from types import SimpleNamespace
+
+    from cogs import final_interaction_policy as policy
+    from utils import command_visuals
+
+    jeton = policy._COMMAND_CONTEXT.set(
+        SimpleNamespace(command=SimpleNamespace(qualified_name="sentrix", cog_name="Ai"))
+    )
+    try:
+        assert command_visuals.banniere_desactivee() is True
+    finally:
+        policy._COMMAND_CONTEXT.reset(jeton)
+    assert command_visuals.banniere_desactivee() is False

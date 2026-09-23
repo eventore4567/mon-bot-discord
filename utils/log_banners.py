@@ -47,12 +47,13 @@ def _resolve_logo():
 
 LOGO_PATH = _resolve_logo()
 WIDTH = 1024
-# Bandeau fin : juste la place du logo et de son halo. Un bandeau haut ajoutait
-# du vide au-dessus et au-dessous du trait, visible même en transparent.
-HEIGHT = 64
+# Bandeau fin : juste la place du logo et de son halo. Un bandeau plus haut
+# ajouterait du vide au-dessus et au-dessous du trait ; plus bas, Discord réduit
+# l'image et le trait devient invisible sur mobile.
+HEIGHT = 72
 
 # Côté du logo centré : il reste petit, le trait occupe la largeur.
-LOGO_BOX = 42
+LOGO_BOX = 56
 # Le trait part à MARGE du bord et s'arrête à ÉCART du logo.
 MARGE = 14
 ECART = 12
@@ -96,6 +97,17 @@ STYLES = tuple(COLORS)
 EXTENSION = "webp"
 _QUALITE_WEBP = 88
 
+# Jeton de version des bannières SERVIES PAR URL. Discord met en cache l'image d'un
+# embed par URL, pendant des heures : changer le contenu d'un fichier sans changer
+# son nom laisse l'ancienne bannière s'afficher. À incrémenter à chaque refonte du
+# dessin, c'est la seule façon de forcer Discord à retélécharger.
+BANNER_VERSION = "v3"
+
+
+def nom_source(style: str) -> str:
+    """Nom du fichier committé, servi par URL GitHub raw (donc versionné)."""
+    return f"banner_source_{style}_{BANNER_VERSION}.{EXTENSION}"
+
 
 def nom_fichier(style: str) -> str:
     """Nom du fichier de banniere pour une famille."""
@@ -134,17 +146,21 @@ def _glow_lines(accent: tuple[int, int, int]) -> Image.Image:
         else:
             continue
         t = t * t * (3.0 - 2.0 * t)  # smoothstep : aucune coupure franche
-        blanc = round(110 * t * t)   # le cœur vire au blanc là où il est le plus fort
-        pix_coeur[x, milieu_y] = (
-            min(255, accent[0] + blanc), min(255, accent[1] + blanc),
-            min(255, accent[2] + blanc), round(255 * t),
-        )
-        pix_coeur[x, milieu_y - 1] = (*accent, round(110 * t))
-        pix_coeur[x, milieu_y + 1] = (*accent, round(80 * t))
-        for decalage in (-2, -1, 0, 1, 2):
-            pix_halo[x, milieu_y + decalage] = (*accent, round(190 * t))
+        # Le trait garde sa COULEUR sur toute sa longueur : un cœur qui vire au blanc
+        # trop tôt donnait un trait pâle au lieu d'un vrai rouge ou d'un vrai bleu.
+        blanc = round(70 * t ** 4)
+        coeur_alpha = round(255 * t)
+        for decalage in (0, 1):  # 2 px de cœur : lisible même réduit par Discord
+            pix_coeur[x, milieu_y + decalage] = (
+                min(255, accent[0] + blanc), min(255, accent[1] + blanc),
+                min(255, accent[2] + blanc), coeur_alpha,
+            )
+        pix_coeur[x, milieu_y - 1] = (*accent, round(150 * t))
+        pix_coeur[x, milieu_y + 2] = (*accent, round(120 * t))
+        for decalage in (-2, -1, 0, 1, 2, 3):
+            pix_halo[x, milieu_y + decalage] = (*accent, round(215 * t))
 
-    halo = halo.filter(ImageFilter.GaussianBlur(3.5))
+    halo = halo.filter(ImageFilter.GaussianBlur(4))
     return Image.alpha_composite(halo, coeur)
 
 
@@ -163,11 +179,11 @@ def _tinted_logo(logo: Image.Image, accent: tuple[int, int, int]) -> Image.Image
     for y in range(logo.height):
         for x in range(logo.width):
             niveau = source[x, y] / 255.0
-            ombre = 0.45 + niveau * 0.55
+            ombre = 0.55 + niveau * 0.45
             cible[x, y] = (
-                min(255, round(accent[0] * ombre + 255 * niveau * niveau * 0.55)),
-                min(255, round(accent[1] * ombre + 255 * niveau * niveau * 0.55)),
-                min(255, round(accent[2] * ombre + 255 * niveau * niveau * 0.55)),
+                min(255, round(accent[0] * ombre + 255 * niveau ** 3 * 0.45)),
+                min(255, round(accent[1] * ombre + 255 * niveau ** 3 * 0.45)),
+                min(255, round(accent[2] * ombre + 255 * niveau ** 3 * 0.45)),
                 255,
             )
     teinte.putalpha(alpha)
@@ -199,7 +215,7 @@ def _composite_logo(image: Image.Image, accent: tuple[int, int, int]) -> Image.I
     masque.paste(logo.getchannel("A"), (x, y))
     masque = masque.filter(ImageFilter.GaussianBlur(5))
     halo = Image.new("RGBA", (WIDTH, HEIGHT), (*accent, 0))
-    halo.putalpha(masque.point(lambda valeur: min(95, round(valeur * 0.42))))
+    halo.putalpha(masque.point(lambda valeur: min(120, round(valeur * 0.50))))
     image = Image.alpha_composite(image, halo)
     image.alpha_composite(logo, (x, y))
     return image
@@ -295,7 +311,7 @@ def _purge_anciennes_bannieres() -> None:
     pour toujours et pourrait encore être servie.
     """
     attendus = {nom_fichier(style) for style in COLORS}
-    attendus |= {f"banner_source_{style}.{EXTENSION}" for style in COLORS}
+    attendus |= {nom_source(style) for style in COLORS}
     for chemin in BANNER_DIR.glob("banner_*"):
         if chemin.name in attendus:
             continue
@@ -331,5 +347,5 @@ __all__ = [
     "BANNER_DIR", "COLORS", "HEIGHT", "LOGO_PATH", "STYLES", "WIDTH",
     "banner_kind", "build_banner", "ensure_banners", "get_banner", "LOGO_BOX",
     "family_for_command", "MODULE_FAMILIES", "COG_FAMILIES", "COMMAND_FAMILIES",
-    "MARGE", "ECART",
+    "MARGE", "ECART", "BANNER_VERSION", "nom_source",
 ]

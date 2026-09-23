@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import secrets
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 
@@ -313,6 +314,31 @@ def random_reward(rng, lo: int, hi: int) -> int:
     """Petit utilitaire commun : montant aléatoire entre lo et hi inclus, via le module
     `random` fourni par l'appelant (pour rester testable/déterministe si besoin)."""
     return rng.randint(lo, hi)
+
+
+def normalize_answer(value: str) -> str:
+    """Normalise une réponse joueur sans changer le sens attendu du jeu."""
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    ascii_text = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return " ".join(ascii_text.casefold().strip().split())
+
+
+def answer_matches(player_answer: str, expected: str | list[str] | tuple[str, ...] | set[str]) -> bool:
+    """Compare une réponse à une ou plusieurs réponses acceptées.
+
+    Les accents, la casse et les espaces répétés ne doivent pas transformer une
+    bonne réponse en défaite frustrante.
+    """
+    accepted = expected if isinstance(expected, (list, tuple, set)) else (expected,)
+    normalized_player = normalize_answer(player_answer)
+    return any(normalized_player == normalize_answer(answer) for answer in accepted)
+
+
+def skill_reward(base_amount: int, *, difficulty: str = "normal", attempts: int = 1, max_attempts: int = 1) -> int:
+    """Petit ajustement borné pour rendre les jeux moins plats sans casser l'économie."""
+    difficulty_bonus = {"easy": -3, "normal": 0, "hard": 6}.get(difficulty, 0)
+    speed_bonus = max(0, int(max_attempts) - int(attempts)) * 2
+    return max(1, int(base_amount) + difficulty_bonus + speed_bonus)
 
 
 # Cooldowns (secondes) de chaque mini-jeu — à titre INFORMATIF pour +dailygames (affiche à

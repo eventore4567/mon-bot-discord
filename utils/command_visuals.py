@@ -25,8 +25,14 @@ _BANNER_RAW_BASE = (
 # Une URL par famille de bannière : les cinq états, plus les domaines, pour que ce
 # chemin (embed + image distante) donne la même couleur que le chemin panneau
 # (pièce jointe). Les fichiers sont committés et servis par GitHub raw.
+def _url_source(famille: str) -> str:
+    from .log_banners import nom_source
+
+    return f"{_BANNER_RAW_BASE}/{nom_source(famille)}"
+
+
 _BANNER_URLS = {
-    famille: f"{_BANNER_RAW_BASE}/banner_source_{famille}.webp"
+    famille: _url_source(famille)
     for famille in (
         "success", "error", "warning", "info", "special",
         "moderation", "security", "tickets", "economy", "levels",
@@ -45,7 +51,7 @@ def _hex(famille: str) -> int:
 _ACCENTS = {famille: _hex(famille) for famille in _BANNER_URLS}
 
 _DECORATIVE_LINE_RE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]{8,}$")
-_COMMAND_BANNER_RE = re.compile(r"/banner_source_[a-z]+\.webp(?:\?.*)?$")
+_COMMAND_BANNER_RE = re.compile(r"/banner_source_[a-z]+(?:_v\d+)?\.webp(?:\?.*)?$")
 
 _ERROR_WORDS = (
     "erreur", "impossible", "introuvable", "interdit", "refus", "échou", "echec",
@@ -153,6 +159,21 @@ def resolve_kind(
     return "info"
 
 
+def banniere_desactivee() -> bool:
+    """Vrai quand la commande en cours répond en texte libre (IA, traduction).
+
+    Le chemin embed pose la bannière par URL, indépendamment du chemin panneau :
+    sans cette garde, +sentrix gardait un bandeau alors que la règle existait déjà
+    côté pièce jointe.
+    """
+    try:
+        from .sentrix_panels import commande_en_texte_libre
+
+        return commande_en_texte_libre()
+    except Exception:
+        return False
+
+
 def banner_url(kind: str) -> str:
     """URL de bannière pour une intention, accordée à la commande en cours.
 
@@ -179,7 +200,10 @@ def _decorate_embed(embed: discord.Embed, kind: str) -> discord.Embed:
     """Add the command banner without replacing a semantic image."""
     result = embed.copy()
     current_image = getattr(getattr(result, "image", None), "url", None)
-    if not current_image or _is_command_banner(current_image):
+    if banniere_desactivee():
+        if current_image and _is_command_banner(current_image):
+            result.set_image(url=None)
+    elif not current_image or _is_command_banner(current_image):
         result.set_image(url=banner_url(kind))
     return result
 
@@ -312,7 +336,8 @@ def _native_payload(
             description=_clean_text(content, limit=3900) or None,
             colour=discord.Colour(_ACCENTS[kind]),
         )
-        panel.set_image(url=banner_url(kind))
+        if not banniere_desactivee():
+            panel.set_image(url=banner_url(kind))
         output["embed"] = panel
         return None, output
 
@@ -426,7 +451,7 @@ def _install_embed_banner_factory() -> None:
             kind = _kind_from_colour(getattr(result, "colour", None)) or "special"
 
         current_image = getattr(getattr(result, "image", None), "url", None)
-        if not current_image:
+        if not current_image and not banniere_desactivee():
             result.set_image(url=banner_url(kind))
         return result
 
@@ -457,6 +482,7 @@ def install_command_visuals() -> None:
 __all__ = [
     "CommandPanelView",
     "banner_url",
+    "banniere_desactivee",
     "install_command_visuals",
     "resolve_kind",
 ]
