@@ -65,7 +65,7 @@ PUBLIC_COMMANDS = frozenset({
     # strictes que cette racine — sans lui, TOUT +giveaway (y compris +giveaway
     # create) était bloqué aux membres normaux, alors que +giveaway-list restait
     # public : incohérence confirmée par exécution (utils/access_matrix.py::evaluate).
-    "ticket", "ticketcenter", "giveaway-list", "giveaway", "event-join", "event-leave",
+    "ticket", "giveaway-list", "giveaway", "event-join", "event-leave",
     "event-list", "tournament-join", "tournament-list", "invites",
     "invite-leaderboard", "invited-by",
     # Statistiques publiques
@@ -93,7 +93,7 @@ PUBLIC_COMMANDS = frozenset({
     # corps de la commande, pas ici (la cible n'est pas connue au niveau matrice).
     "permissions",
     # Hubs et profils membre (anciennement fail-closed par oubli)
-    "home", "gamehub", "economyhub", "checkin", "progress", "profilecard",
+    "checkin", "progress", "profilecard",
     "achievements", "achievements-v21", "challenges", "missions", "gamelobby", "matchmake",
     "market", "market-buy", "market-sell", "market-cancel", "market-find",
     "market-history", "market-my", "transactions", "shopwindow",
@@ -305,7 +305,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "shopstock", "shopwindowclear",
     }),
     "ai": frozenset({
-        "aisetup", "aidiag", "aicenter", "aicontext", "aimemorychannel",
+        "aisetup", "aidiag", "aicontext", "aimemorychannel",
         "airolequota", "ai enable", "ai disable",
     }),
     "logs": frozenset({"createalllogs", "testlogs", "logevent", "logsearch"}),
@@ -504,7 +504,7 @@ def module_for_command(name: str) -> str | None:
                     "withdraw", "banque", "economy", "economyleaderboard",
                     "leaderboard-money", "market", "market-buy", "market-sell",
                     "market-cancel", "market-find", "market-history",
-                    "market-my", "transactions", "shopwindow", "economyhub"}:
+                    "market-my", "transactions", "shopwindow"}:
             return "economy"
         if name in {"stats", "me", "level", "rank", "leaderboard-levels",
                     "level-roles", "profile", "set-bio", "rep", "reputation",
@@ -515,7 +515,7 @@ def module_for_command(name: str) -> str | None:
                     "image", "image-prompt", "explain", "rewrite", "fact-check",
                     "ai", "improve", "correct", "ai-translate", "code"}:
             return "ai"
-        if name in {"ticket", "ticketcenter"}:
+        if name == "ticket":
             return "tickets"
     return None
 

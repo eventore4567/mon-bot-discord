@@ -22,9 +22,12 @@ from utils import sentrix_panels as panels
 logger = logging.getLogger("bot.sentrix-v2")
 
 
+# +home, +economyhub, +gamehub, +aicenter et +ticketcenter ont été retirées le
+# 23/09/2026 : elles n'ouvraient qu'un menu vers des commandes maintenues
+# (+setup, +economy, /jeux, +ai, +ticket) et affichaient le même contenu qu'elles.
 V2_PUBLIC_COMMANDS = frozenset({
-    "home", "profilecard", "economyhub", "gamehub", "aicenter", "ticketcenter",
-    "progress", "checkin", "market", "market-sell", "market-buy", "market-cancel",
+    "profilecard", "progress", "checkin",
+    "market", "market-sell", "market-buy", "market-cancel",
 })
 V2_DIRECT_COMMANDS = V2_PUBLIC_COMMANDS | {"modcenter"}
 
@@ -154,6 +157,11 @@ class CheckinButton(discord.ui.Button):
         await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
 
 
+# HomeView / GameView et les constructeurs build_*_embed ci-dessous ne sont plus
+# ouverts par aucune commande depuis le retrait de +home et +gamehub (23/09/2026).
+# Ils restent en place parce que les panneaux déjà envoyés dans les salons peuvent
+# encore être cliqués jusqu'au prochain redémarrage : SentriXView n'est pas
+# persistante, elle meurt au reboot, mais pas avant.
 class HomeView(design_system.SentriXView):
     def __init__(self, cog: "SentriXV2", guild: discord.Guild, member: discord.Member, staff: bool):
         super().__init__(author_id=member.id, allowed_staff=False, timeout=240)
@@ -604,37 +612,10 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         e.add_field(name="Acheter / annuler", value="`+market-buy <id>` · `+market-cancel <id>`", inline=False)
         return e
 
-    @commands.hybrid_command(name="home", aliases=["sentrixhome"], description="Ouvrir le centre de contrôle SentriX.", with_app_command=False)
-    async def home(self, ctx):
-        if ctx.guild is None or not isinstance(ctx.author, discord.Member): return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
-        view = HomeView(self, ctx.guild, ctx.author, await self.can_staff_context(ctx))
-        view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await self.build_home_embed(ctx.guild, ctx.author)), view))
-
     @commands.hybrid_command(name="profilecard", aliases=["profilcard"], description="Afficher votre carte de profil.", with_app_command=False)
     async def profilecard(self, ctx, membre: discord.Member = None):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         await panels.envoyer(ctx, panels.depuis_embed(await self.build_profile_embed(ctx.guild, membre or ctx.author)))
-
-    @commands.hybrid_command(name="economyhub", description="Ouvrir le tableau de bord de l'économie du serveur.", with_app_command=False)
-    async def economyhub(self, ctx):
-        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
-        await panels.envoyer(ctx, panels.depuis_embed(await self.build_economy_embed(ctx.guild, ctx.author)))
-
-    @commands.hybrid_command(name="gamehub", description="Ouvrir le hub interactif des jeux.", with_app_command=False)
-    async def gamehub(self, ctx):
-        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
-        view = GameView(self, ctx.author)
-        view.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await self.build_games_embed(ctx.guild, ctx.author)), view))
-
-    @commands.hybrid_command(name="aicenter", description="Afficher le centre IA.", with_app_command=False)
-    async def aicenter(self, ctx):
-        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
-        await panels.envoyer(ctx, panels.depuis_embed(await self.build_ai_embed(ctx.guild, ctx.author)))
-
-    @commands.hybrid_command(name="ticketcenter", description="Afficher le centre de tickets.", with_app_command=False)
-    async def ticketcenter(self, ctx):
-        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
-        await panels.envoyer(ctx, panels.depuis_embed(await self.build_ticket_embed(ctx.guild, ctx.author)))
 
     @commands.hybrid_command(name="progress", description="Afficher la progression globale et les badges.", with_app_command=False)
     async def progress(self, ctx, membre: discord.Member = None):
