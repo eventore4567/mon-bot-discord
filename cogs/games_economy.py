@@ -721,40 +721,56 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "fasttype", 15)
         if not started:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Retape vite', description=err, kind='warning')))
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await _embed(self.bot, guild_id, title="Course de vitesse", description=err, kind="warning")
+                ),
+            )
 
         difficulty = await _game_difficulty(self.bot, guild_id)
         challenge = _make_fasttype_challenge(difficulty)
-        _length, preview_seconds, bonus = _difficulty_profile(difficulty)
+        _length, ready_delay, bonus = _difficulty_profile(difficulty)
         challenge_tokens = challenge.split()
+
         msg = await panels.envoyer(
             ctx,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Course de vitesse — préparez-vous",
+                    description=(
+                        "⌨️ **But du jeu**\n"
+                        "Dans un instant, un petit code apparaît sous forme de cases.\n"
+                        "Recopiez-le **dans le chat**, dans le même ordre, avec un espace entre chaque case.\n\n"
+                        "🧪 Exemple : NOVA 7 🔥 2\n"
+                        f"🎚️ Difficulté : **{difficulty}** · {len(challenge_tokens)} cases\n"
+                        "⏳ Préparez-vous..."
+                    ),
+                )
+            ),
+        )
+        await asyncio.sleep(ready_delay)
+
+        token_view = _PreviewTokensView(challenge_tokens)
+        await panels.editer(
+            msg,
             panels.avec_composants(
                 panels.depuis_embed(
                     await _embed(
                         self.bot,
                         guild_id,
-                        title="Retape vite — mémorisez",
+                        title="Course de vitesse — GO",
                         description=(
-                            f"⌨️ Niveau **{difficulty}** · {len(challenge_tokens)} éléments\n"
-                            f"Les boutons disparaissent dans **{preview_seconds:.1f}s**. "
-                            "Ils sont volontairement non sélectionnables pour éviter le simple copier-coller."
+                            "⚡ **GO ! Recopiez les cases ci-dessous dans le chat.**\n"
+                            "Les cases restent visibles : pas besoin de mémoriser.\n"
+                            "Elles ne sont pas sélectionnables, donc pas de simple copier-coller.\n"
+                            "⏱️ Vous avez **20 secondes**."
                         ),
                     )
                 ),
-                _PreviewTokensView(challenge_tokens),
-            ),
-        )
-        await asyncio.sleep(preview_seconds)
-        await panels.editer(
-            msg,
-            panels.depuis_embed(
-                await _embed(
-                    self.bot,
-                    guild_id,
-                    title="Retape vite — GO",
-                    description="⚡ Retapez maintenant le code exact. **15 secondes**.",
-                )
+                token_view,
             ),
         )
         start_time = time.monotonic()
@@ -763,7 +779,7 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
 
         try:
-            answer = await self.bot.wait_for("message", check=check, timeout=15)
+            answer = await self.bot.wait_for("message", check=check, timeout=20)
         except asyncio.TimeoutError:
             await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
             return await panels.editer(
@@ -772,15 +788,15 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                     await _embed(
                         self.bot,
                         guild_id,
-                        title="Retape vite — temps écoulé",
-                        description=f"⏱️ Le code était **{challenge}**.",
+                        title="Course de vitesse — temps écoulé",
+                        description=f"⏱️ Le code était : **{challenge}**\n🔁 Réessayez dans quelques secondes.",
                         kind="warning",
                     )
                 ),
             )
 
         elapsed = time.monotonic() - start_time
-        if answer.content.strip() != challenge:
+        if game_rewards.normalize_answer(answer.content) != game_rewards.normalize_answer(challenge):
             await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
             return await panels.editer(
                 msg,
@@ -788,14 +804,18 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                     await _embed(
                         self.bot,
                         guild_id,
-                        title="Retape vite — erreur",
-                        description=f"❌ Le code exact était **{challenge}**.",
+                        title="Course de vitesse — presque",
+                        description=(
+                            f"❌ Votre réponse : **{answer.content.strip() or 'vide'}**\n"
+                            f"✅ Il fallait écrire : **{challenge}**\n"
+                            "Astuce : gardez bien un espace entre chaque case."
+                        ),
                         kind="danger",
                     )
                 ),
             )
 
-        speed_bonus = 12 if elapsed < 4 else 7 if elapsed < 7 else 3
+        speed_bonus = 12 if elapsed < 5 else 7 if elapsed < 9 else 3
         reward = await _finish(self.bot, ctx, "fasttype", sid, "win", 18 + bonus + speed_bonus)
         await panels.editer(
             msg,
@@ -803,15 +823,15 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                 await _embed(
                     self.bot,
                     guild_id,
-                    title="Retape vite — terminé",
+                    title="Course de vitesse — réussi",
                     description=(
-                        f"⚡ Exact en **{elapsed:.1f}s** · bonus vitesse **+{speed_bonus}**"
+                        f"🏁 Code exact en **{elapsed:.1f}s**.\n"
+                        f"⚡ Bonus vitesse : **+{speed_bonus}**"
                     ) + _reward_line(reward),
                     kind="success",
                 )
             ),
         )
-
 
 async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cooldown: int, mode: str):
     guild_id = ctx.guild.id if ctx.guild else None
