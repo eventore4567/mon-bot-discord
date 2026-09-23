@@ -80,3 +80,29 @@ def test_editer_refuse_ce_que_discord_refuse():
     # La banniere est reattachee : un panneau d'une autre intention pointe vers
     # un AUTRE nom de fichier, et Discord garderait sinon l'ancienne image.
     assert [f.filename for f in cible.recu["attachments"]] == ["banner_success.webp"]
+
+
+def test_avec_composants_preserves_original_business_view_for_callbacks():
+    """Un Button déplacé dans Panneau garde une référence vers sa View métier.
+
+    Régression production : self.view devenait Panneau et les jeux plantaient sur
+    view._lock / view.selected / view.winner après le premier clic.
+    """
+    import discord
+    from utils import sentrix_panels as panels
+
+    class Source(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=30)
+            self._lock = object()
+            self.selected = None
+            self.add_item(discord.ui.Button(label="Choisir"))
+
+    source = Source()
+    button = source.children[0]
+    panel = panels.avec_composants(panels.Panneau(titre="Test"), source)
+
+    assert panels.vue_source(button) is source
+    assert getattr(source, "_sentrix_panel_view") is panel
+    assert panels.vue_panneau(button) is panel
+    assert panels.vue_source(button) is source

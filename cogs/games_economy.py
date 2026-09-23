@@ -57,7 +57,7 @@ from cogs.games_catalog import (
     SOLO_FLAVORS,
     WORDGAME_CLUES,
 )
-from utils import checks, design_system, game_rewards, stats_service
+from utils import checks, design_system, game_rewards, stats_service, temporary_boosts
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.games-economy")
@@ -65,22 +65,51 @@ logger = logging.getLogger("bot.games-economy")
 TICTACTOE_QUESTIONS = None  # (placeholder retiré — voir cogs/minigames.py pour tictactoe)
 
 
+def _game_icon(title: str) -> str:
+    value = str(title or "").casefold()
+    for words, icon in (
+        (("réaction", "reaction", "clic"), "⚡"),
+        (("vitesse", "retape", "fast"), "⌨️"),
+        (("mémoire", "memory"), "🧠"),
+        (("mine", "minage", "démineur"), "⛏️"),
+        (("chasse", "hunt"), "🏹"),
+        (("pêche", "peche", "fishing"), "🎣"),
+        (("donjon", "dungeon"), "🗝️"),
+        (("trésor", "tresor", "treasure"), "💎"),
+        (("aventure", "quête", "quete"), "🗺️"),
+        (("plus haut", "plus bas"), "🃏"),
+        (("quiz", "trivia"), "❓"),
+        (("course", "race"), "🏁"),
+        (("duel",), "⚔️"),
+    ):
+        if any(word in value for word in words):
+            return icon
+    return "🎮"
+
+
 async def _embed(bot, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
     style = design_system.CATEGORY_STYLES["games"]
     colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
     default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
     design = await bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
-    return design_system.create_embed(
-        title=design_system.kind_title(title, kind=kind, category_emoji=style["emoji"]),
+    resolved_title = design_system.kind_title(title, kind=kind, category_emoji=style["emoji"])
+    embed = design_system.create_embed(
+        title=resolved_title,
         description=description,
         colour=design.get(colour_key, default_colour),
         footer=design.get("footer"),
     )
+    embed.title = f"{_game_icon(title)} {resolved_title}"
+    if description:
+        embed.description = str(description)
+    return embed
 
 
 def _reward_line(reward: "game_rewards.GameReward | None") -> str:
     if reward and reward.success and reward.amount > 0:
-        return f"\n\n🪙 **+{reward.amount}** crédités ! (réf. `{reward.display_id}`)"
+        boost = float((reward.metadata or {}).get("money_boost", 1.0) or 1.0)
+        suffix = f" · 🚀 boost x{boost:g}" if boost > 1.0 else ""
+        return f"\n\n🪙 **+{reward.amount}** crédités !{suffix} (réf. `{reward.display_id}`)"
     if reward and reward.reason == "daily_limit":
         return (
             "\n\n🪙 **Récompense quotidienne maximale atteinte.** "
@@ -99,12 +128,12 @@ def _difficulty_profile(value: str) -> tuple[int, float, int]:
     """Retourne longueur du défi, temps d'affichage et multiplicateur de récompense."""
     value = str(value or "normal").casefold()
     return {
-        "facile": (5, 3.2, 0),
-        "easy": (5, 3.2, 0),
-        "normal": (7, 2.4, 5),
-        "difficile": (9, 1.8, 10),
-        "hard": (9, 1.8, 10),
-    }.get(value, (7, 2.4, 5))
+        "facile": (3, 0.8, 0),
+        "easy": (3, 0.8, 0),
+        "normal": (4, 1.2, 4),
+        "difficile": (6, 1.5, 9),
+        "hard": (6, 1.5, 9),
+    }.get(value, (4, 1.2, 4))
 
 
 async def _game_difficulty(bot, guild_id: int | None) -> str:
@@ -692,40 +721,56 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "fasttype", 15)
         if not started:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Retape vite', description=err, kind='warning')))
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await _embed(self.bot, guild_id, title="Course de vitesse", description=err, kind="warning")
+                ),
+            )
 
         difficulty = await _game_difficulty(self.bot, guild_id)
         challenge = _make_fasttype_challenge(difficulty)
-        _length, preview_seconds, bonus = _difficulty_profile(difficulty)
+        _length, ready_delay, bonus = _difficulty_profile(difficulty)
         challenge_tokens = challenge.split()
+
         msg = await panels.envoyer(
             ctx,
+            panels.depuis_embed(
+                await _embed(
+                    self.bot,
+                    guild_id,
+                    title="Course de vitesse — préparez-vous",
+                    description=(
+                        "⌨️ **But du jeu**\n"
+                        "Dans un instant, un petit code apparaît sous forme de cases.\n"
+                        "Recopiez-le **dans le chat**, dans le même ordre, avec un espace entre chaque case.\n\n"
+                        "🧪 Exemple : NOVA 7 🔥 2\n"
+                        f"🎚️ Difficulté : **{difficulty}** · {len(challenge_tokens)} cases\n"
+                        "⏳ Préparez-vous..."
+                    ),
+                )
+            ),
+        )
+        await asyncio.sleep(ready_delay)
+
+        token_view = _PreviewTokensView(challenge_tokens)
+        await panels.editer(
+            msg,
             panels.avec_composants(
                 panels.depuis_embed(
                     await _embed(
                         self.bot,
                         guild_id,
-                        title="Retape vite — mémorisez",
+                        title="Course de vitesse — GO",
                         description=(
-                            f"⌨️ Niveau **{difficulty}** · {len(challenge_tokens)} éléments\n"
-                            f"Les boutons disparaissent dans **{preview_seconds:.1f}s**. "
-                            "Ils sont volontairement non sélectionnables pour éviter le simple copier-coller."
+                            "⚡ **GO ! Recopiez les cases ci-dessous dans le chat.**\n"
+                            "Les cases restent visibles : pas besoin de mémoriser.\n"
+                            "Elles ne sont pas sélectionnables, donc pas de simple copier-coller.\n"
+                            "⏱️ Vous avez **20 secondes**."
                         ),
                     )
                 ),
-                _PreviewTokensView(challenge_tokens),
-            ),
-        )
-        await asyncio.sleep(preview_seconds)
-        await panels.editer(
-            msg,
-            panels.depuis_embed(
-                await _embed(
-                    self.bot,
-                    guild_id,
-                    title="Retape vite — GO",
-                    description="⚡ Retapez maintenant le code exact. **15 secondes**.",
-                )
+                token_view,
             ),
         )
         start_time = time.monotonic()
@@ -734,7 +779,7 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
 
         try:
-            answer = await self.bot.wait_for("message", check=check, timeout=15)
+            answer = await self.bot.wait_for("message", check=check, timeout=20)
         except asyncio.TimeoutError:
             await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
             return await panels.editer(
@@ -743,15 +788,15 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                     await _embed(
                         self.bot,
                         guild_id,
-                        title="Retape vite — temps écoulé",
-                        description=f"⏱️ Le code était **{challenge}**.",
+                        title="Course de vitesse — temps écoulé",
+                        description=f"⏱️ Le code était : **{challenge}**\n🔁 Réessayez dans quelques secondes.",
                         kind="warning",
                     )
                 ),
             )
 
         elapsed = time.monotonic() - start_time
-        if answer.content.strip() != challenge:
+        if game_rewards.normalize_answer(answer.content) != game_rewards.normalize_answer(challenge):
             await _finish(self.bot, ctx, "fasttype", sid, "loss", 0)
             return await panels.editer(
                 msg,
@@ -759,14 +804,18 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                     await _embed(
                         self.bot,
                         guild_id,
-                        title="Retape vite — erreur",
-                        description=f"❌ Le code exact était **{challenge}**.",
+                        title="Course de vitesse — presque",
+                        description=(
+                            f"❌ Votre réponse : **{answer.content.strip() or 'vide'}**\n"
+                            f"✅ Il fallait écrire : **{challenge}**\n"
+                            "Astuce : gardez bien un espace entre chaque case."
+                        ),
                         kind="danger",
                     )
                 ),
             )
 
-        speed_bonus = 12 if elapsed < 4 else 7 if elapsed < 7 else 3
+        speed_bonus = 12 if elapsed < 5 else 7 if elapsed < 9 else 3
         reward = await _finish(self.bot, ctx, "fasttype", sid, "win", 18 + bonus + speed_bonus)
         await panels.editer(
             msg,
@@ -774,15 +823,15 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                 await _embed(
                     self.bot,
                     guild_id,
-                    title="Retape vite — terminé",
+                    title="Course de vitesse — réussi",
                     description=(
-                        f"⚡ Exact en **{elapsed:.1f}s** · bonus vitesse **+{speed_bonus}**"
+                        f"🏁 Code exact en **{elapsed:.1f}s**.\n"
+                        f"⚡ Bonus vitesse : **+{speed_bonus}**"
                     ) + _reward_line(reward),
                     kind="success",
                 )
             ),
         )
-
 
 async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cooldown: int, mode: str):
     guild_id = ctx.guild.id if ctx.guild else None
@@ -823,10 +872,16 @@ class _PreviewTokensView(discord.ui.View):
 
     def __init__(self, tokens: list[str]):
         super().__init__(timeout=None)
+        visual_emojis = set(FASTTYPE_EMOJIS) | {
+            item for item in MEMORY_TOKENS if not str(item).isdigit()
+        }
         for index, token in enumerate(tokens[:20]):
+            value = str(token)
+            is_emoji = value in visual_emojis
             self.add_item(
                 discord.ui.Button(
-                    label=str(token)[:80],
+                    label=" " if is_emoji else value[:80],
+                    emoji=value if is_emoji else None,
                     style=discord.ButtonStyle.secondary,
                     disabled=True,
                     row=index // 5,
@@ -856,11 +911,14 @@ class _ReactionSoloView(discord.ui.View):
 
 class _ReactionButton(discord.ui.Button):
     def __init__(self, token: str, *, is_target: bool):
-        super().__init__(label=token, style=discord.ButtonStyle.secondary)
+        parts = str(token).split(maxsplit=1)
+        emoji = parts[0] if len(parts) == 2 else None
+        label = parts[1] if len(parts) == 2 else str(token)
+        super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.secondary)
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
-        view: _ReactionSoloView = self.view
+        view: _ReactionSoloView = panels.vue_source(self)
         async with view._lock:
             if view.correct is not None:
                 if not interaction.response.is_done():
@@ -871,8 +929,8 @@ class _ReactionButton(discord.ui.Button):
             for child in view.children:
                 child.disabled = True
             self.style = discord.ButtonStyle.success if self.is_target else discord.ButtonStyle.danger
-            await interaction.response.edit_message(view=view)
-            view.stop()
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
+            panels.terminer_vue(self)
 
 
 class _MinesweeperView(discord.ui.View):
@@ -958,8 +1016,11 @@ class _MinesweeperView(discord.ui.View):
             f"💥 Bombe touchée sur la case **{hit_index + 1}**. Manche perdue.",
             kind="danger",
         )
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.depuis_embed(embed))
         self.stop()
+        panel = getattr(self, "_sentrix_panel_view", None)
+        if panel is not None:
+            panel.stop()
 
     async def settle_win(self, interaction: discord.Interaction) -> None:
         if self._settled:
@@ -981,8 +1042,11 @@ class _MinesweeperView(discord.ui.View):
             + _reward_line(reward),
             kind="success",
         )
-        await interaction.response.edit_message(embed=embed, view=self)
+        await panels.editer(interaction.response, panels.depuis_embed(embed))
         self.stop()
+        panel = getattr(self, "_sentrix_panel_view", None)
+        if panel is not None:
+            panel.stop()
 
     async def on_timeout(self):
         if self._settled:
@@ -994,7 +1058,7 @@ class _MinesweeperView(discord.ui.View):
         if self.message is not None:
             try:
                 embed = await self.make_embed("⏱️ Partie expirée.", kind="warning")
-                await self.message.edit(embed=embed, view=self)
+                await panels.editer(self.message, panels.depuis_embed(embed))
             except discord.HTTPException:
                 pass
 
@@ -1009,7 +1073,7 @@ class _MinesweeperButton(discord.ui.Button):
         self.index = index
 
     async def callback(self, interaction: discord.Interaction):
-        view: _MinesweeperView = self.view
+        view: _MinesweeperView = panels.vue_source(self)
         async with view._lock:
             if view._settled or self.index in view.revealed:
                 if not interaction.response.is_done():
@@ -1033,10 +1097,10 @@ class _MinesweeperButton(discord.ui.Button):
             if len(view.revealed) >= view.safe_target:
                 return await view.settle_win(interaction)
 
-            embed = await view.make_embed(
-                f"⛏️ Case sûre. **{around}** bombe(s) autour."
-            )
-            await interaction.response.edit_message(embed=embed, view=view)
+            # Les boutons vivent dans le Panneau Components V2 : leurs labels/styles
+            # changent directement dans cette LayoutView. On accuse réception sans
+            # tenter de réinjecter un embed classique (interdit par Discord).
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
 
 
 class _HighLowView(discord.ui.View):
@@ -1062,7 +1126,7 @@ class _HighLowButton(discord.ui.Button):
         self.choice = choice
 
     async def callback(self, interaction: discord.Interaction):
-        view: _HighLowView = self.view
+        view: _HighLowView = panels.vue_source(self)
         async with view._lock:
             if view.choice is not None:
                 if not interaction.response.is_done():
@@ -1071,8 +1135,8 @@ class _HighLowButton(discord.ui.Button):
             view.choice = self.choice
             for child in view.children:
                 child.disabled = True
-            await interaction.response.edit_message(view=view)
-            view.stop()
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
+            panels.terminer_vue(self)
 
 
 class _ColorQuizView(discord.ui.View):
@@ -1096,12 +1160,12 @@ class _ColorButton(discord.ui.Button):
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
-        view: _ColorQuizView = self.view
+        view: _ColorQuizView = panels.vue_source(self)
         view.correct = self.is_target
         for child in view.children:
             child.disabled = True
-        await interaction.response.edit_message(view=view)
-        view.stop()
+        await interaction.response.edit_message(view=panels.vue_panneau(self))
+        panels.terminer_vue(self)
 
 
 # =============================================================================
@@ -1214,7 +1278,7 @@ class _RPSPickButton(discord.ui.Button):
         self.value = value
 
     async def callback(self, interaction: discord.Interaction):
-        view: _RPSPickView = self.view
+        view: _RPSPickView = panels.vue_source(self)
         view.outer.choices[view.picker.id] = self.value
         for child in view.children:
             child.disabled = True
@@ -1275,7 +1339,7 @@ class _RPSDuelButton(discord.ui.Button):
         super().__init__(label="🎯 Faire mon choix", style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
-        view: _RPSDuelView = self.view
+        view: _RPSDuelView = panels.vue_source(self)
         if interaction.user.id not in (view.p1.id, view.p2.id):
             return await interaction.response.send_message("❌ Ce duel ne vous concerne pas.", ephemeral=True)
         if interaction.user.id in view.choices:
@@ -1436,7 +1500,7 @@ class _DuelModalButton(discord.ui.Button):
         super().__init__(label=label, style=discord.ButtonStyle.primary)
 
     async def callback(self, interaction: discord.Interaction):
-        await self.view.open_modal(interaction)
+        await panels.vue_source(self).open_modal(interaction)
 
 
 class _ReactionDuelView(discord.ui.View):
@@ -1452,7 +1516,7 @@ class _ReactionDuelButton(discord.ui.Button):
         super().__init__(label="🔴 CLIQUEZ !", style=discord.ButtonStyle.danger)
 
     async def callback(self, interaction: discord.Interaction):
-        view: _ReactionDuelView = self.view
+        view: _ReactionDuelView = panels.vue_source(self)
         if interaction.user.id not in (view.p1.id, view.p2.id):
             return await interaction.response.send_message("❌ Ce duel ne vous concerne pas.", ephemeral=True)
         if view.winner is not None:
@@ -1460,7 +1524,7 @@ class _ReactionDuelButton(discord.ui.Button):
         view.winner = interaction.user
         self.disabled = True
         await interaction.response.defer()
-        view.stop()
+        panels.terminer_vue(self)
 
 
 class ConnectFourView(discord.ui.View):
@@ -1605,7 +1669,7 @@ class _ConnectFourButton(discord.ui.Button):
         self.col = col
 
     async def callback(self, interaction: discord.Interaction):
-        await self.view.play(interaction, self.col)
+        await panels.vue_source(self).play(interaction, self.col)
 
 
 # =============================================================================
@@ -1845,11 +1909,14 @@ class _CommunityRaceButtonView(discord.ui.View):
 
 class _CommunityRaceButton(discord.ui.Button):
     def __init__(self, token: str, *, is_target: bool):
-        super().__init__(label=token, style=discord.ButtonStyle.secondary)
+        parts = str(token).split(maxsplit=1)
+        emoji = parts[0] if len(parts) == 2 else None
+        label = parts[1] if len(parts) == 2 else str(token)
+        super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.secondary)
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
-        view: _CommunityRaceButtonView = self.view
+        view: _CommunityRaceButtonView = panels.vue_source(self)
         async with view._lock:
             if view.winner is not None:
                 if not interaction.response.is_done():
@@ -1867,8 +1934,8 @@ class _CommunityRaceButton(discord.ui.Button):
             self.style = discord.ButtonStyle.success
             # edit_message accuse réception immédiatement : le callback ne reste jamais
             # sans ACK et évite l'ancien panneau « Action interrompue ».
-            await interaction.response.edit_message(view=view)
-            view.stop()
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
+            panels.terminer_vue(self)
 
 
 class _EmojiRaceView(discord.ui.View):
@@ -1885,7 +1952,7 @@ class _EmojiRaceButton(discord.ui.Button):
         self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
-        view: _EmojiRaceView = self.view
+        view: _EmojiRaceView = panels.vue_source(self)
         if view.winner is not None:
             return await interaction.response.send_message("❌ Trop tard.", ephemeral=True)
         if not self.is_target:
@@ -1894,7 +1961,7 @@ class _EmojiRaceButton(discord.ui.Button):
         for child in view.children:
             child.disabled = True
         await interaction.response.defer()
-        view.stop()
+        panels.terminer_vue(self)
 
 
 # =============================================================================
@@ -1942,7 +2009,7 @@ class _SoloChoiceButton(discord.ui.Button):
         self.choice = (emoji, label, chance, multiplier, description)
 
     async def callback(self, interaction: discord.Interaction):
-        view: _SoloChoiceView = self.view
+        view: _SoloChoiceView = panels.vue_source(self)
         async with view._lock:
             if view.selected is not None:
                 if not interaction.response.is_done():
@@ -1951,8 +2018,8 @@ class _SoloChoiceButton(discord.ui.Button):
             view.selected = self.choice
             for child in view.children:
                 child.disabled = True
-            await interaction.response.edit_message(view=view)
-            view.stop()
+            await interaction.response.edit_message(view=panels.vue_panneau(self))
+            panels.terminer_vue(self)
 
 class GamesSolo(commands.Cog, name="GamesSolo"):
     def __init__(self, bot: commands.Bot):
@@ -2042,6 +2109,34 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
         text = game_rewards.secure_pick(succes)
         reward = await _finish(self.bot, ctx, game_name, sid, "win", amount)
 
+        boost_text = ""
+        if game_name == "adventure":
+            try:
+                money_boost, xp_boost, duration, rarity = temporary_boosts.quest_boost_for_risk(multiplier)
+                active_boost, granted = await temporary_boosts.grant_quest_boost(
+                    self.bot.db,
+                    guild_id,
+                    ctx.author.id,
+                    money_multiplier=money_boost,
+                    xp_multiplier=xp_boost,
+                    duration_seconds=duration,
+                    source=f"quest:{rarity}",
+                )
+                if granted:
+                    boost_text = (
+                        f"\n\n🚀 **Boost de quête {rarity} activé !**\n"
+                        f"🪙 Argent **x{active_boost.money_multiplier:g}** · "
+                        f"⭐ XP **x{active_boost.xp_multiplier:g}** · "
+                        f"⏱️ **{max(1, (active_boost.remaining() + 59) // 60)} min**"
+                    )
+                else:
+                    boost_text = (
+                        f"\n\n🚀 Votre boost actuel est déjà aussi fort ou meilleur : "
+                        f"argent x{active_boost.money_multiplier:g} · XP x{active_boost.xp_multiplier:g}."
+                    )
+            except Exception:
+                logger.warning("Boost de quête indisponible, résultat du jeu conservé.", exc_info=True)
+
         if reward and reward.success and reward.amount > 0:
             reward_text = (
                 f"🪙 **+{stats_service.format_number(reward.amount)}** crédités\n"
@@ -2061,7 +2156,7 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
                     description=(
                         f"{emoji} **{label}** · butin x{multiplier:g}\n{text}\n\n"
                         f"🎲 Chance jouée : **{round(chance * 100)}%**\n"
-                        f"{reward_text}\n\n"
+                        f"{reward_text}{boost_text}\n\n"
                         "🔁 Vous pouvez rejouer dans quelques secondes."
                     ),
                     kind="success",

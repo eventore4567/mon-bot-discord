@@ -260,7 +260,8 @@ def _attachment_line(attachment: discord.Attachment) -> str:
     else:
         size_text = f"{size} o"
     kind = str(getattr(attachment, "content_type", None) or "fichier")
-    return f"**{attachment.filename}** • {size_text} • `{kind}`"
+    icon = "🖼️" if kind.startswith("image/") else "📎"
+    return f"{icon} **{attachment.filename}** • {size_text} • `{kind}`"
 
 
 async def _best_effort_files(attachments: list[discord.Attachment]) -> list[discord.File]:
@@ -588,13 +589,17 @@ def _patch_raw_file_recovery(bot: commands.Bot) -> None:
             author_id = int(row["author_id"])
             panel = embeds.canonical_log_embed(
                 "Pièce jointe supprimée" if len(urls) == 1 else "Pièces jointes supprimées",
+                description=(
+                    f"🗑️ **{len(urls)}** pièce(s) jointe(s) ont été supprimées du message."
+                ),
                 fields=(
                     ("Salon", _channel_ref_v6(channel_id), False),
                     ("Auteur", f"<@{author_id}>", True),
                     ("Message", f"`{message_id}`", True),
-                    ("Fichiers", "\n".join(str(url) for url in urls)[:1024], False),
+                    ("Fichiers", "\n".join(f"📎 {url}" for url in urls)[:1024], False),
                 ),
             )
+            panel.colour = discord.Colour(embeds.COLOR_DANGER)
             await _send_files_log(
                 bot,
                 guild,
@@ -653,6 +658,9 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
             if len(message.attachments) == 1
             and str(message.attachments[0].content_type or "").startswith("image/")
             else ("Fichier supprimé" if len(message.attachments) == 1 else "Fichiers supprimés"),
+            description=(
+                f"🗑️ **{len(message.attachments)}** fichier(s) supprimé(s) avec ce message."
+            ),
             fields=(
                 ("Salon", _channel_value(message.channel), False),
                 ("Auteur", message.author.mention, True),
@@ -660,6 +668,9 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
                 ("Fichiers", "\n".join(lines)[:1024], False),
             ),
         )
+        # Une suppression est un événement destructif : l'ancien classifieur voyait
+        # le mot « supprimé » comme un succès et affichait le log en vert.
+        panel.colour = discord.Colour(embeds.COLOR_DANGER)
         if files:
             image_file = next(
                 (

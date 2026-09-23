@@ -106,3 +106,17 @@ if __name__ == "__main__":
     test_ticket_transcript_is_a_button_not_a_permanent_gray_attachment()
     test_reset_moves_all_ticket_types_and_preserves_unrelated_staff_channels()
     print("logs unified v6 contracts: ok")
+
+
+def test_deleted_file_log_is_destructive_readable_and_keeps_image_preview():
+    source = read(V6)
+    embeds_source = read(ROOT / "utils" / "embeds.py")
+
+    # La suppression ne doit plus être classée verte comme un « succès ».
+    assert "panel.colour = discord.Colour(embeds.COLOR_DANGER)" in source
+    assert 'icon = "🖼️" if kind.startswith("image/") else "📎"' in source
+    assert "fichier(s) supprimé(s) avec ce message" in source
+
+    # canonical_normalize_log ne doit plus jeter l'aperçu attachment://image.jpg.
+    assert 'image_url = getattr(source.image, "url", None)' in embeds_source
+    assert 'panel.set_image(url=str(image_url))' in embeds_source

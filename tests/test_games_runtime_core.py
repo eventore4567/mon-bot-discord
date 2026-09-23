@@ -414,16 +414,16 @@ def test_fasttype_challenge_always_mixes_word_number_and_emoji():
     challenge = games_economy._make_fasttype_challenge("normal")
     tokens = challenge.split()
 
-    assert len(tokens) == 7
+    assert len(tokens) == 4
     assert any(token.isdigit() for token in tokens)
     assert any(token in games_economy.FASTTYPE_WORDS for token in tokens)
     assert any(token in games_economy.FASTTYPE_EMOJIS for token in tokens)
 
 
 def test_memory_difficulty_changes_sequence_length():
-    assert len(games_economy._make_memory_sequence("facile")) == 5
-    assert len(games_economy._make_memory_sequence("normal")) == 7
-    assert len(games_economy._make_memory_sequence("difficile")) == 9
+    assert len(games_economy._make_memory_sequence("facile")) == 3
+    assert len(games_economy._make_memory_sequence("normal")) == 4
+    assert len(games_economy._make_memory_sequence("difficile")) == 6
 
 
 def test_reaction_round_has_four_unique_decoys_and_one_target():
@@ -460,7 +460,8 @@ def test_reactionevent_uses_targeted_safe_button_view():
 
     assert "options, target = _reaction_round()" in block
     assert "_CommunityRaceButtonView(options, target)" in block
-    assert "interaction.response.edit_message(view=view)" in source
+    assert "panels.vue_source(self)" in source
+    assert "panels.vue_panneau(self)" in source
 
 
 def test_minesweeper_is_public_and_has_a_real_command():
@@ -490,4 +491,106 @@ def test_typing_and_memory_previews_are_not_plain_copyable_text():
     assert "_PreviewTokensView(sequence)" in memory_block
     assert "_PreviewTokensView(challenge_tokens)" in fast_block
     assert "Mémorisez les boutons" in memory_block
-    assert "non sélectionnables" in fast_block
+    assert "ne sont pas sélectionnables" in fast_block
+    assert "Les cases restent visibles" in fast_block
+    assert "20 secondes" in fast_block
+
+
+def test_all_game_buttons_use_original_business_view_after_v2_relocation():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+
+    # Le bug production du 23/09 : self.view était devenu Panneau et n'avait plus
+    # _lock / winner / selected. Aucun callback jeu ne doit relire self.view.
+    assert "view: _HighLowView = self.view" not in source
+    assert "view: _SoloChoiceView = self.view" not in source
+    assert "view: _CommunityRaceButtonView = self.view" not in source
+    assert "view: _MinesweeperView = self.view" not in source
+    assert "panels.vue_source(self)" in source
+    assert "panels.terminer_vue(self)" in source
+
+
+def test_speed_race_default_is_short_clear_and_not_memory_only():
+    assert games_economy._difficulty_profile("normal")[0] == 4
+    assert games_economy._difficulty_profile("difficile")[0] == 6
+
+    from pathlib import Path
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+    block = source.split("async def fasttype", 1)[1].split(
+        "async def _run_word_guess", 1
+    )[0]
+    assert "Recopiez-le **dans le chat**" in block
+    assert "Les cases restent visibles" in block
+    assert "pas besoin de mémoriser" in block
+    assert "normalize_answer(answer.content)" in block
+
+
+def test_adventure_success_is_the_quest_that_grants_temporary_boost():
+    from pathlib import Path
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+    solo = source.split("async def _run_solo", 1)[1].split(
+        '@commands.hybrid_command(name="adventure"', 1
+    )[0]
+    assert 'if game_name == "adventure":' in solo
+    assert "grant_quest_boost" in solo
+    assert "Boost de quête" in solo
+
+
+@pytest.mark.asyncio
+async def test_relocated_highlow_button_updates_source_view_without_attribute_error():
+    """Reproduit exactement le bug vu sur Discord : le bouton vit dans Panneau,
+    mais son état métier (_lock/choice) reste sur _HighLowView."""
+    import discord
+    from utils import sentrix_panels as panels
+
+    source = games_economy._HighLowView(author_id=123)
+    button = source.children[0]
+    panel = panels.avec_composants(panels.Panneau(titre="Plus ou moins"), source)
+
+    response = SimpleNamespace(
+        edit_message=AsyncMock(),
+        send_message=AsyncMock(),
+        is_done=lambda: False,
+    )
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=123),
+        response=response,
+    )
+
+    await button.callback(interaction)
+
+    assert source.choice == "plus_haut"
+    response.edit_message.assert_awaited_once()
+    assert response.edit_message.await_args.kwargs["view"] is panel
+
+
+@pytest.mark.asyncio
+async def test_relocated_solo_choice_button_updates_source_view_without_attribute_error():
+    from utils import sentrix_panels as panels
+
+    choices = [("🧭", "Sûr", 0.9, 0.8, "test")]
+    source = games_economy._SoloChoiceView(author_id=123, choices=choices)
+    button = source.children[0]
+    panel = panels.avec_composants(panels.Panneau(titre="Quête"), source)
+
+    response = SimpleNamespace(
+        edit_message=AsyncMock(),
+        send_message=AsyncMock(),
+        is_done=lambda: False,
+    )
+    interaction = SimpleNamespace(
+        user=SimpleNamespace(id=123),
+        response=response,
+    )
+
+    await button.callback(interaction)
+
+    assert source.selected == choices[0]
+    assert response.edit_message.await_args.kwargs["view"] is panel

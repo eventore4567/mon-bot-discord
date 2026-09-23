@@ -19,7 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from services import levels as levels_service
-from utils import embeds, checks, stats_service, design_system, visual_v5
+from utils import embeds, checks, stats_service, design_system, visual_v5, temporary_boosts
 from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
 
@@ -758,6 +758,11 @@ class Levels(commands.Cog, name="Levels"):
                 xp_min, xp_max = xp_max, xp_min
             multiplier = conf["xp_multiplier"] if conf and conf["xp_multiplier"] else 1.0
             gained = round(random.randint(xp_min, xp_max) * multiplier)
+            # Les boosts de quête ne touchent que l'XP gagnée naturellement. Les
+            # commandes admin set-xp/add-xp gardent exactement la quantité demandée.
+            gained, _active_boost = await temporary_boosts.apply_xp_boost(
+                self.bot.db, message.guild.id, message.author.id, gained
+            )
 
             # _apply_xp_delta gère le verrou par membre (lecture+calcul+écriture atomiques)
             # et le recalcul du niveau — source unique partagée avec +add-xp.

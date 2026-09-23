@@ -33,6 +33,8 @@ import unicodedata
 import uuid
 from dataclasses import dataclass, field
 
+from utils import temporary_boosts
+
 DEFAULT_GAME_SETTINGS = {
     "enabled": True,
     "disabled_games": [],
@@ -275,6 +277,19 @@ async def reward_game_winner(
                 )
 
     final_amount = compute_reward(settings, base_amount) if result == "win" else 0
+    if result == "win" and final_amount > 0:
+        boosted_amount, boost = await temporary_boosts.apply_money_boost(
+            bot.db, guild_id, user_id, final_amount
+        )
+        if boost is not None:
+            metadata = {
+                **metadata,
+                "money_boost": boost.money_multiplier,
+                "boost_expires_at": boost.expires_at,
+                "base_reward_before_boost": final_amount,
+            }
+        final_amount = boosted_amount
+
     ok, display_id_or_reason, credited = await bot.db.record_game_reward(
         guild_id, user_id, game_name, session_id, result, final_amount, json.dumps(metadata),
     )
