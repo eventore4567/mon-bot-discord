@@ -491,7 +491,7 @@ def test_typing_and_memory_previews_are_not_plain_copyable_text():
     assert "_PreviewTokensView(sequence)" in memory_block
     assert "_PreviewTokensView(challenge_tokens)" in fast_block
     assert "Mémorisez les boutons" in memory_block
-    assert "non sélectionnables" in fast_block
+    assert "ne sont pas sélectionnables" in fast_block
     assert "Les cases restent visibles" in fast_block
     assert "20 secondes" in fast_block
 
