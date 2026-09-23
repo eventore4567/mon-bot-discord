@@ -1,9 +1,10 @@
 """Génération des bannières SentriX (1024x110, quatorze familles).
 
 Le visuel est volontairement minimal : le canevas est **100 % transparent**.
-Seuls deux éléments sont dessinés :
+Seuls trois éléments sont dessinés :
 - un long trait lumineux coloré de chaque côté ;
-- le logo SentriX, centré et teinté de la même couleur.
+- le logo SentriX, centré et teinté de la même couleur ;
+- un petit séparateur lumineux centré sous la bannière.
 
 Aucun rectangle, fond bleu/noir, dégradé, cadre ou liseré n'est rendu. Discord
 laisse donc apparaître directement le fond naturel du panneau sous la bannière.
@@ -87,7 +88,7 @@ STYLES = tuple(COLORS)
 # meme visuel pese 5 Ko au lieu de 45. Sur un degrade avec logo, la difference ne
 # se voit pas ; sur la bande passante d'un gros serveur, si.
 EXTENSION = "webp"
-_QUALITE_WEBP = 78
+_QUALITE_WEBP = 75
 
 
 def nom_fichier(style: str) -> str:
@@ -137,6 +138,34 @@ def _add_glow_lines(image: Image.Image, accent: tuple[int, int, int]) -> Image.I
             bloom_pixels[x, y + offset] = (*accent, round(235 * t))
 
     bloom = bloom.filter(ImageFilter.GaussianBlur(6))
+    image = Image.alpha_composite(image, bloom)
+    return Image.alpha_composite(image, core)
+
+
+def _add_bottom_separator(image: Image.Image, accent: tuple[int, int, int]) -> Image.Image:
+    """Petit trait sous la bannière, sans fond ni cadre.
+
+    Il sert uniquement à séparer visuellement la bannière du contenu Discord. Le trait
+    reste court et centré pour ne jamais donner l'impression d'un rectangle.
+    """
+    y = HEIGHT - 9
+    half = 155
+    left, right = WIDTH // 2 - half, WIDTH // 2 + half
+
+    core = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    bloom = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    core_pixels, bloom_pixels = core.load(), bloom.load()
+
+    for x in range(left, right + 1):
+        distance = abs(x - WIDTH // 2) / max(1, half)
+        strength = max(0.0, 1.0 - distance)
+        # Le centre est discret mais net ; les extrémités disparaissent doucement.
+        alpha = round(145 * (strength ** 0.55))
+        core_pixels[x, y] = (*accent, alpha)
+        for offset in (-1, 0, 1):
+            bloom_pixels[x, y + offset] = (*accent, round(95 * strength))
+
+    bloom = bloom.filter(ImageFilter.GaussianBlur(3))
     image = Image.alpha_composite(image, bloom)
     return Image.alpha_composite(image, core)
 
@@ -200,7 +229,8 @@ def build_banner(style: str) -> Image.Image:
     accent, _legacy_deep = COLORS.get(style, COLORS["info"])
     image = _transparent_canvas()
     image = _add_glow_lines(image, accent)
-    return _composite_logo(image, accent)
+    image = _composite_logo(image, accent)
+    return _add_bottom_separator(image, accent)
 
 
 def ensure_banners(force: bool = False) -> None:
