@@ -101,7 +101,7 @@ _QUALITE_WEBP = 88
 # embed par URL, pendant des heures : changer le contenu d'un fichier sans changer
 # son nom laisse l'ancienne bannière s'afficher. À incrémenter à chaque refonte du
 # dessin, c'est la seule façon de forcer Discord à retélécharger.
-BANNER_VERSION = "v3"
+BANNER_VERSION = "v4"
 
 
 def nom_source(style: str) -> str:
@@ -164,6 +164,31 @@ def _glow_lines(accent: tuple[int, int, int]) -> Image.Image:
     return Image.alpha_composite(halo, coeur)
 
 
+def _bottom_separator(image: Image.Image, accent: tuple[int, int, int]) -> Image.Image:
+    """Petit trait lumineux centré sous la bannière, sans recréer de fond.
+
+    Le séparateur reste court et très fin : il sépare visuellement le bandeau du
+    contenu Discord tout en laissant les bords et le bas de l'image transparents.
+    """
+    y = HEIGHT - 5
+    demi = 130
+    gauche, droite = WIDTH // 2 - demi, WIDTH // 2 + demi
+    couche = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    pixels = couche.load()
+
+    for x in range(gauche, droite + 1):
+        distance = abs(x - WIDTH // 2) / max(1, demi)
+        force = max(0.0, 1.0 - distance)
+        alpha = round(125 * (force ** 0.55))
+        pixels[x, y] = (*accent, alpha)
+        if y - 1 >= 0:
+            pixels[x, y - 1] = (*accent, round(alpha * 0.35))
+        if y + 1 < HEIGHT:
+            pixels[x, y + 1] = (*accent, round(alpha * 0.22))
+
+    return Image.alpha_composite(image, couche)
+
+
 def _tinted_logo(logo: Image.Image, accent: tuple[int, int, int]) -> Image.Image:
     """Logo re-teinté à la couleur de la famille, ses reliefs conservés.
 
@@ -222,10 +247,11 @@ def _composite_logo(image: Image.Image, accent: tuple[int, int, int]) -> Image.I
 
 
 def build_banner(style: str) -> Image.Image:
-    """Bannière complète : fond transparent, deux traits, logo centré."""
+    """Bannière complète : fond transparent, traits, logo et séparateur inférieur."""
     accent = COLORS.get(style, COLORS["info"])
     image = _glow_lines(accent)
-    return _composite_logo(image, accent)
+    image = _composite_logo(image, accent)
+    return _bottom_separator(image, accent)
 
 
 # Domaine SentriX -> famille de banniere. Le module vient de utils/access_matrix
