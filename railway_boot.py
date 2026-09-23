@@ -175,10 +175,11 @@ def _install_discord_readiness_healthcheck() -> None:
 
 
 def _install_sentrix_asset_route() -> None:
-    """Expose la bannière Ping sur le domaine Railway de SentriX.
+    """Expose les bannières générées runtime sur le domaine Railway de SentriX.
 
-    Discord charge plus fiablement une image servie directement par l'application que
-    les URLs GitHub raw/attachment utilisées auparavant dans MediaGallery.
+    Les panneaux Components V2 les joignent en pièce jointe ; les embeds classiques
+    chargent exactement les mêmes fichiers via HTTP. Ainsi, aucune ancienne image
+    committée ne peut conserver un fond coloré différent du rendu runtime.
     """
     current = dashboard_web.build_app
     if getattr(current, "_sentrix_asset_route", False):
@@ -192,13 +193,30 @@ def _install_sentrix_asset_route() -> None:
             response.headers["Cache-Control"] = "public, max-age=86400"
             return response
 
+        async def sentrix_banner(request):
+            from utils.log_banners import BANNER_DIR, STYLES, ensure_banners, nom_fichier
+
+            style = str(request.match_info.get("style") or "").casefold()
+            if style not in STYLES:
+                raise aiohttp_web.HTTPNotFound()
+            ensure_banners()
+            path = BANNER_DIR / nom_fichier(style)
+            if not path.exists():
+                ensure_banners(force=True)
+            if not path.exists():
+                raise aiohttp_web.HTTPNotFound()
+            response = aiohttp_web.FileResponse(path)
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            return response
+
         app.router.add_get("/assets/sentrix-ping-banner.png", ping_banner)
+        app.router.add_get("/assets/sentrix-banner/{style}.webp", sentrix_banner)
         return app
 
     build_app_with_assets._sentrix_asset_route = True
     build_app_with_assets._sentrix_original = current
     dashboard_web.build_app = build_app_with_assets
-    logger.info("Bannière Ping SentriX exposée via Railway.")
+    logger.info("Bannières SentriX runtime exposées via Railway.")
 
 
 def _install_dashboard_loader_guard_prestart() -> bool:
