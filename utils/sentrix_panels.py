@@ -728,6 +728,9 @@ __all__ = [
     "famille_de_la_commande",
     "commande_en_texte_libre",
     "reponse_en_texte_libre",
+    "vue_source",
+    "vue_panneau",
+    "terminer_vue",
     "REPONSE_LIBRE",
     "COMMANDES_TEXTE_LIBRE",
     "nom_banniere",
@@ -735,21 +738,16 @@ __all__ = [
 
 
 def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
-    """Reloge les composants d'une View existante DANS un panneau.
+    """Reloge les composants d'une View existante DANS un panneau Components V2.
 
-    Une interface interactive (aide, setup, confirmation, panneau de tickets)
-    envoyait jusqu'ici un embed et, a cote, une View classique portant ses
-    boutons. Un message Components V2 n'accepte pas cette cohabitation : la vue
-    EST le message. Reconstruire ces boutons a l'identique reviendrait a
-    dupliquer des dizaines de callbacks metier, donc on deplace les items
-    existants au lieu de les recreer.
+    discord.py ré-associe chaque Item à la LayoutView finale quand il est ajouté dans
+    une ActionRow. Les callbacks historiques qui font ``self.view`` voient alors un
+    :class:`Panneau` au lieu de leur vue métier et lèvent des AttributeError
+    (`_lock`, `winner`, `selected`...). On conserve donc explicitement la vue
+    d'origine sur chaque item avant le relogement.
 
-    C'est sur : un item decore par ``@discord.ui.button`` garde une reference a
-    la vue qui l'a cree (discord.py lie son callback a cette instance), donc son
-    comportement ne change pas en changeant de conteneur. On redirige en plus le
-    controle d'interaction et l'expiration vers la vue d'origine, sinon ses
-    gardes (« ce bouton n'est pas pour vous », desactivation a l'expiration)
-    seraient perdues.
+    Le panneau reste la vraie vue Discord envoyée ; la vue source ne sert qu'à porter
+    l'état métier et à débloquer les coroutines qui attendent ``view.wait()``.
     """
     enfants = list(getattr(vue, "children", ()) or ())
     if not enfants:
@@ -759,22 +757,73 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
     if conteneur is None:
         return panneau
 
+    for item in enfants:
+        try:
+            item._sentrix_source_view = vue
+        except Exception:
+            pass
+
     rangees = _rangees_d_items(enfants)
     if rangees:
         for rangee in rangees:
             conteneur.add_item(rangee)
 
-    # La vue d'origine reste responsable de son comportement ; le panneau n'est
-    # que le contenant. Sans ces trois renvois, un bouton continuerait de
-    # fonctionner mais les gardes de la vue seraient muettes.
     panneau._vue_source = vue
+    vue._sentrix_panel_view = panneau
     if getattr(vue, "timeout", None) is not None:
         panneau.timeout = vue.timeout
-    for nom in ("interaction_check", "on_timeout", "on_error"):
-        methode = getattr(vue, nom, None)
-        if methode is not None:
-            setattr(panneau, nom, methode)
+
+    interaction_check = getattr(vue, "interaction_check", None)
+    if interaction_check is not None:
+        panneau.interaction_check = interaction_check
+
+    source_error = getattr(vue, "on_error", None)
+    if source_error is not None:
+        panneau.on_error = source_error
+
+    source_timeout = getattr(vue, "on_timeout", None)
+
+    async def _timeout_bridge():
+        try:
+            if source_timeout is not None:
+                await source_timeout()
+        finally:
+            # La vue métier n'est pas enregistrée directement dans le ViewStore
+            # (seul le Panneau l'est), donc son wait() ne se terminerait jamais
+            # sans ce stop explicite.
+            try:
+                vue.stop()
+            except Exception:
+                logger.debug("Arrêt de la vue source impossible.", exc_info=True)
+
+    panneau.on_timeout = _timeout_bridge
     return panneau
+
+
+def vue_source(item: discord.ui.Item):
+    """Retourne la vue métier d'origine d'un composant relogé dans un Panneau."""
+    return getattr(item, "_sentrix_source_view", None) or getattr(item, "view", None)
+
+
+def vue_panneau(item: discord.ui.Item):
+    """Retourne la LayoutView réellement attachée au message Discord."""
+    current = getattr(item, "view", None)
+    return current if isinstance(current, discord.ui.LayoutView) else getattr(
+        vue_source(item), "_sentrix_panel_view", current
+    )
+
+
+def terminer_vue(item: discord.ui.Item) -> None:
+    """Arrête à la fois la vue métier et la LayoutView envoyée."""
+    source = vue_source(item)
+    panel = vue_panneau(item)
+    for candidate in (source, panel):
+        stop = getattr(candidate, "stop", None)
+        if callable(stop):
+            try:
+                stop()
+            except Exception:
+                logger.debug("Arrêt d'une vue interactive impossible.", exc_info=True)
 
 
 def _rangees_d_items(items: Sequence[discord.ui.Item]) -> list[discord.ui.ActionRow]:
