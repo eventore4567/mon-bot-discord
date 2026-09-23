@@ -1,6 +1,8 @@
-"""Noms courts (cogs/common_command_names.py) : le nom interne ne change jamais — seul
-un alias court est ajouté et affiché. Permissions, catalogue et récompenses restent
-donc strictement identiques (« sûr pour tout le monde »)."""
+"""Noms publics SentriX : + et / partagent la même surface sans renommer l'interne.
+
+Les anciens raccourcis restent des alias de compatibilité ; +help affiche désormais
+le chemin canonique publié en slash."""
+
 from __future__ import annotations
 
 from discord.ext import commands
@@ -36,8 +38,43 @@ def test_root_and_subcommand_short_names_resolve_to_the_same_object():
     # Le nom interne — donc la clé de la matrice de permissions — n'a pas bougé.
     assert bot.get_command("topeco").qualified_name == "economyleaderboard"
     assert bot.get_command("pro quarantaine").qualified_name == "sentrixpro quarantine-setup"
-    assert short.display_name(bot.get_command("sentrixpro quarantine-setup")) == "pro quarantaine"
-    assert short.display_name(bot.get_command("economyleaderboard")) == "topeco"
+    # Les vieux raccourcis restent tapables, mais le nom affiché suit le slash.
+    assert short.display_name(bot.get_command("economyleaderboard")) == "economy leaderboard"
+
+
+def test_canonical_prefix_routes_match_the_slash_surface():
+    bot = _bot()
+
+    @bot.command(name="economyleaderboard")
+    async def economyleaderboard(ctx):
+        pass
+
+    @bot.command(name="set-bio")
+    async def set_bio(ctx):
+        pass
+
+    @bot.command(name="guess-number")
+    async def guess_number(ctx):
+        pass
+
+    @bot.command(name="setprefix")
+    async def setprefix(ctx):
+        pass
+
+    @bot.command(name="welcome-config")
+    async def welcome_config(ctx):
+        pass
+
+    routes = short._rebuild_canonical_prefix_routes(bot)
+    assert routes["economy leaderboard"] == "economyleaderboard"
+    assert short.rewrite_canonical_prefix_content(bot, "economy leaderboard") == "economyleaderboard"
+    assert short.rewrite_canonical_prefix_content(bot, "economy leaderboard 5") == "economyleaderboard 5"
+
+    # Exceptions explicitement conservées par le propriétaire.
+    assert short.display_name(bot.get_command("set-bio")) == "set-bio"
+    assert short.display_name(bot.get_command("guess-number")) == "guess-number"
+    assert short.display_name(bot.get_command("setprefix")) == "setprefix"
+    assert short.display_name(bot.get_command("welcome-config")) == "welcome-config"
 
 
 def test_intermediate_group_short_name_propagates_to_children():

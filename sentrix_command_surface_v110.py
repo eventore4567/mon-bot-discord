@@ -25,13 +25,203 @@ logger = logging.getLogger("bot.command-surface-v110")
 # arbitrairement (/moderation reste /moderation, /notifications reste /notifications).
 COMPACT_ROOT_NAMES: dict[str, str] = {}
 
-# Renommages réellement justifiés par une convention Discord répandue.
-# Important : userinfo/serverinfo/clearwarnings restent volontairement inchangés.
+# Renommages de feuilles utilisés à l'intérieur des groupes V95.
 COMPACT_COMMAND_NAMES: dict[str, str] = {
-    "nickname": "setnick",
+    # Choix explicite : /economy leaderboard reste la surface argent canonique.
+    "economyleaderboard": "leaderboard",
     "leaderboard-levels": "leaderboard",
+    # Les noms XP déjà validés restent inchangés.
     "set-xp": "setxp",
     "add-xp": "addxp",
+}
+
+# Chemins groupés canoniques. V95 construit ces groupes avec les callbacks historiques ;
+# cette table ne duplique donc aucune logique métier. +help lit la même table via
+# common_command_names, ce qui garantit + et / identiques.
+CANONICAL_GROUPED_NAMES: dict[str, tuple[str, str]] = {
+    # Économie
+    "economyleaderboard": ("economy", "leaderboard"),
+    "give-money": ("economy", "give"),
+    "reset-economy": ("economy", "reset"),
+    "economy-system": ("economy", "setup"),
+    "economy-audit": ("economy", "audit"),
+
+    # Jeux
+    "gamehistory": ("games", "history"),
+    "gameprofile": ("games", "profile"),
+    "gamestats": ("games", "stats"),
+    "gametop": ("games", "top"),
+    "dailygames": ("games", "daily"),
+    "gamelobby": ("games", "lobby"),
+    "numberduel": ("games", "duel-number"),
+    "reactionduel": ("games", "duel-reaction"),
+    "quizduel": ("games", "duel-quiz"),
+    "guessrace": ("games", "race-guess"),
+    "mathrace": ("games", "race-math"),
+    "wordrace": ("games", "race-word"),
+    "reactionevent": ("games", "race-reaction"),
+
+    # Tickets / événements / notifications
+    "ticketsetup": ("ticket", "setup"),
+    "tickettranscript": ("ticket", "transcript"),
+    "ticketstats": ("ticket", "stats"),
+    "ticketstaffstats": ("ticket", "staff-stats"),
+    "ticketreopenwindow": ("ticket", "reopen-window"),
+    "notifs-ping": ("notifications", "ping"),
+    "notifs-list": ("notifications", "list"),
+    "notifs-remove": ("notifications", "remove"),
+    "event-create": ("events", "create"),
+    "event-cancel": ("events", "cancel"),
+    "event-join": ("events", "join"),
+    "event-leave": ("events", "leave"),
+    "event-list": ("events", "list"),
+    "tournament-create": ("events", "tournament-create"),
+    "tournament-start": ("events", "tournament-start"),
+    "tournament-join": ("events", "tournament-join"),
+    "tournament-list": ("events", "tournament-list"),
+
+    # IA
+    "aisetup": ("ai", "setup"),
+    "aidiag": ("ai", "status"),
+    "aicontext": ("ai", "context"),
+    "aimemorychannel": ("ai", "memory"),
+    "airolequota": ("ai", "quota"),
+    "ai-translate": ("ai", "translate"),
+    "chat-reset": ("ai", "reset"),
+
+    # Logs / design
+    "logsetup": ("logs", "setup"),
+    "logs-status": ("logs", "status"),
+    "logevent": ("logs", "event"),
+    "logsearch": ("logs", "search"),
+    "createalllogs": ("logs", "create"),
+    "testlogs": ("logs", "test"),
+    "logs-diag": ("logs", "debug"),
+    "reset-logs-all": ("logs", "reset"),
+    "designsetup": ("design", "setup"),
+    "design-theme": ("design", "theme"),
+    "iconsetup": ("design", "icon"),
+
+    # Serveur / sécurité
+    "server-audit": ("server", "audit"),
+    "server-health": ("server", "health"),
+    "server-growth": ("server", "growth"),
+    "server-managed": ("server", "manage"),
+    "serversnapshot": ("server", "snapshot"),
+    "server-backup": ("server", "backup"),
+    "server-restore": ("server", "restore"),
+    "backup-now": ("server", "backup-now"),
+    "healthcheck": ("server", "healthcheck"),
+    "permission-audit": ("security", "permissions"),
+    "antinuke-config": ("security", "antinuke"),
+    "nukewhitelist": ("security", "whitelist"),
+    "automod-status": ("security", "automod-status"),
+    "automod-history": ("security", "automod-history"),
+    "automod-native-sync": ("security", "automod-sync"),
+    "security-check": ("security", "check"),
+    "security-level": ("security", "level"),
+    "security-repair": ("security", "repair"),
+    "antinuke": ("security", "antinuke"),
+    "antiraid": ("security", "antiraid"),
+    "panic": ("security", "panic"),
+    "syncbl": ("security", "sync-blacklist"),
+
+    # Automatisations
+    "schedule-send": ("schedule", "send"),
+    "schedule-list": ("schedule", "list"),
+    "schedule-cancel": ("schedule", "cancel"),
+    "sticky-set": ("sticky", "set"),
+    "sticky-every": ("sticky", "interval"),
+    "sticky-off": ("sticky", "off"),
+    "starboard-setup": ("starboard", "setup"),
+    "starboard-off": ("starboard", "off"),
+    "voicehub-setup": ("voice", "setup"),
+    "voicehub-off": ("voice", "off"),
+    "voice-limit": ("voice", "limit"),
+    "voice-lock": ("voice", "lock"),
+    "voice-unlock": ("voice", "unlock"),
+    "voice-name": ("voice", "name"),
+    "voice-transfer": ("voice", "transfer"),
+    "voice-time": ("voice", "time"),
+    # Hubs visibles : un verbe/une feuille claire au lieu d'une racine ambiguë.
+    "economy": ("economy", "overview"),
+    "security": ("security", "overview"),
+    "ticket": ("ticket", "open"),
+    "giveaway": ("giveaway", "panel"),
+    "giveaway-reroll": ("giveaway", "reroll"),
+    "logs": ("logs", "overview"),
+
+    # Économie / boutique / réputation
+    "buy": ("economy", "buy"),
+    "sell": ("economy", "sell"),
+    "shoppanel": ("economy", "shop-panel"),
+    "shoprole": ("economy", "shop-role"),
+    "rep": ("rep", "give"),
+    "reputation": ("rep", "profile"),
+    "repleaderboard": ("rep", "leaderboard"),
+    "rephistory": ("rep", "history"),
+
+    # Niveaux : les commandes XP directes restent inchangées, le reste est rangé.
+    "level-roles": ("levels", "roles"),
+    "set-level-role": ("levels", "role-add"),
+    "remove-level-role": ("levels", "role-remove"),
+    "reset-levels": ("levels", "reset"),
+
+    # Jeux : une seule racine /games pour éviter 40 racines slash.
+    "adventure": ("games", "adventure"),
+    "blackjack": ("games", "blackjack"),
+    "coinflip": ("games", "coinflip"),
+    "colorquiz": ("games", "colorquiz"),
+    "connect4": ("games", "connect4"),
+    "dice": ("games", "dice"),
+    "duel": ("games", "duel"),
+    "dungeon": ("games", "dungeon"),
+    "emoji-race": ("games", "emoji-race"),
+    "emojiquiz": ("games", "emojiquiz"),
+    "explore": ("games", "explore"),
+    "fasttype": ("games", "fasttype"),
+    "fishing": ("games", "fishing"),
+    "hangman": ("games", "hangman"),
+    "highlow": ("games", "highlow"),
+    "hunt": ("games", "hunt"),
+    "luckyroll": ("games", "luckyroll"),
+    "math-quiz": ("games", "math-quiz"),
+    "memory": ("games", "memory"),
+    "mining": ("games", "mining"),
+    "reaction": ("games", "reaction"),
+    "rps": ("games", "rps"),
+    "scramble": ("games", "scramble"),
+    "slots": ("games", "slots"),
+    "tictactoe": ("games", "tictactoe"),
+    "treasure": ("games", "treasure"),
+    "trivia": ("games", "trivia"),
+    "triviastart": ("games", "trivia-start"),
+    "wordgame": ("games", "wordgame"),
+
+    # Proof
+    "proof": ("proof", "check"),
+    "proofstatus": ("proof", "status"),
+    "proofsetup": ("proof", "setup"),
+    "proofexample": ("proof", "example"),
+    "proofexample-remove": ("proof", "example-remove"),
+    "proofexamples": ("proof", "examples"),
+    "proofpanel": ("proof", "panel"),
+    "proofreset": ("proof", "reset"),
+
+    # Emojis
+    "addemoji": ("emoji", "add"),
+    "deleteemoji": ("emoji", "remove"),
+    "emoji-list": ("emoji", "list"),
+
+    # Administration du bot / configuration
+    "bot-servers": ("bot", "servers"),
+    "bot-leave": ("bot", "leave"),
+    "setstatus": ("bot", "status"),
+    "status-rotate": ("bot", "status-rotate"),
+    "set-bot": ("bot", "profile"),
+    "footer": ("bot", "footer"),
+    "theme": ("bot", "theme"),
+    "setmodrole": ("config", "modrole"),
 }
 
 # Commandes que les grands bots exposent généralement directement à la racine. SentriX
@@ -46,13 +236,14 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "mute": "mute",
     "unmute": "unmute",
     "warn": "warn",
-    "warnings": "warnings",
-    "clearwarnings": "clearwarnings",
+    "warnings": "warns",
+    "clearwarnings": "clearwarns",
     "clear": "clear",
     "lock": "lock",
     "unlock": "unlock",
     "slowmode": "slowmode",
-    "nickname": "setnick",
+    "nickname": "nick",
+    "resetnick": "resetnick",
     "case": "case",
 
     # Informations — userinfo/serverinfo sont déjà des noms très répandus.
@@ -60,7 +251,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "userinfo": "userinfo",
     "serverinfo": "serverinfo",
     "channelinfo": "channelinfo",
-    "membercount": "membercount",
+    "membercount": "members",
 
     # Niveaux — /level et /leaderboard sont des conventions répandues.
     "level": "level",
@@ -80,6 +271,13 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "gamble": "gamble",
     "deposit": "deposit",
     "withdraw": "withdraw",
+    "banque": "bank",
+
+    # Choix explicites conservés tels quels.
+    "set-bio": "set-bio",
+    "guess-number": "guess-number",
+    "setprefix": "setprefix",
+    "welcome-config": "welcome-config",
 
     # Musique — vocabulaire commun aux bots musique majeurs.
     # +play reste la commande préfixée historique ; les autres restent aussi accessibles
@@ -96,12 +294,24 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "music join": "join",
     "music leave": "leave",
     "music seek": "seek",
+    # Utilitaires simples qui n'ont pas besoin d'un groupe.
+    "afk": "afk",
+    "image": "image",
+    "lastmessage": "lastmessage",
+    "stats": "stats",
 }
 
 # Les rôles sont plus lisibles sous un petit groupe /role que sous des chemins profonds.
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
+    "roleall": ("role", "all"),
+    "massrole": ("role", "mass"),
+    "rolepanel": ("role", "panel"),
+    "rolepanel-refresh": ("role", "panel-refresh"),
+    "reactionrole-add": ("role", "reaction-add"),
+    "reactionrole-remove": ("role", "reaction-remove"),
+    "reactionrole-list": ("role", "reactions"),
 }
 
 # /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
@@ -158,9 +368,18 @@ def _command_key(command) -> tuple[str, str]:
 
 
 def _compact_group_for(command) -> tuple[str, str]:
-    root_name, original_leaf = _ORIGINAL_GROUP_FOR(command)
     qualified, name = _command_key(command)
-    explicit = COMPACT_COMMAND_NAMES.get(qualified) or COMPACT_COMMAND_NAMES.get(name)
+    grouped = CANONICAL_GROUPED_NAMES.get(qualified)
+    if grouped is None and command.root_parent is None:
+        grouped = CANONICAL_GROUPED_NAMES.get(name)
+    if grouped is not None:
+        root_name, leaf = grouped
+        return v95._safe_name(root_name), _normalise_public_leaf(leaf)
+
+    root_name, original_leaf = _ORIGINAL_GROUP_FOR(command)
+    explicit = COMPACT_COMMAND_NAMES.get(qualified)
+    if explicit is None and command.root_parent is None:
+        explicit = COMPACT_COMMAND_NAMES.get(name)
     leaf = explicit or original_leaf
     return v95._safe_name(root_name), _normalise_public_leaf(leaf)
 
@@ -170,12 +389,15 @@ def _compact_should_expose(command) -> bool:
         return False
 
     qualified, name = _command_key(command)
-    if qualified in STANDARD_DIRECT_SLASH or name in STANDARD_DIRECT_SLASH:
+    root_level = command.root_parent is None
+    if qualified in STANDARD_DIRECT_SLASH or (root_level and name in STANDARD_DIRECT_SLASH):
         return False
-    if qualified in STANDARD_GROUPED_SLASH or name in STANDARD_GROUPED_SLASH:
+    if qualified in STANDARD_GROUPED_SLASH or (root_level and name in STANDARD_GROUPED_SLASH):
         return False
     if qualified in SUPPRESSED_SLASH_DUPLICATES:
         return False
+    if qualified in CANONICAL_GROUPED_NAMES or (root_level and name in CANONICAL_GROUPED_NAMES):
+        return True
 
     # Les anciennes commandes déjà fusionnées dans les centres Setup/Ticket/Giveaway/
     # Security ne doivent pas créer un second slash public.
@@ -337,6 +559,7 @@ def install() -> None:
 
 
 __all__ = [
+    "CANONICAL_GROUPED_NAMES",
     "COMPACT_COMMAND_NAMES",
     "COMPACT_ROOT_NAMES",
     "STANDARD_DIRECT_SLASH",

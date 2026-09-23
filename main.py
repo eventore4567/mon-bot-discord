@@ -674,6 +674,29 @@ class BotAllInOne(commands.Bot):
 
     async def get_context(self, message, *, cls=SentriXContext):
         ctx = await super().get_context(message, cls=cls)
+
+        # Surface canonique partagée avec les slash : +economy leaderboard,
+        # +logs setup, +ticket setup, +role give, etc. sont réécrits vers la
+        # commande historique AVANT exécution. Les callbacks, convertisseurs,
+        # checks et permissions d'origine restent donc exactement les mêmes.
+        try:
+            from copy import copy
+            from cogs.common_command_names import rewrite_canonical_prefix_content
+
+            prefix = str(getattr(ctx, "prefix", "") or "")
+            content = str(getattr(message, "content", "") or "")
+            if prefix and content.startswith(prefix):
+                body = content[len(prefix):]
+                rewritten = rewrite_canonical_prefix_content(self, body)
+                if rewritten != body.lstrip():
+                    shadow = copy(message)
+                    shadow.content = prefix + rewritten
+                    routed = await super().get_context(shadow, cls=cls)
+                    routed.message = message
+                    ctx = routed
+        except Exception:
+            logger.warning("Routage canonique des commandes + impossible.", exc_info=True)
+
         if ctx.command is None and ctx.guild is not None and ctx.invoked_with:
             row = await self.db.get_alias(ctx.guild.id, ctx.invoked_with.lower())
             if row:

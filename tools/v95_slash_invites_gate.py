@@ -102,8 +102,8 @@ async def run() -> int:
         required_roots = (
             "help", "setup", "ping", "sentrix",
             "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
-            "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
-            "clearwarnings", "clear", "lock", "unlock", "slowmode",
+            "ban", "unban", "kick", "mute", "unmute", "warn", "warns",
+            "clearwarns", "clear", "lock", "unlock", "slowmode",
             "userinfo", "serverinfo", "avatar", "level", "leaderboard",
             "balance", "play", "pause", "queue", "role",
         )

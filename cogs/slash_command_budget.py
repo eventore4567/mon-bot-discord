@@ -34,6 +34,11 @@ def _v110_public_root_names() -> set[str]:
         for root_name, _leaf_name in getattr(surface, "STANDARD_GROUPED_SLASH", {}).values()
         if str(root_name).strip()
     )
+    roots.update(
+        str(root_name).casefold().strip()
+        for root_name, _leaf_name in getattr(surface, "CANONICAL_GROUPED_NAMES", {}).values()
+        if str(root_name).strip()
+    )
     return roots
 
 

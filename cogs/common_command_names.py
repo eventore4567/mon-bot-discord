@@ -167,6 +167,20 @@ PREFERRED_COMMAND_NAMES: dict[str, str] = {
 }
 
 # Anciens noms conseillés remplacés ci-dessus : ils restent tapables (alias secondaires).
+# Noms publics explicitement conservés par le propriétaire. Les anciens alias courts
+# restent tapables, mais +help et la surface slash utilisent ces noms.
+PUBLIC_NAME_EXCEPTIONS = frozenset({
+    "set-bio",
+    "guess-number",
+    "setprefix",
+    "welcome-config",
+})
+
+# Les noms historiques ci-dessous restent des alias de compatibilité seulement.
+# Ils ne doivent plus décider de ce que +help affiche.
+for _name in PUBLIC_NAME_EXCEPTIONS:
+    PREFERRED_COMMAND_NAMES.pop(_name, None)
+
 LEGACY_PREFERRED_ALIASES: dict[str, tuple[str, ...]] = {
     "ai-translate": ("aitranslate",),
     "notifs-ping": ("notify",),
@@ -262,7 +276,102 @@ FRENCH_COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+def canonical_public_name(command: commands.Command) -> str | None:
+    """Nom public partagé par les transports + et /.
+
+    V110/V95 restent la source de vérité du slash. Cette fonction lit cette surface
+    au lieu d'inventer un deuxième catalogue pour le préfixe. Les vieux noms courts
+    restent enregistrés comme alias, mais ne sont plus affichés en priorité.
+    """
+    qualified = str(getattr(command, "qualified_name", "") or "").casefold().strip()
+    name = str(getattr(command, "name", "") or "").casefold().strip()
+    if not qualified:
+        return None
+
+    try:
+        import sentrix_command_surface_v110 as surface
+        import sentrix_v95_runtime as v95
+
+        keys = (qualified,) if command.root_parent is not None else (qualified, name)
+        for key in keys:
+            direct = surface.STANDARD_DIRECT_SLASH.get(key)
+            if direct:
+                return str(direct)
+            grouped = surface.STANDARD_GROUPED_SLASH.get(key)
+            if grouped:
+                return " ".join(grouped)
+
+        if command.root_parent is None and name in v95.DIRECT_ROOTS:
+            return name
+
+        if surface._compact_should_expose(command):
+            root, leaf = surface._compact_group_for(command)
+            if root == leaf:
+                return root
+            return f"{root} {leaf}"
+    except Exception:
+        logger.debug("Surface slash indisponible pour +%s", qualified, exc_info=True)
+
+    return None
+
+
+def _rebuild_canonical_prefix_routes(bot: commands.Bot) -> dict[str, str]:
+    """Construit les routes multi-mots + à partir des noms réellement publiés en slash."""
+    routes: dict[str, str] = {}
+    for command in bot.walk_commands():
+        public = canonical_public_name(command)
+        if not public:
+            continue
+        public = public.casefold().strip()
+        internal = str(getattr(command, "qualified_name", "") or "").casefold().strip()
+        if not public or not internal or public == internal:
+            continue
+
+        # Si une vraie commande racine porte déjà ce nom, elle garde la priorité.
+        if " " not in public:
+            existing = bot.get_command(public)
+            if existing is not None and existing is not command:
+                continue
+
+        previous = routes.get(public)
+        if previous is None or previous == internal:
+            routes[public] = internal
+        else:
+            logger.warning(
+                "Route canonique +%s ignorée : conflit entre %s et %s.",
+                public, previous, internal,
+            )
+
+    bot._sentrix_canonical_prefix_routes = routes
+    return routes
+
+
+def rewrite_canonical_prefix_content(bot: commands.Bot, body: str) -> str:
+    """Réécrit « economy leaderboard ... » vers la commande interne correspondante.
+
+    Le texte après le nom de commande n'est jamais reparsé ici : il est simplement
+    recollé, puis discord.py applique les convertisseurs/checks habituels.
+    """
+    routes = getattr(bot, "_sentrix_canonical_prefix_routes", None)
+    if routes is None:
+        routes = _rebuild_canonical_prefix_routes(bot)
+
+    raw = str(body or "").lstrip()
+    folded = raw.casefold()
+    for public in sorted(routes, key=len, reverse=True):
+        if folded == public:
+            return routes[public]
+        marker = public + " "
+        if folded.startswith(marker):
+            return routes[public] + raw[len(public):]
+    return raw
+
+
 def preferred_name(command: commands.Command) -> str:
+    canonical = canonical_public_name(command)
+    if canonical:
+        return canonical
+
     extras = getattr(command, "extras", {}) or {}
     saved = extras.get("sentrix_preferred_name")
     if saved:
@@ -292,6 +401,8 @@ def _register_alias(bot: commands.Bot, command: commands.Command, preferred: str
     if command.parent is not None:
         return False
     original = str(command.name)
+    if " " in preferred:
+        return False
     if original in PROTECTED_NAMES or preferred in PROTECTED_NAMES or original == preferred:
         return False
 
@@ -540,6 +651,7 @@ def _watch_late_commands() -> None:
         try:
             if isinstance(self, commands.Bot):
                 _apply_short_names(self, command)
+                _rebuild_canonical_prefix_routes(self)
             else:
                 _apply_sub_short_names(command)
         except Exception:
@@ -558,6 +670,7 @@ def refresh_short_names(bot: commands.Bot) -> None:
             _apply_short_names(bot, command)
         except Exception:
             logger.warning("Nom court impossible pour +%s", getattr(command, "qualified_name", "?"), exc_info=True)
+    _rebuild_canonical_prefix_routes(bot)
 
 
 def install(bot: commands.Bot) -> None:
@@ -573,6 +686,7 @@ def install(bot: commands.Bot) -> None:
         french_added += f
         sub_added += sub
     _watch_late_commands()
+    _rebuild_canonical_prefix_routes(bot)
 
     _patch_help_renderers()
     if added:
