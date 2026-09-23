@@ -77,6 +77,20 @@ def test_banner_draws_a_glowing_line_from_each_edge():
     assert bord < gauche / 3, "le trait doit s'éteindre avant le bord"
 
 
+def test_banner_has_a_small_centered_separator_below_content():
+    """Le séparateur demandé reste court : visible au centre, absent près des bords."""
+    with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("games")) as image:
+        alpha = image.convert("RGBA").getchannel("A")
+        centre = alpha.getpixel((512, 101))
+        gauche = alpha.getpixel((250, 101))
+        droite = alpha.getpixel((774, 101))
+        coin = alpha.getpixel((1015, 100))
+
+    assert centre > 70, "séparateur inférieur absent"
+    assert gauche < 10 and droite < 10, "le séparateur doit rester court et centré"
+    assert coin == 0, "aucun cadre/fond ne doit apparaître"
+
+
 def test_banner_background_is_really_transparent():
     """La couleur ne doit vivre que dans le trait, le logo et leur léger glow."""
     points = ((8, 8), (300, 15), (724, 15), (1015, 100))
