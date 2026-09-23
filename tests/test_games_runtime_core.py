@@ -414,16 +414,16 @@ def test_fasttype_challenge_always_mixes_word_number_and_emoji():
     challenge = games_economy._make_fasttype_challenge("normal")
     tokens = challenge.split()
 
-    assert len(tokens) == 7
+    assert len(tokens) == 4
     assert any(token.isdigit() for token in tokens)
     assert any(token in games_economy.FASTTYPE_WORDS for token in tokens)
     assert any(token in games_economy.FASTTYPE_EMOJIS for token in tokens)
 
 
 def test_memory_difficulty_changes_sequence_length():
-    assert len(games_economy._make_memory_sequence("facile")) == 5
-    assert len(games_economy._make_memory_sequence("normal")) == 7
-    assert len(games_economy._make_memory_sequence("difficile")) == 9
+    assert len(games_economy._make_memory_sequence("facile")) == 3
+    assert len(games_economy._make_memory_sequence("normal")) == 4
+    assert len(games_economy._make_memory_sequence("difficile")) == 6
 
 
 def test_reaction_round_has_four_unique_decoys_and_one_target():
@@ -460,7 +460,8 @@ def test_reactionevent_uses_targeted_safe_button_view():
 
     assert "options, target = _reaction_round()" in block
     assert "_CommunityRaceButtonView(options, target)" in block
-    assert "interaction.response.edit_message(view=view)" in source
+    assert "panels.vue_source(self)" in source
+    assert "panels.vue_panneau(self)" in source
 
 
 def test_minesweeper_is_public_and_has_a_real_command():
@@ -491,3 +492,52 @@ def test_typing_and_memory_previews_are_not_plain_copyable_text():
     assert "_PreviewTokensView(challenge_tokens)" in fast_block
     assert "Mémorisez les boutons" in memory_block
     assert "non sélectionnables" in fast_block
+    assert "Les cases restent visibles" in fast_block
+    assert "20 secondes" in fast_block
+
+
+def test_all_game_buttons_use_original_business_view_after_v2_relocation():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+
+    # Le bug production du 23/09 : self.view était devenu Panneau et n'avait plus
+    # _lock / winner / selected. Aucun callback jeu ne doit relire self.view.
+    assert "view: _HighLowView = self.view" not in source
+    assert "view: _SoloChoiceView = self.view" not in source
+    assert "view: _CommunityRaceButtonView = self.view" not in source
+    assert "view: _MinesweeperView = self.view" not in source
+    assert "panels.vue_source(self)" in source
+    assert "panels.terminer_vue(self)" in source
+
+
+def test_speed_race_default_is_short_clear_and_not_memory_only():
+    assert games_economy._difficulty_profile("normal")[0] == 4
+    assert games_economy._difficulty_profile("difficile")[0] == 6
+
+    from pathlib import Path
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+    block = source.split("async def fasttype", 1)[1].split(
+        "async def _run_word_guess", 1
+    )[0]
+    assert "Recopiez-le **dans le chat**" in block
+    assert "Les cases restent visibles" in block
+    assert "pas besoin de mémoriser" in block
+    assert "normalize_answer(answer.content)" in block
+
+
+def test_adventure_success_is_the_quest_that_grants_temporary_boost():
+    from pathlib import Path
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
+    ).read_text(encoding="utf-8")
+    solo = source.split("async def _run_solo", 1)[1].split(
+        '@commands.hybrid_command(name="adventure"', 1
+    )[0]
+    assert 'if game_name == "adventure":' in solo
+    assert "grant_quest_boost" in solo
+    assert "Boost de quête" in solo
