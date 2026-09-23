@@ -447,8 +447,26 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} a quitté {channel or 'un salon vocal'}" + (f", après **{duration}**" if duration else "") + ".")
     elif event_type == "voice_move":
         lines.append(_strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id) or f"{member or 'Un membre'} a été déplacé en vocal.")
+    elif event_type == "ticket_open":
+        lines.append(f"{member or 'Un membre'} a ouvert un ticket.")
+        ticket_type = _field_value(embed, "type")
+        ticket_channel = _field_value(embed, "salon", "channel")
+        ticket_number = _field_value(embed, "numéro", "numero", "ticket")
+        staff_role = _field_value(embed, "rôle support", "role support", "staff")
+        if ticket_number:
+            lines.append(f"**Ticket :** {ticket_number}")
+        if ticket_type:
+            lines.append(f"**Type :** {ticket_type}")
+        if ticket_channel:
+            lines.append(f"**Salon :** {ticket_channel}")
+        if staff_role:
+            lines.append(f"**Support :** {staff_role}")
     elif event_type == "ticket_close":
-        lines.append(_strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id) or "Le ticket a été fermé.")
+        base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
+        lines.append(base or "Le ticket a été fermé.")
+        reason_value = _field_value(embed, "raison", "reason")
+        if reason_value and reason_value not in (base or ""):
+            lines.append(f"**Raison :** {reason_value}")
     elif event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"):
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         lines.append(base or f"Une protection SentriX s'est déclenchée pour {member or 'un membre'}.")
