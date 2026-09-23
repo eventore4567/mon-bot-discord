@@ -88,3 +88,46 @@ def test_collision_suffix_is_readable() -> None:
 def test_me_and_profile_are_not_public_direct_slash_commands() -> None:
     assert "profile" not in surface.STANDARD_DIRECT_SLASH
     assert "me" not in surface.STANDARD_DIRECT_SLASH.values()
+
+
+def test_every_visible_public_command_has_one_explicit_canonical_path() -> None:
+    from cogs import command_catalog_cleanup as catalog
+    import sentrix_v95_runtime as v95
+
+    visible = (
+        set(catalog.NORMAL_DIRECT_COMMANDS)
+        | set(catalog.ADMIN_DIRECT_COMMANDS)
+        | set(catalog.PROOF_VISIBLE_COMMANDS)
+        | set(catalog.HELP_VISIBLE_EXTRA_COMMANDS)
+    )
+    mapped = (
+        set(surface.STANDARD_DIRECT_SLASH)
+        | set(surface.STANDARD_GROUPED_SLASH)
+        | set(surface.CANONICAL_GROUPED_NAMES)
+        | set(v95.DIRECT_ROOTS)
+    )
+    assert visible <= mapped, sorted(visible - mapped)
+
+    public_paths: dict[str, str] = {}
+    for source in sorted(visible):
+        if source in surface.STANDARD_DIRECT_SLASH:
+            public = surface.STANDARD_DIRECT_SLASH[source]
+        elif source in surface.STANDARD_GROUPED_SLASH:
+            public = " ".join(surface.STANDARD_GROUPED_SLASH[source])
+        elif source in surface.CANONICAL_GROUPED_NAMES:
+            public = " ".join(surface.CANONICAL_GROUPED_NAMES[source])
+        else:
+            public = source
+
+        previous = public_paths.get(public)
+        assert previous is None, f"{source} et {previous} partagent {public}"
+        public_paths[public] = source
+
+
+def test_user_kept_command_names_stay_exactly_as_requested() -> None:
+    assert surface.CANONICAL_GROUPED_NAMES["economyleaderboard"] == ("economy", "leaderboard")
+    assert surface.STANDARD_DIRECT_SLASH["leaderboard-levels"] == "leaderboard"
+    assert surface.STANDARD_DIRECT_SLASH["set-bio"] == "set-bio"
+    assert surface.STANDARD_DIRECT_SLASH["guess-number"] == "guess-number"
+    assert surface.STANDARD_DIRECT_SLASH["setprefix"] == "setprefix"
+    assert surface.STANDARD_DIRECT_SLASH["welcome-config"] == "welcome-config"
