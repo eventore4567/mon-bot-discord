@@ -153,8 +153,14 @@ async def fake_request(self, route, *, files=None, form=None, **kwargs):
         return [] if method == "GET" else None
     if re.match(r"/guilds/\d+/channels$", path) and method == "POST":
         STATE["msg_seq"] += 1
-        return {"id": str(STATE["msg_seq"]), "type": (js or {}).get("type", 0), "name": (js or {}).get("name") or "salon",
-                "position": 9, "permission_overwrites": [], "nsfw": False, "parent_id": (js or {}).get("parent_id"), "guild_id": str(GID)}
+        kind = int((js or {}).get("type", 0))
+        salon = {"id": str(STATE["msg_seq"]), "type": kind, "name": (js or {}).get("name") or "salon",
+                 "position": 9, "permission_overwrites": [], "nsfw": False,
+                 "parent_id": (js or {}).get("parent_id"), "guild_id": str(GID)}
+        if kind in (2, 13):  # vocal / conférence : discord.py exige ces champs
+            salon.update({"bitrate": 64000, "user_limit": 0, "rtc_region": None,
+                          "video_quality_mode": 1, "last_message_id": None})
+        return salon
     if re.match(r"/guilds/\d+/channels$", path):
         return None
     if re.match(r"/guilds/\d+/emojis", path):

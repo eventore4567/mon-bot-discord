@@ -570,10 +570,12 @@ def _sep() -> discord.ui.Separator:
 
 
 def _accent_for_kind(kind: str) -> int | None:
-    pair = COLORS.get(kind)
-    if not pair:
+    accent = COLORS.get(kind)
+    if not accent:
         return None
-    r, g, b = pair[0]
+    # COLORS ne porte plus qu'UNE couleur par famille depuis le passage aux bannières
+    # transparentes : le liseré du conteneur doit être exactement celle du trait.
+    r, g, b = accent
     return (r << 16) | (g << 8) | b
 
 

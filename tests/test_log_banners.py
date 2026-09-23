@@ -1,7 +1,8 @@
-"""Contrat des bannières SentriX (1024x110, style issu de LOG_REGISTRY).
+"""Contrat des bannières SentriX (1024x64, style issu de LOG_REGISTRY).
 
-Style unique depuis le 23/09/2026 : fond nuit, trait lumineux venant de chaque bord,
-logo SentriX teinté au centre, liseré d'accent à gauche (voir utils/log_banners.py)."""
+Style unique : AUCUN fond. Un trait lumineux part de chaque bord, s'arrête avant le
+logo SentriX centré et teinté, et tout le reste de l'image a un alpha de 0 — le
+panneau Discord se voit directement derrière (voir utils/log_banners.py)."""
 from io import BytesIO
 
 import discord
@@ -11,12 +12,11 @@ from utils import log_banners
 from utils.log_categories import LOG_REGISTRY
 
 
-def test_chaque_famille_fait_1024x110_et_reste_distincte():
-    """Cinq etats et neuf domaines. Toutes doivent differer.
+def test_chaque_famille_fait_1024x64_et_reste_distincte():
+    """Seize familles : cinq états et onze domaines. Toutes doivent différer.
 
-    Le format est WebP depuis que la banniere part en piece jointe a chaque
-    reponse de commande et plus seulement dans les journaux : le meme visuel pese
-    5 Ko au lieu de 45.
+    WebP sans perte : la bannière part en pièce jointe à chaque message et sa
+    couche alpha doit rester exacte (un WebP avec perte salit les bords du halo).
     """
     payloads = []
     for style in log_banners.STYLES:
@@ -26,7 +26,8 @@ def test_chaque_famille_fait_1024x110_et_reste_distincte():
         payloads.append(payload)
         assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", style
         with Image.open(BytesIO(payload)) as image:
-            assert image.size == (1024, 110)
+            assert image.size == (1024, 64)
+            assert image.mode == "RGBA", f"{style} : pas de couche alpha"
     assert len(set(payloads)) == len(log_banners.STYLES)
 
 
@@ -64,52 +65,66 @@ def test_every_registry_entry_maps_to_a_generated_banner():
 
 
 def test_banner_draws_a_glowing_line_from_each_edge():
-    """Le trait est le dessin de la bannière : il doit éclairer la mi-hauteur et
-    s'éteindre au bord, sinon il ne reste qu'un rectangle sombre."""
+    """Le trait EST le dessin : il éclaire la mi-hauteur, il est plus intense près du
+    logo et il s'éteint avant le bord (coupé net, il redessinerait un rectangle)."""
+    milieu = log_banners.HEIGHT // 2
     with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("info")) as image:
-        rgb = image.convert("RGB")
-        gauche = sum(rgb.getpixel((300, 55)))
-        droite = sum(rgb.getpixel((724, 55)))
-        au_dessus = sum(rgb.getpixel((300, 40)))
-        bord = sum(rgb.getpixel((1015, 55)))
-        liseré_haut = sum(rgb.getpixel((300, 0)))
-        fond = sum(rgb.getpixel((300, 15)))
-    assert gauche > au_dessus * 2, "trait gauche absent"
-    assert droite > au_dessus * 2, "trait droit absent"
-    assert bord < gauche / 2, "le trait doit s'éteindre avant le bord"
-    assert liseré_haut > fond, "liseré lumineux en haut absent"
+        rgba = image.convert("RGBA")
+        pres_du_logo = rgba.getpixel((460, milieu))[3]
+        a_mi_chemin = rgba.getpixel((250, milieu))[3]
+        vers_le_bord = rgba.getpixel((20, milieu))[3]
+        cote_droit = rgba.getpixel((564, milieu))[3]
+        au_dessus = rgba.getpixel((250, milieu - 6))[3]
+    assert pres_du_logo > 200, "trait absent près du logo"
+    assert cote_droit > 200, "trait droit absent"
+    assert pres_du_logo > a_mi_chemin > vers_le_bord, "le trait doit s'éteindre vers le bord"
+    assert vers_le_bord < 40, "le trait doit être éteint au bord"
+    assert au_dessus < 40, "le trait doit rester fin"
 
 
-def test_banner_keeps_a_readable_background_and_an_accent_bar():
-    """Fond teinté à la famille mais assez sombre pour que le panneau posé dessous
-    reste lisible ; liseré d'accent sur le bord gauche, comme les bannières validées."""
-    for style, canal in (("error", 0), ("success", 1), ("info", 2)):
+def test_banner_has_no_background_at_all():
+    """« aucun fond visible » : hors du trait, du logo et de leur halo, l'image est
+    totalement transparente — sinon Discord affiche un rectangle coloré."""
+    for style in log_banners.STYLES:
         with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
-            rgb = image.convert("RGB")
-            fond = rgb.getpixel((300, 15))
-            barre = rgb.getpixel((1, 55))
-            trait = rgb.getpixel((300, 55))
-        assert sum(fond) / 3 < 70, f"{style} : fond trop clair ({fond})"
-        assert fond[canal] == max(fond), f"{style} : fond pas à la couleur ({fond})"
-        assert barre[canal] == max(barre), f"{style} : liseré gauche pas à la couleur ({barre})"
-        assert trait[canal] == max(trait), f"{style} : trait pas à la couleur ({trait})"
+            rgba = image.convert("RGBA")
+            for point in ((0, 0), (1023, 0), (0, 63), (1023, 63), (512, 0), (512, 63),
+                          (200, 8), (800, 56)):
+                assert rgba.getpixel(point)[3] == 0, f"{style} : fond peint en {point}"
+            opaques = sum(1 for valeur in rgba.getchannel("A").getdata() if valeur > 8)
+        part = opaques / (log_banners.WIDTH * log_banners.HEIGHT)
+        assert part < 0.25, f"{style} : {part:.0%} de l'image est peinte"
 
 
 def test_the_centered_logo_is_tinted_with_the_family_colour():
-    """Le logo du dépôt est bleu : non teinté, il jurait sur une bannière rouge ou or."""
-    with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("error")) as image:
-        rouge = image.convert("RGB").crop((470, 20, 554, 90))
-    with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("success")) as image:
-        verte = image.convert("RGB").crop((470, 20, 554, 90))
-    r_rouge = sum(p[0] for p in rouge.getdata()) / rouge.width / rouge.height
-    b_rouge = sum(p[2] for p in rouge.getdata()) / rouge.width / rouge.height
-    v_verte = sum(p[1] for p in verte.getdata()) / verte.width / verte.height
-    assert r_rouge > b_rouge * 1.5, "logo de la bannière erreur non teinté en rouge"
-    assert v_verte > b_rouge, "logo de la bannière succès non teinté en vert"
+    """Le logo du dépôt est bleu : non teinté, il jurait sur un trait rouge ou or."""
+    def moyenne(style: str, canal: int) -> float:
+        with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
+            centre = image.convert("RGBA").crop((492, 12, 532, 52))
+        pixels = [p for p in centre.getdata() if p[3] > 60]
+        return sum(p[canal] for p in pixels) / max(1, len(pixels))
+
+    assert moyenne("error", 0) > moyenne("error", 2) * 1.5, "logo erreur non teinté en rouge"
+    assert moyenne("success", 1) > moyenne("success", 0) * 1.5, "logo succès non teinté en vert"
+    assert moyenne("music", 0) > moyenne("music", 1), "logo musique non teinté en rose"
+
+
+def test_the_logo_is_exactly_centered():
+    """« parfaitement centré » : le dessin doit être symétrique au pixel près."""
+    with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier("info")) as image:
+        alpha = image.convert("RGBA").getchannel("A")
+    colonnes = [x for x in range(log_banners.WIDTH)
+                if any(alpha.getpixel((x, y)) > 40 for y in range(6, 20))]
+    lignes = [y for y in range(log_banners.HEIGHT)
+              if any(alpha.getpixel((x, y)) > 40 for x in range(470, 554))]
+    centre_x = (min(colonnes) + max(colonnes)) / 2
+    centre_y = (min(lignes) + max(lignes)) / 2
+    assert abs(centre_x - log_banners.WIDTH / 2) <= 1, f"logo décalé horizontalement ({centre_x})"
+    assert abs(centre_y - log_banners.HEIGHT / 2) <= 1, f"logo décalé verticalement ({centre_y})"
 
 
 def test_committed_source_banners_are_valid_and_match_the_generator():
-    """Ces cinq fichiers sont servis par URL GitHub raw aux réponses de commande :
+    """Ces fichiers sont servis par URL GitHub raw aux réponses de commande :
     un fichier corrompu (cas réel de banner_source_warning.webp) casse l'embed
     sans aucune erreur côté bot."""
     for state in log_banners.STYLES:
@@ -118,7 +133,8 @@ def test_committed_source_banners_are_valid_and_match_the_generator():
         payload = path.read_bytes()
         assert payload[:4] == b"RIFF" and payload[8:12] == b"WEBP", f"{state} : fichier illisible"
         with Image.open(BytesIO(payload)) as image:
-            assert image.size == (1024, 110), state
+            assert image.size == (1024, 64), state
+            assert image.mode == "RGBA", f"{state} : pas de couche alpha"
         assert path.stat().st_size < 12_000, f"{state} : {path.stat().st_size} octets"
 
 
@@ -130,7 +146,7 @@ def test_banner_uses_the_repository_logo():
 def test_generation_survives_a_missing_logo(tmp_path, monkeypatch):
     monkeypatch.setattr(log_banners, "LOGO_PATH", tmp_path / "absent.png")
     image = log_banners.build_banner("error")
-    assert image.size == (1024, 110)
+    assert image.size == (1024, 64)
 
 
 def test_no_invisible_padding_and_no_hard_rules_in_the_renderer():
@@ -200,13 +216,28 @@ def test_le_liseré_du_conteneur_suit_la_banniere():
         assert famille in panels.ACCENTS_PAR_FAMILLE, famille
 
 
-def test_chaque_famille_est_teintee_et_jamais_grise():
-    """« pas genre un gris noir » : le fond doit porter la couleur de la famille."""
-    for style in ("error", "success", "warning", "music", "economy"):
+def test_chaque_famille_porte_sa_couleur_sur_le_trait():
+    """La couleur s'applique au trait et au logo, jamais à un fond."""
+    milieu = log_banners.HEIGHT // 2
+    for style, canal in (("error", 0), ("success", 1), ("info", 2), ("music", 0),
+                         ("levels", 1), ("security", 2)):
         with Image.open(log_banners.BANNER_DIR / log_banners.nom_fichier(style)) as image:
-            fond = image.convert("RGB").getpixel((300, 18))
-        ecart = max(fond) - min(fond)
-        assert ecart >= 18, f"{style} : fond trop neutre {fond}"
+            trait = image.convert("RGBA").getpixel((300, milieu))
+        assert trait[3] > 120, f"{style} : trait trop pâle ({trait})"
+        assert trait[canal] == max(trait[:3]), f"{style} : trait pas à la couleur ({trait})"
+
+
+def test_une_famille_retiree_ne_reste_pas_sur_le_disque():
+    """Le dossier survit aux déploiements : une bannière d'un ancien style pourrait
+    encore être servie. ensure_banners() fait le ménage."""
+    intruse = log_banners.BANNER_DIR / "banner_ancien_style.webp"
+    intruse.write_bytes(b"pas une vraie image")
+    try:
+        log_banners.ensure_banners(force=True)
+        assert not intruse.exists(), "l'ancienne bannière aurait dû être supprimée"
+    finally:
+        if intruse.exists():
+            intruse.unlink()
 
 
 def test_les_deux_chemins_de_banniere_ont_les_memes_familles():

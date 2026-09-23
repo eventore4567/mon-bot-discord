@@ -28,27 +28,21 @@ _BANNER_RAW_BASE = (
 _BANNER_URLS = {
     famille: f"{_BANNER_RAW_BASE}/banner_source_{famille}.webp"
     for famille in (
-        "error", "success", "warning", "info", "special",
-        "moderation", "security", "economy", "config",
-        "levels", "music", "tickets", "games", "ai",
+        "success", "error", "warning", "info", "special",
+        "moderation", "security", "tickets", "economy", "levels",
+        "music", "games", "ai", "config", "welcome", "goodbye",
     )
 }
-_ACCENTS = {
-    "error": 0xEF4444,
-    "success": 0x22C55E,
-    "warning": 0xF59E0B,
-    "info": 0x3B82F6,
-    "special": 0x7C3AED,
-    "moderation": 0xF4687C,
-    "security": 0x847CFA,
-    "economy": 0xF8CA60,
-    "config": 0x54DEE4,
-    "levels": 0xAAE45C,
-    "music": 0xFF6CBC,
-    "tickets": 0x3AD6C6,
-    "games": 0xFF9648,
-    "ai": 0xD67CFF,
-}
+# Couleur du liseré du conteneur : exactement celle du trait et du logo de la
+# bannière (utils/log_banners.COLORS), pour que l'embed et la bannière s'accordent.
+def _hex(famille: str) -> int:
+    from .log_banners import COLORS
+
+    r, g, b = COLORS[famille]
+    return (r << 16) | (g << 8) | b
+
+
+_ACCENTS = {famille: _hex(famille) for famille in _BANNER_URLS}
 
 _DECORATIVE_LINE_RE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]{8,}$")
 _COMMAND_BANNER_RE = re.compile(r"/banner_source_[a-z]+\.webp(?:\?.*)?$")

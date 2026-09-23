@@ -54,23 +54,26 @@ logger = logging.getLogger("bot.panels")
 #   de moderation reussie n'est pas « verte », elle est « moderation ». Une
 #   sanction affichee en vert de reussite serait un contresens.
 INTENTIONS: dict[str, tuple[int, str]] = {
-    # Etats
+    # Etats : la couleur vient de config.py, comme les embeds. Le liseré du conteneur
+    # et le trait de la bannière sont alors exactement le même rouge, vert ou ambre.
     "success": (int(_config.COLOR_SUCCESS), "success"),
     "danger": (int(_config.COLOR_ERROR), "error"),
     "warning": (int(_config.COLOR_WARNING), "warning"),
     "info": (int(_config.COLOR_INFO), "info"),
     "brand": (int(_config.COLOR_BRAND), "special"),
-    "neutral": (int(_config.COLOR_NEUTRAL), "info"),
-    # Domaines
-    "moderation": (0xF4687C, "moderation"),
-    "securite": (0x847CFA, "security"),
-    "economie": (0xF8CA60, "economy"),
-    "configuration": (0x54DEE4, "config"),
-    "niveaux": (0xAAE45C, "levels"),
-    "musique": (0xFF6CBC, "music"),
-    "tickets": (0x3AD6C6, "tickets"),
-    "jeux": (0xFF9648, "games"),
-    "ia": (0xD67CFF, "ai"),
+    "neutral": (int(_config.COLOR_INFO), "info"),
+    # Domaines : la teinte est celle de la famille de bannière (utils/log_banners).
+    "moderation": (0xFF6B6B, "moderation"),
+    "securite": (0x22D3EE, "security"),
+    "tickets": (0x2DD4BF, "tickets"),
+    "economie": (0xF5C542, "economy"),
+    "niveaux": (0xA3E635, "levels"),
+    "musique": (0xFF5FC8, "music"),
+    "jeux": (0xFF8A3D, "games"),
+    "ia": (0xA855F7, "ai"),
+    "configuration": (0xC084FC, "config"),
+    "bienvenue": (0x34D399, "welcome"),
+    "depart": (0xFF6A3D, "goodbye"),
 }
 
 # Intentions qui ne disent rien du domaine : pour celles-la, la banniere prend la
