@@ -60,16 +60,16 @@ async def run() -> int:
         # produit blacklist-add/blacklist-users = 95. L'ancien alias `me` est aussi
         # marqué retiré, mais n'appartenait pas à ces 97 commandes directes : sa surface
         # canonique est désormais `stats`, qui reste directe.
-        expected_normal_direct = 95
+        expected_normal_direct = 96
         if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
             errors.append(
                 "la surface normale doit contenir exactement "
                 f"{expected_normal_direct} commandes directes après retraits produit, "
                 f"obtenu: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)}"
             )
-        if len(command_catalog_cleanup.GAME_COMMANDS) != 43:
+        if len(command_catalog_cleanup.GAME_COMMANDS) != 44:
             errors.append(
-                f"les 43 jeux doivent rester directs, obtenu: {len(command_catalog_cleanup.GAME_COMMANDS)}"
+                f"les 44 jeux doivent rester directs, obtenu: {len(command_catalog_cleanup.GAME_COMMANDS)}"
             )
 
         expected_pruned = command_catalog_cleanup.PURE_DUPLICATE_COMMANDS | frozenset(explicit_removed)
