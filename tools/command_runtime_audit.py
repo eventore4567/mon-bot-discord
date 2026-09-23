@@ -56,11 +56,10 @@ async def run() -> int:
         explicit_removed = set(
             getattr(command_catalog_cleanup, "EXPLICITLY_REMOVED_COMMANDS", frozenset())
         )
-        # Contrat actuel : 97 commandes directes historiques moins les deux retraits
-        # produit blacklist-add/blacklist-users = 95. L'ancien alias `me` est aussi
-        # marqué retiré, mais n'appartenait pas à ces 97 commandes directes : sa surface
-        # canonique est désormais `stats`, qui reste directe.
-        expected_normal_direct = 95
+        # Contrat actuel : les deux retraits produit historiques sont complétés par
+        # leaderboard-money, retiré comme doublon explicite de /economy leaderboard.
+        # Le compteur baisse donc d'une commande directe sans perte de fonctionnalité.
+        expected_normal_direct = 94
         if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
             errors.append(
                 "la surface normale doit contenir exactement "
