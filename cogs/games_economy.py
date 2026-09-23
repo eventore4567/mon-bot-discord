@@ -57,7 +57,7 @@ from cogs.games_catalog import (
     SOLO_FLAVORS,
     WORDGAME_CLUES,
 )
-from utils import checks, design_system, game_rewards, stats_service
+from utils import checks, design_system, game_rewards, stats_service, temporary_boosts
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.games-economy")
@@ -65,22 +65,51 @@ logger = logging.getLogger("bot.games-economy")
 TICTACTOE_QUESTIONS = None  # (placeholder retiré — voir cogs/minigames.py pour tictactoe)
 
 
+def _game_icon(title: str) -> str:
+    value = str(title or "").casefold()
+    for words, icon in (
+        (("réaction", "reaction", "clic"), "⚡"),
+        (("vitesse", "retape", "fast"), "⌨️"),
+        (("mémoire", "memory"), "🧠"),
+        (("mine", "minage", "démineur"), "⛏️"),
+        (("chasse", "hunt"), "🏹"),
+        (("pêche", "peche", "fishing"), "🎣"),
+        (("donjon", "dungeon"), "🗝️"),
+        (("trésor", "tresor", "treasure"), "💎"),
+        (("aventure", "quête", "quete"), "🗺️"),
+        (("plus haut", "plus bas"), "🃏"),
+        (("quiz", "trivia"), "❓"),
+        (("course", "race"), "🏁"),
+        (("duel",), "⚔️"),
+    ):
+        if any(word in value for word in words):
+            return icon
+    return "🎮"
+
+
 async def _embed(bot, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
     style = design_system.CATEGORY_STYLES["games"]
     colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
     default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
     design = await bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
-    return design_system.create_embed(
-        title=design_system.kind_title(title, kind=kind, category_emoji=style["emoji"]),
+    resolved_title = design_system.kind_title(title, kind=kind, category_emoji=style["emoji"])
+    embed = design_system.create_embed(
+        title=resolved_title,
         description=description,
         colour=design.get(colour_key, default_colour),
         footer=design.get("footer"),
     )
+    embed.title = f"{_game_icon(title)} {resolved_title}"
+    if description:
+        embed.description = str(description)
+    return embed
 
 
 def _reward_line(reward: "game_rewards.GameReward | None") -> str:
     if reward and reward.success and reward.amount > 0:
-        return f"\n\n🪙 **+{reward.amount}** crédités ! (réf. `{reward.display_id}`)"
+        boost = float((reward.metadata or {}).get("money_boost", 1.0) or 1.0)
+        suffix = f" · 🚀 boost x{boost:g}" if boost > 1.0 else ""
+        return f"\n\n🪙 **+{reward.amount}** crédités !{suffix} (réf. `{reward.display_id}`)"
     if reward and reward.reason == "daily_limit":
         return (
             "\n\n🪙 **Récompense quotidienne maximale atteinte.** "
@@ -99,12 +128,12 @@ def _difficulty_profile(value: str) -> tuple[int, float, int]:
     """Retourne longueur du défi, temps d'affichage et multiplicateur de récompense."""
     value = str(value or "normal").casefold()
     return {
-        "facile": (5, 3.2, 0),
-        "easy": (5, 3.2, 0),
-        "normal": (7, 2.4, 5),
-        "difficile": (9, 1.8, 10),
-        "hard": (9, 1.8, 10),
-    }.get(value, (7, 2.4, 5))
+        "facile": (3, 0.8, 0),
+        "easy": (3, 0.8, 0),
+        "normal": (4, 1.2, 4),
+        "difficile": (6, 1.5, 9),
+        "hard": (6, 1.5, 9),
+    }.get(value, (4, 1.2, 4))
 
 
 async def _game_difficulty(bot, guild_id: int | None) -> str:
@@ -2048,6 +2077,31 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
         text = game_rewards.secure_pick(succes)
         reward = await _finish(self.bot, ctx, game_name, sid, "win", amount)
 
+        boost_text = ""
+        if game_name == "adventure":
+            money_boost, xp_boost, duration, rarity = temporary_boosts.quest_boost_for_risk(multiplier)
+            active_boost, granted = await temporary_boosts.grant_quest_boost(
+                self.bot.db,
+                guild_id,
+                ctx.author.id,
+                money_multiplier=money_boost,
+                xp_multiplier=xp_boost,
+                duration_seconds=duration,
+                source=f"quest:{rarity}",
+            )
+            if granted:
+                boost_text = (
+                    f"\n\n🚀 **Boost de quête {rarity} activé !**\n"
+                    f"🪙 Argent **x{active_boost.money_multiplier:g}** · "
+                    f"⭐ XP **x{active_boost.xp_multiplier:g}** · "
+                    f"⏱️ **{max(1, (active_boost.remaining() + 59) // 60)} min**"
+                )
+            else:
+                boost_text = (
+                    f"\n\n🚀 Votre boost actuel est déjà aussi fort ou meilleur : "
+                    f"argent x{active_boost.money_multiplier:g} · XP x{active_boost.xp_multiplier:g}."
+                )
+
         if reward and reward.success and reward.amount > 0:
             reward_text = (
                 f"🪙 **+{stats_service.format_number(reward.amount)}** crédités\n"
@@ -2067,7 +2121,7 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
                     description=(
                         f"{emoji} **{label}** · butin x{multiplier:g}\n{text}\n\n"
                         f"🎲 Chance jouée : **{round(chance * 100)}%**\n"
-                        f"{reward_text}\n\n"
+                        f"{reward_text}{boost_text}\n\n"
                         "🔁 Vous pouvez rejouer dans quelques secondes."
                     ),
                     kind="success",
