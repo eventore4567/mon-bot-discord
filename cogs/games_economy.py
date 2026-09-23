@@ -303,25 +303,101 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Lancer de dés chanceux', description=f'🎲🎲 **{d1} - {d2}**, pas de double cette fois.')))
 
     @commands.hybrid_command(name="highlow", description="Le bot tire une carte (1-13). Devinez si la suivante sera plus haute ou plus basse.", with_app_command=False)
-    @app_commands.describe(pari="plus_haut ou plus_bas")
+    @app_commands.describe(pari="Optionnel : plus_haut ou plus_bas ; sinon utilisez les boutons")
     @app_commands.choices(pari=[app_commands.Choice(name="Plus haut", value="plus_haut"), app_commands.Choice(name="Plus bas", value="plus_bas")])
-    async def highlow(self, ctx: commands.Context, pari: str):
+    async def highlow(self, ctx: commands.Context, pari: str = None):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, "highlow", 12)
         if not started:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Plus haut ou plus bas', description=err, kind='warning')))
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await _embed(self.bot, guild_id, title="Plus haut ou plus bas", description=err, kind="warning")
+                ),
+            )
+
         first = game_rewards.secure_pick(range(1, 14))
+        selected = (pari or "").strip().casefold()
+        msg = None
+
+        if selected not in {"plus_haut", "plus_bas"}:
+            view = _HighLowView(ctx.author.id)
+            msg = await panels.envoyer(
+                ctx,
+                panels.avec_composants(
+                    panels.depuis_embed(
+                        await _embed(
+                            self.bot,
+                            guild_id,
+                            title="Plus haut ou plus bas",
+                            description=(
+                                f"🃏 Première carte : **{first}**\n"
+                                "La prochaine sera-t-elle plus haute ou plus basse ?"
+                            ),
+                        )
+                    ),
+                    view,
+                ),
+            )
+            await view.wait()
+            if view.choice is None:
+                await _finish(self.bot, ctx, "highlow", sid, "loss", 0)
+                return await panels.editer(
+                    msg,
+                    panels.depuis_embed(
+                        await _embed(
+                            self.bot,
+                            guild_id,
+                            title="Plus haut ou plus bas",
+                            description="⏱️ Aucun choix reçu.",
+                            kind="warning",
+                        )
+                    ),
+                )
+            selected = view.choice
+
         second = game_rewards.secure_pick(range(1, 14))
         if second == first:
             await _finish(self.bot, ctx, "highlow", sid, "draw", 0)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Plus haut ou plus bas', description=f'🃏 {first} puis 🃏 {second} — égalité, personne ne gagne.')))
-        won = (pari == "plus_haut" and second > first) or (pari == "plus_bas" and second < first)
-        if won:
-            reward = await _finish(self.bot, ctx, "highlow", sid, "win", 18)
-            desc = f"🃏 {first} → 🃏 **{second}** — bien vu !" + _reward_line(reward)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Plus haut ou plus bas', description=desc, kind='success')))
-        await _finish(self.bot, ctx, "highlow", sid, "loss", 0)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Plus haut ou plus bas', description=f'🃏 {first} → 🃏 **{second}** — perdu.', kind='danger')))
+            desc = f"🃏 **{first} → {second}** · égalité, manche nulle."
+            kind = "primary"
+        else:
+            won = (
+                (selected == "plus_haut" and second > first)
+                or (selected == "plus_bas" and second < first)
+            )
+            if won:
+                # Les cartes proches sont plus difficiles à prédire : petit bonus.
+                distance = abs(second - first)
+                skill_bonus = 6 if distance <= 2 else 3 if distance <= 4 else 0
+                reward = await _finish(self.bot, ctx, "highlow", sid, "win", 18 + skill_bonus)
+                desc = (
+                    f"🃏 **{first} → {second}** · bon choix : "
+                    f"**{'plus haut' if selected == 'plus_haut' else 'plus bas'}**."
+                    + (f"\n🎯 Bonus risque : **+{skill_bonus}**" if skill_bonus else "")
+                    + _reward_line(reward)
+                )
+                kind = "success"
+            else:
+                await _finish(self.bot, ctx, "highlow", sid, "loss", 0)
+                desc = (
+                    f"🃏 **{first} → {second}** · perdu. Vous aviez choisi "
+                    f"**{'plus haut' if selected == 'plus_haut' else 'plus bas'}**."
+                )
+                kind = "danger"
+
+        panel = panels.depuis_embed(
+            await _embed(
+                self.bot,
+                guild_id,
+                title="Plus haut ou plus bas — résultat",
+                description=desc,
+                kind=kind,
+            )
+        )
+        if msg is not None:
+            return await panels.editer(msg, panel)
+        return await panels.envoyer(ctx, panel)
 
     @commands.hybrid_command(name="memory", description="Mémorisez une séquence d'emojis puis retapez-la dans l'ordre.", with_app_command=False)
     async def memory(self, ctx: commands.Context):
@@ -954,6 +1030,42 @@ class _MinesweeperButton(discord.ui.Button):
                 f"⛏️ Case sûre. **{around}** bombe(s) autour."
             )
             await interaction.response.edit_message(embed=embed, view=view)
+
+
+class _HighLowView(discord.ui.View):
+    def __init__(self, author_id: int):
+        super().__init__(timeout=20)
+        self.author_id = author_id
+        self.choice: str | None = None
+        self._lock = asyncio.Lock()
+        self.add_item(_HighLowButton("⬆️ Plus haut", "plus_haut", discord.ButtonStyle.success))
+        self.add_item(_HighLowButton("⬇️ Plus bas", "plus_bas", discord.ButtonStyle.primary))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Cette manche appartient à un autre joueur.", ephemeral=True)
+            return False
+        return True
+
+
+class _HighLowButton(discord.ui.Button):
+    def __init__(self, label: str, choice: str, style: discord.ButtonStyle):
+        super().__init__(label=label, style=style)
+        self.choice = choice
+
+    async def callback(self, interaction: discord.Interaction):
+        view: _HighLowView = self.view
+        async with view._lock:
+            if view.choice is not None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Choix déjà enregistré.", ephemeral=True)
+                return
+            view.choice = self.choice
+            for child in view.children:
+                child.disabled = True
+            await interaction.response.edit_message(view=view)
+            view.stop()
 
 
 class _ColorQuizView(discord.ui.View):
