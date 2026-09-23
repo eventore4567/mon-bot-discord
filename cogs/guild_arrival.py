@@ -1,9 +1,7 @@
-"""Accueil UNIQUE envoyé lorsque SentriX rejoint un serveur.
+"""Accueil minimal envoyé lorsque SentriX rejoint un serveur.
 
-Un seul message : présentation, bouton Configurer, choix de la langue (Français /
-English), demande d'aide au créateur et liens officiels. Les anciens messages
-séparés (« Bienvenue sur SentriX V3 », « Choose your language », « Besoin d'aide pour
-configurer SentriX ? ») ont été retirés de leurs modules respectifs.
+Aucun gros panneau n'est publié dans un salon. Le propriétaire reçoit seulement un
+court message privé avec +help, +setup et le lien du dashboard.
 """
 from __future__ import annotations
 
@@ -286,20 +284,39 @@ class GuildArrival(commands.Cog):
         except Exception:
             logger.exception("Initialisation de la base impossible pour le serveur %s.", guild.id)
 
-        embed = _arrival_embed(self.bot, guild)
-        view = GuildArrivalView(self.bot)
-        channel = self._target_channel(guild)
-        allowed_mentions = discord.AllowedMentions(users=True, roles=False, everyone=False)
+        dashboard = _safe_url(getattr(config, "DASHBOARD_APP_URL", None))
+        if not dashboard:
+            public = _safe_url(getattr(config, "DASHBOARD_PUBLIC_URL", None))
+            dashboard = f"{public.rstrip('/')}/app" if public else None
+
+        owner = guild.owner
+        if owner is None:
+            try:
+                owner = await self.bot.fetch_user(int(guild.owner_id))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
+                owner = None
+        if owner is None:
+            logger.info("Accueil MP ignoré : propriétaire introuvable guild=%s", guild.id)
+            return
+
+        lines = [
+            f"Merci d'avoir ajouté SentriX sur **{guild.name}**.",
+            "",
+            "Commandes utiles :",
+            "`+help` — voir les commandes",
+            "`+setup` — configurer le serveur",
+        ]
+        if dashboard:
+            lines.extend(["", f"Dashboard : {dashboard}"])
+
         try:
-            if channel is not None:
-                await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=allowed_mentions)
-                logger.info("Accueil SentriX envoyé dans %s (%s).", guild.name, guild.id)
-                return
-            if guild.owner is not None:
-                await panels.envoyer(guild.owner, panels.avec_composants(panels.depuis_embed(embed), view), allowed_mentions=allowed_mentions)
-                logger.info("Accueil premium SentriX envoyé en MP au propriétaire de %s.", guild.id)
+            await owner.send(
+                "\n".join(lines)[:2000],
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            logger.info("Accueil compact SentriX envoyé en MP au propriétaire de %s.", guild.id)
         except (discord.Forbidden, discord.HTTPException):
-            logger.exception("Impossible d'envoyer l'accueil sur %s (%s).", guild.name, guild.id)
+            logger.info("Accueil MP impossible pour le propriétaire de %s.", guild.id)
 
 
 async def setup(bot: commands.Bot):

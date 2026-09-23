@@ -25,7 +25,7 @@ from utils.log_categories import (
     category_for,
     resolve,
 )
-from utils.wide_logs import send_wide_log
+from utils.wide_logs import derive_identity, send_wide_log
 
 logger = logging.getLogger("bot")
 
@@ -218,13 +218,15 @@ def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> st
     title, description = embed.title or "", embed.description or ""
     event_type = canonical_event_type(log_type, title, description)
     if event_type not in LOG_REGISTRY:
-        # log_type etait une CATEGORIE ("moderation") et non un type d'evenement :
-        # canonical_event_type la renvoie telle quelle sans jamais lire le texte. Les
-        # commandes de sanction passent la categorie, les listeners Discord passent
-        # l'evenement — sans cette relecture, les deux sources ne partageaient aucune
-        # cle semantique et un meme kick sortait deux fois.
         event_type = canonical_event_type("", title, description)
-    if event_type not in {
+
+    sample = " ".join(
+        [str(title), str(description)]
+        + [f"{field.name} {field.value}" for field in embed.fields]
+    )
+    target = _first_snowflake(sample)
+
+    if event_type in {
         "member_ban",
         "member_unban",
         "member_kick",
@@ -232,14 +234,116 @@ def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> st
         "member_untimeout",
         "member_warn",
     }:
-        return None
-    sample = " ".join(
-        [str(title), str(description)]
-        + [f"{field.name} {field.value}" for field in embed.fields]
-    )
-    target = _first_snowflake(sample)
-    return f"semantic:{guild_id}:{event_type}:{target}" if target else None
+        return f"semantic:{guild_id}:{event_type}:{target}" if target else None
 
+    # Les événements d'invitation peuvent être produits par deux anciennes couches
+    # (gateway et audit). Une clé sémantique courte supprime le doublon visible.
+    if event_type in {"invite_create", "invite_delete"}:
+        return f"semantic:{guild_id}:{event_type}:{target or 0}"
+
+    return None
+
+
+_INVITE_CODE_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com/invite)/([A-Za-z0-9_-]{2,32})",
+    re.IGNORECASE,
+)
+
+
+def _invite_code_from_embed(embed: discord.Embed) -> str | None:
+    for field in embed.fields:
+        name = str(field.name or "").casefold()
+        value = str(field.value or "").strip()
+        if "lien" in name or "invite" in name or "code" in name:
+            match = _INVITE_CODE_RE.search(value)
+            if match:
+                return match.group(1)
+            code = value.strip(" <>`")
+            if re.fullmatch(r"[A-Za-z0-9_-]{2,32}", code):
+                return code
+    match = _INVITE_CODE_RE.search(str(embed.description or ""))
+    return match.group(1) if match else None
+
+
+async def _resolve_log_identity(
+    bot,
+    guild: discord.Guild,
+    embed: discord.Embed,
+    event_type: str,
+    identity_name: str | None,
+    identity_id: int | None,
+    identity_icon: str | None,
+) -> tuple[str | None, int | None, str | None]:
+    identity_name, identity_id, identity_icon = derive_identity(
+        embed,
+        log_type=event_type,
+        guild=guild,
+        identity_name=identity_name,
+        identity_id=identity_id,
+        identity_icon=identity_icon,
+    )
+    if not identity_id:
+        return identity_name, identity_id, identity_icon
+
+    unresolved = not identity_name or str(identity_name).strip().startswith("<@")
+    if not unresolved:
+        return identity_name, identity_id, identity_icon
+
+    user = guild.get_member(int(identity_id))
+    if user is None:
+        try:
+            user = bot.get_user(int(identity_id))
+        except Exception:
+            user = None
+    if user is None:
+        try:
+            user = await bot.fetch_user(int(identity_id))
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
+            user = None
+
+    if user is not None:
+        identity_name = (
+            getattr(user, "display_name", None)
+            or getattr(user, "global_name", None)
+            or getattr(user, "name", None)
+            or identity_name
+        )
+        asset = getattr(user, "display_avatar", None)
+        if asset is not None:
+            identity_icon = str(asset.url)
+    elif not identity_name or str(identity_name).strip().startswith("<@"):
+        identity_name = "Utilisateur Discord"
+
+    return identity_name, identity_id, identity_icon
+
+
+class RevealInviteButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"sxinvite:(?P<code>[A-Za-z0-9_-]{2,32})",
+):
+    """Bouton persistant qui réaffiche le lien d'invitation en privé."""
+
+    def __init__(self, code: str, *, row: int = 0):
+        self.code = str(code)
+        super().__init__(
+            discord.ui.Button(
+                label="Copier l'invitation",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"sxinvite:{self.code}",
+                row=row,
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match, /):
+        return cls(match["code"])
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            f"https://discord.gg/{self.code}",
+            ephemeral=True,
+            allowed_mentions=LOG_ALLOWED_MENTIONS,
+        )
 
 class RevealIdButton(
     discord.ui.DynamicItem[discord.ui.Button],
@@ -283,6 +387,7 @@ class LogActionsView(discord.ui.View):
         *,
         jump_url: str | None = None,
         ids: list[tuple[str, int]] | None = None,
+        invite_code: str | None = None,
     ):
         super().__init__(timeout=None)
         if jump_url:
@@ -296,15 +401,19 @@ class LogActionsView(discord.ui.View):
             )
         for label, entity_id in (ids or [])[:4]:
             self.add_item(RevealIdButton(label, entity_id, row=0))
+        if invite_code:
+            self.add_item(RevealInviteButton(invite_code, row=0))
 
 
 def log_actions(
     *,
     jump_url: str | None = None,
     ids: list[tuple[str, int]] | None = None,
+    invite_code: str | None = None,
 ) -> LogActionsView | None:
-    return LogActionsView(jump_url=jump_url, ids=ids) if jump_url or ids else None
-
+    if not (jump_url or ids or invite_code):
+        return None
+    return LogActionsView(jump_url=jump_url, ids=ids, invite_code=invite_code)
 
 async def _ensure_log_config_schema(bot) -> None:
     """Filet de sécurité : la table canonique est créée par ``Database.connect()``.
@@ -612,6 +721,22 @@ async def send_log(
         )
         return False
 
+    identity_name, identity_id, identity_icon = await _resolve_log_identity(
+        bot, guild, rendered, event_type, identity_name, identity_id, identity_icon
+    )
+
+    if event_type == "invite_create":
+        invite_code = _invite_code_from_embed(rendered)
+        if invite_code:
+            if view is None:
+                view = log_actions(invite_code=invite_code)
+            elif isinstance(view, discord.ui.View):
+                try:
+                    if not any(isinstance(item, RevealInviteButton) for item in view.children):
+                        view.add_item(RevealInviteButton(invite_code))
+                except (ValueError, TypeError):
+                    logger.debug("Bouton de copie invitation non ajouté.", exc_info=True)
+
     config = await get_log_config(bot, guild.id, category)
     channel_id = config["channel_id"] if config else None
 
@@ -755,7 +880,7 @@ async def send_test_log(
 
 __all__ = [
     "CATEGORY_ORDER", "DEFAULT_LOG_SETTING", "LOG_ALLOWED_MENTIONS", "LOG_TYPES",
-    "LogActionsView", "RevealIdButton", "_ensure_category_row", "_ensure_log_config_schema",
+    "LogActionsView", "RevealIdButton", "RevealInviteButton", "_ensure_category_row", "_ensure_log_config_schema",
     "categories_with_types", "get_all_log_settings", "get_log_config", "get_log_setting",
     "is_primary_process", "log_actions", "make_event_key", "route_for", "semantic_event_key",
     "send_log", "send_test_log", "set_log_channel", "set_log_config", "set_log_enabled",

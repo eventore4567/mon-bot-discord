@@ -332,24 +332,19 @@ def test_avatar_uses_the_target_display_name_and_real_animated_asset():
     assert 'label="Ouvrir l\'avatar"' not in source
 
 
-def test_guild_arrival_opens_the_real_setup_and_has_safe_fallbacks():
+def test_guild_arrival_is_a_compact_owner_dm_only():
     import inspect
-    source = inspect.getsource(guild_arrival)
+    source = inspect.getsource(guild_arrival.GuildArrival.on_guild_join)
     assert 'async def on_guild_join' in source
-    assert 'guild.system_channel' in source
-    assert 'permissions.send_messages and permissions.embed_links' in source
-    # Le custom_id est versionne : on verifie la forme, pas un numero fige, sinon le
-    # test casse a chaque revision du panneau d'accueil.
-    assert re.search(r'custom_id="sentrix:guild-arrival:setup:v\d+"', source)
-    assert 'configuration._open_setup_panel(interaction.channel, author=member)' in source
-    # Repli en message prive au proprietaire quand aucun salon n'est ecrivable.
-    # Il passe desormais par le systeme compose : c'est la DESTINATION qui compte,
-    # pas la methode d'envoi.
-    assert 'panels.envoyer(guild.owner,' in source
-    assert 'title="SentriX • Installation réussie"' in source
-    assert 'Placez le rôle **SentriX** au-dessus' in source
-    assert 'name="Liens officiels"' in source
-    assert 'Une fois le panneau terminé' not in source
+    assert 'owner.send(' in source
+    assert '`+help` — voir les commandes' in source
+    assert '`+setup` — configurer le serveur' in source
+    assert 'DASHBOARD_APP_URL' in source
+    assert 'DASHBOARD_PUBLIC_URL' in source
+    # L'ajout du bot ne publie plus de gros panneau dans un salon du serveur.
+    assert '_target_channel' not in source
+    assert '_arrival_embed' not in source
+    assert 'panels.envoyer(' not in source
 
 
 def test_setup_is_compact_and_does_not_repeat_the_control_center():
