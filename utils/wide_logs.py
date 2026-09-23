@@ -43,7 +43,8 @@ _DECORATIVE_LINE_RE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]{4
 
 _TARGET_LABELS = (
     "auteur", "author", "cible", "target", "membre", "member", "utilisateur",
-    "user", "victime", "rôle", "role", "salon", "channel",
+    "user", "victime", "créateur", "createur", "creator", "rôle", "role",
+    "salon", "channel",
 )
 _MODERATOR_LABELS = (
     "modérateur", "moderateur", "moderator", "staff", "exécuteur", "executeur",
