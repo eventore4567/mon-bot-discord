@@ -685,27 +685,44 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
 
 
 class _ReactionSoloView(discord.ui.View):
-    def __init__(self, author_id: int):
+    def __init__(self, author_id: int, options: list[str], target: str):
         super().__init__(timeout=6)
         self.author_id = author_id
-        self.elapsed = None
+        self.target = target
+        self.correct: bool | None = None
+        self.elapsed: float | None = None
         self._start = time.monotonic()
-        self.add_item(_ReactionButton())
+        self._lock = asyncio.Lock()
+        for token in options:
+            self.add_item(_ReactionButton(token, is_target=(token == target)))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.author_id
+        if interaction.user.id != self.author_id:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Cette manche appartient à un autre joueur.", ephemeral=True)
+            return False
+        return True
 
 
 class _ReactionButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="🔴 CLIQUEZ !", style=discord.ButtonStyle.danger)
+    def __init__(self, token: str, *, is_target: bool):
+        super().__init__(label=token, style=discord.ButtonStyle.secondary)
+        self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
         view: _ReactionSoloView = self.view
-        view.elapsed = time.monotonic() - view._start
-        self.disabled = True
-        await interaction.response.defer()
-        view.stop()
+        async with view._lock:
+            if view.correct is not None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Cette manche est déjà terminée.", ephemeral=True)
+                return
+            view.correct = self.is_target
+            view.elapsed = time.monotonic() - view._start
+            for child in view.children:
+                child.disabled = True
+            self.style = discord.ButtonStyle.success if self.is_target else discord.ButtonStyle.danger
+            await interaction.response.edit_message(view=view)
+            view.stop()
 
 
 class _ColorQuizView(discord.ui.View):
@@ -1381,24 +1398,43 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
 
 
 class _CommunityRaceButtonView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, options: list[str], target: str):
         super().__init__(timeout=10)
-        self.winner: discord.Member | None = None
-        self.add_item(_CommunityRaceButton())
+        self.target = target
+        self.winner: discord.Member | discord.User | None = None
+        self.elapsed: float | None = None
+        self._start = time.monotonic()
+        self._lock = asyncio.Lock()
+        for token in options:
+            self.add_item(_CommunityRaceButton(token, is_target=(token == target)))
 
 
 class _CommunityRaceButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(label="🔴 CLIQUEZ !", style=discord.ButtonStyle.danger)
+    def __init__(self, token: str, *, is_target: bool):
+        super().__init__(label=token, style=discord.ButtonStyle.secondary)
+        self.is_target = is_target
 
     async def callback(self, interaction: discord.Interaction):
         view: _CommunityRaceButtonView = self.view
-        if view.winner is not None:
-            return await interaction.response.send_message("❌ Trop tard, quelqu'un a déjà cliqué.", ephemeral=True)
-        view.winner = interaction.user
-        self.disabled = True
-        await interaction.response.defer()
-        view.stop()
+        async with view._lock:
+            if view.winner is not None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Trop tard, la manche est déjà terminée.", ephemeral=True)
+                return
+            if not self.is_target:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Mauvaise cible. Cherchez le bon symbole + nombre.", ephemeral=True)
+                return
+
+            view.winner = interaction.user
+            view.elapsed = time.monotonic() - view._start
+            for child in view.children:
+                child.disabled = True
+            self.style = discord.ButtonStyle.success
+            # edit_message accuse réception immédiatement : le callback ne reste jamais
+            # sans ACK et évite l'ancien panneau « Action interrompue ».
+            await interaction.response.edit_message(view=view)
+            view.stop()
 
 
 class _EmojiRaceView(discord.ui.View):
