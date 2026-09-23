@@ -1,18 +1,18 @@
-"""Génération des bannières de logs SentriX (1024x110, cinq variantes).
+"""Génération des bannières SentriX (1024x110, neuf familles).
 
-Le style vient du registre ``LOG_REGISTRY`` via ``utils.log_categories.resolve`` : la
-couleur est déterminée par le ``log_type``, jamais devinée depuis le titre. Deviner était
-cassé — « unban » contient « ban », donc un débannissement sortait en rouge. La détection
-textuelle ne subsiste que comme repli, à l'intérieur de ``canonical_event_type``, quand le
-``log_type`` est inconnu du registre.
+Style unique, aligné sur les bannières validées ``banner_source_*`` : fond nuit
+quasi noir, **trait lumineux** qui part de chaque bord vers le centre, **logo
+SentriX au centre** avec son halo, liseré d'accent à gauche et cadre arrondi
+discret. La couleur (rouge, verte, jaune…) vient du ``log_type`` via
+``utils.log_categories.resolve`` — jamais devinée depuis le titre : « unban »
+contient « ban », un débannissement sortait en rouge.
 
 Composition d'une bannière :
-- dégradé horizontal courbé (la ligne de mélange s'incurve verticalement) ;
-- halo radial décentré ;
-- bandes diagonales très discrètes ;
-- vignettage sur le bord droit ;
-- liseré lumineux sur le bord haut ;
-- logo ``assets/sentrix_logo.png`` centré avec un halo à la couleur d'accent.
+- fond nuit + halo d'accent centré derrière le logo ;
+- deux traits lumineux (cœur net + bloom) s'éteignant vers les bords ;
+- liseré vertical d'accent sur le bord gauche ;
+- cadre arrondi et liseré supérieur très discrets ;
+- logo ``assets/sentrix_logo.png`` centré, teinté à la couleur d'accent.
 
 Le logo est facultatif : s'il est absent, la bannière se génère sans lever.
 """
@@ -54,23 +54,33 @@ HEIGHT = 110
 # calculés en Python pur au démarrage.
 _GRADIENT_WIDTH = 256
 
+# Côté du logo centré. 70 px sur 110 : lisible sur mobile sans manger le trait.
+LOGO_BOX = 70
+
 # Familles de bannieres. Cinq etats (les quatre premiers plus « special »), puis
 # quatre domaines. On s'arrete la volontairement : une famille par domaine reste
 # reconnaissable, une par commande ne le serait plus, et chaque variante est une
 # image de plus a garder coherente.
 COLORS: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
     # Etats
-    "error": ((255, 62, 82), (126, 17, 48)),
-    "success": ((42, 221, 119), (12, 100, 67)),
-    "warning": ((255, 188, 60), (176, 78, 18)),
-    "info": ((55, 151, 255), (51, 67, 198)),
-    "special": ((174, 97, 255), (76, 38, 180)),
+    "error": ((255, 82, 98), (168, 30, 58)),
+    "success": ((62, 231, 134), (18, 132, 86)),
+    "warning": ((255, 198, 74), (188, 104, 20)),
+    "info": ((88, 168, 255), (44, 86, 214)),
+    "special": ((186, 118, 255), (94, 48, 200)),
     # Domaines : une identite propre la ou la teinte d'etat ne dit rien d'utile.
-    "moderation": ((232, 84, 106), (104, 22, 46)),   # rouge sourd, distinct de l'erreur
-    "security": ((139, 122, 255), (58, 40, 148)),    # indigo, la couleur des protections
-    "economy": ((240, 190, 78), (146, 92, 20)),      # or
-    "config": ((64, 208, 214), (22, 96, 132)),       # cyan, les reglages
+    "moderation": ((244, 104, 124), (132, 30, 58)),  # rouge sourd, distinct de l'erreur
+    "security": ((150, 138, 255), (68, 52, 170)),    # indigo, la couleur des protections
+    "economy": ((248, 202, 96), (168, 110, 24)),     # or
+    "config": ((84, 222, 228), (26, 116, 150)),      # cyan, les reglages
 }
+
+# Fond commun à toutes les familles : c'est le trait et le logo qui portent la
+# couleur, pas le fond. Deux bannières côte à côte restent ainsi de la même
+# famille visuelle, exactement comme les bannières validées banner_source_*.
+NIGHT = (20, 22, 48)
+NIGHT_EDGE = (12, 13, 30)
+
 STYLES = tuple(COLORS)
 
 # WebP plutot que PNG : la banniere part en piece jointe a CHAQUE message, et le
@@ -94,66 +104,121 @@ def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
 
 
-def _build_gradient(left: tuple[int, int, int], right: tuple[int, int, int]) -> Image.Image:
-    """Dégradé courbé + halo radial décentré + vignettage droit, en basse résolution."""
+def _night_background(accent: tuple[int, int, int]) -> Image.Image:
+    """Fond nuit + halo d'accent centré, calculé en basse résolution puis étiré."""
     image = Image.new("RGB", (_GRADIENT_WIDTH, HEIGHT))
     pixels = image.load()
-    halo_x, halo_y = _GRADIENT_WIDTH * 0.34, HEIGHT * 0.42
-    halo_rx, halo_ry = _GRADIENT_WIDTH * 0.54, HEIGHT * 1.65
+    cx, cy = _GRADIENT_WIDTH * 0.5, HEIGHT * 0.5
+    rx, ry = _GRADIENT_WIDTH * 0.42, HEIGHT * 1.15
     last_x = max(1, _GRADIENT_WIDTH - 1)
     last_y = max(1, HEIGHT - 1)
 
     for y in range(HEIGHT):
         yn = y / last_y
-        # La ligne de mélange s'incurve : le dégradé n'est pas une verticale plate.
-        vertical_bend = math.sin(yn * math.pi) * 0.055
-        center_light = 1.0 - abs(yn * 2.0 - 1.0)
-        dy = (y - halo_y) / halo_ry
+        # Très léger éclaircissement vers le haut : le bandeau ne paraît pas plat.
+        vertical = (1.0 - yn) * 0.35
+        dy = (y - cy) / ry
         dy2 = dy * dy
         for x in range(_GRADIENT_WIDTH):
             xn = x / last_x
-            curved = _clamp(xn + vertical_bend * (0.55 - xn))
-            curved = curved * curved * (3.0 - 2.0 * curved)  # smoothstep
-            dx = (x - halo_x) / halo_rx
-            radial = _clamp(1.0 - math.sqrt(dx * dx + dy2)) ** 2
-            lift = 0.88 + center_light * 0.08 + radial * 0.20
-            vignette = _clamp((xn - 0.62) / 0.38)
-            fade = 1.0 - vignette * vignette * 0.28
-            factor = lift * fade
-            pixels[x, y] = (
-                min(255, round(_mix(left[0], right[0], curved) * factor)),
-                min(255, round(_mix(left[1], right[1], curved) * factor)),
-                min(255, round(_mix(left[2], right[2], curved) * factor)),
+            # Les bords s'assombrissent : le trait lumineux s'y éteint proprement.
+            edge = _clamp(abs(xn * 2.0 - 1.0) * 1.35 - 0.35)
+            base = [
+                _mix(NIGHT[i], NIGHT_EDGE[i], edge * edge) + round(vertical * 6)
+                for i in range(3)
+            ]
+            dx = (x - cx) / rx
+            halo = _clamp(1.0 - math.sqrt(dx * dx + dy2)) ** 3
+            pixels[x, y] = tuple(
+                min(255, round(base[i] + accent[i] * halo * 0.16)) for i in range(3)
             )
 
     return image.resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS).convert("RGBA")
 
 
-def _add_stripes(image: Image.Image) -> Image.Image:
-    """Bandes diagonales très discrètes (alpha 12/255), floutées pour rester sourdes."""
-    stripes = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(stripes)
-    for start in range(-HEIGHT * 2, WIDTH + HEIGHT * 2, 138):
-        draw.polygon(
-            [(start, HEIGHT), (start + 88, HEIGHT), (start + 180, 0), (start + 92, 0)],
-            fill=(255, 255, 255, 12),
+def _add_glow_lines(image: Image.Image, accent: tuple[int, int, int]) -> Image.Image:
+    """Deux traits lumineux partant des bords vers le centre.
+
+    Un cœur net d'un pixel porte le dessin, un bloom flouté porte la lumière :
+    la même image reste nette sur un écran de téléphone et lumineuse en grand.
+    """
+    y = HEIGHT // 2
+    inner = (WIDTH // 2 - LOGO_BOX // 2 - 10, WIDTH // 2 + LOGO_BOX // 2 + 10)
+    outer = (66, WIDTH - 66)
+
+    core = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    bloom = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    core_pixels, bloom_pixels = core.load(), bloom.load()
+
+    for x in range(WIDTH):
+        if outer[0] <= x <= inner[0]:
+            # Segment gauche : éteint au bord, plein près du logo.
+            t = (x - outer[0]) / max(1, inner[0] - outer[0])
+        elif inner[1] <= x <= outer[1]:
+            t = (outer[1] - x) / max(1, outer[1] - inner[1])
+        else:
+            continue
+        t = t * t * (3.0 - 2.0 * t)  # smoothstep : pas de coupure franche
+        blanc = round(120 * t * t)  # le cœur vire au blanc là où il est le plus fort
+        core_pixels[x, y] = (
+            min(255, accent[0] + blanc), min(255, accent[1] + blanc),
+            min(255, accent[2] + blanc), round(255 * t),
         )
-    return Image.alpha_composite(image, stripes.filter(ImageFilter.GaussianBlur(1.5)))
+        core_pixels[x, y - 1] = (*accent, round(120 * t))
+        core_pixels[x, y + 1] = (*accent, round(90 * t))
+        for offset in (-3, -2, -1, 0, 1, 2, 3):
+            bloom_pixels[x, y + offset] = (*accent, round(235 * t))
+
+    bloom = bloom.filter(ImageFilter.GaussianBlur(6))
+    image = Image.alpha_composite(image, bloom)
+    return Image.alpha_composite(image, core)
 
 
-def _add_top_edge(image: Image.Image) -> Image.Image:
-    """Liseré lumineux sur le bord haut : 1 px franc, puis une retombée douce."""
+def _add_frame(image: Image.Image, accent: tuple[int, int, int]) -> Image.Image:
+    """Liseré d'accent à gauche + cadre arrondi et liseré supérieur très discrets."""
     overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    draw.rectangle([(0, 0), (WIDTH - 1, 0)], fill=(255, 255, 255, 96))
-    for offset in range(1, 5):
-        alpha = round(52 * (1.0 - offset / 5.0))
-        draw.rectangle([(0, offset), (WIDTH - 1, offset)], fill=(255, 255, 255, alpha))
+    draw.rounded_rectangle(
+        [(1, 1), (WIDTH - 2, HEIGHT - 2)], radius=12, outline=(*accent, 40), width=1
+    )
+    draw.rectangle([(0, 0), (WIDTH - 1, 0)], fill=(255, 255, 255, 34))
+    # Bord gauche : la barre d'accent, comme sur les bannières validées.
+    draw.rounded_rectangle([(0, 6), (3, HEIGHT - 7)], radius=2, fill=(*accent, 235))
+    glow = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rectangle([(0, 6), (5, HEIGHT - 7)], fill=(*accent, 120))
+    image = Image.alpha_composite(image, glow.filter(ImageFilter.GaussianBlur(4)))
     return Image.alpha_composite(image, overlay)
 
 
+def _tinted_logo(logo: Image.Image, accent: tuple[int, int, int]) -> Image.Image:
+    """Logo re-teinté à la couleur d'accent, ses reliefs conservés.
+
+    Le logo du dépôt est bleu : tel quel, il jurait sur une bannière rouge ou or.
+    On garde sa luminance (donc son relief) et on la projette sur la couleur de
+    la famille — trait et logo parlent alors de la même chose.
+    """
+    alpha = logo.getchannel("A")
+    luminance = logo.convert("L")
+    tinted = Image.new("RGBA", logo.size)
+    source = luminance.load()
+    target = tinted.load()
+    for y in range(logo.height):
+        for x in range(logo.width):
+            level = source[x, y] / 255.0
+            # Ombres légèrement teintées, hautes lumières proches du blanc.
+            shade = 0.42 + level * 0.58
+            target[x, y] = (
+                min(255, round(accent[0] * shade + 255 * level * level * 0.55)),
+                min(255, round(accent[1] * shade + 255 * level * level * 0.55)),
+                min(255, round(accent[2] * shade + 255 * level * level * 0.55)),
+                255,
+            )
+    tinted.putalpha(alpha)
+    return tinted
+
+
 def _composite_logo(image: Image.Image, accent: tuple[int, int, int]) -> Image.Image:
-    """Logo centré avec halo. Absence du fichier = bannière rendue telle quelle."""
+    """Logo centré, teinté, avec halo. Absence du fichier = bannière rendue telle quelle."""
     if not LOGO_PATH.exists():
         return image
     try:
@@ -163,28 +228,29 @@ def _composite_logo(image: Image.Image, accent: tuple[int, int, int]) -> Image.I
         logger.warning("Logo illisible (%s) : bannière générée sans logo.", LOGO_PATH)
         return image
 
-    scale = min(210 / max(1, logo.width), 82 / max(1, logo.height), 1.0)
+    scale = min(LOGO_BOX / max(1, logo.width), LOGO_BOX / max(1, logo.height))
     size = (max(1, round(logo.width * scale)), max(1, round(logo.height * scale)))
     if size != logo.size:
         logo = logo.resize(size, Image.Resampling.LANCZOS)
+    logo = _tinted_logo(logo, accent)
 
     x, y = (WIDTH - logo.width) // 2, (HEIGHT - logo.height) // 2
     halo_mask = Image.new("L", (WIDTH, HEIGHT), 0)
     halo_mask.paste(logo.getchannel("A"), (x, y))
     halo_mask = halo_mask.filter(ImageFilter.GaussianBlur(13))
     halo = Image.new("RGBA", (WIDTH, HEIGHT), (*accent, 0))
-    halo.putalpha(halo_mask.point(lambda value: min(125, round(value * 0.50))))
+    halo.putalpha(halo_mask.point(lambda value: min(170, round(value * 0.70))))
     image = Image.alpha_composite(image, halo)
     image.alpha_composite(logo, (x, y))
     return image
 
 
 def build_banner(style: str) -> Image.Image:
-    left, right = COLORS.get(style, COLORS["info"])
-    image = _build_gradient(left, right)
-    image = _add_stripes(image)
-    image = _add_top_edge(image)
-    return _composite_logo(image, left)
+    accent, deep = COLORS.get(style, COLORS["info"])
+    image = _night_background(deep)
+    image = _add_glow_lines(image, accent)
+    image = _add_frame(image, accent)
+    return _composite_logo(image, accent)
 
 
 def ensure_banners(force: bool = False) -> None:
@@ -231,5 +297,5 @@ except Exception:  # pragma: no cover - dépend de l'environnement de rendu
 
 __all__ = [
     "BANNER_DIR", "COLORS", "HEIGHT", "LOGO_PATH", "STYLES", "WIDTH",
-    "banner_kind", "build_banner", "ensure_banners", "get_banner",
+    "banner_kind", "build_banner", "ensure_banners", "get_banner", "LOGO_BOX", "NIGHT",
 ]
