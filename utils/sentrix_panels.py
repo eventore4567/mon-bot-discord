@@ -787,6 +787,11 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
         try:
             if source_timeout is not None:
                 await source_timeout()
+        except Exception:
+            # Beaucoup d'anciennes View essayaient encore message.edit(view=self) dans
+            # on_timeout. Sur un message Components V2 Discord refuse cette conversion ;
+            # un timeout ne doit jamais devenir une erreur utilisateur.
+            logger.warning("Timeout de la vue source ignoré proprement.", exc_info=True)
         finally:
             # La vue métier n'est pas enregistrée directement dans le ViewStore
             # (seul le Panneau l'est), donc son wait() ne se terminerait jamais
