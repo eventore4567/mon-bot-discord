@@ -87,6 +87,22 @@ if not _raw_dashboard_url.startswith(("https://", "http://")):
 DASHBOARD_PUBLIC_URL = _raw_dashboard_url
 DASHBOARD_APP_URL = f"{DASHBOARD_PUBLIC_URL}/app"
 DASHBOARD_CALLBACK_URL = f"{DASHBOARD_PUBLIC_URL}/oauth/callback"
+
+# Lien public que SentriX partage aux utilisateurs. Il est volontairement séparé de
+# DASHBOARD_PUBLIC_URL : ce dernier reste l'hôte OAuth canonique interne, tandis que le
+# domaine standby est le lien public stable utilisé dans les MP, boutons et réponses du bot.
+_DEFAULT_DASHBOARD_SHARE_URL = "https://sentrix-standby-production.up.railway.app/app"
+_raw_dashboard_share_url = os.getenv("DASHBOARD_SHARE_URL", "").strip().rstrip("/")
+if _raw_dashboard_share_url:
+    if _raw_dashboard_share_url.endswith("/oauth/callback"):
+        _raw_dashboard_share_url = _raw_dashboard_share_url[: -len("/oauth/callback")].rstrip("/")
+    if not _raw_dashboard_share_url.endswith("/app"):
+        _raw_dashboard_share_url += "/app"
+    if not _raw_dashboard_share_url.startswith(("https://", "http://")):
+        _raw_dashboard_share_url = _DEFAULT_DASHBOARD_SHARE_URL
+else:
+    _raw_dashboard_share_url = _DEFAULT_DASHBOARD_SHARE_URL
+DASHBOARD_SHARE_URL = _raw_dashboard_share_url
 # Ancien réglage conservé pour ne pas casser les installations existantes.
 DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
 
