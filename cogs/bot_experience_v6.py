@@ -1,12 +1,11 @@
-"""Bot Experience V6 — accueil interactif et raccourcis instantanés.
+"""Bot Experience V6 — intentions rapides sans doublon d'interface.
 
-Cette couche améliore ce que les membres voient immédiatement dans Discord sans ajouter de
-nouvelle commande slash :
-- une simple mention / un simple mot de réveil ouvre un vrai panneau d'accueil interactif ;
-- les demandes très courtes (aide, jeux, économie, profil, ping) sont traitées localement,
-  donc sans latence OpenAI ni coût API ;
-- les boutons donnent des parcours courts et propres vers les fonctions les plus utiles ;
-- les commandes utilisées récemment servent à proposer des raccourcis personnels en mémoire.
+Cette couche améliore les demandes courtes dans Discord sans ajouter de commande slash :
+- une simple mention reste une réponse compacte du pipeline V5 ;
+- aide, jeux, économie, profil et IA ouvrent le centre +help officiel au lieu d'un
+  second panneau d'accueil qui dupliquait l'interface et vieillissait séparément ;
+- ping reste traité localement, sans appel OpenAI ;
+- les commandes utilisées récemment restent comptabilisées en mémoire pour la télémétrie UX.
 
 Elle se branche après Bot Core V5 et ne modifie ni le dashboard, ni les permissions, ni les
 secrets, ni le catalogue slash.
@@ -18,11 +17,9 @@ import re
 import types
 import unicodedata
 from collections import Counter
-from typing import Any
-
 import discord
 
-from utils import sentrix_panels as panels, helpers
+from utils import helpers
 from discord.ext import commands
 
 import config
@@ -86,187 +83,6 @@ def _usage_store(bot: commands.Bot) -> dict[tuple[int, int], Counter[str]]:
     return store
 
 
-def _top_commands(bot: commands.Bot, guild_id: int, user_id: int, prefix: str, limit: int = 3) -> list[str]:
-    counter = _usage_store(bot).get((int(guild_id), int(user_id)))
-    if counter:
-        names = [name for name, _count in counter.most_common(limit)]
-        if names:
-            return [f"{prefix}{name}" for name in names]
-    return [f"{prefix}help", f"{prefix}profile", f"{prefix}daily"][:limit]
-
-
-def _home_embed(bot: commands.Bot, author: discord.abc.User, prefix: str, guild_id: int = 0) -> discord.Embed:
-    brand = brand_label()
-    display_name = getattr(author, "display_name", None) or getattr(author, "name", None) or "membre"
-    shortcuts = "  •  ".join(f"`{name}`" for name in _top_commands(bot, guild_id, author.id, prefix))
-    embed = discord.Embed(
-        title=f"{brand} — Accueil",
-        description=(
-            f"Salut **{display_name}**. Choisissez un bouton ci-dessous ou parle-moi directement.\nExemple : `{('Odboug' if 'odboug' in brand.casefold() else 'SentriX')} explique-moi comment fonctionne Discord`."
-        ),
-        color=_ACCENT,
-    )
-    embed.add_field(
-        name="Commencer rapidement",
-        value=(
-            f"**Commandes :** `{prefix}help`\n"
-            f"**Jeux :** `{prefix}blackjack`, `{prefix}connect4`, `{prefix}trivia`\n"
-            f"**Économie :** `{prefix}daily`, `{prefix}work`, `{prefix}shop`\n"
-            f"**Profil :** `{prefix}profile`, `{prefix}level`"
-        ),
-        inline=False,
-    )
-    embed.add_field(name='Vos raccourcis', value=shortcuts, inline=False)
-    embed.add_field(
-        name="Conversation naturelle",
-        value="Vous pouvez aussi répondre directement à l'un de mes messages : pas besoin de répéter mon nom à chaque fois.",
-        inline=False,
-    )
-    embed.set_footer(text="Les boutons répondent seulement à la personne qui clique pour éviter de spammer le salon.")
-    return embed
-
-
-def _guide_embed(kind: str, prefix: str, *, bot: commands.Bot | None = None, user_id: int = 0, guild_id: int = 0) -> discord.Embed:
-    brand = brand_label()
-    if kind == "games":
-        title = "Jeux"
-        description = "Des jeux rapides, des duels et des modes plus longs."
-        lines = [
-            f"`{prefix}blackjack` — blackjack",
-            f"`{prefix}connect4` — puissance 4",
-            f"`{prefix}trivia` — questions rapides",
-            f"`{prefix}wordrace` — course de mots",
-            f"`{prefix}adventure` — aventure",
-            f"`{prefix}fishing` — pêche",
-            f"`{prefix}dailygames` — récompenses jeux du jour",
-        ]
-    elif kind == "economy":
-        title = "Économie"
-        description = "Le parcours le plus simple pour commencer et progresser."
-        lines = [
-            f"`{prefix}daily` puis `{prefix}weekly` — récompenses",
-            f"`{prefix}work` — gagner de l'argent",
-            f"`{prefix}balance` — voir ton solde",
-            f"`{prefix}shop` — ouvrir la boutique",
-            f"`{prefix}buy` — acheter",
-            f"`{prefix}inventory` — voir tes objets",
-        ]
-    elif kind == "profile":
-        title = "Profil et progression"
-        description = "Tout ce qui concerne ton niveau, ton activité et ta réputation."
-        lines = [
-            f"`{prefix}profile` — profil complet",
-            f"`{prefix}level` — niveau et XP",
-            f"`{prefix}reputation` — réputation",
-            f"`{prefix}rep` — donner une réputation",
-            f"`{prefix}voice-time` — temps passé en vocal",
-        ]
-    elif kind == "ai":
-        title = "Intelligence artificielle"
-        description = "Parle au bot comme à une personne, sans apprendre une syntaxe compliquée."
-        wake = "Odboug" if "odboug" in brand.casefold() else "SentriX"
-        lines = [
-            f"`{wake} explique-moi ...` — conversation naturelle",
-            "Réponds directement à un message du bot pour continuer la discussion.",
-            f"`{prefix}ai` — commande IA",
-            f"`{prefix}image` — générer une image",
-            f"`{prefix}summarize` — résumer un texte",
-        ]
-    elif kind == "shortcuts" and bot is not None:
-        title = "Tes raccourcis"
-        description = "Basé sur les commandes que tu utilises le plus depuis le dernier redémarrage."
-        lines = [f"`{name}`" for name in _top_commands(bot, guild_id, user_id, prefix, limit=5)]
-    else:
-        title = "Commandes"
-        description = "Le menu d'aide contient toutes les commandes, rangées par catégories."
-        lines = [
-            f"`{prefix}help` — ouvrir l'aide complète",
-            f"`{prefix}botinfo` — infos sur le bot",
-            f"`{prefix}ping` — latence",
-            f"`{prefix}profile` — ton profil",
-            f"`{prefix}dailygames` — activités du jour",
-        ]
-
-    embed = discord.Embed(title=f"{brand} — {title}", description=description, color=_ACCENT)
-    embed.add_field(name="À essayer", value="\n".join(lines), inline=False)
-    return embed
-
-
-class QuickHomeView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, prefix: str):
-        super().__init__(timeout=180)
-        self.bot = bot
-        self.prefix = prefix
-
-    async def _reply(self, interaction: discord.Interaction, kind: str) -> None:
-        guild_id = interaction.guild.id if interaction.guild else 0
-        embed = _guide_embed(
-            kind,
-            self.prefix,
-            bot=self.bot,
-            user_id=interaction.user.id,
-            guild_id=guild_id,
-        )
-        await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
-
-    @discord.ui.button(label="Commandes", style=discord.ButtonStyle.primary, row=0)
-    async def commands_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._reply(interaction, "commands")
-
-    @discord.ui.button(label="Jeux", style=discord.ButtonStyle.secondary, row=0)
-    async def games_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._reply(interaction, "games")
-
-    @discord.ui.button(label="Économie", style=discord.ButtonStyle.secondary, row=0)
-    async def economy_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._reply(interaction, "economy")
-
-    @discord.ui.button(label="IA", style=discord.ButtonStyle.secondary, row=0)
-    async def ai_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._reply(interaction, "ai")
-
-    @discord.ui.button(label="Profil", style=discord.ButtonStyle.secondary, row=1)
-    async def profile_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._reply(interaction, "profile")
-
-    @discord.ui.button(label="Mes raccourcis", style=discord.ButtonStyle.secondary, row=1)
-    async def shortcuts_button(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._reply(interaction, "shortcuts")
-
-
-async def _send_panel(
-    bot: commands.Bot,
-    destination: Any,
-    author: discord.abc.User,
-    *,
-    prefix: str,
-    reply_to: discord.Message | None,
-    kind: str = "home",
-):
-    guild_id = reply_to.guild.id if reply_to is not None and reply_to.guild is not None else 0
-    if kind == "home":
-        embed = _home_embed(bot, author, prefix, guild_id)
-        view: discord.ui.View | None = QuickHomeView(bot, prefix)
-    else:
-        embed = _guide_embed(kind, prefix, bot=bot, user_id=author.id, guild_id=guild_id)
-        view = None
-
-    kwargs: dict[str, Any] = {
-        "embed": embed,
-        "view": view,
-        "allowed_mentions": discord.AllowedMentions(everyone=False, roles=False, users=False, replied_user=False),
-    }
-    if reply_to is not None:
-        kwargs["reference"] = reply_to
-        kwargs["mention_author"] = False
-    try:
-        return await destination.send(**kwargs)
-    except (discord.HTTPException, TypeError):
-        kwargs.pop("reference", None)
-        kwargs.pop("mention_author", None)
-        return await destination.send(**kwargs)
-
-
 def _install_usage_memory(bot: commands.Bot) -> None:
     if getattr(bot, "_sentrix_experience_v6_usage_installed", False):
         return
@@ -314,10 +130,37 @@ def _install_fast_home(bot: commands.Bot) -> None:
     ):
         prefix = _prefix_for(self.bot, reply_to)
 
+        # Une mention seule ne doit plus ouvrir l'ancien gros panneau
+        # "SentriX — Accueil". Le pipeline V5 renvoie déjà une réponse compacte et
+        # unique avec le vrai +help.
         if bot_experience_v5._is_bare_trigger(self.bot, reply_to):
-            return await _send_panel(self.bot, destination, author, prefix=prefix, reply_to=reply_to, kind="home")
+            return await original(destination, author, question, reply_to=reply_to)
 
         intent = _quick_intent(question)
+
+        # Les anciens mini-menus V6 (Accueil / Jeux / Économie / IA / Profil /
+        # raccourcis) dupliquaient le centre d'aide officiel et pouvaient afficher des
+        # commandes obsolètes. Une demande courte ouvre désormais l'unique +help
+        # canonique, éventuellement filtré sur la catégorie demandée.
+        if intent in {"home", "games", "economy", "profile", "ai"} and reply_to is not None:
+            help_queries = {
+                "home": "",
+                "games": "jeux",
+                "economy": "économie",
+                "profile": "profil",
+                "ai": "ia",
+            }
+            suffix = help_queries[intent]
+            command_line = f"{prefix}help" + (f" {suffix}" if suffix else "")
+            invoke = getattr(self, "_invoke_command_line", None)
+            if callable(invoke):
+                try:
+                    if await invoke(reply_to, command_line):
+                        return None
+                except Exception:
+                    logger.exception("Bot Experience V6 : ouverture du help canonique impossible.")
+            return await original(destination, author, question, reply_to=reply_to)
+
         if intent == "ping":
             latency = helpers.latence_ms(self.bot)
             embed = discord.Embed(
@@ -338,9 +181,6 @@ def _install_fast_home(bot: commands.Bot) -> None:
                 kwargs.pop("reference", None)
                 kwargs.pop("mention_author", None)
                 return await destination.send(**kwargs)
-
-        if intent is not None:
-            return await _send_panel(self.bot, destination, author, prefix=prefix, reply_to=reply_to, kind=intent)
 
         return await original(destination, author, question, reply_to=reply_to)
 
