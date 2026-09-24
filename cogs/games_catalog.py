@@ -227,3 +227,16 @@ SOLO_LOOT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
     },
 }
 
+
+
+# Machine à sous : le rouleau était uniforme et le gain plat — trois 7️⃣ payaient
+# exactement comme trois 🍒, ce qui rendait les symboles rares purement décoratifs.
+# Poids sur 100 (du plus commun au plus rare) puis multiplicateur de gain.
+ROULEAU_SLOTS = (
+    ("🍒", 30, 1.0),
+    ("🍋", 24, 1.3),
+    ("🍊", 19, 1.7),
+    ("🍇", 14, 2.2),
+    ("💎", 9, 4.0),
+    ("7️⃣", 4, 9.0),
+)

@@ -18,6 +18,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from cogs.games_catalog import ROULEAU_SLOTS
 from utils import embeds, helpers, design_system, game_rewards
 from utils import sentrix_panels as panels
 
@@ -570,6 +571,27 @@ class Minigames(commands.Cog, name="Minigames"):
         )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
+    # ---- Machine à sous : rouleau pondéré ------------------------------------
+    _MULTIPLICATEURS = tuple((symbole, mult) for symbole, _poids, mult in ROULEAU_SLOTS)
+
+    @staticmethod
+    def _tirer_rouleau() -> str:
+        """Un symbole, tiré selon son poids. De l'argent réel en dépend : le
+        tirage passe par game_rewards, pas par random."""
+        tirage = game_rewards.secure_randint(1, sum(p for _s, p, _m in ROULEAU_SLOTS))
+        for symbole, poids, _mult in ROULEAU_SLOTS:
+            tirage -= poids
+            if tirage <= 0:
+                return symbole
+        return ROULEAU_SLOTS[0][0]
+
+    @staticmethod
+    def _table_des_gains() -> str:
+        """Ce que paie chaque symbole — un joueur ne devrait pas avoir à deviner."""
+        return "Trois symboles identiques : " + " · ".join(
+            f"{symbole} x{mult:g}" for symbole, _poids, mult in ROULEAU_SLOTS
+        )
+
     @commands.hybrid_command(name="slots", description="Jouer à la machine à sous.", with_app_command=False)
     async def slots(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
@@ -577,18 +599,48 @@ class Minigames(commands.Cog, name="Minigames"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=err, kind='warning')))
 
-        symbols = ["🍒", "🍋", "🍊", "🍇", "💎", "7️⃣"]
-        result = [game_rewards.secure_pick(symbols) for _ in range(3)]
+        result = [self._tirer_rouleau() for _ in range(3)]
         text = " | ".join(result)
+        gains = dict(self._MULTIPLICATEURS)
+        # Le gain suit le symbole : trois 7️⃣ ne peuvent pas payer comme trois 🍒,
+        # sinon les symboles rares ne sont que du décor.
         if result[0] == result[1] == result[2]:
-            reward = await self._finish(ctx, "slots", session_id, "win", REWARD_SLOTS_JACKPOT)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=f'🎰 {text}\n🎉 JACKPOT !' + self._reward_line(reward), kind='success')))
+            multiplicateur = gains.get(result[0], 1.0)
+            montant = max(1, round(REWARD_SLOTS_JACKPOT * multiplicateur))
+            reward = await self._finish(ctx, "slots", session_id, "win", montant)
+            titre = "🎉 **JACKPOT !**" if multiplicateur < 4 else "💥 **GROS JACKPOT !**"
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                guild_id, title='Machine à sous',
+                description=(
+                    f"🎰 {text}\n{titre}\n"
+                    f"Trois {result[0]} — gains **x{multiplicateur:g}**"
+                    + self._reward_line(reward)
+                ),
+                kind='success',
+            )))
         elif len(set(result)) == 2:
-            reward = await self._finish(ctx, "slots", session_id, "win", REWARD_SLOTS_PARTIAL)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=f'🎰 {text}\n👍 Presque !' + self._reward_line(reward))))
+            paire = next(sym for sym in result if result.count(sym) == 2)
+            multiplicateur = max(1.0, gains.get(paire, 1.0) / 2)
+            montant = max(1, round(REWARD_SLOTS_PARTIAL * multiplicateur))
+            reward = await self._finish(ctx, "slots", session_id, "win", montant)
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                guild_id, title='Machine à sous',
+                description=(
+                    f"🎰 {text}\n👍 **Une paire de {paire}**"
+                    + (f" — gains **x{multiplicateur:g}**" if multiplicateur > 1 else "")
+                    + self._reward_line(reward)
+                ),
+            )))
         else:
             await self._finish(ctx, "slots", session_id, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=f'🎰 {text}\n○ Perdu !', kind='danger')))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                guild_id, title='Machine à sous',
+                description=(
+                    f"🎰 {text}\n○ **Perdu !** Trois symboles différents.\n"
+                    f"-# {self._table_des_gains()}"
+                ),
+                kind='danger',
+            )))
 
 
 class TicTacToeButton(discord.ui.Button):

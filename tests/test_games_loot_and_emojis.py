@@ -487,3 +487,27 @@ def test_pierre_feuille_ciseaux_refuse_un_choix_inconnu_sans_planter():
     for geste in ("✊", "✋", "✌️"):
         assert geste in texte, "les gestes acceptés ne sont pas montrés"
     assert not demarrages, "une manche a été consommée pour un choix invalide"
+
+
+def test_la_machine_a_sous_paie_selon_le_symbole():
+    """Le rouleau était uniforme et le gain plat : trois 7️⃣ payaient comme trois
+    🍒, donc les symboles rares n'étaient que du décor."""
+    import collections
+
+    from cogs.games_catalog import ROULEAU_SLOTS
+    from cogs.minigames import Minigames
+
+    assert sum(poids for _s, poids, _m in ROULEAU_SLOTS) == 100
+    poids = [p for _s, p, _m in ROULEAU_SLOTS]
+    gains = [m for _s, _p, m in ROULEAU_SLOTS]
+    assert poids == sorted(poids, reverse=True), "les poids doivent décroître"
+    assert gains == sorted(gains), "plus c'est rare, plus ça doit payer"
+
+    tirages = collections.Counter(Minigames._tirer_rouleau() for _ in range(20000))
+    for symbole, attendu, _mult in ROULEAU_SLOTS:
+        observe = tirages[symbole] * 100 / 20000
+        assert abs(observe - attendu) < 2.5, f"{symbole} sort à {observe:.1f} % au lieu de {attendu} %"
+
+    table = Minigames._table_des_gains()
+    for symbole, _poids, _mult in ROULEAU_SLOTS:
+        assert symbole in table, f"{symbole} manque à la table des gains"
