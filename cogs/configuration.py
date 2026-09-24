@@ -497,11 +497,11 @@ class Configuration(commands.Cog):
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
         view.message = msg
 
-    @commands.hybrid_group(name="logs", description="Commandes rapides pour les logs (voir aussi +logsetup pour le panneau complet).", with_app_command=False)
+    @commands.hybrid_group(name="logs", description="Ancienne interface interne des logs ; utilisez +logsetup pour la configuration publique.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")
     async def logs_group(self, ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Sous-commandes : `+logs enable`, `+logs disable`, `+logs channel`, `+logs test`, `+logs status`, `+logs list`, `+logs reset`. Ou utilisez `+logsetup` pour le panneau interactif.')))
+            await panels.envoyer(ctx, panels.depuis_embed(embeds.info('Utilisez `+logsetup` pour configurer, tester et vérifier les logs depuis l’interface actuelle.')))
 
     def _resolve_log_type(self, value: str) -> str | None:
         value = value.strip().lower().replace("-", "_")
@@ -520,7 +520,7 @@ class Configuration(commands.Cog):
     async def logs_enable(self, ctx: commands.Context, type_log: str, salon: discord.TextChannel = None):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Ouvrez `+logsetup` pour voir les types disponibles.')))
         if salon:
             ok, reason = log_service.validate_channel(ctx.guild, salon.id)
             if not ok:
@@ -529,7 +529,7 @@ class Configuration(commands.Cog):
         try:
             await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, True)
         except ValueError:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"○ Vous devez d'abord choisir un salon valide avant d'activer ce log (`+logs channel {type_log} #salon` ou `+logs enable {type_log} #salon`).")))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Vous devez d’abord choisir un salon valide dans `+logsetup` avant d’activer le log `{type_log}`.")))
         label = log_service.LOG_TYPES[log_type]["label"]
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Log **{label}** activé.')))
 
@@ -537,7 +537,7 @@ class Configuration(commands.Cog):
     async def logs_disable(self, ctx: commands.Context, type_log: str):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Ouvrez `+logsetup` pour voir les types disponibles.')))
         await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, False)
         label = log_service.LOG_TYPES[log_type]["label"]
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Log **{label}** désactivé.')))
@@ -546,19 +546,19 @@ class Configuration(commands.Cog):
     async def logs_channel(self, ctx: commands.Context, type_log: str, salon: discord.TextChannel):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Ouvrez `+logsetup` pour voir les types disponibles.')))
         ok, reason = log_service.validate_channel(ctx.guild, salon.id)
         if not ok:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Impossible d'utiliser {salon.mention} : {reason}.")))
         await log_service.set_log_channel(self.bot, ctx.guild.id, log_type, salon.id)
         label = log_service.LOG_TYPES[log_type]["label"]
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Salon du log **{label}** défini sur {salon.mention}. Utilisez `+logs enable {type_log}` pour l'activer.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Salon du log **{label}** défini sur {salon.mention}. Activez-le depuis `+logsetup`.")))
 
     @logs_group.command(name="test", description="Envoyer un message de test dans le salon d'un type de log.", with_app_command=False)
     async def logs_test(self, ctx: commands.Context, type_log: str):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Ouvrez `+logsetup` pour voir les types disponibles.')))
         ok, message = await log_service.send_test_log(self.bot, ctx.guild, log_type, ctx.author)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(message) if ok else embeds.error(message)))
 
@@ -566,7 +566,7 @@ class Configuration(commands.Cog):
     async def logs_status_one(self, ctx: commands.Context, type_log: str):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Ouvrez `+logsetup` pour voir les types disponibles.')))
         setting = await log_service.get_log_setting(self.bot, ctx.guild.id, log_type)
         meta = log_service.LOG_TYPES[log_type]
         e = embeds.neutral(f"📋 {meta['label']}")
@@ -592,7 +592,7 @@ class Configuration(commands.Cog):
     async def logs_reset(self, ctx: commands.Context, type_log: str):
         log_type = self._resolve_log_type(type_log)
         if not log_type:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Utilisez `+logs list` pour voir les types disponibles.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Type de log inconnu : `{type_log}`. Ouvrez `+logsetup` pour voir les types disponibles.')))
         await log_service.set_log_enabled(self.bot, ctx.guild.id, log_type, False)
         await log_service.set_log_channel(self.bot, ctx.guild.id, log_type, None)
         label = log_service.LOG_TYPES[log_type]["label"]
@@ -640,7 +640,7 @@ class Configuration(commands.Cog):
 
     @commands.hybrid_command(
         name="createrole",
-        description="Créer rapidement un rôle : nom + couleur en un seul message (ex: +createrole Middle Man bleu).",
+        description="Ancienne création rapide de rôle ; utilisez +setup puis la section Rôles.",
         with_app_command=False,
     )
     @checks.is_owner_or_admin()
@@ -660,7 +660,7 @@ class Configuration(commands.Cog):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("⚠️ SentriX n'a pas la permission **Gérer les rôles** sur ce serveur — impossible de créer un rôle.")))
         texte = texte.strip()
         if not texte:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Merci d'indiquer un nom de rôle. Exemple : `+createrole Middle Man bleu`")))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez un nom de rôle depuis `+setup` puis la section Rôles.")))
 
         name = texte
         colour_value = 0
@@ -688,7 +688,7 @@ class Configuration(commands.Cog):
         await self.bot.db.log_setup_history(
             ctx.guild.id, ctx.author.id, "Rôles", "rôle créé (+createrole)", new_value=f"{role.name} (#{role.id})",
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'● Le rôle {role.mention} a été créé (couleur : {colour_label}).\nPour régler ses permissions, utilisez `/setup` → 🎭 Rôles, ou les paramètres du serveur Discord.')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le rôle {role.mention} a été créé (couleur : {colour_label}).\nPour régler ses permissions, utilisez `+setup` puis la section Rôles, ou les paramètres du serveur Discord.')))
 
     @commands.hybrid_command(
         name="setwarnrole",
@@ -810,7 +810,7 @@ class Configuration(commands.Cog):
                             "Démarrer",
                             [
                                 panels.Ligne("`+setup`", "Centre de contrôle, tout se règle au clic"),
-                                panels.Ligne("`+create-logs`", "Crée la catégorie de journaux d'un coup"),
+                                panels.Ligne("`+logsetup`", "Configurer et tester les journaux"),
                             ],
                         )
                     ],
