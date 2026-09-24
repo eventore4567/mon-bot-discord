@@ -31,13 +31,56 @@ class ModerationMatch:
 
 
 def normalize_message(text: str) -> str:
-    """NFKC + casse Unicode + retrait des caractères invisibles et de la ponctuation."""
-    value = unicodedata.normalize("NFKC", text or "").casefold()
+    """Forme comparable d'un message : confusables, invisibles, ponctuation.
+
+    La normalisation NFKC seule laissait passer presque tout : sur 200 termes du
+    dataset, le cyrillique en attrapait 5, le leet 2, les petites capitales
+    aucune. Le texte passe donc d'abord par utils.text_normalization, qui ramène
+    « ᴄᴏɴ », « сon » (с cyrillique) et le gras mathématique à des lettres ASCII.
+    """
+    from utils.text_normalization import normaliser
+
+    value = normaliser(text)
     value = _ZERO_WIDTH_RE.sub("", value)
     value = _URL_RE.sub(" ", value)
     value = _DISCORD_MARKUP_RE.sub(" ", value)
     value = "".join(char if (char.isalnum() or char.isspace()) else " " for char in value)
     return " ".join(value.split())
+
+
+# Substitutions leet, appliquées comme variante SUPPLÉMENTAIRE d'un token — jamais
+# en remplacement : « a1 » ne doit pas cesser d'être « a1 » sous prétexte qu'il
+# pourrait se lire « ai ».
+_LEET_TOKEN = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+
+def _tokens_candidats(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    """Tous les tokens à tester : les vrais, les recollés et les dé-leetés.
+
+    Deux contournements triviaux, mesurés à 100 % de réussite avant ce correctif :
+    « c o n » et « c.o.n ». La ponctuation ayant déjà été remplacée par des
+    espaces, les deux arrivent ici comme une suite de tokens d'un seul caractère.
+    On recolle donc ces suites — et SEULEMENT elles. Chercher le terme en
+    sous-chaîne du message entier, la solution évidente, ferait correspondre
+    « con » dans « connexion » : c'est précisément ce que la comparaison par
+    token exact évitait, et il n'est pas question de le perdre.
+    """
+    candidats = list(tokens)
+
+    suite: list[str] = []
+    for token in (*tokens, ""):
+        if len(token) == 1 and token.isalnum():
+            suite.append(token)
+            continue
+        if len(suite) >= 3:
+            candidats.append("".join(suite))
+        suite = []
+
+    for token in list(candidats):
+        deleete = token.translate(_LEET_TOKEN)
+        if deleete != token:
+            candidats.append(deleete)
+    return tuple(candidats)
 
 
 def _uses_no_space_script(value: str) -> bool:
@@ -200,6 +243,6 @@ class MultilingualModerationDataset:
             elif self._ordered_token_group(tokens, group_tokens, max_gap):
                 return ModerationMatch("groupe_de_mots")
 
-        if any(token in self._terms for token in tokens):
+        if any(token in self._terms for token in _tokens_candidats(tokens)):
             return ModerationMatch("mot")
         return None

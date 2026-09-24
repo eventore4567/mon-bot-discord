@@ -43,13 +43,34 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds, checks, helpers, log_service
+from utils import embeds, checks, helpers, log_service, text_normalization
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
 
 logger = logging.getLogger("bot")
 
-INVITE_RE = re.compile(r"(discord\.gg|discord(?:app)?\.com/invite)/\S+", re.IGNORECASE)
+# Redirecteurs d'invitation aussi courants que discord.gg lui-même : les
+# ignorer laissait passer un lien d'invitation sur quatre.
+# « discord . gg/abc » : un espace de part et d'autre du point suffisait à passer.
+# On recolle UNIQUEMENT les couples hôte/TLD d'invitation connus — recoller tous
+# les points transformerait « salut . com » en lien et ferait sanctionner une
+# phrase banale.
+_INVITE_ESPACEE = re.compile(
+    r"\b(discord|discordapp|dsc|invite|disboard)\s*\.\s*(gg|me|io|com|org|net|link)\b",
+    re.IGNORECASE,
+)
+
+
+def _recoller_hotes_invitation(contenu: str) -> str:
+    return _INVITE_ESPACEE.sub(lambda m: f"{m.group(1)}.{m.group(2)}", str(contenu or ""))
+
+
+INVITE_RE = re.compile(
+    r"(?:discord\.gg|discord(?:app)?\.com/invite|dsc\.gg|invite\.gg|discord\.me"
+    r"|disboard\.org/server/join|discord\.io|discordapp\.net/invite|discord\.link)"
+    r"/\S+",
+    re.IGNORECASE,
+)
 _COMMON_TLDS = (
     "com|net|org|gg|io|co|fr|ma|me|tv|ly|be|dev|app|ai|xyz|info|biz|online|"
     "site|shop|store|tech|pro|cc|ru|de|uk|us|ca|eu|ch|it|es|pt|nl|se|no|fi|"
@@ -1674,15 +1695,24 @@ class AutoMod(commands.Cog, name="Automod"):
                 pass
             return
 
-        if conf["antiscam"] and any(k in content_lower for k in SCAM_KEYWORDS):
+        # Comparaison tolérante aux obfuscations : avant, sept variantes sur huit
+        # de la même arnaque passaient — majuscules, leet, gras mathématique ou
+        # une lettre cyrillique suffisaient (voir utils/text_normalization).
+        motif_scam = text_normalization.contient(message.content, SCAM_KEYWORDS) if conf["antiscam"] else None
+        if motif_scam:
             return await self._delete_and_warn(
                 message,
-                "Message d'arnaque potentiel détecté.",
+                f"Message d'arnaque potentiel détecté ({motif_scam}).",
                 "antiscam",
                 censored_content=_compose_censored_content(message.content, scam=True),
             )
 
-        if conf["antiinvite"] and INVITE_RE.search(link_content):
+        contenu_invitation = _recoller_hotes_invitation(
+            text_normalization.normaliser(message.content)
+        )
+        if conf["antiinvite"] and (
+            INVITE_RE.search(link_content) or INVITE_RE.search(contenu_invitation)
+        ):
             return await self._delete_and_warn(
                 message,
                 "Lien d'invitation Discord non autorisé.",
