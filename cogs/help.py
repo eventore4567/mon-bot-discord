@@ -285,7 +285,11 @@ def _valid_http_url(value: str) -> str | None:
 
 def _dashboard_url() -> str | None:
     legacy = os.getenv("DASHBOARD_URL", "").strip()
-    return _valid_http_url(legacy) or _valid_http_url(getattr(config, "DASHBOARD_APP_URL", ""))
+    return (
+        _valid_http_url(legacy)
+        or _valid_http_url(getattr(config, "DASHBOARD_SHARE_URL", ""))
+        or _valid_http_url(getattr(config, "DASHBOARD_APP_URL", ""))
+    )
 
 
 def _support_url() -> str | None:
