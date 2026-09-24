@@ -160,3 +160,78 @@ def test_la_prise_est_bien_affichee_dans_la_manche_gagnee():
         )
     ]
     assert rendus, "butin_text n'apparaît dans aucun texte envoyé au joueur"
+
+
+def test_la_prise_part_avec_la_manche_dans_les_metadonnees():
+    """Sans ce passage, la collection resterait vide quoi qu'on ramène."""
+    import asyncio
+
+    from cogs import games_economy
+    from utils import game_rewards
+
+    vu = {}
+
+    async def _faux_reward(bot, guild_id, user_id, game_name, base, sid, result="win", metadata=None):
+        vu["metadata"] = metadata
+        return None
+
+    async def _rien(*a, **k):
+        return None
+
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        author=SimpleNamespace(id=2),
+    )
+    anciens = (game_rewards.reward_game_winner, game_rewards.touch_cooldown, game_rewards.release_play_lock)
+    game_rewards.reward_game_winner = _faux_reward
+    game_rewards.touch_cooldown = _rien
+    game_rewards.release_play_lock = lambda *a, **k: None
+    try:
+        asyncio.run(games_economy._finish(
+            None, ctx, "fishing", "sid", "win", 40,
+            metadata={"butin": {"emoji": "🐟", "nom": "Truite", "rarete": "Commun"}},
+        ))
+    finally:
+        (game_rewards.reward_game_winner, game_rewards.touch_cooldown,
+         game_rewards.release_play_lock) = anciens
+
+    assert vu["metadata"]["butin"]["nom"] == "Truite"
+
+
+def test_la_collection_ne_retient_que_les_manches_gagnees_avec_prise():
+    """La requête filtre en SQL : une défaite ou un simple boost ne doit pas
+    entrer dans la collection, sinon le compteur ment."""
+    import ast
+    import json as _json
+    import sqlite3
+
+    arbre = ast.parse(open("database/db.py", encoding="utf-8").read())
+    fonction = next(
+        n for n in ast.walk(arbre)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "get_game_loot"
+    )
+    requete = next(
+        n.value for n in ast.walk(fonction)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and "SELECT" in n.value
+    )
+
+    base = sqlite3.connect(":memory:")
+    base.row_factory = sqlite3.Row
+    base.execute(
+        "CREATE TABLE game_transactions (id INTEGER PRIMARY KEY, guild_id INTEGER,"
+        " user_id INTEGER, game_name TEXT, game_session_id TEXT, result TEXT,"
+        " reward_amount INTEGER, created_at INTEGER, metadata_json TEXT)"
+    )
+    prise = _json.dumps({"butin": {"emoji": "🐟", "nom": "Truite", "rarete": "Commun"}})
+    base.executemany(
+        "INSERT INTO game_transactions (guild_id, user_id, game_name, game_session_id,"
+        " result, reward_amount, created_at, metadata_json) VALUES (?,?,?,?,?,?,?,?)",
+        [
+            (1, 1, "fishing", "s1", "win", 40, 100, prise),
+            (1, 1, "fishing", "s2", "win", 40, 101, _json.dumps({"money_boost": 1.5})),
+            (1, 1, "mining", "s3", "loss", 0, 102, prise),
+            (1, 2, "fishing", "s4", "win", 40, 103, prise),
+        ],
+    )
+    lignes = list(base.execute(requete, (1, 1, 50)))
+    assert [l["game_name"] for l in lignes] == ["fishing"], "la collection compte des manches qu'elle ne devrait pas"

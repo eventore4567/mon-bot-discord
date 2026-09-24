@@ -2578,6 +2578,21 @@ class Database:
             "total_earned": (row["total_earned"] if row else 0) or 0,
         }
 
+    async def get_game_loot(self, guild_id: int, user_id: int, limit: int = 4000):
+        """Les prises rapportées par un membre, les plus récentes d'abord.
+
+        Le butin vit déjà dans metadata_json des manches gagnées : la collection
+        se reconstruit donc sans nouvelle table et sans migration, et les parties
+        jouées avant cette fonctionnalité restent simplement vides.
+        """
+        return await self.fetchall(
+            "SELECT game_name, metadata_json, created_at FROM game_transactions "
+            "WHERE guild_id = ? AND user_id = ? AND result = 'win' "
+            "AND metadata_json LIKE '%\"butin\"%' "
+            "ORDER BY created_at DESC LIMIT ?",
+            (guild_id, user_id, limit),
+        )
+
     async def get_game_leaderboard(self, guild_id: int, limit: int = 10):
         return await self.fetchall(
             "SELECT user_id, SUM(reward_amount) as total_earned, COUNT(*) as games_played "

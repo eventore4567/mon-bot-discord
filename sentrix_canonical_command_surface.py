@@ -118,7 +118,7 @@ LEAVES = {
     "reactionevent": "course-reaction", "guessrace": "course-devinette",
     "mathrace": "course-calcul", "emoji-race": "course-emoji", "dungeon": "donjon",
     "mining": "minage", "fishing": "peche", "treasure": "tresor", "hunt": "chasse",
-    "explore": "explorer", "gamehistory": "historique", "gameprofile": "profil",
+    "explore": "explorer", "collec": "collection", "gamehistory": "historique", "gameprofile": "profil",
     "gamestats": "stats", "gametop": "classement", "dailygames": "jeux-du-jour",
 }
 MUSIC_LEAVES = {

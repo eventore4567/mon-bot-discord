@@ -31,6 +31,7 @@ Commandes ajoutées ici :
 """
 
 from __future__ import annotations
+import json
 import logging
 
 import asyncio
@@ -227,7 +228,10 @@ def tirer_butin(game_name: str) -> tuple[str, str, str, float] | None:
     return None
 
 
-async def _finish(bot, ctx: commands.Context, game_name: str, session_id: str, result: str, base_amount: int) -> "game_rewards.GameReward | None":
+async def _finish(
+    bot, ctx: commands.Context, game_name: str, session_id: str, result: str, base_amount: int,
+    metadata: dict | None = None,
+) -> "game_rewards.GameReward | None":
     guild_id = ctx.guild.id
     game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
     await game_rewards.touch_cooldown(bot, guild_id, ctx.author.id, game_name)
@@ -237,7 +241,8 @@ async def _finish(bot, ctx: commands.Context, game_name: str, session_id: str, r
     # un GameReward(reason="daily_limit") au lieu de faire disparaître l'information :
     # l'UI peut donc dire clairement que seul l'argent est plafonné, jamais le gameplay.
     return await game_rewards.reward_game_winner(
-        bot, guild_id, ctx.author.id, game_name, base_amount, session_id, result="win"
+        bot, guild_id, ctx.author.id, game_name, base_amount, session_id, result="win",
+        metadata=metadata,
     )
 
 
@@ -2141,7 +2146,16 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
             if rarete == "Légendaire":
                 butin_text += "✨ **Prise légendaire !** Ça n'arrive presque jamais.\n"
         amount = max(1, round(base * float(multiplier)))
-        reward = await _finish(self.bot, ctx, game_name, sid, "win", amount)
+        # La prise part avec la manche dans metadata_json : c'est elle que relit
+        # +collec, sans table supplémentaire.
+        reward = await _finish(
+            self.bot, ctx, game_name, sid, "win", amount,
+            metadata=(
+                {"butin": {"emoji": emoji_butin, "nom": nom_butin, "rarete": rarete}}
+                if butin is not None
+                else None
+            ),
+        )
 
         boost_text = ""
         if game_name == "adventure":
@@ -2263,6 +2277,91 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
             amount = f"+{row['reward_amount']} 🪙" if row["reward_amount"] > 0 else "0"
             lines.append(f"`{row['game_session_id'][:8]}…` **{label}** — {row['result']} — {amount} — <t:{row['created_at']}:R>")
         await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=f'Historique des jeux — {target.display_name}', description='\n'.join(lines))))
+
+    @commands.hybrid_command(name="collec", description="Votre collection de prises rapportées des jeux solo.", with_app_command=False)
+    @app_commands.describe(membre="Voir la collection d'un autre membre (staff uniquement)")
+    async def collec(self, ctx: commands.Context, membre: discord.Member = None):
+        guild_id = ctx.guild.id if ctx.guild else None
+        if membre and membre.id != ctx.author.id:
+            allowed = ctx.author.guild_permissions.administrator if isinstance(ctx.author, discord.Member) else False
+            if not allowed:
+                return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                    self.bot, guild_id, title="Collection",
+                    description="❌ Seul le staff peut consulter la collection d'un autre membre.",
+                    kind="danger",
+                )))
+        target = membre or ctx.author
+
+        trouves: dict[str, dict[tuple[str, str], int]] = {}
+        try:
+            rows = await self.bot.db.get_game_loot(guild_id, target.id)
+        except Exception:
+            logger.warning("Collection indisponible pour %s", target.id, exc_info=True)
+            rows = []
+        for row in rows:
+            try:
+                butin = (json.loads(row["metadata_json"] or "{}") or {}).get("butin") or {}
+            except Exception:
+                continue
+            emoji, nom = butin.get("emoji"), butin.get("nom")
+            if not emoji or not nom:
+                continue
+            seau = trouves.setdefault(row["game_name"], {})
+            seau[(emoji, nom)] = seau.get((emoji, nom), 0) + 1
+
+        total_possible = sum(
+            len(objets) for table in SOLO_LOOT.values() for objets in table.values()
+        )
+        total_trouve = sum(len(seau) for seau in trouves.values())
+
+        if not total_trouve:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title=f"Collection — {target.display_name}",
+                description=(
+                    f"🎒 **0 / {total_possible}** objet trouvé.\n\n"
+                    "Gagnez une manche de `+fishing`, `+mining`, `+hunt`, `+treasure`, "
+                    "`+adventure`, `+dungeon` ou `+explore` pour rapporter votre première prise."
+                ),
+            )))
+
+        # Une rareté par objet : la table du catalogue est l'autorité, pas ce que
+        # la manche avait affiché ce jour-là.
+        rarete_de: dict[tuple[str, str], str] = {}
+        for table in SOLO_LOOT.values():
+            for cle, libelle, _poids, _mult in RARETES:
+                for objet in table.get(cle, ()):
+                    rarete_de[tuple(objet)] = libelle
+
+        sections = []
+        for jeu in sorted(trouves, key=lambda j: -len(trouves[j])):
+            seau = trouves[jeu]
+            possible = sum(len(o) for o in SOLO_LOOT.get(jeu, {}).values())
+            lignes = []
+            for (emoji, nom), combien in sorted(
+                seau.items(), key=lambda kv: (-kv[1], kv[0][1])
+            )[:12]:
+                rarete = rarete_de.get((emoji, nom), "Commun")
+                lignes.append(panels.Ligne(
+                    f"{emoji} {nom}",
+                    f"×{combien}",
+                    indice=rarete,
+                ))
+            titre_jeu = GAME_CATALOG.get(jeu, (jeu, ""))[0]
+            sections.append(panels.Section(
+                f"{titre_jeu} — {len(seau)}/{possible}", lignes
+            ))
+
+        pourcent = round(total_trouve * 100 / total_possible) if total_possible else 0
+        entete = panels.Section("Avancement", [
+            panels.Ligne("Objets distincts", f"**{total_trouve} / {total_possible}**", indice=f"{pourcent} % de la collection"),
+            panels.Ligne("Prises rapportées", f"**{sum(sum(s.values()) for s in trouves.values())}**"),
+        ])
+        await panels.envoyer(ctx, panels.Panneau(
+            titre=f"Collection — {target.display_name}",
+            sous_titre=f"{pourcent} % de la collection SentriX",
+            sections=[entete, *sections],
+            kind="jeux",
+        ))
 
     @commands.hybrid_command(name="gameprofile", description="Profil de jeu complet d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à afficher")

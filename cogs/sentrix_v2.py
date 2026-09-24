@@ -36,7 +36,7 @@ GAME_GROUPS = {
     "Duels": ("tictactoe", "duel", "connect4", "numberduel", "reactionduel", "quizduel"),
     "Événements": ("triviastart", "wordrace", "reactionevent", "guessrace", "mathrace", "emoji-race"),
     "Aventure": ("adventure", "dungeon", "mining", "fishing", "treasure", "hunt", "explore"),
-    "Profil jeux": ("gameprofile", "gamehistory", "gamestats", "gametop", "dailygames"),
+    "Profil jeux": ("gameprofile", "collec", "gamehistory", "gamestats", "gametop", "dailygames"),
 }
 
 V2_SCHEMA = """
