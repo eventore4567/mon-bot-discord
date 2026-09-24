@@ -90,3 +90,80 @@ def test_le_filtre_de_contenu_partage_le_meme_compteur():
     source = inspect.getsource(content_filter_policy)
     assert "infraction_tracker.setdefault" not in source
     assert "infraction_tracker.ajouter" in source
+
+
+def _automod_factice():
+    """Le minimum pour exercer la détection de répétition, sans booter le bot."""
+    from types import SimpleNamespace
+
+    from cogs.automod import REPEAT_WINDOW
+
+    return SimpleNamespace(repeat_tracker=FenetreGlissante(fenetre=REPEAT_WINDOW))
+
+
+def _message(texte: str, salon: int = 1):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(content=texte, channel=SimpleNamespace(id=salon))
+
+
+def test_le_meme_message_repete_lentement_est_du_spam():
+    """Le comptage par débit ne voyait QUE la vitesse : cent fois le même
+    message espacé de dix secondes n'était pas du spam pour lui."""
+    from cogs.automod import REPEAT_THRESHOLD, AutoMod
+
+    cog = _automod_factice()
+    resultats = [
+        AutoMod._detecter_repetition(cog, _message("Rejoignez mon serveur promo"), ("g", "u"))
+        for _ in range(REPEAT_THRESHOLD)
+    ]
+    assert resultats[-1], "la répétition n'est pas détectée"
+    assert not any(resultats[:-1]), "sanction déclenchée avant le seuil"
+
+
+def test_changer_la_casse_ou_espacer_ne_contourne_pas():
+    from cogs.automod import AutoMod
+
+    cog = _automod_factice()
+    variantes = [
+        "Rejoignez mon serveur promo",
+        "REJOIGNEZ MON SERVEUR PROMO",
+        "rejoignez  mon  serveur  promo",
+        "R e j o i g n e z mon serveur promo",
+    ]
+    resultats = [AutoMod._detecter_repetition(cog, _message(v), ("g", "u")) for v in variantes]
+    assert resultats[-1], "les quatre variantes ne comptent pas pour le même message"
+
+
+def test_le_meme_message_dans_plusieurs_salons_part_plus_tot():
+    """Recopier la même chose dans trois salons n'est jamais un accident."""
+    from cogs.automod import REPEAT_CHANNEL_THRESHOLD, AutoMod
+
+    cog = _automod_factice()
+    resultats = [
+        AutoMod._detecter_repetition(cog, _message("Venez voir ma boutique en ligne", salon), ("g", "u"))
+        for salon in range(1, REPEAT_CHANNEL_THRESHOLD + 1)
+    ]
+    assert "salons" in (resultats[-1] or ""), resultats
+    assert not any(resultats[:-1])
+
+
+def test_une_conversation_normale_n_est_jamais_sanctionnee():
+    """« ok », « lol », « +1 » se répètent toute la journée. Les sanctionner
+    ferait couper la protection par les admins — donc plus de protection."""
+    from cogs.automod import AutoMod
+
+    cog = _automod_factice()
+    for court in ("ok", "lol", "oui", "+1", "merci", "mdr", "ok", "oui", "lol", "merci", "ok", "oui"):
+        assert not AutoMod._detecter_repetition(cog, _message(court), ("g", "u")), court
+
+    cog = _automod_factice()
+    conversation = (
+        "je suis d'accord avec toi la-dessus",
+        "moi aussi je pense pareil franchement",
+        "on se retrouve demain vers dix-huit heures",
+        "je suis d'accord avec toi la-dessus",
+        "oui exactement c'est ce que je disais",
+    )
+    for phrase in conversation:
+        assert not AutoMod._detecter_repetition(cog, _message(phrase), ("g", "u")), phrase

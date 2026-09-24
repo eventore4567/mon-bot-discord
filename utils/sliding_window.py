@@ -34,15 +34,20 @@ class FenetreGlissante:
     def __init__(self, fenetre: float, purge_toutes: int = 1000) -> None:
         self.fenetre = float(fenetre)
         self.purge_toutes = max(1, int(purge_toutes))
-        self._evenements: dict[Hashable, list[float]] = {}
+        # Chaque entrée est (instant, valeur). La valeur reste None pour un
+        # simple comptage ; elle porte une empreinte de message quand on veut
+        # savoir non pas COMBIEN de messages, mais si c'est le même.
+        self._evenements: dict[Hashable, list[tuple[float, object]]] = {}
         self._depuis_purge = 0
 
-    def ajouter(self, cle: Hashable, maintenant: float | None = None) -> int:
+    def ajouter(
+        self, cle: Hashable, valeur: object = None, maintenant: float | None = None
+    ) -> int:
         """Enregistre un événement et retourne le nombre d'événements dans la fenêtre."""
         instant = time.time() if maintenant is None else maintenant
         limite = instant - self.fenetre
-        recents = [x for x in self._evenements.get(cle, ()) if x > limite]
-        recents.append(instant)
+        recents = [e for e in self._evenements.get(cle, ()) if e[0] > limite]
+        recents.append((instant, valeur))
         self._evenements[cle] = recents
 
         self._depuis_purge += 1
@@ -53,7 +58,13 @@ class FenetreGlissante:
     def compter(self, cle: Hashable, maintenant: float | None = None) -> int:
         instant = time.time() if maintenant is None else maintenant
         limite = instant - self.fenetre
-        return sum(1 for x in self._evenements.get(cle, ()) if x > limite)
+        return sum(1 for e in self._evenements.get(cle, ()) if e[0] > limite)
+
+    def valeurs(self, cle: Hashable, maintenant: float | None = None) -> list[object]:
+        """Les valeurs encore dans la fenêtre, de la plus ancienne à la plus récente."""
+        instant = time.time() if maintenant is None else maintenant
+        limite = instant - self.fenetre
+        return [valeur for moment, valeur in self._evenements.get(cle, ()) if moment > limite]
 
     def reinitialiser(self, cle: Hashable) -> None:
         """Oublie complètement une clé — après une sanction, par exemple.
@@ -76,9 +87,9 @@ class FenetreGlissante:
     def _purger(self, instant: float) -> None:
         limite = instant - self.fenetre
         self._evenements = {
-            cle: horodatages
-            for cle, horodatages in self._evenements.items()
-            if horodatages and horodatages[-1] > limite
+            cle: entrees
+            for cle, entrees in self._evenements.items()
+            if entrees and entrees[-1][0] > limite
         }
         self._depuis_purge = 0
 

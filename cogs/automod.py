@@ -378,6 +378,19 @@ TOGGLE_CHOICES = [
 DANGEROUS_PERMS = ["administrator", "manage_guild", "manage_roles", "manage_channels", "ban_members", "kick_members"]
 SPAM_WINDOW = 6  # secondes observées pour le comptage anti-spam
 SPAM_THRESHOLD = 5  # messages dans la fenêtre avant sanction
+
+# Le comptage par débit ne voit QUE la vitesse : quatre messages toutes les six
+# secondes — quarante par minute, indéfiniment — restaient invisibles, et cent
+# fois le même message espacé de dix secondes n'était pas du spam pour lui.
+# C'est pourtant le schéma publicitaire le plus courant sur Discord.
+REPEAT_WINDOW = 90  # secondes observées pour la répétition d'un même message
+REPEAT_THRESHOLD = 4  # fois le même message avant sanction
+REPEAT_CHANNEL_THRESHOLD = 3  # salons différents recevant le même message
+# En dessous de cette longueur, on ne compte pas : « ok », « lol », « +1 » ou
+# « merci » se répètent légitimement toute la journée dans une conversation, et
+# les sanctionner ferait couper la protection par les admins — donc plus de
+# protection du tout.
+REPEAT_MIN_LENGTH = 12
 RAID_JOIN_WINDOW = 10  # secondes observées pour l'afflux d'arrivées
 RAID_JOIN_THRESHOLD = 8  # arrivées dans la fenêtre avant alerte de raid
 NUKE_ACTION_WINDOW = 30  # secondes
@@ -396,6 +409,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self.join_tracker = FenetreGlissante(fenetre=RAID_JOIN_WINDOW, purge_toutes=100)
         self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
         self.infraction_tracker = FenetreGlissante(fenetre=ESCALATION_WINDOW)
+        self.repeat_tracker = FenetreGlissante(fenetre=REPEAT_WINDOW)
         self.incidents: dict[tuple[int, int], _Incident] = {}
         self.moderation_dataset = MultilingualModerationDataset()
         # Caches mémoire : évitent des allers-retours en base de données à CHAQUE
@@ -1754,6 +1768,41 @@ class AutoMod(commands.Cog, name="Automod"):
             if self.spam_tracker.ajouter(key) >= SPAM_THRESHOLD:
                 self.spam_tracker.reinitialiser(key)
                 return await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
+
+            motif_repete = self._detecter_repetition(message, key)
+            if motif_repete:
+                self.repeat_tracker.reinitialiser(key)
+                return await self._delete_and_warn(message, motif_repete, "antispam")
+
+    def _detecter_repetition(self, message: discord.Message, key: tuple[int, int]) -> str | None:
+        """Le même message répété, quelle que soit sa vitesse.
+
+        L'empreinte passe par la normalisation de sécurité : « FREE NITRO » et
+        « f r e e   n i t r o » comptent donc pour le même message, sinon il
+        suffirait de changer la casse à chaque envoi.
+
+        Deux signaux distincts, parce qu'ils décrivent deux abus différents :
+        répéter dans un salon (flood) et recopier dans plusieurs salons
+        (publicité). Le second se déclenche plus tôt — poster trois fois la
+        même chose dans trois salons différents n'est jamais un accident.
+        """
+        contenu = text_normalization.normaliser(message.content)
+        if len(contenu) < REPEAT_MIN_LENGTH:
+            return None
+
+        # L'empreinte ignore aussi les espaces : « promo » et « p r o m o » sont
+        # le même message. Ici le dé-espacement est sans danger — l'empreinte
+        # n'est comparée qu'à d'autres empreintes du MÊME membre, jamais à une
+        # liste de mots interdits où « con » dans « connexion » poserait problème.
+        empreinte = hash("".join(contenu.split()))
+        salon_id = getattr(message.channel, "id", 0)
+        self.repeat_tracker.ajouter(key, (empreinte, salon_id))
+        precedents = [v for v in self.repeat_tracker.valeurs(key) if v and v[0] == empreinte]
+        if len(precedents) >= REPEAT_THRESHOLD:
+            return "Message identique répété plusieurs fois."
+        if len({salon for _e, salon in precedents}) >= REPEAT_CHANNEL_THRESHOLD:
+            return "Même message recopié dans plusieurs salons."
+        return None
 
     def _mark_xp_skip(self, message_id: int):
         """Empêche cogs/levels.py d'accorder de l'XP pour ce message : AutoMod vient de
