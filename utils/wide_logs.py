@@ -240,7 +240,14 @@ def derive_identity(
         first = description.splitlines()[0].strip()
         bold = re.match(r"\*\*(.+?)\*\*", first)
         if bold:
-            identity_name = safe_text(bold.group(1))[:80]
+            candidat = safe_text(bold.group(1)).strip()
+            # « **Joueur :** <@123> » : le gras est l'ÉTIQUETTE, pas l'entité. La
+            # prendre pour un nom affichait « Joueur : » en titre du journal, sans
+            # jamais le nom réel. On lit alors la valeur qui suit.
+            if candidat.endswith(":"):
+                valeur = safe_text(first[bold.end():]).strip(" :")
+                candidat = valeur if valeur and not valeur.startswith("<") else ""
+            identity_name = candidat[:80] or None
 
     if not identity_name:
         for label in _TARGET_LABELS:

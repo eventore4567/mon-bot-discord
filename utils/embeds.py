@@ -59,7 +59,17 @@ def _is_emoji_codepoint(code: int) -> bool:
 
 
 def strip_emojis(value: Any) -> str:
-    text = _CUSTOM_EMOJI_RE.sub("", str(value or ""))
+    """Retire les pictogrammes décoratifs — sauf dans un mini-jeu.
+
+    Les rouleaux de la machine à sous, les dés, les poissons : les effacer vidait
+    littéralement l'écran de jeu (voir utils/game_context.py).
+    """
+    text = str(value or "")
+    from utils.game_context import commande_de_jeu
+
+    if commande_de_jeu():
+        return text
+    text = _CUSTOM_EMOJI_RE.sub("", text)
     return "".join(char for char in text if not _is_emoji_codepoint(ord(char)))
 
 

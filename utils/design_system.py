@@ -113,6 +113,13 @@ KIND_LABELS = {
 
 def kind_title(title: str, *, kind: str, category_emoji: str) -> str:
     """Ajoute un libellé textuel seulement lorsqu'il apporte une information utile."""
+    from utils.game_context import commande_de_jeu
+
+    # Perdre une partie n'est pas une panne : « Action impossible — Machine à sous »
+    # donnait à une défaite l'allure d'une erreur technique. Dans un mini-jeu, le
+    # titre reste celui du jeu et la couleur suffit à dire le résultat.
+    if commande_de_jeu():
+        return title
     label = KIND_LABELS.get(kind)
     return f"{label} — {title}" if label else title
 

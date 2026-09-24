@@ -52,9 +52,11 @@ from cogs.games_catalog import (
     FASTTYPE_WORDS,
     GAME_CATALOG,
     MEMORY_TOKENS,
+    RARETES,
     RPS_BEATS,
     SOLO_CHOICES,
     SOLO_FLAVORS,
+    SOLO_LOOT,
     WORDGAME_CLUES,
 )
 from utils import checks, design_system, game_rewards, stats_service, temporary_boosts
@@ -201,6 +203,28 @@ async def _precheck(bot, ctx: commands.Context, game_name: str, cooldown: int) -
     if not game_rewards.acquire_play_lock(guild_id, ctx.author.id, game_name):
         return False, "🎮 Une manche de ce jeu est déjà en cours pour vous.", None
     return True, "", game_rewards.new_session_id(game_name)
+
+
+def tirer_butin(game_name: str) -> tuple[str, str, str, float] | None:
+    """Tire une prise : (emoji, nom, libellé de rareté, multiplicateur).
+
+    Le tirage passe par game_rewards.secure_pick/secure_below : les gains sont
+    réels, donc l'aléa doit l'être aussi — pas un random prévisible.
+    """
+    table = SOLO_LOOT.get(game_name)
+    if not table:
+        return None
+    total = sum(poids for _cle, _libelle, poids, _mult in RARETES)
+    tirage = game_rewards.secure_randint(1, total)
+    for cle, libelle, poids, multiplicateur in RARETES:
+        tirage -= poids
+        if tirage <= 0:
+            objets = table.get(cle) or table.get("commun") or ()
+            if not objets:
+                return None
+            emoji, nom = game_rewards.secure_pick(list(objets))
+            return emoji, nom, libelle, multiplicateur
+    return None
 
 
 async def _finish(bot, ctx: commands.Context, game_name: str, session_id: str, result: str, base_amount: int) -> "game_rewards.GameReward | None":
@@ -2105,8 +2129,18 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
             )
 
         base = random.randint(30, 70)
-        amount = max(1, round(base * float(multiplier)))
         text = game_rewards.secure_pick(succes)
+        # La prise est le deuxieme axe de variete : le chemin choisi dit le risque,
+        # la rarete de l'objet dit la chance. Les deux se cumulent sur le gain.
+        butin = tirer_butin(game_name)
+        butin_text = ""
+        if butin is not None:
+            emoji_butin, nom_butin, rarete, mult_butin = butin
+            base = max(1, round(base * float(mult_butin)))
+            butin_text = f"{emoji_butin} Prise : **{nom_butin}** · {rarete} · gains x{mult_butin:g}\n"
+            if rarete == "Légendaire":
+                butin_text += "✨ **Prise légendaire !** Ça n'arrive presque jamais.\n"
+        amount = max(1, round(base * float(multiplier)))
         reward = await _finish(self.bot, ctx, game_name, sid, "win", amount)
 
         boost_text = ""
@@ -2155,6 +2189,7 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
                     self.bot, guild_id, title=f"{titre} — réussite",
                     description=(
                         f"{emoji} **{label}** · butin x{multiplier:g}\n{text}\n\n"
+                        f"{butin_text}"
                         f"🎲 Chance jouée : **{round(chance * 100)}%**\n"
                         f"{reward_text}{boost_text}\n\n"
                         "🔁 Vous pouvez rejouer dans quelques secondes."

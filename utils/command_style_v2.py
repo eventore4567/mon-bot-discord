@@ -290,7 +290,13 @@ def style_view(view: Any) -> Any:
         content = getattr(item, "content", None)
         if isinstance(content, str):
             try:
-                item.content = "".join(ch for ch in _CUSTOM_EMOJI_RE.sub("", content) if not _is_emoji_codepoint(ch))
+                from utils.game_context import commande_de_jeu
+
+                if not commande_de_jeu():  # un mini-jeu garde ses pictogrammes
+                    item.content = "".join(
+                        ch for ch in _CUSTOM_EMOJI_RE.sub("", content)
+                        if not _is_emoji_codepoint(ch)
+                    )
             except Exception:
                 logger.warning("Étape non critique ignorée dans style_view", exc_info=True)
 

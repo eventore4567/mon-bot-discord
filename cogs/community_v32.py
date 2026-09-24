@@ -71,8 +71,20 @@ KEEP_RICH_COMMANDS = {
 }
 
 
+def _commande_de_jeu() -> bool:
+    """Exception mini-jeux, décidée dans utils/game_context.py (source unique)."""
+    from utils.game_context import commande_de_jeu
+
+    return commande_de_jeu()
+
+
 def strip_decorative_emoji(value: Any) -> str:
-    """Retire uniquement les pictogrammes décoratifs des textes générés par SentriX."""
+    """Retire uniquement les pictogrammes décoratifs des textes générés par SentriX.
+
+    Exception : les mini-jeux, dont les pictogrammes SONT le jeu (voir _commande_de_jeu).
+    """
+    if _commande_de_jeu():
+        return str(value or "")
     text = str(value or "")
     text = _CUSTOM_EMOJI_RE.sub("", text)
     text = _EMOJI_RE.sub("", text)

@@ -161,3 +161,69 @@ SOLO_FLAVORS = {
         "Une grotte inexplorée révèle des richesses insoupçonnées.",
     ], "La zone explorée était déjà pillée, rien à récupérer."),
 }
+
+# =============================================================================
+# Butin des jeux solo : ce qu'on ramène vraiment
+# =============================================================================
+#
+# Avant, une manche gagnante affichait une phrase au hasard et un montant : deux
+# parties de pêche se ressemblaient, et rien ne donnait envie d'en relancer une.
+# Chaque manche tire maintenant une PRISE, avec sa rareté et son multiplicateur —
+# la légendaire est rare, visible, et vaut le coup.
+#
+# Le multiplicateur s'applique au montant de base ; les réglages du serveur
+# (multiplicateur de gains, limite quotidienne) s'appliquent ensuite, comme avant.
+
+RARETES = (
+    # (clé, libellé, poids, multiplicateur)
+    ("commun", "Commun", 58, 1.0),
+    ("rare", "Rare", 26, 1.6),
+    ("epique", "Épique", 13, 2.6),
+    ("legendaire", "Légendaire", 3, 4.5),
+)
+
+SOLO_LOOT: dict[str, dict[str, tuple[tuple[str, str], ...]]] = {
+    "fishing": {
+        "commun": (("🐟", "Gardon"), ("🐠", "Poisson-clown"), ("🦐", "Crevette grise"), ("🥾", "Vieille botte")),
+        "rare": (("🐡", "Poisson-globe"), ("🦑", "Calmar"), ("🦀", "Tourteau")),
+        "epique": (("🦞", "Homard bleu"), ("🐙", "Pieuvre géante"), ("🐢", "Tortue centenaire")),
+        "legendaire": (("🦈", "Requin blanc"), ("🐋", "Baleine bleue"), ("🧜", "Sirène (elle est repartie)")),
+    },
+    "mining": {
+        "commun": (("🪨", "Caillou"), ("⚫", "Charbon"), ("🧱", "Argile")),
+        "rare": (("🔩", "Fer"), ("🥉", "Cuivre"), ("🪙", "Filon d'argent")),
+        "epique": (("🥇", "Pépite d'or"), ("💠", "Améthyste"), ("🔷", "Saphir brut")),
+        "legendaire": (("💎", "Diamant pur"), ("☄️", "Fragment de météorite"), ("🟣", "Cristal de faille")),
+    },
+    "hunt": {
+        "commun": (("🐇", "Lièvre"), ("🦆", "Canard"), ("🐿️", "Écureuil")),
+        "rare": (("🦌", "Cerf"), ("🐗", "Sanglier"), ("🦃", "Dindon sauvage")),
+        "epique": (("🐺", "Loup gris"), ("🦅", "Aigle royal"), ("🐻", "Ours brun")),
+        "legendaire": (("🦁", "Lion évadé du zoo"), ("🦬", "Bison des plaines"), ("🐉", "Quelque chose d'inexplicable")),
+    },
+    "treasure": {
+        "commun": (("🪙", "Poignée de pièces"), ("🗝️", "Clé rouillée"), ("🏺", "Vase ébréché")),
+        "rare": (("💰", "Bourse pleine"), ("📜", "Parchemin scellé"), ("⚱️", "Urne gravée")),
+        "epique": (("👑", "Couronne oubliée"), ("💍", "Anneau ancien"), ("🗿", "Idole de pierre")),
+        "legendaire": (("🏆", "Trésor du capitaine"), ("💎", "Gemme des profondeurs"), ("🪬", "Amulette maudite")),
+    },
+    "adventure": {
+        "commun": (("🍄", "Champignons rares"), ("🌿", "Herbes médicinales"), ("🪵", "Bois noble")),
+        "rare": (("🗺️", "Carte annotée"), ("🧭", "Boussole ancienne"), ("🔮", "Éclat de cristal")),
+        "epique": (("⚗️", "Fiole d'alchimiste"), ("📕", "Grimoire poussiéreux"), ("🎭", "Masque rituel")),
+        "legendaire": (("🗡️", "Lame elfique"), ("🛡️", "Bouclier du gardien"), ("🪄", "Bâton runique")),
+    },
+    "dungeon": {
+        "commun": (("🕯️", "Bougie du gardien"), ("🦴", "Ossements"), ("⛓️", "Chaîne brisée")),
+        "rare": (("🗡️", "Dague ébréchée"), ("🛡️", "Écu cabossé"), ("💀", "Crâne gravé")),
+        "epique": (("🏹", "Arc du veilleur"), ("🧿", "Œil de pierre"), ("🔱", "Trident rouillé")),
+        "legendaire": (("👹", "Trophée du boss"), ("🔥", "Cœur de braise"), ("⚜️", "Sceau royal")),
+    },
+    "explore": {
+        "commun": (("🌾", "Champ de blé"), ("🪺", "Nid abandonné"), ("🍃", "Sentier oublié")),
+        "rare": (("⛰️", "Grotte cachée"), ("💧", "Source claire"), ("🏕️", "Campement désert")),
+        "epique": (("🌋", "Cratère fumant"), ("🏛️", "Ruines antiques"), ("🌌", "Clairière étoilée")),
+        "legendaire": (("🏝️", "Île non cartographiée"), ("🛸", "Objet non identifié"), ("🗿", "Monolithe silencieux")),
+    },
+}
+

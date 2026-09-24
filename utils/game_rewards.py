@@ -307,6 +307,23 @@ async def reward_game_winner(
     return reward
 
 
+def jeu_libelle(game_name: str) -> str:
+    """Nom lisible d'un jeu (« 🎰 Machine à sous ») à partir de sa clé interne.
+
+    Le catalogue est la source de ces libellés ; un jeu absent garde sa clé plutôt
+    que d'afficher un titre vide.
+    """
+    try:
+        from cogs.games_catalog import GAME_CATALOG
+
+        entree = GAME_CATALOG.get(str(game_name or "").casefold())
+        if entree:
+            return str(entree[0])
+    except Exception:
+        pass
+    return str(game_name or "Mini-jeu")
+
+
 async def _emit_game_log(bot, guild_id: int, reward: GameReward):
     """Émet dans la catégorie de log 'games' (+logsetup) si un salon est configuré et
     activé — n'échoue jamais silencieusement de façon bruyante (send_log gère déjà tout ça)."""
@@ -319,13 +336,17 @@ async def _emit_game_log(bot, guild_id: int, reward: GameReward):
             return
         member = guild.get_member(reward.user_id)
         who = member.mention if member else f"<@{reward.user_id}>"
-        title = design_system.kind_title("Récompense de mini-jeu", kind="success", category_emoji="🎮")
+        # Le nom du jeu va dans le TITRE. En première ligne de description, le
+        # transport de logs le lisait comme l'entité concernée et affichait
+        # « Jeu : > » — un titre vide, sans le nom du jeu ni le joueur.
+        libelle = jeu_libelle(reward.game_name)
+        issue = {"win": "Gagné", "loss": "Perdu", "draw": "Égalité"}.get(
+            str(reward.result or "").casefold(), str(reward.result or "—")
+        )
         embed = discord.Embed(
-            title=title,
+            title=f"{libelle} — {issue}",
             description=(
-                f"**Jeu :** {reward.game_name}\n"
                 f"**Joueur :** {who}\n"
-                f"**Résultat :** {reward.result}\n"
                 f"**Récompense :** {reward.amount} 🪙\n"
                 f"**Référence :** `{reward.display_id}`"
             ),
@@ -393,3 +414,12 @@ def secure_pick(options: list):
     """Choix aléatoire cryptographiquement sûr (secrets), utilisé pour tout ce qui touche à
     une récompense — évite un random.choice() prévisible/manipulable."""
     return options[secrets.randbelow(len(options))]
+
+
+def secure_randint(low: int, high: int) -> int:
+    """Entier sûr dans [low, high]. Même raison que secure_pick : ce tirage décide
+    d'une rareté, donc d'un gain."""
+    low, high = int(low), int(high)
+    if high <= low:
+        return low
+    return low + secrets.randbelow(high - low + 1)
