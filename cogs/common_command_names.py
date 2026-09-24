@@ -421,15 +421,15 @@ async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
 
 
 def _install_mention_listener(bot: commands.Bot) -> None:
+    """Ne crée plus de deuxième réponse quand quelqu'un mentionne uniquement SentriX.
+
+    Le pipeline IA V5/V6 est l'unique autorité pour ce cas. Garder un listener séparé
+    produisait l'ancien embed « Besoin d'aide ? » EN PLUS de la réponse naturelle.
+    """
     if getattr(bot, "_sentrix_mention_help_listener", False):
         return
-
-    async def listener(message: discord.Message):
-        await _mention_help(bot, message)
-
-    bot.add_listener(listener, "on_message")
     bot._sentrix_mention_help_listener = True
-    logger.info("Aide au ping direct activée : @SentriX affiche le préfixe et +help.")
+    logger.info("Ping direct unifié : aucun listener d'aide séparé, réponse IA unique.")
 
 
 def _patch_help_renderers() -> None:
