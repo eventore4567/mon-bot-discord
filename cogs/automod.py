@@ -44,6 +44,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds, checks, helpers, log_service, text_normalization
+from utils.sliding_window import FenetreGlissante
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
 
@@ -375,6 +376,10 @@ TOGGLE_CHOICES = [
 ]
 
 DANGEROUS_PERMS = ["administrator", "manage_guild", "manage_roles", "manage_channels", "ban_members", "kick_members"]
+SPAM_WINDOW = 6  # secondes observées pour le comptage anti-spam
+SPAM_THRESHOLD = 5  # messages dans la fenêtre avant sanction
+RAID_JOIN_WINDOW = 10  # secondes observées pour l'afflux d'arrivées
+RAID_JOIN_THRESHOLD = 8  # arrivées dans la fenêtre avant alerte de raid
 NUKE_ACTION_WINDOW = 30  # secondes
 NUKE_ACTION_THRESHOLD = 3  # actions destructrices avant déclenchement
 
@@ -382,10 +387,15 @@ NUKE_ACTION_THRESHOLD = 3  # actions destructrices avant déclenchement
 class AutoMod(commands.Cog, name="Automod"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.spam_tracker: dict[tuple[int, int], list[float]] = {}
-        self.join_tracker: dict[int, list[float]] = {}
-        self.nuke_tracker: dict[tuple[int, int], list[float]] = {}
-        self.infraction_tracker: dict[tuple[int, int], list[float]] = {}
+        # Compteurs à fenêtre glissante. Ils étaient de simples dictionnaires dont
+        # les horodatages étaient élagués mais dont les CLÉS ne l'étaient jamais :
+        # une entrée par membre ayant parlé une fois, gardée à vie, même après son
+        # départ. Mesuré à 12,4 Mo pour 50 000 membres sur le seul spam_tracker,
+        # et rien ne redescendait. FenetreGlissante oublie les clés inactives.
+        self.spam_tracker = FenetreGlissante(fenetre=SPAM_WINDOW)
+        self.join_tracker = FenetreGlissante(fenetre=RAID_JOIN_WINDOW, purge_toutes=100)
+        self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
+        self.infraction_tracker = FenetreGlissante(fenetre=ESCALATION_WINDOW)
         self.incidents: dict[tuple[int, int], _Incident] = {}
         self.moderation_dataset = MultilingualModerationDataset()
         # Caches mémoire : évitent des allers-retours en base de données à CHAQUE
@@ -923,11 +933,7 @@ class AutoMod(commands.Cog, name="Automod"):
         dépasse un des seuils d'ESCALATION_RULES, applique automatiquement une sanction plus
         sévère (mute → kick → ban). Retourne (action_prise_ou_None, nombre_d_infractions)."""
         key = (guild.id, member.id)
-        t = time.time()
-        hits = self.infraction_tracker.setdefault(key, [])
-        hits.append(t)
-        self.infraction_tracker[key] = [x for x in hits if t - x < ESCALATION_WINDOW]
-        count = len(self.infraction_tracker[key])
+        count = self.infraction_tracker.ajouter(key)
 
         conf = await self.get_automod_cached(guild.id)
         if not conf.get("escalation", 0):
@@ -954,7 +960,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 await member.kick(reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}")
             elif action_to_take == "ban":
                 await member.ban(reason=f"AutoMod : escalade ({count} infractions/1h) — {reason}", delete_message_seconds=0)
-            self.infraction_tracker[key] = []  # repart à zéro après une sanction
+            self.infraction_tracker.reinitialiser(key)  # repart à zéro après une sanction
             return action_to_take, count
         except discord.Forbidden:
             return None, count
@@ -1745,12 +1751,8 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if conf["antispam"]:
             key = (message.guild.id, message.author.id)
-            timestamps = self.spam_tracker.setdefault(key, [])
-            t = time.time()
-            timestamps.append(t)
-            self.spam_tracker[key] = [x for x in timestamps if t - x < 6]
-            if len(self.spam_tracker[key]) >= 5:
-                self.spam_tracker[key] = []
+            if self.spam_tracker.ajouter(key) >= SPAM_THRESHOLD:
+                self.spam_tracker.reinitialiser(key)
                 return await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
 
     def _mark_xp_skip(self, message_id: int):
@@ -2093,15 +2095,12 @@ class AutoMod(commands.Cog, name="Automod"):
                 return
 
         if conf["antiraid"]:
-            joins = self.join_tracker.setdefault(member.guild.id, [])
-            t = time.time()
-            joins.append(t)
-            self.join_tracker[member.guild.id] = [x for x in joins if t - x < 10]
-            if len(self.join_tracker[member.guild.id]) >= 8:
+            arrivees = self.join_tracker.ajouter(member.guild.id)
+            if arrivees >= RAID_JOIN_THRESHOLD:
                 e = embeds.log_entry(
                     "🚨 Raid potentiel détecté", config.COLOR_WARNING,
                     raison="Afflux massif de nouveaux membres observé",
-                    extra={"📊 Arrivées en 10s": str(len(self.join_tracker[member.guild.id]))},
+                    extra={f"📊 Arrivées en {RAID_JOIN_WINDOW}s": str(arrivees)},
                 )
                 await self.log_action(member.guild, e)
                 # Réponse automatique : relever le niveau de vérification du serveur
@@ -2123,18 +2122,13 @@ class AutoMod(commands.Cog, name="Automod"):
                 except discord.Forbidden:
                     pass
                 # Évite de redéclencher la même alerte à chaque nouvel arrivant tant que le raid dure.
-                self.join_tracker[member.guild.id] = []
+                self.join_tracker.reinitialiser(member.guild.id)
 
     # ---------------------------------------------------------------- ANTI-NUKE
 
     async def record_nuke_action(self, guild: discord.Guild, actor_id: int) -> bool:
         """Retourne True si le seuil d'actions destructrices est dépassé pour cet auteur."""
-        key = (guild.id, actor_id)
-        t = time.time()
-        actions = self.nuke_tracker.setdefault(key, [])
-        actions.append(t)
-        self.nuke_tracker[key] = [x for x in actions if t - x < NUKE_ACTION_WINDOW]
-        return len(self.nuke_tracker[key]) >= NUKE_ACTION_THRESHOLD
+        return self.nuke_tracker.ajouter((guild.id, actor_id)) >= NUKE_ACTION_THRESHOLD
 
     async def get_audit_actor(self, guild: discord.Guild, action: discord.AuditLogAction, target_id: int = None):
         """Retrouve l'auteur d'une action récente via les logs d'audit (nécessite la permission adéquate).

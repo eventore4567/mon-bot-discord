@@ -12,7 +12,6 @@ Cette couche se branche sur le Cog AutoMod existant sans dupliquer son listener 
 from __future__ import annotations
 
 import logging
-import time
 from types import MethodType
 
 import discord
@@ -35,7 +34,6 @@ _OWNER_ONLY_WHITELIST_COMMANDS = {
 
 # Même fenêtre que le moteur historique : on conserve un compteur informatif, mais aucune
 # sanction n'est déclenchée par les filtres de contenu.
-_CONTENT_INFRACTION_WINDOW = 3600
 
 
 async def _guild_owner_only(ctx: commands.Context) -> bool:
@@ -139,13 +137,10 @@ def _patch_automod(bot: commands.Bot) -> None:
             if override is False:
                 return await original_maybe_escalate(guild, member, reason)
 
-        key = (guild.id, member.id)
-        now_ts = time.time()
-        hits = _self.infraction_tracker.setdefault(key, [])
-        hits.append(now_ts)
-        hits = [stamp for stamp in hits if now_ts - stamp < _CONTENT_INFRACTION_WINDOW]
-        _self.infraction_tracker[key] = hits
-        return None, len(hits)
+        # Le compteur d'infractions est une FenetreGlissante depuis qu'il fuyait
+        # (une clé par membre, conservée à vie). Sa fenêtre est déjà celle de
+        # l'escalade AutoMod (ESCALATION_WINDOW), seule source de cette durée.
+        return None, _self.infraction_tracker.ajouter((guild.id, member.id))
 
     automod._maybe_escalate = MethodType(delete_only_escalation, automod)
 
