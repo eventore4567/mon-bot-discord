@@ -93,14 +93,35 @@ def _command_line(utility, command: commands.Command, prefix: str, language: str
     return f"{index}`{usage}`  `{access}`\n{_summary(command, language)}"
 
 
+def _quick_shortcuts(bot: commands.Bot, prefix: str, is_staff: bool) -> list[str]:
+    """N'affiche jamais un raccourci vers une commande absente du runtime."""
+    candidates = ["profilecard", "ticket", "daily"]
+    if is_staff:
+        candidates.append("setup")
+
+    result: list[str] = []
+    for name in candidates:
+        command = bot.get_command(name)
+        if command is None:
+            continue
+        try:
+            from . import common_command_names
+            display = common_command_names.preferred_name(command)
+        except Exception:
+            display = str(getattr(command, "qualified_name", name) or name)
+        result.append(f"`{prefix}{display}`")
+
+    if not result and bot.get_command("help") is not None:
+        result.append(f"`{prefix}help`")
+    return result
+
+
 def _help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_staff: bool, language: str) -> discord.Embed:
     entries = _help_entries(bot, is_staff)
     total = sum(len(commands_list) for _, commands_list in entries)
     category_count = len(entries)
+    shortcuts = _quick_shortcuts(bot, prefix, is_staff)
     if language == "en":
-        shortcuts = [f"`{prefix}profile`", f"`{prefix}ticket`", f"`{prefix}daily`"]
-        if is_staff:
-            shortcuts.append(f"`{prefix}setup`")
         embed = _brand(
             "SENTRIX / HELP",
             (
@@ -111,9 +132,6 @@ def _help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_s
         )
         embed.set_footer(text=f"SentriX • {category_count} categories")
     else:
-        shortcuts = [f"`{prefix}profile`", f"`{prefix}ticket`", f"`{prefix}daily`"]
-        if is_staff:
-            shortcuts.append(f"`{prefix}setup`")
         embed = _brand(
             "SENTRIX / AIDE",
             (
