@@ -113,3 +113,44 @@ def test_la_normalisation_reste_bon_marche():
             normaliser(message)
     par_message = (time.perf_counter() - debut) * 1000 / (300 * len(messages))
     assert par_message < 1.0, f"{par_message:.3f} ms par message"
+
+
+def test_les_petites_capitales_sont_couvertes_sur_tous_leurs_blocs():
+    """Unicode répartit les 45 petites capitales latines sur SIX blocs. Ne
+    balayer que deux d'entre eux laissait dehors la petite capitale Q, donc
+    « ᴀʀɴᴀꞯᴜᴇ » traversait tous les filtres."""
+    from utils.text_normalization import _PETITES_CAPITALES
+
+    assert normaliser("ᴀʀɴᴀꞯᴜᴇ") == "arnaque"
+    assert normaliser("ᴅɪsᴄᴏʀᴅ") == "discord"
+    assert len(_PETITES_CAPITALES) >= 30, len(_PETITES_CAPITALES)
+
+
+def test_le_filtre_de_mots_interdits_resiste_aux_deguisements():
+    """C'est le seul filtre que les administrateurs configurent eux-mêmes, et
+    il avait déjà les frontières de mots — mais pas la normalisation."""
+    from cogs.automod import AutoMod
+
+    for variante in (
+        "arnaque", "ARNAQUE", "arnaqué", "a r n a q u e",
+        "a.r.n.a.q.u.e", "4rn4qu3", "аrnaque", "ᴀʀɴᴀꞯᴜᴇ", "𝗮𝗿𝗻𝗮𝗾𝘂𝗲",
+    ):
+        assert AutoMod._blacklist_hit(["arnaque"], f"ceci est une {variante} ici"), variante
+
+
+def test_le_filtre_de_mots_interdits_garde_ses_frontieres_et_son_prefixe():
+    """« con » ne doit pas supprimer « connexion », et « merd* » doit toujours
+    attraper « merdier » : les deux comportements existaient avant, ils ne
+    doivent pas disparaître en gagnant la tolérance aux déguisements."""
+    from cogs.automod import AutoMod
+
+    for innocent in (
+        "j'ai une bonne connexion internet",
+        "il est reputé sérieux dans le métier",
+        "je configure mon serveur ce soir",
+        "on a promis de venir demain",
+    ):
+        assert not AutoMod._blacklist_hit(["arnaque", "promo*", "con"], innocent), innocent
+
+    for attrape in ("promotion", "promos", "promo", "p r o m o t i o n"):
+        assert AutoMod._blacklist_hit(["promo*"], attrape), attrape

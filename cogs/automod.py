@@ -393,6 +393,12 @@ REPEAT_CHANNEL_THRESHOLD = 3  # salons différents recevant le même message
 REPEAT_MIN_LENGTH = 12
 RAID_JOIN_WINDOW = 10  # secondes observées pour l'afflux d'arrivées
 RAID_JOIN_THRESHOLD = 8  # arrivées dans la fenêtre avant alerte de raid
+# Même angle mort que l'anti-spam : une fenêtre courte ne voit que la vitesse.
+# Sept arrivées toutes les dix secondes — quarante-deux comptes par minute,
+# deux mille cinq cents par heure — n'atteignaient jamais le seuil. Une seconde
+# fenêtre, large, attrape le raid patient sans gêner un serveur qui grandit.
+RAID_SLOW_WINDOW = 600  # dix minutes
+RAID_SLOW_THRESHOLD = 60  # arrivées sur dix minutes avant alerte
 NUKE_ACTION_WINDOW = 30  # secondes
 NUKE_ACTION_THRESHOLD = 3  # actions destructrices avant déclenchement
 
@@ -407,6 +413,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # et rien ne redescendait. FenetreGlissante oublie les clés inactives.
         self.spam_tracker = FenetreGlissante(fenetre=SPAM_WINDOW)
         self.join_tracker = FenetreGlissante(fenetre=RAID_JOIN_WINDOW, purge_toutes=100)
+        self.slow_join_tracker = FenetreGlissante(fenetre=RAID_SLOW_WINDOW, purge_toutes=100)
         self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
         self.infraction_tracker = FenetreGlissante(fenetre=ESCALATION_WINDOW)
         self.repeat_tracker = FenetreGlissante(fenetre=REPEAT_WINDOW)
@@ -868,16 +875,23 @@ class AutoMod(commands.Cog, name="Automod"):
         """
         if not words:
             return None
-        texte = _sans_accents(content).casefold()
+        # Même normalisation que les autres filtres : sans elle, « a r n a q u e »,
+        # « 4rn4qu3 », « аrnaque » (а cyrillique) et « ᴀʀɴᴀǫᴜᴇ » passaient tous —
+        # cinq contournements sur dix, sur le seul filtre que les admins
+        # configurent eux-mêmes.
+        texte = text_normalization.normaliser(content)
         for word in words:
-            brut = _sans_accents(str(word or "")).casefold().strip()
+            brut = text_normalization.normaliser(str(word or "")).strip()
             if not brut:
                 continue
             if brut.endswith("*"):
-                motif = r"(?<![\w])" + re.escape(brut[:-1]) + r"\w*"
+                # Préfixe : « merd* » attrape toujours « merdier ». On tolère les
+                # séparateurs DANS le mot, puis on laisse courir la fin.
+                motif = text_normalization.motif_tolerant(brut[:-1]).pattern
+                motif = motif.replace(r"(?![a-z0-9])", r"[a-z0-9]*")
             else:
-                motif = r"(?<![\w])" + re.escape(brut) + r"(?![\w])"
-            if re.search(motif, texte):
+                motif = text_normalization.motif_tolerant(brut).pattern
+            if re.search(motif, texte, re.IGNORECASE):
                 return word
         return None
 
@@ -2145,11 +2159,22 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if conf["antiraid"]:
             arrivees = self.join_tracker.ajouter(member.guild.id)
-            if arrivees >= RAID_JOIN_THRESHOLD:
+            arrivees_lentes = self.slow_join_tracker.ajouter(member.guild.id)
+            raid_rapide = arrivees >= RAID_JOIN_THRESHOLD
+            raid_lent = arrivees_lentes >= RAID_SLOW_THRESHOLD
+            if raid_rapide or raid_lent:
                 e = embeds.log_entry(
                     "🚨 Raid potentiel détecté", config.COLOR_WARNING,
-                    raison="Afflux massif de nouveaux membres observé",
-                    extra={f"📊 Arrivées en {RAID_JOIN_WINDOW}s": str(arrivees)},
+                    raison=(
+                        "Afflux massif de nouveaux membres observé"
+                        if raid_rapide
+                        else "Arrivées trop nombreuses sur une longue période "
+                             "(raid lent, sous le seuil de l'afflux instantané)"
+                    ),
+                    extra={
+                        f"📊 Arrivées en {RAID_JOIN_WINDOW}s": str(arrivees),
+                        f"📈 Arrivées en {RAID_SLOW_WINDOW // 60} min": str(arrivees_lentes),
+                    },
                 )
                 await self.log_action(member.guild, e)
                 # Réponse automatique : relever le niveau de vérification du serveur
@@ -2172,6 +2197,10 @@ class AutoMod(commands.Cog, name="Automod"):
                     pass
                 # Évite de redéclencher la même alerte à chaque nouvel arrivant tant que le raid dure.
                 self.join_tracker.reinitialiser(member.guild.id)
+                if raid_lent:
+                    # Sinon l'alerte « raid lent » repartirait à chaque arrivée
+                    # suivante tant que la fenêtre de dix minutes reste pleine.
+                    self.slow_join_tracker.reinitialiser(member.guild.id)
 
     # ---------------------------------------------------------------- ANTI-NUKE
 

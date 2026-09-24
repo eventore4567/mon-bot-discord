@@ -102,6 +102,13 @@ def _voit_lien(contenu: str) -> bool:
     return bool(LINK_RE.search(_normalize_link_text(contenu)))
 
 
+def _voit_mot_interdit(contenu: str) -> bool:
+    """Le filtre que les administrateurs configurent eux-mêmes."""
+    from cogs.automod import AutoMod
+
+    return AutoMod._blacklist_hit(["arnaque", "promo*"], contenu) is not None
+
+
 # Chaque famille : (nom, détecteur, attaques qui DOIVENT être vues,
 # phrases banales qui NE doivent PAS l'être).
 FAMILLES = (
@@ -178,6 +185,29 @@ FAMILLES = (
             "c'est un t-shirt rouge",
             "o.k. pour demain",
             "salut ça va ? on se voit demain au parc",
+        ),
+    ),
+    (
+        "mots interdits (liste du serveur)",
+        _voit_mot_interdit,
+        (
+            "ceci est une arnaque evidente",
+            "ceci est une ARNAQUE evidente",
+            "ceci est une arnaqué evidente",
+            "ceci est une a r n a q u e evidente",
+            "ceci est une a.r.n.a.q.u.e evidente",
+            "ceci est une 4rn4qu3 evidente",
+            "ceci est une аrnaque evidente",       # а cyrillique
+            "ceci est une ᴀʀɴᴀꞯᴜᴇ evidente",        # petites capitales
+            "ceci est une 𝗮𝗿𝗻𝗮𝗾𝘂𝗲 evidente",        # gras mathématique
+            "profitez de la promotion du jour",     # préfixe « promo* »
+        ),
+        (
+            "j'ai une bonne connexion internet",
+            "il est reputé sérieux dans le métier",
+            "le contact du conseil est pris",
+            "je configure mon serveur ce soir",
+            "on a promis de venir demain",
         ),
     ),
     (

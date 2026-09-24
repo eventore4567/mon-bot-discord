@@ -54,25 +54,28 @@ def _table_petites_capitales() -> dict[str, str]:
     reste juste si Unicode en ajoute, et personne n'a à vérifier 26 codes.
     """
     table: dict[str, str] = {}
-    for point in range(0x0250, 0x02B0):
-        caractere = chr(point)
-        try:
-            nom = unicodedata.name(caractere)
-        except ValueError:
-            continue
-        if nom.startswith("LATIN LETTER SMALL CAPITAL "):
+    # Les 45 petites capitales latines d'Unicode sont réparties sur SIX blocs,
+    # pas deux : ne balayer que 0x0250 et 0x1D00 laissait dehors la petite
+    # capitale Q (U+A7AF) et quelques autres, donc « ᴀʀɴᴀQᴜᴇ » passait.
+    for debut, fin in (
+        (0x0200, 0x0300),
+        (0x1D00, 0x1D80),
+        (0x2C00, 0x2C80),
+        (0xA700, 0xA7D0),
+        (0xAB00, 0xAB80),
+    ):
+        for point in range(debut, fin):
+            caractere = chr(point)
+            try:
+                nom = unicodedata.name(caractere)
+            except ValueError:
+                continue
+            if not nom.startswith("LATIN LETTER SMALL CAPITAL "):
+                continue
             lettre = nom.rsplit(" ", 1)[-1]
-            if len(lettre) == 1 and lettre.isalpha():
-                table[caractere] = lettre.lower()
-    for point in range(0x1D00, 0x1D30):
-        caractere = chr(point)
-        try:
-            nom = unicodedata.name(caractere)
-        except ValueError:
-            continue
-        if nom.startswith("LATIN LETTER SMALL CAPITAL "):
-            lettre = nom.rsplit(" ", 1)[-1]
-            if len(lettre) == 1 and lettre.isalpha():
+            # « SMALL CAPITAL AE », « SMALL CAPITAL L WITH STROKE »… : seules les
+            # lettres simples se ramènent à une lettre ASCII sans inventer.
+            if len(lettre) == 1 and lettre.isalpha() and lettre.isascii():
                 table[caractere] = lettre.lower()
     return table
 

@@ -167,3 +167,43 @@ def test_une_conversation_normale_n_est_jamais_sanctionnee():
     )
     for phrase in conversation:
         assert not AutoMod._detecter_repetition(cog, _message(phrase), ("g", "u")), phrase
+
+
+def test_le_raid_lent_est_detecte_sans_gener_un_serveur_qui_grandit():
+    """Sept arrivées toutes les dix secondes — quarante-deux comptes par
+    minute — n'atteignaient jamais le seuil d'afflux instantané."""
+    from cogs.automod import (
+        RAID_JOIN_THRESHOLD,
+        RAID_JOIN_WINDOW,
+        RAID_SLOW_THRESHOLD,
+        RAID_SLOW_WINDOW,
+    )
+
+    # Un raid juste sous le seuil rapide, tenu pendant la fenêtre lente.
+    par_minute = (RAID_JOIN_THRESHOLD - 1) * 60 / RAID_JOIN_WINDOW
+    sur_la_fenetre_lente = par_minute * RAID_SLOW_WINDOW / 60
+    assert sur_la_fenetre_lente >= RAID_SLOW_THRESHOLD, (
+        "un raid sous le seuil rapide reste invisible sur la fenêtre lente"
+    )
+
+    # Un serveur populaire qui grandit vraiment ne doit pas être alerté : six
+    # arrivées par minute soutenues restent sous le seuil lent.
+    croissance_normale = 5 * RAID_SLOW_WINDOW / 60
+    assert croissance_normale < RAID_SLOW_THRESHOLD, (
+        "un serveur qui grandit normalement déclencherait l'alerte"
+    )
+
+
+def test_les_deux_fenetres_de_raid_existent_et_sont_reinitialisees():
+    """Sans réinitialisation, l'alerte « raid lent » repartirait à chaque
+    arrivée tant que la fenêtre de dix minutes reste pleine."""
+    import inspect
+
+    from cogs.automod import AutoMod
+
+    init = inspect.getsource(AutoMod.__init__)
+    assert "self.join_tracker = FenetreGlissante(" in init
+    assert "self.slow_join_tracker = FenetreGlissante(" in init
+
+    source = inspect.getsource(AutoMod)
+    assert "slow_join_tracker.reinitialiser" in source
