@@ -2694,9 +2694,37 @@ class Ai(commands.Cog, name="Ai"):
         await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'🤖 Modèle par défaut sur ce serveur : **{label}**.\nLes demandes complexes (code, analyse détaillée, longs textes...) basculent automatiquement sur **GPT-5.6 Sol**, sans surcoût sur les questions simples.')))
 
     async def _ai_help(self, ctx: commands.Context):
-        e = embeds.brand("🤖 Aide — Intelligence artificielle SentriX", (
-            "**+ai <question>** / **/ai ask <question>** — poser une question à l'IA\n**+ai search <question>** / **/ai search** — poser une question en forçant une vraie recherche web\n**+ai reset** / **/ai reset** — réinitialiser votre conversation dans ce salon\n**+ai memory** / **/ai memory** — voir si une conversation est active\n**+ai model** / **/ai model** — voir le modèle utilisé par défaut\n**+ai enable** / **/ai enable** *(admin)* — activer l'IA sur ce serveur\n**+ai disable** / **/ai disable** *(admin)* — désactiver l'IA sur ce serveur\n**+improve <texte>** — améliorer un texte\n**+correct <texte>** — corriger l'orthographe et la grammaire\n**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n**+code <demande>** — générer du code\n**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n**+image <description>** — générer une image 4K (3840 × 2160)\n**SentriX fais-moi une image de...** — génération 4K en langage naturel\n**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n**+aisetup** *(admin)* — configuration avancée de l'IA sur ce serveur"
-        ))
+        prefix = str(getattr(ctx, "clean_prefix", None) or config.DEFAULT_PREFIX)
+        lines: list[str] = []
+
+        def add(command_name: str, usage: str, description: str) -> None:
+            if self.bot.get_command(command_name) is not None:
+                lines.append(f"**`{prefix}{usage}`** — {description}")
+
+        add("ai", "ai <question>", "poser une question à l'IA")
+        add("ai search", "ai search <question>", "faire une recherche web")
+        add("ai reset", "ai reset", "réinitialiser la conversation")
+        add("ai memory", "ai memory", "voir l'état de la mémoire")
+        add("ai model", "ai model", "voir le modèle utilisé")
+        add("ai enable", "ai enable", "activer l'IA (admin)")
+        add("ai disable", "ai disable", "désactiver l'IA (admin)")
+        add("improve", "improve <texte>", "améliorer un texte")
+        add("correct", "correct <texte>", "corriger un texte")
+        add("ai-translate", "ai-translate <langue> <texte>", "traduire avec l'IA")
+        add("code", "code <demande>", "générer du code")
+        add("summarize", "summarize <texte>", "résumer")
+        add("explain", "explain <texte>", "expliquer")
+        add("rewrite", "rewrite <texte>", "réécrire")
+        add("fact-check", "fact-check <texte>", "vérifier une affirmation")
+        add("image", "image <description>", "générer une image")
+
+        lines.append("**SentriX <demande>** — parler naturellement au bot")
+        lines.append(f"Pour le catalogue complet et à jour : **`{prefix}help`**")
+
+        e = embeds.brand(
+            "Aide — Intelligence artificielle SentriX",
+            "\n".join(lines),
+        )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="chat", description="Discuter avec l'IA de SentriX (avec mémoire de conversation).", with_app_command=False)
