@@ -685,8 +685,29 @@ class TypeEditView(discord.ui.View):
         t = await self.cog.get_type(self.type_id)
         new_val = 0 if t["use_form"] else 1
         await self.cog.bot.db.execute("UPDATE ticket_types SET use_form = ? WHERE id = ?", (new_val, self.type_id))
-        state = "activé (utilisez `+ticketform add` pour ajouter des questions)" if new_val else "désactivé"
+        state = "activé" if new_val else "désactivé"
         await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Formulaire {state}.')), ephemere=True)
+
+    @discord.ui.button(label="Ajouter une question", style=discord.ButtonStyle.secondary, row=1)
+    async def add_form_question(self, interaction: discord.Interaction, button: discord.ui.Button):
+        t = await self.cog.get_type(self.type_id)
+        if not t:
+            return await interaction.response.send_message("Ce type de ticket n'existe plus.", ephemeral=True)
+        if not t["use_form"]:
+            return await interaction.response.send_message(
+                "Activez d'abord le formulaire avec le bouton Formulaire on/off.",
+                ephemeral=True,
+            )
+        questions = await self.cog.bot.db.fetchall(
+            "SELECT id FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position",
+            (self.type_id,),
+        )
+        if len(questions) >= 5:
+            return await interaction.response.send_message(
+                "Ce formulaire contient déjà le maximum de 5 questions.",
+                ephemeral=True,
+            )
+        await interaction.response.send_modal(FormQuestionModal(self.cog, self.type_id))
 
     @discord.ui.button(label="Mention staff on/off", style=discord.ButtonStyle.secondary, emoji="🔔", row=1)
     async def toggle_mention(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -818,7 +839,16 @@ class TicketSetupHubView(discord.ui.View):
 
         async def on_submit(inter: discord.Interaction):
             panel_id = await self.cog.create_panel(inter.guild.id, name_input.value)
-            await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'Panel **{name_input.value}** créé (#{panel_id}). Utilisez `+ticketpanel edit {name_input.value}` pour le configurer.')), ephemere=True)
+            await sx_panels.envoyer(
+                inter.response,
+                sx_panels.avec_composants(
+                    sx_panels.depuis_embed(
+                        embeds.success(f'Panel **{name_input.value}** créé (#{panel_id}). Configurez-le ci-dessous.')
+                    ),
+                    PanelEditView(self.cog, panel_id, inter.user.id),
+                ),
+                ephemere=True,
+            )
 
         modal.on_submit = on_submit
         await interaction.response.send_modal(modal)
@@ -951,7 +981,7 @@ class Tickets(commands.Cog):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
         if not types:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning("Ce panel n'a aucun type de ticket — ajoutez-en avec `+tickettype add`.")), ephemere=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`.")), ephemere=True)
         await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemere=True)
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
@@ -960,7 +990,7 @@ class Tickets(commands.Cog):
         if not panel["channel_id"]:
             return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Choisissez d'abord un salon de destination (menu déroulant du dessus).")), ephemere=True)
         if not types:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce panel n'a aucun type de ticket — ajoutez-en avec `+tickettype add` avant de l'envoyer.")), ephemere=True)
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup` avant de l’envoyer.")), ephemere=True)
         channel = interaction.guild.get_channel(panel["channel_id"])
         if not channel:
             return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Le salon configuré n'existe plus.")), ephemere=True)
@@ -1519,7 +1549,7 @@ class Tickets(commands.Cog):
                             "Pour le staff",
                             [
                                 sx_panels.Ligne("`+ticketsetup`", "Configuration guidée, la plus simple"),
-                                sx_panels.Ligne("`+ticketpanel create`", "Création manuelle d'un panel"),
+                                sx_panels.Ligne("Bouton Nouveau panel", "Créer puis configurer un panel sans commande cachée"),
                             ],
                         ),
                     ],
@@ -1558,8 +1588,7 @@ class Tickets(commands.Cog):
     async def ticketsetup(self, ctx: commands.Context):
         e = embeds.brand(
             "🎫 Configuration des tickets",
-            "Menu privé — utilisez les boutons ci-dessous pour gérer vos panels, types de tickets et boutons staff.\n\n"
-            "Pour un contrôle plus fin, les commandes `+ticketpanel`, `+tickettype` et `+ticketform` sont aussi disponibles.",
+            "Menu privé — utilisez les boutons ci-dessous pour gérer les panels, types de tickets et boutons staff. Toutes les actions proposées ici correspondent à des fonctions réellement disponibles.",
         )
         panels = await self.bot.db.fetchall("SELECT * FROM ticket_panels_v2 WHERE guild_id = ?", (ctx.guild.id,))
         types = await self.bot.db.fetchall("SELECT * FROM ticket_types WHERE guild_id = ?", (ctx.guild.id,))
@@ -1581,7 +1610,7 @@ class Tickets(commands.Cog):
         panels = await self.bot.db.fetchall("SELECT * FROM ticket_panels_v2 WHERE guild_id = ?", (guild.id,))
         e = embeds.neutral("📋 Panels de tickets")
         if not panels:
-            e.description = "Aucun panel créé. Utilisez `+ticketpanel create <nom>` pour commencer."
+            e.description = "Aucun panel créé. Relancez `+ticketsetup` puis utilisez le bouton **Nouveau panel**."
         else:
             for p in panels:
                 types_count = await self.bot.db.fetchone("SELECT COUNT(*) c FROM ticket_types WHERE panel_id = ?", (p["id"],))
@@ -1684,7 +1713,7 @@ class Tickets(commands.Cog):
             await self.send_panel(ctx.interaction, panel["id"])
         else:
             if not panel["channel_id"]:
-                return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Choisissez d'abord un salon via `+ticketpanel edit`.")))
+                return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Choisissez d’abord un salon depuis l’éditeur du panel dans `+ticketsetup`.")))
             types = await self.get_panel_types(panel["id"])
             if not types:
                 return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce panel n'a aucun type de ticket.")))
@@ -1755,7 +1784,7 @@ class Tickets(commands.Cog):
             types = await self.bot.db.fetchall("SELECT * FROM ticket_types WHERE guild_id = ? ORDER BY panel_id, position", (guild.id,))
         e = embeds.neutral("🎫 Types de tickets")
         if not types:
-            e.description = "Aucun type de ticket créé. Utilisez `+tickettype add <panel> <nom>` pour commencer."
+            e.description = "Aucun type de ticket créé. Dans `+ticketsetup`, ouvrez un panel puis utilisez **Ajouter un type de ticket**."
         else:
             for t in types:
                 staff = f"<@&{t['staff_role_id']}>" if t["staff_role_id"] else "Aucun"
@@ -1815,7 +1844,7 @@ class Tickets(commands.Cog):
     @commands.hybrid_group(name="ticketform", description="Gérer le formulaire d'un type de ticket.")
     @checks.is_owner_or_admin_for("tickets")
     async def ticketform(self, ctx: commands.Context):
-        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.info('Utilisez `+ticketform add <type>`, `+ticketform edit <type> <question>` ou `+ticketform remove <type> <question>`.')))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.info('La gestion publique des formulaires se fait depuis `+ticketsetup` et l’éditeur du type de ticket.')))
 
     @ticketform.command(name="add", description="Ajouter une question au formulaire d'un type de ticket (max 5).")
     @app_commands.describe(type_ticket="Le nom du type de ticket")
