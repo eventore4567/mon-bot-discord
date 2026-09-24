@@ -20,7 +20,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from utils import log_service
+from utils import log_service, protection_requirements
 from utils import sentrix_panels as panels
 from . import security_verification_v71 as security_v71
 from . import setup_control_center as setup_ui
@@ -226,6 +226,34 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     )
 
     container.add_item(discord.ui.Separator())
+
+    # Une protection cochée mais incapable d'agir est pire qu'une protection
+    # désactivée : elle donne un sentiment de sécurité qui n'existe pas. Le
+    # panneau listait les permissions manquantes dans un fourre-tout, sans
+    # jamais dire LAQUELLE des protections en mourait.
+    libelles = {champ: nom for champ, nom in setup_ui.AUTOMOD}
+    inertes, degradees = protection_requirements.diagnostic(
+        self.guild.me.guild_permissions if self.guild.me else discord.Permissions.none(),
+        selected,
+    )
+    if inertes or degradees:
+        lignes = ["### ⚠️ Protections activées qui ne protègent pas"]
+        for champ, manquantes in inertes:
+            lignes.append(
+                f"🔴 **{libelles.get(champ, champ)}** ne se déclenchera jamais — "
+                f"il manque au rôle SentriX : {', '.join(manquantes)}."
+            )
+        for champ, manquantes in degradees:
+            lignes.append(
+                f"🟠 **{libelles.get(champ, champ)}** détecte et journalise, mais ne peut pas "
+                f"sanctionner — il manque : {', '.join(manquantes)}."
+            )
+        lignes.append(
+            "-# Ces permissions s'accordent au rôle SentriX dans les paramètres du serveur."
+        )
+        container.add_item(discord.ui.TextDisplay("\n".join(lignes)))
+        container.add_item(discord.ui.Separator())
+
     container.add_item(discord.ui.TextDisplay("### Protections actives"))
 
     protection_select = discord.ui.Select(
