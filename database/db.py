@@ -2578,6 +2578,18 @@ class Database:
             "total_earned": (row["total_earned"] if row else 0) or 0,
         }
 
+    async def get_game_cooldowns(self, guild_id: int, user_id: int) -> dict[str, int]:
+        """Tous les cooldowns d'un membre en UNE requête.
+
+        L'écran des mini-jeux en interroge une quarantaine : un aller-retour SQL
+        par jeu, c'est une requête par ligne affichée.
+        """
+        rows = await self.fetchall(
+            "SELECT game_name, last_used_at FROM game_cooldowns WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        return {row["game_name"]: int(row["last_used_at"] or 0) for row in rows}
+
     async def get_game_loot(self, guild_id: int, user_id: int, limit: int = 4000):
         """Les prises rapportées par un membre, les plus récentes d'abord.
 

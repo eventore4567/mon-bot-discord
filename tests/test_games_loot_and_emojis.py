@@ -295,3 +295,54 @@ def test_plus_haut_ou_plus_bas_montre_une_carte_pas_un_nombre():
     assert _carte_lisible(12, "♦") == "`D♦`"
     assert _carte_lisible(13, "♣") == "`R♣`"
     assert _carte_lisible(7, "♠") == "`7♠`"
+
+
+def test_l_ecran_des_jeux_du_jour_liste_vraiment_les_jeux():
+    """Il n'affichait qu'un quota et des cooldowns : rien ne disait à quoi
+    jouer. C'est pourtant le seul écran où un membre vient le chercher."""
+    import ast
+    import inspect
+    import textwrap
+
+    from cogs.games_economy import GamesPlayerCommands
+
+    source = textwrap.dedent(inspect.getsource(GamesPlayerCommands.dailygames.callback))
+    arbre = ast.parse(source)
+    noms = {n.id for n in ast.walk(arbre) if isinstance(n, ast.Name)}
+    assert "GAME_CATALOG" in noms, "l'écran ne parcourt plus le catalogue"
+
+    # Une requête par jeu affiché serait ~39 allers-retours SQL par appel.
+    attributs = {
+        n.attr for n in ast.walk(arbre) if isinstance(n, ast.Attribute)
+    }
+    assert "get_game_cooldowns" in attributs, "les cooldowns repassent en N requêtes"
+    assert "check_cooldown" not in attributs, "un appel par jeu est revenu"
+
+
+def test_le_menu_des_jeux_tient_dans_la_limite_de_discord():
+    """39 jeux listés : le panneau doit rester sous les 4000 caractères de
+    Components V2, y compris quand tous affichent un cooldown."""
+    from utils import sentrix_panels as panels
+
+    familles = {"rapide": "⚡ Jeux rapides", "duel": "⚔️ Duels",
+                "communautaire": "🎪 Jeux communautaires", "solo": "🗺️ Expéditions"}
+    rangs: dict[str, list[str]] = {cle: [] for cle in familles}
+    for nom, (libelle, famille) in GAME_CATALOG.items():
+        if famille in rangs:
+            rangs[famille].append(f"⏳ {libelle} — `+{nom}` · encore 9999s")
+
+    sections = [panels.Section("Aujourd'hui", [panels.Ligne("Manches", "**0 / 50**", indice="x" * 90)])]
+    for cle, titre in familles.items():
+        sections.append(panels.Section(f"{titre} — {len(rangs[cle])}", texte="\n".join(rangs[cle])))
+    panneau = panels.Panneau(titre="🎮 Mini-jeux du jour", sections=sections, kind="jeux")
+
+    def caracteres(noeud) -> int:
+        if isinstance(noeud, dict):
+            propre = len(noeud.get("content", "")) if noeud.get("type") == 10 else 0
+            return propre + sum(caracteres(v) for v in noeud.values() if isinstance(v, (dict, list)))
+        if isinstance(noeud, list):
+            return sum(caracteres(v) for v in noeud)
+        return 0
+
+    total = caracteres(panneau.to_components())
+    assert total < 4000, f"le menu des jeux pèse {total} caractères"

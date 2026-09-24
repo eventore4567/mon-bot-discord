@@ -2356,7 +2356,7 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
             panels.Ligne("Prises rapportées", f"**{sum(sum(s.values()) for s in trouves.values())}**"),
         ])
         await panels.envoyer(ctx, panels.Panneau(
-            titre=f"Collection — {target.display_name}",
+            titre=f"{_game_icon('Collection')} Collection — {target.display_name}",
             sous_titre=f"{pourcent} % de la collection SentriX",
             sections=[entete, *sections],
             kind="jeux",
@@ -2423,19 +2423,77 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         guild_id = ctx.guild.id if ctx.guild else None
         if guild_id is None:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mini-jeux du jour', description='🎮 Disponible uniquement sur un serveur.', kind='warning')))
-        allowed, played, limit = await game_rewards.check_daily_limit(self.bot, guild_id, ctx.author.id)
-        limit_text = f"{played} / {limit}" if limit > 0 else f"{played} (illimité)"
-        active_cooldowns = []
-        for game_name in GAME_CATALOG:
-            duration = game_rewards.GAME_COOLDOWNS.get(game_name, 0)
-            if duration <= 0:
+        _allowed, played, limit = await game_rewards.check_daily_limit(self.bot, guild_id, ctx.author.id)
+        limit_text = f"**{played} / {limit}**" if limit > 0 else f"**{played}** (illimité)"
+        prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
+
+        # Cet écran ne disait que le quota et les cooldowns : rien n'indiquait
+        # quels jeux existent. C'est pourtant le seul endroit où un membre
+        # vient chercher « à quoi je peux jouer maintenant ». Il liste donc le
+        # catalogue, avec pour chaque jeu son état réel sur CE serveur.
+        familles = {
+            "rapide": ("⚡ Jeux rapides", "seul, une manche courte"),
+            "duel": ("⚔️ Duels", "contre un autre membre"),
+            "communautaire": ("🎪 Jeux communautaires", "tout le salon participe"),
+            "solo": ("🗺️ Expéditions", "trois chemins de risque, une prise à rapporter"),
+        }
+        # Les gardes de serveur (interrupteur, salon, rôle) sont les mêmes pour les
+        # 39 jeux : is_game_enabled tranche UNE fois et reste l'autorité. Seule la
+        # liste des jeux coupés varie ensuite, et elle sort des mêmes réglages.
+        ouvert, _raison = await game_rewards.is_game_enabled(
+            self.bot, guild_id, "", channel_id=getattr(ctx.channel, "id", None),
+            role_ids={r.id for r in getattr(ctx.author, "roles", [])} or None,
+        )
+        reglages = await game_rewards.get_settings(self.bot, guild_id)
+        coupes = set(reglages.get("disabled_games") or ())
+        # Un seul aller-retour pour tous les cooldowns, au lieu d'un par ligne.
+        derniers = await self.bot.db.get_game_cooldowns(guild_id, ctx.author.id)
+        maintenant = int(time.time())
+
+        rangs: dict[str, list[str]] = {cle: [] for cle in familles}
+        cooldowns_actifs = 0
+        for game_name, (libelle, famille) in GAME_CATALOG.items():
+            if famille not in rangs or not ouvert or game_name in coupes:
                 continue
-            ok, remaining = await game_rewards.check_cooldown(self.bot, guild_id, ctx.author.id, game_name, duration)
-            if not ok:
-                active_cooldowns.append(f"• {GAME_CATALOG[game_name][0]} — encore {remaining}s")
-        cooldowns_text = "\n".join(active_cooldowns) if active_cooldowns else "Aucun cooldown en cours."
-        description = f"**Manches récompensées aujourd'hui :** {limit_text}\n\n**Cooldowns en cours :**\n{cooldowns_text}"
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mini-jeux du jour', description=description)))
+            duree = min(
+                int(game_rewards.GAME_COOLDOWNS.get(game_name, 0)),
+                game_rewards.MAX_PLAY_COOLDOWN_SECONDS,
+            )
+            reste = 0
+            if duree > 0 and derniers.get(game_name):
+                reste = max(0, duree - (maintenant - derniers[game_name]))
+            if reste:
+                cooldowns_actifs += 1
+                etat, marque = f"encore {reste}s", "⏳"
+            else:
+                etat, marque = "prêt", "·"
+            rangs[famille].append(f"{marque} {libelle} — `{prefixe}{game_name}` · {etat}")
+
+        sections = [panels.Section("Aujourd'hui", [
+            panels.Ligne("Manches récompensées", limit_text,
+                         indice="Au-delà, les parties restent jouables : seule la monnaie est plafonnée."),
+            panels.Ligne("Jeux en attente", f"**{cooldowns_actifs}**" if cooldowns_actifs else "**Aucun**",
+                         indice="⏳ = il faut patienter un peu avant de rejouer."),
+        ])]
+        for cle, (titre_famille, quoi) in familles.items():
+            lignes = rangs[cle]
+            if not lignes:
+                continue
+            sections.append(panels.Section(f"{titre_famille} — {len(lignes)}", texte=f"*{quoi}*\n" + "\n".join(lignes)))
+
+        if len(sections) == 1:
+            sections.append(panels.Section(
+                "Aucun jeu disponible",
+                texte="Les mini-jeux sont désactivés ici, ou bloqués dans ce salon. "
+                      "Un membre du staff peut les rouvrir avec `+gamesetup`.",
+            ))
+
+        await panels.envoyer(ctx, panels.Panneau(
+            titre=f"{_game_icon('Mini-jeux du jour')} Mini-jeux du jour",
+            sous_titre="Ce à quoi vous pouvez jouer, maintenant, sur ce serveur",
+            sections=sections,
+            kind="jeux",
+        ))
 
 
 async def setup(bot: commands.Bot):
