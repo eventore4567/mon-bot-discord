@@ -2269,7 +2269,15 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         target = membre or ctx.author
         rows = await self.bot.db.get_game_history(guild_id, target.id, limit=10)
         if not rows:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Historique des jeux', description=f'Aucune manche enregistrée pour {target.mention}.')))
+            prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
+            qui = "Vous n'avez" if target.id == ctx.author.id else f"{target.mention} n'a"
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title='Historique des jeux',
+                description=(
+                    f"📜 {qui} pas encore joué ici.\n"
+                    f"`{prefixe}jeuxjour` montre les 39 jeux disponibles sur ce serveur."
+                ),
+            )))
         lines = []
         for row in rows:
             label = GAME_CATALOG.get(row["game_name"], (row["game_name"], ""))[0]
@@ -2465,7 +2473,16 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Classement des jeux', description='🎮 Le classement des mini-jeux est désactivé sur ce serveur.', kind='warning')))
         rows = await self.bot.db.get_game_leaderboard(guild_id, limit=10)
         if not rows:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Classement des jeux', description='Aucune donnée pour le moment.')))
+            # Un écran vide qui ne dit pas quoi faire ensuite est un cul-de-sac.
+            prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title='Classement des jeux',
+                description=(
+                    "🏆 Personne n'a encore joué sur ce serveur.\n"
+                    f"`{prefixe}jeuxjour` montre les 39 jeux disponibles — "
+                    "la première manche jouée ouvre le classement."
+                ),
+            )))
         medals = ["🥇", "🥈", "🥉"]
         lines = []
         for i, row in enumerate(rows):
