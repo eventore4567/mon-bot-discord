@@ -68,3 +68,33 @@ def test_ai_is_told_not_to_hallucinate_removed_commands():
     assert "N'invente jamais de commande SentriX" in source
     for stale in ("+configurer", "+profile", "+profil", "+chat", "+me", "+rank"):
         assert stale in source
+
+
+def test_shop_does_not_advertise_removed_buyrole():
+    source = _read("cogs/economy.py")
+    assert "Acheter : +buy <id>" in source
+    assert "Acheter : +buy <id> ou +buyrole" not in source
+
+
+def test_setup_visible_text_prefers_current_centers():
+    source = _read("cogs/configuration.py")
+    assert 'panels.Ligne("`+logsetup`", "Configurer et tester les journaux")' in source
+    assert "Utilisez `+logsetup` pour configurer" in source
+    assert "Exemple : `+createrole Middle Man bleu`" not in source
+
+
+def test_ticket_hub_does_not_send_users_to_pruned_manual_commands():
+    source = _read("cogs/tickets.py")
+    assert "Panel **{name_input.value}** créé" in source
+    assert "PanelEditView(self.cog, panel_id, inter.user.id)" in source
+    assert "Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`" in source
+    assert "Les anciennes commandes séparées ne sont plus proposées" not in source or "+ticketpanel" not in source[source.find("async def ticketsetup"):source.find("# ---------------------------------------------------------------- COMMANDES : PANELS")]
+    assert "Ajouter une question" in source
+    assert "FormQuestionModal(self.cog, self.type_id)" in source
+
+
+def test_ai_prompt_knows_configuration_centers_replaced_old_commands():
+    source = _read("utils/ai_service.py")
+    assert "+create-logs" in source
+    assert "+ticketpanel" in source
+    assert "+setup, +logsetup ou +ticketsetup" in source
