@@ -67,12 +67,19 @@ class Minigames(commands.Cog, name="Minigames"):
         colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
         default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
         design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
-        return design_system.create_embed(
-            title=design_system.kind_title(title, kind=kind, category_emoji=style["emoji"]),
+        from utils.game_context import pictogramme_de_titre
+
+        resolu = design_system.kind_title(title, kind=kind, category_emoji=style["emoji"])
+        embed = design_system.create_embed(
+            title=resolu,
             description=description,
             colour=design.get(colour_key, default_colour),
             footer=design.get("footer"),
         )
+        # Le titre d'un mini-jeu porte le pictogramme de CE jeu, comme dans
+        # cogs/games_economy : « Question de culture générale » arrivait nu.
+        embed.title = f"{pictogramme_de_titre(title)} {resolu}"
+        return embed
 
     @staticmethod
     def _reward_line(reward: "game_rewards.GameReward | None") -> str:
@@ -129,16 +136,21 @@ class Minigames(commands.Cog, name="Minigames"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Pierre-feuille-ciseaux', description=err, kind='warning')))
 
         options = ["pierre", "feuille", "ciseaux"]
+        mains = {"pierre": "✊", "feuille": "✋", "ciseaux": "✌️"}
         bot_choice = random.choice(options)
         if choix == bot_choice:
-            result, kind, game_result = "Égalité !", "primary", "draw"
+            result, kind, game_result = "🤝 **Égalité !**", "primary", "draw"
         elif (choix, bot_choice) in [("pierre", "ciseaux"), ("feuille", "pierre"), ("ciseaux", "feuille")]:
-            result, kind, game_result = "Vous avez gagné ! 🎉", "success", "win"
+            result, kind, game_result = "🎉 **Vous avez gagné !**", "success", "win"
         else:
-            result, kind, game_result = "Vous avez perdu !", "danger", "loss"
+            result, kind, game_result = "○ **Vous avez perdu.**", "danger", "loss"
 
         reward = await self._finish(ctx, "rps", session_id, game_result, REWARD_RPS)
-        description = f"Vous : **{choix}** | Bot : **{bot_choice}**\n{result}" + self._reward_line(reward)
+        # Le geste se lit d'un coup d'œil : « pierre | feuille » demandait de relire.
+        description = (
+            f"{mains[choix]} **vous**  ⚔️  **le bot** {mains[bot_choice]}\n"
+            f"{choix} contre {bot_choice}\n\n{result}"
+        ) + self._reward_line(reward)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Pierre-feuille-ciseaux', description=description, kind=kind)))
 
     async def _finish_guess_number_round(
@@ -424,6 +436,41 @@ class Minigames(commands.Cog, name="Minigames"):
             await self._finish(ctx, "math-quiz", session_id, "loss", 0)
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Réponse invalide', description=f"○ Ce n'est pas un nombre. La réponse était **{answer}**.", kind='danger')))
 
+    # ---- Blackjack : un vrai paquet de 52 cartes -----------------------------
+    # L'ancienne version tirait `random.randint(1, 11)` et affichait la liste
+    # Python telle quelle : « Votre main : [1, 9] ». Illisible, et faux — un 1
+    # est un as, qui vaut 11 tant que la main ne dépasse pas 21.
+    ENSEIGNES = ("♠", "♥", "♦", "♣")
+    VALEURS = (
+        ("A", 11), ("2", 2), ("3", 3), ("4", 4), ("5", 5), ("6", 6), ("7", 7),
+        ("8", 8), ("9", 9), ("10", 10), ("V", 10), ("D", 10), ("R", 10),
+    )
+
+    @classmethod
+    def _paquet(cls) -> list[tuple[str, int]]:
+        """52 cartes mélangées. Un paquet fini : on ne peut plus tirer cinq as."""
+        paquet = [
+            (f"{figure}{enseigne}", valeur)
+            for enseigne in cls.ENSEIGNES
+            for figure, valeur in cls.VALEURS
+        ]
+        random.shuffle(paquet)
+        return paquet
+
+    @staticmethod
+    def _total(main: list[tuple[str, int]]) -> int:
+        """Total de la main, les as retombant à 1 tant que ça dépasse 21."""
+        total = sum(valeur for _carte, valeur in main)
+        as_restants = sum(1 for carte, _valeur in main if carte.startswith("A"))
+        while total > 21 and as_restants:
+            total -= 10
+            as_restants -= 1
+        return total
+
+    @classmethod
+    def _main_lisible(cls, main: list[tuple[str, int]]) -> str:
+        return " ".join(f"`{carte}`" for carte, _valeur in main)
+
     @commands.hybrid_command(name="blackjack", description="Jouer au blackjack simplifié contre le bot.", with_app_command=False)
     async def blackjack(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
@@ -431,43 +478,83 @@ class Minigames(commands.Cog, name="Minigames"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Blackjack', description=err, kind='warning')))
 
-        def draw():
-            return random.randint(1, 11)
+        paquet = self._paquet()
+        player = [paquet.pop(), paquet.pop()]
+        bot_hand = [paquet.pop(), paquet.pop()]
 
-        player = [draw(), draw()]
-        bot_hand = [draw(), draw()]
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Blackjack', description=f'🃏 Votre main : {player} (total {sum(player)})\nTapez `hit` pour tirer ou `stand` pour rester.')))
+        def table(cache_le_bot: bool = True) -> str:
+            if cache_le_bot:
+                visible = f"{self._main_lisible(bot_hand[:1])} `??`"
+                score_bot = "?"
+            else:
+                visible, score_bot = self._main_lisible(bot_hand), self._total(bot_hand)
+            return (
+                f"🃏 **Votre main** — {self._main_lisible(player)} · total **{self._total(player)}**\n"
+                f"🤖 **Le bot** — {visible} · total **{score_bot}**"
+            )
+
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+            guild_id, title='Blackjack',
+            description=(
+                f"{table()}\n\n"
+                "🎯 Objectif : s'approcher de **21** sans le dépasser.\n"
+                "Tapez `hit` pour tirer une carte ou `stand` pour vous arrêter. "
+                "Vous avez **20 secondes** par décision."
+            ),
+        )))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and m.content.lower() in ("hit", "stand")
 
-        while sum(player) < 21:
+        while self._total(player) < 21:
             try:
                 m = await self.bot.wait_for("message", check=check, timeout=20)
             except asyncio.TimeoutError:
                 await self._finish(ctx, "blackjack", session_id, "loss", 0)
-                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', kind='warning')))
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                    guild_id, title='Temps écoulé',
+                    description=f"⏱️ Plus de 20 secondes sans réponse.\n\n{table(cache_le_bot=False)}",
+                    kind='warning',
+                )))
             if m.content.lower() == "hit":
-                player.append(draw())
-                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Blackjack', description=f'🃏 Votre main : {player} (total {sum(player)})')))
+                tiree = paquet.pop()
+                player.append(tiree)
+                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                    guild_id, title='Blackjack',
+                    description=f"🂠 Vous tirez `{tiree[0]}`.\n\n{table()}",
+                )))
             else:
                 break
 
-        if sum(player) > 21:
+        if self._total(player) > 21:
             await self._finish(ctx, "blackjack", session_id, "loss", 0)
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Perdu', description=f'💥 Vous avez dépassé 21 ({sum(player)}). Vous perdez !', kind='danger')))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                guild_id, title='Blackjack',
+                description=(
+                    f"💥 **Vous dépassez 21** avec {self._total(player)}.\n\n"
+                    f"{table(cache_le_bot=False)}"
+                ),
+                kind='danger',
+            )))
 
-        while sum(bot_hand) < 17:
-            bot_hand.append(draw())
+        while self._total(bot_hand) < 17:
+            bot_hand.append(paquet.pop())
 
-        if sum(bot_hand) > 21 or sum(player) > sum(bot_hand):
-            issue, kind, game_result = "🎉 Vous gagnez !", "success", "win"
-        elif sum(player) == sum(bot_hand):
-            issue, kind, game_result = "🤝 Égalité !", "primary", "draw"
+        total_joueur, total_bot = self._total(player), self._total(bot_hand)
+        if total_bot > 21:
+            issue, kind, game_result = f"🎉 **Le bot dépasse 21** ({total_bot}) — vous gagnez !", "success", "win"
+        elif total_joueur > total_bot:
+            issue, kind, game_result = f"🎉 **{total_joueur} contre {total_bot}** — vous gagnez !", "success", "win"
+        elif total_joueur == total_bot:
+            issue, kind, game_result = f"🤝 **Égalité à {total_joueur}.**", "primary", "draw"
         else:
-            issue, kind, game_result = "○ Vous perdez !", "danger", "loss"
+            issue, kind, game_result = f"○ **{total_bot} contre {total_joueur}** — le bot l'emporte.", "danger", "loss"
         reward = await self._finish(ctx, "blackjack", session_id, game_result, REWARD_BLACKJACK)
-        e = await self._embed(guild_id, title="Résultat", description=f"Vous : {sum(player)} | Bot : {sum(bot_hand)}\n{issue}" + self._reward_line(reward), kind=kind)
+        e = await self._embed(
+            guild_id, title="Blackjack",
+            description=f"{table(cache_le_bot=False)}\n\n{issue}" + self._reward_line(reward),
+            kind=kind,
+        )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="slots", description="Jouer à la machine à sous.", with_app_command=False)

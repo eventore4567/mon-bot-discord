@@ -235,3 +235,63 @@ def test_la_collection_ne_retient_que_les_manches_gagnees_avec_prise():
     )
     lignes = list(base.execute(requete, (1, 1, 50)))
     assert [l["game_name"] for l in lignes] == ["fishing"], "la collection compte des manches qu'elle ne devrait pas"
+
+
+def test_le_pictogramme_vient_du_catalogue_pas_d_un_mot_cle():
+    """Les titres retombaient sur un « 🎮 » générique : le catalogue savait
+    pourtant que dice est un dé et slots une machine à sous."""
+    from utils.game_context import pictogramme_du_jeu
+
+    attendus = {
+        "dice": "🎲", "slots": "🎰", "trivia": "❓", "blackjack": "🃏",
+        "minesweeper": "💣", "fishing": "🎣", "hangman": "🎯",
+    }
+    for jeu, icone in attendus.items():
+        assert pictogramme_du_jeu(jeu) == icone, jeu
+    # Chaque jeu du catalogue porte un pictogramme : aucun ne doit rester nu.
+    for jeu in GAME_CATALOG:
+        assert pictogramme_du_jeu(jeu), f"{jeu} n'a pas de pictogramme au catalogue"
+    assert pictogramme_du_jeu("commande-inconnue") == ""
+
+
+def test_le_pictogramme_de_titre_garde_un_secours_hors_jeu():
+    """Un écran de jeu rattaché à aucun jeu précis (classement, collection) doit
+    quand même être décoré, sans jamais lever."""
+    from utils.game_context import pictogramme_de_titre
+
+    assert pictogramme_de_titre("Classement des jeux") == "🏆"
+    assert pictogramme_de_titre("Collection — jayden") == "🎒"
+    assert pictogramme_de_titre("Un écran sans mot connu") == "🎮"
+
+
+def test_le_blackjack_joue_avec_un_vrai_paquet():
+    """L'ancienne version tirait randint(1, 11) et affichait « [1, 9] » :
+    illisible, et faux — un as vaut 11 tant que la main tient sous 21."""
+    from cogs.minigames import Minigames
+
+    paquet = Minigames._paquet()
+    assert len(paquet) == 52
+    assert len({carte for carte, _valeur in paquet}) == 52, "une carte est en double"
+
+    cas = [
+        ([("A♠", 11), ("9♥", 9)], 20),
+        ([("A♠", 11), ("A♥", 11)], 12),
+        ([("A♠", 11), ("R♥", 10), ("5♦", 5)], 16),
+        ([("R♠", 10), ("D♥", 10), ("2♦", 2)], 22),
+        ([("A♠", 11), ("A♥", 11), ("A♦", 11)], 13),
+    ]
+    for main, attendu in cas:
+        assert Minigames._total(main) == attendu, [c for c, _v in main]
+
+    rendu = Minigames._main_lisible([("A♠", 11), ("10♦", 10)])
+    assert rendu == "`A♠` `10♦`"
+
+
+def test_plus_haut_ou_plus_bas_montre_une_carte_pas_un_nombre():
+    from cogs.games_economy import _carte_lisible
+
+    assert _carte_lisible(1, "♠") == "`A♠`"
+    assert _carte_lisible(11, "♥") == "`V♥`"
+    assert _carte_lisible(12, "♦") == "`D♦`"
+    assert _carte_lisible(13, "♣") == "`R♣`"
+    assert _carte_lisible(7, "♠") == "`7♠`"

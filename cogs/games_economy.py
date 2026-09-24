@@ -69,25 +69,10 @@ TICTACTOE_QUESTIONS = None  # (placeholder retiré — voir cogs/minigames.py po
 
 
 def _game_icon(title: str) -> str:
-    value = str(title or "").casefold()
-    for words, icon in (
-        (("réaction", "reaction", "clic"), "⚡"),
-        (("vitesse", "retape", "fast"), "⌨️"),
-        (("mémoire", "memory"), "🧠"),
-        (("mine", "minage", "démineur"), "⛏️"),
-        (("chasse", "hunt"), "🏹"),
-        (("pêche", "peche", "fishing"), "🎣"),
-        (("donjon", "dungeon"), "🗝️"),
-        (("trésor", "tresor", "treasure"), "💎"),
-        (("aventure", "quête", "quete"), "🗺️"),
-        (("plus haut", "plus bas"), "🃏"),
-        (("quiz", "trivia"), "❓"),
-        (("course", "race"), "🏁"),
-        (("duel",), "⚔️"),
-    ):
-        if any(word in value for word in words):
-            return icon
-    return "🎮"
+    """Pictogramme du titre — règle unique dans utils/game_context."""
+    from utils.game_context import pictogramme_de_titre
+
+    return pictogramme_de_titre(title)
 
 
 async def _embed(bot, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
@@ -106,6 +91,17 @@ async def _embed(bot, guild_id: int | None, *, title: str, description: str = No
     if description:
         embed.description = str(description)
     return embed
+
+
+# Plus haut ou plus bas : la valeur reste un nombre de 1 a 13 pour la comparaison,
+# mais le joueur voit une vraie carte. « Première carte : 1 » ne veut rien dire a
+# une table de jeu ; « A♠ » si.
+_ENSEIGNES = ("♠", "♥", "♦", "♣")
+_FIGURES = {1: "A", 11: "V", 12: "D", 13: "R"}
+
+
+def _carte_lisible(valeur: int, enseigne: str) -> str:
+    return f"`{_FIGURES.get(int(valeur), str(valeur))}{enseigne}`"
 
 
 def _reward_line(reward: "game_rewards.GameReward | None") -> str:
@@ -382,6 +378,8 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             )
 
         first = game_rewards.secure_pick(range(1, 14))
+        enseigne_1 = game_rewards.secure_pick(_ENSEIGNES)
+        carte_1 = _carte_lisible(first, enseigne_1)
         selected = (pari or "").strip().casefold()
         msg = None
 
@@ -396,7 +394,7 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                             guild_id,
                             title="Plus haut ou plus bas",
                             description=(
-                                f"🃏 Première carte : **{first}**\n"
+                                f"🃏 Première carte : {carte_1}\n"
                                 "La prochaine sera-t-elle plus haute ou plus basse ?"
                             ),
                         )
@@ -422,9 +420,10 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             selected = view.choice
 
         second = game_rewards.secure_pick(range(1, 14))
+        carte_2 = _carte_lisible(second, game_rewards.secure_pick(_ENSEIGNES))
         if second == first:
             await _finish(self.bot, ctx, "highlow", sid, "draw", 0)
-            desc = f"🃏 **{first} → {second}** · égalité, manche nulle."
+            desc = f"🃏 {carte_1} → {carte_2} · égalité, manche nulle."
             kind = "primary"
         else:
             won = (
@@ -437,7 +436,7 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                 skill_bonus = 6 if distance <= 2 else 3 if distance <= 4 else 0
                 reward = await _finish(self.bot, ctx, "highlow", sid, "win", 18 + skill_bonus)
                 desc = (
-                    f"🃏 **{first} → {second}** · bon choix : "
+                    f"🃏 {carte_1} → {carte_2} · bon choix : "
                     f"**{'plus haut' if selected == 'plus_haut' else 'plus bas'}**."
                     + (f"\n🎯 Bonus risque : **+{skill_bonus}**" if skill_bonus else "")
                     + _reward_line(reward)
@@ -446,7 +445,7 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             else:
                 await _finish(self.bot, ctx, "highlow", sid, "loss", 0)
                 desc = (
-                    f"🃏 **{first} → {second}** · perdu. Vous aviez choisi "
+                    f"🃏 {carte_1} → {carte_2} · perdu. Vous aviez choisi "
                     f"**{'plus haut' if selected == 'plus_haut' else 'plus bas'}**."
                 )
                 kind = "danger"
