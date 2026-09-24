@@ -107,6 +107,8 @@ def _quick_shortcuts(bot: commands.Bot, prefix: str, is_staff: bool) -> list[str
         try:
             from . import common_command_names
             display = common_command_names.preferred_name(command)
+            if bot.get_command(display) is not command:
+                display = str(getattr(command, "qualified_name", name) or name)
         except Exception:
             display = str(getattr(command, "qualified_name", name) or name)
         result.append(f"`{prefix}{display}`")
