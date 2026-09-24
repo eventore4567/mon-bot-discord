@@ -56,6 +56,7 @@ from cogs.games_catalog import (
     RARETES,
     RPS_BEATS,
     SOLO_CHOICES,
+    SOLO_ECHECS,
     SOLO_FLAVORS,
     SOLO_LOOT,
     WORDGAME_CLUES,
@@ -98,6 +99,9 @@ async def _embed(bot, guild_id: int | None, *, title: str, description: str = No
 # une table de jeu ; « A♠ » si.
 _ENSEIGNES = ("♠", "♥", "♦", "♣")
 _FIGURES = {1: "A", 11: "V", 12: "D", 13: "R"}
+
+
+_FACES_DE = {1: "⚀", 2: "⚁", 3: "⚂", 4: "⚃", 5: "⚄", 6: "⚅"}
 
 
 def _carte_lisible(valeur: int, enseigne: str) -> str:
@@ -324,13 +328,37 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         started, err, sid = await _precheck(self.bot, ctx, "coinflip", 10)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description=err, kind='warning')))
+        # Le résultat est tiré AVANT l'animation : ce qui tourne à l'écran ne
+        # décide de rien, et une édition perdue ne peut pas changer la manche.
         result = game_rewards.secure_pick(["pile", "face"])
+        faces = {"pile": "🪙", "face": "🌝"}
+        message = await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+            self.bot, guild_id, title='Pile ou face',
+            description=f"🪙 La pièce monte…\nVous avez dit **{cote}**.",
+        )))
+        for apercu in ("pile", "face"):
+            await asyncio.sleep(0.7)
+            try:
+                await panels.editer(message, panels.depuis_embed(await _embed(
+                    self.bot, guild_id, title='Pile ou face',
+                    description=f"{faces[apercu]} Elle tourne…\nVous avez dit **{cote}**.",
+                )))
+            except Exception:
+                logger.debug("Animation de pile ou face interrompue.", exc_info=True)
+                break
+        await asyncio.sleep(0.7)
+
         if result == cote:
             reward = await _finish(self.bot, ctx, "coinflip", sid, "win", 12)
-            desc = f"🪙 **{result.upper()}** ! Vous aviez raison." + _reward_line(reward)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description=desc, kind='success')))
-        await _finish(self.bot, ctx, "coinflip", sid, "loss", 0)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description=f'🪙 **{result.upper()}** — perdu, vous aviez dit {cote}.', kind='danger')))
+            desc = f"{faces[result]} **{result.upper()}** — vous aviez vu juste !" + _reward_line(reward)
+            kind = "success"
+        else:
+            await _finish(self.bot, ctx, "coinflip", sid, "loss", 0)
+            desc = f"{faces[result]} **{result.upper()}** — raté, vous aviez dit {cote}."
+            kind = "danger"
+        await panels.editer(message, panels.depuis_embed(await _embed(
+            self.bot, guild_id, title='Pile ou face', description=desc, kind=kind,
+        )))
 
     @commands.hybrid_command(name="dice", description="Pariez sur le résultat d'un dé à 6 faces.", with_app_command=False)
     @app_commands.describe(nombre="Votre pari, entre 1 et 6")
@@ -342,12 +370,40 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pari sur un dé', description=err, kind='warning')))
         result = game_rewards.secure_pick([1, 2, 3, 4, 5, 6])
+        message = await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+            self.bot, guild_id, title='Pari sur un dé',
+            description=f"🎲 Le dé roule…\nVous avez parié sur {_FACES_DE[nombre]} **{nombre}**.",
+        )))
+        for _tour in range(2):
+            await asyncio.sleep(0.7)
+            try:
+                await panels.editer(message, panels.depuis_embed(await _embed(
+                    self.bot, guild_id, title='Pari sur un dé',
+                    description=(
+                        f"{_FACES_DE[game_rewards.secure_pick([1, 2, 3, 4, 5, 6])]} Il rebondit…\n"
+                        f"Vous avez parié sur {_FACES_DE[nombre]} **{nombre}**."
+                    ),
+                )))
+            except Exception:
+                logger.debug("Animation du dé interrompue.", exc_info=True)
+                break
+        await asyncio.sleep(0.7)
+
+        face = _FACES_DE[result]
         if result == nombre:
             reward = await _finish(self.bot, ctx, "dice", sid, "win", 35)
-            desc = f"🎲 Le dé tombe sur **{result}** ! Pari gagné." + _reward_line(reward)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pari sur un dé', description=desc, kind='success')))
-        await _finish(self.bot, ctx, "dice", sid, "loss", 0)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pari sur un dé', description=f'🎲 Le dé tombe sur **{result}** — perdu, vous aviez parié {nombre}.', kind='danger')))
+            desc = f"{face} Le dé s'arrête sur **{result}** — pari gagné !" + _reward_line(reward)
+            kind = "success"
+        else:
+            await _finish(self.bot, ctx, "dice", sid, "loss", 0)
+            desc = (
+                f"{face} Le dé s'arrête sur **{result}** — vous aviez parié {nombre}.\n"
+                "-# Une chance sur six : ça se retente vite."
+            )
+            kind = "danger"
+        await panels.editer(message, panels.depuis_embed(await _embed(
+            self.bot, guild_id, title='Pari sur un dé', description=desc, kind=kind,
+        )))
 
     @commands.hybrid_command(name="luckyroll", description="Lancez deux dés — un double rapporte un petit bonus. (+roll existant reste inchangé)", with_app_command=False)
     async def luckyroll(self, ctx: commands.Context):
@@ -356,12 +412,22 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Lancer de dés chanceux', description=err, kind='warning')))
         d1, d2 = game_rewards.secure_pick(range(1, 7)), game_rewards.secure_pick(range(1, 7))
+        faces = f"{_FACES_DE[d1]} {_FACES_DE[d2]}"
         if d1 == d2:
-            reward = await _finish(self.bot, ctx, "luckyroll", sid, "win", 20)
-            desc = f"🎲🎲 **{d1} - {d2}** — DOUBLE !" + _reward_line(reward)
+            # Le double six est le meilleur des doubles : il mérite d'être signalé.
+            montant = 32 if d1 == 6 else 20
+            reward = await _finish(self.bot, ctx, "luckyroll", sid, "win", montant)
+            titre = "🏆 **DOUBLE SIX !**" if d1 == 6 else f"🎉 **DOUBLE {d1} !**"
+            desc = f"## {faces}\n{titre}" + _reward_line(reward)
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Lancer de dés chanceux', description=desc, kind='success')))
         await _finish(self.bot, ctx, "luckyroll", sid, "loss", 0)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Lancer de dés chanceux', description=f'🎲🎲 **{d1} - {d2}**, pas de double cette fois.')))
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+            self.bot, guild_id, title='Lancer de dés chanceux',
+            description=(
+                f"## {faces}\n**{d1} et {d2}** — pas de double cette fois.\n"
+                "-# Un double paie 20, un double six en paie 32."
+            ),
+        )))
 
     @commands.hybrid_command(name="highlow", description="Le bot tire une carte (1-13). Devinez si la suivante sera plus haute ou plus basse.", with_app_command=False)
     @app_commands.describe(pari="Optionnel : plus_haut ou plus_bas ; sinon utilisez les boutons")
@@ -2056,12 +2122,18 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
     async def _run_solo(self, ctx: commands.Context, game_name: str):
         """Jeu solo interactif : trois chemins, trois niveaux de risque et aucun long verrou."""
         titre, cooldown, succes, texte_echec = SOLO_FLAVORS[game_name]
+        # Le libellé du catalogue porte déjà son pictogramme, et _embed le repose
+        # devant : « 🎣 SentriX — 🎣 Pêche ». On garde le nom du jeu, rien d'autre.
+        titre = titre.split(" ", 1)[1] if " " in titre and not titre[0].isalnum() else titre
+        # Une seule phrase d'échec par jeu se reconnaissait dès la troisième
+        # partie. SOLO_ECHECS en propose plusieurs ; l'ancienne reste le secours.
+        echecs = list(SOLO_ECHECS.get(game_name) or (texte_echec,))
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, game_name, cooldown)
         if not started:
             return await panels.envoyer(
                 ctx,
-                panels.depuis_embed(await _embed(self.bot, guild_id, title=f"SentriX — {titre}", description=err, kind="warning")),
+                panels.depuis_embed(await _embed(self.bot, guild_id, title=titre, description=err, kind="warning")),
             )
 
         difficulty = await _game_difficulty(self.bot, guild_id)
@@ -2079,7 +2151,7 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
             panels.avec_composants(
                 panels.depuis_embed(
                     await _embed(
-                        self.bot, guild_id, title=f"SentriX — {titre}",
+                        self.bot, guild_id, title=titre,
                         description=(
                             f"🎮 Difficulté serveur : **{difficulty}**\n"
                             "Choisissez votre approche : plus le risque monte, plus le butin potentiel augmente.\n\n"
@@ -2098,7 +2170,7 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
                 msg,
                 panels.depuis_embed(
                     await _embed(
-                        self.bot, guild_id, title=f"SentriX — {titre}",
+                        self.bot, guild_id, title=titre,
                         description="⏱️ Aucun choix effectué. La manche est annulée, vous pouvez relancer le jeu.",
                         kind="warning",
                     )
@@ -2123,7 +2195,7 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
                     await _embed(
                         self.bot, guild_id, title=f"{titre} — échec",
                         description=(
-                            f"{emoji} **{label}**\n{texte_echec}\n\n"
+                            f"{emoji} **{label}**\n{game_rewards.secure_pick(echecs)}\n\n"
                             f"🎲 Chance de réussite : **{round(chance * 100)}%**\n"
                             "🔁 Vous pouvez rejouer dans quelques secondes."
                         ),

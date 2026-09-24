@@ -12,6 +12,7 @@ manche précise" et non sur un identifiant recalculé après coup. Les réglages
 la manche ne démarre — voir Minigames._start().
 """
 
+import logging
 import random
 import asyncio
 import discord
@@ -21,6 +22,8 @@ from discord.ext import commands
 from cogs.games_catalog import ROULEAU_SLOTS
 from utils import embeds, helpers, design_system, game_rewards
 from utils import sentrix_panels as panels
+
+logger = logging.getLogger("bot.minigames")
 
 MATH_OPS = {
     "+": lambda a, b: a + b,
@@ -450,10 +453,10 @@ class Minigames(commands.Cog, name="Minigames"):
             await self._finish(ctx, "math-quiz", session_id, "loss", 0)
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Réponse invalide', description=f"○ Ce n'est pas un nombre. La réponse était **{answer}**.", kind='danger')))
 
-    # ---- Blackjack : un vrai paquet de 52 cartes -----------------------------
-    # L'ancienne version tirait `random.randint(1, 11)` et affichait la liste
-    # Python telle quelle : « Votre main : [1, 9] ». Illisible, et faux — un 1
-    # est un as, qui vaut 11 tant que la main ne dépasse pas 21.
+    # ---- Blackjack : un vrai paquet de 52 cartes, joué aux boutons ----------
+    # Il fallait taper « hit » ou « stand » dans le chat, et la main s'affichait
+    # comme une liste Python. Maintenant : deux boutons, une carte révélée à la
+    # fois, et le croupier qui retourne son jeu à la fin.
     ENSEIGNES = ("♠", "♥", "♦", "♣")
     VALEURS = (
         ("A", 11), ("2", 2), ("3", 3), ("4", 4), ("5", 5), ("6", 6), ("7", 7),
@@ -485,7 +488,7 @@ class Minigames(commands.Cog, name="Minigames"):
     def _main_lisible(cls, main: list[tuple[str, int]]) -> str:
         return " ".join(f"`{carte}`" for carte, _valeur in main)
 
-    @commands.hybrid_command(name="blackjack", description="Jouer au blackjack simplifié contre le bot.", with_app_command=False)
+    @commands.hybrid_command(name="blackjack", description="Jouer au blackjack contre le croupier.", with_app_command=False)
     async def blackjack(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, session_id = await self._start(ctx, "blackjack", cooldown=15)
@@ -493,83 +496,96 @@ class Minigames(commands.Cog, name="Minigames"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Blackjack', description=err, kind='warning')))
 
         paquet = self._paquet()
-        player = [paquet.pop(), paquet.pop()]
-        bot_hand = [paquet.pop(), paquet.pop()]
+        joueur = [paquet.pop(), paquet.pop()]
+        croupier = [paquet.pop(), paquet.pop()]
 
-        def table(cache_le_bot: bool = True) -> str:
-            if cache_le_bot:
-                visible = f"{self._main_lisible(bot_hand[:1])} `??`"
-                score_bot = "?"
+        def table(devoile: bool = False) -> str:
+            if devoile:
+                visible, score = self._main_lisible(croupier), f"**{self._total(croupier)}**"
             else:
-                visible, score_bot = self._main_lisible(bot_hand), self._total(bot_hand)
+                visible, score = f"{self._main_lisible(croupier[:1])} `🂠`", "**?**"
             return (
-                f"🃏 **Votre main** — {self._main_lisible(player)} · total **{self._total(player)}**\n"
-                f"🤖 **Le bot** — {visible} · total **{score_bot}**"
+                f"🎩 **Croupier** — {visible} · {score}\n"
+                f"🧑 **Vous** — {self._main_lisible(joueur)} · **{self._total(joueur)}**"
             )
 
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
-            guild_id, title='Blackjack',
-            description=(
-                f"{table()}\n\n"
-                "🎯 Objectif : s'approcher de **21** sans le dépasser.\n"
-                "Tapez `hit` pour tirer une carte ou `stand` pour vous arrêter. "
-                "Vous avez **20 secondes** par décision."
-            ),
-        )))
-
-        def check(m):
-            return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and m.content.lower() in ("hit", "stand")
-
-        while self._total(player) < 21:
-            try:
-                m = await self.bot.wait_for("message", check=check, timeout=20)
-            except asyncio.TimeoutError:
-                await self._finish(ctx, "blackjack", session_id, "loss", 0)
-                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
-                    guild_id, title='Temps écoulé',
-                    description=f"⏱️ Plus de 20 secondes sans réponse.\n\n{table(cache_le_bot=False)}",
-                    kind='warning',
-                )))
-            if m.content.lower() == "hit":
-                tiree = paquet.pop()
-                player.append(tiree)
-                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
-                    guild_id, title='Blackjack',
-                    description=f"🂠 Vous tirez `{tiree[0]}`.\n\n{table()}",
-                )))
-            else:
-                break
-
-        if self._total(player) > 21:
-            await self._finish(ctx, "blackjack", session_id, "loss", 0)
+        # Un blackjack servi d'entrée : la manche est gagnée sans rien cliquer.
+        if self._total(joueur) == 21:
+            recompense = await self._finish(ctx, "blackjack", session_id, "win", round(REWARD_BLACKJACK * 1.5))
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
                 guild_id, title='Blackjack',
                 description=(
-                    f"💥 **Vous dépassez 21** avec {self._total(player)}.\n\n"
-                    f"{table(cache_le_bot=False)}"
+                    f"{table(devoile=True)}\n\n"
+                    "🂡 **BLACKJACK !** Vingt-et-un servi, la main est imbattable."
+                    + self._reward_line(recompense)
                 ),
-                kind='danger',
+                kind='success',
             )))
 
-        while self._total(bot_hand) < 17:
-            bot_hand.append(paquet.pop())
+        vue = _BlackjackView(ctx.author.id)
+        message = await panels.envoyer(ctx, panels.avec_composants(
+            panels.depuis_embed(await self._embed(
+                guild_id, title='Blackjack',
+                description=(
+                    f"{table()}\n\n"
+                    "🎯 Approchez-vous de **21** sans le dépasser.\n"
+                    "👆 **Carte** pour en tirer une · ✋ **Rester** pour vous arrêter."
+                ),
+            )),
+            vue,
+        ))
 
-        total_joueur, total_bot = self._total(player), self._total(bot_hand)
-        if total_bot > 21:
-            issue, kind, game_result = f"🎉 **Le bot dépasse 21** ({total_bot}) — vous gagnez !", "success", "win"
-        elif total_joueur > total_bot:
-            issue, kind, game_result = f"🎉 **{total_joueur} contre {total_bot}** — vous gagnez !", "success", "win"
-        elif total_joueur == total_bot:
-            issue, kind, game_result = f"🤝 **Égalité à {total_joueur}.**", "primary", "draw"
+        while True:
+            await vue.attendre()
+            if vue.action is None:
+                await self._finish(ctx, "blackjack", session_id, "loss", 0)
+                return await panels.editer(message, panels.depuis_embed(await self._embed(
+                    guild_id, title='Blackjack',
+                    description=f"⏱️ Le croupier n'attend pas.\n\n{table(devoile=True)}",
+                    kind='warning',
+                )))
+            if vue.action == "stand":
+                break
+
+            tiree = paquet.pop()
+            joueur.append(tiree)
+            if self._total(joueur) > 21:
+                await self._finish(ctx, "blackjack", session_id, "loss", 0)
+                return await panels.editer(message, panels.depuis_embed(await self._embed(
+                    guild_id, title='Blackjack',
+                    description=(
+                        f"🃏 Vous tirez `{tiree[0]}`…\n💥 **{self._total(joueur)} — vous sautez.**\n\n"
+                        f"{table(devoile=True)}"
+                    ),
+                    kind='danger',
+                )))
+            vue.rearmer()
+            await panels.editer(message, panels.avec_composants(
+                panels.depuis_embed(await self._embed(
+                    guild_id, title='Blackjack',
+                    description=f"🃏 Vous tirez `{tiree[0]}`.\n\n{table()}",
+                )),
+                vue,
+            ))
+
+        while self._total(croupier) < 17:
+            croupier.append(paquet.pop())
+
+        moi, lui = self._total(joueur), self._total(croupier)
+        if lui > 21:
+            issue, kind, resultat = f"🎉 **Le croupier saute à {lui}** — vous gagnez !", "success", "win"
+        elif moi > lui:
+            issue, kind, resultat = f"🎉 **{moi} contre {lui}** — vous gagnez !", "success", "win"
+        elif moi == lui:
+            issue, kind, resultat = f"🤝 **Égalité à {moi}.**", "primary", "draw"
         else:
-            issue, kind, game_result = f"○ **{total_bot} contre {total_joueur}** — le bot l'emporte.", "danger", "loss"
-        reward = await self._finish(ctx, "blackjack", session_id, game_result, REWARD_BLACKJACK)
-        e = await self._embed(
-            guild_id, title="Blackjack",
-            description=f"{table(cache_le_bot=False)}\n\n{issue}" + self._reward_line(reward),
+            issue, kind, resultat = f"○ **{lui} contre {moi}** — le croupier l'emporte.", "danger", "loss"
+        recompense = await self._finish(ctx, "blackjack", session_id, resultat, REWARD_BLACKJACK)
+        await panels.editer(message, panels.depuis_embed(await self._embed(
+            guild_id, title='Blackjack',
+            description=f"{table(devoile=True)}\n\n{issue}" + self._reward_line(recompense),
             kind=kind,
-        )
-        await panels.envoyer(ctx, panels.depuis_embed(e))
+        )))
 
     # ---- Machine à sous : rouleau pondéré ------------------------------------
     _MULTIPLICATEURS = tuple((symbole, mult) for symbole, _poids, mult in ROULEAU_SLOTS)
@@ -592,6 +608,28 @@ class Minigames(commands.Cog, name="Minigames"):
             f"{symbole} x{mult:g}" for symbole, _poids, mult in ROULEAU_SLOTS
         )
 
+    # Phrases de résultat : le même « Perdu ! » à chaque manche use vite. Elles
+    # sont tirées au hasard pour que dix parties d'affilée ne se ressemblent pas.
+    _SLOTS_PERDU = (
+        "Rien. La machine garde tout.",
+        "Trois inconnus qui ne se parlent pas.",
+        "Presque… non, pas du tout.",
+        "La machine a fait semblant d'hésiter.",
+        "Zéro. Mais le bruit était joli.",
+        "Trois symboles, trois avis différents.",
+    )
+    _SLOTS_PAIRE = (
+        "Deux sur trois. Le dernier a fait exprès.",
+        "Il s'en est fallu d'un rouleau.",
+        "Une paire ! Le troisième regardait ailleurs.",
+        "Si près du compte.",
+    )
+    _SLOTS_JACKPOT = (
+        "La machine s'aligne enfin.",
+        "Trois d'un coup. Ça n'arrive pas souvent.",
+        "Les rouleaux tombent ensemble.",
+    )
+
     @commands.hybrid_command(name="slots", description="Jouer à la machine à sous.", with_app_command=False)
     async def slots(self, ctx: commands.Context):
         guild_id = ctx.guild.id if ctx.guild else None
@@ -600,47 +638,155 @@ class Minigames(commands.Cog, name="Minigames"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Machine à sous', description=err, kind='warning')))
 
         result = [self._tirer_rouleau() for _ in range(3)]
-        text = " | ".join(result)
         gains = dict(self._MULTIPLICATEURS)
-        # Le gain suit le symbole : trois 7️⃣ ne peuvent pas payer comme trois 🍒,
-        # sinon les symboles rares ne sont que du décor.
+
+        # Les rouleaux s'arrêtent un par un. Le résultat est tiré AVANT toute
+        # animation : ce qui s'affiche pendant n'influence rien, et une coupure
+        # réseau au milieu ne peut pas changer ce que la manche a donné.
+        async def rouleaux(arretes: int) -> str:
+            cases = [
+                result[i] if i < arretes else self._tirer_rouleau()
+                for i in range(3)
+            ]
+            # Pas de cadre dessiné à la main : sentrix_panels efface toute suite
+            # de traits (règle de design, le séparateur du panneau s'en charge).
+            marques = " ".join("🔒" if i < arretes else "🎲" for i in range(3))
+            return f"## {cases[0]} │ {cases[1]} │ {cases[2]}\n{marques}"
+
+        message = await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+            guild_id, title='Machine à sous',
+            description=f"{await rouleaux(0)}\n\n🎰 **Ça tourne…**",
+        )))
+        for arretes in (1, 2):
+            await asyncio.sleep(0.9)
+            try:
+                await panels.editer(message, panels.depuis_embed(await self._embed(
+                    guild_id, title='Machine à sous',
+                    description=(
+                        f"{await rouleaux(arretes)}\n\n"
+                        + ("🎰 **Ça tourne…**" if arretes < 2
+                           else f"🎰 Deux {result[0]}… le dernier rouleau ralentit."
+                           if result[0] == result[1]
+                           else "🎰 **Dernier rouleau…**")
+                    ),
+                )))
+            except Exception:
+                # L'animation est un confort : si une édition échoue (message
+                # supprimé, salon fermé), la manche doit quand même se conclure.
+                logger.debug("Animation de la machine à sous interrompue.", exc_info=True)
+                break
+
+        await asyncio.sleep(0.9)
+        grille = await rouleaux(3)
+
         if result[0] == result[1] == result[2]:
             multiplicateur = gains.get(result[0], 1.0)
             montant = max(1, round(REWARD_SLOTS_JACKPOT * multiplicateur))
             reward = await self._finish(ctx, "slots", session_id, "win", montant)
-            titre = "🎉 **JACKPOT !**" if multiplicateur < 4 else "💥 **GROS JACKPOT !**"
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
-                guild_id, title='Machine à sous',
-                description=(
-                    f"🎰 {text}\n{titre}\n"
-                    f"Trois {result[0]} — gains **x{multiplicateur:g}**"
-                    + self._reward_line(reward)
-                ),
-                kind='success',
-            )))
+            if multiplicateur >= 9:
+                titre = "🏆 **TRIPLE SEPT !** Le gros lot de la machine."
+            elif multiplicateur >= 4:
+                titre = "💥 **GROS JACKPOT !**"
+            else:
+                titre = f"🎉 **JACKPOT !** {game_rewards.secure_pick(list(self._SLOTS_JACKPOT))}"
+            description = (
+                f"{grille}\n\n{titre}\n"
+                f"Trois {result[0]} — gains **x{multiplicateur:g}**"
+                + self._reward_line(reward)
+            )
+            kind = "success"
         elif len(set(result)) == 2:
             paire = next(sym for sym in result if result.count(sym) == 2)
             multiplicateur = max(1.0, gains.get(paire, 1.0) / 2)
             montant = max(1, round(REWARD_SLOTS_PARTIAL * multiplicateur))
             reward = await self._finish(ctx, "slots", session_id, "win", montant)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
-                guild_id, title='Machine à sous',
-                description=(
-                    f"🎰 {text}\n👍 **Une paire de {paire}**"
-                    + (f" — gains **x{multiplicateur:g}**" if multiplicateur > 1 else "")
-                    + self._reward_line(reward)
-                ),
-            )))
+            description = (
+                f"{grille}\n\n👍 **Une paire de {paire}** — "
+                f"{game_rewards.secure_pick(list(self._SLOTS_PAIRE))}"
+                + (f"\nGains **x{multiplicateur:g}**" if multiplicateur > 1 else "")
+                + self._reward_line(reward)
+            )
+            kind = "primary"
         else:
             await self._finish(ctx, "slots", session_id, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
-                guild_id, title='Machine à sous',
-                description=(
-                    f"🎰 {text}\n○ **Perdu !** Trois symboles différents.\n"
-                    f"-# {self._table_des_gains()}"
-                ),
-                kind='danger',
-            )))
+            description = (
+                f"{grille}\n\n○ **{game_rewards.secure_pick(list(self._SLOTS_PERDU))}**\n"
+                f"-# {self._table_des_gains()}"
+            )
+            kind = "danger"
+
+        await panels.editer(message, panels.depuis_embed(await self._embed(
+            guild_id, title='Machine à sous', description=description, kind=kind,
+        )))
+
+
+class _BlackjackView(discord.ui.View):
+    """Deux boutons, réarmés après chaque carte.
+
+    Une View discord.py ne se « rejoue » pas : ``wait()`` ne se débloque qu'une
+    fois. Le blackjack, lui, pose la même question à chaque tour. La vue porte
+    donc son propre événement, remis à zéro entre deux cartes, ce qui évite d'en
+    reconstruire une (et de perdre le relogement dans le panneau) à chaque tirage.
+    """
+
+    def __init__(self, author_id: int):
+        super().__init__(timeout=None)
+        self.author_id = author_id
+        self.action: str | None = None
+        self._repondu = asyncio.Event()
+        self._lock = asyncio.Lock()
+        self.add_item(_BlackjackButton("👆 Carte", "hit", discord.ButtonStyle.primary))
+        self.add_item(_BlackjackButton("✋ Rester", "stand", discord.ButtonStyle.success))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "Cette main appartient à un autre joueur.", ephemeral=True
+                )
+            return False
+        return True
+
+    def rearmer(self) -> None:
+        self.action = None
+        self._repondu.clear()
+        for child in self.children:
+            child.disabled = False
+
+    async def attendre(self, delai: float = 45.0) -> str | None:
+        """Le prochain clic, ou None si le joueur abandonne la main."""
+        try:
+            await asyncio.wait_for(self._repondu.wait(), timeout=delai)
+        except asyncio.TimeoutError:
+            self.action = None
+        return self.action
+
+    def repondre(self, action: str) -> None:
+        self.action = action
+        self._repondu.set()
+
+
+class _BlackjackButton(discord.ui.Button):
+    def __init__(self, label: str, action: str, style: discord.ButtonStyle):
+        super().__init__(label=label, style=style)
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction):
+        view: _BlackjackView = panels.vue_source(self)
+        async with view._lock:
+            if view.action is not None:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Un coup est déjà en cours.", ephemeral=True
+                    )
+                return
+            for child in view.children:
+                child.disabled = True
+            # Le message est réécrit juste après par la commande : on se contente
+            # ici d'accuser réception pour que Discord n'affiche pas « échec ».
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            view.repondre(self.action)
 
 
 class TicTacToeButton(discord.ui.Button):

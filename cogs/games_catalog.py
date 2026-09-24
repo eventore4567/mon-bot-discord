@@ -240,3 +240,52 @@ ROULEAU_SLOTS = (
     ("💎", 9, 4.0),
     ("7️⃣", 4, 9.0),
 )
+
+
+# Chaque expédition n'avait qu'UNE phrase d'échec : au troisième essai, on la
+# connaît par cœur. SOLO_ECHECS en donne plusieurs par jeu (la phrase d'origine
+# de SOLO_FLAVORS reste le secours si un jeu manque ici).
+SOLO_ECHECS: dict[str, tuple[str, ...]] = {
+    "adventure": (
+        "Vous vous perdez en chemin et rentrez bredouille.",
+        "Un orage vous force à faire demi-tour avant le col.",
+        "La carte était fausse. Trois heures pour revenir au point de départ.",
+        "Un pont effondré, et aucun gué à des lieues à la ronde.",
+    ),
+    "dungeon": (
+        "Le donjon s'effondre partiellement, vous devez rebrousser chemin.",
+        "La torche s'éteint dans le troisième couloir. On ne tente pas la suite à l'aveugle.",
+        "La porte scellée résiste. Il faudra revenir avec la bonne clé.",
+        "Quelque chose grogne derrière le mur. Vous décidez de ne pas vérifier quoi.",
+    ),
+    "mining": (
+        "La mine est vide aujourd'hui, vous ne trouvez rien.",
+        "Le filon s'arrête net après deux coups de pioche.",
+        "Le manche de la pioche cède. Fin de la séance.",
+        "Rien que de la roche stérile sur toute la galerie.",
+    ),
+    "fishing": (
+        "Aucun poisson ne mord aujourd'hui.",
+        "Une touche, une seule — et la ligne casse.",
+        "Vous remontez une botte. Elle n'intéresse personne.",
+        "Le poisson vous regarde, puis s'en va.",
+    ),
+    "treasure": (
+        "La carte au trésor était un faux, rien à l'horizon.",
+        "La croix sur la carte marquait un caillou.",
+        "Le coffre était là. Quelqu'un est passé avant vous.",
+        "Trois trous, trois déceptions.",
+    ),
+    "hunt": (
+        "Le gibier s'échappe, vous rentrez les mains vides.",
+        "Une piste fraîche, puis plus rien pendant des heures.",
+        "Le vent tournait dans le mauvais sens tout l'après-midi.",
+        "Vous rentrez avec le carquois plein. C'est bien le problème.",
+    ),
+    "explore": (
+        "La zone explorée était déjà pillée, rien à récupérer.",
+        "Le sentier se termine sur une falaise.",
+        "Brouillard épais. Impossible de relever quoi que ce soit.",
+        "Vous cartographiez une clairière déjà cartographiée.",
+    ),
+}

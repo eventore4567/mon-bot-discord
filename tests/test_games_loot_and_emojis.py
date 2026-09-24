@@ -511,3 +511,93 @@ def test_la_machine_a_sous_paie_selon_le_symbole():
     table = Minigames._table_des_gains()
     for symbole, _poids, _mult in ROULEAU_SLOTS:
         assert symbole in table, f"{symbole} manque à la table des gains"
+
+
+def test_le_blackjack_se_joue_aux_boutons_et_se_rejoue():
+    """Il fallait taper « hit » dans le chat. Et une View discord.py ne se
+    débloque qu'une fois : sans réarmement, la deuxième carte serait
+    impossible à demander."""
+    import asyncio
+    import inspect
+
+    from cogs.minigames import Minigames, _BlackjackView
+
+    source = inspect.getsource(Minigames.blackjack.callback)
+    assert "wait_for" not in source, "le blackjack attend encore un message dans le chat"
+    assert "_BlackjackView" in source
+
+    vue = _BlackjackView(author_id=1)
+    labels = [getattr(enfant, "label", "") for enfant in vue.children]
+    assert any("Carte" in l for l in labels) and any("Rester" in l for l in labels)
+
+    async def scenario():
+        vue.repondre("hit")
+        assert await vue.attendre(delai=1) == "hit"
+        # Sans rearmer(), la vue resterait bloquée sur le premier clic.
+        vue.rearmer()
+        assert vue.action is None
+        assert not any(enfant.disabled for enfant in vue.children)
+        vue.repondre("stand")
+        assert await vue.attendre(delai=1) == "stand"
+        # Abandon : la main ne doit pas rester en suspens indéfiniment.
+        vue.rearmer()
+        assert await vue.attendre(delai=0.05) is None
+
+    asyncio.run(scenario())
+
+
+def test_les_manches_a_suspense_tirent_le_resultat_avant_l_animation():
+    """Une animation ne doit jamais pouvoir décider de la manche : si une
+    édition échoue en plein vol, le résultat reste celui qui a été tiré."""
+    import inspect
+
+    from cogs import games_economy
+    from cogs.minigames import Minigames
+
+    for fonction, marqueur in (
+        (Minigames.slots.callback, "result = ["),
+        (games_economy.GamesRapides.coinflip.callback, "result = game_rewards.secure_pick"),
+        (games_economy.GamesRapides.dice.callback, "result = game_rewards.secure_pick"),
+    ):
+        source = inspect.getsource(fonction)
+        tirage = source.index(marqueur)
+        animation = source.index("asyncio.sleep")
+        assert tirage < animation, f"{fonction.__qualname__} anime avant de tirer"
+        # Et l'animation ne doit pas pouvoir faire échouer la manche.
+        assert "except Exception" in source, f"{fonction.__qualname__} : animation non protégée"
+
+
+def test_chaque_expedition_a_plusieurs_phrases_d_echec():
+    """Une seule phrase par jeu se reconnaissait dès la troisième partie."""
+    from cogs.games_catalog import SOLO_ECHECS
+
+    assert set(SOLO_ECHECS) == set(SOLO_FLAVORS), "un jeu solo sans phrases d'échec"
+    for jeu, phrases in SOLO_ECHECS.items():
+        assert len(phrases) >= 3, f"{jeu} n'a que {len(phrases)} phrase(s)"
+        assert len(set(phrases)) == len(phrases), f"{jeu} répète une phrase"
+        # La phrase d'origine reste dans le lot : on varie, on ne remplace pas.
+        assert SOLO_FLAVORS[jeu][3] in phrases, f"{jeu} a perdu sa phrase d'origine"
+
+
+def test_une_main_qui_saute_ne_peut_pas_gagner():
+    """Le bust doit sortir la manche AVANT la comparaison finale : sinon une
+    main à 22 « battrait » un croupier à 18."""
+    import ast
+    import inspect
+    import textwrap
+
+    from cogs.minigames import Minigames
+
+    source = textwrap.dedent(inspect.getsource(Minigames.blackjack.callback))
+    lignes = source.split("\n")
+
+    def ligne_de(motif, depuis=0):
+        return next(i for i, l in enumerate(lignes) if i >= depuis and motif in l)
+
+    i_tirage = ligne_de("joueur.append(tiree)")
+    i_bust = ligne_de("_total(joueur) > 21", i_tirage)
+    i_sortie = ligne_de("return await panels.editer", i_bust)
+    i_rearme = ligne_de("vue.rearmer()")
+    assert i_tirage < i_bust < i_sortie < i_rearme, (
+        "une main qui dépasse 21 peut atteindre la comparaison finale"
+    )
