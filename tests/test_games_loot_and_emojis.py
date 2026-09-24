@@ -8,6 +8,7 @@ Deux problèmes mesurés le 23/09/2026 sur le bot booté :
 """
 from __future__ import annotations
 
+import textwrap
 from types import SimpleNamespace
 
 from cogs.games_catalog import GAME_CATALOG, RARETES, SOLO_FLAVORS, SOLO_LOOT
@@ -126,3 +127,36 @@ def test_une_etiquette_en_gras_n_est_jamais_prise_pour_un_nom():
     nom, identifiant, _icone = wide_logs.derive_identity(embed, log_type="game_reward")
     assert nom != "Joueur :"
     assert identifiant == 100000000000000042
+
+
+def test_la_prise_est_bien_affichee_dans_la_manche_gagnee():
+    """Un rebase avait déjà supprimé le butin du rendu : le tirage existait,
+    mais le joueur ne voyait jamais ce qu'il avait ramené."""
+    import ast
+    import inspect
+
+    from cogs.games_economy import GamesSolo
+
+    source = inspect.getsource(GamesSolo._run_solo)
+    arbre = ast.parse(textwrap.dedent(source))
+    appels = {
+        n.func.id
+        for n in ast.walk(arbre)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "tirer_butin" in appels, "la manche ne tire plus de prise"
+    noms = {n.id for n in ast.walk(arbre) if isinstance(n, ast.Name)}
+    assert "butin_text" in noms, "la prise est tirée mais jamais rendue"
+    # Le texte de la prise doit vraiment atterrir dans une f-string du rendu.
+    rendus = [
+        n
+        for n in ast.walk(arbre)
+        if isinstance(n, ast.JoinedStr)
+        and any(
+            isinstance(v, ast.FormattedValue)
+            and isinstance(v.value, ast.Name)
+            and v.value.id == "butin_text"
+            for v in n.values
+        )
+    ]
+    assert rendus, "butin_text n'apparaît dans aucun texte envoyé au joueur"
