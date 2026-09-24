@@ -195,7 +195,7 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
             return await _send(embed=embeds.error(access_error))
 
         if _is_bare_trigger(self.bot, reply_to):
-            return await _send(content="Je suis là. Dis-moi simplement ce que tu veux faire.")
+            return await _send(content="Je suis là. Dites-moi simplement ce que vous voulez faire.")
 
         command_name = "ai-dm" if guild_id is None else ("ai-reply" if reply_to is not None else "sentrix")
         result = await self._prepare_and_generate(
