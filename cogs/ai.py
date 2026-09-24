@@ -895,7 +895,7 @@ class Ai(commands.Cog, name="Ai"):
         view.add_item(discord.ui.Button(
             label="Ouvrir le Dashboard",
             style=discord.ButtonStyle.link,
-            url=config.DASHBOARD_APP_URL,
+            url=getattr(config, "DASHBOARD_SHARE_URL", config.DASHBOARD_APP_URL),
         ))
         note = (
             "\n\n-# Mode lecture seule : vous pouvez consulter cet état, mais pas modifier "
@@ -945,7 +945,7 @@ class Ai(commands.Cog, name="Ai"):
         view.add_item(discord.ui.Button(
             label="Ouvrir le Dashboard",
             style=discord.ButtonStyle.link,
-            url=config.DASHBOARD_APP_URL,
+            url=getattr(config, "DASHBOARD_SHARE_URL", config.DASHBOARD_APP_URL),
         ))
         await message.reply(
             "Dashboard SentriX :",
@@ -2695,7 +2695,7 @@ class Ai(commands.Cog, name="Ai"):
 
     async def _ai_help(self, ctx: commands.Context):
         e = embeds.brand("🤖 Aide — Intelligence artificielle SentriX", (
-            "**+ai <question>** / **/ai ask <question>** — poser une question à l'IA\n**+ai search <question>** / **/ai search** — poser une question en forçant une vraie recherche web\n**+ai reset** / **/ai reset** — réinitialiser votre conversation dans ce salon\n**+ai memory** / **/ai memory** — voir si une conversation est active\n**+ai model** / **/ai model** — voir le modèle utilisé par défaut\n**+ai enable** / **/ai enable** *(admin)* — activer l'IA sur ce serveur\n**+ai disable** / **/ai disable** *(admin)* — désactiver l'IA sur ce serveur\n**+chat <message>** — discuter avec mémoire de conversation\n**+improve <texte>** — améliorer un texte\n**+correct <texte>** — corriger l'orthographe et la grammaire\n**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n**+code <demande>** — générer du code\n**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n**+image <description>** — générer une image 4K (3840 × 2160)\n**SentriX fais-moi une image de...** — génération 4K en langage naturel\n**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n**+aisetup** *(admin)* — configuration avancée de l'IA sur ce serveur"
+            "**+ai <question>** / **/ai ask <question>** — poser une question à l'IA\n**+ai search <question>** / **/ai search** — poser une question en forçant une vraie recherche web\n**+ai reset** / **/ai reset** — réinitialiser votre conversation dans ce salon\n**+ai memory** / **/ai memory** — voir si une conversation est active\n**+ai model** / **/ai model** — voir le modèle utilisé par défaut\n**+ai enable** / **/ai enable** *(admin)* — activer l'IA sur ce serveur\n**+ai disable** / **/ai disable** *(admin)* — désactiver l'IA sur ce serveur\n**+improve <texte>** — améliorer un texte\n**+correct <texte>** — corriger l'orthographe et la grammaire\n**+ai-translate <langue> <texte>** — traduire un texte avec l'IA\n**+code <demande>** — générer du code\n**+summarize / +explain / +rewrite / +fact-check** — outils spécialisés\n**+image <description>** — générer une image 4K (3840 × 2160)\n**SentriX fais-moi une image de...** — génération 4K en langage naturel\n**SentriX ouvre-moi setup/help** — exécuter une commande en langage naturel\n**SentriX ajoute cet emoji** — importer l'emoji collé ou l'image jointe\n**SentriX donne-moi le lien de...** — rechercher un lien public avec ses sources\n**+aisetup** *(admin)* — configuration avancée de l'IA sur ce serveur"
         ))
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
