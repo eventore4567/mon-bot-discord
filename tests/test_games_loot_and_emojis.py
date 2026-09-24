@@ -346,3 +346,144 @@ def test_le_menu_des_jeux_tient_dans_la_limite_de_discord():
 
     total = caracteres(panneau.to_components())
     assert total < 4000, f"le menu des jeux pèse {total} caractères"
+
+
+def _panneau_en_texte(panneau) -> str:
+    def morceaux(noeud):
+        if isinstance(noeud, dict):
+            propres = [noeud["content"]] if noeud.get("type") == 10 else []
+            for valeur in noeud.values():
+                if isinstance(valeur, (dict, list)):
+                    propres += morceaux(valeur)
+            return propres
+        if isinstance(noeud, list):
+            return [m for v in noeud for m in morceaux(v)]
+        return []
+
+    return "\n".join(morceaux(panneau.to_components()))
+
+
+def test_le_profil_de_jeu_est_un_panneau_lisible():
+    """Le profil alignait cinq lignes de texte brut. Il doit montrer un bilan
+    structuré, une barre de victoires, le jeu préféré et les dernières manches."""
+    import asyncio
+
+    from cogs import games_economy
+    from utils import design_system
+    from utils import sentrix_panels as panels
+
+    envoyes = []
+
+    async def _faux_envoyer(destination, panneau, **extra):
+        envoyes.append(panneau)
+
+    historique = [
+        {"game_name": "slots", "result": "win", "reward_amount": 40, "created_at": 1},
+        {"game_name": "fishing", "result": "loss", "reward_amount": 0, "created_at": 2},
+    ]
+
+    class _DB:
+        async def get_game_stats(self, guild_id, user_id):
+            return {"games_played": 12, "wins": 7, "losses": 4, "draws": 1, "total_earned": 1540}
+
+        async def get_game_history(self, guild_id, user_id, limit=15):
+            return historique[:limit]
+
+        async def get_favourite_game(self, guild_id, user_id):
+            return ("slots", 9)
+
+        async def get_design_settings(self, guild_id):
+            return dict(design_system.DEFAULT_DESIGN_SETTINGS)
+
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(id=1),
+        author=SimpleNamespace(
+            id=2, display_name="jayden", mention="<@2>",
+            display_avatar=SimpleNamespace(url="https://exemple/a.png"),
+        ),
+        clean_prefix="+",
+    )
+    cog = games_economy.GamesPlayerCommands(SimpleNamespace(db=_DB()))
+    ancien = panels.envoyer
+    panels.envoyer = _faux_envoyer
+    try:
+        asyncio.run(cog.gameprofile.callback(cog, ctx, None))
+    finally:
+        panels.envoyer = ancien
+
+    texte = _panneau_en_texte(envoyes[0])
+    assert "🎮 Profil de jeu — jayden" in texte
+    assert "58 %" in texte, "le taux de victoires a disparu"
+    assert "▰" in texte, "la barre de progression a disparu"
+    assert "🎰 Machine à sous" in texte, "le jeu préféré n'apparaît pas"
+    assert "9 manche(s) jouée(s)" in texte
+    assert "🏆 gagnée" in texte and "○ perdue" in texte
+    assert "1 540" in texte, "le total gagné n'est plus formaté"
+
+
+def test_le_jeu_prefere_se_compte_en_sql():
+    """Compter en Python imposait de ramener des centaines de lignes par profil."""
+    import ast
+    import inspect
+    import textwrap
+
+    from cogs.games_economy import GamesPlayerCommands
+
+    source = textwrap.dedent(inspect.getsource(GamesPlayerCommands.gameprofile.callback))
+    attributs = {n.attr for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Attribute)}
+    assert "get_favourite_game" in attributs
+    for appel in ast.walk(ast.parse(source)):
+        if isinstance(appel, ast.Call) and getattr(appel.func, "attr", "") == "get_game_history":
+            limites = [k.value.value for k in appel.keywords if k.arg == "limit"]
+            assert all(int(l) <= 25 for l in limites), "le profil relit tout l'historique"
+
+
+def test_pierre_feuille_ciseaux_refuse_un_choix_inconnu_sans_planter():
+    """Deux bugs d'un coup : `+rps banane` annonçait une défaite inventée, puis
+    — une fois les gestes ajoutés — levait un KeyError. Ni l'un ni l'autre."""
+    import asyncio
+
+    from cogs import minigames
+    from utils import design_system
+    from utils import sentrix_panels as panels
+
+    envoyes = []
+    demarrages = []
+
+    async def _faux_envoyer(destination, panneau, **extra):
+        envoyes.append(panneau)
+
+    class _DB:
+        async def get_design_settings(self, guild_id):
+            return dict(design_system.DEFAULT_DESIGN_SETTINGS)
+
+    cog = minigames.Minigames(SimpleNamespace(db=_DB()))
+
+    async def _faux_start(ctx, nom, **kwargs):
+        demarrages.append(nom)
+        return True, "", "sid"
+
+    cog._start = _faux_start
+    ctx = SimpleNamespace(
+        guild=SimpleNamespace(id=1), author=SimpleNamespace(id=2),
+        # Le bot pose ce contexte dans Bot.invoke : sans lui, la couche sobre
+        # retirerait les pictogrammes, et le test testerait autre chose.
+        command=SimpleNamespace(name="rps", root_parent=None, cog_name="Minigames"),
+    )
+
+    from cogs.final_interaction_policy import _COMMAND_CONTEXT
+
+    ancien = panels.envoyer
+    panels.envoyer = _faux_envoyer
+    jeton = _COMMAND_CONTEXT.set(ctx)
+    try:
+        asyncio.run(cog.rps.callback(cog, ctx, "oui|non"))
+    finally:
+        _COMMAND_CONTEXT.reset(jeton)
+        panels.envoyer = ancien
+
+    texte = _panneau_en_texte(envoyes[0])
+    assert "n'existe pas" in texte
+    for geste in ("✊", "✋", "✌️"):
+        assert geste in texte, "les gestes acceptés ne sont pas montrés"
+    assert not demarrages, "une manche a été consommée pour un choix invalide"

@@ -2578,6 +2578,20 @@ class Database:
             "total_earned": (row["total_earned"] if row else 0) or 0,
         }
 
+    async def get_favourite_game(self, guild_id: int, user_id: int) -> tuple[str, int] | None:
+        """Le jeu le plus joué par un membre, et son nombre de manches.
+
+        En SQL plutôt qu'en ramenant tout l'historique : le profil n'a pas
+        besoin des cinq cents dernières lignes pour compter jusqu'au plus joué.
+        """
+        row = await self.fetchone(
+            "SELECT game_name, COUNT(*) AS manches FROM game_transactions "
+            "WHERE guild_id = ? AND user_id = ? "
+            "GROUP BY game_name ORDER BY manches DESC, game_name ASC LIMIT 1",
+            (guild_id, user_id),
+        )
+        return (row["game_name"], int(row["manches"])) if row else None
+
     async def get_game_cooldowns(self, guild_id: int, user_id: int) -> dict[str, int]:
         """Tous les cooldowns d'un membre en UNE requête.
 

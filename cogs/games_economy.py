@@ -2367,23 +2367,78 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
     async def gameprofile(self, ctx: commands.Context, membre: discord.Member = None):
         guild_id = ctx.guild.id if ctx.guild else None
         target = membre or ctx.author
+        prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
         stats = await self.bot.db.get_game_stats(guild_id, target.id)
         recent = await self.bot.db.get_game_history(guild_id, target.id, limit=5)
-        win_rate = round((stats["wins"] / stats["games_played"]) * 100) if stats["games_played"] else 0
-        recent_lines = "\n".join(
-            f"• {GAME_CATALOG.get(r['game_name'], (r['game_name'], ''))[0]} — {r['result']}" for r in recent
-        ) or "Aucune manche récente."
-        description = (
-            f"🎮 **Manches jouées :** {stats['games_played']}\n"
-            f"🏆 **Victoires :** {stats['wins']} ({win_rate}%)\n"
-            f"❌ **Défaites :** {stats['losses']}\n"
-            f"🤝 **Égalités :** {stats['draws']}\n"
-            f"🪙 **Total gagné :** {stats['total_earned']}\n\n"
-            f"**Dernières manches :**\n{recent_lines}"
-        )
-        e = await _embed(self.bot, guild_id, title=f"Profil de jeu — {target.display_name}", description=description)
-        e.set_thumbnail(url=target.display_avatar.url)
-        await panels.envoyer(ctx, panels.depuis_embed(e))
+        joues = stats["games_played"]
+        win_rate = round((stats["wins"] / joues) * 100) if joues else 0
+
+        if not joues:
+            return await panels.envoyer(ctx, panels.Panneau(
+                titre=f"{_game_icon('Profil de jeu')} Profil de jeu — {target.display_name}",
+                vignette=target.display_avatar.url,
+                sections=[panels.Section(
+                    "Aucune manche jouée",
+                    texte=(
+                        f"{target.mention} n'a pas encore joué ici.\n"
+                        f"`{prefixe}jeuxjour` montre les 39 jeux disponibles sur ce serveur."
+                        if target.id != ctx.author.id else
+                        "Vous n'avez pas encore joué ici.\n"
+                        f"`{prefixe}jeuxjour` montre les 39 jeux disponibles sur ce serveur."
+                    ),
+                )],
+                kind="jeux",
+            ))
+
+        # Le jeu préféré se compte sur TOUT l'historique, pas sur les cinq
+        # dernières manches — sinon « votre jeu » changerait à chaque partie.
+        favori = await self.bot.db.get_favourite_game(guild_id, target.id)
+
+        issues = {"win": "🏆 gagnée", "loss": "○ perdue", "draw": "🤝 nulle"}
+        dernieres = [
+            panels.Ligne(
+                GAME_CATALOG.get(r["game_name"], (r["game_name"], ""))[0],
+                issues.get(r["result"], r["result"]),
+                indice=(
+                    f"+{stats_service.format_number(r['reward_amount'])} 🪙"
+                    if r["reward_amount"] else None
+                ),
+            )
+            for r in recent
+        ]
+
+        bilan = [
+            panels.Ligne("Manches jouées", f"**{stats_service.format_number(joues)}**"),
+            panels.Ligne(
+                "Victoires",
+                f"**{stats_service.format_number(stats['wins'])}** · {win_rate} %",
+                indice=design_system.progress_bar(stats["wins"], joues),
+            ),
+            panels.Ligne(
+                "Défaites / égalités",
+                f"{stats_service.format_number(stats['losses'])} · {stats_service.format_number(stats['draws'])}",
+            ),
+            panels.Ligne("Total gagné", f"**{stats_service.format_number(stats['total_earned'])}** 🪙"),
+        ]
+        if favori:
+            nom_favori, manches_favori = favori
+            libelle = GAME_CATALOG.get(nom_favori, (nom_favori, ""))[0]
+            bilan.append(panels.Ligne(
+                "Jeu préféré", f"**{libelle}**",
+                indice=f"{stats_service.format_number(manches_favori)} manche(s) jouée(s)",
+            ))
+
+        sections = [
+            panels.Section("Bilan", bilan),
+            panels.Section("Dernières manches", dernieres),
+        ]
+        await panels.envoyer(ctx, panels.Panneau(
+            titre=f"{_game_icon('Profil de jeu')} Profil de jeu — {target.display_name}",
+            sous_titre=f"{win_rate} % de victoires sur {stats_service.format_number(joues)} manches",
+            vignette=target.display_avatar.url,
+            sections=sections,
+            kind="jeux",
+        ))
 
     @commands.hybrid_command(name="gamestats", description="Statistiques détaillées de mini-jeux d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à afficher")

@@ -131,12 +131,25 @@ class Minigames(commands.Cog, name="Minigames"):
         app_commands.Choice(name="Ciseaux", value="ciseaux"),
     ])
     async def rps(self, ctx: commands.Context, choix: str):
+        mains = {"pierre": "✊", "feuille": "✋", "ciseaux": "✌️"}
+        options = list(mains)
+        # En slash, app_commands.choices verrouille l'argument ; en préfixe, non.
+        # `+rps banane` annonçait « vous avez perdu » — une défaite inventée pour
+        # une faute de frappe. On le dit, et la manche n'est même pas démarrée.
+        choix = str(choix or "").strip().casefold()
+        if choix not in mains:
+            gestes = " · ".join(f"{mains[o]} `{o}`" for o in options)
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                ctx.guild.id if ctx.guild else None,
+                title='Pierre-feuille-ciseaux',
+                description=f"Ce choix n'existe pas. Jouez l'un des trois :\n{gestes}",
+                kind='warning',
+            )))
+
         started, err, session_id = await self._start(ctx, "rps")
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Pierre-feuille-ciseaux', description=err, kind='warning')))
 
-        options = ["pierre", "feuille", "ciseaux"]
-        mains = {"pierre": "✊", "feuille": "✋", "ciseaux": "✌️"}
         bot_choice = random.choice(options)
         if choix == bot_choice:
             result, kind, game_result = "🤝 **Égalité !**", "primary", "draw"
