@@ -143,19 +143,10 @@ def _install_fast_home(bot: commands.Bot) -> None:
         # commandes obsolètes. Une demande courte ouvre désormais l'unique +help
         # canonique, éventuellement filtré sur la catégorie demandée.
         if intent in {"home", "games", "economy", "profile", "ai"} and reply_to is not None:
-            help_queries = {
-                "home": "",
-                "games": "jeux",
-                "economy": "économie",
-                "profile": "profil",
-                "ai": "ia",
-            }
-            suffix = help_queries[intent]
-            command_line = f"{prefix}help" + (f" {suffix}" if suffix else "")
             invoke = getattr(self, "_invoke_command_line", None)
             if callable(invoke):
                 try:
-                    if await invoke(reply_to, command_line):
+                    if await invoke(reply_to, f"{prefix}help"):
                         return None
                 except Exception:
                     logger.exception("Bot Experience V6 : ouverture du help canonique impossible.")
