@@ -195,6 +195,18 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
             return await _send(embed=embeds.error(access_error))
 
         if _is_bare_trigger(self.bot, reply_to):
+            # Réponse UNIQUE à une mention nue : ce pipeline est la seule
+            # autorité pour ce cas. Elle porte désormais le contenu utile
+            # (préfixe, commandes réellement chargées, langue du serveur) qui
+            # vivait dans un second listener — lequel produisait un deuxième
+            # message par-dessus celui-ci.
+            try:
+                from . import language_runtime
+
+                titre, texte = await language_runtime.texte_accueil_mention(self.bot, guild)
+                return await _send(embed=embeds.neutral(titre, texte))
+            except Exception:
+                logger.debug("Accueil de mention localisé indisponible.", exc_info=True)
             return await _send(content="Je suis là. Dites-moi simplement ce que vous voulez faire.")
 
         command_name = "ai-dm" if guild_id is None else ("ai-reply" if reply_to is not None else "sentrix")

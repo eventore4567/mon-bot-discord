@@ -154,3 +154,28 @@ def test_le_filtre_de_mots_interdits_garde_ses_frontieres_et_son_prefixe():
 
     for attrape in ("promotion", "promos", "promo", "p r o m o t i o n"):
         assert AutoMod._blacklist_hit(["promo*"], attrape), attrape
+
+
+def test_la_reponse_a_une_mention_n_annonce_que_des_commandes_reelles():
+    """Elle annonçait « +aide » et « +configurer ». Mesuré sur le bot booté :
+    les deux sont introuvables — help et setup n'ont aucun alias une fois la
+    surface nettoyée. Envoyer quelqu'un vers une commande qui n'existe pas est
+    pire que de ne rien dire."""
+    from types import SimpleNamespace
+
+    from cogs.language_runtime import _nom_reellement_utilisable
+
+    reelles = {"help": object(), "setup": object()}
+    bot = SimpleNamespace(get_command=lambda nom: reelles.get(nom))
+
+    # L'alias français n'existe pas sur ce bot : on retombe sur le nom réel.
+    assert _nom_reellement_utilisable(bot, "aide", "help") == "help"
+    assert _nom_reellement_utilisable(bot, "configurer", "setup") == "setup"
+
+    # S'il existe et pointe bien sur la même commande, on le préfère.
+    reelles["aide"] = reelles["help"]
+    assert _nom_reellement_utilisable(bot, "aide", "help") == "aide"
+
+    # S'il existe mais désigne AUTRE chose, on ne l'annonce pas.
+    reelles["configurer"] = object()
+    assert _nom_reellement_utilisable(bot, "configurer", "setup") == "setup"

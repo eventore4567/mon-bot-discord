@@ -960,6 +960,54 @@ async def _find_prompt_channel(guild: discord.Guild) -> discord.TextChannel | No
 # boutons Français / English) : plus de second message « Choose your language ».
 
 
+def _nom_reellement_utilisable(bot: commands.Bot, prefere: str, secours: str) -> str:
+    """Le nom préféré s'il résout vraiment sur ce bot, sinon le nom canonique.
+
+    Un libellé écrit en dur finit toujours par mentir : la surface des
+    commandes est nettoyée au boot, et les alias linguistiques n'y survivent
+    pas tous. On demande donc au bot, au moment d'écrire la phrase.
+    """
+    try:
+        vise = bot.get_command(prefere)
+        canonique = bot.get_command(secours)
+        if vise is not None and (canonique is None or vise is canonique):
+            return prefere
+    except Exception:
+        logger.debug("Résolution du nom de commande impossible, repli sur %s.", secours, exc_info=True)
+    return secours
+
+
+async def texte_accueil_mention(bot: commands.Bot, guild) -> tuple[str, str]:
+    """(titre, texte) de la réponse à une mention nue, dans la langue du serveur.
+
+    Vit ici parce que la langue et la résolution des noms de commandes y vivent
+    déjà ; l'unique appelant est le pipeline V5, seule autorité pour ce cas.
+    """
+    guild_id = getattr(guild, "id", None)
+    language = await get_language(bot, guild_id)
+    prefix = "+"
+    if guild_id is not None:
+        try:
+            conf = await bot.db.get_guild_config(guild_id)
+            if conf and conf["prefix"]:
+                prefix = conf["prefix"]
+        except Exception:
+            logger.debug("Préfixe du serveur illisible, repli sur « + ».", exc_info=True)
+    aide = _nom_reellement_utilisable(bot, "aide" if language != LANG_EN else "help", "help")
+    config = _nom_reellement_utilisable(bot, "configurer" if language != LANG_EN else "setup", "setup")
+    if language == LANG_EN:
+        return (
+            "👋 Need help?",
+            f"My prefix here is **`{prefix}`**. Use **`{prefix}{aide}`** for commands "
+            f"or **`{prefix}{config}`** for server setup.",
+        )
+    return (
+        "👋 Besoin d'aide ?",
+        f"Mon préfixe ici est **`{prefix}`**. Utilisez **`{prefix}{aide}`** pour les commandes "
+        f"ou **`{prefix}{config}`** pour configurer le serveur.",
+    )
+
+
 async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
     if message.author.bot or bot.user is None:
         return
@@ -979,14 +1027,21 @@ async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
         conf = await bot.db.get_guild_config(message.guild.id)
         if conf and conf["prefix"]:
             prefix = conf["prefix"]
-    help_name = "help" if language == LANG_EN else "aide"
-    setup_name = "setup" if language == LANG_EN else "configurer"
+    # Les noms sont résolus SUR LE BOT, jamais écrits en dur. Ce message
+    # annonçait « +aide » et « +configurer » : mesuré sur le bot booté, les deux
+    # sont introuvables — help et setup n'ont aucun alias une fois la surface
+    # nettoyée. Envoyer quelqu'un vers une commande qui n'existe pas est pire
+    # que de ne rien dire, et un nom écrit en dur recommencera au prochain
+    # changement de surface.
+    help_name = _nom_reellement_utilisable(bot, "aide" if language != LANG_EN else "help", "help")
+    setup_name = _nom_reellement_utilisable(bot, "configurer" if language != LANG_EN else "setup", "setup")
     if language == LANG_EN:
         title = "👋 Need help?"
         text = f"My prefix here is **`{prefix}`**. Use **`{prefix}{help_name}`** for commands or **`{prefix}{setup_name}`** for server setup."
     else:
         title = "👋 Besoin d'aide ?"
-        text = f"Mon prefixe ici est **`{prefix}`**. Utilise **`{prefix}{help_name}`** pour les commandes ou **`{prefix}{setup_name}`** pour configurer le serveur."
+        # Vouvoiement : registre unique du dépôt (tests/test_registre_editorial).
+        text = f"Mon préfixe ici est **`{prefix}`**. Utilisez **`{prefix}{help_name}`** pour les commandes ou **`{prefix}{setup_name}`** pour configurer le serveur."
     try:
         await panels.envoyer(message.channel, panels.depuis_embed(embeds.neutral(title, text)), allowed_mentions=discord.AllowedMentions.none())
     except (discord.Forbidden, discord.HTTPException):
@@ -1005,11 +1060,13 @@ def _install_listeners(bot: commands.Bot) -> None:
         except Exception:
             logger.exception("Prechargement des langues impossible.")
 
-    async def message_listener(message: discord.Message):
-        await _mention_help(bot, message)
-
+    # Plus de réponse séparée à une mention nue. Elle en produisait une DEUXIÈME,
+    # après celle du pipeline V5 — mesuré sur le bot booté : « Je suis là… »
+    # suivi de l'embed « Besoin d'aide ? ». cogs/common_command_names avait déjà
+    # neutralisé sa propre copie pour cette raison ; celle-ci avait survécu.
+    # V5 appelle maintenant texte_accueil_mention() pour garder le contenu utile
+    # — préfixe, commandes réellement chargées, langue du serveur.
     bot.add_listener(ready, "on_ready")
-    bot.add_listener(message_listener, "on_message")
     try:
         bot.add_view(LanguageChoiceView(bot))
     except Exception:

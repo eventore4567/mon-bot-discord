@@ -10,13 +10,33 @@ def _read(path: str) -> str:
 
 
 def test_bare_mention_has_one_short_authority():
+    """Une mention nue ne doit produire QU'UNE réponse.
+
+    Deux listeners séparés y répondaient : celui de common_command_names, déjà
+    neutralisé, et celui de language_runtime, qui avait survécu — mesuré sur le
+    bot booté, « Je suis là… » PUIS l'embed « Besoin d'aide ? ». Le pipeline V5
+    est la seule autorité, et il porte maintenant le contenu utile.
+
+    L'assertion sur common ne cherche plus la phrase « Besoin d'aide ? » dans le
+    texte brut du fichier : elle y apparaît dans le commentaire qui documente
+    justement le retrait, ce qui faisait échouer le test sur sa propre preuve.
+    On vérifie le comportement — pas de fonction, pas d'envoi.
+    """
     common = _read("cogs/common_command_names.py")
     v5 = _read("cogs/bot_experience_v5.py")
+    language = _read("cogs/language_runtime.py")
 
     assert "async def _mention_help(" not in common
-    assert "Besoin d'aide ?" not in common
+    assert "panels.envoyer" not in common
     assert "Ping direct unifié" in common
-    assert 'Je suis là. Dis-moi simplement ce que tu veux faire.' in v5
+
+    # language_runtime ne doit plus enregistrer de listener on_message.
+    assert 'bot.add_listener(message_listener, "on_message")' not in language
+    assert "async def texte_accueil_mention(" in language
+
+    # V5 reste l'unique autorité, et sa réponse est celle qui informe.
+    assert "_is_bare_trigger(self.bot, reply_to)" in v5
+    assert "language_runtime.texte_accueil_mention" in v5
 
 
 def test_quick_intents_never_invent_category_commands():

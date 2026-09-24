@@ -333,14 +333,32 @@ def test_avatar_uses_the_target_display_name_and_real_animated_asset():
 
 
 def test_guild_arrival_is_a_compact_owner_dm_only():
+    """Le MP d'arrivée reste un message court au propriétaire, avec un lien qui
+    marche.
+
+    Le test exigeait les noms DASHBOARD_APP_URL et DASHBOARD_PUBLIC_URL DANS le
+    corps de on_guild_join. Le lien passe désormais par _dashboard_url(), qui
+    préfère DASHBOARD_SHARE_URL — le domaine stable, volontairement séparé de
+    l'hôte OAuth (voir config.py). Chercher un nom d'identifiant dans un corps
+    de fonction fait échouer le test sur un remaniement légitime ; on vérifie
+    donc que le lien envoyé est bien celui que la configuration désigne.
+    """
     import inspect
+
+    import config
+
     source = inspect.getsource(guild_arrival.GuildArrival.on_guild_join)
     assert 'async def on_guild_join' in source
     assert 'owner.send(' in source
     assert '`+help` — voir les commandes' in source
     assert '`+setup` — configurer le serveur' in source
-    assert 'DASHBOARD_APP_URL' in source
-    assert 'DASHBOARD_PUBLIC_URL' in source
+
+    # Le lien réellement partagé est celui de la configuration, et c'est une URL.
+    lien = guild_arrival._dashboard_url()
+    assert lien, "le MP d'arrivée ne partage plus aucun lien de dashboard"
+    assert lien.startswith("https://"), lien
+    assert lien == config.DASHBOARD_SHARE_URL or lien == config.DASHBOARD_APP_URL, lien
+
     # L'ajout du bot ne publie plus de gros panneau dans un salon du serveur.
     assert '_target_channel' not in source
     assert '_arrival_embed' not in source
