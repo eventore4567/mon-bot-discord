@@ -108,3 +108,12 @@ def install(dashboard) -> None:
 
     from . import advanced_mode_guide
     advanced_mode_guide.install(dashboard)
+
+    # Face dashboard de cogs/bot_v10 — vivant : il porte la table
+    # v10_privacy_policy, le service de rétention et la commande Discord
+    # correspondante. Seul son branchement web s'était perdu, si bien que la
+    # durée de conservation ne se réglait plus que par commande. tools/
+    # bot_v10_audit le signalait ; le module doit être installé APRÈS
+    # platform_v4, dont il complète le HTML.
+    from . import platform_v10
+    platform_v10.install(dashboard)

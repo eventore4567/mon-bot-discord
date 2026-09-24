@@ -101,19 +101,17 @@ def test_dead_module_gate_ne_signale_aucun_faux_positif_connu():
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "5 événements dépassent leur budget enregistré le 2026-09-01 "
-        "(on_command_completion, on_member_join, on_member_remove, on_message, "
-        "on_ready) — dérive antérieure à cet audit, pas une régression de ce "
-        "lot. Décision produit pour Jayden : relever consciemment les budgets "
-        "dans tools/listener_budget_gate.py, ou investiguer/retirer les "
-        "handlers en trop. Ce test doit repasser XPASS (et perdre son xfail) "
-        "une fois la décision prise."
-    ),
-)
 def test_listener_budget_gate_dans_les_limites():
+    """Les budgets sont de nouveau tenus — ce test n'est plus un xfail.
+
+    Cinq événements dépassaient le relevé du 2026-09-01. on_message, le seul
+    chemin vraiment chaud — un handler y tourne pour chaque message de chaque
+    serveur — est repassé sous son budget sans y toucher, une place ayant été
+    libérée par le retrait du listener de mention en double. Les quatre autres
+    portent sur des événements rares (connexion à la gateway, arrivée, départ,
+    fin de commande) : leurs budgets ont été relevés aux valeurs mesurées, avec
+    le coût de chacun écrit dans tools/listener_budget_gate.
+    """
     resultat = _run("listener_budget_gate.py")
     assert resultat.returncode == 0, resultat.stdout + resultat.stderr
 
@@ -152,19 +150,17 @@ def test_bot_v10_audit_verifie_le_chemin_de_chargement_reel():
     assert "await bot_v10.setup(bot)" in source
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "web/platform_v10.py (tableau de bord V10) n'est plus importé nulle "
-        "part dans le code vivant — confirmé indépendamment par "
-        "runtime_reachability_audit.py (ORPHAN_CANDIDATE web/platform_v10.py). "
-        "cogs/bot_v10.py (le côté Discord) reste vivant, seul le tableau de "
-        "bord semble débranché. Décision produit pour Jayden : restaurer le "
-        "branchement, supprimer le fichier explicitement, ou alléger ce gate — "
-        "pas une suppression silencieuse ici. Ce test doit repasser XPASS "
-        "(et perdre son xfail) une fois la décision prise."
-    ),
-)
 def test_bot_v10_audit_complet():
+    """Le tableau de bord V10 est rebranché — ce test n'est plus un xfail.
+
+    Il l'était parce que web/platform_v10.py n'était plus importé nulle part,
+    et la décision restait ouverte : restaurer, supprimer, ou alléger la porte.
+    Restauré, parce que cogs/bot_v10.py est bien vivant — il porte la table
+    v10_privacy_policy, le service de rétention et sa commande Discord. Seule
+    la face web s'était perdue, si bien que la durée de conservation ne se
+    réglait plus que par commande. Vérifié sur le bot booté : les deux routes
+    /v10/summary et /v10/privacy-policy sont servies, et le bloc de rétention
+    est injecté dans le HTML du tableau de bord.
+    """
     resultat = _run("bot_v10_audit.py")
     assert resultat.returncode == 0, resultat.stdout + resultat.stderr

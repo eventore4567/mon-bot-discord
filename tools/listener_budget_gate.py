@@ -45,13 +45,25 @@ async def _close_runtime(bot) -> None:
         if inspect.isawaitable(result):
             await result
 
-# Budgets constates le 2026-09-01. Un depassement doit etre un choix, pas une derive.
+# Budgets constates le 2026-09-01, quatre releves le 2026-09-24 apres verification
+# evenement par evenement. Un depassement doit rester un choix, pas une derive.
+#
+# on_message garde son budget de 20 : c'est LE chemin chaud, chaque handler tourne
+# pour chaque message de chaque serveur. Il est a 19 — une place a ete liberee en
+# retirant le listener de mention en double de cogs/language_runtime.
+#
+# Les quatre releves portent sur des evenements rares, ou le cout d'un handler de
+# plus est sans commune mesure :
+#   on_ready               une fois par connexion a la gateway
+#   on_member_join         a chaque arrivee
+#   on_member_remove       a chaque depart
+#   on_command_completion  a chaque commande terminee
 BUDGETS: dict[str, int] = {
     "on_message": 20,
-    "on_ready": 28,
-    "on_member_join": 16,
-    "on_command_completion": 13,
-    "on_member_remove": 7,
+    "on_ready": 32,
+    "on_member_join": 17,
+    "on_command_completion": 14,
+    "on_member_remove": 8,
     "on_member_ban": 6,
     "on_guild_join": 9,
     "on_guild_role_update": 6,
