@@ -9,20 +9,15 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 
 import discord
 from discord.ext import commands
 
 import config
-from utils import embeds
-from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.common-command-names")
 _HELP_PATCHED = False
 _USER_CONVERTER_PATCHED = False
-_MENTION_COOLDOWN_SECONDS = 5.0
-_MENTION_LAST: dict[int, float] = {}
 
 # Ne jamais renommer ces commandes, conformément au choix du propriétaire.
 PROTECTED_NAMES = {"bl", "blacklist-add", "blacklist-list", "blacklist-remove"}
@@ -379,45 +374,6 @@ def _patch_user_converter() -> None:
     commands.UserConverter.convert = convert_with_fetch_fallback
     _USER_CONVERTER_PATCHED = True
     logger.info("Résolution utilisateur renforcée : ID/mention hors cache pris en charge.")
-
-
-async def _mention_help(bot: commands.Bot, message: discord.Message) -> None:
-    """Quand quelqu'un ping uniquement SentriX, lui indique immédiatement comment commencer."""
-    if message.author.bot or bot.user is None:
-        return
-
-    content = str(message.content or "").strip()
-    if content not in {f"<@{bot.user.id}>", f"<@!{bot.user.id}>"}:
-        return
-
-    now = time.monotonic()
-    user_id = int(message.author.id)
-    if now - _MENTION_LAST.get(user_id, 0.0) < _MENTION_COOLDOWN_SECONDS:
-        return
-    _MENTION_LAST[user_id] = now
-    if len(_MENTION_LAST) > 5000:
-        cutoff = now - 60.0
-        for key, stamp in list(_MENTION_LAST.items()):
-            if stamp < cutoff:
-                _MENTION_LAST.pop(key, None)
-
-    prefix = config.DEFAULT_PREFIX
-    if message.guild is not None:
-        cached = getattr(bot, "prefix_cache", {}).get(message.guild.id)
-        if cached:
-            prefix = cached
-        else:
-            try:
-                conf = await bot.db.get_guild_config(message.guild.id)
-                if conf and conf["prefix"]:
-                    prefix = conf["prefix"]
-            except Exception:
-                logger.warning("Étape non critique ignorée dans _mention_help", exc_info=True)
-
-    try:
-        await panels.envoyer(message.channel, panels.depuis_embed(embeds.neutral("👋 Besoin d'aide ?", f'Mon préfixe sur ce serveur est **`{prefix}`**.\nTapez **`{prefix}help`** pour voir les commandes ou **`{prefix}setup`** pour configurer le serveur.')), allowed_mentions=discord.AllowedMentions.none())
-    except (discord.Forbidden, discord.HTTPException):
-        pass
 
 
 def _install_mention_listener(bot: commands.Bot) -> None:
