@@ -644,14 +644,21 @@ def _install_dashboard_v3(bot: commands.Bot) -> None:
 
 
 async def _notify_mission_rewards(ctx: commands.Context, rewards: list[tuple[str, int]]) -> None:
+    """L'XP de mission est enregistrée SANS annonce dans le salon.
+
+    La carte « Mission terminée » s'affichait après chaque commande qui validait une
+    mission : un deuxième message, à chaque fois, pour une information que personne
+    n'avait demandée. L'XP reste comptée exactement pareil (record_action l'a déjà
+    créditée avant cet appel) et se consulte dans `+profile` › Missions.
+    """
     if not rewards:
         return
-    total = sum(xp for _, xp in rewards)
-    names = "\n".join(f"✅ {label} — **+{xp} XP saison**" for label, xp in rewards)
-    try:
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🎯 Mission terminée !\n{names}\n\nTotal gagné : **+{total} XP saison**')))
-    except discord.HTTPException:
-        pass
+    logger.debug(
+        "Missions validées sans annonce guild=%s user=%s total=%s XP",
+        getattr(getattr(ctx, "guild", None), "id", None),
+        getattr(getattr(ctx, "author", None), "id", None),
+        sum(xp for _, xp in rewards),
+    )
 
 
 def _root_name(ctx: commands.Context) -> str:

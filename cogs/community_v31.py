@@ -483,26 +483,15 @@ def _install_ai_quick_actions(bot: commands.Bot) -> None:
 
 
 def _install_mission_reward_card(bot: commands.Bot) -> None:
-    if getattr(community_v3._notify_mission_rewards, "_sentrix_v31_reward_card", False):
-        return
+    """Ne pose plus rien : l'XP de mission n'est plus annoncée dans le salon.
 
-    async def premium_reward(ctx: commands.Context, rewards: list[tuple[str, int]]) -> None:
-        if not rewards or ctx.guild is None:
-            return
-        progression = await community_v3.get_progression(bot, ctx.guild.id, ctx.author.id)
-        total = sum(xp for _, xp in rewards)
-        lines = "\n".join(f"✅ {label} → **+{xp} XP**" for label, xp in rewards)
-        embed = embeds.success(
-            f"{lines}\n\n**+{total} XP saison** • Total : **{stats_service.format_number(progression['season_xp'])} XP**\nRang : {progression['tier']} • Niveau de saison **{progression['season_level']}**\n\nUtilisez `+profile` puis **Missions** pour voir la suite.",
-            title="🎯 Mission terminée",
-        )
-        try:
-            await panels.envoyer(ctx, panels.depuis_embed(embed))
-        except discord.HTTPException:
-            pass
-
-    premium_reward._sentrix_v31_reward_card = True
-    community_v3._notify_mission_rewards = premium_reward
+    Cette fonction posait une carte « Mission terminée » après chaque commande qui
+    validait une mission. Elle reste appelée par install() pour ne pas changer la
+    séquence de démarrage, et neutralise une éventuelle carte posée par une couche
+    plus ancienne (le remplacement de community_v3._notify_mission_rewards est la
+    source unique de ce comportement).
+    """
+    del bot
 
 
 def install(bot: commands.Bot) -> None:
