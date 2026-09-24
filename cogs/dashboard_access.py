@@ -22,7 +22,11 @@ _DEFAULT_PROFILE_DESCRIPTION = (
 
 def dashboard_url() -> str:
     """Retourne toujours la page publique du dashboard, jamais la callback OAuth."""
-    configured = str(getattr(config, "DASHBOARD_APP_URL", "") or "").strip()
+    configured = str(
+        getattr(config, "DASHBOARD_SHARE_URL", "")
+        or getattr(config, "DASHBOARD_APP_URL", "")
+        or ""
+    ).strip()
     if configured:
         return configured
 
@@ -30,7 +34,7 @@ def dashboard_url() -> str:
     for suffix in ("/oauth/callback", "/app"):
         if base.endswith(suffix):
             base = base[: -len(suffix)].rstrip("/")
-    return f"{base}/app" if base else "https://mon-bot-discord-production-8944.up.railway.app/app"
+    return f"{base}/app" if base else "https://sentrix-standby-production.up.railway.app/app"
 
 
 def _profile_description(current: str) -> str:
