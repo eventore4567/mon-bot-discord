@@ -108,13 +108,8 @@ def normaliser(texte: str) -> str:
     return re.sub(r"\s+", " ", valeur.casefold()).strip()
 
 
-@lru_cache(maxsize=512)
-def motif_tolerant(expression: str) -> re.Pattern[str]:
-    """Compile une expression en motif tolérant aux séparateurs et au leet.
-
-    « free nitro » attrape « f.r.e.e n1tr0 » et « F R E E   N I T R O », mais
-    PAS « offre e nitro » : les deux extrémités restent des frontières de mot.
-    """
+def _corps_tolerant(expression: str) -> str:
+    """Le cœur du motif : lettres, leet, séparateurs tolérés entre elles."""
     morceaux: list[str] = []
     for caractere in normaliser(expression):
         if caractere == " ":
@@ -131,7 +126,28 @@ def motif_tolerant(expression: str) -> re.Pattern[str]:
     corps = "".join(morceaux).rstrip()
     if corps.endswith(r"[\W_]*"):
         corps = corps[: -len(r"[\W_]*")]
-    return re.compile(rf"(?<![a-z0-9]){corps}(?![a-z0-9])", re.IGNORECASE)
+    return corps
+
+
+@lru_cache(maxsize=2048)
+def motif_tolerant(expression: str) -> re.Pattern[str]:
+    """Compile une expression en motif tolérant aux séparateurs et au leet.
+
+    « free nitro » attrape « f.r.e.e n1tr0 » et « F R E E   N I T R O », mais
+    PAS « offre e nitro » : les deux extrémités restent des frontières de mot.
+    """
+    return re.compile(rf"(?<![a-z0-9]){_corps_tolerant(expression)}(?![a-z0-9])", re.IGNORECASE)
+
+
+@lru_cache(maxsize=2048)
+def motif_prefixe(expression: str) -> re.Pattern[str]:
+    """Même tolérance, mais la fin du mot est libre : « merd* » → « merdier ».
+
+    Construit directement, et non en retouchant la chaîne de motif_tolerant :
+    remplacer un morceau de regex par recherche de texte casserait en silence
+    le jour où l'ancre change — un filtre qui n'attrape plus rien, sans erreur.
+    """
+    return re.compile(rf"(?<![a-z0-9]){_corps_tolerant(expression)}[a-z0-9]*", re.IGNORECASE)
 
 
 def contient(texte: str, expressions) -> str | None:
@@ -149,4 +165,4 @@ def contient(texte: str, expressions) -> str | None:
     return None
 
 
-__all__ = ["normaliser", "motif_tolerant", "contient"]
+__all__ = ["normaliser", "motif_tolerant", "motif_prefixe", "contient"]

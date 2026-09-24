@@ -67,9 +67,14 @@ async def run() -> int:
                 f"{expected_normal_direct} commandes directes après retraits produit, "
                 f"obtenu: {len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)}"
             )
-        if len(command_catalog_cleanup.GAME_COMMANDS) != 44:
+        # 45 depuis l'ajout de +collec, la collection de prises des expéditions.
+        # Ce compte est figé volontairement : ajouter un jeu à la surface directe
+        # doit être un geste explicite, pas un effet de bord.
+        expected_games = 45
+        if len(command_catalog_cleanup.GAME_COMMANDS) != expected_games:
             errors.append(
-                f"les 44 jeux doivent rester directs, obtenu: {len(command_catalog_cleanup.GAME_COMMANDS)}"
+                f"les {expected_games} jeux doivent rester directs, "
+                f"obtenu: {len(command_catalog_cleanup.GAME_COMMANDS)}"
             )
 
         expected_pruned = command_catalog_cleanup.PURE_DUPLICATE_COMMANDS | frozenset(explicit_removed)

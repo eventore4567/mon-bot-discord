@@ -884,14 +884,14 @@ class AutoMod(commands.Cog, name="Automod"):
             brut = text_normalization.normaliser(str(word or "")).strip()
             if not brut:
                 continue
+            # Le motif compilé est réutilisé (lru_cache) : passer par .pattern
+            # puis re.search recompilait à chaque message, pour chaque mot de la
+            # liste du serveur — 64 ms sur une liste de vingt mots.
             if brut.endswith("*"):
-                # Préfixe : « merd* » attrape toujours « merdier ». On tolère les
-                # séparateurs DANS le mot, puis on laisse courir la fin.
-                motif = text_normalization.motif_tolerant(brut[:-1]).pattern
-                motif = motif.replace(r"(?![a-z0-9])", r"[a-z0-9]*")
+                motif = text_normalization.motif_prefixe(brut[:-1])
             else:
-                motif = text_normalization.motif_tolerant(brut).pattern
-            if re.search(motif, texte, re.IGNORECASE):
+                motif = text_normalization.motif_tolerant(brut)
+            if motif.search(texte):
                 return word
         return None
 

@@ -212,22 +212,34 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
     @checks.is_owner_or_admin()
     async def infinit_status(self, ctx: commands.Context):
         row = await self.bot.db.fetchone("SELECT * FROM infinite_counter_config WHERE guild_id=?", (ctx.guild.id,))
+        prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
         if row is None:
-            return await ctx.send("Le compteur infini n’est pas configuré sur ce serveur.")
+            return await panels.envoyer(ctx, panels.Panneau(
+                titre="Compteur infini",
+                sections=[panels.Section(
+                    "Pas encore configuré",
+                    texte=f"Lancez `{prefixe}infinit` pour choisir le salon et démarrer le compteur.",
+                )],
+                kind="warning",
+            ))
         channel = ctx.guild.get_channel(int(row["channel_id"]))
-        last = f"<@{row['last_user_id']}>" if row["last_user_id"] else "personne"
-        await ctx.send(
-            embed=discord.Embed(
-                title="Compteur infini — état",
-                description=(
-                    f"**État :** {'ACTIF' if row['enabled'] else 'INACTIF'}\n"
-                    f"**Salon :** {channel.mention if channel else 'introuvable'}\n"
-                    f"**Prochain nombre :** {row['next_number']}\n"
-                    f"**Dernier joueur :** {last}"
+        actif = bool(row["enabled"])
+        await panels.envoyer(ctx, panels.Panneau(
+            titre="Compteur infini",
+            sous_titre="Actif sur ce serveur" if actif else "En pause — la progression est gardée",
+            sections=[panels.Section("État", [
+                panels.Ligne("Compteur", "**● ACTIF**" if actif else "**○ EN PAUSE**",
+                             indice=None if actif else f"`{prefixe}infinit resume` pour reprendre"),
+                panels.Ligne("Salon", channel.mention if channel else "**Introuvable**",
+                             indice=None if channel else "Le salon a été supprimé ou n'est plus visible."),
+                panels.Ligne("Prochain nombre", f"**{row['next_number']}**"),
+                panels.Ligne(
+                    "Dernier joueur",
+                    f"<@{row['last_user_id']}>" if row["last_user_id"] else "Personne pour l'instant",
                 ),
-                colour=discord.Colour.blurple(),
-            )
-        )
+            ])],
+            kind="jeux",
+        ))
 
     @infinit.command(
         name="stop",
@@ -238,7 +250,18 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
     async def infinit_stop(self, ctx: commands.Context):
         await self.bot.db.execute("UPDATE infinite_counter_config SET enabled=0,updated_at=? WHERE guild_id=?", (int(time.time()), ctx.guild.id))
         self._invalidate_enabled(ctx.guild.id)
-        await ctx.send("Compteur infini désactivé. La progression reste enregistrée.")
+        prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
+        await panels.envoyer(ctx, panels.Panneau(
+            titre="Compteur infini",
+            sections=[panels.Section(
+                "Mis en pause",
+                texte=(
+                    "Le compteur ne répond plus dans son salon.\n"
+                    f"La progression est conservée : `{prefixe}infinit resume` la reprend où elle en était."
+                ),
+            )],
+            kind="success",
+        ))
 
     @infinit.command(
         name="resume",
@@ -248,11 +271,26 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
     @checks.is_owner_or_admin()
     async def infinit_resume(self, ctx: commands.Context):
         row = await self.bot.db.fetchone("SELECT 1 FROM infinite_counter_config WHERE guild_id=?", (ctx.guild.id,))
+        prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
         if row is None:
-            return await ctx.send("Configurez d’abord le compteur avec `+infinit`.")
+            return await panels.envoyer(ctx, panels.Panneau(
+                titre="Compteur infini",
+                sections=[panels.Section(
+                    "Rien à reprendre",
+                    texte=f"Le compteur n'a jamais été configuré ici. `{prefixe}infinit` s'en charge.",
+                )],
+                kind="warning",
+            ))
         await self.bot.db.execute("UPDATE infinite_counter_config SET enabled=1,updated_at=? WHERE guild_id=?", (int(time.time()), ctx.guild.id))
         self._invalidate_enabled(ctx.guild.id)
-        await ctx.send("Compteur infini réactivé avec la progression sauvegardée.")
+        await panels.envoyer(ctx, panels.Panneau(
+            titre="Compteur infini",
+            sections=[panels.Section(
+                "Reprise",
+                texte="Le compteur repart où il s'était arrêté, avec la progression sauvegardée.",
+            )],
+            kind="success",
+        ))
 
     _ENABLED_TTL = 15.0
 
