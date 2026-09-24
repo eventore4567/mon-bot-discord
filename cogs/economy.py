@@ -869,7 +869,7 @@ class Economy(commands.Cog, name="Economy"):
                 )
             embed = design_system.create_embed(
                 title="Boutique",
-                description="\n".join(lines) + "\n\nAcheter : +buy <id> ou +buyrole @rôle",
+                description="\n".join(lines) + "\n\nAcheter : +buy <id>",
                 colour=design.get("primary_color", style["colour"]),
                 footer=f"Page {page_number}/{len(chunks)}",
             )
