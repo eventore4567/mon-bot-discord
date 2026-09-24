@@ -26,6 +26,13 @@ def _safe_url(value: str | None) -> str | None:
     return value if value.startswith(("https://", "http://")) else None
 
 
+def _dashboard_url() -> str | None:
+    return (
+        _safe_url(getattr(config, "DASHBOARD_SHARE_URL", None))
+        or _safe_url(getattr(config, "DASHBOARD_APP_URL", None))
+    )
+
+
 def _invite_url(bot: commands.Bot) -> str | None:
     user = getattr(bot, "user", None)
     if user is None:
@@ -56,7 +63,7 @@ def _invite_url(bot: commands.Bot) -> str | None:
 def _arrival_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
     owner = guild.owner.mention if guild.owner else f"<@{guild.owner_id}>"
     invite = _invite_url(bot)
-    dashboard = _safe_url(getattr(config, "DASHBOARD_APP_URL", None))
+    dashboard = _dashboard_url()
     support = _safe_url(SUPPORT_URL) or OFFICIAL_SUPPORT_URL
 
     links = [f"[Serveur officiel]({support})"]
@@ -284,10 +291,7 @@ class GuildArrival(commands.Cog):
         except Exception:
             logger.exception("Initialisation de la base impossible pour le serveur %s.", guild.id)
 
-        dashboard = _safe_url(getattr(config, "DASHBOARD_APP_URL", None))
-        if not dashboard:
-            public = _safe_url(getattr(config, "DASHBOARD_PUBLIC_URL", None))
-            dashboard = f"{public.rstrip('/')}/app" if public else None
+        dashboard = _dashboard_url()
 
         owner = guild.owner
         if owner is None:
@@ -299,22 +303,46 @@ class GuildArrival(commands.Cog):
             logger.info("Accueil MP ignoré : propriétaire introuvable guild=%s", guild.id)
             return
 
-        lines = [
-            f"Merci d'avoir ajouté SentriX sur **{guild.name}**.",
-            "",
-            "Commandes utiles :",
-            "`+help` — voir les commandes",
-            "`+setup` — configurer le serveur",
-        ]
+        embed = discord.Embed(
+            title="SentriX est prêt",
+            description=f"SentriX a été ajouté à **{guild.name}**.",
+            colour=discord.Colour(WELCOME_COLOUR),
+        )
+        embed.add_field(
+            name="Démarrage",
+            value=(
+                "`+setup` — configurer le serveur\n"
+                "`+help` — voir les commandes réellement disponibles"
+            ),
+            inline=False,
+        )
+        bot_user = getattr(self.bot, "user", None)
+        avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
+        if avatar:
+            embed.set_thumbnail(url=str(avatar))
+        embed.set_footer(text=f"SentriX • {guild.name}")
+
+        view = discord.ui.View(timeout=None)
         if dashboard:
-            lines.extend(["", f"Dashboard : {dashboard}"])
+            view.add_item(discord.ui.Button(
+                label="Ouvrir le Dashboard",
+                style=discord.ButtonStyle.link,
+                url=dashboard,
+            ))
+        support = _safe_url(SUPPORT_URL) or OFFICIAL_SUPPORT_URL
+        view.add_item(discord.ui.Button(
+            label="Serveur officiel",
+            style=discord.ButtonStyle.link,
+            url=support,
+        ))
 
         try:
             await owner.send(
-                "\n".join(lines)[:2000],
+                embed=embed,
+                view=view,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
-            logger.info("Accueil compact SentriX envoyé en MP au propriétaire de %s.", guild.id)
+            logger.info("Accueil MP SentriX envoyé au propriétaire de %s.", guild.id)
         except (discord.Forbidden, discord.HTTPException):
             logger.info("Accueil MP impossible pour le propriétaire de %s.", guild.id)
 
