@@ -350,15 +350,21 @@ def _patch_prefix_error_ux(bot: commands.Bot) -> None:
     bot.on_command_error = types.MethodType(prefix_error, bot)
 
 
-async def _gamble_signature_probe(ctx: commands.Context, montant: int):
+async def _gamble_signature_probe(ctx: commands.Context, montant: str):
     return None
 
 
 def _repair_gamble_parser(bot: commands.Bot) -> None:
-    """Contrat ciblé +gamble : un seul argument utilisateur ``montant: int``.
+    """Contrat ciblé +gamble : un seul argument utilisateur ``montant: str``.
 
     Cette réparation est gardée ici parce qu'une ancienne couche runtime a déjà corrompu
     ce contrat en production. Elle ne touche pas à l'Application Command /gamble.
+
+    Le type est ``str`` et non ``int`` : la commande accepte « all » pour tout
+    miser, et la conversion vers un entier se fait DANS la commande, qui seule
+    connaît le solde. Imposer ``int`` ici faisait échouer « +double all » sur une
+    erreur d'argument avant même d'entrer dans le pari — le contrat protégeait la
+    forme (un seul argument nommé montant) mais interdisait le geste.
     """
     command = bot.get_command("gamble")
     if command is None:
@@ -366,14 +372,14 @@ def _repair_gamble_parser(bot: commands.Bot) -> None:
 
     actual = tuple(str(name) for name in getattr(command, "clean_params", {}))
     annotation = getattr(getattr(command, "clean_params", {}).get("montant"), "annotation", None)
-    if actual == ("montant",) and annotation is int:
-        command.usage = "<montant>"
+    if actual == ("montant",) and annotation is str:
+        command.usage = "<montant|all>"
         command._sentrix_gamble_contract_fixed = True
         return
 
     probe = commands.Command(_gamble_signature_probe, name="_sentrix_gamble_signature_probe")
     command.params = probe.params.copy()
-    command.usage = "<montant>"
+    command.usage = "<montant|all>"
     command._sentrix_gamble_contract_fixed = True
     logger.warning("Contrat du parseur +gamble réparé : %r -> ('montant',).", actual)
 

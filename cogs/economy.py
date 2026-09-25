@@ -1047,25 +1047,84 @@ class Economy(commands.Cog, name="Economy"):
         return await sx_panels.envoyer(
             ctx, sx_panels.depuis_embed(embeds.error("Vente temporairement indisponible."))
         )
-    @commands.hybrid_command(name="gamble", description="Miser de l'argent au casino (50% de chance).")
-    @app_commands.describe(montant="Le montant à miser")
-    async def gamble(self, ctx: commands.Context, montant: int):
+    @commands.hybrid_command(
+        name="gamble",
+        aliases=["double"],
+        description="Doubler ou tout perdre : misez un montant, ou 'all' pour tout miser.",
+    )
+    @app_commands.describe(montant="Le montant à miser, ou 'all' pour tout votre argent liquide")
+    async def gamble(self, ctx: commands.Context, montant: str):
+        """Double ou rien. `all` mise tout l'argent liquide.
+
+        Le montant est une chaîne et non un entier : sans ça, `+double all`
+        échouait à la conversion avant même d'entrer dans la commande, avec un
+        message d'erreur d'argument au lieu d'un pari.
+        """
         if ctx.guild is None:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
-        if int(montant) <= 0:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Le montant doit être positif.')))
+
+        stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
+        liquide = int(stats.get("cash", stats.get("total_money", 0)) or 0)
+        emoji = await self._emoji_monnaie(ctx.guild.id)
+        tout_demande = str(montant).strip().casefold() in {"all", "tout", "max"}
+        mise = _parse_amount(str(montant), liquide)
+        if mise is None or mise <= 0:
+            # Le parseur partagé renvoie None pour « all » quand il n'y a rien à
+            # miser. Dire « indiquez un montant » dans ce cas serait une fausse
+            # raison : le format était bon, c'est la bourse qui est vide.
+            if tout_demande or liquide <= 0:
+                return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(
+                    f"Vous n'avez rien à miser : **{stats_service.format_number(liquide)}** {emoji} en liquide."
+                    if liquide <= 0 else
+                    f"Mise impossible avec **{stats_service.format_number(liquide)}** {emoji} en liquide."
+                )))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(
+                "Indiquez un montant, ou `all` pour tout miser. Exemple : `+double 50`."
+            )))
+
         won = random.random() < 0.5
         status = await economy_service.atomic_gamble(
-            self.bot.db, ctx.guild.id, ctx.author.id, int(montant), win=won
+            self.bot.db, ctx.guild.id, ctx.author.id, mise, win=won
         )
         if status == "insufficient":
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Solde insuffisant.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(
+                f"Solde insuffisant : vous avez **{stats_service.format_number(liquide)}** {emoji} en liquide."
+            )))
         if status != "ok":
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Casino temporairement indisponible.')))
-        amount_text = stats_service.format_number(int(montant))
+
+        apres = liquide + mise if won else liquide - mise
+        texte = stats_service.format_number(mise)
+        tout = mise >= liquide > 0
         if won:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'Vous gagnez **{amount_text}** 🪙.')))
-        return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Vous perdez **{amount_text}** 🪙.')))
+            titre = "🎉 **DOUBLÉ !**" if not tout else "🏆 **TOUT DOUBLÉ !**"
+            description = (
+                f"{titre}\n**+{texte}** {emoji} — vous avez maintenant "
+                f"**{stats_service.format_number(apres)}** {emoji}."
+            )
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(
+                await self._embed_jeu(ctx, "Double ou rien", description, kind="success")
+            ))
+        description = (
+            ("💥 **Tout perdu.**" if tout else "○ **Perdu.**")
+            + f"\n**−{texte}** {emoji} — il vous reste "
+            f"**{stats_service.format_number(apres)}** {emoji}."
+        )
+        return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(
+            await self._embed_jeu(ctx, "Double ou rien", description, kind="danger")
+        ))
+
+    async def _embed_jeu(self, ctx, titre: str, description: str, *, kind: str):
+        """Embed du casino, aux couleurs de design du serveur."""
+        design = await self.bot.db.get_design_settings(ctx.guild.id)
+        couleur = {
+            "success": design.get("success_color", design_system.COLORS.success),
+            "danger": design.get("danger_color", design_system.COLORS.danger),
+        }.get(kind, design_system.COLORS.primary)
+        return design_system.create_embed(
+            title=titre, description=description,
+            colour=couleur, footer=design.get("footer"),
+        )
     async def _deposit_to_bank(self, ctx: commands.Context, montant: str):
         if ctx.guild is None:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
@@ -1146,6 +1205,19 @@ class Economy(commands.Cog, name="Economy"):
     async def reset_economy(self, ctx: commands.Context):
         await self.bot.db.execute("DELETE FROM economy WHERE guild_id = ?", (ctx.guild.id,))
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success("L'économie du serveur a été réinitialisée. (L'historique des transactions est conservé pour l'audit.)")))
+
+
+# cogs/bot_excellence_runtime remplace le callback de +gamble au démarrage par sa
+# propre copie — SQL, tirage et messages compris. Cette copie existait parce que la
+# version d'origine n'était pas atomique ; elle l'est depuis qu'elle passe par
+# economy_service.atomic_gamble, qui prend le même verrou et refuse la mise en une
+# seule requête conditionnelle. Le remplacement ne garderait donc plus qu'un
+# doublon, et c'est LUI que les membres voyaient : « all » y est impossible, le
+# paramètre étant déclaré int.
+#
+# Le wrapper prévoit déjà sa propre sortie : il ne remplace rien si le callback est
+# marqué atomique. On pose le marqueur plutôt que de supprimer son code.
+Economy.gamble.callback._sentrix_atomic = True
 
 
 async def setup(bot: commands.Bot):

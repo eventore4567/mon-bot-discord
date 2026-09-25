@@ -661,3 +661,59 @@ def test_le_compteur_d_objets_lit_la_collection_et_ne_plante_jamais():
             raise RuntimeError("base indisponible")
 
     assert asyncio.run(_combien_deja(SimpleNamespace(db=_DBCassee()), 1, 2, "Gardon")) == 0
+
+
+def test_double_accepte_all_et_un_entier():
+    """« +double all » échouait sur une erreur d'argument avant d'entrer dans le
+    pari : trois couches figeaient `montant` en int — le contrat de
+    user_facing_hygiene, la porte V2.5, et un wrapper runtime qui remplaçait
+    carrément le callback par sa propre copie."""
+    import inspect
+
+    from cogs import economy, user_facing_hygiene
+
+    # 1. La commande canonique accepte une chaîne.
+    signature = inspect.signature(economy.Economy.gamble.callback)
+    assert str(signature.parameters["montant"].annotation) in ("<class 'str'>", "str")
+
+    # 2. « double » est bien un raccourci de la même commande.
+    assert "double" in (economy.Economy.gamble.aliases or [])
+
+    # 3. La sonde qui répare le contrat n'impose plus int.
+    sonde = inspect.signature(user_facing_hygiene._gamble_signature_probe)
+    assert str(sonde.parameters["montant"].annotation) in ("<class 'str'>", "str")
+
+    # 4. Le wrapper runtime ne remplace plus le callback canonique.
+    assert getattr(economy.Economy.gamble.callback, "_sentrix_atomic", False)
+
+    # 5. Les deux formes se lisent.
+    assert economy._parse_amount("50", 1000) == 50
+    assert economy._parse_amount("all", 1000) == 1000
+
+
+def test_l_economie_garde_son_symbole_monetaire():
+    """« **141 ** au total » et « Portefeuille   141  » : la couche sobre
+    retirait la pièce, qui n'est pas une décoration mais l'UNITÉ du montant."""
+    from types import SimpleNamespace as _NS
+
+    from cogs.final_interaction_policy import _COMMAND_CONTEXT
+    from utils.embeds import strip_emojis
+    from utils.game_context import COGS_D_ECONOMIE, commande_de_jeu
+
+    assert "economy" in COGS_D_ECONOMIE
+
+    contexte = _NS(command=_NS(name="balance", root_parent=None, cog_name="Economy"))
+    jeton = _COMMAND_CONTEXT.set(contexte)
+    try:
+        assert commande_de_jeu() is True
+        assert strip_emojis("141 🪙 au total") == "141 🪙 au total"
+    finally:
+        _COMMAND_CONTEXT.reset(jeton)
+
+    # Hors économie et hors jeu, la sobriété reste la règle.
+    hors = _NS(command=_NS(name="ping", root_parent=None, cog_name="Utility"))
+    jeton = _COMMAND_CONTEXT.set(hors)
+    try:
+        assert commande_de_jeu() is False
+    finally:
+        _COMMAND_CONTEXT.reset(jeton)

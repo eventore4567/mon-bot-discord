@@ -22,6 +22,13 @@ COGS_DE_JEU = frozenset({
     "gamesplayercommands", "gameseconomy", "games", "gamesetup",
 })
 
+# L'économie partage l'exception, pour une raison différente : son pictogramme
+# est le SYMBOLE MONÉTAIRE, c'est-à-dire l'unité du nombre affiché. Le retirer
+# laissait « 141 » sans dire 141 de quoi, avec une double espace là où la pièce
+# se trouvait : « **141 ** au total », « Portefeuille   141  ». Un montant sans
+# son unité n'est pas plus sobre, il est incomplet.
+COGS_D_ECONOMIE = frozenset({"economy", "moneydrops", "shop", "sentrixeconomy"})
+
 
 def _racine_et_cog() -> tuple[str, str]:
     from cogs.final_interaction_policy import _COMMAND_CONTEXT, _COMMAND_ROOT
@@ -101,17 +108,22 @@ def pictogramme_de_titre(titre: str) -> str:
 
 
 def commande_de_jeu() -> bool:
-    """Vrai quand la commande en train de répondre est un mini-jeu."""
+    """Vrai quand les pictogrammes de la commande portent du sens.
+
+    Deux familles, pour deux raisons distinctes : dans un mini-jeu l'emoji EST
+    le jeu (une machine à sous sans ses rouleaux n'est rien), et dans une
+    commande d'économie il est l'unité du montant.
+    """
     try:
         from cogs.games_catalog import GAME_CATALOG
 
         nom, cog = _racine_et_cog()
         if nom and nom in GAME_CATALOG:
             return True
-        return bool(cog) and cog in COGS_DE_JEU
+        return bool(cog) and (cog in COGS_DE_JEU or cog in COGS_D_ECONOMIE)
     except Exception:
         # Hors commande, ou pendant le démarrage : on garde la règle sobre.
         return False
 
 
-__all__ = ["commande_de_jeu", "jeu_en_cours", "pictogramme_du_jeu", "pictogramme_de_titre", "COGS_DE_JEU"]
+__all__ = ["commande_de_jeu", "jeu_en_cours", "pictogramme_du_jeu", "pictogramme_de_titre", "COGS_DE_JEU", "COGS_D_ECONOMIE"]

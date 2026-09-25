@@ -2,7 +2,7 @@
 """Quality gate V2.5 : stabilité, UX, sécurité et contrats de commandes SentriX.
 
 Le but est de bloquer AVANT production les régressions déjà vues : paramètres ``ctx``
-exposés, +gamble qui refuse un entier valide, slash absent/cassé, cooldowns sans retour,
+exposés, +gamble qui refuse un entier valide ou « all », slash absent/cassé, cooldowns sans retour,
 perte des protections économie/tickets/IA et réintroduction de patchs obsolètes.
 """
 from __future__ import annotations
@@ -33,8 +33,8 @@ CRITICAL_CONTRACTS = {
 }
 
 
-def _annotation_is_int(value) -> bool:
-    return value is int or str(value).strip() in {"int", "<class 'int'>"}
+def _annotation_is_str(value) -> bool:
+    return value is str or str(value).strip() in {"str", "<class 'str'>"}
 
 
 def _static_checks(errors: list[str]) -> None:
@@ -195,8 +195,24 @@ async def _runtime_checks(errors: list[str]) -> None:
             parameter = gamble.clean_params.get("montant")
             if parameter is None:
                 errors.append("+gamble n'a plus de paramètre montant")
-            elif not _annotation_is_int(parameter.annotation):
-                errors.append(f"+gamble montant doit rester int, obtenu {parameter.annotation!r}")
+            elif not _annotation_is_str(parameter.annotation):
+                # La régression gardée ici est « +gamble refuse un entier
+                # valide ». Elle se vérifie par le COMPORTEMENT, plus bas : le
+                # paramètre est une chaîne pour que « all » soit possible, et la
+                # conversion se fait dans la commande, qui seule connaît le
+                # solde. Imposer int faisait échouer « +double all » sur une
+                # erreur d'argument avant même d'entrer dans le pari.
+                errors.append(
+                    f"+gamble montant doit être une chaîne (pour accepter « all »), "
+                    f"obtenu {parameter.annotation!r}"
+                )
+            else:
+                from cogs.economy import _parse_amount
+
+                if _parse_amount("50", 1000) != 50:
+                    errors.append("+gamble refuse un entier valide — régression historique")
+                if _parse_amount("all", 1000) != 1000:
+                    errors.append("+gamble n'accepte plus « all »")
             if "ctx" in user_facing_hygiene.visible_usage(gamble, "+").casefold():
                 errors.append("+gamble affiche encore ctx dans sa syntaxe")
 
