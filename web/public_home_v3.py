@@ -137,7 +137,7 @@ img{display:block;max-width:100%}
 footer{margin-top:116px;padding:42px 0 34px;border-top:1px solid rgba(255,255,255,.06)}.footer-grid{display:grid;grid-template-columns:1.4fr repeat(3,1fr);gap:28px}.footer-brand p{max-width:340px;color:var(--muted);font-size:11px}.footer-col b{display:block;margin-bottom:10px;font-size:10px;text-transform:uppercase;letter-spacing:.09em}.footer-col a{display:block;width:max-content;max-width:100%;margin:7px 0;color:var(--muted);font-size:11px}.footer-col a:hover{color:#fff}.footer-bottom{display:flex;justify-content:space-between;gap:18px;margin-top:30px;padding-top:19px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
 
 /* pointer depth */
-.card,.step,.security-box,.tour-screen,.ai-card,.terminal{transform-style:preserve-3d;will-change:transform;transition:transform .16s ease,border-color .18s ease,box-shadow .18s ease}
+.card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo{transform-style:preserve-3d;will-change:transform;transition:border-color .18s ease,box-shadow .18s ease}
 .card:hover,.step:hover,.ai-card:hover,.terminal:hover{box-shadow:0 24px 62px rgba(0,0,0,.30)}
 .card>*:not(.flow),.step>*,.ai-card>*,.terminal>*{position:relative;z-index:1}
 .pointer-ring{position:fixed;z-index:125;width:13px;height:13px;border-radius:50%;pointer-events:none;opacity:0;transform:translate(-50%,-50%);background:rgba(170,158,255,.24);box-shadow:0 0 34px rgba(124,108,255,.45);transition:opacity .15s ease}
@@ -191,6 +191,17 @@ footer{margin-top:116px;padding:42px 0 34px;border-top:1px solid rgba(255,255,25
   .hero-actions .btn{width:100%}.hero-art{min-height:365px}.side-nav span{height:27px}.kpi-row{display:none}.chart{height:78px}.section h2{font-size:34px}.security-box{min-height:575px}.radar{right:50%;transform:translateX(50%)}.alerts{top:225px;bottom:auto}.tour-pane.security{grid-template-columns:74px 1fr}.tour-side{padding:10px 5px}
 }
 @keyframes flowMoveY{to{top:100%}}
+@media(max-width:380px){
+  .wrap{width:min(calc(100% - 22px),1240px)}
+  .brand span{font-size:15px}.nav-actions>.btn.primary{font-size:11px;padding:8px 9px}
+  .hero h1{font-size:40px}.hero .lead{font-size:14px}.hero-meta{gap:8px 12px}
+  .status-cell{padding:13px}.status-cell strong{font-size:16px}
+  .section{padding:68px 0}.section h2{font-size:31px}.card{padding:18px}.final{padding:52px 16px}
+}
+@media(pointer:coarse){
+  .pointer-ring{display:none}
+  .card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo{will-change:auto}
+}
 @media(prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}body:after,canvas#fx{display:none}.hero:before,.badge i,.orbit,.product-shell,.float-card,.pulse-dots i,.chart-path,.chart-fill,.rail-track,.security-box:before,.radar:before,.bars i,.coin,.connector:after,.cursor,.final:before,.spinner{animation:none!important}.pointer-ring{display:none}.badge,.hero h1,.hero .lead,.hero-actions,.hero-meta,.hero-art,.alert,.bubble,.reveal,.stagger>*{opacity:1!important;transform:none!important;animation:none!important;transition:none!important}.btn,.card,.tour-tab,.topbar{transition:none!important}
 }
@@ -373,9 +384,24 @@ if(!reduced){
   art?.addEventListener("pointermove",e=>{const r=art.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;art.style.transform="perspective(1500px) rotateX("+(-y*3)+"deg) rotateY("+(x*3)+"deg)"});
   art?.addEventListener("pointerleave",()=>art.style.transform="");
 
-  const interactive=$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal");
-  function tilt(el,e,max){const r=el.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;el.style.transform="perspective(1000px) rotateX("+(-y*max)+"deg) rotateY("+(x*max)+"deg) translateY(-3px)";el.style.boxShadow=(-x*16)+"px "+(18+y*10)+"px 58px rgba(0,0,0,.30)"}
-  interactive.forEach(el=>{const max=el.classList.contains("card")?5:3.4;el.addEventListener("pointermove",e=>tilt(el,e,max));el.addEventListener("pointerleave",()=>{el.style.transform="";el.style.boxShadow=""})});
+  const interactive=$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo");
+  const motion=new WeakMap();
+  function getMotion(el){let s=motion.get(el);if(!s){s={rx:0,ry:0,tx:0,ty:0,trx:0,try:0,ttx:0,tty:0,raf:0};motion.set(el,s)}return s}
+  function animateTilt(el){
+    const s=getMotion(el),ease=.145;
+    s.rx+=(s.trx-s.rx)*ease;s.ry+=(s.try-s.ry)*ease;s.tx+=(s.ttx-s.tx)*ease;s.ty+=(s.tty-s.ty)*ease;
+    el.style.transform="perspective(1100px) rotateX("+s.rx.toFixed(2)+"deg) rotateY("+s.ry.toFixed(2)+"deg) translate3d("+s.tx.toFixed(1)+"px,"+s.ty.toFixed(1)+"px,0)";
+    el.style.boxShadow=(-s.ry*3).toFixed(1)+"px "+(20+s.rx*1.5).toFixed(1)+"px 62px rgba(0,0,0,.31)";
+    const delta=Math.abs(s.trx-s.rx)+Math.abs(s.try-s.ry)+Math.abs(s.ttx-s.tx)+Math.abs(s.tty-s.ty);
+    if(delta>.05)s.raf=requestAnimationFrame(()=>animateTilt(el));else{s.raf=0;if(!s.trx&&!s.try&&!s.ttx&&!s.tty){el.style.transform="";el.style.boxShadow=""}}
+  }
+  function aimTilt(el,x,y,scale=1){const r=el.getBoundingClientRect(),nx=Math.max(0,Math.min(1,(x-r.left)/r.width))-.5,ny=Math.max(0,Math.min(1,(y-r.top)/r.height))-.5,s=getMotion(el),max=el.classList.contains("card")?9:el.classList.contains("step")?7:5.2;s.trx=-ny*max*scale;s.try=nx*max*scale;s.ttx=nx*12*scale;s.tty=ny*8*scale;if(!s.raf)s.raf=requestAnimationFrame(()=>animateTilt(el))}
+  function releaseTilt(el){const s=getMotion(el);s.trx=s.try=s.ttx=s.tty=0;if(!s.raf)s.raf=requestAnimationFrame(()=>animateTilt(el))}
+  interactive.forEach(el=>{
+    el.addEventListener("pointermove",e=>{if(e.pointerType!=="touch")aimTilt(el,e.clientX,e.clientY)});
+    el.addEventListener("pointerleave",()=>releaseTilt(el));
+    el.addEventListener("pointerdown",e=>{if(e.pointerType==="touch"){aimTilt(el,e.clientX,e.clientY,.8);setTimeout(()=>releaseTilt(el),220)}});
+  });
 
   const canvas=$("#fx"),ctx=canvas?.getContext("2d");let dots=[];
   function resize(){if(!canvas||!ctx)return;const d=Math.min(devicePixelRatio||1,2);canvas.width=innerWidth*d;canvas.height=innerHeight*d;canvas.style.width=innerWidth+"px";canvas.style.height=innerHeight+"px";ctx.setTransform(d,0,0,d,0,0);dots=Array.from({length:Math.min(70,Math.max(34,Math.floor(innerWidth/20)))},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:.45+Math.random()*1.2,v:.08+Math.random()*.22,a:.10+Math.random()*.35}))}
