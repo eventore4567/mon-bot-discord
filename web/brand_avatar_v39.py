@@ -154,6 +154,30 @@ def _inject_brand_meta(source: str, image_url: str) -> str:
 
 
 @web.middleware
+async def public_home_middleware(request: web.Request, handler):
+    """Autorité HTTP finale pour la racine publique.
+
+    Plusieurs couches historiques du dashboard enveloppent handle_index et peuvent
+    court-circuiter le handler de /. La landing est donc décidée au niveau middleware,
+    après les middlewares de sécurité mais avant le handler routé.
+    """
+    if request.path == "/" and request.method in {"GET", "HEAD"}:
+        dashboard = request.app.get("dashboard_module")
+        if dashboard is not None:
+            return web.Response(
+                text=_public_home_html(request, dashboard),
+                content_type="text/html",
+                headers={
+                    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                    "X-Robots-Tag": "index, follow",
+                    "X-SentriX-Surface": "public-home-v2",
+                },
+            )
+    return await handler(request)
+
+
+@web.middleware
 async def brand_meta_middleware(request: web.Request, handler):
     response = await handler(request)
     if request.path not in _PUBLIC_HTML_PATHS:
@@ -208,7 +232,11 @@ def install(dashboard) -> None:
 
     def build_app(bot):
         app = original_build_app(bot)
+        app["dashboard_module"] = dashboard
+        # brand_meta_middleware reste avant public_home_middleware afin d’enrichir aussi
+        # la landing. Le middleware public tranche / avant les frozen_handle_index historiques.
         app.middlewares.append(brand_meta_middleware)
+        app.middlewares.append(public_home_middleware)
         app.router.add_get(_AVATAR_PATH, official_avatar)
         app.router.add_get("/favicon.ico", favicon)
         return app
