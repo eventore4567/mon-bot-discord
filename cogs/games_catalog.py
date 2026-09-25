@@ -48,6 +48,10 @@ GAME_CATALOG = {
     "lava": ("🌋 Tour de lave", "rapide"),
     "rocket": ("🚀 Fusée", "rapide"),
     "safe": ("🔐 Coffre-fort", "rapide"),
+    "dragon": ("🐉 Chasse au dragon", "solo"),
+    "zombie": ("🧟 Nuit des zombies", "solo"),
+    "ice": ("🧊 Lac gelé", "solo"),
+    "potion": ("⚗️ Atelier d'alchimie", "solo"),
 }
 
 WORDGAME_CLUES = [

@@ -239,6 +239,91 @@ class VueMisee(VueDeJeu):
         return statut
 
 
+class VuePvE(VueDeJeu):
+    """Socle des combats au tour par tour : ``+dragon`` et ``+zombie``.
+
+    La vue ne tient AUCUN point de vie. Les règles vivent dans
+    ``utils.pve_engine`` et l'état s'y trouve ; tout ici est délégué. Deux
+    compteurs de PV, l'un dans la vue et l'autre dans le moteur, finiraient par
+    se contredire au premier correctif appliqué d'un seul côté — et c'est
+    l'affichage qui mentirait, donc le joueur qui aurait raison de se plaindre.
+
+    Ce que le socle apporte vraiment : le propriétaire, le verrou d'interaction,
+    l'expiration, l'abandon, la désactivation des composants, le rendu des
+    barres de vie, le journal des derniers tours et — le seul garde-fou qui
+    compte pour l'économie — la récompense versée une fois et une seule.
+    """
+
+    def __init__(self, proprietaire_id: int | None, *, etat, tours_journal: int = 3, **kwargs):
+        super().__init__(proprietaire_id, **kwargs)
+        self.etat = etat
+        self.abandonne = False
+        self.recompense_versee = False
+        self.recompense = None
+        self.journal: list[str] = []
+        self._tours_journal = max(1, int(tours_journal))
+
+    # -- délégation au moteur ----------------------------------------------
+
+    @property
+    def tour(self) -> int:
+        return self.etat.tour
+
+    @property
+    def combat_fini(self) -> bool:
+        """Vrai dès que le moteur conclut, ou que le joueur abandonne."""
+        return self.abandonne or self.etat.fini
+
+    def actions_possibles(self) -> list[str]:
+        return self.etat.actions_possibles()
+
+    # -- abandon -----------------------------------------------------------
+
+    def abandonner(self) -> None:
+        """Quitter proprement : la manche se conclut, sans récompense."""
+        self.abandonne = True
+        self.terminer()
+
+    # -- récompense --------------------------------------------------------
+
+    def marquer_recompense_versee(self) -> bool:
+        """Vrai la PREMIÈRE fois seulement.
+
+        Un combat peut se conclure par deux chemins au même instant — le
+        dernier coup tue l'ennemi pendant qu'une expiration se déclenche. Celui
+        qui obtient ``False`` ne doit rien payer.
+        """
+        if self.recompense_versee:
+            return False
+        self.recompense_versee = True
+        return True
+
+    # -- rendu partagé ------------------------------------------------------
+
+    @staticmethod
+    def barre(actuels: int, maximum: int, longueur: int = 10) -> str:
+        """Barre de vie lisible sur téléphone, sans dépendre de la couleur.
+
+        Un combattant encore debout garde toujours un bloc plein : arrondir un
+        point de vie restant à zéro afficherait un mort qui joue encore.
+        """
+        maximum = max(1, int(maximum))
+        actuels = max(0, min(int(actuels), maximum))
+        pleins = round(actuels / maximum * longueur)
+        if actuels > 0:
+            pleins = max(1, pleins)
+        pleins = max(0, min(longueur, pleins))
+        return "█" * pleins + "░" * (longueur - pleins)
+
+    def noter(self, ligne: str) -> None:
+        """Ajoute une ligne au journal, qui ne garde que les derniers tours."""
+        self.journal.append(ligne)
+        del self.journal[:-self._tours_journal]
+
+    def journal_texte(self) -> str:
+        return "\n".join(self.journal)
+
+
 class VueReflexe(VueDeJeu):
     """Socle des jeux de réflexe : signal, faux départ, mesure monotone.
 
@@ -316,6 +401,7 @@ class BoutonRejouer(discord.ui.Button):
 
 __all__ = [
     "VueDeJeu",
+    "VuePvE",
     "VueMisee",
     "VueReflexe",
     "positions_melangees",

@@ -63,7 +63,7 @@ RECOVERED_GAMES = {
     "connect4", "numberduel", "reactionduel", "quizduel", "triviastart",
     "wordrace", "reactionevent", "guessrace", "mathrace", "lastmessage",
     "emoji-race", "adventure", "dungeon", "mining", "fishing", "treasure",
-    "hunt", "explore", "bomb", "target", "archery", "ghost", "sequence", "lava", "rocket", "safe", "collec", "gamehistory", "gameprofile", "gamestats", "gametop",
+    "hunt", "explore", "bomb", "target", "archery", "ghost", "sequence", "lava", "rocket", "safe", "dragon", "zombie", "ice", "potion", "collec", "gamehistory", "gameprofile", "gamestats", "gametop",
     "dailygames", "gamesetup",
 }
 

@@ -27,11 +27,14 @@ from discord.ext import commands
 
 from cogs.games_economy import _embed, _finish, _precheck
 from services import game_stakes
-from utils import game_rewards, stats_service
+from services import crafting
+from utils import game_rewards, ice_puzzle, stats_service
+from utils import pve_engine as pve
 from utils import sentrix_panels as panels
 from utils.game_ui import (
     VueDeJeu,
     VueMisee,
+    VuePvE,
     VueReflexe,
     positions_melangees,
     valider_composants,
@@ -628,6 +631,96 @@ class GamesArcade(commands.Cog, name="GamesArcade"):
                 embed = await _embed(self.bot, ctx.guild.id, title="Coffre-fort",
                                      description=texte, kind="success")
             await panels.envoyer(ctx, panels.depuis_embed(embed))
+
+    # ------------------------------------------------------------- bloc PvE
+
+    @commands.hybrid_command(
+        name="dragon",
+        description="Affrontez un dragon au tour par tour : attaque, parade, soin, déchaînement.",
+        with_app_command=False,
+    )
+    @app_commands.describe(adversaire="dragonnet, feu, glace ou ombre — au hasard si omis")
+    async def dragon(self, ctx: commands.Context, adversaire: str | None = None):
+        choisi = (adversaire or "").strip().lower()
+        if choisi and choisi not in pve.DRAGONS:
+            connus = ", ".join(f"`{c}`" for c in pve.DRAGONS)
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None, title="Chasse au dragon",
+                description=f"Dragon inconnu. Au choix : {connus}.", kind="warning")))
+        demarre, erreur, session = await _precheck(self.bot, ctx, "dragon", DRAGON_COOLDOWN)
+        if not demarre:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None,
+                title="Chasse au dragon", description=erreur, kind="warning")))
+        bete = pve.DRAGONS[choisi] if choisi else game_rewards.secure_pick(list(pve.DRAGONS.values()))
+        vue = _VueDragon(self, ctx, bete, session)
+        embed = await _embed(self.bot, ctx.guild.id, title="Chasse au dragon",
+                             description=vue.texte())
+        valider_composants(vue)
+        vue.message = await panels.envoyer(
+            ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+
+    @commands.hybrid_command(
+        name="zombie",
+        description="Tenez six vagues de zombies : munitions comptées, retranchements limités.",
+        with_app_command=False,
+    )
+    async def zombie(self, ctx: commands.Context):
+        demarre, erreur, session = await _precheck(self.bot, ctx, "zombie", ZOMBIE_COOLDOWN)
+        if not demarre:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None,
+                title="Nuit des zombies", description=erreur, kind="warning")))
+        vue = _VueZombie(self, ctx, session)
+        embed = await _embed(self.bot, ctx.guild.id, title="Nuit des zombies",
+                             description=vue.texte())
+        valider_composants(vue)
+        vue.message = await panels.envoyer(
+            ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+
+    @commands.hybrid_command(
+        name="ice",
+        description="Le pingouin glisse jusqu'au premier rocher : amenez-le sur le trou.",
+        with_app_command=False,
+    )
+    async def ice(self, ctx: commands.Context):
+        demarre, erreur, session = await _precheck(self.bot, ctx, "ice", ICE_COOLDOWN)
+        if not demarre:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None,
+                title="Lac gelé", description=erreur, kind="warning")))
+        # Génération sous solveur : une grille sans solution n'est jamais envoyée.
+        niveau = ice_puzzle.generer(pve.AleaSecurise())
+        if niveau is None:
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "ice")
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id, title="Lac gelé",
+                description="La glace n'a pas pris ce soir. Réessayez dans un instant.",
+                kind="warning")))
+        vue = _VueIce(self, ctx, niveau, session)
+        embed = await _embed(self.bot, ctx.guild.id, title="Lac gelé", description=vue.texte())
+        valider_composants(vue)
+        vue.message = await panels.envoyer(
+            ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+
+    @commands.hybrid_command(
+        name="potion",
+        description="Récoltez des ingrédients, fabriquez des potions, buvez-les pour un vrai bonus.",
+        with_app_command=False,
+    )
+    async def potion(self, ctx: commands.Context):
+        demarre, erreur, session = await _precheck(self.bot, ctx, "potion", POTION_COOLDOWN)
+        if not demarre:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None,
+                title="Atelier d'alchimie", description=erreur, kind="warning")))
+        stocks = await crafting.stock(self.bot.db, ctx.guild.id, ctx.author.id)
+        vue = _VuePotion(self, ctx, stocks, session)
+        embed = await _embed(self.bot, ctx.guild.id, title="Atelier d'alchimie",
+                             description=vue.texte())
+        valider_composants(vue)
+        vue.message = await panels.envoyer(
+            ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
 
 
 # =============================================================================
@@ -1317,3 +1410,642 @@ class _VueSafe(VueDeJeu):
             if self.restants <= 0:
                 await _finish(self.cog.bot, self.ctx, "safe", self.session_id, "loss", 0)
                 self.terminer()
+
+
+# =============================================================================
+# 🐉 DRAGON — duel au tour par tour contre un adversaire qui télégraphie
+# =============================================================================
+
+DRAGON_COOLDOWN = 45
+DRAGON_BASE = 70            # récompense d'une victoire en difficulté normale
+DRAGON_PRIMES = {"facile": 0.6, "normal": 1.0, "difficile": 1.8}
+
+LIBELLES_ACTION = {
+    "attaque": ("Attaquer", "⚔️"),
+    "defense": ("Parer", "🛡️"),
+    "soin": ("Soigner", "❤️"),
+    "special": ("Déchaînement", "💥"),
+}
+LIBELLES_INTENTION = {
+    pve.GRIFFE: ("🗡️", "prépare un coup de griffe"),
+    pve.SOUFFLE: ("🔥", "inspire profondément — un souffle arrive"),
+    pve.GARDE: ("🐚", "se replie derrière ses écailles"),
+}
+
+
+class _VueDragon(VuePvE):
+    """Un duel entier, scellé à la création.
+
+    Les intentions du dragon sont tirées d'avance : en décider après avoir lu
+    le coup du joueur permettrait de souffler exactement quand il n'a pas paré,
+    et le combat cesserait d'être un jeu de lecture.
+    """
+
+    def __init__(self, cog: "GamesArcade", ctx: commands.Context, dragon, session_id: str):
+        super().__init__(
+            ctx.author.id,
+            etat=pve.EtatDragon(dragon=dragon, alea=pve.AleaSecurise()),
+            timeout=240.0,
+            message_intrus="Ce dragon est déjà affronté par quelqu'un d'autre.",
+        )
+        self.cog, self.ctx, self.session_id = cog, ctx, session_id
+        self.dragon = dragon
+        self._reconstruire()
+
+    # -- composants ---------------------------------------------------------
+
+    def _reconstruire(self) -> None:
+        """Reconstruit les boutons selon ce qui est réellement jouable.
+
+        Un bouton « Déchaîner » affiché sans rage serait cliquable pour rien, et
+        un bouton « Soigner » sans charge annoncerait un soin qui n'arrivera
+        pas. Les actions impossibles disparaissent au lieu d'être grisées.
+        """
+        self.clear_items()
+        if self.combat_fini:
+            return
+        possibles = self.actions_possibles()
+        for action in pve.ACTIONS_DRAGON:
+            if action in possibles:
+                self.add_item(_BoutonDragon(action))
+        self.add_item(_BoutonAbandon("dragon", "Fuir"))
+
+    # -- rendu --------------------------------------------------------------
+
+    def texte(self) -> str:
+        e, d = self.etat, self.dragon
+        emoji = self.cog.emoji_monnaie
+        lignes = [
+            f"{d.emoji} **{d.nom}** · {d.difficulte}",
+            f"{self.barre(e.pv_dragon, d.pv)} `{e.pv_dragon}/{d.pv}` PV",
+            f"🧝 **Vous** {self.barre(e.pv_joueur, pve.PV_JOUEUR)} `{e.pv_joueur}/{pve.PV_JOUEUR}` PV",
+        ]
+        if self.journal:
+            lignes += ["", self.journal_texte()]
+        if self.combat_fini:
+            lignes += ["", self._conclusion()]
+            if self.recompense is not None:
+                lignes.append(self.cog.ligne_recompense(self.recompense).strip())
+            elif self.abandonne:
+                lignes.append(f"Aucun gain — vous avez quitté le combat. {emoji}")
+            return "\n".join(lignes)
+
+        picto, phrase = LIBELLES_INTENTION[e.intention]
+        lignes += [
+            "",
+            f"{picto} Le dragon {phrase}.",
+            f"🔥 Rage **{e.rage}/{pve.RAGE_MAX}** · ❤️ soins **{e.soins}** · "
+            f"tour **{e.tour + 1}/{pve.TOURS_MAX_DRAGON}**",
+        ]
+        return "\n".join(lignes)
+
+    def _conclusion(self) -> str:
+        if self.abandonne:
+            return "🏃 **Vous fuyez.** Le dragon vous laisse partir."
+        issue = self.etat.issue()
+        if issue == "victoire":
+            return f"🏆 **{self.dragon.nom} s'effondre !** Victoire en {self.etat.tour} tours."
+        if issue == "egalite":
+            return "⚰️ **Vous tombez ensemble.** Personne ne ramène rien."
+        if self.etat.pv_joueur <= 0:
+            return f"💀 **Vous tombez.** {self.dragon.nom} garde son trésor."
+        return f"🕊️ **{self.dragon.nom} s'envole.** Vous n'avez pas su le retenir à temps."
+
+    def _resume_tour(self, r: dict) -> str:
+        libelle, picto = LIBELLES_ACTION[r["action"]]
+        bouts = [f"{picto} {libelle}"]
+        if r["esquive"]:
+            bouts.append("le dragon esquive")
+        elif r["inflige"]:
+            bouts.append(f"**{r['inflige']}** dégâts" + (" ✨ critique" if r["critique"] else ""))
+        if r["soigne"]:
+            bouts.append(f"**+{r['soigne']}** PV")
+        if r["recu"]:
+            bouts.append(f"vous encaissez **{r['recu']}**")
+        return "· " + " · ".join(bouts)
+
+    # -- jeu ----------------------------------------------------------------
+
+    async def jouer(self, interaction: discord.Interaction, action: str) -> None:
+        if self.combat_fini or action not in self.actions_possibles():
+            return await self._refuser(interaction, "Cette action n'est plus disponible.")
+        self.noter(self._resume_tour(self.etat.jouer(action)))
+        if self.combat_fini:
+            await self._conclure()
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, "Chasse au dragon", kind=self._kind())
+
+    def _kind(self) -> str:
+        if not self.combat_fini:
+            return "primary"
+        return "success" if self.etat.issue() == "victoire" and not self.abandonne else "danger"
+
+    async def _conclure(self) -> None:
+        """Verse la récompense, une fois et une seule."""
+        if not self.marquer_recompense_versee():
+            return
+        gagne = not self.abandonne and self.etat.issue() == "victoire"
+        montant = round(DRAGON_BASE * DRAGON_PRIMES[self.dragon.difficulte]) if gagne else 0
+        resultat = "win" if gagne else "loss"
+        self.recompense = await _finish(
+            self.cog.bot, self.ctx, "dragon", self.session_id, resultat, montant,
+            metadata={"dragon": self.dragon.cle, "difficulte": self.dragon.difficulte,
+                      "tours": self.etat.tour, "pv_restants": self.etat.pv_joueur,
+                      "abandon": self.abandonne},
+        )
+        if not gagne:
+            self.recompense = None
+        self.terminer()
+
+    async def abandonner_manche(self, interaction: discord.Interaction) -> None:
+        self.abandonner()
+        await self._conclure()
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, "Chasse au dragon", kind="warning")
+
+    async def on_timeout(self) -> None:
+        if not self.terminee:
+            self.abandonne = True
+            await self._conclure()
+        await super().on_timeout()
+
+
+class _BoutonDragon(discord.ui.Button):
+    def __init__(self, action: str):
+        libelle, picto = LIBELLES_ACTION[action]
+        style = {
+            "attaque": discord.ButtonStyle.primary,
+            "defense": discord.ButtonStyle.secondary,
+            "soin": discord.ButtonStyle.success,
+            "special": discord.ButtonStyle.danger,
+        }[action]
+        super().__init__(label=libelle, emoji=picto, style=style,
+                         custom_id=f"dragon:{action}")
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueDragon = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.jouer(interaction, self.action))
+
+
+class _BoutonAbandon(discord.ui.Button):
+    """Sortie propre, partagée par les deux jeux PvE."""
+
+    def __init__(self, jeu: str, libelle: str = "Abandonner"):
+        super().__init__(label=libelle, emoji="🏳️", style=discord.ButtonStyle.secondary,
+                         custom_id=f"{jeu}:abandon", row=4)
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.abandonner_manche(interaction))
+
+
+# =============================================================================
+# 🧟 ZOMBIE — survie par vagues, la munition est la vraie ressource
+# =============================================================================
+
+ZOMBIE_COOLDOWN = 45
+ZOMBIE_PAR_VAGUE = 26       # récompense par vague nettoyée
+ZOMBIE_PRIME_INTEGRALE = 90  # bonus si les six vagues tombent
+
+LIBELLES_ZOMBIE = {
+    "tirer": ("Tirer", "🔫"),
+    "melee": ("Corps à corps", "🔪"),
+    "barricader": ("Se retrancher", "🧱"),
+    "fouiller": ("Fouiller", "🎒"),
+}
+
+
+class _VueZombie(VuePvE):
+    """Six vagues, connues d'avance et identiques pour tout le monde.
+
+    Aucune vague n'est composée après avoir lu le choix du joueur : la
+    composition ne dépend que du numéro de vague, si bien qu'un joueur peut
+    apprendre le jeu au lieu de le subir.
+    """
+
+    def __init__(self, cog: "GamesArcade", ctx: commands.Context, session_id: str):
+        super().__init__(
+            ctx.author.id,
+            etat=pve.EtatZombie(alea=pve.AleaSecurise()),
+            timeout=300.0,
+            message_intrus="Cet abri est déjà défendu par quelqu'un d'autre.",
+        )
+        self.cog, self.ctx, self.session_id = cog, ctx, session_id
+        self._reconstruire()
+
+    def _reconstruire(self) -> None:
+        self.clear_items()
+        if self.combat_fini:
+            return
+        possibles = self.actions_possibles()
+        for action in pve.ACTIONS_ZOMBIE:
+            if action in possibles:
+                self.add_item(_BoutonZombie(action))
+        self.add_item(_BoutonAbandon("zombie", "Se rendre"))
+
+    def texte(self) -> str:
+        e = self.etat
+        if self.combat_fini:
+            lignes = [self._conclusion(),
+                      f"🧟 Vagues nettoyées : **{e.vagues_terminees}/{pve.VAGUES_MAX}** "
+                      f"en {e.tour} tours."]
+            if self.recompense is not None:
+                lignes.append(self.cog.ligne_recompense(self.recompense).strip())
+            return "\n".join(lignes)
+
+        horde = "".join(z.emoji for z in pve.composer_vague(e.vague))
+        total = pve.pv_vague(e.vague)
+        lignes = [
+            f"🧟 **Vague {e.vague}/{pve.VAGUES_MAX}** — {horde}",
+            f"{self.barre(e.pv_vague_restants, total)} `{e.pv_vague_restants}/{total}` PV de horde",
+            f"🧝 **Vous** {self.barre(e.pv, pve.PV_SURVIVANT)} `{e.pv}/{pve.PV_SURVIVANT}` PV",
+        ]
+        if self.journal:
+            lignes += ["", self.journal_texte()]
+        lignes += [
+            "",
+            f"🔫 Munitions **{e.munitions}** · 🧱 retranchements **{e.barricades_restantes}** · "
+            f"tour **{e.tour + 1}/{pve.TOURS_MAX_ZOMBIE}**",
+        ]
+        return "\n".join(lignes)
+
+    def _conclusion(self) -> str:
+        e = self.etat
+        if self.abandonne:
+            return "🏳️ **Vous quittez l'abri.** Ce qui restait dehors y reste."
+        if e.vagues_terminees >= pve.VAGUES_MAX:
+            return "🏆 **L'aube se lève.** Vous avez tenu les six vagues."
+        if e.pv <= 0:
+            return "💀 **La horde vous submerge.**"
+        return "⏳ **Vous n'avez plus la force de tenir un tour de plus.**"
+
+    def _resume_tour(self, r: dict) -> str:
+        libelle, picto = LIBELLES_ZOMBIE[r["action"]]
+        bouts = [f"{picto} {libelle}"]
+        if r["inflige"]:
+            bouts.append(f"**{r['inflige']}** dégâts" + (" ✨ critique" if r["critique"] else ""))
+        if r["trouve"]:
+            bouts.append(f"**+{r['trouve']}** munitions")
+        if r["soigne"]:
+            bouts.append(f"**+{r['soigne']}** PV")
+        if r["morsure"]:
+            bouts.append("morsure")
+        if r["recu"]:
+            bouts.append(f"vous encaissez **{r['recu']}**")
+        if r["vague_nettoyee"]:
+            bouts.append("**vague nettoyée**")
+        return "· " + " · ".join(bouts)
+
+    async def jouer(self, interaction: discord.Interaction, action: str) -> None:
+        if self.combat_fini or action not in self.actions_possibles():
+            return await self._refuser(interaction, "Cette action n'est plus disponible.")
+        self.noter(self._resume_tour(self.etat.jouer(action)))
+        if self.combat_fini:
+            await self._conclure()
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, "Nuit des zombies", kind=self._kind())
+
+    def _kind(self) -> str:
+        if not self.combat_fini:
+            return "primary"
+        return "success" if self.etat.vagues_terminees >= pve.VAGUES_MAX else "danger"
+
+    async def _conclure(self) -> None:
+        if not self.marquer_recompense_versee():
+            return
+        vagues = self.etat.vagues_terminees
+        montant = vagues * ZOMBIE_PAR_VAGUE
+        if vagues >= pve.VAGUES_MAX and not self.abandonne:
+            montant += ZOMBIE_PRIME_INTEGRALE
+        self.recompense = await _finish(
+            self.cog.bot, self.ctx, "zombie", self.session_id,
+            "win" if vagues > 0 else "loss", montant,
+            metadata={"vagues": vagues, "tours": self.etat.tour,
+                      "munitions": self.etat.munitions, "abandon": self.abandonne},
+        )
+        if montant <= 0:
+            self.recompense = None
+        self.terminer()
+
+    async def abandonner_manche(self, interaction: discord.Interaction) -> None:
+        self.abandonner()
+        await self._conclure()
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, "Nuit des zombies", kind="warning")
+
+    async def on_timeout(self) -> None:
+        if not self.terminee:
+            self.abandonne = True
+            await self._conclure()
+        await super().on_timeout()
+
+
+class _BoutonZombie(discord.ui.Button):
+    def __init__(self, action: str):
+        libelle, picto = LIBELLES_ZOMBIE[action]
+        style = {
+            "tirer": discord.ButtonStyle.primary,
+            "melee": discord.ButtonStyle.secondary,
+            "barricader": discord.ButtonStyle.success,
+            "fouiller": discord.ButtonStyle.secondary,
+        }[action]
+        super().__init__(label=libelle, emoji=picto, style=style,
+                         custom_id=f"zombie:{action}")
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueZombie = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.jouer(interaction, self.action))
+
+
+# =============================================================================
+# 🧊 ICE — le pingouin glisse jusqu'au premier obstacle
+# =============================================================================
+
+ICE_COOLDOWN = 25
+ICE_BASE = 40
+ICE_PRIME_PARFAITE = 25     # résoudre au nombre de coups optimal
+
+
+class _VueIce(VueDeJeu):
+    """Puzzle glissant, validé par un solveur AVANT d'être envoyé.
+
+    Près de six grilles sur dix tirées au hasard n'ont aucune solution : sans
+    la vérification par parcours en largeur faite à la génération, la majorité
+    des manches seraient injouables sans que personne ne le sache.
+    """
+
+    def __init__(self, cog: "GamesArcade", ctx: commands.Context,
+                 niveau: ice_puzzle.Niveau, session_id: str):
+        super().__init__(ctx.author.id, timeout=180.0,
+                         message_intrus="Ce lac appartient à quelqu'un d'autre.")
+        self.cog, self.ctx, self.session_id = cog, ctx, session_id
+        self.niveau = niveau
+        self.position = niveau.depart
+        self.coups = 0
+        self.reussi = False
+        self.recompense = None
+        for direction in ("haut", "gauche", "droite", "bas"):
+            self.add_item(_BoutonGlisse(direction))
+        self.add_item(_BoutonAbandon("ice", "Quitter le lac"))
+
+    @property
+    def coups_restants(self) -> int:
+        return max(0, self.niveau.coups_max - self.coups)
+
+    def texte(self) -> str:
+        grille = ice_puzzle.dessiner(self.niveau, self.position)
+        if self.reussi:
+            parfait = self.coups == len(self.niveau.solution)
+            tete = (f"🏆 **Dans le trou en {self.coups} coups !**"
+                    + (" Le minimum possible. ✨" if parfait else ""))
+            lignes = [grille, "", tete]
+            if self.recompense is not None:
+                lignes.append(self.cog.ligne_recompense(self.recompense).strip())
+            return "\n".join(lignes)
+        if self.terminee:
+            chemin = " ".join(ice_puzzle.FLECHES[d] for d in self.niveau.solution)
+            raison = ("🏳️ **Vous quittez le lac.**" if self.abandonne
+                      else "❄️ **Plus de coups.** Le pingouin reste sur la glace.")
+            return f"{grille}\n\n{raison}\nLa solution était : {chemin}"
+        return (
+            f"{grille}\n\n"
+            f"🐧 Le pingouin glisse jusqu'au premier rocher — il ne s'arrête pas d'une case.\n"
+            f"Amenez-le **exactement** sur le trou 🕳️.\n"
+            f"Coups restants : **{self.coups_restants}/{self.niveau.coups_max}**"
+        )
+
+    @property
+    def abandonne(self) -> bool:
+        return getattr(self, "_abandonne", False)
+
+    async def glisser(self, interaction: discord.Interaction, direction: str) -> None:
+        arrivee = ice_puzzle.glisser(self.position, direction,
+                                     self.niveau.rochers, self.niveau.taille)
+        if arrivee == self.position:
+            # Un mur juste devant : ne pas décompter un coup qui ne fait rien.
+            return await self._refuser(
+                interaction, "Un rocher bloque déjà ce côté — le pingouin ne bouge pas.")
+        self.position = arrivee
+        self.coups += 1
+        if self.position == self.niveau.trou:
+            self.reussi = True
+            montant = ICE_BASE + len(self.niveau.solution) * 4
+            if self.coups == len(self.niveau.solution):
+                montant += ICE_PRIME_PARFAITE
+            self.recompense = await _finish(
+                self.cog.bot, self.ctx, "ice", self.session_id, "win", montant,
+                metadata={"coups": self.coups, "optimal": len(self.niveau.solution)},
+            )
+            self.terminer()
+            return await self.cog.rendre(self, interaction, "Lac gelé", kind="success")
+        if self.coups_restants <= 0:
+            await _finish(self.cog.bot, self.ctx, "ice", self.session_id, "loss", 0)
+            self.terminer()
+            return await self.cog.rendre(self, interaction, "Lac gelé", kind="danger")
+        await self.cog.rendre(self, interaction, "Lac gelé")
+
+    async def abandonner_manche(self, interaction: discord.Interaction) -> None:
+        self._abandonne = True
+        await _finish(self.cog.bot, self.ctx, "ice", self.session_id, "loss", 0)
+        self.terminer()
+        await self.cog.rendre(self, interaction, "Lac gelé", kind="warning")
+
+    async def on_timeout(self) -> None:
+        if not self.terminee:
+            await _finish(self.cog.bot, self.ctx, "ice", self.session_id, "loss", 0)
+        await super().on_timeout()
+
+
+class _BoutonGlisse(discord.ui.Button):
+    def __init__(self, direction: str):
+        # Croix directionnelle : haut seul, puis gauche/droite, puis bas.
+        rangee = {"haut": 0, "gauche": 1, "droite": 1, "bas": 2}[direction]
+        super().__init__(emoji=ice_puzzle.FLECHES[direction],
+                         style=discord.ButtonStyle.primary,
+                         custom_id=f"ice:{direction}", row=rangee)
+        self.direction = direction
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueIce = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.glisser(interaction, self.direction))
+
+
+# =============================================================================
+# ⚗️ POTION — récolte, fabrication atomique, effet réel
+# =============================================================================
+
+POTION_COOLDOWN = 30
+
+
+class _VuePotion(VueDeJeu):
+    """Atelier d'alchimie branché sur le vrai inventaire.
+
+    Rien n'est simulé : les ingrédients et les potions sont des lignes de la
+    table ``inventory``, celle qu'affichent ``+inv`` et la boutique. La
+    fabrication passe par ``services.crafting``, qui consomme et crée dans une
+    seule transaction — deux fabrications simultanées sur le dernier ingrédient
+    ne peuvent pas aboutir toutes les deux.
+    """
+
+    def __init__(self, cog: "GamesArcade", ctx: commands.Context,
+                 stocks: dict, session_id: str):
+        super().__init__(ctx.author.id, timeout=180.0,
+                         message_intrus="Cet atelier appartient à quelqu'un d'autre.")
+        self.cog, self.ctx, self.session_id = cog, ctx, session_id
+        self.stocks = dict(stocks)
+        self.message_action = "Que préparez-vous ?"
+        self.recolte_utilisee = False
+        self._reconstruire()
+
+    def _reconstruire(self) -> None:
+        """Un bouton par recette réalisable, plus la récolte. Jamais de bouton mort."""
+        self.clear_items()
+        if self.terminee:
+            return
+        for recette in crafting.RECETTES.values():
+            realisable = all(self.stocks.get(c, 0) >= q for c, q in recette.ingredients)
+            if realisable:
+                self.add_item(_BoutonFabriquer(recette))
+        for recette in crafting.RECETTES.values():
+            if self.stocks.get(recette.cle, 0) > 0:
+                self.add_item(_BoutonBoire(recette))
+        if not self.recolte_utilisee:
+            self.add_item(_BoutonRecolter())
+        self.add_item(_BoutonAbandon("potion", "Fermer l'atelier"))
+
+    def texte(self) -> str:
+        lignes = ["⚗️ **Atelier d'alchimie**", ""]
+        possede = [f"{crafting.nom_objet(c)} ×**{n}**"
+                   for c, n in self.stocks.items() if n > 0 and c in crafting.INGREDIENTS]
+        fioles = [f"{crafting.nom_objet(c)} ×**{n}**"
+                  for c, n in self.stocks.items() if n > 0 and c in crafting.RECETTES]
+        lignes.append("🎒 " + (" · ".join(possede) if possede else "_Aucun ingrédient._"))
+        if fioles:
+            lignes.append("🧴 " + " · ".join(fioles))
+        lignes.append("")
+        for recette in crafting.RECETTES.values():
+            besoin = " + ".join(
+                f"{crafting.nom_objet(c)}×{q}" for c, q in recette.ingredients)
+            manque = crafting.manquants(recette, self.stocks)
+            etat = "✅" if not manque else "❌ manque " + ", ".join(
+                f"{crafting.nom_objet(c)}×{n}" for c, n in manque)
+            lignes.append(f"{recette.emoji} **{recette.nom}** — {besoin} {etat}")
+            lignes.append(f"　_{recette.description}_")
+        lignes += ["", self.message_action]
+        return "\n".join(lignes)
+
+    async def _rafraichir(self, interaction: discord.Interaction, kind: str = "primary") -> None:
+        self.stocks = await crafting.stock(self.cog.bot.db, self.ctx.guild.id, self.ctx.author.id)
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, "Atelier d'alchimie", kind=kind)
+
+    async def recolter(self, interaction: discord.Interaction) -> None:
+        if self.recolte_utilisee:
+            return await self._refuser(interaction, "Vous avez déjà fouillé les environs.")
+        self.recolte_utilisee = True
+        # Les tirages sont figés ici puis passés à la base : tirer côté SQL
+        # ferait diverger ce qui est affiché de ce qui est écrit.
+        tirages: dict[str, int] = {}
+        paires = [(i.cle, i.poids) for i in crafting.INGREDIENTS.values()]
+        alea = pve.AleaSecurise()
+        for _ in range(alea.entier(crafting.RECOLTE_MIN, crafting.RECOLTE_MAX)):
+            cle = alea.pondere(paires)
+            tirages[cle] = tirages.get(cle, 0) + 1
+        statut, obtenus = await crafting.recolter(
+            self.cog.bot.db, self.ctx.guild.id, self.ctx.author.id, list(tirages.items()))
+        if statut != "ok":
+            self.recolte_utilisee = False
+            self.message_action = "🌾 La récolte a échoué — rien n'a été ajouté."
+            return await self._rafraichir(interaction, "warning")
+        butin = " · ".join(f"{crafting.nom_objet(c)} ×{n}" for c, n in obtenus)
+        self.message_action = f"🌾 Vous ramenez {butin}."
+        await _finish(self.cog.bot, self.ctx, "potion", self.session_id, "win", 0,
+                      metadata={"action": "recolte", "butin": dict(obtenus)})
+        await self._rafraichir(interaction, "success")
+
+    async def fabriquer(self, interaction: discord.Interaction, recette) -> None:
+        statut = await crafting.fabriquer(
+            self.cog.bot.db, self.ctx.guild.id, self.ctx.author.id, recette.cle)
+        if statut == "missing":
+            self.message_action = (
+                f"❌ Il vous manque des ingrédients pour {recette.emoji} **{recette.nom}**.")
+            return await self._rafraichir(interaction, "warning")
+        if statut != "ok":
+            self.message_action = "⚠️ L'alambic refuse de coopérer. Rien n'a été consommé."
+            return await self._rafraichir(interaction, "warning")
+        self.message_action = f"{recette.emoji} **{recette.nom}** fabriquée et rangée dans votre sac."
+        await _finish(self.cog.bot, self.ctx, "potion", self.session_id, "win", 0,
+                      metadata={"action": "fabrication", "recette": recette.cle})
+        await self._rafraichir(interaction, "success")
+
+    async def boire(self, interaction: discord.Interaction, recette) -> None:
+        statut, boost = await crafting.boire(
+            self.cog.bot.db, self.ctx.guild.id, self.ctx.author.id, recette.cle)
+        if statut == "missing":
+            self.message_action = "❌ Vous n'avez plus cette potion."
+            return await self._rafraichir(interaction, "warning")
+        if statut != "ok":
+            self.message_action = "⚠️ La potion n'a pas été consommée. Elle est toujours dans votre sac."
+            return await self._rafraichir(interaction, "warning")
+        from utils import temporary_boosts
+        self.message_action = f"{recette.emoji} Vous buvez. {temporary_boosts.describe(boost)}"
+        await _finish(self.cog.bot, self.ctx, "potion", self.session_id, "win", 0,
+                      metadata={"action": "consommation", "recette": recette.cle})
+        await self._rafraichir(interaction, "success")
+
+    async def abandonner_manche(self, interaction: discord.Interaction) -> None:
+        self.message_action = "🔒 Atelier fermé."
+        self.terminer()
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, "Atelier d'alchimie", kind="secondary")
+
+
+class _BoutonFabriquer(discord.ui.Button):
+    def __init__(self, recette):
+        super().__init__(label=recette.nom, emoji=recette.emoji,
+                         style=discord.ButtonStyle.success,
+                         custom_id=f"potion:craft:{recette.cle}")
+        self.recette = recette
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VuePotion = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.fabriquer(interaction, self.recette))
+
+
+class _BoutonBoire(discord.ui.Button):
+    def __init__(self, recette):
+        super().__init__(label=f"Boire — {recette.nom}", emoji="🥤",
+                         style=discord.ButtonStyle.primary, row=2,
+                         custom_id=f"potion:drink:{recette.cle}")
+        self.recette = recette
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VuePotion = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.boire(interaction, self.recette))
+
+
+class _BoutonRecolter(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Récolter", emoji="🌾",
+                         style=discord.ButtonStyle.secondary, row=3,
+                         custom_id="potion:recolte")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VuePotion = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.recolter(interaction))
