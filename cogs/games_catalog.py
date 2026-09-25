@@ -40,6 +40,7 @@ GAME_CATALOG = {
     "treasure": ("💎 Chasse au trésor", "solo"),
     "hunt": ("🏹 Chasse", "solo"),
     "explore": ("🧭 Exploration", "solo"),
+    "bomb": ("💣 Bombes", "rapide"),
 }
 
 WORDGAME_CLUES = [

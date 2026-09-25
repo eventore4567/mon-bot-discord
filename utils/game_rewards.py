@@ -416,6 +416,22 @@ def secure_pick(options: list):
     return options[secrets.randbelow(len(options))]
 
 
+def secure_sample(population, taille: int) -> list:
+    """``taille`` éléments distincts, tirés sûrement. Même raison que secure_pick.
+
+    Utilisé pour poser les bombes d'une grille : c'est ce tirage qui décide si
+    la manche est gagnable, donc il ne doit pas être prévisible. La grille est
+    tirée UNE fois, avant le premier clic, et ne bouge plus — une bombe
+    déplacée après coup rendrait le jeu truqué et invérifiable.
+    """
+    restants = list(population)
+    taille = max(0, min(int(taille), len(restants)))
+    tires = []
+    for _ in range(taille):
+        tires.append(restants.pop(secrets.randbelow(len(restants))))
+    return tires
+
+
 def secure_randint(low: int, high: int) -> int:
     """Entier sûr dans [low, high]. Même raison que secure_pick : ce tirage décide
     d'une rareté, donc d'un gain."""

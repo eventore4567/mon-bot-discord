@@ -85,11 +85,16 @@ def test_every_catalog_game_has_a_real_command_surface():
     }
 
     economy_commands = set()
+    from cogs import games_arcade
+
     for cog_cls in (
         games_economy.GamesRapides,
         games_economy.GamesDuels,
         games_economy.GamesCommunity,
         games_economy.GamesSolo,
+        # Les jeux d'arcade (mise, multiplicateur, encaissement) vivent dans leur
+        # propre cog : ils partagent le socle mais pas le moteur des expéditions.
+        games_arcade.GamesArcade,
     ):
         economy_commands.update(
             command.name for command in cog_cls.__cog_commands__ if command.name in expected

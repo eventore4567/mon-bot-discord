@@ -183,7 +183,7 @@ class BoutonRejouer(discord.ui.Button):
                 await interaction.response.defer()
             await self._relancer(interaction)
         except Exception:
-            logger.warning("Relance de partie impossible.", exc_info=True)
+            logger.warning("Impossible de relancer la partie.", exc_info=True)
             await VueDeJeu._refuser(interaction, "Impossible de relancer la partie pour le moment.")
 
 
