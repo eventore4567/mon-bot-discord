@@ -31,7 +31,7 @@ def test_v2_is_visually_rich_and_has_all_major_sections():
         'class="hero-visual"',
         'class="console"',
         'class="module-marquee"',
-        'class="bento"',
+        'class="bento stagger"',
         'id="security"',
         'id="dashboard"',
         'id="automation"',
