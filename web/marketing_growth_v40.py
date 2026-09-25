@@ -106,7 +106,7 @@ async def stats_page(request: web.Request) -> web.Response:
 
 
 async def support_page(request: web.Request) -> web.Response:
-    from .public_support_v1 import render as render_support
+    from .public_support_v2 import render as render_support
 
     dashboard = request.app["dashboard_module"]
     return web.Response(
@@ -114,7 +114,7 @@ async def support_page(request: web.Request) -> web.Response:
         content_type="text/html",
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "X-SentriX-Surface": "support-v1",
+            "X-SentriX-Surface": "support-v2",
         },
     )
 
