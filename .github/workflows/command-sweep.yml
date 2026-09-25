@@ -61,7 +61,8 @@ jobs:
             tests/test_ha_sigterm_failover.py \
             tests/test_dashboard_auth_visible.py \
             tests/test_public_home_v1.py \
-            tests/test_public_home_v2.py
+            tests/test_public_home_v2.py \
+            tests/test_public_home_runtime_route.py
 
       - name: Sweep every command (strict on technical errors)
         env:
