@@ -106,11 +106,17 @@ async def stats_page(request: web.Request) -> web.Response:
 
 
 async def support_page(request: web.Request) -> web.Response:
-    support = _support_url()
-    support_button = f'<a class="btn primary" href="{html.escape(support, quote=True)}" target="_blank" rel="noopener">Rejoindre le serveur support</a>' if support else '<a class="btn primary" href="/login">Ouvrir le dashboard</a>'
-    note = "Le serveur support officiel est disponible via le bouton ci-dessus." if support else "Le lien du serveur support public n’est pas encore configuré. Les administrateurs peuvent utiliser le dashboard en attendant."
-    body = f'''<div class="actions">{support_button}<a class="btn" href="/start">Guide de démarrage</a></div><section class="grid two"><div class="card"><h2>Avant de signaler un problème</h2><p class="muted">Vérifiez les permissions du bot, le rôle de SentriX dans la hiérarchie Discord et les réglages du serveur dans le dashboard.</p></div><div class="card"><h2>Support</h2><p class="muted">{html.escape(note)}</p></div><div class="card"><h2>Sécurité</h2><p class="muted">Ne partagez jamais le token du bot, un secret OAuth, une clé API ou un mot de passe dans un ticket ou un message.</p></div><div class="card"><h2>Informations utiles</h2><p class="muted">Pour accélérer un diagnostic, indiquez le serveur concerné, la fonction utilisée, le résultat attendu et le message d’erreur exact sans publier de secret.</p></div></section>'''
-    return web.Response(text=_layout(request, title="Support SentriX — Aide pour le bot Discord", description="Centre de support officiel de SentriX : démarrage, diagnostic et accès au support du bot Discord.", heading="Support SentriX", body=body), content_type="text/html")
+    from .public_support_v1 import render as render_support
+
+    dashboard = request.app["dashboard_module"]
+    return web.Response(
+        text=render_support(request, dashboard, _support_url()),
+        content_type="text/html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "X-SentriX-Surface": "support-v1",
+        },
+    )
 
 
 async def privacy_page(request: web.Request) -> web.Response:
