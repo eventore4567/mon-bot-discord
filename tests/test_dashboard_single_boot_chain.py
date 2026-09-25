@@ -77,3 +77,14 @@ def test_core_recovery_js_n_appelle_plus_loadGuilds():
     recovery_block = source[start:end]
     for call in ("await loadGuilds()", "loadGuilds().catch", "typeof loadGuilds"):
         assert call not in recovery_block
+
+
+
+def test_health_watch_ne_confond_pas_standby_ha_et_panne_dashboard():
+    html = dashboard.INDEX_HTML
+    assert "await api('/health', { background: true });" in html
+    assert "await api('/ready', { background: true });" not in html
+    assert "dashboardHealthFailures >= 3" in html
+    assert "dashboardHealthNotified" in html
+    assert "sticky: false" in html
+    assert "souci de connexion au dashboard. Les données peuvent mettre quelques secondes à revenir" not in html
