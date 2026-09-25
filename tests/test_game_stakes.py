@@ -345,7 +345,8 @@ def test_un_redemarrage_ne_rend_pas_une_partie_engagee():
                          (now() - 5400, game_id))
 
         bilan = await game_stakes.reprendre_mises_interrompues(db)
-        assert bilan == {"rembourses": 0, "perdus": 1}, bilan
+        assert (bilan["rembourses"], bilan["perdus"]) == (0, 1), bilan
+        assert bilan["inspectees"] == 1
         assert await _cash(db) == 0, "la mise a été rendue gratuitement"
         ligne = await db.fetchone("SELECT state FROM game_stakes WHERE game_id=?", (game_id,))
         assert ligne["state"] == game_stakes.PERDUE
@@ -365,7 +366,7 @@ def test_une_partie_jamais_affichee_est_remboursee():
         await db.execute("UPDATE game_stakes SET created_at=? WHERE game_id=?",
                          (now() - 5400, game_id))
         bilan = await game_stakes.reprendre_mises_interrompues(db)
-        assert bilan == {"rembourses": 1, "perdus": 0}
+        assert (bilan["rembourses"], bilan["perdus"]) == (1, 0), bilan
         assert await _cash(db) == 100
         return db
 
@@ -384,7 +385,7 @@ def test_une_partie_affichee_sans_action_est_remboursee():
         await db.execute("UPDATE game_stakes SET created_at=? WHERE game_id=?",
                          (now() - 5400, game_id))
         bilan = await game_stakes.reprendre_mises_interrompues(db)
-        assert bilan == {"rembourses": 1, "perdus": 0}
+        assert (bilan["rembourses"], bilan["perdus"]) == (1, 0), bilan
         assert await _cash(db) == 100
         return db
 
@@ -444,7 +445,7 @@ def test_une_manche_deja_reglee_est_ignoree_par_la_reprise():
                              (now() - 5400, game_id))
         avant = await _cash(db)
         bilan = await game_stakes.reprendre_mises_interrompues(db)
-        assert bilan == {"rembourses": 0, "perdus": 0}
+        assert (bilan["rembourses"], bilan["perdus"]) == (0, 0), bilan
         assert await _cash(db) == avant
         return db
 

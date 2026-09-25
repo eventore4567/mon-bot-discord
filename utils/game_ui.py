@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Awaitable, Callable
 
 import discord
@@ -166,6 +167,60 @@ class VueDeJeu(discord.ui.View):
             logger.debug("Vue expirée non mise à jour (message disparu).", exc_info=True)
 
 
+class VueReflexe(VueDeJeu):
+    """Socle des jeux de réflexe : signal, faux départ, mesure monotone.
+
+    Trois jeux partagent exactement cette mécanique — ``+target``, ``+ghost``
+    et ``+archery``. La recopier trois fois garantirait qu'un correctif n'en
+    atteigne qu'un seul.
+
+    **La mesure passe par ``time.monotonic``, jamais par l'heure système.**
+    Un décalage NTP, un changement d'heure ou une horloge qui recule
+    produiraient un « record » négatif ou absurde. L'horloge monotone ne
+    recule pas, par définition.
+
+    **Un clic avant le signal est un faux départ**, pas une victoire à zéro
+    milliseconde : sans ce contrôle, le joueur le plus rapide serait celui qui
+    clique au hasard avant même de voir la cible.
+    """
+
+    def __init__(self, proprietaire_id: int | None, *, timeout: float | None = 30.0, **kwargs):
+        super().__init__(proprietaire_id, timeout=timeout, **kwargs)
+        self._signal_a: float | None = None
+        self.faux_depart = False
+        self.reaction_ms: int | None = None
+
+    def armer(self) -> None:
+        """Le signal est donné : le chronomètre part maintenant."""
+        self._signal_a = time.monotonic()
+
+    @property
+    def arme(self) -> bool:
+        return self._signal_a is not None
+
+    def mesurer(self) -> int | None:
+        """Millisecondes depuis le signal, ou None si le signal n'a pas eu lieu."""
+        if self._signal_a is None:
+            return None
+        self.reaction_ms = max(0, int((time.monotonic() - self._signal_a) * 1000))
+        return self.reaction_ms
+
+    def declarer_faux_depart(self) -> None:
+        self.faux_depart = True
+        self.terminer()
+
+
+def positions_melangees(elements: list) -> list:
+    """Mélange sûr, pour que la bonne réponse ne soit jamais à la même place.
+
+    Le tirage passe par le RNG partagé des jeux : une position prévisible
+    donnerait un avantage à qui l'a remarqué, et ces manches paient.
+    """
+    from utils.game_rewards import secure_sample
+
+    return secure_sample(elements, len(elements))
+
+
 class BoutonRejouer(discord.ui.Button):
     """Relance la même commande sans la retaper.
 
@@ -189,6 +244,8 @@ class BoutonRejouer(discord.ui.Button):
 
 __all__ = [
     "VueDeJeu",
+    "VueReflexe",
+    "positions_melangees",
     "BoutonRejouer",
     "BoutonInvisibleError",
     "valider_composants",

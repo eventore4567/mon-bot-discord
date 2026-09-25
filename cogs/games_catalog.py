@@ -41,6 +41,10 @@ GAME_CATALOG = {
     "hunt": ("🏹 Chasse", "solo"),
     "explore": ("🧭 Exploration", "solo"),
     "bomb": ("💣 Bombes", "rapide"),
+    "target": ("🎯 Cible", "rapide"),
+    "archery": ("🏹 Tir à l'arc", "rapide"),
+    "ghost": ("👻 Fantôme", "rapide"),
+    "sequence": ("🧩 Suite", "rapide"),
 }
 
 WORDGAME_CLUES = [

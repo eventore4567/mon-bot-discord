@@ -295,37 +295,62 @@ async def reprendre_mises_interrompues(db, *, age_minimum: int = ORPHELINE_APRES
                   cette action. Aucun remboursement au seul motif que le
                   processus a redémarré.
 
+    Chaque décision est journalisée ligne à ligne, et le bilan est résumé à la
+    fin : c'est ce qui permettra de PROUVER dans les logs Railway, après un
+    vrai redéploiement, que la reprise a réellement tourné — tant qu'on ne l'a
+    pas observé là-bas, elle n'est pas validée.
+
     Idempotent et sûr en haute disponibilité : chaque règlement part d'un état
     en cours, donc si le primary et le standby balaient en même temps, un seul
     des deux change la ligne et l'autre obtient « already_settled ».
     """
+    bilan = {"inspectees": 0, "rembourses": 0, "perdus": 0, "deja_reglees": 0, "erreurs": 0}
     conn = getattr(db, "_conn", None)
     if conn is None:
-        return {"rembourses": 0, "perdus": 0}
+        logger.warning("Reprise des mises impossible : base indisponible.")
+        return bilan
     from database.db import now
 
     limite = now() - int(age_minimum)
     marques = ",".join("?" for _ in (*EN_COURS, OUVERTE))
     cur = await conn.execute(
-        f"SELECT game_id, state FROM game_stakes "
+        f"SELECT game_id, game_name, user_id, guild_id, amount, state FROM game_stakes "
         f"WHERE state IN ({marques}) AND created_at <= ?",
         (*EN_COURS, OUVERTE, limite),
     )
-    interrompues = [(l["game_id"], l["state"]) for l in await cur.fetchall()]
+    interrompues = await cur.fetchall()
+    bilan["inspectees"] = len(interrompues)
 
-    bilan = {"rembourses": 0, "perdus": 0}
-    for game_id, etat in interrompues:
-        if etat == ENGAGEE:
-            if await regler_perte(db, game_id) == "ok":
-                bilan["perdus"] += 1
-        elif await rembourser_mise(db, game_id) == "ok":
-            bilan["rembourses"] += 1
-
-    if bilan["rembourses"] or bilan["perdus"]:
-        logger.info(
-            "Mises interrompues reprises : %s remboursée(s), %s perdue(s) (parties engagées).",
-            bilan["rembourses"], bilan["perdus"],
+    for ligne in interrompues:
+        game_id = ligne["game_id"]
+        etat = ligne["state"]
+        decision = "forfeit" if etat == ENGAGEE else "refund"
+        statut = (
+            await regler_perte(db, game_id) if decision == "forfeit"
+            else await rembourser_mise(db, game_id)
         )
+        if statut == "ok":
+            bilan["perdus" if decision == "forfeit" else "rembourses"] += 1
+        elif statut == "already_settled":
+            decision = "ignore"
+            bilan["deja_reglees"] += 1
+        else:
+            decision = f"erreur:{statut}"
+            bilan["erreurs"] += 1
+
+        logger.info(
+            "Reprise de mise | game_id=%s jeu=%s joueur=%s serveur=%s montant=%s "
+            "statut_precedent=%s decision=%s resultat=%s",
+            game_id, ligne["game_name"], ligne["user_id"], ligne["guild_id"],
+            ligne["amount"], etat, decision, statut,
+        )
+
+    logger.info(
+        "Reprise des mises terminée | inspectées=%s remboursées=%s perdues=%s "
+        "déjà_réglées=%s erreurs=%s",
+        bilan["inspectees"], bilan["rembourses"], bilan["perdus"],
+        bilan["deja_reglees"], bilan["erreurs"],
+    )
     return bilan
 
 

@@ -115,10 +115,19 @@ async def _recover_startup_tasks(bot: commands.Bot) -> list[str]:
             from services import game_stakes
 
             bilan = await game_stakes.reprendre_mises_interrompues(bot.db)
-            if bilan["rembourses"] or bilan["perdus"]:
-                recovered.append(
-                    f"game_stakes({bilan['rembourses']} remboursée(s), {bilan['perdus']} perdue(s))"
-                )
+            # Toujours signalé, même à zéro : c'est ce qui prouve dans les logs
+            # du déploiement que la reprise a bien tourné, plutôt que de devoir
+            # deviner son silence.
+            logger.info(
+                "Reprise des mises de jeu au démarrage : inspectées=%s remboursées=%s "
+                "perdues=%s déjà_réglées=%s erreurs=%s",
+                bilan["inspectees"], bilan["rembourses"], bilan["perdus"],
+                bilan["deja_reglees"], bilan["erreurs"],
+            )
+            recovered.append(
+                f"game_stakes(inspectées={bilan['inspectees']}, "
+                f"remboursées={bilan['rembourses']}, perdues={bilan['perdus']})"
+            )
         except Exception:
             logger.warning("Reprise des mises de jeu impossible.", exc_info=True)
 
