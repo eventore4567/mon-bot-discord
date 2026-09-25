@@ -136,6 +136,12 @@ img{display:block;max-width:100%}
 /* footer */
 footer{margin-top:116px;padding:42px 0 34px;border-top:1px solid rgba(255,255,255,.06)}.footer-grid{display:grid;grid-template-columns:1.4fr repeat(3,1fr);gap:28px}.footer-brand p{max-width:340px;color:var(--muted);font-size:11px}.footer-col b{display:block;margin-bottom:10px;font-size:10px;text-transform:uppercase;letter-spacing:.09em}.footer-col a{display:block;width:max-content;max-width:100%;margin:7px 0;color:var(--muted);font-size:11px}.footer-col a:hover{color:#fff}.footer-bottom{display:flex;justify-content:space-between;gap:18px;margin-top:30px;padding-top:19px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
 
+/* pointer depth */
+.card,.step,.security-box,.tour-screen,.ai-card,.terminal{transform-style:preserve-3d;will-change:transform;transition:transform .16s ease,border-color .18s ease,box-shadow .18s ease}
+.card:hover,.step:hover,.ai-card:hover,.terminal:hover{box-shadow:0 24px 62px rgba(0,0,0,.30)}
+.card>*:not(.flow),.step>*,.ai-card>*,.terminal>*{position:relative;z-index:1}
+.pointer-ring{position:fixed;z-index:125;width:13px;height:13px;border-radius:50%;pointer-events:none;opacity:0;transform:translate(-50%,-50%);background:rgba(170,158,255,.24);box-shadow:0 0 34px rgba(124,108,255,.45);transition:opacity .15s ease}
+
 /* reveal + loader */
 .reveal{opacity:0;transform:translateY(24px) scale(.985);transition:opacity .65s cubic-bezier(.2,.8,.2,1),transform .65s cubic-bezier(.2,.8,.2,1)}.reveal.visible{opacity:1;transform:none}.stagger>*{opacity:0;transform:translateY(16px)}.stagger.visible>*{animation:stagger .5s forwards}.stagger.visible>*:nth-child(2){animation-delay:.05s}.stagger.visible>*:nth-child(3){animation-delay:.1s}.stagger.visible>*:nth-child(4){animation-delay:.15s}.stagger.visible>*:nth-child(5){animation-delay:.2s}.stagger.visible>*:nth-child(6){animation-delay:.25s}
 .auth-notice{width:min(760px,calc(100% - 40px));margin:15px auto -24px;padding:12px 15px;border:1px solid rgba(239,189,98,.28);border-radius:11px;background:rgba(239,189,98,.07);color:#f5d8a2;font-size:12px}
@@ -186,11 +192,12 @@ footer{margin-top:116px;padding:42px 0 34px;border-top:1px solid rgba(255,255,25
 }
 @keyframes flowMoveY{to{top:100%}}
 @media(prefers-reduced-motion:reduce){
-  html{scroll-behavior:auto}body:after,canvas#fx{display:none}.hero:before,.badge i,.orbit,.product-shell,.float-card,.pulse-dots i,.chart-path,.chart-fill,.rail-track,.security-box:before,.radar:before,.bars i,.coin,.connector:after,.cursor,.final:before,.spinner{animation:none!important}.badge,.hero h1,.hero .lead,.hero-actions,.hero-meta,.hero-art,.alert,.bubble,.reveal,.stagger>*{opacity:1!important;transform:none!important;animation:none!important;transition:none!important}.btn,.card,.tour-tab,.topbar{transition:none!important}
+  html{scroll-behavior:auto}body:after,canvas#fx{display:none}.hero:before,.badge i,.orbit,.product-shell,.float-card,.pulse-dots i,.chart-path,.chart-fill,.rail-track,.security-box:before,.radar:before,.bars i,.coin,.connector:after,.cursor,.final:before,.spinner{animation:none!important}.pointer-ring{display:none}.badge,.hero h1,.hero .lead,.hero-actions,.hero-meta,.hero-art,.alert,.bubble,.reveal,.stagger>*{opacity:1!important;transform:none!important;animation:none!important;transition:none!important}.btn,.card,.tour-tab,.topbar{transition:none!important}
 }
 </style>
 </head>
 <body>
+<div class="pointer-ring" id="pointerRing" aria-hidden="true"></div>
 <a class="skip" href="#main">Aller au contenu</a>
 <div class="noise" aria-hidden="true"></div>
 <canvas id="fx" aria-hidden="true"></canvas>
@@ -358,9 +365,18 @@ if(chat){const bubbles=$$(".bubble",chat);if(!reduced&&"IntersectionObserver" in
 $$(".tour-tab").forEach(tab=>tab.addEventListener("click",()=>{$$(".tour-tab").forEach(x=>x.classList.remove("active"));$$(".tour-pane").forEach(x=>x.classList.remove("active"));tab.classList.add("active");document.getElementById(tab.dataset.pane)?.classList.add("active")}));
 
 if(!reduced){
+  const ring=$("#pointerRing");
+  addEventListener("pointermove",e=>{if(ring){ring.style.left=e.clientX+"px";ring.style.top=e.clientY+"px";ring.style.opacity="1"}},{passive:true});
+  addEventListener("pointerleave",()=>{if(ring)ring.style.opacity="0"});
+
   const art=$("#heroArt");
   art?.addEventListener("pointermove",e=>{const r=art.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;art.style.transform="perspective(1500px) rotateX("+(-y*3)+"deg) rotateY("+(x*3)+"deg)"});
   art?.addEventListener("pointerleave",()=>art.style.transform="");
+
+  const interactive=$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal");
+  function tilt(el,e,max){const r=el.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;el.style.transform="perspective(1000px) rotateX("+(-y*max)+"deg) rotateY("+(x*max)+"deg) translateY(-3px)";el.style.boxShadow=(-x*16)+"px "+(18+y*10)+"px 58px rgba(0,0,0,.30)"}
+  interactive.forEach(el=>{const max=el.classList.contains("card")?5:3.4;el.addEventListener("pointermove",e=>tilt(el,e,max));el.addEventListener("pointerleave",()=>{el.style.transform="";el.style.boxShadow=""})});
+
   const canvas=$("#fx"),ctx=canvas?.getContext("2d");let dots=[];
   function resize(){if(!canvas||!ctx)return;const d=Math.min(devicePixelRatio||1,2);canvas.width=innerWidth*d;canvas.height=innerHeight*d;canvas.style.width=innerWidth+"px";canvas.style.height=innerHeight+"px";ctx.setTransform(d,0,0,d,0,0);dots=Array.from({length:Math.min(70,Math.max(34,Math.floor(innerWidth/20)))},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:.45+Math.random()*1.2,v:.08+Math.random()*.22,a:.10+Math.random()*.35}))}
   function tick(){if(!ctx)return;ctx.clearRect(0,0,innerWidth,innerHeight);for(const p of dots){p.y-=p.v;if(p.y<-4){p.y=innerHeight+4;p.x=Math.random()*innerWidth}ctx.beginPath();ctx.fillStyle="rgba(170,158,255,"+p.a+")";ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill()}requestAnimationFrame(tick)}
