@@ -15,7 +15,11 @@ socle d'interface la seule autorité pour accepter un clic.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import math
+import secrets
+import time
 
 import discord
 from discord import app_commands
@@ -27,6 +31,7 @@ from utils import game_rewards, stats_service
 from utils import sentrix_panels as panels
 from utils.game_ui import (
     VueDeJeu,
+    VueMisee,
     VueReflexe,
     positions_melangees,
     valider_composants,
@@ -43,7 +48,9 @@ BOMB_CASES = 9          # grille 3x3 : tient sur un écran de téléphone
 BOMB_BOMBES = 2         # deux bombes sur neuf cases
 BOMB_COOLDOWN = 12
 BOMB_MISE_MIN = 10
-BOMB_MISE_MAX = 5_000
+BOMB_MISE_MAX = 1_500       # ×34,92 en grille parfaite → 52 380 au plus. Avec
+                            # 5 000 le gain maximal atteignait 174 600, de quoi
+                            # déséquilibrer l'économie d'un serveur en une manche.
 
 
 def multiplicateur_bomb(ouvertes: int, bombes: int = BOMB_BOMBES, cases: int = BOMB_CASES) -> float:
@@ -243,6 +250,29 @@ class _BoutonEncaisser(discord.ui.Button):
         await vue.jouer_un_coup(lambda: vue.encaisser(interaction))
 
 
+# --- Constantes du bloc risque/encaissement -------------------------------
+# Déclarées avant la classe : Python évalue les valeurs par défaut des
+# paramètres au moment où il lit la méthode, pas à l'appel.
+LAVA_CASES = 3              # trois dalles par étage
+LAVA_LAVE = 1               # une seule brûle
+LAVA_ETAGES = 8             # au-delà, le gain deviendrait ingérable
+LAVA_COOLDOWN = 12
+LAVA_MISE_MIN, LAVA_MISE_MAX = 10, 1_000   # ×24,86 au 8ᵉ étage → 24 860 au plus,
+                                           # du même ordre que le plafond de +rocket
+RTP_CIBLE = 0.97
+ROCKET_COOLDOWN = 15
+ROCKET_MISE_MIN, ROCKET_MISE_MAX = 10, 1_000
+ROCKET_PLAFOND = 50.0       # borne le gain maximal : 50 × la mise
+ROCKET_CROISSANCE = 0.22    # e^(0,22·t) — ×2 vers 3,2 s, ×5 vers 7,3 s
+ROCKET_DUREE_MAX = 30.0
+SAFE_COOLDOWN = 20
+SAFE_ESSAIS = 7
+SAFE_DIFFICULTES = {
+    "facile": (50, 30),
+    "normal": (100, 55),
+    "difficile": (200, 110),
+}
+
 class GamesArcade(commands.Cog, name="GamesArcade"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -430,6 +460,174 @@ class GamesArcade(commands.Cog, name="GamesArcade"):
         vue.message = await panels.envoyer(
             ctx, panels.avec_composants(panels.depuis_embed(embed), vue)
         )
+
+    # ---- Bloc risque / encaissement ----------------------------------------
+
+    async def _ouvrir_manche_misee(self, ctx, jeu: str, titre: str, mise: int,
+                                   bornes: tuple[int, int], cooldown: int):
+        """Précontrôle, réservation de la mise, identifiant de manche.
+
+        Partagé par tous les jeux à mise : une deuxième implémentation
+        économique en parallèle finirait par diverger de celle-ci.
+        Retourne (game_id, None) ou (None, réponse déjà envoyée).
+        """
+        guild_id = ctx.guild.id if ctx.guild else None
+        bas, haut = bornes
+        if not bas <= mise <= haut:
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title=titre,
+                description=(
+                    f"La mise doit être comprise entre **{stats_service.format_number(bas)}** "
+                    f"et **{stats_service.format_number(haut)}** {self.emoji_monnaie}."
+                ),
+                kind="warning")))
+            return None, True
+
+        demarre, erreur, _s = await _precheck(self.bot, ctx, jeu, cooldown)
+        if not demarre:
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title=titre, description=erreur, kind="warning")))
+            return None, True
+
+        game_id = game_stakes.nouvel_identifiant(jeu)
+        statut = await game_stakes.ouvrir_mise(
+            self.bot.db, ctx.guild.id, ctx.author.id, jeu, mise, game_id
+        )
+        if statut != "ok":
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, jeu)
+            texte = {
+                "insufficient": "Votre solde ne couvre pas cette mise.",
+                "invalid": "Le montant de la mise est invalide.",
+            }.get(statut, "Jeu momentanément indisponible. Votre argent n'a pas bougé.")
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title=titre, description=texte, kind="warning")))
+            return None, True
+        return game_id, None
+
+    @commands.hybrid_command(
+        name="lava", description="Montez d'étage en étage et encaissez avant la lave.",
+        with_app_command=False,
+    )
+    @app_commands.describe(mise="Ce que vous engagez sur cette ascension")
+    async def lava(self, ctx: commands.Context, mise: int = LAVA_MISE_MIN):
+        game_id, arrete = await self._ouvrir_manche_misee(
+            ctx, "lava", "Tour de lave", int(mise),
+            (LAVA_MISE_MIN, LAVA_MISE_MAX), LAVA_COOLDOWN,
+        )
+        if arrete:
+            return
+        try:
+            vue = _VueLava(self, ctx, int(mise), game_id)
+            embed = await _embed(self.bot, ctx.guild.id, title="Tour de lave", description=vue.texte())
+            valider_composants(vue)
+            vue.message = await panels.envoyer(
+                ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+            await vue.activer(getattr(vue.message, "id", None))
+        except Exception:
+            logger.exception("Tour de lave non affichée : mise remboursée (%s).", game_id)
+            await game_stakes.rembourser_mise(self.bot.db, game_id)
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "lava")
+
+    @commands.hybrid_command(
+        name="rocket", description="Encaissez avant que la fusée n'explose.",
+        with_app_command=False,
+    )
+    @app_commands.describe(mise="Ce que vous engagez sur ce vol")
+    async def rocket(self, ctx: commands.Context, mise: int = ROCKET_MISE_MIN):
+        game_id, arrete = await self._ouvrir_manche_misee(
+            ctx, "rocket", "Fusée", int(mise),
+            (ROCKET_MISE_MIN, ROCKET_MISE_MAX), ROCKET_COOLDOWN,
+        )
+        if arrete:
+            return
+        try:
+            vue = _VueRocket(self, ctx, int(mise), game_id)
+            embed = await _embed(self.bot, ctx.guild.id, title="Fusée", description=vue.texte())
+            valider_composants(vue)
+            vue.message = await panels.envoyer(
+                ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+            await vue.activer(getattr(vue.message, "id", None))
+        except Exception:
+            logger.exception("Fusée non affichée : mise remboursée (%s).", game_id)
+            await game_stakes.rembourser_mise(self.bot.db, game_id)
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "rocket")
+            return
+
+        vue.demarrer()
+        self.bot.loop.create_task(self._suivre_vol(vue))
+
+    async def _suivre_vol(self, vue: "_VueRocket") -> None:
+        """Rafraîchit le vol et déclenche l'explosion à l'heure dite.
+
+        Le multiplicateur vient TOUJOURS de l'horloge monotone, jamais d'un
+        compteur incrémenté ici : si cette boucle prend du retard — gros
+        à-coup de l'event loop, rafraîchissement raté — le joueur n'est ni
+        avantagé ni pénalisé, seul l'affichage retarde.
+        """
+        try:
+            while not vue.terminee:
+                await asyncio.sleep(0.9)
+                if vue.terminee:
+                    return
+                if vue.multiplicateur_actuel() >= vue.crash:
+                    return await vue.jouer_un_coup(lambda: vue.exploser(None))
+                try:
+                    await self.rendre(vue, None, "Fusée")
+                except Exception:
+                    logger.debug("Rafraîchissement du vol ignoré.", exc_info=True)
+        except Exception:
+            logger.warning("Suivi de vol interrompu (%s).", vue.game_id, exc_info=True)
+
+    @commands.hybrid_command(
+        name="safe", description="Trouvez le code du coffre avec des indices.",
+        with_app_command=False,
+    )
+    @app_commands.describe(difficulte="facile, normal ou difficile")
+    async def safe(self, ctx: commands.Context, difficulte: str = "normal"):
+        difficulte = str(difficulte).strip().casefold()
+        if difficulte not in SAFE_DIFFICULTES:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None, title="Coffre-fort",
+                description="Difficultés disponibles : `facile`, `normal`, `difficile`.",
+                kind="warning")))
+        demarre, erreur, session = await _precheck(self.bot, ctx, "safe", SAFE_COOLDOWN)
+        if not demarre:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None,
+                title="Coffre-fort", description=erreur, kind="warning")))
+
+        vue = _VueSafe(self, ctx, session, difficulte)
+        embed = await _embed(self.bot, ctx.guild.id, title="Coffre-fort", description=vue.texte())
+        vue.message = await panels.envoyer(ctx, panels.depuis_embed(embed))
+
+        def du_joueur(message):
+            return (
+                message.author.id == ctx.author.id
+                and message.channel.id == ctx.channel.id
+                and message.content.strip().isdigit()
+            )
+
+        while not vue.terminee:
+            try:
+                message = await self.bot.wait_for("message", check=du_joueur, timeout=60)
+            except asyncio.TimeoutError:
+                await _finish(self.bot, ctx, "safe", session, "loss", 0)
+                vue.terminer()
+                break
+            await vue.jouer_un_coup(
+                lambda m=message: vue.proposer(int(m.content.strip()))
+            )
+            embed = await _embed(
+                self.bot, ctx.guild.id, title="Coffre-fort", description=vue.texte(),
+                kind="success" if vue.trouve else ("danger" if vue.terminee else "primary"),
+            )
+            texte = vue.texte()
+            recompense = getattr(vue, "recompense", None)
+            if recompense is not None:
+                texte += self.ligne_recompense(recompense)
+                embed = await _embed(self.bot, ctx.guild.id, title="Coffre-fort",
+                                     description=texte, kind="success")
+            await panels.envoyer(ctx, panels.depuis_embed(embed))
 
 
 # =============================================================================
@@ -759,3 +957,363 @@ class _BoutonSequence(discord.ui.Button):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(GamesArcade(bot))
+
+
+# =============================================================================
+# 🌋 LAVA — monter d'étage en étage, encaisser avant la coulée
+# =============================================================================
+
+
+
+def multiplicateur_lava(etages: int) -> float:
+    """Multiplicateur après ``etages`` dalles franchies.
+
+    Calculé — pas choisi au jugé : il vaut ``RTP / survie^étages``, si bien que
+    l'espérance est la MÊME à tous les étages. Sans cette construction, un
+    palier paierait mieux que les autres et tout le monde s'arrêterait là.
+    """
+    if etages <= 0:
+        return 1.0
+    survie = (LAVA_CASES - LAVA_LAVE) / LAVA_CASES
+    return round(RTP_CIBLE / (survie ** min(etages, LAVA_ETAGES)), 2)
+
+
+class _VueLava(VueMisee):
+    """Une coulée par étage, tirée AVANT le premier pas.
+
+    Toute la carte est décidée à la création : déplacer la lave après un choix
+    rendrait le jeu truqué, et invérifiable. Les custom_id sont positionnels —
+    rien dans le payload ne dit quelle dalle brûle.
+    """
+
+    def __init__(self, cog: "GamesArcade", ctx: commands.Context, mise: int, game_id: str):
+        super().__init__(ctx.author.id, game_id=game_id, db=cog.bot.db, timeout=150.0,
+                         message_intrus="Cette tour appartient à quelqu'un d'autre.")
+        self.cog, self.ctx, self.mise = cog, ctx, int(mise)
+        # Une position de lave par étage, fixée d'avance.
+        self.laves = [
+            game_rewards.secure_randint(0, LAVA_CASES - 1) for _ in range(LAVA_ETAGES)
+        ]
+        self.etage = 0
+        self.brule = False
+        self.encaisse = False
+        for position in range(LAVA_CASES):
+            self.add_item(_DalleLava(position))
+        self.add_item(_BoutonEncaisserLava())
+
+    @property
+    def multiplicateur(self) -> float:
+        return multiplicateur_lava(self.etage)
+
+    @property
+    def retour(self) -> int:
+        """Retour total, arrondi à l'entier — on ne paie pas des centièmes.
+
+        L'arrondi est fait UNE fois, sur le produit final : arrondir le
+        multiplicateur puis multiplier accumulerait l'erreur étage après étage.
+        """
+        return int(round(self.mise * self.multiplicateur))
+
+    def texte(self) -> str:
+        emoji = self.cog.emoji_monnaie
+        if self.brule:
+            return (
+                f"🌋 **La dalle cède !** Vous tombez à l'étage {self.etage + 1}.\n"
+                f"Mise perdue : **{stats_service.format_number(self.mise)}** {emoji}."
+            )
+        if self.encaisse:
+            return (
+                f"💰 **Encaissé au {self.etage}ᵉ étage, ×{self.multiplicateur:g}**\n"
+                f"Retour : **{stats_service.format_number(self.retour)}** {emoji} "
+                f"(profit **+{stats_service.format_number(self.retour - self.mise)}**)."
+            )
+        tour = "🟩" * self.etage
+        prochain = multiplicateur_lava(self.etage + 1)
+        return (
+            f"{tour or '·'}\n\n"
+            f"🌋 Étage **{self.etage + 1}/{LAVA_ETAGES}** — trois dalles, une brûle.\n"
+            f"**Mise** {stats_service.format_number(self.mise)} {emoji} · "
+            f"**×{self.multiplicateur:g}** acquis · **×{prochain:g}** à l'étage suivant"
+        )
+
+    async def avancer(self, interaction: discord.Interaction, position: int) -> None:
+        await self.engager()
+        if position == self.laves[self.etage]:
+            self.brule = True
+            await self.regler_perte()
+            await _finish(self.cog.bot, self.ctx, "lava", self.game_id, "loss", 0)
+            self.terminer()
+            return await self.cog.rendre(self, interaction, "Tour de lave", kind="danger")
+
+        self.etage += 1
+        if self.etage >= LAVA_ETAGES:
+            return await self.encaisser(interaction)
+        await self.cog.rendre(self, interaction, "Tour de lave")
+
+    async def encaisser(self, interaction: discord.Interaction) -> None:
+        if self.etage <= 0:
+            return await self._refuser(interaction, "Franchissez au moins une dalle avant d'encaisser.")
+        self.encaisse = True
+        await self.regler_gain(self.retour)
+        await _finish(
+            self.cog.bot, self.ctx, "lava", self.game_id, "win", 0,
+            metadata={"mise": self.mise, "etages": self.etage,
+                      "multiplicateur": self.multiplicateur, "retour": self.retour},
+        )
+        self.terminer()
+        await self.cog.rendre(self, interaction, "Tour de lave", kind="success")
+
+    async def on_timeout(self) -> None:
+        if not self.terminee:
+            await self.regler_expiration()
+            await _finish(self.cog.bot, self.ctx, "lava", self.game_id, "loss", 0)
+        await super().on_timeout()
+
+
+class _DalleLava(discord.ui.Button):
+    def __init__(self, position: int):
+        super().__init__(emoji="🟫", label=str(position + 1),
+                         style=discord.ButtonStyle.secondary, custom_id=f"lava:{position}")
+        self.position = position
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueLava = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.avancer(interaction, self.position))
+
+
+class _BoutonEncaisserLava(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Encaisser", emoji="💰",
+                         style=discord.ButtonStyle.success, custom_id="lava:cashout")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueLava = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.encaisser(interaction))
+
+
+# =============================================================================
+# 🚀 ROCKET — le multiplicateur monte, encaissez avant l'explosion
+# =============================================================================
+
+
+
+def multiplicateur_rocket(secondes: float) -> float:
+    """Multiplicateur après ``secondes`` de vol, arrondi au centième.
+
+    Dérivé du temps écoulé mesuré à l'horloge monotone, jamais d'un compteur
+    incrémenté dans une boucle : une boucle qui prend du retard fausserait le
+    multiplicateur, et un gros à-coup de l'event loop ferait gagner ou perdre
+    le joueur pour une raison qui n'est pas le jeu.
+    """
+    if secondes <= 0:
+        return 1.0
+    return min(ROCKET_PLAFOND, round(math.exp(ROCKET_CROISSANCE * secondes), 2))
+
+
+def tirer_point_de_crash(seed: str) -> float:
+    """Point d'explosion, dérivé du seed. Déterministe et vérifiable.
+
+    ``crash = RTP / (1 − u)`` donne une espérance constante quelle que soit la
+    cible visée : encaisser à ×1,2 ou à ×20 rapporte le même 97 % à long
+    terme, donc aucune stratégie ne domine. Le plafond borne le gain sans rien
+    changer en dessous de lui.
+
+    Le seed est tiré AVANT la manche et conservé dans l'historique : le point
+    de crash se recalcule après coup, ce qui permet de vérifier qu'il n'a pas
+    bougé selon la mise, le solde ou le moment du clic.
+    """
+    brut = int(hashlib.sha256(seed.encode("utf-8")).hexdigest()[:13], 16)
+    u = brut / float(1 << 52)
+    if u >= 1.0:  # borne théorique, jamais atteinte en pratique
+        u = 0.999999
+    return min(ROCKET_PLAFOND, max(1.00, math.floor((RTP_CIBLE / (1 - u)) * 100) / 100))
+
+
+class _VueRocket(VueMisee):
+    """Le point de crash est tiré à la création et n'est JAMAIS recalculé.
+
+    Il ne dépend ni de la mise, ni du solde, ni de l'historique, ni du moment
+    où le joueur clique : il est fixé par un seed tiré avant le décollage. Le
+    seed n'est publié qu'après la manche, avec son empreinte, pour que le
+    résultat soit auditable sans être devinable pendant le vol.
+
+    **Règle du seuil, verrouillée par test** : l'encaissement est accepté si le
+    multiplicateur atteint est STRICTEMENT inférieur au point de crash. À
+    égalité exacte, la fusée explose — il faut une règle, et celle-ci est du
+    côté de la maison de façon explicite plutôt qu'implicite.
+    """
+
+    def __init__(self, cog: "GamesArcade", ctx: commands.Context, mise: int, game_id: str):
+        super().__init__(ctx.author.id, game_id=game_id, db=cog.bot.db, timeout=ROCKET_DUREE_MAX + 10,
+                         message_intrus="Cette fusée appartient à quelqu'un d'autre.")
+        self.cog, self.ctx, self.mise = cog, ctx, int(mise)
+        self.seed = secrets.token_hex(16)
+        self.empreinte = hashlib.sha256(self.seed.encode("utf-8")).hexdigest()
+        self.crash = tirer_point_de_crash(self.seed)
+        self._decollage: float | None = None
+        self.encaisse_a: float | None = None
+        self.explose = False
+        self.add_item(_BoutonEncaisserRocket())
+
+    def demarrer(self) -> None:
+        self._decollage = time.monotonic()
+
+    def multiplicateur_actuel(self) -> float:
+        if self._decollage is None:
+            return 1.0
+        return multiplicateur_rocket(time.monotonic() - self._decollage)
+
+    @property
+    def retour(self) -> int:
+        if self.encaisse_a is None:
+            return 0
+        return int(round(self.mise * self.encaisse_a))
+
+    def texte(self) -> str:
+        emoji = self.cog.emoji_monnaie
+        if self.explose:
+            return (
+                f"💥 **Explosion à ×{self.crash:g}**\n"
+                f"Mise perdue : **{stats_service.format_number(self.mise)}** {emoji}.\n"
+                f"-# Empreinte `{self.empreinte[:16]}…` · seed `{self.seed}`"
+            )
+        if self.encaisse_a is not None:
+            return (
+                f"🚀 **Encaissé à ×{self.encaisse_a:g}** (explosion à ×{self.crash:g})\n"
+                f"Retour : **{stats_service.format_number(self.retour)}** {emoji} "
+                f"(profit **+{stats_service.format_number(self.retour - self.mise)}**).\n"
+                f"-# Empreinte `{self.empreinte[:16]}…` · seed `{self.seed}`"
+            )
+        return (
+            f"🚀 La fusée décolle — **×{self.multiplicateur_actuel():g}**\n"
+            f"**Mise** {stats_service.format_number(self.mise)} {emoji}\n"
+            f"-# Empreinte du tirage `{self.empreinte[:16]}…` — publiée AVANT le résultat."
+        )
+
+    async def encaisser(self, interaction: discord.Interaction) -> None:
+        await self.engager()
+        atteint = self.multiplicateur_actuel()
+        if atteint >= self.crash:
+            # À égalité exacte, la fusée gagne : la règle est explicite.
+            return await self.exploser(interaction)
+        self.encaisse_a = atteint
+        await self.regler_gain(self.retour)
+        await _finish(
+            self.cog.bot, self.ctx, "rocket", self.game_id, "win", 0,
+            metadata={"mise": self.mise, "encaisse_a": atteint, "crash": self.crash,
+                      "seed": self.seed, "empreinte": self.empreinte},
+        )
+        self.terminer()
+        await self.cog.rendre(self, interaction, "Fusée", kind="success")
+
+    async def exploser(self, interaction: discord.Interaction | None = None) -> None:
+        if self.terminee:
+            return
+        self.explose = True
+        await self.engager()
+        await self.regler_perte()
+        await _finish(
+            self.cog.bot, self.ctx, "rocket", self.game_id, "loss", 0,
+            metadata={"mise": self.mise, "crash": self.crash,
+                      "seed": self.seed, "empreinte": self.empreinte},
+        )
+        self.terminer()
+        await self.cog.rendre(self, interaction, "Fusée", kind="danger")
+
+    async def on_timeout(self) -> None:
+        if not self.terminee:
+            await self.regler_expiration()
+            await _finish(self.cog.bot, self.ctx, "rocket", self.game_id, "loss", 0)
+        await super().on_timeout()
+
+
+class _BoutonEncaisserRocket(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Encaisser", emoji="💰",
+                         style=discord.ButtonStyle.success, custom_id="rocket:cashout")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueRocket = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_un_coup(lambda: vue.encaisser(interaction))
+
+
+# =============================================================================
+# 🔐 SAFE — trouver le code, plus haut ou plus bas
+# =============================================================================
+
+
+
+class _VueSafe(VueDeJeu):
+    """Coffre gratuit : cooldown et récompense plafonnée, pas de mise.
+
+    Un jeu de déduction pure n'a pas besoin d'argent engagé pour être
+    intéressant, et le brancher sur une mise n'aurait ajouté qu'un risque de
+    perte sur une manche qui se gagne à la réflexion. Le farm est contenu par
+    le cooldown et par un gain borné, pas par une mise.
+
+    Le code vit uniquement côté serveur : ni les custom_id, ni le texte envoyé
+    ne le contiennent avant la fin.
+    """
+
+    def __init__(self, cog: "GamesArcade", ctx: commands.Context, session_id: str, difficulte: str):
+        super().__init__(ctx.author.id, timeout=120.0,
+                         message_intrus="Ce coffre appartient à quelqu'un d'autre.")
+        self.cog, self.ctx, self.session_id = cog, ctx, session_id
+        self.difficulte = difficulte
+        self.borne, self.gain_max = SAFE_DIFFICULTES[difficulte]
+        self.code = game_rewards.secure_randint(1, self.borne)
+        self.bas, self.haut = 1, self.borne
+        self.restants = SAFE_ESSAIS
+        self.trouve = False
+        self.dernier: int | None = None
+
+    def texte(self) -> str:
+        if self.trouve:
+            return (
+                f"🔓 **Coffre ouvert !** Le code était **{self.code}**.\n"
+                f"Trouvé avec **{self.restants}** essai(s) restant(s)."
+            )
+        if self.restants <= 0:
+            return f"🔒 **Coffre bloqué.** Le code était **{self.code}**."
+        indice = ""
+        if self.dernier is not None:
+            indice = (
+                f"**{self.dernier}** — c'est plus "
+                + ("**haut** ⬆️" if self.dernier < self.code else "**bas** ⬇️") + "\n"
+            )
+        return (
+            f"🔐 Code entre **{self.bas}** et **{self.haut}**.\n"
+            f"{indice}Essais restants : **{self.restants}**\n"
+            "-# Écrivez un nombre dans le salon."
+        )
+
+    async def proposer(self, valeur: int) -> None:
+        """Une proposition. Le compteur d'essais est protégé par le verrou de
+        la vue : plusieurs envois simultanés ne consomment pas un seul essai
+        pour deux, ni deux pour un."""
+        if self.terminee or self.restants <= 0:
+            return
+        self.dernier = valeur
+        self.restants -= 1
+        if valeur == self.code:
+            self.trouve = True
+            gain = max(1, round(self.gain_max * (self.restants + 1) / SAFE_ESSAIS))
+            self.recompense = await _finish(
+                self.cog.bot, self.ctx, "safe", self.session_id, "win", gain,
+                metadata={"difficulte": self.difficulte, "restants": self.restants},
+            )
+            self.terminer()
+        else:
+            if valeur < self.code:
+                self.bas = max(self.bas, valeur + 1)
+            else:
+                self.haut = min(self.haut, valeur - 1)
+            if self.restants <= 0:
+                await _finish(self.cog.bot, self.ctx, "safe", self.session_id, "loss", 0)
+                self.terminer()

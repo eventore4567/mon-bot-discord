@@ -167,6 +167,78 @@ class VueDeJeu(discord.ui.View):
             logger.debug("Vue expirée non mise à jour (message disparu).", exc_info=True)
 
 
+class VueMisee(VueDeJeu):
+    """Vue d'un jeu à mise. Sait dire où en est sa manche, pour n'importe quel jeu.
+
+    Le système de reprise après redémarrage a besoin de savoir si une partie
+    était non commencée, engagée ou déjà réglée. Coder cette réponse dans
+    ``+bomb`` l'aurait rendue vraie pour lui seul ; chaque jeu suivant aurait
+    refait la sienne, et la reprise aurait fini par se tromper sur l'un d'eux.
+
+    Les trois transitions sont donc ici, et un jeu n'a qu'à appeler
+    ``engager()`` à sa première action significative.
+    """
+
+    def __init__(self, proprietaire_id: int | None, *, game_id: str, db, **kwargs):
+        super().__init__(proprietaire_id, **kwargs)
+        self.game_id = game_id
+        self._db = db
+        self.engagee = False
+        self.reglee = False
+
+    async def activer(self, message_id: int | None = None) -> None:
+        """La partie est à l'écran : un crash ne la dira plus « jamais affichée »."""
+        from services import game_stakes
+
+        await game_stakes.marquer_active(self._db, self.game_id, message_id)
+
+    async def engager(self) -> None:
+        """Première action significative : la mise n'est plus remboursable.
+
+        Sans ce marqueur, un redémarrage rendrait la mise d'une partie déjà
+        mal engagée — un crash, ou un simple déploiement, deviendrait une
+        façon gratuite d'annuler une manche qu'on est en train de perdre.
+        """
+        from services import game_stakes
+
+        if self.engagee:
+            return
+        self.engagee = True
+        await game_stakes.marquer_engagee(self._db, self.game_id)
+
+    async def regler_gain(self, retour_total: int) -> str:
+        """Crédite le retour COMPLET : la mise a été débitée à l'ouverture."""
+        from services import game_stakes
+
+        statut = await game_stakes.regler_gain(self._db, self.game_id, retour_total)
+        self.reglee = statut == "ok"
+        return statut
+
+    async def regler_perte(self) -> str:
+        from services import game_stakes
+
+        statut = await game_stakes.regler_perte(self._db, self.game_id)
+        self.reglee = statut == "ok"
+        return statut
+
+    async def regler_expiration(self) -> str:
+        """Politique de timeout, identique pour tous les jeux à mise.
+
+        Aucune action jouée : la manche n'a pas commencé, la mise est rendue.
+        Au moins une action : la mise est perdue — sinon attendre l'expiration
+        serait une façon gratuite d'annuler une partie mal engagée.
+        """
+        from services import game_stakes
+
+        if self.reglee:
+            return "already_settled"
+        if self.engagee:
+            return await self.regler_perte()
+        statut = await game_stakes.rembourser_mise(self._db, self.game_id)
+        self.reglee = statut == "ok"
+        return statut
+
+
 class VueReflexe(VueDeJeu):
     """Socle des jeux de réflexe : signal, faux départ, mesure monotone.
 
@@ -244,6 +316,7 @@ class BoutonRejouer(discord.ui.Button):
 
 __all__ = [
     "VueDeJeu",
+    "VueMisee",
     "VueReflexe",
     "positions_melangees",
     "BoutonRejouer",

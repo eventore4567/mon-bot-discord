@@ -45,6 +45,9 @@ GAME_CATALOG = {
     "archery": ("🏹 Tir à l'arc", "rapide"),
     "ghost": ("👻 Fantôme", "rapide"),
     "sequence": ("🧩 Suite", "rapide"),
+    "lava": ("🌋 Tour de lave", "rapide"),
+    "rocket": ("🚀 Fusée", "rapide"),
+    "safe": ("🔐 Coffre-fort", "rapide"),
 }
 
 WORDGAME_CLUES = [
