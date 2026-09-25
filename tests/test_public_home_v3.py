@@ -58,8 +58,8 @@ def test_v3_has_interactive_motion_and_reduced_motion_fallback():
         'data-pane="pane-economy"',
         'id="progress"',
         'id="pointerRing"',
-        'const interactive=$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal")',
-        'perspective(1000px) rotateX(',
+        'const interactive=$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo")',
+        'perspective(1100px) rotateX(',
     ):
         assert marker in page
     assert "@media(prefers-reduced-motion:reduce)" in page
@@ -97,6 +97,9 @@ def test_v3_is_mobile_and_accessibility_aware():
     page = _html()
     assert "@media(max-width:720px)" in page
     assert "@media(max-width:430px)" in page
+    assert "@media(max-width:380px)" in page
+    assert "@media(pointer:coarse)" in page
+    assert 'e.pointerType==="touch"' in page
     assert 'class="skip" href="#main"' in page
     assert 'aria-label="Navigation principale"' in page
     assert 'aria-expanded="false"' in page
