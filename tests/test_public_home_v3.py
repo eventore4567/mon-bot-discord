@@ -29,7 +29,7 @@ def test_v3_has_premium_product_structure():
     for marker in (
         'id="fx"',
         'class="product-shell"',
-        'class="status-strip reveal"',
+        'class="wrap status-strip reveal"',
         'class="rail-track"',
         'class="bento stagger"',
         'id="security"',
