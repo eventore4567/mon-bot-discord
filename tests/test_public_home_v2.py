@@ -37,7 +37,7 @@ def test_v2_is_visually_rich_and_has_all_major_sections():
         'id="automation"',
         'id="ai"',
         'id="faq"',
-        'class="final reveal"',
+        'class="wrap final reveal"',
     ):
         assert marker in page
 
