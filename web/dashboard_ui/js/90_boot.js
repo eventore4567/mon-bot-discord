@@ -175,6 +175,7 @@ const boot = { state: 'booting', watchdog: null };
 let startupSlowTimer = null;
 let dashboardHealthTimer = null;
 let dashboardHealthFailures = 0;
+let dashboardHealthNotified = false;
 function scheduleStartupSlowHint() {
   clearTimeout(startupSlowTimer);
   startupSlowTimer = setTimeout(() => {
@@ -194,15 +195,21 @@ function clearStartupSlowHint() {
 async function dashboardHealthTick({ manual = false } = {}) {
   if (boot.state !== 'ready' || (!manual && document.hidden)) return;
   try {
-    await api('/ready', { background: true });
+    // /ready vérifie aussi la connexion Discord locale. En HA, le standby est
+    // volontairement passif et répond donc 503 alors que son dashboard HTTP
+    // fonctionne normalement. Pour la bannière navigateur on teste uniquement
+    // la liveness web ; les vraies erreurs API restent gérées par api().
+    await api('/health', { background: true });
     dashboardHealthFailures = 0;
+    dashboardHealthNotified = false;
     if (dashboardIssueKey === 'SXD-HEALTH') hideDashboardIssue('SXD-HEALTH');
   } catch (_) {
     dashboardHealthFailures += 1;
-    if (manual || dashboardHealthFailures >= 2) {
+    if ((manual || dashboardHealthFailures >= 3) && !dashboardHealthNotified) {
+      dashboardHealthNotified = true;
       announceDashboardIssue(
-        'SentriX détecte un souci de connexion au dashboard. Les données peuvent mettre quelques secondes à revenir.',
-        { code: 'SXD-HEALTH', retry: () => dashboardHealthTick({ manual: true }), bad: true, sticky: true }
+        'La connexion au dashboard est momentanément instable. La page reste ouverte et SentriX réessaie automatiquement.',
+        { code: 'SXD-HEALTH', retry: () => dashboardHealthTick({ manual: true }), bad: true, sticky: false }
       );
     }
   }
@@ -210,6 +217,7 @@ async function dashboardHealthTick({ manual = false } = {}) {
 function startDashboardHealthWatch() {
   clearInterval(dashboardHealthTimer);
   dashboardHealthFailures = 0;
+  dashboardHealthNotified = false;
   dashboardHealthTimer = setInterval(() => dashboardHealthTick(), 30000);
   setTimeout(() => dashboardHealthTick(), 5000);
 }
