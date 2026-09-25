@@ -21,7 +21,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.games_economy import _embed, _finish, _precheck
-from services import economy as economy_service
+from services import game_stakes
 from utils import game_rewards, stats_service
 from utils import sentrix_panels as panels
 from utils.game_ui import VueDeJeu, valider_composants
@@ -134,19 +134,10 @@ class _VueBomb(VueDeJeu):
             return
         if index in self.bombes:
             self.perdu = True
-            # La mise est prélevée ICI, atomiquement, et pas avant : le joueur
-            # ne paie que s'il perd. Économiquement identique à une mise
-            # retenue d'avance, mais la limite quotidienne de récompenses ne
-            # peut plus lui faire perdre son argent sans rien lui rendre.
-            statut = await economy_service.atomic_gamble(
-                self.cog.bot.db, self.ctx.guild.id, self.ctx.author.id, self.mise, win=False
-            )
-            if statut != "ok":
-                logger.warning(
-                    "Mise de %s non prélevée sur %s (statut=%s).",
-                    self.mise, self.ctx.author.id, statut,
-                )
-                self.mise_non_prelevee = True
+            # La mise est partie à l'OUVERTURE de la manche : il n'y a plus rien
+            # à débiter ici, seulement à clore la réservation. C'est ce qui
+            # empêche d'ouvrir trois grilles à 100 avec 100 en poche.
+            await game_stakes.regler_perte(self.cog.bot.db, self.session_id)
             await _finish(self.cog.bot, self.ctx, "bomb", self.session_id, "loss", 0)
             self.terminer()
             return await self._rendre(interaction, kind="danger")
@@ -167,20 +158,18 @@ class _VueBomb(VueDeJeu):
             return await self._refuser(interaction, "Ouvrez au moins une case avant d'encaisser.")
         self.encaisse = True
         gain = self.gain
-        # Le gain net passe par la même primitive atomique que la perte. Le
-        # crédit de jeu (_finish) n'est appelé qu'avec 0 : il sert au cooldown,
-        # à l'historique et aux statistiques, pas à payer une deuxième fois.
-        self.credit_ok = True
-        if gain > 0:
-            statut = await economy_service.atomic_gamble(
-                self.cog.bot.db, self.ctx.guild.id, self.ctx.author.id, gain, win=True
+        # On crédite le RETOUR COMPLET (mise + profit) : la mise a été débitée à
+        # l'ouverture, ne rendre que le profit la confisquerait au gagnant.
+        statut = await game_stakes.regler_gain(
+            self.cog.bot.db, self.session_id, round(self.mise * self.multiplicateur)
+        )
+        self.credit_ok = statut == "ok"
+        if not self.credit_ok:
+            logger.warning(
+                "Gain de %s non crédité sur %s (statut=%s).", gain, self.ctx.author.id, statut
             )
-            if statut != "ok":
-                self.credit_ok = False
-                logger.warning(
-                    "Gain de %s non crédité sur %s (statut=%s).",
-                    gain, self.ctx.author.id, statut,
-                )
+        # _finish n'est appelé qu'avec 0 : cooldown, historique et statistiques,
+        # jamais un deuxième paiement.
         await _finish(
             self.cog.bot, self.ctx, "bomb", self.session_id, "win", 0,
             metadata={"mise": self.mise, "multiplicateur": self.multiplicateur,
@@ -198,6 +187,23 @@ class _VueBomb(VueDeJeu):
         embed = await _embed(self.cog.bot, self.ctx.guild.id, title="Bombes", description=texte, kind=kind)
         valider_composants(self)
         await panels.editer(self.message, panels.avec_composants(panels.depuis_embed(embed), self))
+
+
+    async def on_timeout(self) -> None:
+        """Comportement défini à l'expiration, jamais un silence.
+
+        Aucune case ouverte : la manche n'a pas commencé, la mise est rendue.
+        Des cases ouvertes : le joueur a choisi de ne pas encaisser, la mise
+        est perdue — sinon attendre l'expiration serait une façon gratuite
+        d'annuler une partie mal engagée.
+        """
+        if not self.terminee:
+            if self.ouvertes:
+                await game_stakes.regler_perte(self.cog.bot.db, self.session_id)
+            else:
+                await game_stakes.rembourser_mise(self.cog.bot.db, self.session_id)
+            await _finish(self.cog.bot, self.ctx, "bomb", self.session_id, "loss", 0)
+        await super().on_timeout()
 
 
 class _CaseBomb(discord.ui.Button):
@@ -230,6 +236,26 @@ class GamesArcade(commands.Cog, name="GamesArcade"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.emoji_monnaie = "🪙"
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Rend les mises restées ouvertes après un redémarrage.
+
+        Une manche interrompue — crash, déploiement, message supprimé — laisse
+        sa mise réservée en base. Sans ce balayage, l'argent resterait bloqué
+        dans une partie qui n'existe plus : le joueur l'aurait perdu sans avoir
+        joué. Le balayage ne touche que les mises assez vieilles pour qu'aucune
+        vue ne soit plus en face.
+        """
+        if getattr(self.bot, "_sentrix_mises_balayees", False):
+            return
+        self.bot._sentrix_mises_balayees = True
+        try:
+            rendues = await game_stakes.rembourser_mises_orphelines(self.bot.db)
+            if rendues:
+                logger.info("Mises orphelines remboursées au démarrage : %s.", rendues)
+        except Exception:
+            logger.warning("Balayage des mises orphelines impossible.", exc_info=True)
 
     async def cog_before_invoke(self, ctx: commands.Context) -> None:
         """Le symbole monétaire du serveur, lu une fois par manche."""
@@ -272,29 +298,45 @@ class GamesArcade(commands.Cog, name="GamesArcade"):
                 kind="warning",
             )))
 
-        # Sans cette vérification, une grille lancée sans le sou serait gratuite :
-        # la perte ne prélèverait rien et l'encaissement paierait quand même.
-        stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
-        liquide = int(stats.get("cash", stats.get("total_money", 0)) or 0)
-        if liquide < mise:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
-                self.bot, guild_id, title="Bombes",
-                description=(
-                    f"Mise de **{stats_service.format_number(mise)}** {self.emoji_monnaie} impossible : "
-                    f"vous avez **{stats_service.format_number(liquide)}** {self.emoji_monnaie} en liquide."
-                ),
-                kind="warning",
-            )))
-
-        demarre, erreur, session_id = await _precheck(self.bot, ctx, "bomb", BOMB_COOLDOWN)
+        demarre, erreur, _session = await _precheck(self.bot, ctx, "bomb", BOMB_COOLDOWN)
         if not demarre:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
                 self.bot, guild_id, title="Bombes", description=erreur, kind="warning")))
 
-        vue = _VueBomb(self, ctx, mise, session_id)
-        embed = await _embed(self.bot, guild_id, title="Bombes", description=vue.texte())
-        valider_composants(vue)
-        vue.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+        # La mise est RÉSERVÉE avant d'afficher la grille. Deux +bomb 100 lancés
+        # à la même milliseconde avec 100 en poche : un seul démarre.
+        session_id = game_stakes.nouvel_identifiant("bomb")
+        statut = await game_stakes.ouvrir_mise(
+            self.bot.db, ctx.guild.id, ctx.author.id, "bomb", mise, session_id
+        )
+        if statut != "ok":
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "bomb")
+            texte = {
+                "insufficient": (
+                    f"Mise de **{stats_service.format_number(mise)}** {self.emoji_monnaie} impossible : "
+                    "votre solde ne la couvre pas."
+                ),
+                "invalid": "Le montant de la mise est invalide.",
+            }.get(statut, "Le casino est momentanément indisponible. Votre argent n'a pas bougé.")
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Bombes", description=texte, kind="warning")))
+
+        # À partir d'ici l'argent est engagé : toute panne avant que le joueur
+        # puisse cliquer doit le rendre, sinon il paierait une partie qu'il n'a
+        # jamais vue.
+        try:
+            vue = _VueBomb(self, ctx, mise, session_id)
+            embed = await _embed(self.bot, guild_id, title="Bombes", description=vue.texte())
+            valider_composants(vue)
+            vue.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+        except Exception:
+            logger.exception("Grille non affichée : mise remboursée (%s).", session_id)
+            await game_stakes.rembourser_mise(self.bot.db, session_id)
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "bomb")
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Bombes",
+                description="La partie n'a pas pu démarrer. Votre mise vous a été rendue.",
+                kind="danger")))
 
 
 async def setup(bot: commands.Bot):

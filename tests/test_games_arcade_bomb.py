@@ -53,8 +53,14 @@ def test_le_retour_est_constant_quel_que_soit_le_moment_d_encaissement():
             survie *= (sures - index) / (BOMB_CASES - index)
         retours.append(survie * multiplicateur_bomb(n))
     assert max(retours) - min(retours) < 0.01, f"retours inégaux : {retours}"
-    # La banque garde une petite marge, sinon l'économie du serveur ne tient pas.
-    assert 0.95 < sum(retours) / len(retours) < 1.0
+    # Le RTP est calculé depuis BOMB_CASES et BOMB_BOMBES, jamais écrit en dur :
+    # changer le nombre de bombes ou un multiplicateur fait bouger ce chiffre et
+    # casse ce test, ce qui est exactement le but. 97 % laisse trois points à la
+    # banque — sans marge, le jeu ne coûterait jamais rien et l'économie du
+    # serveur ne tiendrait pas ; au-delà de cinq, il devient punitif.
+    rtp = sum(retours) / len(retours)
+    assert 0.95 <= rtp <= 0.98, f"RTP dérivé à {rtp:.3f} — vérifiez multiplicateurs et bombes"
+    assert abs(rtp - 0.97) < 0.005, f"RTP attendu ~0,97, obtenu {rtp:.4f}"
 
 
 def test_le_multiplicateur_ne_depasse_jamais_la_grille():

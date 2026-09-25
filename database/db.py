@@ -1162,6 +1162,25 @@ CREATE TABLE IF NOT EXISTS game_settings (
 # ressuscitait une table vide après la migration, ce qui annulait la migration au
 # redémarrage suivant. Elle est désormais migrée puis archivée une seule fois par
 # ``Database._migrate_logs()``.
+GAME_STAKES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS game_stakes (
+    game_id TEXT PRIMARY KEY,
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    game_name TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    state TEXT NOT NULL DEFAULT 'open',
+    payout INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    settled_at INTEGER
+);
+-- Le balayage des mises orphelines au démarrage lit sur (state, created_at) :
+-- sans cet index, il parcourrait toute la table à chaque boot.
+CREATE INDEX IF NOT EXISTS idx_game_stakes_ouvertes ON game_stakes (state, created_at);
+CREATE INDEX IF NOT EXISTS idx_game_stakes_joueur ON game_stakes (guild_id, user_id);
+"""
+
+
 AUTO_DROP_SCHEMA = """
 CREATE TABLE IF NOT EXISTS auto_drop_config (
     guild_id INTEGER PRIMARY KEY,
@@ -1323,6 +1342,7 @@ class Database:
         await self._conn.executescript(GAME_TRANSACTIONS_SCHEMA)
         await self._conn.executescript(LOG_CONFIG_SCHEMA)
         await self._conn.executescript(AUTO_DROP_SCHEMA)
+        await self._conn.executescript(GAME_STAKES_SCHEMA)
         await self._migrate()
         await self._conn.execute(
             "INSERT INTO bot_creators (user_id, display_name, username, is_primary, added_at) "
