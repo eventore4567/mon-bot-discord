@@ -129,7 +129,7 @@ def _public_home_html(request: web.Request, dashboard) -> str:
     # params.get("auth")==="missing"
     # notice.hidden=false
     # history.replaceState
-    from .public_home_v1 import render
+    from .public_home_v2 import render
 
     return render(request, dashboard)
 
