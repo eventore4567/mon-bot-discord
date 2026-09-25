@@ -57,6 +57,9 @@ def test_v3_has_interactive_motion_and_reduced_motion_fallback():
         'data-pane="pane-tickets"',
         'data-pane="pane-economy"',
         'id="progress"',
+        'id="pointerRing"',
+        'const interactive=$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal")',
+        'perspective(1000px) rotateX(',
     ):
         assert marker in page
     assert "@media(prefers-reduced-motion:reduce)" in page
