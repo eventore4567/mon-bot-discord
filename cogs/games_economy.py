@@ -2142,18 +2142,54 @@ class _SoloChoiceButton(discord.ui.Button):
             await interaction.response.edit_message(view=panels.vue_panneau(self))
             panels.terminer_vue(self)
 
+async def _bonus_de_quete(bot, ctx, guild_id: int | None, multiplier: float) -> str:
+    """Boost temporaire accordé par une aventure réussie, selon le risque pris.
+
+    Jamais bloquant : un boost indisponible ne doit pas faire échouer une manche
+    déjà gagnée ni faire disparaître la récompense.
+    """
+    try:
+        money_boost, xp_boost, duration, rarity = temporary_boosts.quest_boost_for_risk(multiplier)
+        active_boost, granted = await temporary_boosts.grant_quest_boost(
+            bot.db, guild_id, ctx.author.id,
+            money_multiplier=money_boost, xp_multiplier=xp_boost,
+            duration_seconds=duration, source=f"quest:{rarity}",
+        )
+        if granted:
+            return (
+                f"\n🚀 **Boost de quête {rarity} !** 🪙 x{active_boost.money_multiplier:g}"
+                f" · ⭐ x{active_boost.xp_multiplier:g}"
+                f" · ⏱️ {max(1, (active_boost.remaining() + 59) // 60)} min"
+            )
+        return (
+            f"\n🚀 Votre boost actuel est déjà aussi bon : 🪙 x{active_boost.money_multiplier:g}"
+            f" · ⭐ x{active_boost.xp_multiplier:g}."
+        )
+    except Exception:
+        logger.warning("Boost de quête indisponible, résultat du jeu conservé.", exc_info=True)
+        return ""
+
+
 class GamesSolo(commands.Cog, name="GamesSolo"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     async def _run_solo(self, ctx: commands.Context, game_name: str):
-        """Jeu solo interactif : trois chemins, trois niveaux de risque et aucun long verrou."""
+        """Une manche, une réponse. Pas de clic intermédiaire.
+
+        Le parcours à trois chemins demandait de choisir un niveau de risque
+        avant de savoir quoi que ce soit : deux messages et une attente pour
+        une expédition qu'on relance toutes les deux minutes. Jayden a tranché
+        pour l'immédiat, façon Vex — on tape, on a le résultat.
+
+        Le risque n'a pas disparu pour autant : il est tiré avec la manche, et
+        annoncé dans le résultat. Une sortie prudente rapporte peu et rate
+        rarement, une sortie téméraire fait l'inverse.
+        """
         titre, cooldown, succes, texte_echec = SOLO_FLAVORS[game_name]
         # Le libellé du catalogue porte déjà son pictogramme, et _embed le repose
         # devant : « 🎣 SentriX — 🎣 Pêche ». On garde le nom du jeu, rien d'autre.
         titre = titre.split(" ", 1)[1] if " " in titre and not titre[0].isalnum() else titre
-        # Une seule phrase d'échec par jeu se reconnaissait dès la troisième
-        # partie. SOLO_ECHECS en propose plusieurs ; l'ancienne reste le secours.
         echecs = list(SOLO_ECHECS.get(game_name) or (texte_echec,))
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await _precheck(self.bot, ctx, game_name, cooldown)
@@ -2164,159 +2200,65 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
             )
 
         difficulty = await _game_difficulty(self.bot, guild_id)
-        choices = list(SOLO_CHOICES[game_name])
-        view = _SoloChoiceView(ctx.author.id, choices)
-        choice_lines = []
-        for emoji, label, chance, multiplier, description in choices:
-            choice_lines.append(
-                f"{emoji} **{label}** · réussite ~{round(chance * 100)}% · butin x{multiplier:g}\n"
-                f"└ {description}"
-            )
-
-        msg = await panels.envoyer(
-            ctx,
-            panels.avec_composants(
-                panels.depuis_embed(
-                    await _embed(
-                        self.bot, guild_id, title=titre,
-                        description=(
-                            f"🎮 Difficulté serveur : **{difficulty}**\n"
-                            "Choisissez votre approche : plus le risque monte, plus le butin potentiel augmente.\n\n"
-                            + "\n\n".join(choice_lines)
-                        ),
-                    )
-                ),
-                view,
-            ),
+        # Le chemin est tiré, plus choisi : le joueur découvre comment ça s'est
+        # passé au lieu de le décider à l'avance.
+        emoji, label, chance, multiplier, _description = game_rewards.secure_pick(
+            list(SOLO_CHOICES[game_name])
         )
-        await view.wait()
-
-        if view.selected is None:
-            game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
-            return await panels.editer(
-                msg,
-                panels.depuis_embed(
-                    await _embed(
-                        self.bot, guild_id, title=titre,
-                        description="⏱️ Aucun choix effectué. La manche est annulée, vous pouvez relancer le jeu.",
-                        kind="warning",
-                    )
-                ),
-            )
-
-        emoji, label, base_chance, multiplier, description = view.selected
-        difficulty_key = difficulty.casefold()
         chance_shift = (
-            0.08 if difficulty_key in {"facile", "easy"}
-            else -0.07 if difficulty_key in {"difficile", "hard"}
-            else 0.0
+            0.12 if difficulty == "facile" else -0.12 if difficulty == "difficile" else 0.0
         )
-        chance = max(0.15, min(0.95, float(base_chance) + chance_shift))
-        won = random.random() < chance
+        chance = max(0.15, min(0.95, float(chance) + chance_shift))
 
-        if not won:
+        if random.random() >= chance:
             await _finish(self.bot, ctx, game_name, sid, "loss", 0)
-            return await panels.editer(
-                msg,
-                panels.depuis_embed(
-                    await _embed(
-                        self.bot, guild_id, title=f"{titre} — échec",
-                        description=(
-                            f"{emoji} **{label}**\n{game_rewards.secure_pick(echecs)}\n\n"
-                            f"🎲 Chance de réussite : **{round(chance * 100)}%**\n"
-                            "🔁 Vous pouvez rejouer dans quelques secondes."
-                        ),
-                        kind="danger",
-                    )
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title=titre,
+                description=(
+                    f"{emoji} **{label}** — {game_rewards.secure_pick(echecs)}\n"
+                    f"-# Réussite ~{round(chance * 100)} % · vous pouvez rejouer dans un instant."
                 ),
-            )
+                kind="danger",
+            )))
 
         base = random.randint(30, 70)
-        text = game_rewards.secure_pick(succes)
-        # La prise est le deuxieme axe de variete : le chemin choisi dit le risque,
-        # la rarete de l'objet dit la chance. Les deux se cumulent sur le gain.
+        texte = game_rewards.secure_pick(succes)
         butin = tirer_butin(game_name)
         butin_text = ""
+        metadata = None
         if butin is not None:
             emoji_butin, nom_butin, rarete, mult_butin, valeur = butin
             base = max(1, round(base * float(mult_butin)))
-            # « a Salmon worth 45 Coins. You now hold 2 of them. » — un objet
-            # sans prix ni compteur n'est qu'un mot de plus dans une phrase.
             possedes = await _combien_deja(self.bot, guild_id, ctx.author.id, nom_butin) + 1
             butin_text = (
                 f"{emoji_butin} Vous ramenez **{nom_butin}** — vaut **{valeur}** 🪙"
                 f" · vous en avez **{possedes}**\n"
-                f"-# {rarete} · gains ×{mult_butin:g}\n"
             )
             if rarete == "Légendaire":
                 butin_text += "✨ **Prise légendaire !** Ça n'arrive presque jamais.\n"
-        amount = max(1, round(base * float(multiplier)))
-        # La prise part avec la manche dans metadata_json : c'est elle que relit
-        # +collec, sans table supplémentaire.
-        reward = await _finish(
-            self.bot, ctx, game_name, sid, "win", amount,
-            metadata=(
-                {"butin": {"emoji": emoji_butin, "nom": nom_butin, "rarete": rarete}}
-                if butin is not None
-                else None
-            ),
-        )
+            metadata = {"butin": {"emoji": emoji_butin, "nom": nom_butin, "rarete": rarete}}
+
+        montant = max(1, round(base * float(multiplier)))
+        reward = await _finish(self.bot, ctx, game_name, sid, "win", montant, metadata=metadata)
 
         boost_text = ""
         if game_name == "adventure":
-            try:
-                money_boost, xp_boost, duration, rarity = temporary_boosts.quest_boost_for_risk(multiplier)
-                active_boost, granted = await temporary_boosts.grant_quest_boost(
-                    self.bot.db,
-                    guild_id,
-                    ctx.author.id,
-                    money_multiplier=money_boost,
-                    xp_multiplier=xp_boost,
-                    duration_seconds=duration,
-                    source=f"quest:{rarity}",
-                )
-                if granted:
-                    boost_text = (
-                        f"\n\n🚀 **Boost de quête {rarity} activé !**\n"
-                        f"🪙 Argent **x{active_boost.money_multiplier:g}** · "
-                        f"⭐ XP **x{active_boost.xp_multiplier:g}** · "
-                        f"⏱️ **{max(1, (active_boost.remaining() + 59) // 60)} min**"
-                    )
-                else:
-                    boost_text = (
-                        f"\n\n🚀 Votre boost actuel est déjà aussi fort ou meilleur : "
-                        f"argent x{active_boost.money_multiplier:g} · XP x{active_boost.xp_multiplier:g}."
-                    )
-            except Exception:
-                logger.warning("Boost de quête indisponible, résultat du jeu conservé.", exc_info=True)
+            boost_text = await _bonus_de_quete(self.bot, ctx, guild_id, multiplier)
 
         if reward and reward.success and reward.amount > 0:
-            reward_text = (
-                f"🪙 **+{stats_service.format_number(reward.amount)}** crédités\n"
-                f"Référence `{reward.display_id}`"
-            )
+            gain = f"🪙 **+{stats_service.format_number(reward.amount)}** crédités · réf. `{reward.display_id}`"
         else:
-            reward_text = (
-                "🪙 **0 crédit** — limite quotidienne de récompenses atteinte.\n"
-                "La partie reste jouable normalement."
-            )
+            gain = "🪙 **0 crédit** — limite quotidienne atteinte. La partie reste jouable."
 
-        await panels.editer(
-            msg,
-            panels.depuis_embed(
-                await _embed(
-                    self.bot, guild_id, title=f"{titre} — réussite",
-                    description=(
-                        f"{emoji} **{label}** · butin x{multiplier:g}\n{text}\n\n"
-                        f"{butin_text}"
-                        f"🎲 Chance jouée : **{round(chance * 100)}%**\n"
-                        f"{reward_text}{boost_text}\n\n"
-                        "🔁 Vous pouvez rejouer dans quelques secondes."
-                    ),
-                    kind="success",
-                )
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+            self.bot, guild_id, title=titre,
+            description=(
+                f"{emoji} **{label}** — {texte}\n{butin_text}{gain}{boost_text}\n"
+                f"-# Réussite ~{round(chance * 100)} % · gains ×{multiplier:g}"
             ),
-        )
+            kind="success",
+        )))
+
     @commands.hybrid_command(name="adventure", description="Partir à l'aventure pour une récompense (cooldown long).", with_app_command=False)
     async def adventure(self, ctx: commands.Context):
         await self._run_solo(ctx, "adventure")

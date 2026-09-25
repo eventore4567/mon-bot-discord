@@ -531,16 +531,24 @@ def test_speed_race_default_is_short_clear_and_not_memory_only():
 
 
 def test_adventure_success_is_the_quest_that_grants_temporary_boost():
-    from pathlib import Path
-    source = (
-        Path(__file__).resolve().parents[1] / "cogs" / "games_economy.py"
-    ).read_text(encoding="utf-8")
-    solo = source.split("async def _run_solo", 1)[1].split(
-        '@commands.hybrid_command(name="adventure"', 1
-    )[0]
+    """Seule l'aventure réussie accorde un boost temporaire.
+
+    Le bloc vivait dans _run_solo ; il est passé dans _bonus_de_quete quand la
+    manche est devenue immédiate. On vérifie donc les deux maillons — l'appel
+    réservé à l'aventure, et le helper qui accorde vraiment le boost — plutôt
+    qu'une chaîne dans un corps de fonction, qui casse au premier remaniement.
+    """
+    import inspect
+
+    from cogs import games_economy
+
+    solo = inspect.getsource(games_economy.GamesSolo._run_solo)
     assert 'if game_name == "adventure":' in solo
-    assert "grant_quest_boost" in solo
-    assert "Boost de quête" in solo
+    assert "_bonus_de_quete" in solo
+
+    helper = inspect.getsource(games_economy._bonus_de_quete)
+    assert "grant_quest_boost" in helper
+    assert "Boost de quête" in helper
 
 
 @pytest.mark.asyncio
