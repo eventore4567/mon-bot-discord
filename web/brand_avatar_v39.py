@@ -129,7 +129,7 @@ def _public_home_html(request: web.Request, dashboard) -> str:
     # params.get("auth")==="missing"
     # notice.hidden=false
     # history.replaceState
-    from .public_home_v2 import render
+    from .public_home_v3 import render
 
     return render(request, dashboard)
 
@@ -161,7 +161,7 @@ async def public_home_middleware(request: web.Request, handler):
     court-circuiter le handler de /. La landing est donc décidée au niveau middleware,
     après les middlewares de sécurité mais avant le handler routé.
     """
-    if request.path == "/" and request.method in {"GET", "HEAD"}:
+    if request.path in {"/", "/home"} and request.method in {"GET", "HEAD"}:
         dashboard = request.app.get("dashboard_module")
         if dashboard is not None:
             return web.Response(
@@ -171,7 +171,7 @@ async def public_home_middleware(request: web.Request, handler):
                     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
                     "Pragma": "no-cache",
                     "X-Robots-Tag": "index, follow",
-                    "X-SentriX-Surface": "public-home-v2",
+                    "X-SentriX-Surface": "public-home-v3",
                 },
             )
     return await handler(request)
@@ -237,6 +237,7 @@ def install(dashboard) -> None:
         # la landing. Le middleware public tranche / avant les frozen_handle_index historiques.
         app.middlewares.append(brand_meta_middleware)
         app.middlewares.append(public_home_middleware)
+        app.router.add_get("/home", dashboard.handle_index)
         app.router.add_get(_AVATAR_PATH, official_avatar)
         app.router.add_get("/favicon.ico", favicon)
         return app
