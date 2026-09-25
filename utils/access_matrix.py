@@ -303,6 +303,10 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "shopsetup", "shoppanel", "shoprole", "give-money", "reset-economy",
         "gamesetup", "economy-system", "economy-audit", "shoppromo",
         "shopstock", "shopwindowclear",
+        # Les drops automatiques créent de la monnaie sans intervention : régler
+        # leur salon, leur montant et leur fréquence relève de la gestion
+        # d'économie, pas d'une commande publique. +drop lui-même l'était déjà.
+        "autodrop", "autodrop-off",
     }),
     "ai": frozenset({
         "aisetup", "aidiag", "aicontext", "aimemorychannel",

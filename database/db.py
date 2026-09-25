@@ -1162,6 +1162,21 @@ CREATE TABLE IF NOT EXISTS game_settings (
 # ressuscitait une table vide après la migration, ce qui annulait la migration au
 # redémarrage suivant. Elle est désormais migrée puis archivée une seule fois par
 # ``Database._migrate_logs()``.
+AUTO_DROP_SCHEMA = """
+CREATE TABLE IF NOT EXISTS auto_drop_config (
+    guild_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    channel_id INTEGER,
+    min_amount INTEGER NOT NULL DEFAULT 100,
+    max_amount INTEGER NOT NULL DEFAULT 500,
+    interval_minutes INTEGER NOT NULL DEFAULT 60,
+    last_drop_at INTEGER NOT NULL DEFAULT 0,
+    updated_by INTEGER,
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+"""
+
+
 LOG_CONFIG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS log_config (
     guild_id INTEGER NOT NULL,
@@ -1307,6 +1322,7 @@ class Database:
         # EXISTS, ne touche à aucune table/donnée déjà existante.
         await self._conn.executescript(GAME_TRANSACTIONS_SCHEMA)
         await self._conn.executescript(LOG_CONFIG_SCHEMA)
+        await self._conn.executescript(AUTO_DROP_SCHEMA)
         await self._migrate()
         await self._conn.execute(
             "INSERT INTO bot_creators (user_id, display_name, username, is_primary, added_at) "
@@ -2591,6 +2607,45 @@ class Database:
             (guild_id, user_id),
         )
         return (row["game_name"], int(row["manches"])) if row else None
+
+    async def get_auto_drop_config(self, guild_id: int) -> dict:
+        """Réglages du drop automatique, avec les valeurs par défaut si absent."""
+        row = await self.fetchone("SELECT * FROM auto_drop_config WHERE guild_id = ?", (guild_id,))
+        defauts = {
+            "guild_id": guild_id, "enabled": 0, "channel_id": None,
+            "min_amount": 100, "max_amount": 500, "interval_minutes": 60,
+            "last_drop_at": 0,
+        }
+        return {**defauts, **(dict(row) if row else {})}
+
+    async def set_auto_drop_config(self, guild_id: int, updates: dict, actor_id: int | None = None) -> dict:
+        colonnes = {
+            cle: valeur for cle, valeur in updates.items()
+            if cle in {"enabled", "channel_id", "min_amount", "max_amount", "interval_minutes", "last_drop_at"}
+        }
+        if not colonnes:
+            return await self.get_auto_drop_config(guild_id)
+        await self.execute(
+            "INSERT OR IGNORE INTO auto_drop_config (guild_id) VALUES (?)", (guild_id,)
+        )
+        assignations = ", ".join(f"{cle} = ?" for cle in colonnes)
+        await self.execute(
+            f"UPDATE auto_drop_config SET {assignations}, updated_by = ?, updated_at = ? WHERE guild_id = ?",
+            (*colonnes.values(), actor_id, now(), guild_id),
+        )
+        return await self.get_auto_drop_config(guild_id)
+
+    async def auto_drops_a_lancer(self, maintenant: int) -> list:
+        """Les serveurs dont le prochain drop automatique est dû.
+
+        Le filtre est en SQL : parcourir tous les serveurs en Python pour n'en
+        garder qu'un ou deux ferait un aller-retour par serveur, chaque minute.
+        """
+        return await self.fetchall(
+            "SELECT * FROM auto_drop_config WHERE enabled = 1 AND channel_id IS NOT NULL "
+            "AND (? - last_drop_at) >= (interval_minutes * 60)",
+            (maintenant,),
+        )
 
     async def get_game_cooldowns(self, guild_id: int, user_id: int) -> dict[str, int]:
         """Tous les cooldowns d'un membre en UNE requête.

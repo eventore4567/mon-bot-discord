@@ -12,6 +12,8 @@ l'exception soit décidée à un seul endroit.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 
 logger = logging.getLogger("bot.game-context")
@@ -107,6 +109,26 @@ def pictogramme_de_titre(titre: str) -> str:
     return "🎮"
 
 
+# Un envoi déclenché par une TÂCHE DE FOND n'a aucun contexte de commande : le
+# drop automatique partait donc avec « **128 ** viennent d'apparaître », pièce
+# mangée et double espace, alors que le même drop lancé à la main gardait la
+# sienne. Ce drapeau permet de déclarer explicitement un bloc dont les
+# pictogrammes portent du sens, indépendamment de toute commande.
+_PICTOGRAMMES_PORTEURS: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "sentrix_pictogrammes_porteurs", default=False
+)
+
+
+@contextlib.contextmanager
+def pictogrammes_porteurs():
+    """Déclare que les pictogrammes de ce bloc sont du contenu, pas du décor."""
+    jeton = _PICTOGRAMMES_PORTEURS.set(True)
+    try:
+        yield
+    finally:
+        _PICTOGRAMMES_PORTEURS.reset(jeton)
+
+
 def commande_de_jeu() -> bool:
     """Vrai quand les pictogrammes de la commande portent du sens.
 
@@ -114,6 +136,8 @@ def commande_de_jeu() -> bool:
     le jeu (une machine à sous sans ses rouleaux n'est rien), et dans une
     commande d'économie il est l'unité du montant.
     """
+    if _PICTOGRAMMES_PORTEURS.get():
+        return True
     try:
         from cogs.games_catalog import GAME_CATALOG
 
@@ -126,4 +150,4 @@ def commande_de_jeu() -> bool:
         return False
 
 
-__all__ = ["commande_de_jeu", "jeu_en_cours", "pictogramme_du_jeu", "pictogramme_de_titre", "COGS_DE_JEU", "COGS_D_ECONOMIE"]
+__all__ = ["commande_de_jeu", "jeu_en_cours", "pictogramme_du_jeu", "pictogramme_de_titre", "COGS_DE_JEU", "COGS_D_ECONOMIE", "pictogrammes_porteurs"]
