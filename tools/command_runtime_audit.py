@@ -60,7 +60,7 @@ async def run() -> int:
         # produit blacklist-add/blacklist-users = 95. L'ancien alias `me` est aussi
         # marqué retiré, mais n'appartenait pas à ces 97 commandes directes : sa surface
         # canonique est désormais `stats`, qui reste directe.
-        expected_normal_direct = 109
+        expected_normal_direct = 112
         if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
             errors.append(
                 "la surface normale doit contenir exactement "
@@ -70,7 +70,7 @@ async def run() -> int:
         # 45 depuis l'ajout de +collec, la collection de prises des expéditions.
         # Ce compte est figé volontairement : ajouter un jeu à la surface directe
         # doit être un geste explicite, pas un effet de bord.
-        expected_games = 57
+        expected_games = 60
         if len(command_catalog_cleanup.GAME_COMMANDS) != expected_games:
             errors.append(
                 f"les {expected_games} jeux doivent rester directs, "

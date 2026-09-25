@@ -117,9 +117,28 @@ class VueDeJeu(discord.ui.View):
         return True
 
     @staticmethod
-    async def _refuser(interaction: discord.Interaction, texte: str) -> None:
+    async def _refuser(interaction: discord.Interaction | None, texte: str) -> None:
+        """Explique un refus au joueur, en éphémère, quoi qu'il arrive.
+
+        Deux chemins, parce qu'il y a deux moments. Depuis
+        ``interaction_check``, rien n'a encore répondu : on répond. Depuis un
+        callback, le bouton a déjà fait ``defer()`` pour pouvoir éditer le
+        message — ``is_done()`` est vrai et ``send_message`` lèverait. Il faut
+        alors passer par un suivi.
+
+        L'ancienne version ne testait que le premier cas et sortait en silence
+        dans le second. Résultat mesuré sur le bot booté : tous les refus
+        émis depuis un callback — encaisser sans avoir joué, cliquer pendant
+        son délai, accuser après élimination, reprendre la couronne trop tôt —
+        ne disaient rien du tout. Le joueur cliquait, et il ne se passait
+        rien : exactement l'état que cette méthode existe pour éviter.
+        """
+        if interaction is None:
+            return
         try:
-            if not interaction.response.is_done():
+            if interaction.response.is_done():
+                await interaction.followup.send(texte, ephemeral=True)
+            else:
                 await interaction.response.send_message(texte, ephemeral=True)
         except discord.HTTPException:
             logger.debug("Refus d'interaction non délivré.", exc_info=True)
@@ -237,6 +256,151 @@ class VueMisee(VueDeJeu):
         statut = await game_stakes.rembourser_mise(self._db, self.game_id)
         self.reglee = statut == "ok"
         return statut
+
+
+class VueSalon(VueDeJeu):
+    """Socle des jeux à plusieurs : +race, +detective, +crown.
+
+    Une vue solo refuse tout clic qui n'est pas du propriétaire et laisse
+    tomber le second clic simultané. Les deux règles sont fausses ici : la
+    table appartient à plusieurs, et deux joueurs qui cliquent en même temps
+    doivent être servis tous les deux. Ne rien changer aurait donné un jeu où
+    le plus rapide fait perdre son tour au second — un bug invisible en test
+    solo, et systématique dès qu'ils sont trois.
+
+    Ce que le socle garantit :
+      - inscription et départ volontaires, avec un effectif minimum et maximum ;
+      - un seul coup en vol PAR JOUEUR (anti-double-clic), mais les coups de
+        joueurs différents sont mis en file, jamais jetés ;
+      - un non-inscrit reçoit une explication au lieu d'un clic ignoré ;
+      - un départ en cours de partie ne casse pas la manche ;
+      - récompense versée une fois, désactivation et expiration propres.
+    """
+
+    def __init__(
+        self,
+        organisateur_id: int,
+        *,
+        joueurs_min: int = 2,
+        joueurs_max: int = 12,
+        timeout: float | None = 180.0,
+        message_intrus: str = "Rejoignez la partie pour y jouer.",
+    ) -> None:
+        # proprietaire_id=None : la vue est ouverte, le filtrage se fait sur
+        # l'inscription et non sur un propriétaire unique.
+        super().__init__(None, timeout=timeout, message_intrus=message_intrus)
+        self.organisateur_id = int(organisateur_id)
+        self.joueurs_min = max(2, int(joueurs_min))
+        self.joueurs_max = max(self.joueurs_min, int(joueurs_max))
+        self.participants: dict[int, str] = {}
+        self.partis: set[int] = set()
+        self.demarree = False
+        self.recompense_versee = False
+        self._coups_en_vol: set[int] = set()
+
+    # -- inscription --------------------------------------------------------
+
+    @property
+    def complet(self) -> bool:
+        """Les partis ne gardent pas leur chaise.
+
+        Compter ``participants`` plutôt que ``actifs`` bloquerait une table de
+        dix dont trois sont partis : elle refuserait de nouveaux joueurs tout
+        en n'en ayant que sept.
+        """
+        return len(self.actifs) >= self.joueurs_max
+
+    @property
+    def assez_de_joueurs(self) -> bool:
+        return len(self.actifs) >= self.joueurs_min
+
+    @property
+    def actifs(self) -> list[int]:
+        """Les inscrits qui n'ont pas quitté, dans l'ordre d'arrivée."""
+        return [uid for uid in self.participants if uid not in self.partis]
+
+    def est_inscrit(self, user_id: int) -> bool:
+        return int(user_id) in self.participants and int(user_id) not in self.partis
+
+    def joindre(self, user_id: int, nom: str) -> str:
+        """« ok », « deja », « complet » ou « commencee »."""
+        user_id = int(user_id)
+        if self.demarree:
+            return "commencee"
+        if user_id in self.participants and user_id not in self.partis:
+            return "deja"
+        if user_id not in self.participants and self.complet:
+            return "complet"
+        self.participants[user_id] = nom
+        self.partis.discard(user_id)
+        return "ok"
+
+    def quitter(self, user_id: int) -> str:
+        """« ok » ou « absent ». L'inscrit reste connu : son score garde un nom.
+
+        Le supprimer effacerait son pseudo du tableau final, et une ligne
+        « <@123> » sans nom est exactement ce qu'un joueur ne comprend pas.
+        """
+        user_id = int(user_id)
+        if user_id not in self.participants or user_id in self.partis:
+            return "absent"
+        self.partis.add(user_id)
+        return "ok"
+
+    def nom(self, user_id: int) -> str:
+        return self.participants.get(int(user_id), "Joueur")
+
+    # -- contrôle d'accès ---------------------------------------------------
+
+    #: Suffixes de ``custom_id`` que n'importe qui peut cliquer. Le contrôle se
+    #: fait sur l'identifiant parce que discord.py appelle ``interaction_check``
+    #: avant de savoir quel composant répondra : l'objet bouton n'est pas encore
+    #: connu à cet instant.
+    SUFFIXES_OUVERTS = (":rejoindre", ":quitter")
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Tout le monde peut s'inscrire ; seuls les inscrits peuvent jouer."""
+        if self.terminee:
+            await self._refuser(interaction, "Cette partie est terminée.")
+            return False
+        identifiant = str((getattr(interaction, "data", None) or {}).get("custom_id") or "")
+        if identifiant.endswith(self.SUFFIXES_OUVERTS):
+            return True
+        if not self.est_inscrit(interaction.user.id):
+            await self._refuser(interaction, self.message_intrus)
+            return False
+        return True
+
+    # -- coups --------------------------------------------------------------
+
+    async def jouer_pour(self, user_id: int, action: Callable[[], Awaitable[None]]) -> bool:
+        """Un coup par joueur à la fois ; les joueurs différents font la queue.
+
+        ``jouer_un_coup`` jette le second clic simultané — la bonne règle en
+        solo, où il s'agit du même doigt sur le même bouton. Ici elle ferait
+        disparaître le coup d'un autre joueur, alors on attend le verrou au
+        lieu d'abandonner.
+        """
+        user_id = int(user_id)
+        if user_id in self._coups_en_vol:
+            return False
+        self._coups_en_vol.add(user_id)
+        try:
+            async with self._verrou:
+                if self.terminee:
+                    return False
+                await action()
+        finally:
+            self._coups_en_vol.discard(user_id)
+        return True
+
+    def marquer_recompense_versee(self) -> bool:
+        """Vrai la première fois seulement : une fin atteinte par deux chemins
+        (dernier coup et expiration) ne doit pas payer deux fois."""
+        if self.recompense_versee:
+            return False
+        self.recompense_versee = True
+        return True
 
 
 class VuePvE(VueDeJeu):
@@ -401,6 +565,7 @@ class BoutonRejouer(discord.ui.Button):
 
 __all__ = [
     "VueDeJeu",
+    "VueSalon",
     "VuePvE",
     "VueMisee",
     "VueReflexe",

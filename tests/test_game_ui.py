@@ -220,3 +220,86 @@ def test_une_relance_qui_echoue_previent_le_joueur():
     asyncio.run(bouton.callback(interaction))
     assert appels == ["tentee"]
     assert any("Impossible de relancer" in str(e.get("contenu", "")) for e in interaction._envoyes)
+
+
+# =============================================================================
+# Refus : le joueur doit toujours savoir pourquoi son clic n'a rien fait
+# =============================================================================
+
+def _interaction_factice(deja_repondu: bool):
+    """Deux moments, deux chemins.
+
+    ``interaction_check`` s'exécute avant toute réponse ; un callback de bouton
+    s'exécute APRÈS le ``defer()`` qui permet d'éditer le message. Dans le
+    second cas ``send_message`` lèverait, et c'est le suivi qu'il faut prendre.
+    """
+    from types import SimpleNamespace
+
+    envoyes: list[tuple[str, str]] = []
+
+    async def par_reponse(texte, **kwargs):
+        envoyes.append(("reponse", texte, kwargs.get("ephemeral")))
+
+    async def par_suivi(texte, **kwargs):
+        envoyes.append(("suivi", texte, kwargs.get("ephemeral")))
+
+    return SimpleNamespace(
+        envoyes=envoyes,
+        followup=SimpleNamespace(send=par_suivi),
+        response=SimpleNamespace(is_done=lambda: deja_repondu,
+                                 send_message=par_reponse),
+    )
+
+
+def test_un_refus_avant_toute_reponse_passe_par_la_reponse():
+    import asyncio
+
+    from utils.game_ui import VueDeJeu
+
+    interaction = _interaction_factice(deja_repondu=False)
+    asyncio.run(VueDeJeu._refuser(interaction, "Pas votre partie."))
+    assert interaction.envoyes == [("reponse", "Pas votre partie.", True)]
+
+
+def test_un_refus_apres_le_defer_passe_par_le_suivi():
+    """Le défaut mesuré sur le bot booté : tous les refus émis depuis un
+    callback ne disaient rien du tout. Le joueur cliquait, et il ne se passait
+    rien — encaisser sans avoir joué, cliquer pendant son délai, accuser après
+    élimination, reprendre la couronne trop tôt."""
+    import asyncio
+
+    from utils.game_ui import VueDeJeu
+
+    interaction = _interaction_factice(deja_repondu=True)
+    asyncio.run(VueDeJeu._refuser(interaction, "Encore 2 s."))
+    assert interaction.envoyes == [("suivi", "Encore 2 s.", True)]
+
+
+def test_un_refus_sans_interaction_ne_leve_pas():
+    """Le compte à rebours de +crown conclut la manche sans clic derrière."""
+    import asyncio
+
+    from utils.game_ui import VueDeJeu
+
+    asyncio.run(VueDeJeu._refuser(None, "personne à prévenir"))
+
+
+def test_un_refus_est_toujours_ephemere():
+    """Un refus public exposerait la partie d'un joueur à tout le salon."""
+    import ast
+    import inspect
+    import textwrap
+
+    from utils.game_ui import VueDeJeu
+
+    # dedent, pas lstrip : lstrip ne désindente que la première ligne et laisse
+    # le corps décalé, ce qui fait échouer ast.parse sur une IndentationError.
+    arbre = ast.parse(textwrap.dedent(inspect.getsource(VueDeJeu._refuser)))
+    envois = [n for n in ast.walk(arbre)
+              if isinstance(n, ast.Call)
+              and isinstance(n.func, ast.Attribute)
+              and n.func.attr in ("send", "send_message")]
+    assert envois, "aucun envoi trouvé : le test ne mesure plus rien"
+    for envoi in envois:
+        ephemere = [k for k in envoi.keywords if k.arg == "ephemeral"]
+        assert ephemere and ephemere[0].value.value is True

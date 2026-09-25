@@ -52,6 +52,9 @@ GAME_CATALOG = {
     "zombie": ("🧟 Nuit des zombies", "solo"),
     "ice": ("🧊 Lac gelé", "solo"),
     "potion": ("⚗️ Atelier d'alchimie", "solo"),
+    "race": ("🏁 Course d'obstacles", "communautaire"),
+    "detective": ("🕵️ Enquête", "communautaire"),
+    "crown": ("👑 Roi de la colline", "communautaire"),
 }
 
 WORDGAME_CLUES = [

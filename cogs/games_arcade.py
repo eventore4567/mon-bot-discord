@@ -29,12 +29,14 @@ from cogs.games_economy import _embed, _finish, _precheck
 from services import game_stakes
 from services import crafting
 from utils import game_rewards, ice_puzzle, stats_service
+from utils import party_games as party
 from utils import pve_engine as pve
 from utils import sentrix_panels as panels
 from utils.game_ui import (
     VueDeJeu,
     VueMisee,
     VuePvE,
+    VueSalon,
     VueReflexe,
     positions_melangees,
     valider_composants,
@@ -721,6 +723,63 @@ class GamesArcade(commands.Cog, name="GamesArcade"):
         valider_composants(vue)
         vue.message = await panels.envoyer(
             ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+
+    # --------------------------------------------------- bloc multijoueur
+
+    async def _ouvrir_table(self, ctx, jeu: str, titre: str, cooldown: int, fabrique):
+        """Précontrôle puis affichage d'un salon. Partagé par les trois tables."""
+        demarre, erreur, session = await _precheck(self.bot, ctx, jeu, cooldown)
+        if not demarre:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None,
+                title=titre, description=erreur, kind="warning")))
+        try:
+            vue = fabrique(session)
+        except Exception:
+            logger.exception("Table %s non ouverte : verrou relâché.", jeu)
+            game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, jeu)
+            raise
+        embed = await _embed(self.bot, ctx.guild.id, title=titre, description=vue.texte())
+        valider_composants(vue)
+        vue.message = await panels.envoyer(
+            ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+        return vue
+
+    @commands.hybrid_command(
+        name="race",
+        description="Course à plusieurs : avancer sûrement ou sprinter et risquer de caler.",
+        with_app_command=False,
+    )
+    async def race(self, ctx: commands.Context):
+        await self._ouvrir_table(
+            ctx, "race", "Course d'obstacles", RACE_COOLDOWN,
+            lambda session: _VueRace(self, ctx, session))
+
+    @commands.hybrid_command(
+        name="detective",
+        description="Enquête à plusieurs : accusez tôt pour gagner plus, trompez-vous et sortez.",
+        with_app_command=False,
+    )
+    async def detective(self, ctx: commands.Context):
+        enquete = party.generer_enquete(pve.AleaSecurise())
+        if enquete is None:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, ctx.guild.id if ctx.guild else None, title="Enquête",
+                description="Aucun dossier exploitable ce soir. Réessayez dans un instant.",
+                kind="warning")))
+        await self._ouvrir_table(
+            ctx, "detective", "Enquête", DETECTIVE_COOLDOWN,
+            lambda session: _VueDetective(self, ctx, enquete, session))
+
+    @commands.hybrid_command(
+        name="crown",
+        description="Roi de la colline : gardez la couronne jusqu'à un instant tenu secret.",
+        with_app_command=False,
+    )
+    async def crown(self, ctx: commands.Context):
+        await self._ouvrir_table(
+            ctx, "crown", "Roi de la colline", CROWN_COOLDOWN,
+            lambda session: _VueCrown(self, ctx, session))
 
 
 # =============================================================================
@@ -2049,3 +2108,618 @@ class _BoutonRecolter(discord.ui.Button):
         if not interaction.response.is_done():
             await interaction.response.defer()
         await vue.jouer_un_coup(lambda: vue.recolter(interaction))
+
+
+# =============================================================================
+# SOCLE DES PARTIES À PLUSIEURS — salon, inscriptions, paiements multiples
+# =============================================================================
+
+class _VuePartie(VueSalon):
+    """Ce que +race, +detective et +crown partagent côté Discord.
+
+    Trois points seulement, mais ce sont les trois qui cassent :
+
+      - **un identifiant de manche par joueur payé.** ``game_session_id`` est
+        UNIQUE en base : réutiliser le même pour six gagnants n'en paierait
+        qu'un, les cinq autres recevant « already_rewarded » en silence. Chacun
+        a donc son propre identifiant, dérivé de celui de la manche, ce qui
+        garde l'idempotence par joueur.
+      - **un verrou de jeu par participant.** ``_precheck`` n'en pose un que
+        pour l'organisateur ; sans celui-ci, un membre pourrait être inscrit à
+        deux tables en même temps et encaisser deux fois.
+      - **les départs.** Un joueur qui s'en va reste connu — son pseudo sert
+        encore au tableau final — mais ne compte plus dans les vivants.
+    """
+
+    def __init__(self, cog: "GamesArcade", ctx: commands.Context, jeu: str,
+                 session_id: str, **kwargs):
+        super().__init__(ctx.author.id, **kwargs)
+        self.cog, self.ctx, self.jeu, self.session_id = cog, ctx, jeu, session_id
+        self.raison_de_fin = ""
+        self.gains: dict[int, int] = {}
+        self.recompenses: dict[int, object] = {}
+        self.joindre(ctx.author.id, ctx.author.display_name)
+        self._reconstruire()
+
+    # -- verrous ------------------------------------------------------------
+
+    def _prendre_verrou(self, user_id: int) -> bool:
+        """L'organisateur a déjà le sien, posé par le précontrôle."""
+        if user_id == self.ctx.author.id:
+            return True
+        return game_rewards.acquire_play_lock(self.ctx.guild.id, user_id, self.jeu)
+
+    def liberer_verrous(self) -> None:
+        for user_id in self.participants:
+            game_rewards.release_play_lock(self.ctx.guild.id, user_id, self.jeu)
+
+    # -- inscriptions -------------------------------------------------------
+
+    async def rejoindre(self, interaction: discord.Interaction) -> None:
+        membre = interaction.user
+        if self.est_inscrit(membre.id):
+            return await self._refuser(interaction, "Vous êtes déjà à cette table.")
+        if not self._prendre_verrou(membre.id):
+            return await self._refuser(
+                interaction, "Vous avez déjà une manche de ce jeu en cours.")
+        statut = self.joindre(membre.id, membre.display_name)
+        if statut != "ok":
+            game_rewards.release_play_lock(self.ctx.guild.id, membre.id, self.jeu)
+            return await self._refuser(interaction, {
+                "complet": f"La table est complète ({self.joueurs_max} joueurs).",
+                "commencee": "La partie a déjà commencé.",
+            }.get(statut, "Inscription impossible."))
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, self.titre)
+
+    async def partir(self, interaction: discord.Interaction) -> None:
+        if self.quitter(interaction.user.id) != "ok":
+            return await self._refuser(interaction, "Vous n'étiez pas à cette table.")
+        game_rewards.release_play_lock(self.ctx.guild.id, interaction.user.id, self.jeu)
+        if self.demarree and len(self.actifs) < self.joueurs_min:
+            # Plus assez de monde en cours de route : on conclut avec ce qui a
+            # été joué plutôt que de laisser une partie fantôme sur l'écran.
+            return await self.conclure(interaction, "Il ne reste plus assez de joueurs.")
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, self.titre)
+
+    async def lancer(self, interaction: discord.Interaction) -> None:
+        if interaction.user.id != self.organisateur_id:
+            return await self._refuser(
+                interaction, "Seul l'organisateur de la table peut lancer la partie.")
+        if self.demarree:
+            return await self._refuser(interaction, "La partie a déjà commencé.")
+        if not self.assez_de_joueurs:
+            return await self._refuser(
+                interaction, f"Il faut au moins {self.joueurs_min} joueurs.")
+        self.demarree = True
+        await self.demarrer()
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, self.titre, kind="success")
+
+    async def demarrer(self) -> None:
+        """Préparation propre au jeu, une fois la table complète."""
+
+    # -- composants ---------------------------------------------------------
+
+    def _boutons_salon(self) -> None:
+        self.add_item(_BoutonRejoindre(self.jeu))
+        self.add_item(_BoutonQuitter(self.jeu))
+        if not self.demarree:
+            self.add_item(_BoutonLancer(self.jeu, self.assez_de_joueurs))
+
+    def ligne_table(self) -> str:
+        noms = []
+        for user_id, nom in self.participants.items():
+            noms.append(f"~~{nom}~~" if user_id in self.partis else nom)
+        effectif = f"{len(self.actifs)}/{self.joueurs_max}"
+        return f"👥 **Table ({effectif})** : " + (", ".join(noms) or "_personne_")
+
+    # -- paiement -----------------------------------------------------------
+
+    async def payer(self, gains: dict[int, int]) -> None:
+        """Crédite chaque gagnant sous son propre identifiant de manche.
+
+        Un seul identifiant pour toute la table ne paierait que le premier :
+        l'insertion des suivants serait refusée pour cause de doublon, sans
+        erreur visible nulle part.
+        """
+        if not self.marquer_recompense_versee():
+            return
+        self.gains = dict(gains)
+        for user_id, montant in gains.items():
+            if montant <= 0:
+                continue
+            try:
+                self.recompenses[user_id] = await game_rewards.reward_game_winner(
+                    self.cog.bot, self.ctx.guild.id, user_id, self.jeu, montant,
+                    f"{self.session_id}-{user_id}", result="win",
+                    metadata={"table": len(self.participants), "partis": len(self.partis)},
+                )
+            except Exception:
+                logger.exception("Récompense non versée à %s (%s).", user_id, self.jeu)
+        for user_id in self.participants:
+            try:
+                await game_rewards.touch_cooldown(
+                    self.cog.bot, self.ctx.guild.id, user_id, self.jeu)
+            except Exception:
+                logger.debug("Cooldown non posé pour %s.", user_id, exc_info=True)
+        self.liberer_verrous()
+
+    def tableau_des_gains(self) -> str:
+        if not self.gains:
+            return ""
+        lignes = []
+        for user_id, montant in sorted(self.gains.items(), key=lambda p: -p[1]):
+            if montant <= 0:
+                continue
+            recompense = self.recompenses.get(user_id)
+            verse = getattr(recompense, "amount", montant) if recompense else montant
+            reference = getattr(recompense, "display_id", None)
+            suffixe = f" · réf. `{reference}`" if reference else ""
+            lignes.append(f"{self.cog.emoji_monnaie} **{self.nom(user_id)}** "
+                          f"+{stats_service.format_number(verse)}{suffixe}")
+        return "\n".join(lignes)
+
+    async def conclure(self, interaction, raison: str = "") -> None:
+        """Fin commune : paiement, désactivation, dernier rendu."""
+        await self.payer(self.calculer_gains())
+        self.raison_de_fin = raison
+        self.terminer()
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, self.titre, kind="success")
+
+    def calculer_gains(self) -> dict[int, int]:
+        return {}
+
+    async def on_timeout(self) -> None:
+        if not self.terminee:
+            if self.demarree:
+                await self.payer(self.calculer_gains())
+            self.liberer_verrous()
+        await super().on_timeout()
+
+
+class _BoutonRejoindre(discord.ui.Button):
+    def __init__(self, jeu: str):
+        super().__init__(label="Rejoindre", emoji="➕",
+                         style=discord.ButtonStyle.success, row=4,
+                         custom_id=f"{jeu}:rejoindre")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VuePartie = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_pour(interaction.user.id, lambda: vue.rejoindre(interaction))
+
+
+class _BoutonQuitter(discord.ui.Button):
+    def __init__(self, jeu: str):
+        super().__init__(label="Quitter", emoji="🚪",
+                         style=discord.ButtonStyle.secondary, row=4,
+                         custom_id=f"{jeu}:quitter")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VuePartie = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_pour(interaction.user.id, lambda: vue.partir(interaction))
+
+
+class _BoutonLancer(discord.ui.Button):
+    def __init__(self, jeu: str, pret: bool):
+        super().__init__(label="Lancer la partie", emoji="▶️", row=4,
+                         style=discord.ButtonStyle.primary if pret
+                         else discord.ButtonStyle.secondary,
+                         disabled=not pret, custom_id=f"{jeu}:lancer")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VuePartie = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_pour(interaction.user.id, lambda: vue.lancer(interaction))
+
+
+# =============================================================================
+# 🏁 RACE — avancer sûrement ou sprinter, chacun sa ligne
+# =============================================================================
+
+RACE_COOLDOWN = 40
+
+
+class _VueRace(_VuePartie):
+    """Course où le choix compte autant que la vitesse de clic.
+
+    Le pas garanti rapporte 2 cases en moyenne, le sprint 2,15 mais cale trois
+    fois sur dix et coûte alors un tour. Mesuré sur 4 000 courses : ni l'un ni
+    l'autre ne domine, et le jeu mixte — sprinter puis sécuriser à l'approche
+    de la ligne — bat le pas garanti pur dans 58,5 % des duels.
+
+    Un délai par joueur borne le clic : sans lui, la course se gagnerait à la
+    macro et non à la décision.
+    """
+
+    titre = "Course d'obstacles"
+
+    def __init__(self, cog, ctx, session_id: str):
+        self.coureurs: dict[int, party.Coureur] = {}
+        self.dernier_coup: dict[int, float] = {}
+        self.vainqueur: int | None = None
+        super().__init__(cog, ctx, "race", session_id,
+                         joueurs_min=party.RACE_JOUEURS_MIN,
+                         joueurs_max=party.RACE_JOUEURS_MAX,
+                         timeout=300.0,
+                         message_intrus="Rejoignez la course pour y courir.")
+
+    async def demarrer(self) -> None:
+        self.coureurs = {uid: party.Coureur(uid) for uid in self.actifs}
+
+    def _reconstruire(self) -> None:
+        self.clear_items()
+        if self.terminee:
+            return
+        if self.demarree:
+            self.add_item(_BoutonCourse("avancer", "Avancer", "👟",
+                                        discord.ButtonStyle.primary))
+            self.add_item(_BoutonCourse("sprinter", "Sprinter", "💨",
+                                        discord.ButtonStyle.danger))
+        self._boutons_salon()
+
+    def piste(self, coureur: party.Coureur) -> str:
+        avance = round(coureur.position / party.PISTE * 12)
+        return "─" * avance + "🏃" + "·" * (12 - avance) + "🏁"
+
+    def texte(self) -> str:
+        if not self.demarree:
+            return (f"🏁 **Course d'obstacles** — piste de {party.PISTE} cases.\n"
+                    f"👟 Avancer : 1 à 3 cases, toujours.\n"
+                    f"💨 Sprinter : jusqu'à {party.SPRINT[1]} cases, mais trois fois sur "
+                    f"dix vous calez et perdez le tour suivant.\n\n"
+                    f"{self.ligne_table()}\n\n"
+                    f"Il faut **{self.joueurs_min}** joueurs pour lancer.")
+        lignes = []
+        for user_id, coureur in sorted(self.coureurs.items(),
+                                       key=lambda p: -p[1].position):
+            marque = "🏆 " if user_id == self.vainqueur else ""
+            sortie = " _(parti)_" if user_id in self.partis else ""
+            repos = " 😵" if coureur.repos > 0 else ""
+            lignes.append(f"{marque}`{coureur.position:2}` {self.piste(coureur)} "
+                          f"**{self.nom(user_id)}**{repos}{sortie}")
+        corps = "\n".join(lignes)
+        if self.terminee:
+            tete = (f"🏆 **{self.nom(self.vainqueur)} franchit la ligne !**"
+                    if self.vainqueur is not None
+                    else f"🏁 **Course interrompue.** {self.raison_de_fin}")
+            gains = self.tableau_des_gains()
+            return f"{corps}\n\n{tete}" + (f"\n{gains}" if gains else "")
+        return (f"{corps}\n\n👟 Avancer · 💨 Sprinter — "
+                f"**{party.DELAI_ENTRE_COUPS:g} s** entre deux coups.")
+
+    async def courir(self, interaction: discord.Interaction, sprinte: bool) -> None:
+        user_id = interaction.user.id
+        if not self.demarree:
+            return await self._refuser(interaction, "La course n'a pas encore été lancée.")
+        coureur = self.coureurs.get(user_id)
+        if coureur is None or user_id in self.partis:
+            return await self._refuser(interaction, "Vous ne courez pas cette manche.")
+        # time.monotonic : une horloge qui ne recule pas. time.time() reculerait
+        # à la synchronisation NTP et rendrait le délai négatif.
+        maintenant = time.monotonic()
+        attente = self.dernier_coup.get(user_id, 0.0) + party.DELAI_ENTRE_COUPS - maintenant
+        if attente > 0:
+            return await self._refuser(
+                interaction, f"Reprenez votre souffle — encore {attente:.1f} s.")
+        self.dernier_coup[user_id] = maintenant
+        party.avancer(coureur, sprinte, pve.AleaSecurise())
+        if coureur.arrive:
+            self.vainqueur = user_id
+            return await self.conclure(interaction)
+        await self.cog.rendre(self, interaction, self.titre)
+
+    def calculer_gains(self) -> dict[int, int]:
+        gains: dict[int, int] = {}
+        for user_id, coureur in self.coureurs.items():
+            if user_id in self.partis:
+                continue        # partir en route ne rapporte rien
+            gains[user_id] = party.RACE_PARTICIPATION
+        if self.vainqueur is not None:
+            gains[self.vainqueur] = gains.get(self.vainqueur, 0) + party.RACE_BASE
+        return gains
+
+
+class _BoutonCourse(discord.ui.Button):
+    def __init__(self, cle: str, libelle: str, picto: str, style):
+        super().__init__(label=libelle, emoji=picto, style=style,
+                         custom_id=f"race:{cle}")
+        self.sprinte = cle == "sprinter"
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueRace = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_pour(interaction.user.id,
+                             lambda: vue.courir(interaction, self.sprinte))
+
+
+# =============================================================================
+# 🕵️ DETECTIVE — accuser tôt paie plus, se tromper élimine
+# =============================================================================
+
+DETECTIVE_COOLDOWN = 50
+
+
+class _VueDetective(_VuePartie):
+    """Enquête dont les indices désignent toujours exactement un coupable.
+
+    Vérifié à la génération par le même chemin que le jeu, exactement comme la
+    grille de ``+ice`` : des indices tirés au hasard laissent souvent deux
+    suspects compatibles, et le joueur qui accuse l'autre a raison sans pouvoir
+    gagner. Le coupable et les indices restent côté serveur ; aucun custom_id
+    ne dit lequel est le bon.
+    """
+
+    titre = "Enquête"
+
+    def __init__(self, cog, ctx, enquete, session_id: str):
+        self.enquete = enquete
+        self.indices_lus = 1
+        self.elimines: set[int] = set()
+        self.vainqueur: int | None = None
+        self.prime = 0
+        super().__init__(cog, ctx, "detective", session_id,
+                         joueurs_min=party.DETECTIVE_JOUEURS_MIN,
+                         joueurs_max=party.DETECTIVE_JOUEURS_MAX,
+                         timeout=300.0,
+                         message_intrus="Rejoignez l'enquête pour accuser.")
+
+    def _reconstruire(self) -> None:
+        self.clear_items()
+        if self.terminee:
+            return
+        if self.demarree:
+            for position, suspect in enumerate(self.enquete.suspects):
+                self.add_item(_BoutonSuspect(position, suspect.nom))
+            if self.indices_lus < len(self.enquete.indices):
+                self.add_item(_BoutonIndice())
+        self._boutons_salon()
+
+    def texte(self) -> str:
+        if not self.demarree:
+            return ("🕵️ **Enquête** — un coupable parmi "
+                    f"{len(self.enquete.suspects)} suspects.\n"
+                    "Chaque indice révélé rapproche de la vérité, mais réduit la prime : "
+                    "accuser tôt paie davantage. Une accusation fausse vous élimine.\n\n"
+                    f"{self.ligne_table()}\n\n"
+                    f"Il faut **{self.joueurs_min}** joueurs pour lancer.")
+        lignes = ["🕵️ **Suspects**"]
+        lignes += [f"　{s.portrait()}" for s in self.enquete.suspects]
+        lignes += ["", f"🔍 **Indices ({self.indices_lus}/{len(self.enquete.indices)})**"]
+        lignes += [f"　• {i.texte()}" for i in self.enquete.indices[:self.indices_lus]]
+        if self.terminee:
+            if self.vainqueur is not None:
+                lignes += ["", f"🏆 **{self.nom(self.vainqueur)} démasque "
+                               f"{self.enquete.coupable.nom} !**"]
+            else:
+                lignes += ["", f"🕯️ **Personne n'a trouvé.** Le coupable était "
+                               f"**{self.enquete.coupable.nom}**. {self.raison_de_fin}"]
+            gains = self.tableau_des_gains()
+            if gains:
+                lignes.append(gains)
+            return "\n".join(lignes)
+        lignes += ["", f"💰 Accuser maintenant vaut "
+                       f"**{party.prime_accusation(self.enquete, self.indices_lus)}** "
+                       f"{self.cog.emoji_monnaie}."]
+        if self.elimines:
+            hors = ", ".join(self.nom(u) for u in self.elimines)
+            lignes.append(f"❌ Éliminés : {hors}")
+        return "\n".join(lignes)
+
+    async def reveler(self, interaction: discord.Interaction) -> None:
+        if self.indices_lus >= len(self.enquete.indices):
+            return await self._refuser(interaction, "Tous les indices sont déjà là.")
+        self.indices_lus += 1
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, self.titre)
+
+    async def accuser(self, interaction: discord.Interaction, position: int) -> None:
+        user_id = interaction.user.id
+        if not self.demarree:
+            return await self._refuser(interaction, "L'enquête n'a pas encore commencé.")
+        if user_id in self.elimines:
+            return await self._refuser(interaction, "Vous vous êtes déjà trompé·e.")
+        suspect = self.enquete.suspects[position]
+        if suspect == self.enquete.coupable:
+            self.vainqueur = user_id
+            self.prime = party.prime_accusation(self.enquete, self.indices_lus)
+            return await self.conclure(interaction)
+        self.elimines.add(user_id)
+        restants = [u for u in self.actifs if u not in self.elimines]
+        if not restants:
+            return await self.conclure(interaction, "Tout le monde s'est trompé.")
+        await self._refuser(interaction, f"❌ Ce n'est pas {suspect.nom}. Vous êtes éliminé·e.")
+        self._reconstruire()
+        await self.cog.rendre(self, interaction, self.titre, kind="warning")
+
+    def calculer_gains(self) -> dict[int, int]:
+        return {self.vainqueur: self.prime} if self.vainqueur is not None else {}
+
+
+class _BoutonSuspect(discord.ui.Button):
+    #: Émoji d'accusation identique pour tous : un pictogramme par suspect
+    #: laisserait deviner lequel est le coupable.
+    def __init__(self, position: int, nom: str):
+        super().__init__(label=nom, emoji="🔎", style=discord.ButtonStyle.secondary,
+                         row=position // 3, custom_id=f"detective:accuser:{position}")
+        self.position = position
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueDetective = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_pour(interaction.user.id,
+                             lambda: vue.accuser(interaction, self.position))
+
+
+class _BoutonIndice(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Nouvel indice", emoji="🔍", row=3,
+                         style=discord.ButtonStyle.primary, custom_id="detective:indice")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueDetective = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_pour(interaction.user.id, lambda: vue.reveler(interaction))
+
+
+# =============================================================================
+# 👑 CROWN — tenir la couronne quand le temps s'arrête
+# =============================================================================
+
+CROWN_COOLDOWN = 50
+
+
+class _VueCrown(_VuePartie):
+    """Roi de la colline. L'instant de fin est scellé au départ.
+
+    Le tirer en cours de manche permettrait de le faire tomber pile quand
+    quelqu'un vient de prendre la couronne, et personne ne pourrait le prouver.
+    Ici il est fixé au lancement et jamais relu depuis le client.
+
+    Le temps de port compte autant que le dernier clic : payer uniquement le
+    porteur final ferait de la manche une loterie où tenir la couronne une
+    minute entière ne vaudrait rien.
+    """
+
+    titre = "Roi de la colline"
+
+    def __init__(self, cog, ctx, session_id: str):
+        self.couronne: party.Couronne | None = None
+        self.duree = 0
+        self._horloge: asyncio.Task | None = None
+        super().__init__(cog, ctx, "crown", session_id,
+                         joueurs_min=party.CROWN_JOUEURS_MIN,
+                         joueurs_max=party.CROWN_JOUEURS_MAX,
+                         timeout=240.0,
+                         message_intrus="Rejoignez la colline pour prendre la couronne.")
+
+    async def demarrer(self) -> None:
+        """Scelle l'instant de fin. Rien d'autre.
+
+        Le compte à rebours ne part pas d'ici : y créer une tâche rendrait la
+        préparation de la manche impossible à vérifier sans bot vivant, et
+        lierait l'état du jeu à une boucle d'événements. Il démarre au clic,
+        là où la boucle et le message existent pour de bon.
+        """
+        self.duree = pve.AleaSecurise().entier(*party.CROWN_FENETRE)
+        self.couronne = party.Couronne(fin=time.monotonic() + self.duree)
+
+    async def lancer(self, interaction: discord.Interaction) -> None:
+        await super().lancer(interaction)
+        if self.demarree and self._horloge is None:
+            self._horloge = asyncio.create_task(self._compte_a_rebours())
+
+    def _reconstruire(self) -> None:
+        self.clear_items()
+        if self.terminee:
+            return
+        if self.demarree:
+            self.add_item(_BoutonCouronne())
+        self._boutons_salon()
+
+    def _restant(self) -> float:
+        if self.couronne is None:
+            return 0.0
+        return max(0.0, self.couronne.fin - time.monotonic())
+
+    def texte(self) -> str:
+        if not self.demarree:
+            return ("👑 **Roi de la colline** — une couronne, plusieurs mains.\n"
+                    f"La manche s'arrête à un instant tiré entre "
+                    f"{party.CROWN_FENETRE[0]} et {party.CROWN_FENETRE[1]} secondes, "
+                    "scellé au lancement et jamais annoncé.\n"
+                    f"Reprendre la couronne demande {party.CROWN_VERROU:g} s d'attente "
+                    "après l'avoir perdue.\n\n"
+                    f"{self.ligne_table()}\n\n"
+                    f"Il faut **{self.joueurs_min}** joueurs pour lancer.")
+        porteur = (f"👑 **{self.nom(self.couronne.porteur)}** porte la couronne"
+                   if self.couronne.porteur is not None
+                   else "👑 La couronne est **à terre**")
+        if self.terminee:
+            lignes = [porteur, ""]
+            classement = self.couronne.classement()
+            for rang, (user_id, secondes) in enumerate(classement[:8], start=1):
+                lignes.append(f"`{rang}.` **{self.nom(user_id)}** — "
+                              f"{secondes:.0f} s de règne")
+            if self.raison_de_fin:
+                lignes.append(f"\n{self.raison_de_fin}")
+            gains = self.tableau_des_gains()
+            if gains:
+                lignes += ["", gains]
+            return "\n".join(lignes)
+        restant = self._restant()
+        barre = "▰" * max(0, round(restant / max(1, self.duree) * 12))
+        return (f"{porteur}\n"
+                f"{barre or '▱'} _le temps file…_\n\n"
+                + "\n".join(f"　**{self.nom(u)}** {s:.0f} s"
+                            for u, s in self.couronne.classement()[:6])
+                + "\n\n👑 Prenez la couronne — et gardez-la.")
+
+    async def prendre(self, interaction: discord.Interaction) -> None:
+        if self.couronne is None:
+            return await self._refuser(interaction, "La manche n'a pas encore commencé.")
+        maintenant = time.monotonic()
+        statut = self.couronne.prendre(interaction.user.id, maintenant)
+        if statut == "deja":
+            return await self._refuser(interaction, "Vous la portez déjà.")
+        if statut == "verrou":
+            attente = self.couronne.verrouille_jusqu_a(interaction.user.id) - maintenant
+            return await self._refuser(
+                interaction, f"Vous venez de la perdre — encore {attente:.1f} s.")
+        if statut == "finie":
+            return await self._refuser(interaction, "La manche est terminée.")
+        await self.cog.rendre(self, interaction, self.titre)
+
+    async def _compte_a_rebours(self) -> None:
+        """Rafraîchit la manche, puis la conclut à l'instant scellé.
+
+        La boucle ne décide de rien : elle lit ``couronne.fin``, fixé au
+        lancement. Elle ne peut donc pas allonger la manche pour favoriser
+        qui que ce soit.
+        """
+        try:
+            while not self.terminee and self._restant() > 0:
+                await asyncio.sleep(min(6.0, max(1.0, self._restant())))
+                if self.terminee:
+                    return
+                try:
+                    await self.cog.rendre(self, None, self.titre)
+                except Exception:
+                    logger.debug("Rafraîchissement de la couronne manqué.", exc_info=True)
+            if not self.terminee:
+                await self.jouer_pour(0, lambda: self.conclure(None))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Compte à rebours de la couronne interrompu.")
+
+    def calculer_gains(self) -> dict[int, int]:
+        if self.couronne is None:
+            return {}
+        self.couronne.cloturer(time.monotonic())
+        gains = party.gains_couronne(self.couronne)
+        # Partir en cours de manche ne fait pas perdre le temps déjà régné :
+        # il a bien été tenu, et l'effacer punirait une déconnexion.
+        return gains
+
+
+class _BoutonCouronne(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Prendre la couronne", emoji="👑",
+                         style=discord.ButtonStyle.primary, custom_id="crown:prendre")
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        vue: _VueCrown = panels.vue_source(self)
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        await vue.jouer_pour(interaction.user.id, lambda: vue.prendre(interaction))
