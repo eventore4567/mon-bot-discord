@@ -39,9 +39,17 @@ def test_root_is_intercepted_before_any_dashboard_index_wrapper():
     assert response.status == 200
     assert called["handler"] is False
     assert "Votre serveur Discord." in response.text
-    assert "hero-shell" in response.text
-    assert response.headers["X-SentriX-Surface"] == "public-home-v2"
+    assert "product-shell" in response.text
+    assert response.headers["X-SentriX-Surface"] == "public-home-v3"
     assert "no-store" in response.headers["Cache-Control"]
+
+
+def test_home_alias_is_intercepted_as_public_landing():
+    response, called = asyncio.run(_call("/home"))
+    assert response.status == 200
+    assert called["handler"] is False
+    assert "product-shell" in response.text
+    assert response.headers["X-SentriX-Surface"] == "public-home-v3"
 
 
 def test_app_still_reaches_the_dashboard_handler():
