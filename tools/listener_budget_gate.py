@@ -60,10 +60,7 @@ async def _close_runtime(bot) -> None:
 #   on_command_completion  a chaque commande terminee
 BUDGETS: dict[str, int] = {
     "on_message": 20,
-    # 33 depuis le balayage des mises de jeu orphelines : il tourne une fois par
-    # connexion à la gateway, et rend l'argent bloqué dans une manche qu'un
-    # redémarrage a interrompue.
-    "on_ready": 33,
+    "on_ready": 32,
     "on_member_join": 17,
     "on_command_completion": 14,
     "on_member_remove": 8,

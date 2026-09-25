@@ -105,6 +105,23 @@ async def _recover_startup_tasks(bot: commands.Bot) -> list[str]:
         except Exception:
             logger.exception("Impossible de relancer la boucle %s.%s", cog.__class__.__name__, name)
 
+    # Mises de jeu coupées par l'arrêt : un seul point de reprise pour TOUS les
+    # jeux à mise, présents et à venir. Un on_ready par jeu ferait quinze
+    # écouteurs sur l'événement le plus chargé du démarrage, pour une tâche
+    # qui n'a besoin de tourner qu'une fois.
+    if not getattr(bot, "_sentrix_mises_reprises", False):
+        bot._sentrix_mises_reprises = True
+        try:
+            from services import game_stakes
+
+            bilan = await game_stakes.reprendre_mises_interrompues(bot.db)
+            if bilan["rembourses"] or bilan["perdus"]:
+                recovered.append(
+                    f"game_stakes({bilan['rembourses']} remboursée(s), {bilan['perdus']} perdue(s))"
+                )
+        except Exception:
+            logger.warning("Reprise des mises de jeu impossible.", exc_info=True)
+
     platform = bot.get_cog("PlatformV4")
     if platform is not None and not bool(getattr(platform, "_ready_views", False)):
         restore_task = getattr(platform, "_restore_task", None)

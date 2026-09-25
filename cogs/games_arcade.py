@@ -134,6 +134,7 @@ class _VueBomb(VueDeJeu):
             return
         if index in self.bombes:
             self.perdu = True
+            await game_stakes.marquer_engagee(self.cog.bot.db, self.session_id)
             # La mise est partie à l'OUVERTURE de la manche : il n'y a plus rien
             # à débiter ici, seulement à clore la réservation. C'est ce qui
             # empêche d'ouvrir trois grilles à 100 avec 100 en poche.
@@ -143,6 +144,10 @@ class _VueBomb(VueDeJeu):
             return await self._rendre(interaction, kind="danger")
 
         self.ouvertes.append(index)
+        # Première action significative : à partir d'ici un redémarrage ne rend
+        # plus la mise, sinon un crash annulerait gratuitement une partie mal
+        # engagée.
+        await game_stakes.marquer_engagee(self.cog.bot.db, self.session_id)
         if len(self.ouvertes) >= BOMB_CASES - BOMB_BOMBES:
             # Grille entièrement nettoyée : encaissement d'office.
             return await self.encaisser(interaction)
@@ -237,26 +242,6 @@ class GamesArcade(commands.Cog, name="GamesArcade"):
         self.bot = bot
         self.emoji_monnaie = "🪙"
 
-    @commands.Cog.listener()
-    async def on_ready(self) -> None:
-        """Rend les mises restées ouvertes après un redémarrage.
-
-        Une manche interrompue — crash, déploiement, message supprimé — laisse
-        sa mise réservée en base. Sans ce balayage, l'argent resterait bloqué
-        dans une partie qui n'existe plus : le joueur l'aurait perdu sans avoir
-        joué. Le balayage ne touche que les mises assez vieilles pour qu'aucune
-        vue ne soit plus en face.
-        """
-        if getattr(self.bot, "_sentrix_mises_balayees", False):
-            return
-        self.bot._sentrix_mises_balayees = True
-        try:
-            rendues = await game_stakes.rembourser_mises_orphelines(self.bot.db)
-            if rendues:
-                logger.info("Mises orphelines remboursées au démarrage : %s.", rendues)
-        except Exception:
-            logger.warning("Balayage des mises orphelines impossible.", exc_info=True)
-
     async def cog_before_invoke(self, ctx: commands.Context) -> None:
         """Le symbole monétaire du serveur, lu une fois par manche."""
         if ctx.guild is None:
@@ -329,6 +314,12 @@ class GamesArcade(commands.Cog, name="GamesArcade"):
             embed = await _embed(self.bot, guild_id, title="Bombes", description=vue.texte())
             valider_composants(vue)
             vue.message = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), vue))
+            # La grille est à l'écran : un crash ne la traitera plus comme
+            # « jamais affichée », mais elle reste remboursable tant que le
+            # joueur n'a ouvert aucune case.
+            await game_stakes.marquer_active(
+                self.bot.db, session_id, getattr(vue.message, "id", None)
+            )
         except Exception:
             logger.exception("Grille non affichée : mise remboursée (%s).", session_id)
             await game_stakes.rembourser_mise(self.bot.db, session_id)

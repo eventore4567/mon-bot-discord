@@ -320,3 +320,222 @@ def test_un_intrus_ne_peut_rien_regler_sans_l_identifiant():
     premiers = {game_stakes.nouvel_identifiant("bomb") for _ in range(1000)}
     assert len(premiers) == 1000, "collision d'identifiants"
     assert all(len(g.split("-", 1)[1]) == 16 for g in premiers)
+
+
+# ----------------------------------------------------- reprise après arrêt
+
+def test_un_redemarrage_ne_rend_pas_une_partie_engagee():
+    """LE scénario que Jayden a repéré : miser 100, ouvrir deux cases, se
+    retrouver en mauvaise position, et qu'un crash rende la mise.
+
+    Un remboursement au seul motif que le processus a redémarré serait un
+    cadeau — et un déploiement rembourserait tous ceux qui perdaient.
+    """
+
+    async def scenario():
+        db = await _base(100)
+        game_id = game_stakes.nouvel_identifiant("bomb")
+        await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+        await game_stakes.marquer_active(db, game_id, message_id=777)
+        await game_stakes.marquer_engagee(db, game_id)   # deux cases ouvertes
+        assert await _cash(db) == 0
+
+        from database.db import now
+        await db.execute("UPDATE game_stakes SET created_at=? WHERE game_id=?",
+                         (now() - 5400, game_id))
+
+        bilan = await game_stakes.reprendre_mises_interrompues(db)
+        assert bilan == {"rembourses": 0, "perdus": 1}, bilan
+        assert await _cash(db) == 0, "la mise a été rendue gratuitement"
+        ligne = await db.fetchone("SELECT state FROM game_stakes WHERE game_id=?", (game_id,))
+        assert ligne["state"] == game_stakes.PERDUE
+        return db
+
+    _executer(scenario)
+
+
+def test_une_partie_jamais_affichee_est_remboursee():
+    """reserved : le joueur n'a rien vu, il ne paie rien."""
+
+    async def scenario():
+        db = await _base(100)
+        game_id = game_stakes.nouvel_identifiant("bomb")
+        await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+        from database.db import now
+        await db.execute("UPDATE game_stakes SET created_at=? WHERE game_id=?",
+                         (now() - 5400, game_id))
+        bilan = await game_stakes.reprendre_mises_interrompues(db)
+        assert bilan == {"rembourses": 1, "perdus": 0}
+        assert await _cash(db) == 100
+        return db
+
+    _executer(scenario)
+
+
+def test_une_partie_affichee_sans_action_est_remboursee():
+    """active : la grille s'affichait mais rien ne s'était produit."""
+
+    async def scenario():
+        db = await _base(100)
+        game_id = game_stakes.nouvel_identifiant("bomb")
+        await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+        await game_stakes.marquer_active(db, game_id, message_id=42)
+        from database.db import now
+        await db.execute("UPDATE game_stakes SET created_at=? WHERE game_id=?",
+                         (now() - 5400, game_id))
+        bilan = await game_stakes.reprendre_mises_interrompues(db)
+        assert bilan == {"rembourses": 1, "perdus": 0}
+        assert await _cash(db) == 100
+        return db
+
+    _executer(scenario)
+
+
+def test_la_reprise_appelee_deux_fois_ne_rembourse_pas_deux_fois():
+    async def scenario():
+        db = await _base(100)
+        game_id = game_stakes.nouvel_identifiant("bomb")
+        await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+        from database.db import now
+        await db.execute("UPDATE game_stakes SET created_at=? WHERE game_id=?",
+                         (now() - 5400, game_id))
+        assert (await game_stakes.reprendre_mises_interrompues(db))["rembourses"] == 1
+        assert (await game_stakes.reprendre_mises_interrompues(db))["rembourses"] == 0
+        assert await _cash(db) == 100
+        return db
+
+    _executer(scenario)
+
+
+def test_deux_instances_ha_ne_reglent_la_mise_qu_une_fois():
+    """Primary et standby balaient en même temps : la condition « part d'un
+    état en cours » fait qu'un seul des deux change la ligne."""
+
+    async def scenario():
+        db = await _base(100)
+        game_id = game_stakes.nouvel_identifiant("bomb")
+        await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+        from database.db import now
+        await db.execute("UPDATE game_stakes SET created_at=? WHERE game_id=?",
+                         (now() - 5400, game_id))
+        primary, standby = await asyncio.gather(
+            game_stakes.reprendre_mises_interrompues(db),
+            game_stakes.reprendre_mises_interrompues(db),
+        )
+        assert primary["rembourses"] + standby["rembourses"] == 1, (primary, standby)
+        assert await _cash(db) == 100
+        return db
+
+    _executer(scenario)
+
+
+def test_une_manche_deja_reglee_est_ignoree_par_la_reprise():
+    async def scenario():
+        db = await _base(200)
+        for etat, reglage in (("won", 166), ("lost", 0)):
+            game_id = game_stakes.nouvel_identifiant("bomb")
+            await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+            if etat == "won":
+                await game_stakes.regler_gain(db, game_id, reglage)
+            else:
+                await game_stakes.regler_perte(db, game_id)
+            from database.db import now
+            await db.execute("UPDATE game_stakes SET created_at=? WHERE game_id=?",
+                             (now() - 5400, game_id))
+        avant = await _cash(db)
+        bilan = await game_stakes.reprendre_mises_interrompues(db)
+        assert bilan == {"rembourses": 0, "perdus": 0}
+        assert await _cash(db) == avant
+        return db
+
+    _executer(scenario)
+
+
+def test_un_credit_ne_peut_pas_avoir_lieu_sans_changement_de_statut():
+    """Crash après crédit mais avant changement de statut : impossible, les
+    deux vivent dans la même transaction. Si le statut n'a pas bougé, l'argent
+    non plus — donc un deuxième règlement ne peut pas créditer une deuxième
+    fois par-dessus un crédit déjà passé."""
+
+    async def scenario():
+        db = await _base(100)
+        game_id = game_stakes.nouvel_identifiant("bomb")
+        await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+        assert await game_stakes.regler_gain(db, game_id, 166) == "ok"
+        ligne = await db.fetchone("SELECT state, payout FROM game_stakes WHERE game_id=?", (game_id,))
+        assert ligne["state"] == game_stakes.GAGNEE and int(ligne["payout"]) == 166
+        # Toute nouvelle tentative est refusée : l'état n'est plus « en cours ».
+        for _ in range(3):
+            assert await game_stakes.regler_gain(db, game_id, 166) == "already_settled"
+        assert await _cash(db) == 166
+        return db
+
+    _executer(scenario)
+
+
+def test_les_transitions_enregistrent_ce_qu_il_faut_pour_decider():
+    """La reprise a besoin de savoir QUOI s'est passé, pas seulement quand."""
+
+    async def scenario():
+        db = await _base(100)
+        game_id = game_stakes.nouvel_identifiant("bomb")
+        await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+        ligne = await db.fetchone("SELECT * FROM game_stakes WHERE game_id=?", (game_id,))
+        colonnes = set(ligne.keys())
+        for attendue in ("game_id", "guild_id", "user_id", "game_name", "amount",
+                         "state", "payout", "message_id", "first_action_at",
+                         "created_at", "updated_at", "settled_at"):
+            assert attendue in colonnes, f"colonne manquante : {attendue}"
+        assert ligne["state"] == game_stakes.RESERVEE
+        assert ligne["first_action_at"] is None
+
+        await game_stakes.marquer_active(db, game_id, message_id=123)
+        ligne = await db.fetchone("SELECT * FROM game_stakes WHERE game_id=?", (game_id,))
+        assert ligne["state"] == game_stakes.ACTIVE and int(ligne["message_id"]) == 123
+
+        await game_stakes.marquer_engagee(db, game_id)
+        ligne = await db.fetchone("SELECT * FROM game_stakes WHERE game_id=?", (game_id,))
+        assert ligne["state"] == game_stakes.ENGAGEE
+        assert ligne["first_action_at"] is not None, "on ne saurait pas qu'il a joué"
+        return db
+
+    _executer(scenario)
+
+
+def test_on_ne_revient_jamais_en_arriere_depuis_un_etat_terminal():
+    async def scenario():
+        db = await _base(100)
+        game_id = game_stakes.nouvel_identifiant("bomb")
+        await game_stakes.ouvrir_mise(db, GUILD, JOUEUR, "bomb", 100, game_id)
+        await game_stakes.regler_perte(db, game_id)
+        assert await game_stakes.marquer_active(db, game_id) == "no_op"
+        assert await game_stakes.marquer_engagee(db, game_id) == "no_op"
+        ligne = await db.fetchone("SELECT state FROM game_stakes WHERE game_id=?", (game_id,))
+        assert ligne["state"] == game_stakes.PERDUE
+        return db
+
+    _executer(scenario)
+
+
+def test_la_reprise_est_branchee_sur_le_demarrage_central():
+    """Un seul point de reprise pour TOUS les jeux à mise, présents et à venir.
+
+    Un on_ready par jeu ferait quinze écouteurs de plus sur l'événement le plus
+    chargé du démarrage, pour une tâche qui n'a besoin de tourner qu'une fois.
+    La reprise se greffe donc sur _recover_startup_tasks, qui existait déjà.
+    """
+    import inspect
+
+    from cogs import v17_health
+
+    source = inspect.getsource(v17_health._recover_startup_tasks)
+    assert "reprendre_mises_interrompues" in source
+    assert "_sentrix_mises_reprises" in source, "la reprise doit être idempotente par process"
+
+    # Et aucun jeu ne doit refaire son propre on_ready pour ça.
+    from cogs import games_arcade
+
+    arcade = inspect.getsource(games_arcade)
+    assert "async def on_ready" not in arcade, (
+        "un on_ready par jeu institutionnaliserait +1 écouteur à chaque nouveau jeu"
+    )

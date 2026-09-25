@@ -1169,9 +1169,18 @@ CREATE TABLE IF NOT EXISTS game_stakes (
     user_id INTEGER NOT NULL,
     game_name TEXT NOT NULL,
     amount INTEGER NOT NULL,
-    state TEXT NOT NULL DEFAULT 'open',
+    -- reserved : débitée, partie pas encore affichée
+    -- active   : partie affichée, aucune action du joueur
+    -- committed: au moins une action significative — un redémarrage ne rend
+    --            plus la mise, sinon un crash annulerait gratuitement une
+    --            partie mal engagée
+    -- won / lost / refunded : états terminaux
+    state TEXT NOT NULL DEFAULT 'reserved',
     payout INTEGER NOT NULL DEFAULT 0,
+    message_id INTEGER,
+    first_action_at INTEGER,
     created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0,
     settled_at INTEGER
 );
 -- Le balayage des mises orphelines au démarrage lit sur (state, created_at) :
