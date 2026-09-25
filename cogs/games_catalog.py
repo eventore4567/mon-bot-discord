@@ -289,3 +289,25 @@ SOLO_ECHECS: dict[str, tuple[str, ...]] = {
         "Vous cartographiez une clairière déjà cartographiée.",
     ),
 }
+
+
+# Valeur en pièces d'un objet ramené. Vex affiche « a Salmon worth 45 Coins » :
+# un objet sans prix n'est qu'un mot. La valeur se déduit de la rareté, avec un
+# écart propre à chaque objet pour qu'un Requin blanc ne vaille pas exactement
+# autant qu'une Baleine bleue — et elle est DÉTERMINISTE : le même objet vaut
+# toujours le même prix, sinon le joueur ne peut rien comparer.
+BANDES_DE_VALEUR: dict[str, tuple[int, int]] = {
+    "commun": (5, 25),
+    "rare": (30, 75),
+    "epique": (95, 185),
+    "legendaire": (260, 520),
+}
+
+
+def valeur_objet(rarete_cle: str, nom: str) -> int:
+    """Prix en pièces d'un objet, stable d'une partie à l'autre."""
+    bas, haut = BANDES_DE_VALEUR.get(rarete_cle, BANDES_DE_VALEUR["commun"])
+    # Somme des codes du nom : déterministe entre deux exécutions, contrairement
+    # à hash() que Python randomise à chaque démarrage du process.
+    empreinte = sum(ord(c) for c in nom)
+    return bas + empreinte % (haut - bas + 1)

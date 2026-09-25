@@ -60,6 +60,7 @@ from cogs.games_catalog import (
     SOLO_FLAVORS,
     SOLO_LOOT,
     WORDGAME_CLUES,
+    valeur_objet,
 )
 from utils import checks, design_system, game_rewards, stats_service, temporary_boosts
 from utils import sentrix_panels as panels
@@ -206,8 +207,8 @@ async def _precheck(bot, ctx: commands.Context, game_name: str, cooldown: int) -
     return True, "", game_rewards.new_session_id(game_name)
 
 
-def tirer_butin(game_name: str) -> tuple[str, str, str, float] | None:
-    """Tire une prise : (emoji, nom, libellé de rareté, multiplicateur).
+def tirer_butin(game_name: str) -> tuple[str, str, str, float, int] | None:
+    """Tire une prise : (emoji, nom, libellé de rareté, multiplicateur, valeur).
 
     Le tirage passe par game_rewards.secure_pick/secure_below : les gains sont
     réels, donc l'aléa doit l'être aussi — pas un random prévisible.
@@ -224,8 +225,34 @@ def tirer_butin(game_name: str) -> tuple[str, str, str, float] | None:
             if not objets:
                 return None
             emoji, nom = game_rewards.secure_pick(list(objets))
-            return emoji, nom, libelle, multiplicateur
+            return emoji, nom, libelle, multiplicateur, valeur_objet(cle, nom)
     return None
+
+
+async def _combien_deja(bot, guild_id: int | None, user_id: int, nom: str) -> int:
+    """Combien de fois ce membre a déjà ramené cet objet.
+
+    Lu depuis les manches enregistrées, pas depuis un compteur séparé : une
+    deuxième source de vérité finirait par diverger de la collection affichée
+    par +collec. Toute panne de lecture vaut zéro — un compteur faux serait
+    pire qu'un compteur absent, et la manche doit se conclure de toute façon.
+    """
+    if guild_id is None:
+        return 0
+    try:
+        lignes = await bot.db.get_game_loot(guild_id, user_id)
+    except Exception:
+        logger.debug("Comptage de la collection indisponible.", exc_info=True)
+        return 0
+    total = 0
+    for ligne in lignes:
+        try:
+            prise = (json.loads(ligne["metadata_json"] or "{}") or {}).get("butin") or {}
+        except Exception:
+            continue
+        if prise.get("nom") == nom:
+            total += 1
+    return total
 
 
 async def _finish(
@@ -2211,9 +2238,16 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
         butin = tirer_butin(game_name)
         butin_text = ""
         if butin is not None:
-            emoji_butin, nom_butin, rarete, mult_butin = butin
+            emoji_butin, nom_butin, rarete, mult_butin, valeur = butin
             base = max(1, round(base * float(mult_butin)))
-            butin_text = f"{emoji_butin} Prise : **{nom_butin}** · {rarete} · gains x{mult_butin:g}\n"
+            # « a Salmon worth 45 Coins. You now hold 2 of them. » — un objet
+            # sans prix ni compteur n'est qu'un mot de plus dans une phrase.
+            possedes = await _combien_deja(self.bot, guild_id, ctx.author.id, nom_butin) + 1
+            butin_text = (
+                f"{emoji_butin} Vous ramenez **{nom_butin}** — vaut **{valeur}** 🪙"
+                f" · vous en avez **{possedes}**\n"
+                f"-# {rarete} · gains ×{mult_butin:g}\n"
+            )
             if rarete == "Légendaire":
                 butin_text += "✨ **Prise légendaire !** Ça n'arrive presque jamais.\n"
         amount = max(1, round(base * float(multiplier)))
@@ -2406,10 +2440,12 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         # Une rareté par objet : la table du catalogue est l'autorité, pas ce que
         # la manche avait affiché ce jour-là.
         rarete_de: dict[tuple[str, str], str] = {}
+        valeur_de: dict[tuple[str, str], int] = {}
         for table in SOLO_LOOT.values():
             for cle, libelle, _poids, _mult in RARETES:
                 for objet in table.get(cle, ()):
                     rarete_de[tuple(objet)] = libelle
+                    valeur_de[tuple(objet)] = valeur_objet(cle, objet[1])
 
         sections = []
         for jeu in sorted(trouves, key=lambda j: -len(trouves[j])):
@@ -2420,10 +2456,11 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
                 seau.items(), key=lambda kv: (-kv[1], kv[0][1])
             )[:12]:
                 rarete = rarete_de.get((emoji, nom), "Commun")
+                valeur = valeur_de.get((emoji, nom), 0)
                 lignes.append(panels.Ligne(
                     f"{emoji} {nom}",
                     f"×{combien}",
-                    indice=rarete,
+                    indice=f"{rarete} · {valeur} 🪙 pièce" + (f" · {valeur * combien} au total" if combien > 1 else ""),
                 ))
             titre_jeu = GAME_CATALOG.get(jeu, (jeu, ""))[0]
             sections.append(panels.Section(
@@ -2431,9 +2468,15 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
             ))
 
         pourcent = round(total_trouve * 100 / total_possible) if total_possible else 0
+        valeur_totale = sum(
+            valeur_de.get(cle_objet, 0) * combien
+            for seau in trouves.values()
+            for cle_objet, combien in seau.items()
+        )
         entete = panels.Section("Avancement", [
             panels.Ligne("Objets distincts", f"**{total_trouve} / {total_possible}**", indice=f"{pourcent} % de la collection"),
             panels.Ligne("Prises rapportées", f"**{sum(sum(s.values()) for s in trouves.values())}**"),
+            panels.Ligne("Valeur de la collection", f"**{stats_service.format_number(valeur_totale)}** 🪙"),
         ])
         await panels.envoyer(ctx, panels.Panneau(
             titre=f"{_game_icon('Collection')} Collection — {target.display_name}",

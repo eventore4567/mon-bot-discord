@@ -398,12 +398,19 @@ def _iter_view_items(view: Any):
 def clean_view(view: Any) -> Any:
     if view is None:
         return None
+    # Même exception que pour le texte : dans un mini-jeu, l'emoji d'un bouton
+    # est le contenu du jeu, pas une décoration.
+    from utils.game_context import commande_de_jeu
+
+    jeu = commande_de_jeu()
+
     for item in _iter_view_items(view):
         if isinstance(item, discord.ui.Button):
             if item.label:
                 item.label = clean_ui_text(item.label, 80, "Action")
             try:
-                item.emoji = None
+                if not jeu:
+                    item.emoji = None
             except Exception:
                 pass
             continue
@@ -415,7 +422,8 @@ def clean_view(view: Any) -> Any:
                 if option.description:
                     option.description = clean_ui_text(option.description, 100, "") or None
                 try:
-                    option.emoji = None
+                    if not jeu:
+                        option.emoji = None
                 except Exception:
                     pass
             continue

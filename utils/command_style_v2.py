@@ -241,12 +241,21 @@ def style_view(view: Any) -> Any:
     if view is None:
         return None
 
+    # Dans un mini-jeu, l'emoji d'un bouton EST le jeu : « Course à l'emoji »
+    # demandait de cliquer sur 🍒 et affichait cinq boutons vides, parce que ce
+    # nettoyage retirait l'emoji sans distinction. Mesuré au payload : label
+    # '\u200b', emoji None. Le jeu était injouable.
+    from utils.game_context import commande_de_jeu
+
+    jeu = commande_de_jeu()
+
     for item in _iter_items(view):
         if isinstance(item, discord.ui.Button):
             if item.label:
                 item.label = _normal_text(item.label, limit=80) or "Action"
             try:
-                item.emoji = None
+                if not jeu:
+                    item.emoji = None
             except Exception:
                 logger.warning("Étape non critique ignorée dans style_view", exc_info=True)
             if item.style is discord.ButtonStyle.link:
@@ -280,7 +289,8 @@ def style_view(view: Any) -> Any:
                 if option.description:
                     option.description = _normal_text(option.description, limit=100) or None
                 try:
-                    option.emoji = None
+                    if not jeu:
+                        option.emoji = None
                 except Exception:
                     logger.warning("Étape non critique ignorée dans style_view", exc_info=True)
             continue
@@ -290,9 +300,7 @@ def style_view(view: Any) -> Any:
         content = getattr(item, "content", None)
         if isinstance(content, str):
             try:
-                from utils.game_context import commande_de_jeu
-
-                if not commande_de_jeu():  # un mini-jeu garde ses pictogrammes
+                if not jeu:  # un mini-jeu garde ses pictogrammes
                     item.content = "".join(
                         ch for ch in _CUSTOM_EMOJI_RE.sub("", content)
                         if not _is_emoji_codepoint(ch)

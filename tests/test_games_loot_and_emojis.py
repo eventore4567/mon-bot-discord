@@ -99,9 +99,10 @@ def test_le_tirage_de_butin_respecte_le_catalogue():
         for _ in range(60):
             butin = tirer_butin(jeu)
             assert butin is not None, jeu
-            emoji, nom, rarete, multiplicateur = butin
+            emoji, nom, rarete, multiplicateur, valeur = butin
             assert connus.get((emoji, nom)) == rarete, f"{jeu} : {nom} classé {rarete}"
             assert multiplicateur >= 1.0
+            assert valeur > 0, f"{jeu} : {nom} sans valeur"
     assert tirer_butin("commande-inconnue") is None
 
 
@@ -601,3 +602,62 @@ def test_une_main_qui_saute_ne_peut_pas_gagner():
     assert i_tirage < i_bust < i_sortie < i_rearme, (
         "une main qui dépasse 21 peut atteindre la comparaison finale"
     )
+
+
+def test_chaque_objet_a_une_valeur_stable_et_coherente_avec_sa_rarete():
+    """« a Salmon worth 45 Coins » : un objet sans prix n'est qu'un mot. Et le
+    prix doit être STABLE — sinon le joueur ne peut rien comparer d'une partie
+    à l'autre."""
+    from cogs.games_catalog import BANDES_DE_VALEUR, valeur_objet
+
+    # Déterministe : sum(ord) et non hash(), que Python randomise à chaque
+    # démarrage du process.
+    assert valeur_objet("legendaire", "Requin blanc") == valeur_objet("legendaire", "Requin blanc")
+
+    vus: dict[str, list[int]] = {}
+    for cle, _libelle, _poids, _mult in RARETES:
+        for table in SOLO_LOOT.values():
+            for _emoji, nom in table.get(cle, ()):
+                valeur = valeur_objet(cle, nom)
+                bas, haut = BANDES_DE_VALEUR[cle]
+                assert bas <= valeur <= haut, f"{nom} ({cle}) vaut {valeur}, hors [{bas}, {haut}]"
+                vus.setdefault(cle, []).append(valeur)
+
+    # Plus c'est rare, plus ça vaut : les bandes ne doivent pas se chevaucher.
+    ordre = [cle for cle, _l, _p, _m in RARETES]
+    for precedent, suivant in zip(ordre, ordre[1:]):
+        assert max(vus[precedent]) < min(vus[suivant]), f"{precedent} et {suivant} se chevauchent"
+
+
+def test_le_compteur_d_objets_lit_la_collection_et_ne_plante_jamais():
+    """Le compte affiché vient des manches enregistrées, pas d'un second
+    compteur qui finirait par diverger de +collec. Et une panne de lecture vaut
+    zéro : un compteur faux serait pire qu'un compteur absent."""
+    import asyncio
+    import json as _json
+
+    from cogs.games_economy import _combien_deja
+
+    prise = {"butin": {"emoji": "🐟", "nom": "Gardon", "rarete": "Commun"}}
+    autre = {"butin": {"emoji": "🦈", "nom": "Requin blanc", "rarete": "Légendaire"}}
+
+    class _DB:
+        async def get_game_loot(self, guild_id, user_id):
+            return [
+                {"metadata_json": _json.dumps(prise)},
+                {"metadata_json": _json.dumps(autre)},
+                {"metadata_json": _json.dumps(prise)},
+                {"metadata_json": "pas du json"},
+                {"metadata_json": None},
+            ]
+
+    bot = SimpleNamespace(db=_DB())
+    assert asyncio.run(_combien_deja(bot, 1, 2, "Gardon")) == 2
+    assert asyncio.run(_combien_deja(bot, 1, 2, "Requin blanc")) == 1
+    assert asyncio.run(_combien_deja(bot, None, 2, "Gardon")) == 0
+
+    class _DBCassee:
+        async def get_game_loot(self, guild_id, user_id):
+            raise RuntimeError("base indisponible")
+
+    assert asyncio.run(_combien_deja(SimpleNamespace(db=_DBCassee()), 1, 2, "Gardon")) == 0

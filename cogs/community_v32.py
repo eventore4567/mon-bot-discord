@@ -172,15 +172,18 @@ def _clean_embed(embed: discord.Embed) -> discord.Embed:
 
 
 def _clean_component(component) -> None:
+    jeu = _commande_de_jeu()  # un mini-jeu garde les emojis de ses boutons
     if isinstance(component, discord.ui.Button):
-        component.emoji = None
+        if not jeu:
+            component.emoji = None
         if component.label:
             component.label = strip_decorative_emoji(component.label)[:80] or "Action"
     elif isinstance(component, discord.ui.Select):
         if component.placeholder:
             component.placeholder = strip_decorative_emoji(component.placeholder)[:150]
         for option in component.options:
-            option.emoji = None
+            if not jeu:
+                option.emoji = None
             option.label = strip_decorative_emoji(option.label)[:100] or "Option"
             if option.description:
                 option.description = strip_decorative_emoji(option.description)[:100]
