@@ -38,7 +38,7 @@ def test_root_is_intercepted_before_any_dashboard_index_wrapper():
     response, called = asyncio.run(_call("/"))
     assert response.status == 200
     assert called["handler"] is False
-    assert "Votre serveur Discord." in response.text
+    assert "Moins de chaos." in response.text
     assert "product-shell" in response.text
     assert response.headers["X-SentriX-Surface"] == "public-home-v3"
     assert "no-store" in response.headers["Cache-Control"]
