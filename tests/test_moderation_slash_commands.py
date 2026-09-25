@@ -94,12 +94,20 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
-    def test_normal_direct_commands_reste_exactement_a_112(self):
-        """Contrat imposé par tools/command_runtime_audit.py : la surface directe
-        contient désormais 97 commandes — Démineur puis +collec, la collection de
-        prises, sont deux vrais nouveaux jeux publics.
-        Les retraits produit blacklist-add/blacklist-users restent supprimés."""
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 112)
+    def test_normal_direct_commands_reste_exactement_a_122(self):
+        """Contrat imposé par tools/command_runtime_audit.py.
+
+        Passé de 112 à 122 : les dix bascules AutoMod qui manquaient. Mesuré sur
+        le bot booté le 2026-09-25, seules antiraid et antinuke étaient classées
+        ici, donc seules elles échappaient au « hidden = True » générique
+        d'apply_surface() et à l'éligibilité slash. Les dix autres existaient,
+        fonctionnaient, et n'apparaissaient ni dans +help ni sous
+        /securite automod — le groupe n'exposait qu'une feuille sur vingt-cinq.
+
+        +automod-status n'en fait PAS partie : elle reste dans
+        SECURITY_MERGED_COMMANDS, et user_acceptance_audit exige son masquage.
+        """
+        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 122)
 
 
 if __name__ == "__main__":

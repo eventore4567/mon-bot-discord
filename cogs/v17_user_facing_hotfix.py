@@ -14,7 +14,6 @@ from discord.ext import commands
 logger = logging.getLogger("bot.v17-user-facing-hotfix")
 
 _DISPATCH_PATCHED = False
-_MENTION_PATCHED = False
 _PLAIN_INSTALL_PATCHED = False
 PREFIX_ERROR_LIFETIME = 12.0
 
@@ -110,36 +109,20 @@ def _patch_plain_response_install() -> None:
     _PLAIN_INSTALL_PATCHED = True
 
 
-def _patch_duplicate_mention() -> None:
-    """Désactive l'ancienne carte Utilitaires quand le nouvel accueil est disponible."""
-    global _MENTION_PATCHED
-    if _MENTION_PATCHED:
-        return
-
-    from . import common_command_names
-
-    current = common_command_names._mention_help
-    if getattr(current, "_sentrix_compact_home_guard", False):
-        _MENTION_PATCHED = True
-        return
-
-    async def mention_help_without_duplicate(bot: commands.Bot, message: discord.Message):
-        if bot.get_cog("Ai") is not None:
-            return None
-        return await current(bot, message)
-
-    mention_help_without_duplicate._sentrix_compact_home_guard = True
-    mention_help_without_duplicate._sentrix_original = current
-    common_command_names._mention_help = mention_help_without_duplicate
-    _MENTION_PATCHED = True
-
-
 async def install(bot: commands.Bot, extension_name: str = "") -> None:
+    """Trois correctifs V17. Il y en avait un quatrième, retiré.
+
+    ``_patch_duplicate_mention`` enveloppait ``common_command_names._mention_help``
+    pour empêcher une deuxième réponse à une mention nue. Cette fonction n'existe
+    plus — le pipeline V5 est devenu l'unique autorité, et un test interdit son
+    retour. Le correctif levait donc un ``AttributeError`` à CHAQUE démarrage,
+    avalé par ``bot_v17_major`` en « module non appliqué » : une trace d'erreur
+    permanente en production, pour un doublon devenu structurellement impossible.
+    """
     del extension_name
     _patch_error_dispatch()
     _patch_plain_response_install()
     _apply_error_context_transport()
-    _patch_duplicate_mention()
 
 
 __all__ = ["install"]

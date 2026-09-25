@@ -29,6 +29,22 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
     "security", "antiraid", "antinuke", "panic", "syncbl",
+    # Les treize bascules AutoMod, et non deux. Mesuré sur le bot booté le
+    # 2026-09-25 : seules antiraid et antinuke étaient classées ici, donc seules
+    # elles échappaient au « hidden = True » générique d'apply_surface() et à
+    # l'éligibilité slash de command_hybrid_slash_restore_v3. Les onze autres
+    # existaient, fonctionnaient, et n'étaient visibles nulle part — ni dans
+    # +help, ni sous /securite automod, qui n'exposait qu'une feuille sur
+    # vingt-cinq. Un propriétaire de serveur ne pouvait activer l'anti-spam
+    # qu'en connaissant déjà le nom exact de la commande. Même correction que
+    # l'audit du 2026-09-09 sur tickets/logs/notifications, qui avait laissé
+    # cette famille de côté.
+    "antispam", "antilink", "antilink-strict", "antiinvite", "antimention",
+    "anticaps", "antiemoji", "antiscam", "antibot", "antiaccount",
+    # Pas +automod-status : elle appartient à SECURITY_MERGED_COMMANDS, fusionnée
+    # dans /setup, et tools/user_acceptance_audit.py exige qu'elle reste masquée.
+    # Je l'avais ajoutée par symétrie ; le contrat avait raison, pas moi — c'est
+    # aussi pourquoi elle n'a jamais eu de feuille slash.
     "sentrix", "image", "ai-translate", "chat-reset",
     "balance", "daily", "work", "pay", "inventory", "banque",
     "economyleaderboard", "leaderboard-money",
