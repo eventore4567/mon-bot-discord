@@ -178,7 +178,7 @@ footer{padding:42px 0 34px;border-top:1px solid rgba(255,255,255,.06);margin-top
  .feature-grid{grid-template-columns:repeat(2,1fr)}.dashboard-showcase{grid-template-columns:1fr}.security-panel,.ai-panel{grid-template-columns:1fr}.faq{grid-template-columns:1fr}.footer-grid{grid-template-columns:1.2fr 1fr 1fr}.footer-col:last-child{display:none}
 }
 @media(max-width:680px){
- .wrap{width:min(100% - 28px,1180px)}.topbar{height:64px;--nav:64px}.brand span{font-size:16px}.nav-actions .btn.ghost{display:none}.nav-actions .btn.primary{padding:9px 11px}.hero{padding:56px 0 48px;min-height:auto;gap:30px}.hero h1{font-size:clamp(40px,13vw,58px)}.hero .lead{font-size:16px}.product-preview{min-height:350px}.app-window{inset:8px 0 8px 0;grid-template-columns:62px 1fr;border-radius:18px;transform:none;animation:none}.preview-side{padding:12px 8px}.preview-logo{width:34px;height:34px}.preview-main{padding:14px}.preview-grid{gap:8px}.preview-card{min-height:88px;padding:11px}.preview-card.wide{min-height:118px}.preview-float{display:none}
+ :root{--nav:64px}.wrap{width:min(calc(100% - 28px),1180px)}.topbar{height:64px}.brand span{font-size:16px}.nav-actions .btn.ghost{display:none}.nav-actions .btn.primary{padding:9px 11px}.hero{padding:56px 0 48px;min-height:auto;gap:30px}.hero h1{font-size:clamp(40px,13vw,58px)}.hero .lead{font-size:16px}.product-preview{min-height:350px}.app-window{inset:8px 0 8px 0;grid-template-columns:62px 1fr;border-radius:18px;transform:none;animation:none}.preview-side{padding:12px 8px}.preview-logo{width:34px;height:34px}.preview-main{padding:14px}.preview-grid{gap:8px}.preview-card{min-height:88px;padding:11px}.preview-card.wide{min-height:118px}.preview-float{display:none}
  .public-strip{grid-template-columns:1fr 1fr}.live-state{grid-column:1/-1}.public-stat{border-left:0;border-top:1px solid var(--line)}.public-stat:nth-last-child(1){display:block}
  .section{padding:76px 0}.section-head{display:block}.section-head p{margin-top:14px}.feature-grid{grid-template-columns:1fr}.security-panel{padding:23px}.security-list{grid-template-columns:1fr}.dashboard-body{grid-template-columns:94px 1fr}.dashboard-sidebar{padding:10px 7px}.dashboard-content{padding:12px}.ai-panel{padding:22px}.steps{grid-template-columns:1fr}.final-cta{padding:42px 18px}.footer-grid{grid-template-columns:1fr 1fr}.footer-brand{grid-column:1/-1}.footer-bottom{display:block}.footer-bottom span{display:block;margin-top:5px}
 }
@@ -222,7 +222,7 @@ footer{padding:42px 0 34px;border-top:1px solid rgba(255,255,255,.06);margin-top
    <div class="app-window">
     <aside class="preview-side"><div class="preview-logo">S</div><div class="preview-nav"><i class="active"></i><i></i><i></i><i></i><i></i><i></i></div></aside>
     <div class="preview-main">
-     <div class="preview-top"><div class="preview-title"><b>Centre de contrôle</b><span>Configuration du serveur</span></div><div class="preview-status"><i></i>Actif</div></div>
+     <div class="preview-top"><div class="preview-title"><b>Centre de contrôle</b><span>Configuration du serveur</span></div><div class="preview-status"><i></i>Aperçu</div></div>
      <div class="preview-grid">
       <div class="preview-card"><span class="preview-label">Sécurité</span><h3>Protections</h3><p>AutoMod et règles du serveur.</p></div>
       <div class="preview-card"><span class="preview-label">Communauté</span><h3>Tickets</h3><p>Assistance et organisation du staff.</p></div>
@@ -352,7 +352,7 @@ footer{padding:42px 0 34px;border-top:1px solid rgba(255,255,255,.06);margin-top
      const d=await r.json(),active=Boolean(d.online);
      document.getElementById("publicStatus").textContent=active?"Bot Discord connecté":"Service web disponible";
      document.getElementById("publicStatusDetail").textContent=active?"État public reçu depuis SentriX":"Cette instance web reste disponible pendant la bascule HA";
-     document.getElementById("publicDot").style.background=active?"var(--green)":"var(--amber)";
+     document.getElementById("publicDot").style.background=active?"var(--green)":"var(--amber)";document.getElementById("publicDot").style.boxShadow=active?"0 0 16px rgba(85,214,154,.65)":"0 0 16px rgba(239,189,97,.45)";
      if(active||Number(d.guilds)>0){setNum("publicGuilds",d.guilds);setNum("publicMembers",d.members)}
      document.getElementById("publicLatency").textContent=d.latency_ms==null?"—":Math.round(d.latency_ms)+" ms";
      document.getElementById("publicUptime").textContent=age(d.uptime_seconds);
