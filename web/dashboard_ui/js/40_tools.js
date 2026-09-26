@@ -92,14 +92,16 @@ async function renderInvites() {
   const hidden = (d.leaderboard || []).filter(x => x.hidden);
   const codes = d.codes || [];
   const sourceRows = period.sources || [];
+  const roleNames = [...new Set(board.flatMap(x => (x.member?.roles || []).map(r => r.name)).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'fr'));
 
   const leaderboardRows = board.length ? board.slice(0, 25).map((x, index) => {
     const m = x.member || {};
     const name = m.display_name || m.name || m.id || 'Utilisateur';
-    return `<div class="row">
+    const roles = (m.roles || []).map(r => r.name).join(' ');
+    return `<div class="row" data-invite-roles="${esc(roles)}">
       <div class="row-main">
         <b>#${index + 1} · ${esc(name)}</b>
-        <small>${number(x.real)} réelle(s) · ${number(x.fake)} fake · ${number(x.left)} repartie(s) · ${number(x.bonus)} bonus · rétention ${esc(x.retention)}%</small>
+        <small>${number(x.real)} réelle(s) · ${number(x.fake)} fake · ${number(x.left)} repartie(s) · ${number(x.bonus)} bonus · rétention ${esc(x.retention)}%${x.last_invite_at ? ' · dernière invite ' + esc(when(x.last_invite_at)) : ''}</small>
       </div>
       <div class="row-actions">
         <strong>${number(x.credited)}</strong>
@@ -153,7 +155,10 @@ async function renderInvites() {
 
     <section class="card">
       <div class="card-head"><div><h2>Recherche</h2><p>Filtre instantanément les invitants et les codes affichés sur cette page.</p></div></div>
-      <div class="field full"><label for="inviteSearch">Pseudo, ID, code ou label</label><input class="search-input" id="inviteSearch" type="search" placeholder="Ex. Tomioka, 123456…, youtube"></div>
+      <div class="fields">
+        <div class="field"><label for="inviteSearch">Pseudo, ID, code ou label</label><input class="search-input" id="inviteSearch" type="search" placeholder="Ex. Tomioka, 123456…, youtube"></div>
+        <div class="field"><label for="inviteRoleFilter">Filtrer les invitants par rôle</label><select class="search-input" id="inviteRoleFilter"><option value="">Tous les rôles</option>${roleNames.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('')}</select></div>
+      </div>
       <small id="inviteSearchCount"></small>
     </section>
 
@@ -245,21 +250,28 @@ async function renderInvites() {
     } catch (e) { toast(e.message, true); }
   });
 
-  const search = $('inviteSearch');
-  search.oninput = () => {
+  const search = $('inviteSearch'), roleFilter = $('inviteRoleFilter');
+  const applyInviteFilters = () => {
     const q = search.value.trim().toLocaleLowerCase('fr');
-    const targets = [
-      ...$('inviteLeaderboard').querySelectorAll('.row'),
-      ...$('inviteCodes').querySelectorAll('.row'),
-    ];
+    const role = roleFilter.value.trim().toLocaleLowerCase('fr');
     let visible = 0;
-    for (const row of targets) {
+    for (const row of $('inviteLeaderboard').querySelectorAll('.row')) {
+      const textHit = !q || row.textContent.toLocaleLowerCase('fr').includes(q);
+      const roles = String(row.dataset.inviteRoles || '').toLocaleLowerCase('fr');
+      const roleHit = !role || roles.split(/\s{2,}| · |\|/).join(' ').includes(role);
+      const show = textHit && roleHit;
+      row.style.display = show ? '' : 'none';
+      if (show) visible += 1;
+    }
+    for (const row of $('inviteCodes').querySelectorAll('.row')) {
       const show = !q || row.textContent.toLocaleLowerCase('fr').includes(q);
       row.style.display = show ? '' : 'none';
       if (show) visible += 1;
     }
-    $('inviteSearchCount').textContent = q ? `${visible} résultat(s) visible(s)` : '';
+    $('inviteSearchCount').textContent = (q || role) ? `${visible} résultat(s) visible(s)` : '';
   };
+  search.oninput = applyInviteFilters;
+  roleFilter.onchange = applyInviteFilters;
 }
 
 /* Sauvegardes & historique */
