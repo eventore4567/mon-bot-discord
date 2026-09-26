@@ -114,13 +114,21 @@ EXTENSIONS = [
 # Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
 # implémentés dans leurs cogs afin que les boutons et les données historiques continuent
 # de fonctionner, mais ne sont plus enregistrés comme commandes publiques.
+# Ce que /setup remplace VRAIMENT. Quatre noms en sont sortis le 2026-09-26 :
+# setprefix, setmodrole, set-level-role et remove-level-role. Ils figurent dans
+# NORMAL_DIRECT_COMMANDS, donc la surface les annonce visibles ET éligibles au
+# slash — et integrity_hardening.safe_prune les supprimait pourtant au boot.
+# command_catalog_cleanup vide bien cette liste pour que « les anciennes +
+# restent utilisables », mais il le fait APRÈS le pruning, qui a déjà eu lieu
+# pendant setup_hook. La politique n'avait donc aucun effet, et +setprefix
+# n'existait pas. Mesuré sur la chaîne v8 en traçant remove_command.
 COMMANDS_REPLACED_BY_SETUP = frozenset({
-    "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs",
+    "setlogchannel", "create-logs", "logs",
     "setwelcomechannel", "setgoodbyechannel", "setwelcomemessage",
     "setgoodbyemessage", "setticketlogchannel", "setautorole", "createrole",
     "setlevelchannel", "setsuggestchannel", "setannouncechannel",
-    "setgiveawaychannel", "verify-setup", "set-level-role",
-    "remove-level-role", "level-roles", "levelroles", "ticketpanel",
+    "setgiveawaychannel", "verify-setup",
+    "level-roles", "levelroles", "ticketpanel",
     "ticketpanel-toggle", "tickettype", "ticketform", "ticketconfig",
     "ticketlogs", "ticketlimit", "ticketautoclose",
 })

@@ -147,6 +147,11 @@ MERGED_COMMANDS = (
 # ne les rend visibles QUE dans +help, sans toucher au budget slash : aucune n'est
 # ajoutée à NORMAL_DIRECT_COMMANDS (qui contrôle aussi l'éligibilité slash — voir
 # command_hybrid_slash_restore_v3.py).
+# +logs et +level-roles en sont sorties le 2026-09-26 : main les supprime au boot
+# (COMMANDS_REPLACED_BY_SETUP) et elles n'existent donc jamais au runtime. +logs se
+# décrit elle-même comme « l'ancienne interface interne ; utilisez +logsetup ».
+# Annoncer dans l'aide une commande volontairement retirée est exactement le
+# « vieux nom obsolète affiché » qu'il faut éviter.
 HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # +ticketsetup ouvre le hub de config tickets (panels/types/formulaires/logs...) —
     # /setup ne fait qu'auto-créer UN panel "Support" par défaut
@@ -158,7 +163,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # jamais fusionnées dans /setup contrairement à leurs voisines (logsetup,
     # create-logs, automod-status...).
     "notifs-ping", "notifs-list", "notifs-remove",
-    "logs", "logevent", "logsearch",
+    "logevent", "logsearch",
     "server-audit", "server-health", "server-growth", "server-managed",
     # Économie/niveaux : commandes membres et admin de base, masquées par accident
     # (buy/sell/gamble sans leur propre commande "shop"/"economy" visible, weekly
@@ -166,7 +171,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     "economy", "rob", "buy", "sell", "gamble", "deposit", "withdraw",
     "give-money", "reset-economy", "shoppanel", "shoprole", "shop", "weekly",
     "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
-    "voice-time", "level-roles",
+    "voice-time", 
     # Émojis : aucun chemin de découverte sans les connaître déjà par cœur.
     "addemoji", "deleteemoji", "emoji-list",
 })
