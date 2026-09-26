@@ -19,6 +19,10 @@ logger = logging.getLogger("bot.guild-arrival")
 WELCOME_COLOUR = 0x6C5CE7
 OFFICIAL_SUPPORT_URL = "https://discord.gg/5P5Bqjqu5t"
 SUPPORT_URL = (os.getenv("SUPPORT_SERVER_URL") or OFFICIAL_SUPPORT_URL).strip()
+PUBLIC_HOME_URL = (
+    os.getenv("SENTRIX_PUBLIC_HOME_URL")
+    or "https://sentrix-standby-production.up.railway.app/home"
+).strip()
 
 
 def _safe_url(value: str | None) -> str | None:
@@ -304,15 +308,29 @@ class GuildArrival(commands.Cog):
             return
 
         embed = discord.Embed(
-            title="SentriX est prêt",
-            description=f"SentriX a été ajouté à **{guild.name}**.",
+            title="Bienvenue sur SentriX",
+            description=(
+                f"SentriX vient d'être ajouté à **{guild.name}**.\n\n"
+                "**Votre centre de contrôle Discord** pour la modération, la sécurité, "
+                "l'AutoMod, les tickets, les logs, les rôles, les niveaux, l'économie, "
+                "les notifications et l'IA — dans une expérience claire et centralisée."
+            ),
             colour=discord.Colour(WELCOME_COLOUR),
         )
         embed.add_field(
-            name="Démarrage",
+            name="Commencer",
             value=(
+                f"**Découvrir SentriX :** {PUBLIC_HOME_URL}\n"
                 "`+setup` — configurer le serveur\n"
                 "`+help` — voir les commandes réellement disponibles"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Conseil rapide",
+            value=(
+                "Placez le rôle **SentriX** au-dessus des rôles qu'il doit gérer, "
+                "puis configurez uniquement les modules dont votre serveur a besoin."
             ),
             inline=False,
         )
@@ -320,9 +338,16 @@ class GuildArrival(commands.Cog):
         avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
         if avatar:
             embed.set_thumbnail(url=str(avatar))
-        embed.set_footer(text=f"SentriX • {guild.name}")
+        embed.set_footer(text=f"SentriX • {guild.name} • sentrix-standby-production.up.railway.app")
 
         view = discord.ui.View(timeout=None)
+        public_home = _safe_url(PUBLIC_HOME_URL)
+        if public_home:
+            view.add_item(discord.ui.Button(
+                label="Découvrir SentriX",
+                style=discord.ButtonStyle.link,
+                url=public_home,
+            ))
         if dashboard:
             view.add_item(discord.ui.Button(
                 label="Ouvrir le Dashboard",
