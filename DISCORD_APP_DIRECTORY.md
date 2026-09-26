@@ -11,12 +11,12 @@ Ne pas changer le nom du bot pour le référencement. Le texte SEO reste dans le
 ## General Information — Description (max 400 caractères)
 
 SentriX — modération, sécurité, tickets, IA et automatisations pour Discord.
-Dashboard : https://sentrix.gg/app
+Dashboard : https://mon-bot-discord-production-8944.up.railway.app/app
 Hosting : https://sentrix-hosting-control-plane-production.up.railway.app/
 
 ## Bio / liens à afficher sur le profil SentriX
 
-- Dashboard SentriX : https://sentrix.gg/app
+- Dashboard SentriX : https://mon-bot-discord-production-8944.up.railway.app/app
 - SentriX Hosting : https://sentrix-hosting-control-plane-production.up.railway.app/
 
 Ces deux liens sont les liens publics prioritaires du profil. Le Hosting est une plateforme d'hébergement généraliste distincte du dashboard de gestion du bot Discord.
@@ -88,11 +88,11 @@ Ne jamais sélectionner un tag non représentatif juste pour gagner de la visibi
 
 Discord autorise jusqu'à 5 liens externes. Utiliser en priorité :
 
-1. Dashboard — https://sentrix.gg/app
+1. Dashboard — https://mon-bot-discord-production-8944.up.railway.app/app
 2. SentriX Hosting — https://sentrix-hosting-control-plane-production.up.railway.app/
-3. Support — https://sentrix.gg/support
-4. Politique de confidentialité — https://sentrix.gg/privacy
-5. Conditions d'utilisation — https://sentrix.gg/terms
+3. Support — https://mon-bot-discord-production-8944.up.railway.app/support
+4. Politique de confidentialité — https://mon-bot-discord-production-8944.up.railway.app/privacy
+5. Conditions d'utilisation — https://mon-bot-discord-production-8944.up.railway.app/terms
 
 ## Support Server — BLOQUANT AVANT PUBLICATION
 
@@ -117,10 +117,10 @@ Pour une vidéo, Discord accepte actuellement les vidéos YouTube pour le carrou
 ## URLs légales
 
 Privacy Policy:
-https://sentrix.gg/privacy
+https://mon-bot-discord-production-8944.up.railway.app/privacy
 
 Terms of Service:
-https://sentrix.gg/terms
+https://mon-bot-discord-production-8944.up.railway.app/terms
 
 ## Install URL
 
