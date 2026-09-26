@@ -33,7 +33,7 @@ from typing import Any, Awaitable, Callable
 import discord
 from discord.ext import commands
 
-from utils import embeds
+from utils import embeds, helpers
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.member-data-retention-v17")
@@ -110,6 +110,7 @@ RESET_COMMAND_LABELS = {
     "reset-levels": "tous les niveaux et XP du serveur",
     "reset-economy": "tous les soldes économiques du serveur",
     "represet": "la réputation du membre sélectionné",
+    "reset-invites": "toutes les données d'invitations du serveur",
 }
 
 
@@ -210,12 +211,18 @@ async def _send_reset_confirmation(
     description: str,
     runner: Callable[[], Awaitable[Any]],
 ):
-    view = ResetConfirmationView(
-        requester_id=ctx.author.id,
-        description=description,
-        runner=runner,
-    )
-    return await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embeds.warning(f"Cette action est **volontairement séparée** d'un ban, kick ou départ.\n\nElle va réinitialiser **{description}**.\nUn ban ne déclenche jamais cette suppression.\n\nConfirmez uniquement si vous voulez réellement effacer cette progression.", title='Confirmation de suppression de données')), view))
+    if not await helpers.double_confirm_destructive(
+        ctx,
+        f"réinitialiser {description}",
+        detail=(
+            "Cette remise à zéro est volontairement séparée des bans, kicks et départs. "
+            "Aucun départ de membre ne déclenche cette suppression."
+        ),
+        timeout=60,
+    ):
+        return None
+    with explicit_data_reset():
+        return await runner()
 
 
 def _install_reset_confirmations(bot: commands.Bot) -> list[str]:
