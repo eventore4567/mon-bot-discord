@@ -136,6 +136,19 @@ GUILD_OWNER_COMMANDS = frozenset({
     "immunity",              # propriétaire du serveur (owner global bypass plus haut)
     # Diffusion privee a l'ensemble du serveur
     "dm",                   # ecrit a UN membre au nom du serveur
+    # Reglages que security_runtime_hardening verrouille au proprietaire via
+    # critical_security_owner_only() : proprietaire du serveur ou du bot, jamais un
+    # simple administrateur. C'est voulu — un compte admin compromis commencerait par
+    # desactiver l'anti-nuke, et +panic verrouille le serveur entier. Ces commandes
+    # n'apparaissaient pas ici parce que le module qui pose les verrous ne se chargeait
+    # pas en production (mesure du 2026-09-26) ; l'audit permissions les voyait donc
+    # ouvertes aux administrateurs.
+    "panic",                # verrouillage d'urgence de tout le serveur
+    "antinuke",             # activer/desactiver la protection anti-nuke
+    "antinuke-whitelist-add",
+    "antinuke-whitelist-remove",
+    "automod-exempt-role-add",
+    "automod-exempt-role-remove",
 })
 
 CUSTOM_PERMISSION_COMMANDS = frozenset({"embed"})

@@ -120,11 +120,32 @@ def test_niveau2_moderateur_ne_touche_pas_a_la_configuration(command):
 
 
 # --------------------------------------------------------------- NIVEAU 3
-@pytest.mark.parametrize("command", ["setup", "antinuke", "panic", "create-logs",
+@pytest.mark.parametrize("command", ["setup", "create-logs",
                                      "season start", "sentrixpro lockdown", "ban"])
 def test_niveau3_admin_configure_et_modere(command):
     ok, decision = allowed(command, ADMIN)
     assert ok, f"{command} refuse a un administrateur : {decision.message}"
+
+
+@pytest.mark.parametrize("command", ["antinuke", "panic"])
+def test_niveau3_admin_ne_touche_pas_aux_reglages_anti_nuke(command):
+    """antinuke et panic ont quitte le niveau administrateur, volontairement.
+
+    cogs/security_runtime_hardening.py leur pose un verrou
+    critical_security_owner_only() : proprietaire du serveur ou du bot, jamais un
+    simple administrateur. C'est la defense qui compte vraiment ici — un compte
+    admin compromis commencerait par desactiver l'anti-nuke, et +panic verrouille
+    le serveur entier.
+
+    Ce test affirmait l'inverse, et les deux ont coexiste sans conflit pour une
+    seule raison : le module qui pose ces verrous ne se chargeait pas en
+    production. Mesure du 2026-09-26 sur la chaine v8, +panic n'existait meme pas
+    au runtime. Le module etant desormais une vraie extension, le verrou
+    s'applique, et c'est cette regle-la qui est juste.
+    """
+    ok, decision = allowed(command, ADMIN)
+    assert not ok, f"{command} reste accessible a un administrateur non proprietaire"
+    assert "propri" in decision.message.casefold()
 
 
 @pytest.mark.parametrize("command", sorted(M.GUILD_OWNER_COMMANDS))

@@ -46,6 +46,16 @@ logger = logging.getLogger("bot")
 EXTENSIONS = [
     "cogs.moderation",
     "cogs.automod",
+    # Ces quatre modules n'avaient qu'un install(), déclenché par l'enveloppe de
+    # chargement de cogs/__init__ — enveloppe posée sur une classe que la
+    # production n'instancie plus depuis la substitution de commands.Bot par
+    # railway_boot. Résultat mesuré sur la chaîne v8 : +panic, l'analyse
+    # anti-nuke V47, le centre sécurité et l'immunité propriétaire étaient
+    # absents en production. Ils sont ici juste après cogs.automod, dont
+    # security_runtime_hardening dépend.
+    "cogs.security_runtime_hardening",
+    "cogs.smart_creation_guard_v47",
+    "cogs.owner_sanction_immunity",
     "cogs.security_tools",
     "cogs.tickets",
     "cogs.configuration",

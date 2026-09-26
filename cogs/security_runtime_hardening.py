@@ -669,3 +669,19 @@ async def install(bot: commands.Bot) -> None:
     logger.info(
         "Renforcement sécurité SentriX activé : anti-nuke persistant, verrou propriétaire et +panic."
     )
+
+async def setup(bot: commands.Bot) -> None:
+    """Extension à part entière, et non un simple install() suspendu à une enveloppe.
+
+    Ce module n'exposait qu'``install()``, appelé par l'enveloppe de chargement
+    d'extensions de ``cogs/__init__``. Or ``railway_boot`` remplace
+    ``commands.Bot`` par sa classe AutoSharded et ``main.BotAllInOne`` hérite de
+    celle-là : l'enveloppe reste posée sur une classe que la production
+    n'instancie plus, et ``install()`` n'était jamais appelé. Mesuré le
+    2026-09-26 sur la chaîne v8 du Procfile — Renforcement sécurité : anti-nuke persistant, verrous critiques et +panic.
+
+    Déclarer un ``setup()`` et figurer dans ``main.EXTENSIONS`` supprime cette
+    dépendance : le chargement ne passe plus par une enveloppe fragile.
+    ``install()`` reste idempotent, donc un double appel ne coûte rien.
+    """
+    await install(bot)
