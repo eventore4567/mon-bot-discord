@@ -36,6 +36,19 @@ def _invite(request: web.Request) -> str:
     return str(dashboard._invite_url(request.app["bot"]) or f"{_base(request)}/login")
 
 
+def _invite_sur(request: web.Request) -> str:
+    """Comme ``_invite`` mais ne casse jamais la page qui l'affiche.
+
+    La coquille est aussi rendue quand le bot n'est pas prêt — la page
+    d'attente de /commands, par exemple. ``/add`` est une route réelle qui
+    se charge elle-même de la redirection.
+    """
+    try:
+        return _invite(request)
+    except Exception:
+        return "/add"
+
+
 def _support_url() -> str:
     value = os.getenv("SENTRIX_SUPPORT_URL", "").strip()
     return value if value.startswith(("https://", "http://")) else ""
@@ -134,6 +147,7 @@ footer a{{margin-right:14px;text-decoration:none}}footer a:hover{{color:var(--bl
 .grid .card:nth-child(6){{animation-delay:.35s}}
 @media(max-width:1024px){{header,main,footer{{padding-inline:20px}}}}
 @media(max-width:760px){{header{{align-items:flex-start;flex-direction:column}}main{{padding-top:40px}}
+ .nav-ajout{{display:none}}
  .grid,.grid.two,.media-grid{{grid-template-columns:1fr}}
  nav{{width:100%;overflow-x:auto;padding-bottom:3px}}nav a{{white-space:nowrap}}}}
 @media(max-width:430px){{header{{padding:16px 15px}}main{{padding:36px 15px 68px}}.legal{{padding:22px 19px 26px;border-radius:16px}}
@@ -148,7 +162,7 @@ footer a{{margin-right:14px;text-decoration:none}}footer a:hover{{color:var(--bl
  .card::before{{display:none}}}}
 </style></head><body>{fx.fond()}
 <div class="sx-shell">
-<header><a class="brand" href="/"><img src="/sentrix-avatar.png" alt="" width="34" height="34"><span>SentriX</span></a><nav><a href="/start">Commencer</a><a href="/docs">Documentation</a><a href="/stats">Stats</a><a href="/support">Support</a><a href="/app">Dashboard</a></nav></header>
+<header><a class="brand" href="/"><img src="/sentrix-avatar.png" alt="" width="34" height="34"><span>SentriX</span></a><nav><a href="/start">Commencer</a><a href="/docs">Documentation</a><a href="/stats">Stats</a><a href="/support">Support</a><a href="/app">Dashboard</a><a class="btn primary nav-ajout" href="{html.escape(_invite_sur(request), quote=True)}">Ajouter SentriX</a></nav></header>
 <main><section class="hero"><div class="eyebrow">SentriX officiel</div><h1>{html.escape(heading)}</h1><p class="lead">{html.escape(description)}</p></section>{body}</main>
 <footer><a href="/sentrix">Bot Discord</a><a href="/docs">Documentation</a><a href="/media-kit">Media kit</a><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></footer>
 </div>

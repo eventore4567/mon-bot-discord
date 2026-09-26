@@ -46,7 +46,7 @@ CSS = """
 clip-path:inset(50%);white-space:nowrap;border:0}
 html{background:var(--fond);scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;position:relative;overflow-x:hidden;color:var(--texte);
-font:16px/1.6 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;
 background:
  radial-gradient(1200px 620px at 78% -14%,rgba(77,163,255,.20),transparent 62%),
  radial-gradient(900px 520px at 6% 34%,rgba(111,125,255,.13),transparent 58%),

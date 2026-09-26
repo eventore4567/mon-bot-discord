@@ -144,3 +144,55 @@ def test_la_feuille_legale_ne_refloute_pas_le_fond_a_chaque_frame():
     corps = _rendre("privacy_page")
     debut = corps.index(".legal{")
     assert "backdrop-filter" not in corps[debut : corps.index("}", debut)]
+
+
+def test_la_police_est_la_meme_que_sur_la_landing():
+    """Sinon la typographie change en passant de / à /start.
+
+    Mesuré en production le 2026-09-26 : la landing (web/public_home_v3)
+    déclare ``ui-sans-serif, system-ui, …, Inter`` et ces pages déclaraient
+    ``Inter`` en premier. Inter n'est chargée par aucune feuille de style ni
+    aucun ``@font-face`` : un visiteur qui l'a installée localement voyait
+    donc deux typographies selon la page, les autres n'en voyaient qu'une.
+    La porte d'entrée fait référence.
+    """
+    corps = _rendre("start_page")
+    assert "ui-sans-serif,system-ui" in corps
+    assert "16px/1.6 Inter," not in corps, "Inter est encore déclarée en premier"
+
+
+@pytest.mark.parametrize("nom", PAGES)
+def test_chaque_page_propose_d_ajouter_le_bot(nom):
+    """La landing a un bouton « Ajouter SentriX » ; les sous-pages n'en avaient aucun.
+
+    Un visiteur arrivé sur /privacy ou /terms depuis une recherche n'avait
+    aucun moyen d'installer le bot sans repasser par l'accueil.
+    """
+    corps = _rendre(nom)
+    assert "Ajouter SentriX" in corps
+    assert 'class="btn primary nav-ajout"' in corps
+
+
+def test_le_bouton_d_ajout_ne_casse_pas_une_page_rendue_sans_bot():
+    """La coquille sert aussi des pages rendues quand le bot n'est pas prêt.
+
+    ``_invite`` lit ``request.app["bot"]`` et lèverait un KeyError, ce qui
+    remplacerait la page d'attente de /commands par une erreur serveur.
+    ``/add`` est une route réelle qui fait la redirection elle-même.
+    """
+
+    class AppSansBot(dict):
+        def __getitem__(self, cle):
+            if cle == "bot":
+                raise KeyError("bot")
+            faux = MagicMock()
+            faux._public_url.return_value = "https://exemple.test"
+            return faux
+
+    requete = MagicMock()
+    requete.path, requete.scheme, requete.host = "/terms", "https", "exemple.test"
+    requete.headers = {"Host": "exemple.test"}
+    requete.app = AppSansBot()
+    corps = asyncio.run(pages.terms_page(requete)).text
+    assert 'href="/add"' in corps
+    assert "Ajouter SentriX" in corps
