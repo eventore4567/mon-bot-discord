@@ -11,12 +11,12 @@ Ne pas changer le nom du bot pour le référencement. Le texte SEO reste dans le
 ## General Information — Description (max 400 caractères)
 
 SentriX — modération, sécurité, tickets, IA et automatisations pour Discord.
-Dashboard : https://sentrix-standby-production.up.railway.app/app
+Dashboard : https://sentrix.gg/app
 Hosting : https://sentrix-hosting-control-plane-production.up.railway.app/
 
 ## Bio / liens à afficher sur le profil SentriX
 
-- Dashboard SentriX : https://sentrix-standby-production.up.railway.app/app
+- Dashboard SentriX : https://sentrix.gg/app
 - SentriX Hosting : https://sentrix-hosting-control-plane-production.up.railway.app/
 
 Ces deux liens sont les liens publics prioritaires du profil. Le Hosting est une plateforme d'hébergement généraliste distincte du dashboard de gestion du bot Discord.
@@ -88,11 +88,11 @@ Ne jamais sélectionner un tag non représentatif juste pour gagner de la visibi
 
 Discord autorise jusqu'à 5 liens externes. Utiliser en priorité :
 
-1. Dashboard — https://sentrix-standby-production.up.railway.app/app
+1. Dashboard — https://sentrix.gg/app
 2. SentriX Hosting — https://sentrix-hosting-control-plane-production.up.railway.app/
-3. Support — https://sentrix-standby-production.up.railway.app/support
-4. Politique de confidentialité — https://sentrix-standby-production.up.railway.app/privacy
-5. Conditions d'utilisation — https://sentrix-standby-production.up.railway.app/terms
+3. Support — https://sentrix.gg/support
+4. Politique de confidentialité — https://sentrix.gg/privacy
+5. Conditions d'utilisation — https://sentrix.gg/terms
 
 ## Support Server — BLOQUANT AVANT PUBLICATION
 
@@ -117,10 +117,10 @@ Pour une vidéo, Discord accepte actuellement les vidéos YouTube pour le carrou
 ## URLs légales
 
 Privacy Policy:
-https://sentrix-standby-production.up.railway.app/privacy
+https://sentrix.gg/privacy
 
 Terms of Service:
-https://sentrix-standby-production.up.railway.app/terms
+https://sentrix.gg/terms
 
 ## Install URL
 
