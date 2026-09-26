@@ -71,14 +71,119 @@ function bindModeSwitch(root = content()) {
 }
 
 /* Sécurité : protections / vérification / sanctions */
+const securityOverview = (force = false) => cached('security-overview', () => gget('/security/overview'), { force, ttl: 15000 });
+
 async function renderSecurity() {
   if (state.sub === 'verification') return renderVerification();
   if (state.sub === 'sanctions') return renderSanctions();
+
   const a = state.guild?.automod || {}, s = settings();
   let d = null; try { d = await diagnostics(); } catch (_) {}
-  const missing = (d?.permissions || []).filter(p => !p.granted);
-  content().innerHTML = `<div class="grid">${await moduleHead('automod', 'Protections automatiques. Activez seulement ce dont votre serveur a besoin.', 'Protections')}${missing.length ? `<div class="notice warn full">SentriX n’a pas toutes les permissions nécessaires : ${esc(missing.map(p => p.name).join(', '))}. Certaines protections ne pourront pas agir.</div>` : ''}${card('', '', AUTOMOD.map(([k, l, c]) => switchRow(l, k, Boolean(a[k]), c)).join(''), 'full')}${advanced(card('Politique de sécurité', '', `<div class="fields">${field('Niveau de sécurité', 'security_level', '', { select: ['faible', 'moyen', 'eleve'].map(v => `<option value="${v}" ${s.security_level === v ? 'selected' : ''}>${v === 'eleve' ? 'Élevé' : v[0].toUpperCase() + v.slice(1)}</option>`).join('') })}${field('Avertissements avant ban automatique', 'warn_ban_threshold', s.warn_ban_threshold ?? 0, { type: 'number', min: 0, max: 20, hint: '0 = jamais de ban automatique.' })}</div>` + switchRow('Escalade AutoMod', 'escalation', Boolean(a.escalation), 'Augmente progressivement les sanctions.')))}</div>`;
-  bindEditable(); bindModuleButtons();
+  let sec = null; try { sec = await securityOverview(); } catch (_) {}
+  const missing = (sec?.permissions || d?.permissions || []).filter(p => !p.granted);
+  const risk = sec?.risk || { score: 0, protection_score: 100, level: 'inconnu' };
+  const coverage = sec?.coverage || { active: AUTOMOD.filter(([k]) => Boolean(a[k])).length, total: AUTOMOD.length };
+  const panic = sec?.panic || { active: false, owner_controls: false };
+  const scenarios = sec?.scenarios || [];
+  const timeline = sec?.timeline || [];
+
+  const riskBadge = risk.score >= 55 ? 'bad' : risk.score >= 25 ? 'warn' : 'ok';
+  const riskLabel = risk.level === 'eleve' ? 'Élevé' : risk.level === 'moyen' ? 'Moyen' : risk.level === 'faible' ? 'Faible' : 'Inconnu';
+  const simulationRows = scenarios.length ? scenarios.map(x => {
+    const cls = x.result === 'bloque' ? 'ok' : x.result === 'detecte_sans_action' ? 'warn' : 'bad';
+    const label = x.result === 'bloque' ? 'Bloqué' : x.result === 'detecte_sans_action' ? 'Détecté, action limitée' : 'Non couvert';
+    const detail = x.missing_permissions?.length
+      ? `Permission manquante : ${x.missing_permissions.join(', ')}`
+      : x.detected ? `Protection ${x.filter} active.` : `Protection ${x.filter} désactivée.`;
+    return `<div class="row"><div class="row-main"><b>${esc(x.label)}</b><small>${esc(detail)}</small></div><span class="badge ${cls}">${esc(label)}</span></div>`;
+  }).join('') : emptyState('Simulation indisponible', 'La configuration actuelle n’a pas pu être évaluée.');
+
+  const timelineRows = timeline.length ? timeline.map(item => `<div class="row">
+    <div class="row-main">
+      <b>${esc(item.label || item.type || 'Événement sécurité')}</b>
+      <small>${esc(item.detail || 'Aucun détail')}${item.actor_id ? ' · acteur ' + esc(item.actor_id) : ''}${item.created_at ? ' · ' + esc(when(item.created_at)) : ''}</small>
+    </div>
+    <span class="badge ${item.source === 'incident' || item.type === 'panic_on' ? 'bad' : item.source === 'automod' ? 'blue' : ''}">${esc(item.source || 'security')}</span>
+  </div>`).join('') : emptyState('Aucun incident récent', 'Les interceptions et incidents de sécurité apparaîtront ici.');
+
+  content().innerHTML = `<div class="grid">
+    ${await moduleHead('automod', 'Protections automatiques, observabilité et réponse aux incidents.', 'Protections')}
+
+    <section class="card full">
+      <div class="card-head">
+        <div><h2>Posture de sécurité</h2><p>État réel des protections, permissions et incidents récents.</p></div>
+        <div class="toolbar"><span class="badge ${riskBadge}">Risque ${esc(riskLabel)}</span><button class="btn sm ghost" type="button" id="securityRefresh">Actualiser</button></div>
+      </div>
+      <div class="kpis" style="margin-top:14px">
+        <div class="kpi"><small>Risque</small><b>${number(risk.score)}/100</b><span>Plus bas = mieux</span></div>
+        <div class="kpi"><small>Protection</small><b>${number(risk.protection_score)}/100</b><span>Score défensif</span></div>
+        <div class="kpi"><small>Modules actifs</small><b>${number(coverage.active)}/${number(coverage.total)}</b><span>AutoMod / sécurité</span></div>
+        <div class="kpi"><small>Incidents · 24 h</small><b>${number(sec?.incidents_24h || 0)}</b><span>${number(sec?.severe_incidents_24h || 0)} critique(s)</span></div>
+      </div>
+    </section>
+
+    <section class="card full">
+      <div class="card-head">
+        <div><h2>Réponse d’urgence</h2><p>Le mode PANIC active les protections recommandées et verrouille l’écriture @everyone avec un snapshot restaurable.</p></div>
+        <span class="badge ${panic.active ? 'bad' : 'ok'}">${panic.active ? 'PANIC actif' : 'PANIC inactif'}</span>
+      </div>
+      <div class="toolbar" style="margin-top:12px">
+        <button class="btn ${panic.active ? '' : 'danger'}" type="button" id="securityPanic" ${panic.owner_controls ? '' : 'disabled'}>${panic.active ? 'Restaurer le serveur' : 'Activer PANIC'}</button>
+        ${panic.active && panic.created_at ? `<small>Actif depuis ${esc(when(panic.created_at))}${panic.created_by ? ' · par ' + esc(panic.created_by) : ''}</small>` : ''}
+        ${!panic.owner_controls ? '<small>Réservé au propriétaire du serveur ou du bot.</small>' : ''}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Simulation / dry-run</h2><p>Aucune action Discord n’est exécutée : aperçu de ce que SentriX détecterait et pourrait bloquer maintenant.</p></div><span class="badge blue">Lecture seule</span></div>
+      <div class="list" style="margin-top:12px">${simulationRows}</div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Timeline sécurité</h2><p>Incidents anti-nuke, mode PANIC, pièces dangereuses et actions AutoMod récentes.</p></div><span class="badge">${plural(timeline.length, 'événement')}</span></div>
+      <div class="list compact" style="margin-top:12px">${timelineRows}</div>
+    </section>
+
+    ${missing.length ? `<div class="notice warn full">SentriX n’a pas toutes les permissions nécessaires : ${esc(missing.map(p => p.name).join(', '))}. Certaines protections peuvent détecter un risque sans pouvoir agir.</div>` : ''}
+
+    ${card('Protections', 'Activez uniquement les protections adaptées à votre serveur.', AUTOMOD.map(([k, l, c]) => switchRow(l, k, Boolean(a[k]), c)).join(''), 'full')}
+    ${advanced(card('Politique de sécurité', '', `<div class="fields">${field('Niveau de sécurité', 'security_level', '', { select: ['faible', 'moyen', 'eleve'].map(v => `<option value="${v}" ${s.security_level === v ? 'selected' : ''}>${v === 'eleve' ? 'Élevé' : v[0].toUpperCase() + v.slice(1)}</option>`).join('') })}${field('Avertissements avant ban automatique', 'warn_ban_threshold', s.warn_ban_threshold ?? 0, { type: 'number', min: 0, max: 20, hint: '0 = jamais de ban automatique.' })}</div>` + switchRow('Escalade AutoMod', 'escalation', Boolean(a.escalation), 'Augmente progressivement les sanctions.')))}
+  </div>`;
+
+  bindEditable();
+  bindModuleButtons();
+
+  if ($('securityRefresh')) $('securityRefresh').onclick = async () => {
+    invalidate('security-overview', 'diagnostics');
+    await renderSecurity();
+  };
+
+  if ($('securityPanic')) $('securityPanic').onclick = async () => {
+    if (!(await guardDirty())) return;
+    const turningOn = !panic.active;
+    const ok = await confirmDialog({
+      title: turningOn ? 'Activer le mode PANIC ?' : 'Restaurer le serveur ?',
+      body: turningOn
+        ? 'SentriX va enregistrer l’état actuel, renforcer les protections puis verrouiller l’écriture @everyone dans les salons textuels.'
+        : 'SentriX va restaurer exactement les valeurs d’écriture sauvegardées au moment de l’activation.',
+      confirm: turningOn ? 'Activer PANIC' : 'Restaurer',
+      cancel: 'Annuler',
+      danger: turningOn,
+    });
+    if (!ok) return;
+    const button = $('securityPanic');
+    button.disabled = true;
+    try {
+      const result = await gpost('/security/panic', { action: turningOn ? 'on' : 'off' });
+      toast(result.message || 'Action sécurité appliquée.', Boolean(result.partial));
+      invalidate('security-overview', 'diagnostics');
+      await reloadGuild();
+      await renderSecurity();
+    } catch (e) {
+      toast(e.message, true);
+      button.disabled = false;
+    }
+  };
 }
 
 async function renderVerification() {
