@@ -68,9 +68,9 @@ a{{color:inherit}}header{{max-width:1120px;margin:auto;padding:20px 22px;display
 @media(pointer:coarse){{.public-pointer{{display:none}}.card,.media-grid img{{will-change:auto}}}}
 @media(prefers-reduced-motion:reduce){{html{{scroll-behavior:auto}}.public-pointer{{display:none}}.card,.media-grid img{{transform:none!important;transition:none!important}}}}
 </style></head><body><div class="public-pointer" id="publicPointer" aria-hidden="true"></div>
-<header><a class="brand" href="/"><img src="/sentrix-avatar.png" alt=""><span>SentriX</span></a><nav><a href="/start">Commencer</a><a href="/stats">Stats</a><a href="/support">Support</a><a href="/app">Dashboard</a></nav></header>
+<header><a class="brand" href="/"><img src="/sentrix-avatar.png" alt=""><span>SentriX</span></a><nav><a href="/start">Commencer</a><a href="/docs">Documentation</a><a href="/stats">Stats</a><a href="/support">Support</a><a href="/app">Dashboard</a></nav></header>
 <main><section class="hero"><div class="eyebrow">SentriX officiel</div><h1>{html.escape(heading)}</h1><p class="lead">{html.escape(description)}</p></section>{body}</main>
-<footer><a href="/sentrix">Bot Discord</a><a href="/media-kit">Media kit</a><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></footer>
+<footer><a href="/sentrix">Bot Discord</a><a href="/docs">Documentation</a><a href="/media-kit">Media kit</a><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></footer>
 <script>(()=>{{"use strict";const reduced=matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;if(reduced)return;const pointer=document.getElementById("publicPointer"),items=Array.from(document.querySelectorAll(".card,.media-grid img")),states=new WeakMap();addEventListener("pointermove",e=>{{if(pointer){{pointer.style.left=e.clientX+"px";pointer.style.top=e.clientY+"px";pointer.style.opacity="1"}}}},{{passive:true}});addEventListener("pointerleave",()=>{{if(pointer)pointer.style.opacity="0"}});function state(el){{let s=states.get(el);if(!s){{s={{rx:0,ry:0,trx:0,try:0,raf:0}};states.set(el,s)}}return s}}function frame(el){{const s=state(el),k=.15;s.rx+=(s.trx-s.rx)*k;s.ry+=(s.try-s.ry)*k;el.style.transform="perspective(900px) rotateX("+s.rx.toFixed(2)+"deg) rotateY("+s.ry.toFixed(2)+"deg) translateY(-2px)";if(Math.abs(s.trx-s.rx)+Math.abs(s.try-s.ry)>.04)s.raf=requestAnimationFrame(()=>frame(el));else{{s.raf=0;if(!s.trx&&!s.try)el.style.transform=""}}}}function aim(el,e,scale=1){{const r=el.getBoundingClientRect(),x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))-.5,y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))-.5,s=state(el);s.trx=-y*3.8*scale;s.try=x*3.8*scale;if(!s.raf)s.raf=requestAnimationFrame(()=>frame(el))}}function release(el){{const s=state(el);s.trx=s.try=0;if(!s.raf)s.raf=requestAnimationFrame(()=>frame(el))}}items.forEach(el=>{{el.addEventListener("pointermove",e=>{{if(e.pointerType!=="touch")aim(el,e)}});el.addEventListener("pointerleave",()=>release(el));el.addEventListener("pointerdown",e=>{{if(e.pointerType==="touch"){{aim(el,e,.75);setTimeout(()=>release(el),200)}}}})}})}})();</script>
 </body></html>'''
 
@@ -91,8 +91,22 @@ async def short_panel(request: web.Request) -> web.Response:
     raise web.HTTPFound("/app")
 
 
+async def docs_page(request: web.Request) -> web.Response:
+    from .public_docs_v1 import render as render_docs
+
+    dashboard = request.app["dashboard_module"]
+    return web.Response(
+        text=render_docs(request, dashboard),
+        content_type="text/html",
+        headers={
+            "Cache-Control": "public, max-age=180",
+            "X-SentriX-Surface": "docs-v1",
+        },
+    )
+
+
 async def short_docs(request: web.Request) -> web.Response:
-    raise web.HTTPFound("/commands")
+    raise web.HTTPFound("/docs")
 
 
 async def short_support(request: web.Request) -> web.Response:
@@ -181,6 +195,7 @@ def install(dashboard) -> None:
         app = original_build_app(bot)
         app.router.add_get("/start", start_page)
         app.router.add_get("/stats", stats_page)
+        app.router.add_get("/docs", docs_page)
         app.router.add_get("/support", support_page)
         app.router.add_get("/p", short_panel)
         app.router.add_get("/d", short_docs)
