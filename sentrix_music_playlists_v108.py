@@ -78,6 +78,39 @@ def decode_playlist_items(raw: str | None) -> list[dict[str, Any]]:
     return clean
 
 
+#: Accusés de réception en vol. Comme pour les sanctions, asyncio ne garde
+#: qu'une référence faible aux tâches : sans cet ensemble, le ramasse-miettes
+#: peut en annuler une avant son envoi.
+_ACCUSES: set[asyncio.Task] = set()
+
+
+def _accuser_reception(ctx: commands.Context) -> None:
+    """Montre que SentriX travaille, avant une résolution qui part sur le réseau.
+
+    Les deux commandes de playlist qui résolvent une recherche ne prévenaient
+    que les interactions slash, par ``defer()``. En préfixe, l'utilisateur
+    tapait sa commande et ne voyait RIEN jusqu'à la fin de la recherche —
+    plusieurs secondes quand le fournisseur est lent. Le balayage strict le
+    relevait comme seul défaut restant : « pas de réponse visible dans le
+    délai » sur ``+music pl add``.
+
+    L'indicateur de frappe n'a besoin que d'être demandé, jamais attendu :
+    l'attendre ajouterait un aller-retour Discord au temps déjà long.
+    """
+    if ctx.interaction is not None:
+        return
+
+    async def _silencieux() -> None:
+        try:
+            await ctx.typing()
+        except Exception:
+            logger.debug("Indicateur de frappe playlist non affiché.", exc_info=True)
+
+    tache = asyncio.create_task(_silencieux())
+    _ACCUSES.add(tache)
+    tache.add_done_callback(_ACCUSES.discard)
+
+
 def _track_to_item(track: Track, original_query: str) -> dict[str, Any]:
     return {
         "title": track.title,
@@ -243,6 +276,7 @@ def _install_playlist_group(bot, music_cog) -> None:
             return await _send(music_cog, ctx, "Nom invalide", str(exc), kind="danger")
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.defer()
+        _accuser_reception(ctx)
         try:
             resolved = await music_cog.manager.resolve(recherche, requested_by=ctx.author.id)
         except MusicEngineError as exc:
@@ -329,6 +363,7 @@ def _install_playlist_group(bot, music_cog) -> None:
             return
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.defer()
+        _accuser_reception(ctx)
 
         tracks = [_item_to_track(item, ctx.author.id) for item in items]
         queue.tracks.extend(tracks)
