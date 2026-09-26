@@ -87,6 +87,22 @@ async def start_page(request: web.Request) -> web.Response:
     return web.Response(text=_layout(request, title="Commencer avec SentriX — Bot Discord", description="Ajoutez SentriX à votre serveur Discord puis configurez sécurité, tickets, IA, logs et communauté depuis le dashboard.", heading="Installez SentriX en quelques minutes", body=body), content_type="text/html", headers={"Cache-Control":"public, max-age=300"})
 
 
+async def short_panel(request: web.Request) -> web.Response:
+    raise web.HTTPFound("/app")
+
+
+async def short_docs(request: web.Request) -> web.Response:
+    raise web.HTTPFound("/commands")
+
+
+async def short_support(request: web.Request) -> web.Response:
+    raise web.HTTPFound("/support")
+
+
+async def short_add(request: web.Request) -> web.Response:
+    raise web.HTTPFound(_invite(request))
+
+
 async def public_growth(request: web.Request) -> web.Response:
     bot = request.app["bot"]
     guilds = list(getattr(bot, "guilds", []) or [])
@@ -166,6 +182,10 @@ def install(dashboard) -> None:
         app.router.add_get("/start", start_page)
         app.router.add_get("/stats", stats_page)
         app.router.add_get("/support", support_page)
+        app.router.add_get("/p", short_panel)
+        app.router.add_get("/d", short_docs)
+        app.router.add_get("/s", short_support)
+        app.router.add_get("/add", short_add)
         app.router.add_get("/privacy", privacy_page)
         app.router.add_get("/terms", terms_page)
         app.router.add_get("/media-kit", media_page)
