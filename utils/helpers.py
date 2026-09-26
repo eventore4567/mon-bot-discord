@@ -319,6 +319,9 @@ async def double_confirm_destructive(
     """
     from utils import sentrix_panels as panels
 
+    if getattr(ctx, "_sentrix_double_confirmed", False):
+        return True
+
     author = getattr(ctx, "author", None) or getattr(ctx, "user", None)
     author_id = getattr(author, "id", None)
     if author_id is None:
@@ -381,6 +384,7 @@ async def double_confirm_destructive(
                 )
             except discord.HTTPException:
                 logger.debug("Confirmation destructive : message non modifiable.", exc_info=True)
+    setattr(ctx, "_sentrix_double_confirmed", True)
     return True
 
 
