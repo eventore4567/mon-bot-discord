@@ -273,6 +273,120 @@ class Invites(commands.Cog, name="Invites"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'Je ne sais pas qui a invité {membre.mention} (invitation inconnue ou lien de vanité).')))
         await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral("🔗 Origine de l'invitation", f"{membre.mention} a été invité par <@{row['inviter_id']}> le <t:{row['joined_at']}:D>.")))
 
+    @commands.hybrid_command(
+        name="invited-list",
+        aliases=["invitedlist", "invite-list"],
+        description="Lister les membres réellement attribués à un invitant.",
+        with_app_command=False,
+    )
+    @app_commands.describe(membre="L'invitant à consulter")
+    async def invited_list(self, ctx: commands.Context, membre: discord.Member = None):
+        membre = membre or ctx.author
+        rows = await self.bot.db.fetchall(
+            "SELECT member_id,invite_code,joined_at,left_at,account_age_days "
+            "FROM member_invites WHERE guild_id=? AND inviter_id=? "
+            "ORDER BY joined_at DESC LIMIT 25",
+            (ctx.guild.id, membre.id),
+        )
+        if not rows:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.info(f"Aucune invitation attribuée à {membre.mention}.")),
+            )
+        lines = []
+        for row in rows:
+            state = "reparti" if row["left_at"] is not None else "présent"
+            age = row["account_age_days"]
+            suspect = age is not None and int(age) < FAKE_INVITE_ACCOUNT_AGE_DAYS
+            extra = " · compte récent" if suspect else ""
+            code = f" · \`{row['invite_code']}\`" if row["invite_code"] else ""
+            lines.append(
+                f"<@{row['member_id']}> · {state}{extra}{code} · <t:{row['joined_at']}:R>"
+            )
+        embed = embeds.neutral(
+            f"Invités par {membre.display_name}",
+            "\n".join(lines)[:4000],
+        )
+        embed.set_footer(text=f"SentriX • {len(rows)} résultat(s) affiché(s) • données réellement enregistrées")
+        await panels.envoyer(ctx, panels.depuis_embed(embed))
+
+    @commands.hybrid_command(
+        name="invite-codes",
+        aliases=["invitecodes"],
+        description="Afficher les codes d'invitation créés par un membre.",
+        with_app_command=False,
+    )
+    @app_commands.describe(membre="Le créateur des invitations")
+    async def invite_codes(self, ctx: commands.Context, membre: discord.Member = None):
+        membre = membre or ctx.author
+        try:
+            invites = await ctx.guild.invites()
+        except discord.Forbidden:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("SentriX a besoin de la permission Gérer le serveur pour lire les invitations.")),
+            )
+        own = [inv for inv in invites if inv.inviter and inv.inviter.id == membre.id]
+        if not own:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.info(f"Aucun code d'invitation actif créé par {membre.mention}.")),
+            )
+        own.sort(key=lambda inv: int(inv.uses or 0), reverse=True)
+        lines = [
+            f"\`{inv.code}\` · **{int(inv.uses or 0)}** utilisation(s) · {getattr(inv.channel, 'mention', '#salon')}"
+            for inv in own[:25]
+        ]
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(embeds.neutral(f"Codes d'invitation de {membre.display_name}", "\n".join(lines))),
+        )
+
+    @commands.hybrid_command(
+        name="sync-invites",
+        aliases=["syncinvites"],
+        description="[Admin] Synchroniser l'inventaire actuel des codes d'invitation.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def sync_invites(self, ctx: commands.Context):
+        try:
+            invites = await ctx.guild.invites()
+        except discord.Forbidden:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("SentriX a besoin de la permission Gérer le serveur pour lire les invitations.")),
+            )
+        now_ts = int(time.time())
+        await self.bot.db.execute(
+            "CREATE TABLE IF NOT EXISTS invite_code_meta ("
+            "guild_id INTEGER NOT NULL, code TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', "
+            "last_seen_uses INTEGER NOT NULL DEFAULT 0, last_seen_at INTEGER NOT NULL DEFAULT 0, "
+            "PRIMARY KEY (guild_id, code))"
+        )
+        for inv in invites:
+            existing = await self.bot.db.fetchone(
+                "SELECT label FROM invite_code_meta WHERE guild_id=? AND code=?",
+                (ctx.guild.id, str(inv.code)),
+            )
+            label = str(existing["label"] or "") if existing else ""
+            await self.bot.db.execute(
+                "INSERT INTO invite_code_meta(guild_id,code,label,last_seen_uses,last_seen_at) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(guild_id,code) DO UPDATE SET "
+                "last_seen_uses=excluded.last_seen_uses,last_seen_at=excluded.last_seen_at",
+                (ctx.guild.id, str(inv.code), label, int(inv.uses or 0), now_ts),
+            )
+        await self.cache_guild_invites(ctx.guild)
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.success(
+                    f"{len(invites)} code(s) synchronisé(s). "
+                    "Aucune attribution historique de membre n'a été inventée."
+                )
+            ),
+        )
+
     # -------------------------------------------------------------- Bonus (staff)
 
     @commands.hybrid_command(
