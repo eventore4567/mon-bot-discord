@@ -107,11 +107,11 @@ footer{padding:42px 0;color:var(--muted);font-size:11px}footer .wrap{display:fle
 <script>
 (()=>{
 "use strict";
-const $=(s,r=document)=>r.querySelector(s),$=(s,r=document)=>Array.from(r.querySelectorAll(s)),reduced=matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $=(s,r=document)=>r.querySelector(s),all=(s,r=document)=>Array.from(r.querySelectorAll(s)),reduced=matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
 const supportNav=$("#supportNav"),supportMenu=$("#supportMenu");
 function closeSupportMenu(){supportNav?.classList.remove("open");supportMenu?.setAttribute("aria-expanded","false")}
 supportMenu?.addEventListener("click",()=>{const open=supportNav?.classList.toggle("open");supportMenu.setAttribute("aria-expanded",open?"true":"false")});
-$("#supportLinks a").forEach(a=>a.addEventListener("click",closeSupportMenu));
+all("#supportLinks a").forEach(a=>a.addEventListener("click",closeSupportMenu));
 document.addEventListener("click",e=>{if(supportNav?.classList.contains("open")&&!supportNav.contains(e.target))closeSupportMenu()});
 if(!reduced){
   addEventListener("pointermove",e=>{document.documentElement.style.setProperty("--mx",e.clientX+"px");document.documentElement.style.setProperty("--my",e.clientY+"px");const g=$("#cursorGlow");if(g){g.style.left=e.clientX+"px";g.style.top=e.clientY+"px";g.style.opacity="1"}},{passive:true});
@@ -122,10 +122,10 @@ if(!reduced){
   function animate(el){const s=state(el),k=.14;s.rx+=(s.trx-s.rx)*k;s.ry+=(s.try-s.ry)*k;s.tx+=(s.ttx-s.tx)*k;s.ty+=(s.tty-s.ty)*k;el.style.transform="perspective(1050px) rotateX("+s.rx.toFixed(2)+"deg) rotateY("+s.ry.toFixed(2)+"deg) translate3d("+s.tx.toFixed(1)+"px,"+s.ty.toFixed(1)+"px,0)";el.style.boxShadow=(-s.ry*3).toFixed(1)+"px "+(20+s.rx*1.4).toFixed(1)+"px 62px rgba(0,0,0,.31)";const d=Math.abs(s.trx-s.rx)+Math.abs(s.try-s.ry)+Math.abs(s.ttx-s.tx)+Math.abs(s.tty-s.ty);if(d>.05)s.raf=requestAnimationFrame(()=>animate(el));else{s.raf=0;if(!s.trx&&!s.try&&!s.ttx&&!s.tty){el.style.transform="";el.style.boxShadow=""}}}
   function aim(el,x,y,max,scale=1){const r=el.getBoundingClientRect(),nx=Math.max(0,Math.min(1,(x-r.left)/r.width))-.5,ny=Math.max(0,Math.min(1,(y-r.top)/r.height))-.5,s=state(el);s.trx=-ny*max*scale;s.try=nx*max*scale;s.ttx=nx*12*scale;s.tty=ny*8*scale;el.style.setProperty("--cx",((nx+.5)*100)+"%");el.style.setProperty("--cy",((ny+.5)*100)+"%");if(!s.raf)s.raf=requestAnimationFrame(()=>animate(el))}
   function release(el){const s=state(el);s.trx=s.try=s.ttx=s.tty=0;if(!s.raf)s.raf=requestAnimationFrame(()=>animate(el))}
-  $(".support-card,.diag-panel,.smart-assistant,.score-card,.report-card").forEach(el=>{const max=el.classList.contains("support-card")?9:5;el.addEventListener("pointermove",e=>{if(e.pointerType!=="touch")aim(el,e.clientX,e.clientY,max)});el.addEventListener("pointerleave",()=>release(el));el.addEventListener("pointerdown",e=>{if(e.pointerType==="touch"){aim(el,e.clientX,e.clientY,max,.75);setTimeout(()=>release(el),220)}})});
+  all(".support-card,.diag-panel,.smart-assistant,.score-card,.report-card").forEach(el=>{const max=el.classList.contains("support-card")?9:5;el.addEventListener("pointermove",e=>{if(e.pointerType!=="touch")aim(el,e.clientX,e.clientY,max)});el.addEventListener("pointerleave",()=>release(el));el.addEventListener("pointerdown",e=>{if(e.pointerType==="touch"){aim(el,e.clientX,e.clientY,max,.75);setTimeout(()=>release(el),220)}})});
   const visual=$("#supportVisual");visual?.addEventListener("pointermove",e=>{if(e.pointerType!=="touch")aim(visual,e.clientX,e.clientY,4)});visual?.addEventListener("pointerleave",()=>release(visual));visual?.addEventListener("pointerdown",e=>{if(e.pointerType==="touch"){aim(visual,e.clientX,e.clientY,4,.7);setTimeout(()=>release(visual),220)}});
 }
-const reveals=$$(".reveal");if(!reduced&&"IntersectionObserver" in window){const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add("visible");io.unobserve(e.target)}}),{threshold:.12});reveals.forEach(x=>io.observe(x))}else reveals.forEach(x=>x.classList.add("visible"));
+const reveals=all(".reveal");if(!reduced&&"IntersectionObserver" in window){const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add("visible");io.unobserve(e.target)}}),{threshold:.12});reveals.forEach(x=>io.observe(x))}else reveals.forEach(x=>x.classList.add("visible"));
 
 const data={
  commands:{title:"Commande Discord",text:"Commencez par vérifier le nom réel de la commande et les permissions requises.",items:["Testez la commande dans un salon où SentriX peut lire et répondre.","Vérifiez que votre rôle possède les permissions staff nécessaires si la commande est administrative.","Copiez le message de refus ou d’erreur exact au lieu de seulement dire “ça ne marche pas”."]},
@@ -134,7 +134,7 @@ const data={
  security:{title:"AutoMod & sécurité",text:"Une protection dépend toujours de ses règles et du contexte Discord.",items:["Vérifiez que le module est activé sur le bon serveur.","Testez avec un cas contrôlé plutôt que sur de vrais membres.","Fournissez l’événement attendu, l’événement observé et les logs disponibles."]}
 };
 function render(key){const d=data[key],box=$("#diagContent");if(!d||!box)return;box.innerHTML="<h3>"+d.title+"</h3><p>"+d.text+"</p><div class='checklist'>"+d.items.map((x,i)=>"<div class='check'><i>"+(i+1)+"</i><span>"+x+"</span></div>").join("")+"</div>";box.animate?.([{opacity:.25,transform:"translateY(6px)"},{opacity:1,transform:"none"}],{duration:220,easing:"ease-out"})}
-$(".diag-btn").forEach(btn=>btn.addEventListener("click",()=>{$(".diag-btn").forEach(x=>x.classList.remove("active"));btn.classList.add("active");render(btn.dataset.key);const sel=$("#issueType");if(sel&&[...sel.options].some(o=>o.value===btn.dataset.key))sel.value=btn.dataset.key}));render("commands");
+all(".diag-btn").forEach(btn=>btn.addEventListener("click",()=>{all(".diag-btn").forEach(x=>x.classList.remove("active"));btn.classList.add("active");render(btn.dataset.key);const sel=$("#issueType");if(sel&&[...sel.options].some(o=>o.value===btn.dataset.key))sel.value=btn.dataset.key}));render("commands");
 
 const rules={
  commands:{base:["Vérifiez que la commande existe dans la page Commandes.","Testez dans un salon où SentriX peut lire et répondre."],keywords:[["unknown","commande inconnue ou nom obsolète"],["missing","permission ou argument manquant"],["forbidden","permission Discord refusée"],["timeout","interaction trop lente ou service momentanément indisponible"]]},
@@ -160,7 +160,7 @@ function analyze(){
   $("#reportText").textContent=report;$("#smartOutput").classList.add("show");$("#smartOutput").scrollIntoView({behavior:reduced?"auto":"smooth",block:"nearest"});
 }
 $("#analyzeBtn")?.addEventListener("click",analyze);
-$("#resetBtn")?.addEventListener("click",()=>{$("#smartAssistant input,#smartAssistant textarea").forEach(x=>x.value="");$("#issueType").value="commands";$("#deviceType").selectedIndex=0;$("#smartOutput").classList.remove("show");$("#copyNote").textContent="Vérifiez le contenu avant de l’envoyer. Ne collez jamais de token, secret OAuth, clé API ou cookie."});
+$("#resetBtn")?.addEventListener("click",()=>{all("#smartAssistant input,#smartAssistant textarea").forEach(x=>x.value="");$("#issueType").value="commands";$("#deviceType").selectedIndex=0;$("#smartOutput").classList.remove("show");$("#copyNote").textContent="Vérifiez le contenu avant de l’envoyer. Ne collez jamais de token, secret OAuth, clé API ou cookie."});
 $("#copyReport")?.addEventListener("click",async()=>{const text=$("#reportText")?.textContent||"";try{await navigator.clipboard.writeText(text);$("#copyNote").textContent="Rapport copié. Relisez-le avant de l’envoyer au support."}catch(_){$("#copyNote").textContent="Copie automatique indisponible : sélectionnez le rapport manuellement."}});
 
 })();
