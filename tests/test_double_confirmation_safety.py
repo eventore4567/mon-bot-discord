@@ -35,6 +35,9 @@ def test_bulk_destructive_commands_are_covered_by_late_guard():
         "tickettype remove",
         "ticketform remove",
         "music clear",
+        "security all",
+        "create-logs",
+        "syncbl",
     }
     assert expected <= set(member_data_retention_v17.DOUBLE_CONFIRM_COMMANDS)
 
@@ -51,3 +54,9 @@ def test_reset_wrapper_also_uses_same_two_step_confirmation():
     source = inspect.getsource(member_data_retention_v17._send_reset_confirmation)
     assert "helpers.double_confirm_destructive" in source
     assert "explicit_data_reset()" in source
+
+
+def test_bulk_guard_supports_standalone_commands_without_cog_self():
+    source = inspect.getsource(member_data_retention_v17._install_destructive_confirmations)
+    assert "async def wrapped(*args" in source
+    assert "isinstance(value, commands.Context)" in source
