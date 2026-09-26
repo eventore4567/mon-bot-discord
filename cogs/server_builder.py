@@ -19,7 +19,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import access_matrix, checks, embeds
+from utils import access_matrix, checks, embeds, helpers
 from utils import sentrix_panels as panels
 
 
@@ -1798,6 +1798,12 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
         if salon.id == ctx.channel.id:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas supprimer le salon depuis lequel vous lancez cette commande.')))
         name = salon.name
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            f"supprimer le salon {name}",
+            detail="Le salon et son historique de messages disparaîtront de Discord.",
+        ):
+            return
         try:
             await salon.delete(reason=f"{ctx.author} : {raison}")
         except discord.Forbidden:
