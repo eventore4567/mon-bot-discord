@@ -79,6 +79,11 @@ EXTENSIONS = [
     # ET au niveau du moteur. Sans elle, utils.ai_service.generate n'est gardé
     # par personne et trois appelants directs vivants contournent le réglage.
     "cogs.ai_disable_guard",
+    # Empêche le routeur naturel de confondre une demande de résumé avec une
+    # commande musique, garde les messages très courts en conversation, et
+    # force une vraie URL sur une demande de lien. Trois protections mortes
+    # faute de setup(), mesurées absentes sur la chaîne v8.
+    "cogs.natural_music_intent_guard",
     # Porte V17Health, dont on_ready déclenche la reprise des mises de jeu
     # interrompues par un redémarrage. Vérifié dans les journaux Railway : la
     # ligne de bilan, journalisée même à zéro, n'apparaissait jamais.

@@ -403,3 +403,25 @@ def install(bot: commands.Bot) -> None:
     ai.Ai._natural_command_line = guarded_natural_command_line
     _INSTALLED = True
     logger.info("Protection des intentions musique du langage naturel activée.")
+
+
+async def setup(bot: commands.Bot) -> None:
+    """Extension à part entière : ces trois protections étaient mortes.
+
+    Le module n'exposait qu'``install()``, appelé par l'enveloppe de chargement
+    de ``cogs/__init__`` — posée sur une classe que la production n'instancie
+    plus depuis que ``railway_boot`` remplace ``commands.Bot``. Mesuré le
+    2026-09-26 sur la chaîne v8 : ``_sentrix_music_intent_guard``,
+    ``_sentrix_casual_chat_v58`` et ``_sentrix_link_intent_v59`` étaient tous
+    absents du bot.
+
+    Ce que leur absence laissait passer, et que le docstring de tête décrit :
+    « fais-moi un résumé sur Pythagore » pouvait devenir ``+resume musique``,
+    un « cv ? » déclenchait une définition d'abréviation au lieu d'une
+    conversation, et une demande explicite de lien pouvait renvoyer une vidéo
+    non sourcée.
+
+    ``install()`` est idempotent et dépend du cog Ai, chargé avant.
+    """
+    install(bot)
+

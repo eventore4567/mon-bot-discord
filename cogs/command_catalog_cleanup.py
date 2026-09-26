@@ -163,6 +163,17 @@ MERGED_COMMANDS = (
 # Annoncer dans l'aide une commande volontairement retirée est exactement le
 # « vieux nom obsolète affiché » qu'il faut éviter.
 HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
+    # Interrupteurs de système, 2026-09-26. cogs/feature_systems.py écrit noir
+    # sur blanc que « les interrupteurs doivent TOUJOURS rester accessibles aux
+    # administrateurs, sinon +level-system off bloquerait lui-même
+    # +level-system on et rendrait la désactivation irréversible sans modifier
+    # la base à la main ». Ils étaient pourtant masqués et classés nulle part :
+    # un administrateur qui coupait les niveaux ne pouvait plus les rallumer
+    # sans connaître le nom exact de la commande. Ce ne sont pas des commandes
+    # publiques — la vérification de permission reste entière — seulement des
+    # commandes qu'on doit pouvoir retrouver dans +help.
+    "level-system", "economy-system",
+
     # Deuxième lot d'orphelines, 2026-09-26. Le lot du 2026-09-09 en avait
     # rattrapé trente-quatre ; il en restait 108 chargées, masquées et classées
     # nulle part, dont 47 que main.PUBLIC_COMMANDS déclare pourtant publiques.
