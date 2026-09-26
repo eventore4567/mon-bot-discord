@@ -67,6 +67,11 @@ def register(app: web.Application, dashboard) -> None:
             "display_name": getattr(user, "display_name", None) or getattr(user, "name", None),
             "avatar_url": str(user.display_avatar.url) if user is not None else None,
             "present": member is not None,
+            "roles": [
+                {"id": str(role.id), "name": role.name}
+                for role in (getattr(member, "roles", ()) if member is not None else ())
+                if not role.is_default()
+            ][-20:],
         }
 
     async def _hidden_ids(guild_id: int) -> set[int]:
@@ -215,10 +220,15 @@ def register(app: web.Application, dashboard) -> None:
             breakdown = await bot.db.get_invite_breakdown(guild.id, inviter_id)
             total = int(breakdown["total"] or 0)
             active = max(0, total - int(breakdown["left"] or 0))
+            latest = await bot.db.fetchone(
+                "SELECT MAX(joined_at) AS ts FROM member_invites WHERE guild_id=? AND inviter_id=?",
+                (guild.id, inviter_id),
+            )
             output.append({
                 "member": _member_payload(guild, inviter_id),
                 "hidden": inviter_id in hidden,
                 "retention": round((active / total) * 100, 1) if total else 0.0,
+                "last_invite_at": int(latest["ts"] or 0) if latest else 0,
                 **{k: int(v or 0) for k, v in breakdown.items()},
             })
         output.sort(key=lambda item: (item["credited"], item["real"], item["total"]), reverse=True)
