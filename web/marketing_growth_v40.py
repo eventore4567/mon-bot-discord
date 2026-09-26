@@ -106,7 +106,7 @@ async def docs_page(request: web.Request) -> web.Response:
 
 
 async def short_docs(request: web.Request) -> web.Response:
-    raise web.HTTPFound("/docs")
+    raise web.HTTPFound("/commands")
 
 
 async def short_support(request: web.Request) -> web.Response:
