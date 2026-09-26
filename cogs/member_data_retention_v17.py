@@ -113,6 +113,23 @@ RESET_COMMAND_LABELS = {
     "reset-invites": "toutes les données d'invitations du serveur",
 }
 
+DOUBLE_CONFIRM_COMMANDS = {
+    "config-reset": "réinitialiser toute la configuration du serveur",
+    "logs reset": "réinitialiser ce type de logs",
+    "chat-reset": "réinitialiser l'historique de conversation IA",
+    "ai reset": "réinitialiser la conversation IA du salon",
+    "sanctiondm reset": "réinitialiser le message privé de sanction",
+    "resetnick": "réinitialiser le pseudo du membre",
+    "reset-logs-all": "réinitialiser toute la configuration des logs",
+    "clearwarnings": "supprimer tous les avertissements du membre",
+    "clear": "supprimer plusieurs messages du salon",
+    "delete-channel": "supprimer le salon sélectionné",
+    "ticketpanel delete": "supprimer le panel et ses types associés",
+    "tickettype remove": "supprimer le type de ticket et son formulaire",
+    "ticketform remove": "supprimer la question du formulaire",
+    "music clear": "vider toute la file d'attente musicale",
+}
+
 
 class ProtectedProgressDeletionError(RuntimeError):
     """Levée lorsqu'un code tente de supprimer de la progression sans reset explicite."""
@@ -225,6 +242,55 @@ async def _send_reset_confirmation(
         return await runner()
 
 
+
+def _install_destructive_confirmations(bot: commands.Bot) -> list[str]:
+    """Deux confirmations pour toute commande destructive ou de reset connue.
+
+    Cette couche est chargée tardivement afin de couvrir aussi les callbacks remplacés
+    par les runtimes de production. Les callbacks qui appellent déjà
+    double_confirm_destructive restent à exactement deux confirmations grâce au
+    marqueur idempotent stocké sur le Context.
+    """
+    patched: list[str] = []
+    for command_name, description in DOUBLE_CONFIRM_COMMANDS.items():
+        command = bot.get_command(command_name)
+        if command is None:
+            continue
+        if getattr(command.callback, "_sentrix_double_confirmation_guard", False):
+            patched.append(command_name)
+            continue
+        if getattr(command.callback, "_sentrix_reset_confirmation_v17", False):
+            patched.append(command_name)
+            continue
+
+        original = command.callback
+        original_params = command.params.copy()
+
+        @functools.wraps(original)
+        async def wrapped(cog_self, ctx: commands.Context, *args, __original=original,
+                          __description=description, **kwargs):
+            if not await helpers.double_confirm_destructive(
+                ctx,
+                __description,
+                detail="SentriX exige deux validations explicites avant cette opération.",
+                timeout=60,
+            ):
+                return None
+            return await __original(cog_self, ctx, *args, **kwargs)
+
+        wrapped._sentrix_double_confirmation_guard = True
+        wrapped._sentrix_original = original
+        command.callback = wrapped
+        command.params = original_params
+        patched.append(command_name)
+
+    logger.info(
+        "Double confirmation destructive installée: %s",
+        ", ".join(patched) or "aucune",
+    )
+    return patched
+
+
 def _install_reset_confirmations(bot: commands.Bot) -> list[str]:
     patched: list[str] = []
     for command_name, description in RESET_COMMAND_LABELS.items():
@@ -277,6 +343,7 @@ class MemberDataRetentionV17(commands.Cog):
     async def cog_load(self):
         _install_db_guard(self.bot)
         _install_reset_confirmations(self.bot)
+        _install_destructive_confirmations(self.bot)
 
         # FULL force SQLite à synchroniser le journal avec le stockage avant de confirmer
         # un commit. WAL reste actif via Database.connect().
