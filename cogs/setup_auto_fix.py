@@ -23,7 +23,7 @@ from types import MethodType
 import discord
 from discord.ext import commands
 
-from utils import embeds
+from utils import helpers, embeds
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.setup-auto-fix")
@@ -117,6 +117,14 @@ async def _fallback_auto_setup(bot: commands.Bot, ctx: commands.Context, profile
 async def _run_auto_setup(bot: commands.Bot, ctx: commands.Context, profile: str) -> None:
     if profile not in VALID_PROFILES:
         await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Profil inconnu. Utilisez `community`, `gaming`, `support` ou `creator`.')))
+        return
+
+    if not await helpers.double_confirm_destructive(
+        ctx,
+        f"appliquer le profil de configuration automatique {profile}",
+        detail="Plusieurs réglages, rôles, salons ou modules peuvent être créés/configurés d'un coup.",
+        timeout=60,
+    ):
         return
 
     runtime = bot.get_cog("BotV10")
