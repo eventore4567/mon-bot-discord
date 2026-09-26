@@ -270,8 +270,10 @@ def _install_destructive_confirmations(bot: commands.Bot) -> list[str]:
         original_params = command.params.copy()
 
         @functools.wraps(original)
-        async def wrapped(cog_self, ctx: commands.Context, *args, __original=original,
-                          __description=description, **kwargs):
+        async def wrapped(*args, __original=original, __description=description, **kwargs):
+            ctx = next((value for value in args if isinstance(value, commands.Context)), None)
+            if ctx is None:
+                return await __original(*args, **kwargs)
             if not await helpers.double_confirm_destructive(
                 ctx,
                 __description,
@@ -279,7 +281,7 @@ def _install_destructive_confirmations(bot: commands.Bot) -> list[str]:
                 timeout=60,
             ):
                 return None
-            return await __original(cog_self, ctx, *args, **kwargs)
+            return await __original(*args, **kwargs)
 
         wrapped._sentrix_double_confirmation_guard = True
         wrapped._sentrix_original = original
