@@ -61,6 +61,7 @@ jobs:
             tests/test_ha_sigterm_failover.py \
             tests/test_dashboard_auth_visible.py \
             tests/test_dashboard_install_link.py \
+            tests/test_guild_arrival_onboarding.py \
             tests/test_public_home_v1.py \
             tests/test_public_home_v2.py \
             tests/test_public_home_v3.py \
