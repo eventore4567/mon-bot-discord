@@ -46,7 +46,7 @@ header{position:sticky;top:0;z-index:100;border-bottom:1px solid rgba(255,255,25
 .smart-output{display:none;margin-top:20px;grid-template-columns:.8fr 1.2fr;gap:12px}.smart-output.show{display:grid;animation:rowIn .35s ease both}.score-card,.report-card{padding:17px;border:1px solid var(--line);border-radius:14px;background:#080d13}.score-top{display:flex;align-items:center;justify-content:space-between;gap:12px}.score-top b{font-size:12px}.severity{padding:5px 8px;border-radius:999px;font-size:8px;font-weight:950;text-transform:uppercase;letter-spacing:.07em}.severity.low{background:rgba(89,221,160,.08);color:#8ce2b8}.severity.medium{background:rgba(239,189,98,.08);color:#f3cc83}.severity.high{background:rgba(255,111,125,.08);color:#ff9ca6}
 .reason-list{display:grid;gap:7px;margin-top:13px}.reason{padding:9px;border-radius:9px;background:#0e141d;color:var(--soft);font-size:9px}.reason b{color:#fff}.report-card pre{white-space:pre-wrap;word-break:break-word;margin:11px 0 0;padding:12px;border:1px solid var(--line);border-radius:10px;background:#05090e;color:#cbd3df;font:10px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:260px;overflow:auto}.copy-note{margin-top:8px;color:var(--muted);font-size:8px}
 .device-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:24px}.device{padding:11px;border:1px solid var(--line);border-radius:10px;background:#0a0f16;text-align:center}.device b{display:block;font-size:9px}.device span{display:block;margin-top:2px;color:var(--muted);font-size:7px}
-.diagnose{display:grid;grid-template-columns:300px 1fr;gap:18px;margin-top:36px}.diag-menu{display:grid;gap:8px}.diag-btn{text-align:left;padding:14px;border:1px solid var(--line);border-radius:12px;background:#0c1118;color:var(--muted);cursor:pointer;transition:.18s ease}.diag-btn b{display:block;color:var(--soft);font-size:11px}.diag-btn span{display:block;margin-top:3px;font-size:9px}.diag-btn.active{border-color:rgba(77,163,255,.5);background:rgba(77,163,255,.12);box-shadow:inset 3px 0 0 var(--violet)}
+.sx-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}.support-search{margin-top:30px}.support-search input{width:100%;padding:13px 15px;border:1px solid var(--line);border-radius:12px;background:#0c1118;color:var(--text);font:inherit;outline:none;transition:border-color .18s ease,box-shadow .18s ease}.support-search input:focus-visible{border-color:var(--blue);box-shadow:0 0 0 3px rgba(77,163,255,.24)}.support-search p{margin:9px 0 0;color:var(--muted);font-size:11px;min-height:15px}.diagnose{display:grid;grid-template-columns:300px 1fr;gap:18px;margin-top:36px}.diag-menu{display:grid;gap:8px}.diag-btn{text-align:left;padding:14px;border:1px solid var(--line);border-radius:12px;background:#0c1118;color:var(--muted);cursor:pointer;transition:.18s ease}.diag-btn b{display:block;color:var(--soft);font-size:11px}.diag-btn span{display:block;margin-top:3px;font-size:9px}.diag-btn.active{border-color:rgba(77,163,255,.5);background:rgba(77,163,255,.12);box-shadow:inset 3px 0 0 var(--violet)}
 .diag-panel{position:relative;overflow:hidden;min-height:330px;padding:25px;border:1px solid var(--line);border-radius:19px;background:linear-gradient(145deg,#101720,#090e14)}.diag-panel:before{content:"";position:absolute;inset:-30%;background:conic-gradient(from 180deg,transparent,rgba(77,163,255,.05),transparent 32%);animation:diagGlow 8s linear infinite}.diag-content{position:relative}.diag-content h3{margin:0 0 8px;font-size:22px}.diag-content p{color:var(--muted);line-height:1.68}.checklist{display:grid;gap:8px;margin-top:18px}.check{display:flex;gap:9px;align-items:flex-start;padding:10px;border:1px solid var(--line);border-radius:10px;background:#080d13;color:var(--soft);font-size:11px}.check i{width:19px;height:19px;flex:none;border-radius:6px;background:rgba(89,221,160,.10);display:grid;place-items:center;color:#8de2b7;font-style:normal;font-size:7px;font-weight:950}
 .cta{position:relative;overflow:hidden;text-align:center;padding:58px 22px;border:1px solid rgba(77,163,255,.22);border-radius:24px;background:linear-gradient(145deg,rgba(77,163,255,.13),rgba(13,18,26,.94));box-shadow:0 35px 100px rgba(0,0,0,.4)}.cta:before{content:"";position:absolute;left:50%;top:-220px;width:620px;height:480px;transform:translateX(-50%);border-radius:50%;background:radial-gradient(circle,rgba(119,188,255,.22),transparent 66%);animation:breath 6s ease-in-out infinite alternate}.cta>*{position:relative}.cta h2{max-width:730px;margin:8px auto 12px}.cta p{max-width:620px;margin:0 auto;color:var(--muted)}.cta .actions{justify-content:center}
 footer{padding:42px 0;color:var(--muted);font-size:11px}footer .wrap{display:flex;justify-content:space-between;gap:20px;border-top:1px solid var(--line);padding-top:23px}footer a:hover{color:#fff}
@@ -92,12 +92,15 @@ footer{padding:42px 0;color:var(--muted);font-size:11px}footer .wrap{display:fle
 
 <section class="wrap section">
   <span class="eyebrow">Diagnostic interactif</span><h2>Choisissez ce qui ne fonctionne pas.</h2><p class="lead2">Le panneau change selon votre problème pour vous indiquer les vérifications les plus utiles.</p>
+<div class="support-search"><label><span class="sx-sr-only">Rechercher un problème</span><input id="supportSearch" type="search" autocomplete="off" placeholder="Rechercher : permission, ticket, logs, musique, OAuth…"></label><p id="supportCount" role="status" aria-live="polite"></p></div>
   <div class="diagnose reveal">
     <div class="diag-menu">
       <button class="diag-btn active" type="button" data-key="commands"><b>Commande Discord</b><span>Une commande ne répond pas ou refuse l’action.</span></button>
       <button class="diag-btn" type="button" data-key="dashboard"><b>Dashboard</b><span>Connexion, serveur ou sauvegarde.</span></button>
       <button class="diag-btn" type="button" data-key="permissions"><b>Permissions</b><span>SentriX ne peut pas agir.</span></button>
       <button class="diag-btn" type="button" data-key="security"><b>AutoMod / sécurité</b><span>Une protection ne se déclenche pas comme prévu.</span></button>
+      <button class="diag-btn" type="button" data-key="offline"><b>Bot hors ligne</b><span>SentriX n’apparaît pas ou ne répond plus.</span></button>
+      <button class="diag-btn" type="button" data-key="logs"><b>Logs, tickets, musique</b><span>Un salon reste vide ou une action ne se voit pas.</span></button>
     </div>
     <div class="diag-panel"><div class="diag-content" id="diagContent"></div></div>
   </div>
@@ -146,11 +149,34 @@ if(!reduced){
 }
 const reveals=all(".reveal");if(!reduced&&"IntersectionObserver" in window){const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add("visible");io.unobserve(e.target)}}),{threshold:.12});reveals.forEach(x=>io.observe(x))}else reveals.forEach(x=>x.classList.add("visible"));
 
+(() => {
+  // Filtre les fiches d'aide et les boutons de diagnostic. Le nombre de
+  // résultats est annoncé en aria-live, sinon chercher au clavier ne donne
+  // aucun retour à un lecteur d'écran.
+  const champ = document.getElementById("supportSearch");
+  const compte = document.getElementById("supportCount");
+  if (!champ) return;
+  const fiches = Array.from(document.querySelectorAll(".support-card"));
+  const boutons = Array.from(document.querySelectorAll(".diag-btn"));
+  const texte = el => (el.textContent || "").toLowerCase();
+  champ.addEventListener("input", () => {
+    const q = champ.value.trim().toLowerCase();
+    let vus = 0;
+    fiches.forEach(el => { const ok = !q || texte(el).includes(q); el.hidden = !ok; if (ok) vus++; });
+    boutons.forEach(el => { const ok = !q || texte(el).includes(q); el.hidden = !ok; });
+    if (compte) compte.textContent = q
+      ? vus + (vus > 1 ? " sujets d'aide correspondent" : " sujet d'aide correspond")
+      : "";
+  });
+})();
+
 const data={
  commands:{title:"Commande Discord",text:"Commencez par vérifier le nom réel de la commande et les permissions requises.",items:["Testez la commande dans un salon où SentriX peut lire et répondre.","Vérifiez que votre rôle possède les permissions staff nécessaires si la commande est administrative.","Copiez le message de refus ou d’erreur exact au lieu de seulement dire “ça ne marche pas”."]},
  dashboard:{title:"Dashboard",text:"Le dashboard dépend de votre session Discord et de vos permissions sur le serveur.",items:["Reconnectez-vous à Discord si votre session a expiré.","Confirmez que vous administrez bien le serveur sélectionné.","Si une sauvegarde échoue, notez la section exacte et le message affiché."]},
  permissions:{title:"Permissions & hiérarchie",text:"Discord peut bloquer une action même si le bot est en ligne.",items:["Placez le rôle SentriX au-dessus du rôle qu’il doit gérer.","Vérifiez les permissions du salon en plus des permissions globales.","Pour les actions sensibles, contrôlez aussi les permissions du membre qui lance la commande."]},
- security:{title:"AutoMod & sécurité",text:"Une protection dépend toujours de ses règles et du contexte Discord.",items:["Vérifiez que le module est activé sur le bon serveur.","Testez avec un cas contrôlé plutôt que sur de vrais membres.","Fournissez l’événement attendu, l’événement observé et les logs disponibles."]}
+ security:{title:"AutoMod & sécurité",text:"Une protection dépend toujours de ses règles et du contexte Discord.",items:["Vérifiez que le module est activé sur le bon serveur.","Testez avec un cas contrôlé plutôt que sur de vrais membres.","Fournissez l’événement attendu, l’événement observé et les logs disponibles."]},
+ offline:{title:"Bot hors ligne",text:"Distinguez « hors ligne sur Discord » de « site indisponible » : ce ne sont pas les mêmes causes.",items:["Regardez la pastille de SentriX dans la liste des membres du serveur.","SentriX tourne sur deux instances dont une seule sert à la fois ; pendant une bascule, une page publique peut annoncer que ses données ne sont pas disponibles plutôt qu’un chiffre faux.","Si le bot répond sur un serveur mais pas sur le vôtre, le problème est une permission ou un module désactivé, pas une panne.","Joignez l’heure exacte et le nom du serveur au rapport ci-dessous."]},
+ logs:{title:"Logs, tickets et musique",text:"Ces trois modules échouent presque toujours pour la même raison : un salon que SentriX ne voit pas ou dans lequel il ne peut pas écrire.",items:["Vérifiez que le salon de destination existe encore et n’a pas été renommé ou supprimé.","Ouvrez les permissions du salon : SentriX doit pouvoir le voir ET y écrire, les permissions globales ne suffisent pas.","Pour la musique, SentriX doit aussi pouvoir se connecter et parler dans le salon vocal.","Un refus d’accès côté Discord est enregistré : indiquez l’heure pour qu’on le retrouve."]}
 };
 function render(key){const d=data[key],box=$("#diagContent");if(!d||!box)return;box.innerHTML="<h3>"+d.title+"</h3><p>"+d.text+"</p><div class='checklist'>"+d.items.map((x,i)=>"<div class='check'><i>"+(i+1)+"</i><span>"+x+"</span></div>").join("")+"</div>";box.animate?.([{opacity:.25,transform:"translateY(6px)"},{opacity:1,transform:"none"}],{duration:220,easing:"ease-out"})}
 all(".diag-btn").forEach(btn=>btn.addEventListener("click",()=>{all(".diag-btn").forEach(x=>x.classList.remove("active"));btn.classList.add("active");render(btn.dataset.key);const sel=$("#issueType");if(sel&&[...sel.options].some(o=>o.value===btn.dataset.key))sel.value=btn.dataset.key}));render("commands");

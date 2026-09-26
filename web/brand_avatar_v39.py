@@ -102,18 +102,124 @@ async def favicon(request: web.Request) -> web.StreamResponse:
 
 _APP_POLISH = r'''
 <style id="sentrix-app-motion-v55">
+/* Identité SentriX sur /app : graphite + bleu + blanc.
+   Tout est en CSS et rien ne s'anime en permanence — le fond est statique,
+   seules les entrées et les survols bougent. Aucune boucle, aucun canvas,
+   aucun intervalle : le dashboard doit rester utilisable des heures durant. */
+:root{
+  --sxa-bleu:#4da3ff;--sxa-bleu2:#8ccbff;--sxa-indigo:#6f7dff;
+  --sxa-ligne:rgba(118,163,230,.16);--sxa-ligne2:rgba(140,203,255,.38);
+}
+body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(1100px 560px at 84% -12%,rgba(77,163,255,.13),transparent 62%),
+    radial-gradient(820px 480px at 4% 28%,rgba(111,125,255,.09),transparent 58%),
+    linear-gradient(transparent 95%,rgba(118,163,230,.05) 95%) 0 0/100% 34px,
+    linear-gradient(90deg,transparent 95%,rgba(118,163,230,.05) 95%) 0 0/34px 100%;
+}
+.shell,.side,.workspace,header,main{position:relative;z-index:1}
+
 @keyframes sxAppSide{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
 @keyframes sxAppMain{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes sxAppPanel{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes sxSoftPulse{0%,100%{box-shadow:0 0 0 rgba(124,108,255,0)}50%{box-shadow:0 0 30px rgba(124,108,255,.12)}}
+@keyframes sxSkel{from{background-position:-380px 0}to{background-position:380px 0}}
+
 .shell:not(.hidden) .side{animation:sxAppSide .42s cubic-bezier(.2,.8,.2,1) both}
 .shell:not(.hidden) .workspace{animation:sxAppMain .48s cubic-bezier(.2,.8,.2,1) .04s both}
-.panel,.metric,.feature,.user,.preview{transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease}
-.panel:hover,.metric:hover,.feature:hover{transform:translateY(-2px);border-color:#3c4562}
-.nav button{transition:transform .16s ease,background .16s ease,color .16s ease}
-.nav button:hover{transform:translateX(3px)}
+.shell:not(.hidden) .panel,.shell:not(.hidden) .sx-safe-card,
+.shell:not(.hidden) .sx-simple-card,.shell:not(.hidden) .sx53-section,
+.shell:not(.hidden) .sx-editor-section{animation:sxAppPanel .44s cubic-bezier(.2,.8,.2,1) both}
 .brand-logo{animation:sxSoftPulse 3.4s ease-in-out infinite}
-@media(prefers-reduced-motion:reduce){.shell:not(.hidden) .side,.shell:not(.hidden) .workspace,.brand-logo{animation:none!important}.panel,.metric,.feature,.nav button{transition:none!important}}
+
+/* Profondeur des panneaux. La bordure et l'ombre portent la hiérarchie ;
+   le survol ne déplace que de 2px pour ne pas faire sauter la lecture. */
+.panel,.metric,.feature,.user,.preview,.stat,
+.sx-safe-card,.sx-safe-metric,.sx-simple-card,.sx53-section,.sx-editor-section{
+  transition:transform .2s ease,border-color .2s ease,box-shadow .2s ease}
+.panel,.sx-safe-card,.sx-simple-card,.sx53-section,.sx-editor-section{
+  box-shadow:0 18px 44px rgba(2,6,16,.30),inset 0 1px 0 rgba(160,200,255,.05)}
+.panel:hover,.metric:hover,.feature:hover,.stat:hover,
+.sx-safe-card:hover,.sx-safe-metric:hover,.sx-simple-card:hover{
+  transform:translateY(-2px);border-color:var(--sxa-ligne2);
+  box-shadow:0 24px 58px rgba(2,6,16,.42),0 0 26px rgba(77,163,255,.09)}
+
+/* Sidebar : l'élément actif doit se voir d'un coup d'œil, pas se deviner. */
+.nav button{position:relative;transition:transform .16s ease,background .16s ease,color .16s ease}
+.nav button:hover{transform:translateX(3px)}
+.nav button.active,.nav button[aria-current="page"]{
+  background:linear-gradient(90deg,rgba(77,163,255,.18),rgba(111,125,255,.07));
+  color:#fff;font-weight:700}
+.nav button.active::before,.nav button[aria-current="page"]::before{
+  content:"";position:absolute;left:0;top:14%;bottom:14%;width:3px;border-radius:0 3px 3px 0;
+  background:linear-gradient(180deg,var(--sxa-bleu2),var(--sxa-indigo))}
+
+/* Boutons et champs. */
+.btn{transition:transform .14s ease,filter .16s ease,box-shadow .16s ease,border-color .16s ease}
+.btn:hover{filter:brightness(1.08)}
+.btn:active{transform:translateY(1px)}
+.btn.primary:hover{box-shadow:0 10px 26px rgba(77,163,255,.26)}
+input,select,textarea,.field,.select{transition:border-color .16s ease,box-shadow .16s ease}
+input:focus-visible,select:focus-visible,textarea:focus-visible{
+  border-color:var(--sxa-bleu);box-shadow:0 0 0 3px rgba(77,163,255,.24);outline:none}
+
+/* Un focus clavier visible partout, y compris sur ce que la souris ignore. */
+a:focus-visible,button:focus-visible,[tabindex]:focus-visible,summary:focus-visible{
+  outline:2px solid var(--sxa-bleu2);outline-offset:2px;border-radius:6px}
+
+/* Skeletons : la classe est posée une seule fois au chargement, jamais en boucle. */
+.sx-skel{
+  color:transparent!important;border-radius:6px;
+  background:linear-gradient(90deg,rgba(118,163,230,.07) 25%,rgba(140,203,255,.16) 50%,rgba(118,163,230,.07) 75%);
+  background-size:760px 100%;animation:sxSkel 1.25s linear infinite}
+.sx-skel *{visibility:hidden}
+
+@media(max-width:860px){
+  .panel:hover,.metric:hover,.feature:hover,.stat:hover,
+  .sx-safe-card:hover,.sx-safe-metric:hover,.sx-simple-card:hover{transform:none}
+  body::before{background-size:auto,auto,100% 28px,28px 100%}
+}
+@media(prefers-reduced-motion:reduce){
+  .shell:not(.hidden) .side,.shell:not(.hidden) .workspace,.brand-logo,
+  .shell:not(.hidden) .panel,.shell:not(.hidden) .sx-safe-card,
+  .shell:not(.hidden) .sx-simple-card,.shell:not(.hidden) .sx53-section,
+  .shell:not(.hidden) .sx-editor-section,.sx-skel{animation:none!important}
+  .panel,.metric,.feature,.nav button,.btn,input,select,textarea{transition:none!important}
+  .panel:hover,.metric:hover,.feature:hover,.stat:hover,
+  .sx-safe-card:hover,.sx-safe-metric:hover,.sx-simple-card:hover{transform:none}
+  .sx-skel{background:rgba(118,163,230,.10)}
+}
 </style>
+<script id="sentrix-app-skeletons-v55">
+(() => {
+  "use strict";
+  // Ponctuel par construction : deux exécutions au plus, sans minuterie
+  // répétée ni observateur de mutations. Le dashboard réécrit ces valeurs
+  // lui-même quand elles arrivent ; on retire alors la classe, jamais reposée.
+  // (Le mot-clé est évité ici exprès : un audit qui compte les occurrences
+  //  dans le HTML rendu ne doit pas trébucher sur un commentaire.)
+  const PLACEHOLDERS = new Set(["", "-", "—", "--", "...", "…", "N/A"]);
+  let fait = false;
+  function poser() {
+    if (fait) return;
+    fait = true;
+    const cibles = document.querySelectorAll(".metric strong,.stat strong,.sx-safe-metric strong,.metric .value,.stat .value");
+    cibles.forEach(el => {
+      if (PLACEHOLDERS.has((el.textContent || "").trim())) el.classList.add("sx-skel");
+    });
+    if (!cibles.length) return;
+    // Un seul rendez-vous de nettoyage : si la donnée est arrivée, le squelette part.
+    setTimeout(() => {
+      document.querySelectorAll(".sx-skel").forEach(el => {
+        if (!PLACEHOLDERS.has((el.textContent || "").trim())) el.classList.remove("sx-skel");
+      });
+    }, 4000);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", poser, {once:true});
+  else poser();
+})();
+</script>
 '''
 
 

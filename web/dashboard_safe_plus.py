@@ -262,8 +262,14 @@ SAFE_PLUS_JS = r"""
     if (document.body) observer.observe(document.body, {childList:true, subtree:true, attributes:true, attributeFilter:["class"]});
     refreshPublic().finally(() => { lastSignature = ""; render(); });
     render();
-    setInterval(() => { lastSignature = ""; render(); }, 5000);
-    setInterval(() => refreshPublic().then(() => { lastSignature = ""; render(); }), 30000);
+    // Sans vider lastSignature : render() compare la signature des données et
+    // ne reconstruit que si elles ont bougé. La vider forçait une
+    // reconstruction complète toutes les 5 s même quand rien ne changeait, ce
+    // qui relançait les animations d'entrée en boucle et faisait travailler le
+    // MutationObserver ci-dessus pour rien. Les données publiques font partie
+    // de la signature, donc un vrai changement déclenche bien le rendu.
+    setInterval(render, 5000);
+    setInterval(() => refreshPublic().then(render), 30000);
   };
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, {once:true});

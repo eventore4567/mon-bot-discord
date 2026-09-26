@@ -58,7 +58,9 @@ def test_v3_has_interactive_motion_and_reduced_motion_fallback():
         'data-pane="pane-economy"',
         'id="progress"',
         'id="pointerRing"',
-        'const interactive=$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo")',
+        # Deux dollars, et sans le commentaire qui dupliquait cette ligne dans
+        # le source : le test passait grâce à lui, pas grâce au code.
+        'const interactive=$$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo")',
         'perspective(1100px) rotateX(',
     ):
         assert marker in page
@@ -116,3 +118,21 @@ def test_v3_javascript_syntax_is_valid(tmp_path: Path):
     target.write_text(scripts[0], encoding="utf-8")
     result = subprocess.run(["node", "--check", str(target)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_aucun_selecteur_unique_n_est_parcouru_en_boucle():
+    """La panne la plus coûteuse de la landing, mesurée en production.
+
+    ``$`` renvoie un seul élément, ``$$`` un tableau. ``const sections=$(...)``
+    suivi de ``sections.forEach`` levait « TypeError: sections.forEach is not
+    a function » à la ligne 396, ce qui interrompait tout le reste du script :
+    plus de fond animé (le canvas restait à sa taille par défaut de 300×150 et
+    n'était jamais dessiné), plus de révélations au scroll, onglets du tour
+    inertes, et les statistiques publiques bloquées sur « — ».
+    """
+    import re
+
+    page = _html()
+    noms = set(re.findall(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\$\(", page))
+    fautifs = sorted(n for n in noms if re.search(rf"\b{re.escape(n)}\.forEach\b", page))
+    assert not fautifs, f"parcourus alors qu'ils ne sont pas des tableaux : {fautifs}"

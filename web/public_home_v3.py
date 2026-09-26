@@ -394,12 +394,12 @@ function onScroll(){const y=scrollY,max=Math.max(1,document.documentElement.scro
 addEventListener("scroll",onScroll,{passive:true});onScroll();
 addEventListener("pointermove",e=>{document.documentElement.style.setProperty("--mx",e.clientX+"px");document.documentElement.style.setProperty("--my",e.clientY+"px")},{passive:true});
 
-const sections=$(".section");
+const sections=$$(".section");
 if("IntersectionObserver" in window){
   const sio=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting)entry.target.classList.add("is-visible")}),{threshold:.16,rootMargin:"0px 0px -8% 0px"});
   sections.forEach(s=>sio.observe(s));
 }
-const reveals=$(".reveal,.stagger");
+const reveals=$$(".reveal,.stagger");
 if(!reduced&&"IntersectionObserver" in window){const io=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.style.opacity="1";e.target.style.transform="none";io.unobserve(e.target)}}),{threshold:.1});reveals.forEach(x=>{x.style.opacity="0";x.style.transform="translateY(16px)";x.style.transition="opacity .45s ease,transform .45s ease";io.observe(x)})}
 
 $$(".tour-tab").forEach(tab=>tab.addEventListener("click",()=>{$$(".tour-tab").forEach(x=>x.classList.remove("active"));$$(".tour-pane").forEach(x=>x.classList.remove("active"));tab.classList.add("active");document.getElementById(tab.dataset.pane)?.classList.add("active")}));
@@ -413,7 +413,6 @@ if(!reduced){
   heroArt?.addEventListener("pointermove",e=>{if(e.pointerType!=="touch"){const r=heroArt.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;heroArt.style.transform="perspective(1450px) rotateX("+(-y*4.4)+"deg) rotateY("+(x*4.4)+"deg)";if(heroWorld)heroWorld.style.transform="translate3d("+(x*26)+"px,"+(y*22)+"px,0) rotateY("+(x*3.2)+"deg) rotateX("+(-y*2)+"deg)" }});
   heroArt?.addEventListener("pointerleave",()=>{heroArt.style.transform="";if(heroWorld)heroWorld.style.transform=""});
 
-  // Contrat historique de test : const interactive=$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo")
   const interactive=$$(".card,.step,.security-box,.tour-screen,.ai-card,.terminal,.status-strip,.workflow-demo");
   function tilt(el,x,y,scale=1){const r=el.getBoundingClientRect(),nx=(x-r.left)/r.width-.5,ny=(y-r.top)/r.height-.5;el.style.transform="perspective(1100px) rotateX("+(-ny*3*scale)+"deg) rotateY("+(nx*3*scale)+"deg) translateY(-1px)"}
   interactive.forEach(el=>{el.addEventListener("pointermove",e=>{if(e.pointerType!=="touch")tilt(el,e.clientX,e.clientY)});el.addEventListener("pointerleave",()=>{el.style.transform=""});el.addEventListener("pointerdown",e=>{if(e.pointerType==="touch"){tilt(el,e.clientX,e.clientY,.6);setTimeout(()=>el.style.transform="",180)}})});
