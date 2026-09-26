@@ -9,6 +9,7 @@ from web import dashboard_api_invites
 ROOT = Path(__file__).resolve().parents[1]
 UI = (ROOT / "web" / "dashboard_ui" / "js" / "40_tools.js").read_text(encoding="utf-8")
 DASHBOARD = (ROOT / "web" / "dashboard.py").read_text(encoding="utf-8")
+INVITES_COG = (ROOT / "cogs" / "invites.py").read_text(encoding="utf-8")
 
 
 def test_invite_dashboard_api_registers_advanced_routes():
@@ -62,3 +63,17 @@ def test_invite_dashboard_has_no_periodic_dom_churn():
     section = UI[start:end]
     assert "setInterval(" not in section
     assert "MutationObserver" not in section
+
+
+def test_invite_commands_expose_list_codes_and_safe_sync():
+    for marker in (
+        'name="invited-list"',
+        'name="invite-codes"',
+        'name="sync-invites"',
+        "Aucune attribution historique de membre n'a été inventée.",
+    ):
+        assert marker in INVITES_COG
+    sync_start = INVITES_COG.index("async def sync_invites")
+    sync_section = INVITES_COG[sync_start:sync_start + 4000]
+    assert "record_invite_join" not in sync_section
+    assert "cache_guild_invites" in sync_section
