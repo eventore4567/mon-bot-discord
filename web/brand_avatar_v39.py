@@ -24,6 +24,7 @@ _PUBLIC_HTML_PATHS = {
     "/start",
     "/stats",
     "/support",
+    "/docs",
     "/privacy",
     "/terms",
     "/media-kit",
