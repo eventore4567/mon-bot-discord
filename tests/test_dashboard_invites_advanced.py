@@ -77,3 +77,22 @@ def test_invite_commands_expose_list_codes_and_safe_sync():
     sync_section = INVITES_COG[sync_start:sync_start + 4000]
     assert "record_invite_join" not in sync_section
     assert "cache_guild_invites" in sync_section
+
+
+def test_invite_command_suite_is_expanded_without_destructive_reset():
+    for marker in (
+        'name="invite-stats"',
+        'name="invite-rank"',
+        'name="invite-history"',
+        'name="invite-info"',
+        'name="invite-sources"',
+        'name="invite-retention"',
+        'name="invite-label"',
+        'name="invite-unlabel"',
+        'name="invite-search"',
+        '"invite-sync"',
+        '"resync-invites"',
+    ):
+        assert marker in INVITES_COG
+    assert 'name="reset-invites"' not in INVITES_COG
+    assert 'name="purge-invites"' not in INVITES_COG
