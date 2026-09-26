@@ -143,6 +143,32 @@ _SCRIPT = """<script>
 </script>"""
 
 
+def _page_indisponible(request: web.Request) -> str:
+    """Rendu honnête quand cette instance n'a pas la liste des commandes."""
+    from .marketing_growth_v40 import coquille_publique
+
+    return coquille_publique(
+        request,
+        title="Commandes SentriX — liste momentanément indisponible",
+        description=(
+            "La liste des commandes n'est pas disponible sur cette instance "
+            "pour le moment. Réessayez dans un instant."
+        ),
+        heading="Commandes SentriX",
+        body=(
+            '<section class="legal"><h2>Liste momentanément indisponible</h2>'
+            "<p>SentriX fonctionne sur deux instances et une seule sert à la fois. "
+            "Celle qui répond n'a pas encore chargé la liste des commandes — "
+            "c'est le cas juste après un redémarrage.</p>"
+            "<p>Réessayez dans un instant. Le bot lui-même n'est pas affecté : "
+            'ses commandes continuent de fonctionner sur Discord.</p>'
+            '<p><a class="btn" href="/commands">Recharger la page</a> '
+            '<a class="btn" href="/support">Contacter le support</a></p>'
+            "</section>"
+        ),
+    )
+
+
 def _page(bot, dashboard, request: web.Request) -> str:
     del dashboard  # la coquille partagée calcule elle-même l'URL canonique
     from .marketing_growth_v40 import coquille_publique
@@ -150,6 +176,13 @@ def _page(bot, dashboard, request: web.Request) -> str:
     slash = _slash_commands(bot)
     prefix = _prefix_commands(bot)
     toutes = slash + prefix
+    if not toutes:
+        # Mesuré en production le 2026-09-26 : l'instance qui ne détient pas le
+        # bail HA répond `discord_ready: false`, `extensions_loaded: 0/58`, donc
+        # `bot.commands` est vide et la page annonçait « 0 commandes affichées ».
+        # Un zéro a l'air d'un vrai chiffre ; dire qu'on ne sait pas est exact.
+        # /stats fait déjà ça correctement avec ses tirets et son « Chargement… ».
+        return _page_indisponible(request)
     cartes = "".join(_command_card(item) for item in toutes)
     corps = (
         '<div class="cmd-outils">'
@@ -185,10 +218,20 @@ async def commands_page(request: web.Request) -> web.Response:
     bot = request.app.get("bot")
     if dashboard is None or bot is None:
         raise web.HTTPServiceUnavailable(text="SentriX démarre")
+    # Recompté ici volontairement : mettre une page d'attente en cache 60 s, ou
+    # la laisser indexer, ferait durer un accident de démarrage bien après qu'il
+    # soit passé. Le recomptage coûte ~1 ms pour 300 commandes.
+    disponible = bool(_slash_commands(bot) or _prefix_commands(bot))
+    entetes = (
+        {"Cache-Control": "public, max-age=60", "X-Robots-Tag": "index, follow"}
+        if disponible
+        else {"Cache-Control": "no-store", "X-Robots-Tag": "noindex"}
+    )
     return web.Response(
         text=_page(bot, dashboard, request),
         content_type="text/html",
-        headers={"Cache-Control": "public, max-age=60", "X-Robots-Tag": "index, follow"},
+        status=200 if disponible else 503,
+        headers=entetes,
     )
 
 

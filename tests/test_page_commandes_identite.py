@@ -137,3 +137,65 @@ def test_le_script_de_la_page_est_syntaxiquement_valide():
             chemin = fichier.name
         resultat = subprocess.run(["node", "--check", chemin], capture_output=True, text=True)
         assert resultat.returncode == 0, f"script {index} : {resultat.stderr}"
+
+
+def _bot_vide():
+    """Une instance qui ne détient pas le bail HA.
+
+    Mesuré en production le 2026-09-26 : l'instance non-leader répond
+    ``discord_ready: false`` et ``extensions_loaded: 0/58``, donc
+    ``bot.commands`` est vide et ``tree.get_commands()`` ne renvoie rien.
+    """
+    bot = MagicMock()
+    bot.commands = []
+    bot.tree.get_commands.return_value = []
+    return bot
+
+
+def test_une_instance_sans_commandes_ne_annonce_pas_zero():
+    """Un « 0 commandes » a l'air d'un vrai chiffre. Il est faux.
+
+    Jayden : « chiffres réels uniquement, jamais inventés ». Dire qu'on ne
+    sait pas est exact ; annoncer zéro ne l'est pas. /stats fait déjà ça
+    correctement avec ses tirets et son « Chargement… ».
+    """
+    corps = pages._page(_bot_vide(), MagicMock(), _requete())
+    assert "0 commandes affichées" not in corps
+    assert "0 slash" not in corps
+    assert "Liste momentanément indisponible" in corps
+
+
+def test_la_page_d_attente_garde_l_identite_et_une_sortie():
+    corps = pages._page(_bot_vide(), MagicMock(), _requete())
+    assert 'id="sxfx"' in corps, "la page d'attente perd l'identité du site"
+    assert 'href="/support"' in corps, "aucune sortie proposée au visiteur"
+    assert 'href="/commands"' in corps, "impossible de réessayer"
+
+
+def test_la_page_d_attente_n_est_ni_mise_en_cache_ni_indexee():
+    """Sinon un accident de démarrage survit bien après qu'il soit passé."""
+    import asyncio
+
+    requete = _requete()
+    requete.app.get.side_effect = lambda cle, defaut=None: {
+        "dashboard_module": MagicMock(),
+        "bot": _bot_vide(),
+    }.get(cle, defaut)
+    reponse = asyncio.run(pages.commands_page(requete))
+    assert reponse.status == 503
+    assert reponse.headers["Cache-Control"] == "no-store"
+    assert reponse.headers["X-Robots-Tag"] == "noindex"
+
+
+def test_une_instance_qui_a_les_commandes_reste_indexable():
+    import asyncio
+
+    requete = _requete()
+    requete.app.get.side_effect = lambda cle, defaut=None: {
+        "dashboard_module": MagicMock(),
+        "bot": _bot(),
+    }.get(cle, defaut)
+    reponse = asyncio.run(pages.commands_page(requete))
+    assert reponse.status == 200
+    assert "max-age=60" in reponse.headers["Cache-Control"]
+    assert reponse.headers["X-Robots-Tag"] == "index, follow"
