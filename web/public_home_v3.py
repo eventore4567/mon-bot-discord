@@ -45,7 +45,8 @@ body:before{content:"";position:fixed;inset:0;z-index:-4;pointer-events:none;bac
   linear-gradient(90deg,rgba(255,255,255,.012) 1px,transparent 1px);
   background-size:74px 74px;mask-image:linear-gradient(to bottom,black,transparent 92%)}
 body:after{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;background:radial-gradient(520px circle at var(--mx) var(--my),rgba(77,163,255,.045),transparent 70%)}
-canvas#fx{position:fixed;inset:0;z-index:-2;width:100%;height:100%;pointer-events:none;opacity:.32}
+canvas#fx{position:fixed;inset:0;z-index:-2;width:100%;height:100%;pointer-events:none;opacity:.82;filter:saturate(1.08)}
+.fx-depth-label{position:absolute;inset:auto 0 16px;display:flex;justify-content:center;pointer-events:none;color:rgba(119,188,255,.24);font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.22em;text-transform:uppercase}
 a{color:inherit;text-decoration:none}button{font:inherit}img{display:block;max-width:100%}
 ::selection{background:rgba(77,163,255,.32)}
 :focus-visible{outline:2px solid var(--blue2);outline-offset:3px}
@@ -139,7 +140,7 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
   <div class="wrap navbar" id="navbar">
     <a class="brand" href="/" aria-label="SentriX, accueil"><img src="/sentrix-avatar.png?v=55" width="39" height="39" alt=""><span>SentriX</span></a>
     <nav class="navlinks" id="navlinks" aria-label="Navigation principale">
-      <a href="#platform">Plateforme</a><a href="#security">Sécurité</a><a href="#dashboard">Dashboard</a><a href="#automation">Automatisation</a><a href="#ai">IA</a><a href="#faq">FAQ</a><a href="/support">Support</a>
+      <a href="#platform">Plateforme</a><a href="#security">Sécurité</a><a href="#dashboard">Dashboard</a><a href="#automation">Automatisation</a><a href="#ai">IA</a><a href="/docs">Documentation</a><a href="#faq">FAQ</a><a href="/support">Support</a>
     </nav>
     <div class="nav-actions">
       <a class="btn ghost" href="__INVITE__" target="_blank" rel="noopener">Ajouter SentriX</a>
@@ -159,12 +160,12 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
     <div class="hero-actions">
       <a class="btn primary" href="/app" data-dashboard-entry>Ouvrir le dashboard</a>
       <a class="btn" href="__INVITE__" target="_blank" rel="noopener">Ajouter SentriX</a>
-      <a class="btn ghost" href="/commands">Voir les commandes</a>
+      <a class="btn ghost" href="/docs">Documentation</a>
     </div>
     <div class="hero-meta"><span><i></i>Dashboard web</span><span><i></i>Slash + préfixe</span><span><i></i>Configuration par serveur</span><span><i></i>Architecture HA</span></div>
   </div>
 
-  <div class="hero-art" id="heroArt" aria-label="Aperçu visuel du dashboard SentriX">
+  <div class="hero-art" id="heroArt" aria-label="Aperçu visuel du dashboard SentriX"><div class="fx-depth-label">SentriX // réseau 3D actif</div>
     <div class="product-shell">
       <div class="product-top"><div class="product-title"><img src="/sentrix-avatar.png?v=55" alt=""><span>SentriX Dashboard</span></div><div class="product-live"><i></i>Interface réelle sur /app</div></div>
       <div class="product-body">
@@ -263,7 +264,7 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 <section class="wrap final reveal"><span class="eyebrow">SentriX</span><h2>Un bot. Un dashboard. Une configuration cohérente.</h2><p>Ajoutez SentriX à Discord ou ouvrez le dashboard existant pour gérer votre serveur.</p><div class="hero-actions"><a class="btn primary" href="/app" data-dashboard-entry>Ouvrir le dashboard</a><a class="btn" href="__INVITE__" target="_blank" rel="noopener">Ajouter SentriX</a></div></section>
 </main>
 
-<footer><div class="wrap"><div class="footer-grid"><div class="footer-brand"><a class="brand" href="/"><img src="/sentrix-avatar.png?v=55" width="39" height="39" alt=""><span>SentriX</span></a><p>Plateforme Discord tout-en-un : modération, sécurité, communauté et automatisations.</p></div><div class="footer-col"><b>Produit</b><a href="#platform">Plateforme</a><a href="#security">Sécurité</a><a href="/app">Dashboard</a><a href="/stats">Statistiques</a></div><div class="footer-col"><b>Ressources</b><a href="/commands">Commandes</a><a href="/start">Commencer</a><a href="/support">Support</a><a href="/media-kit">Media kit</a></div><div class="footer-col"><b>Légal</b><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></div></div><div class="footer-bottom"><span>SentriX — plateforme Discord tout-en-un.</span><span>Dashboard canonique : /app</span></div></div></footer>
+<footer><div class="wrap"><div class="footer-grid"><div class="footer-brand"><a class="brand" href="/"><img src="/sentrix-avatar.png?v=55" width="39" height="39" alt=""><span>SentriX</span></a><p>Plateforme Discord tout-en-un : modération, sécurité, communauté et automatisations.</p></div><div class="footer-col"><b>Produit</b><a href="#platform">Plateforme</a><a href="#security">Sécurité</a><a href="/app">Dashboard</a><a href="/stats">Statistiques</a></div><div class="footer-col"><b>Ressources</b><a href="/docs">Documentation</a><a href="/commands">Commandes</a><a href="/start">Commencer</a><a href="/support">Support</a><a href="/media-kit">Media kit</a></div><div class="footer-col"><b>Légal</b><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></div></div><div class="footer-bottom"><span>SentriX — plateforme Discord tout-en-un.</span><span>Dashboard canonique : /app</span></div></div></footer>
 
 <div class="loader" id="loader" aria-hidden="true"><div class="loader-card"><div class="spinner"></div><b>Ouverture du dashboard</b><span id="loaderText">Vérification de votre session Discord…</span></div></div>
 
@@ -301,10 +302,48 @@ if(!reduced){
   function tilt(el,x,y,scale=1){const r=el.getBoundingClientRect(),nx=(x-r.left)/r.width-.5,ny=(y-r.top)/r.height-.5;el.style.transform="perspective(1100px) rotateX("+(-ny*3*scale)+"deg) rotateY("+(nx*3*scale)+"deg) translateY(-1px)"}
   interactive.forEach(el=>{el.addEventListener("pointermove",e=>{if(e.pointerType!=="touch")tilt(el,e.clientX,e.clientY)});el.addEventListener("pointerleave",()=>{el.style.transform=""});el.addEventListener("pointerdown",e=>{if(e.pointerType==="touch"){tilt(el,e.clientX,e.clientY,.6);setTimeout(()=>el.style.transform="",180)}})});
 
-  const canvas=$("#fx"),ctx=canvas?.getContext("2d");let dots=[];
-  function resize(){if(!canvas||!ctx)return;const d=Math.min(devicePixelRatio||1,2);canvas.width=innerWidth*d;canvas.height=innerHeight*d;canvas.style.width=innerWidth+"px";canvas.style.height=innerHeight+"px";ctx.setTransform(d,0,0,d,0,0);dots=Array.from({length:Math.min(36,Math.max(16,Math.floor(innerWidth/42)))},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,r:.4+Math.random()*.7,v:.04+Math.random()*.10,a:.04+Math.random()*.11}))}
-  function tick(){if(!ctx)return;ctx.clearRect(0,0,innerWidth,innerHeight);for(const p of dots){p.y-=p.v;if(p.y<-3){p.y=innerHeight+3;p.x=Math.random()*innerWidth}ctx.beginPath();ctx.fillStyle="rgba(119,188,255,"+p.a+")";ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill()}requestAnimationFrame(tick)}
-  resize();addEventListener("resize",resize,{passive:true});tick();
+  const canvas=$("#fx"),ctx=canvas?.getContext("2d");
+  let stars=[],w=innerWidth,h=innerHeight,dpr=1,camX=0,camY=0,targetX=0,targetY=0,phase=0,raf=0;
+  const FOV=520,DEPTH=1450;
+  function makeStar(reset=false){return{x:(Math.random()-.5)*1300,y:(Math.random()-.5)*900,z:reset?DEPTH:120+Math.random()*DEPTH,size:.45+Math.random()*1.6,speed:1.3+Math.random()*2.4,alpha:.16+Math.random()*.5}}
+  function resize(){if(!canvas||!ctx)return;w=innerWidth;h=innerHeight;dpr=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.floor(w*dpr));canvas.height=Math.max(1,Math.floor(h*dpr));canvas.style.width=w+"px";canvas.style.height=h+"px";ctx.setTransform(dpr,0,0,dpr,0,0);stars=Array.from({length:Math.min(150,Math.max(70,Math.floor(w/9)))},()=>makeStar(false))}
+  function project(x,y,z){const scale=FOV/Math.max(60,z);return{x:w*.5+(x+camX*150)*scale,y:h*.45+(y+camY*100)*scale,scale}}
+  function drawGrid(){
+    const horizon=h*.54+camY*26,base=h+40;
+    ctx.save();ctx.lineWidth=1;
+    for(let i=-10;i<=10;i++){const t=i/10,x0=w*.5+t*w*.9,x1=w*.5+t*w*.13;ctx.strokeStyle="rgba(77,163,255,"+(0.035+0.025*(1-Math.abs(t)))+")";ctx.beginPath();ctx.moveTo(x0,base);ctx.lineTo(x1,horizon);ctx.stroke()}
+    for(let i=0;i<18;i++){const p=(i+(phase*.018)%1)/18,e=p*p,y=horizon+(base-horizon)*e;ctx.strokeStyle="rgba(119,188,255,"+(0.025+p*.07)+")";ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}
+    ctx.restore();
+  }
+  function drawRings(){
+    ctx.save();ctx.translate(w*.78+camX*35,h*.24+camY*24);ctx.rotate(phase*.00018);
+    for(let i=0;i<3;i++){ctx.beginPath();ctx.ellipse(0,0,100+i*34,35+i*12,phase*.00008+i*.55,0,Math.PI*2);ctx.strokeStyle="rgba(77,163,255,"+(0.08-i*.012)+")";ctx.lineWidth=1;ctx.stroke()}
+    ctx.restore();
+  }
+  function tick(){
+    if(!ctx)return;
+    phase+=16;camX+=(targetX-camX)*.035;camY+=(targetY-camY)*.035;
+    ctx.clearRect(0,0,w,h);
+    const glow=ctx.createRadialGradient(w*.72,h*.18,0,w*.72,h*.18,Math.min(w,h)*.55);glow.addColorStop(0,"rgba(77,163,255,.09)");glow.addColorStop(1,"rgba(77,163,255,0)");ctx.fillStyle=glow;ctx.fillRect(0,0,w,h);
+    drawGrid();drawRings();
+    const visible=[];
+    for(const p of stars){
+      p.z-=p.speed;
+      if(p.z<70){Object.assign(p,makeStar(true))}
+      const s=project(p.x,p.y,p.z);
+      if(s.x<-60||s.x>w+60||s.y<-60||s.y>h+60)continue;
+      const r=Math.max(.35,p.size*s.scale*1.9),a=Math.min(.72,p.alpha*(1.15-p.z/DEPTH*.55));
+      ctx.beginPath();ctx.fillStyle="rgba(160,213,255,"+a+")";ctx.shadowBlur=r>1.1?9:0;ctx.shadowColor="rgba(77,163,255,.65)";ctx.arc(s.x,s.y,r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+      visible.push({x:s.x,y:s.y,z:p.z});
+    }
+    visible.sort((a,b)=>a.z-b.z);
+    for(let i=0;i<Math.min(visible.length,54);i++){const a=visible[i];for(let j=i+1;j<Math.min(visible.length,i+7);j++){const b=visible[j],dx=a.x-b.x,dy=a.y-b.y,dist=Math.hypot(dx,dy);if(dist<105&&Math.abs(a.z-b.z)<260){ctx.strokeStyle="rgba(77,163,255,"+(0.055*(1-dist/105))+")";ctx.lineWidth=.7;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}}}
+    raf=requestAnimationFrame(tick);
+  }
+  addEventListener("pointermove",e=>{targetX=(e.clientX/w-.5)*2;targetY=(e.clientY/h-.5)*2},{passive:true});
+  addEventListener("resize",resize,{passive:true});
+  document.addEventListener("visibilitychange",()=>{if(document.hidden&&raf){cancelAnimationFrame(raf);raf=0}else if(!document.hidden&&!raf)tick()});
+  resize();tick();
 }
 
 const fmt=n=>new Intl.NumberFormat("fr-FR").format(Number(n)||0);
