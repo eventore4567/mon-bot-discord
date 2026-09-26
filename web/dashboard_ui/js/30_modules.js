@@ -118,7 +118,7 @@ async function renderSecurity() {
         <div class="kpi"><small>Risque</small><b>${number(risk.score)}/100</b><span>Plus bas = mieux</span></div>
         <div class="kpi"><small>Protection</small><b>${number(risk.protection_score)}/100</b><span>Score défensif</span></div>
         <div class="kpi"><small>Modules actifs</small><b>${number(coverage.active)}/${number(coverage.total)}</b><span>AutoMod / sécurité</span></div>
-        <div class="kpi"><small>Incidents · 24 h</small><b>${number(sec?.incidents_24h || 0)}</b><span>${number(sec?.severe_incidents_24h || 0)} critique(s)</span></div>
+        <div class="kpi"><small>Événements · 24 h</small><b>${number(sec?.events_24h || 0)}</b><span>${number(sec?.severe_incidents_24h || 0)} incident(s) critique(s)</span></div>
       </div>
     </section>
 
