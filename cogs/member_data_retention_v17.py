@@ -128,6 +128,9 @@ DOUBLE_CONFIRM_COMMANDS = {
     "tickettype remove": "supprimer le type de ticket et son formulaire",
     "ticketform remove": "supprimer la question du formulaire",
     "music clear": "vider toute la file d'attente musicale",
+    "security all": "activer toutes les protections AutoMod d'un coup",
+    "create-logs": "créer et configurer tous les salons de logs d'un coup",
+    "syncbl": "appliquer la liste noire à tous les membres concernés d'un coup",
 }
 
 
