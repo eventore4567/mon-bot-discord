@@ -1,2 +1,3 @@
 release=b44fc6186694e1f89100657b4ba36174df5a0a62
 reason=deploy dashboard V17 fail-open uptime hotfix
+profile_links_restore=sentrix-standby-production.up.railway.app
