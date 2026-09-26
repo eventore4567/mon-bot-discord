@@ -304,6 +304,86 @@ class ConfirmView(discord.ui.View):
             logger.debug("Confirmation expirée : message non modifiable.", exc_info=True)
 
 
+async def double_confirm_destructive(
+    ctx,
+    action: str,
+    *,
+    detail: str = "",
+    timeout: float = 30,
+) -> bool:
+    """Exige deux validations explicites avant une action destructive.
+
+    Ce garde est volontairement centralisé afin que les commandes de remise à zéro,
+    purge ou suppression en masse aient le même comportement. Aucun clic d'un tiers
+    n'est accepté grâce à :class:\`ConfirmView\`.
+    """
+    from utils import sentrix_panels as panels
+
+    author = getattr(ctx, "author", None) or getattr(ctx, "user", None)
+    author_id = getattr(author, "id", None)
+    if author_id is None:
+        return False
+
+    action = str(action or "cette action").strip()
+    detail = str(detail or "").strip()
+    prompts = (
+        (
+            "Première confirmation",
+            f"Vous allez {action}.{(' ' + detail) if detail else ''}\n"
+            "Cette opération peut supprimer ou réinitialiser des données. Continuer ?",
+        ),
+        (
+            "Dernière confirmation",
+            f"Dernière vérification : confirmez une seconde fois pour {action}.\n"
+            "Après ce clic, SentriX exécutera réellement l'opération.",
+        ),
+    )
+
+    for index, (title, message) in enumerate(prompts, start=1):
+        view = ConfirmView(int(author_id), timeout=timeout)
+        panel = panels.depuis_embed(
+            embeds.warning(message, title=title),
+            kind="warning",
+        )
+        sent = await panels.envoyer(
+            ctx,
+            panels.avec_composants(panel, view),
+            ephemere=bool(getattr(ctx, "interaction", None)),
+        )
+        if isinstance(sent, discord.Message):
+            view.message = sent
+        await view.wait()
+        if not view.value:
+            if isinstance(sent, discord.Message):
+                try:
+                    await panels.editer(
+                        sent,
+                        panels.depuis_embed(
+                            embeds.info(
+                                f"{action.capitalize()} annulée. Aucune donnée n'a été modifiée.",
+                                title="Action annulée",
+                            )
+                        ),
+                    )
+                except discord.HTTPException:
+                    logger.debug("Confirmation destructive annulée : message non modifiable.", exc_info=True)
+            return False
+        if isinstance(sent, discord.Message):
+            try:
+                await panels.editer(
+                    sent,
+                    panels.depuis_embed(
+                        embeds.success(
+                            f"Confirmation {index}/2 enregistrée.",
+                            title="Confirmation reçue",
+                        )
+                    ),
+                )
+            except discord.HTTPException:
+                logger.debug("Confirmation destructive : message non modifiable.", exc_info=True)
+    return True
+
+
 class PaginatorView(discord.ui.View):
     """Pagination générique qui modifie le message existant."""
 
