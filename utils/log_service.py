@@ -25,6 +25,7 @@ from utils.log_categories import (
     category_for,
     resolve,
 )
+from utils import wide_logs
 from utils.wide_logs import derive_identity, send_wide_log
 
 logger = logging.getLogger("bot")
@@ -536,6 +537,9 @@ async def set_log_config(
     # la valeur qu'il vient de demander. C'est ce qui empêche un panneau d'afficher
     # "ACTIF" pour une route qui n'a pas été écrite.
     invalidate_log_config(guild_id, canonical)
+    # Une reconfiguration est une réponse explicite de l'administrateur : on
+    # oublie la quarantaine au lieu de lui faire attendre son expiration.
+    wide_logs.oublier_salon(normalized)
     # fresh=True : la confirmation doit venir de la BASE, jamais du cache. Sans ca, une
     # ecriture qui n'aboutit pas serait confirmee par la valeur precedente.
     saved = await get_log_config(bot, int(guild_id), canonical, fresh=True)
@@ -796,6 +800,15 @@ async def send_log(
         )
         return False
 
+    if wide_logs.salon_inaccessible(channel_id):
+        # Déjà constaté inaccessible : inutile de reconstruire la bannière et la
+        # vue pour se faire refuser à nouveau. La quarantaine expire seule.
+        logger.debug(
+            "SENTRIX ROUTE log_type=%s category=%s channel_id=%s skipped=QUARANTAINE",
+            event_type, category, channel_id,
+        )
+        return False
+
     ok, reason = validate_channel(guild, channel_id, needs_file=True)
     if not ok:
         logger.debug(
@@ -826,7 +839,7 @@ async def send_log(
         category,
         channel_id,
     )
-    return await send_wide_log(
+    envoye = await send_wide_log(
         channel,
         rendered,
         log_type=event_type,
@@ -836,6 +849,40 @@ async def send_log(
         identity_id=identity_id,
         identity_icon=identity_icon,
     )
+    if not envoye and wide_logs.echecs_permanents(channel_id) >= ECHECS_AVANT_COUPURE:
+        await _couper_route_inaccessible(bot, guild, category, channel_id)
+    return envoye
+
+
+#: Nombre d'échecs définitifs tolérés avant de couper la route. Un seul 403
+#: peut venir d'une permission retirée puis remise dans la minute ; trois de
+#: suite, non. La coupure est journalisée et se répare depuis +setup.
+ECHECS_AVANT_COUPURE = 3
+
+
+async def _couper_route_inaccessible(bot, guild, category: str, channel_id: int) -> None:
+    """Désactive une route dont le salon refuse durablement les messages.
+
+    Sans cela, la configuration continue d'annoncer une catégorie active alors
+    qu'aucun message n'arrive — l'administrateur croit ses logs branchés. On
+    coupe, on le dit une fois, et il suffit de reconfigurer le salon dans
+    +setup pour repartir.
+    """
+    try:
+        config = await get_log_config(bot, int(guild.id), category)
+        if config is None or not config.get("enabled"):
+            return
+        await set_log_config(bot, int(guild.id), category, channel_id=None, enabled=False)
+        logger.error(
+            "Route de logs « %s » désactivée sur %s : le salon %s a refusé %s envois "
+            "consécutifs (accès manquant). Reconfigurez-la avec +setup.",
+            category, guild.id, channel_id, ECHECS_AVANT_COUPURE,
+        )
+    except Exception:
+        logger.exception(
+            "Impossible de désactiver la route de logs %s du serveur %s.",
+            category, getattr(guild, "id", "?"),
+        )
 
 
 async def send_test_log(

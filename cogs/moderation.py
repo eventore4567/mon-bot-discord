@@ -48,6 +48,15 @@ logger = logging.getLogger("bot.moderation")
 _CASE_NUMBER_UNSET = object()
 
 
+#: Indicateurs de frappe en vol. Au niveau du module et non de l'instance :
+#: asyncio ne garde qu'une référence faible aux tâches, donc sans cet ensemble
+#: le ramasse-miettes peut en annuler une avant son envoi. Le mettre sur le cog
+#: le rendrait aussi indisponible aux tests qui construisent un Moderation sans
+#: passer par __init__ — et c'est exactement ce qui a cassé vingt-sept d'entre
+#: eux au premier essai.
+_TACHES_TYPING: set[asyncio.Task] = set()
+
+
 class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -305,10 +314,26 @@ class Moderation(commands.Cog):
         (le petit indicateur "réflexion en cours" apparaît instantanément) ; pour une
         commande texte, on affiche l'indicateur de frappe."""
         if ctx.interaction:
+            # Obligatoire et bloquant : Discord ferme l'interaction sans accusé
+            # sous trois secondes.
             if not ctx.interaction.response.is_done():
                 await ctx.interaction.response.defer()
-        else:
+            return
+        # En préfixe, l'indicateur de frappe n'a besoin que d'être DEMANDÉ pour
+        # apparaître ; attendre sa confirmation ajoutait un aller-retour Discord
+        # complet avant même de commencer le travail. Mesuré à 300 ms par appel
+        # en production, sur les six que +mute enchaîne. On le lance et on passe :
+        # l'indicateur s'affiche pareil, la sanction part plus tôt.
+        tache = asyncio.create_task(self._typing_silencieux(ctx))
+        _TACHES_TYPING.add(tache)
+        tache.add_done_callback(_TACHES_TYPING.discard)
+
+    async def _typing_silencieux(self, ctx: commands.Context) -> None:
+        """Indicateur de frappe best-effort : son échec ne concerne personne."""
+        try:
             await ctx.typing()
+        except Exception:
+            logger.debug("Indicateur de frappe non affiché.", exc_info=True)
 
     @classmethod
     def _normalise_dm_action(cls, action: str) -> str | None:
@@ -702,11 +727,24 @@ class Moderation(commands.Cog):
         if not outcome.executed:
             return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        await self.log_sanction(
+        # La fiche de log part vers le salon de logs, la confirmation vers le
+        # salon courant : deux destinations sans lien, donc deux allers-retours
+        # Discord qui n'ont aucune raison de s'attendre. Mesuré en production,
+        # +mute tenait 2,35 s pour six appels HTTP enchaînés alors que tout le
+        # calcul local coûte 12 ms : la latence, c'est la file d'attente. Les
+        # lancer ensemble retire un aller-retour du temps que l'auteur subit,
+        # sans rien changer à ce qui est envoyé ni à l'ordre perçu.
+        journal = asyncio.create_task(self.log_sanction(
             ctx, "mute", membre, raison,
             duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
-        )
-        await self._reply(ctx, f"{membre.mention} a été rendu muet pendant {helpers.format_duration(outcome.duration_seconds)}.")
+        ))
+        try:
+            await self._reply(ctx, f"{membre.mention} a été rendu muet pendant {helpers.format_duration(outcome.duration_seconds)}.")
+        finally:
+            # Toujours attendu : une tâche abandonnée avalerait son erreur, et
+            # un log de sanction perdu en silence est exactement ce qu'il ne
+            # faut pas.
+            await journal
 
     @commands.hybrid_command(name="unmute", description="Retirer le mute (timeout) d'un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre à démuter", raison="La raison")

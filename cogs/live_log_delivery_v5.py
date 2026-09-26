@@ -42,6 +42,29 @@ CHANNEL_ALIASES: dict[str, tuple[str, ...]] = {
     "moderation": (
         "logs-moderation", "logs-modération", "logs-modo",
     ),
+    # Les six catégories ci-dessous n'avaient aucune entrée : toute tentative de
+    # découverte sortait immédiatement et journalisait « aucun salon live
+    # reconnu … aliases= » (relevé en production le 2026-09-26 sur
+    # channel_create et channel_delete). Les noms suivent ceux que
+    # setup_v2_completion crée réellement, pas une convention inventée.
+    "channels": (
+        "logs-salons", "logs-salon", "logs-serveur", "logs-channels",
+    ),
+    "files": (
+        "logs-fichiers", "logs-files", "logs-dossiers",
+    ),
+    "resources": (
+        "logs-ressources", "logs-resources",
+    ),
+    "spam": (
+        "logs-spam", "logs-protect-spam-logs", "protect-spam-logs",
+    ),
+    "raid": (
+        "logs-raid", "logs-antiraid", "raidprotect-logs",
+    ),
+    "soundboard": (
+        "logs-soundboard", "logs-sons",
+    ),
     "automod": (
         "logs-securite", "logs-sécurité", "automod", "logs-automod",
         "logs-protect-spam-logs", "protect-spam-logs", "raidprotect-logs",
@@ -76,7 +99,18 @@ def _plain(value: Any) -> str:
 
 
 def _aliases(log_type: str) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(_plain(name) for name in CHANNEL_ALIASES.get(log_type, ())))
+    """Noms de salons à chercher pour ce type d'évènement.
+
+    La table est indexée par CATÉGORIE (« channels », « messages »…) alors que
+    l'appelant transmet un type d'évènement (« channel_create »). Sans la
+    conversion, la recherche sortait à vide pour tout évènement dont le nom
+    n'est pas déjà une catégorie — c'est ce qui produisait les avertissements
+    « aucun salon live reconnu … aliases= » observés en production.
+    """
+    noms = CHANNEL_ALIASES.get(log_type)
+    if noms is None:
+        noms = CHANNEL_ALIASES.get(log_service.category_for(log_type), ())
+    return tuple(dict.fromkeys(_plain(name) for name in noms))
 
 
 def _category_is_logs(channel: discord.TextChannel) -> bool:
@@ -203,12 +237,21 @@ async def send_log_v5(
     candidate = _discover_channel(guild, log_type)
     if candidate is None:
         state["last_result"] = "no_live_channel_found"
-        logger.warning(
-            "V5 : aucun salon live reconnu guild=%s type=%s aliases=%s",
-            guild.id,
-            log_type,
-            ",".join(_aliases(log_type)),
-        )
+        alias = _aliases(log_type)
+        if alias:
+            # Des noms à chercher existaient, aucun salon ne correspond : c'est
+            # une vraie lacune de configuration, qui mérite un avertissement.
+            logger.warning(
+                "V5 : aucun salon live reconnu guild=%s type=%s aliases=%s",
+                guild.id, log_type, ",".join(alias),
+            )
+        else:
+            # Aucun nom à chercher pour cette catégorie : la découverte de
+            # secours ne la couvre pas, ce n'est pas une panne.
+            logger.debug(
+                "V5 : découverte non couverte pour guild=%s type=%s",
+                guild.id, log_type,
+            )
         return False
 
     try:

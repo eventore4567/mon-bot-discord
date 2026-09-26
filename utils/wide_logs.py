@@ -771,6 +771,86 @@ def _rewind_file(file: discord.File | None) -> None:
         logger.warning("Étape non critique ignorée dans _rewind_file", exc_info=True)
 
 
+# =============================================================================
+# Salons de logs devenus inaccessibles
+# =============================================================================
+#
+# Mesuré en production le 2026-09-26 : deux salons répondaient 403 « Missing
+# Access » à CHAQUE évènement journalisable, et chaque échec imprimait une
+# trace complète. Le garde log_service.validate_channel passe pourtant avant
+# l'envoi — il lit `channel.permissions_for(me)`, donc le cache local, que
+# Discord contredit quand les permissions ont changé sans que la passerelle
+# l'ait encore répercuté.
+#
+# Un 403 ou un 404 sur un envoi n'est pas une panne passagère : il ne se
+# résoudra pas au prochain évènement. On retient donc le salon pendant un
+# moment, on cesse d'essayer, et on ne journalise qu'UNE ligne lisible au lieu
+# d'une trace par message. La quarantaine expire d'elle-même : si un
+# administrateur rétablit l'accès, les logs repartent sans intervention.
+
+QUARANTAINE_SECONDES = 900.0
+_SALONS_INACCESSIBLES: dict[int, float] = {}
+_ECHECS_PERMANENTS: dict[int, int] = {}
+
+
+def salon_inaccessible(channel_id: int | None) -> bool:
+    """Vrai tant que ce salon est en quarantaine."""
+    if channel_id is None:
+        return False
+    expire = _SALONS_INACCESSIBLES.get(int(channel_id))
+    if expire is None:
+        return False
+    if time.monotonic() >= expire:
+        _SALONS_INACCESSIBLES.pop(int(channel_id), None)
+        return False
+    return True
+
+
+def echecs_permanents(channel_id: int | None) -> int:
+    """Nombre d'échecs définitifs constatés sur ce salon depuis le démarrage."""
+    return _ECHECS_PERMANENTS.get(int(channel_id), 0) if channel_id is not None else 0
+
+
+def oublier_salon(channel_id: int | None) -> None:
+    """Lève la quarantaine — appelé quand la configuration change."""
+    if channel_id is None:
+        return
+    _SALONS_INACCESSIBLES.pop(int(channel_id), None)
+    _ECHECS_PERMANENTS.pop(int(channel_id), None)
+
+
+def _est_definitif(exc: discord.HTTPException) -> bool:
+    """403 et 404 ne se corrigent pas tout seuls au prochain message.
+
+    Tout le reste — 429, 5xx, coupure réseau — mérite d'être réessayé et
+    gardé avec sa trace, parce que c'est réellement inattendu.
+    """
+    return getattr(exc, "status", None) in (403, 404)
+
+
+def _mettre_en_quarantaine(channel_id: int | None, exc: discord.HTTPException) -> int:
+    if channel_id is None:
+        return 0
+    identifiant = int(channel_id)
+    compte = _ECHECS_PERMANENTS.get(identifiant, 0) + 1
+    _ECHECS_PERMANENTS[identifiant] = compte
+    premiere = identifiant not in _SALONS_INACCESSIBLES
+    _SALONS_INACCESSIBLES[identifiant] = time.monotonic() + QUARANTAINE_SECONDES
+    if premiere:
+        # Une seule ligne, sans trace : elle dit le salon, la cause et le geste
+        # qui répare. Une trace de pile n'apprend rien sur une permission
+        # Discord manquante, et répétée elle masque les vraies erreurs.
+        logger.error(
+            "Logs suspendus pour le salon %s : Discord répond %s (%s). "
+            "Vérifiez que SentriX voit ce salon et peut y écrire, ou changez-le "
+            "dans +setup. Nouvel essai automatique dans %d minutes.",
+            identifiant, getattr(exc, "status", "?"),
+            getattr(exc, "text", None) or type(exc).__name__,
+            int(QUARANTAINE_SECONDES // 60),
+        )
+    return compte
+
+
 async def send_wide_log(
     channel: discord.abc.Messageable,
     embed: discord.Embed,
@@ -783,6 +863,12 @@ async def send_wide_log(
     identity_icon: str | None = None,
 ) -> bool:
     """Envoie le log Components V2 avec bannière, identité, événement et actions."""
+    if salon_inaccessible(getattr(channel, "id", None)):
+        logger.debug(
+            "SXTRACE 6 TRANSPORT phase=skip channel=%s reason=QUARANTAINE",
+            getattr(channel, "id", "?"),
+        )
+        return False
     log_runtime_capabilities()
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     _category, emoji, kind = resolve(event_type, embed.title or "", embed.description or "")
@@ -866,11 +952,18 @@ async def send_wide_log(
         _schedule_history(channel, embed, event_type, kind)
         return True
     except discord.HTTPException as exc:
-        logger.error(
+        logger.debug(
             "SXTRACE 6 TRANSPORT phase=send-failed channel=%s reason=HTTP status=%s code=%s",
             getattr(channel, "id", "?"), getattr(exc, "status", None), getattr(exc, "code", None),
         )
-        logger.error("SENTRIX LOG V2 FAILED HTTP status=%s code=%s text=%r\n%s", getattr(exc, "status", None), getattr(exc, "code", None), getattr(exc, "text", None), traceback.format_exc())
+        if _est_definitif(exc):
+            _mettre_en_quarantaine(getattr(channel, "id", None), exc)
+        else:
+            logger.error(
+                "SENTRIX LOG V2 FAILED HTTP status=%s code=%s text=%r\n%s",
+                getattr(exc, "status", None), getattr(exc, "code", None),
+                getattr(exc, "text", None), traceback.format_exc(),
+            )
     except Exception as exc:
         logger.error(
             "SXTRACE 6 TRANSPORT phase=send-failed channel=%s reason=%s",
