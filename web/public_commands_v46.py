@@ -104,8 +104,8 @@ _STYLES = """
 .cmd code{font:700 15px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--bleu2);overflow-wrap:anywhere}
 .cmd-type{font-size:11px;color:var(--doux);border:1px solid var(--ligne);border-radius:999px;
  padding:4px 8px;white-space:nowrap}
-.cmd p{color:var(--doux);line-height:1.55;margin:11px 0}
-.cmd small{color:#78849a}
+.cmd p{color:var(--doux);line-height:1.55;margin:11px 0;overflow-wrap:anywhere}
+.cmd small{color:#78849a;overflow-wrap:anywhere}
 .cmd-vide{display:none;text-align:center;border:1px dashed var(--ligne);border-radius:14px;
  padding:28px;color:var(--doux)}
 @media(max-width:760px){.cmd-outils{grid-template-columns:1fr}.cmd-grille{grid-template-columns:1fr}
@@ -155,6 +155,7 @@ def _page_indisponible(request: web.Request) -> str:
             "pour le moment. Réessayez dans un instant."
         ),
         heading="Commandes SentriX",
+        robots="noindex",
         body=(
             '<section class="legal"><h2>Liste momentanément indisponible</h2>'
             "<p>SentriX fonctionne sur deux instances et une seule sert à la fois. "

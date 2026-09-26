@@ -42,7 +42,8 @@ def _support_url() -> str:
 
 
 def _layout(request: web.Request, *, title: str, description: str, heading: str, body: str,
-            styles_extra: str = "", script_extra: str = "") -> str:
+            styles_extra: str = "", script_extra: str = "",
+            robots: str = "index,follow,max-image-preview:large,max-snippet:-1") -> str:
     """Coquille commune aux pages /start, /stats, /privacy, /terms et /media-kit.
 
     Ces cinq pages partageaient un fond en dégradé CSS pendant que la landing
@@ -57,6 +58,10 @@ def _layout(request: web.Request, *, title: str, description: str, heading: str,
     ``styles_extra`` et ``script_extra`` servent aux pages qui ont besoin de
     leur propre CSS ou de leur propre comportement — /commands et sa recherche.
     Les cinq pages d'origine ne les passent pas et rendent exactement pareil.
+
+    ``robots`` existe parce qu'une page d'attente ou d'erreur ne doit pas
+    demander son indexation. La valeur par défaut est celle que les pages
+    normales utilisaient déjà, donc rien ne change pour elles.
     """
     base = _base(request)
     canonical = f"{base}{request.path}"
@@ -65,7 +70,7 @@ def _layout(request: web.Request, *, title: str, description: str, heading: str,
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title>
 <meta name="description" content="{html.escape(description, quote=True)}">
-<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="robots" content="{html.escape(robots, quote=True)}">
 <link rel="canonical" href="{html.escape(canonical, quote=True)}">
 <meta property="og:type" content="website"><meta property="og:site_name" content="SentriX">
 <meta property="og:title" content="{html.escape(title, quote=True)}">

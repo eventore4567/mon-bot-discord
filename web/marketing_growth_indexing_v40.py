@@ -60,7 +60,14 @@ async def public_growth_indexing(request: web.Request, handler):
     path = request.path
 
     if path in _PUBLIC_PAGES or path.startswith("/sentrix-media/"):
-        response.headers["X-Robots-Tag"] = "index, follow"
+        # Une réponse en erreur n'est pas une page à indexer. Mesuré en
+        # production le 2026-09-26 : /commands rendu en 503 par l'instance
+        # qui n'a pas le bail HA repartait quand même en « index, follow ».
+        # Cela vaut aussi pour les pages d'erreur de web/public_error_pages_v1.
+        if response.status < 400:
+            response.headers["X-Robots-Tag"] = "index, follow"
+        else:
+            response.headers["X-Robots-Tag"] = "noindex"
 
     if isinstance(response, web.Response) and path == "/robots.txt":
         response.text = _patch_robots(response.text or "")

@@ -217,7 +217,11 @@ async def indexing_headers(request: web.Request, handler):
     public_paths = {'/', '/sentrix', '/dashboard-sentrix', '/robots.txt', '/sitemap.xml', _INDEXNOW_PATH}
     if request.path in public_paths:
         if request.path not in {'/robots.txt', '/sitemap.xml', _INDEXNOW_PATH}:
-            response.headers.setdefault('X-Robots-Tag', 'index, follow')
+            # Même règle : une erreur ne s'indexe pas, y compris sur la racine.
+            if response.status >= 400:
+                response.headers['X-Robots-Tag'] = 'noindex'
+            else:
+                response.headers.setdefault('X-Robots-Tag', 'index, follow')
     else:
         response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
     return response

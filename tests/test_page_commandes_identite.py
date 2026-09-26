@@ -199,3 +199,16 @@ def test_une_instance_qui_a_les_commandes_reste_indexable():
     assert reponse.status == 200
     assert "max-age=60" in reponse.headers["Cache-Control"]
     assert reponse.headers["X-Robots-Tag"] == "index, follow"
+
+
+def test_les_descriptions_longues_ne_debordent_pas_sur_telephone():
+    """Mesuré en production le 2026-09-26 à 360px de large.
+
+    La description de ``+statut`` contient
+    « (playing/streaming/listening/watching/competing). », 48 caractères sans
+    espace. Avec le ``overflow-wrap: normal`` par défaut, elle sortait de sa
+    carte : 362 px de contenu pour 302 px disponibles.
+    """
+    corps = _rendre()
+    debut = corps.index(".cmd p{")
+    assert "overflow-wrap:anywhere" in corps[debut : corps.index("}", debut)]
