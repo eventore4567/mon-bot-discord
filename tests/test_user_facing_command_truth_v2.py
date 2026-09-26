@@ -67,10 +67,21 @@ def test_dashboard_share_link_is_the_public_sentrix_link():
 
 
 def test_onboarding_dm_is_compact_embed_not_plain_link_dump():
+    """Le MP d'arrivée reste un panneau avec boutons, pas une liste d'URL.
+
+    L'assertion sur le titre exact — « SentriX est prêt » — a été retirée le
+    2026-09-26 : la refonte de l'accueil l'a renommé en « SentriX •
+    Installation réussie » et « Bienvenue sur SentriX », et le test échouait
+    sur un simple changement de formulation. Ce qu'il doit garder, c'est la
+    forme du message : un embed titré, un bouton vers le dashboard, et aucune
+    URL jetée en texte brut. Figer la phrase exacte revenait à interdire de
+    réécrire l'accueil.
+    """
     source = _read("cogs/guild_arrival.py")
-    assert 'title="SentriX est prêt"' in source
+    assert "title=" in source, "le MP d'arrivée n'est plus un embed titré"
     assert 'label="Ouvrir le Dashboard"' in source
     assert '"Dashboard : {dashboard}"' not in source
+    assert "f\"Dashboard : {" not in source, "l'URL est jetée en texte brut"
 
 
 def test_ai_help_only_lists_registered_prefix_commands():
