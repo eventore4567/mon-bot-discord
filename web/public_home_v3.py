@@ -78,8 +78,8 @@ a{color:inherit;text-decoration:none}button{font:inherit}img{display:block;max-w
 .hero .lead{max-width:680px;margin:0;color:var(--muted);font-size:17px;line-height:1.72}
 .hero-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:26px}
 .hero-meta{display:flex;flex-wrap:wrap;gap:9px 18px;margin-top:20px;color:var(--muted);font-size:11px}.hero-meta span{display:inline-flex;align-items:center;gap:6px}.hero-meta i{width:5px;height:5px;border-radius:50%;background:var(--blue)}
-.hero-art{position:relative;min-height:570px;perspective:1400px;transition:transform .18s ease}
-.product-shell{position:absolute;inset:34px 6px 34px 22px;overflow:hidden;border:1px solid var(--line2);border-radius:22px;background:linear-gradient(145deg,#15191f,#0d1014 72%);box-shadow:0 34px 90px rgba(0,0,0,.44),0 0 54px rgba(77,163,255,.055);transform:rotateY(-3deg) rotateX(1deg);animation:floatPanel 7.4s ease-in-out infinite}
+.hero-art{position:relative;min-height:640px;perspective:1600px;transition:transform .18s ease;isolation:isolate}
+.product-shell{position:absolute;inset:72px 0 38px 78px;overflow:hidden;border:1px solid var(--line2);border-radius:22px;background:linear-gradient(145deg,#15191f,#0d1014 72%);box-shadow:0 42px 110px rgba(0,0,0,.54),0 0 60px rgba(77,163,255,.18),inset 0 1px 0 rgba(180,225,255,.06);transform:rotateY(-8deg) rotateX(2.2deg) translateZ(36px);animation:floatPanel 6.2s ease-in-out infinite}
 .product-top{height:50px;display:flex;align-items:center;justify-content:space-between;padding:0 15px;border-bottom:1px solid var(--line);background:#101318}.product-title{display:flex;align-items:center;gap:9px;font-size:11px;font-weight:750}.product-title img{width:28px;height:28px;border-radius:9px}.product-live{display:flex;align-items:center;gap:7px;color:#8ce2b9;font-size:9px}.product-live i{width:6px;height:6px;border-radius:50%;background:var(--green)}
 .product-body{display:grid;grid-template-columns:78px 1fr;height:calc(100% - 50px)}
 .side{padding:14px 10px;border-right:1px solid var(--line);background:#101318}.side-logo{width:42px;height:42px;margin:0 auto 18px;border-radius:13px;background:linear-gradient(135deg,var(--blue),var(--blue2));display:grid;place-items:center;color:#06111c;font-weight:900}.side-nav{display:grid;gap:7px}.side-nav span{height:34px;border-radius:9px;background:#15191f;position:relative}.side-nav span:before{content:"";position:absolute;left:10px;top:13px;width:28px;height:7px;border-radius:99px;background:#303844}.side-nav span.active{background:var(--blue-bg);box-shadow:inset 3px 0 0 var(--blue)}.side-nav span.active:before{background:var(--blue2)}
@@ -87,6 +87,26 @@ a{color:inherit;text-decoration:none}button{font:inherit}img{display:block;max-w
 .kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.kpi{padding:11px;border:1px solid var(--line);border-radius:10px;background:#101318}.kpi small{display:block;color:var(--muted);font-size:7px;text-transform:uppercase;letter-spacing:.08em}.kpi b{display:block;margin-top:4px;font-size:10px}
 .preview-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:9px;margin-top:9px}.preview-card{padding:12px;border:1px solid var(--line);border-radius:11px;background:#101318}.preview-card.tall{grid-row:span 2}.preview-card h3{margin:0;font-size:10px}.preview-card p{margin:3px 0 0;color:var(--muted);font-size:7px}.bars{height:120px;display:flex;align-items:end;gap:6px;margin-top:12px}.bars i{flex:1;height:var(--h);min-height:15px;border-radius:5px 5px 2px 2px;background:linear-gradient(180deg,var(--blue2),#2f7fd4);opacity:.78;animation:draw 1.7s ease both}.settings{display:grid;gap:7px;margin-top:10px}.setting{display:flex;align-items:center;justify-content:space-between;padding:7px 8px;border-radius:8px;background:#0c1014;color:var(--soft);font-size:7px}.setting i{width:25px;height:14px;border-radius:99px;background:rgba(77,163,255,.35);position:relative}.setting i:after{content:"";position:absolute;right:3px;top:3px;width:8px;height:8px;border-radius:50%;background:var(--blue2)}
 .float-card{position:absolute;right:-6px;top:78px;z-index:5;padding:11px 12px;border:1px solid rgba(77,163,255,.18);border-radius:12px;background:rgba(21,25,31,.94);box-shadow:0 16px 36px rgba(0,0,0,.27);backdrop-filter:blur(10px)}.float-card b{display:block;font-size:9px}.float-card span{display:block;margin-top:3px;color:var(--muted);font-size:7px}
+
+
+.hero-art:before{content:"";position:absolute;inset:1% -10% 0 0;z-index:-5;border-radius:50%;background:radial-gradient(circle at 58% 42%,rgba(77,163,255,.30),rgba(35,83,190,.13) 28%,transparent 66%);filter:blur(20px);animation:holoBreath 4.8s ease-in-out infinite}
+.hero-world{position:absolute;inset:-7% -12% -4% -7%;z-index:-1;pointer-events:none;transform-style:preserve-3d;perspective:1200px;overflow:visible;transition:transform .18s ease}
+.holo-core{position:absolute;left:57%;top:43%;width:280px;height:280px;transform:translate(-50%,-50%) translateZ(-40px);transform-style:preserve-3d;animation:coreFloat 6s ease-in-out infinite}
+.holo-core:before{content:"";position:absolute;inset:16%;border-radius:30%;background:radial-gradient(circle at 38% 30%,rgba(220,242,255,.98),rgba(77,163,255,.40) 28%,rgba(23,76,168,.18) 55%,transparent 72%);filter:blur(2px);box-shadow:0 0 80px rgba(77,163,255,.54),0 0 160px rgba(77,163,255,.24)}
+.holo-core img{position:absolute;left:50%;top:50%;width:108px;height:108px;transform:translate(-50%,-50%) translateZ(75px);border-radius:30px;border:1px solid rgba(137,203,255,.52);box-shadow:0 0 36px rgba(77,163,255,.62),0 0 96px rgba(77,163,255,.28);animation:logoPulse 3.6s ease-in-out infinite}
+.holo-ring{position:absolute;left:50%;top:50%;border:1px solid rgba(119,188,255,.42);border-radius:50%;transform-style:preserve-3d;box-shadow:0 0 20px rgba(77,163,255,.12)}
+.holo-ring.r1{width:250px;height:250px;margin:-125px;transform:rotateX(68deg) rotateZ(0deg);animation:ringOne 8s linear infinite}
+.holo-ring.r2{width:330px;height:330px;margin:-165px;transform:rotateY(66deg) rotateZ(18deg);border-color:rgba(77,163,255,.32);animation:ringTwo 11s linear infinite reverse}
+.holo-ring.r3{width:395px;height:395px;margin:-197px;transform:rotateX(32deg) rotateY(32deg);border-style:dashed;border-color:rgba(119,188,255,.22);animation:ringThree 15s linear infinite}
+.holo-ring:before,.holo-ring:after{content:"";position:absolute;width:10px;height:10px;border-radius:50%;background:#a7dcff;box-shadow:0 0 18px #4da3ff,0 0 38px rgba(77,163,255,.72)}
+.holo-ring:before{left:50%;top:-5px}.holo-ring:after{right:8%;bottom:20%}
+.holo-cube{position:absolute;width:38px;height:38px;border:1px solid rgba(119,188,255,.42);background:linear-gradient(145deg,rgba(77,163,255,.20),rgba(10,18,30,.06));box-shadow:inset 0 0 20px rgba(77,163,255,.16),0 0 26px rgba(77,163,255,.16);transform-style:preserve-3d}
+.holo-cube:before,.holo-cube:after{content:"";position:absolute;inset:0;border:inherit;background:inherit}
+.holo-cube:before{transform:rotateY(90deg) translateZ(19px)}.holo-cube:after{transform:rotateX(90deg) translateZ(19px)}
+.holo-cube.c1{left:2%;top:16%;animation:cubeA 7s ease-in-out infinite}.holo-cube.c2{right:1%;top:15%;width:30px;height:30px;animation:cubeB 8.5s ease-in-out infinite}.holo-cube.c3{left:12%;bottom:10%;width:24px;height:24px;animation:cubeC 6.8s ease-in-out infinite}
+.holo-beam{position:absolute;height:1px;transform-origin:left center;background:linear-gradient(90deg,transparent,rgba(157,216,255,.78),rgba(77,163,255,.16),transparent);filter:drop-shadow(0 0 7px rgba(77,163,255,.55));animation:beamDrift 5s ease-in-out infinite}
+.holo-beam.b1{width:80%;left:6%;top:25%;transform:rotate(-13deg)}.holo-beam.b2{width:72%;left:14%;bottom:24%;transform:rotate(11deg);animation-delay:-2s}.holo-beam.b3{width:52%;right:1%;top:54%;transform:rotate(-34deg);animation-delay:-3.2s}
+.scan-plane{position:absolute;left:5%;right:1%;top:17%;height:67%;border:1px solid rgba(77,163,255,.18);transform:rotateX(68deg) rotateZ(-2deg) translateZ(-130px);background:repeating-linear-gradient(90deg,rgba(119,188,255,.10) 0 1px,transparent 1px 44px),repeating-linear-gradient(0deg,rgba(119,188,255,.10) 0 1px,transparent 1px 44px);box-shadow:0 0 48px rgba(77,163,255,.10);animation:scanPlane 8s linear infinite}
 
 /* live strip */
 .status-strip{position:relative;z-index:5;margin-top:-16px;display:grid;grid-template-columns:1.35fr repeat(4,1fr);overflow:hidden;border:1px solid var(--line);border-radius:16px;background:rgba(16,19,24,.9);box-shadow:0 18px 52px rgba(0,0,0,.25);backdrop-filter:blur(12px)}
@@ -115,7 +135,20 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 
 .loader{position:fixed;inset:0;z-index:300;display:none;place-items:center;background:rgba(7,9,12,.72);backdrop-filter:blur(8px)}.loader.show{display:grid}.loader-card{min-width:280px;padding:22px;border:1px solid var(--line);border-radius:15px;background:var(--panel);text-align:center;box-shadow:var(--shadow)}.loader-card b,.loader-card span{display:block}.loader-card span{margin-top:6px;color:var(--muted);font-size:10px}.spinner{width:30px;height:30px;margin:0 auto 13px;border:3px solid var(--line);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
 
-@keyframes floatPanel{50%{transform:rotateY(-2deg) rotateX(.5deg) translateY(-7px)}}
+
+@keyframes holoBreath{0%,100%{opacity:.72;transform:scale(.96)}50%{opacity:1;transform:scale(1.08)}}
+@keyframes coreFloat{0%,100%{transform:translate(-50%,-50%) translateY(0) rotateZ(-1deg)}50%{transform:translate(-50%,-50%) translateY(-17px) rotateZ(2deg)}}
+@keyframes logoPulse{0%,100%{filter:saturate(1);transform:translate(-50%,-50%) translateZ(75px) scale(.95)}50%{filter:saturate(1.4) brightness(1.16);transform:translate(-50%,-50%) translateZ(98px) scale(1.08)}}
+@keyframes ringOne{to{transform:rotateX(68deg) rotateZ(360deg)}}
+@keyframes ringTwo{to{transform:rotateY(66deg) rotateZ(378deg)}}
+@keyframes ringThree{to{transform:rotateX(32deg) rotateY(392deg) rotateZ(360deg)}}
+@keyframes cubeA{0%,100%{transform:translate3d(0,0,35px) rotateX(18deg) rotateY(28deg)}50%{transform:translate3d(40px,-34px,125px) rotateX(160deg) rotateY(210deg)}}
+@keyframes cubeB{0%,100%{transform:translate3d(0,0,20px) rotateX(24deg) rotateY(12deg)}50%{transform:translate3d(-34px,36px,94px) rotateX(200deg) rotateY(150deg)}}
+@keyframes cubeC{0%,100%{transform:translate3d(0,0,20px) rotateX(15deg) rotateY(35deg)}50%{transform:translate3d(50px,-18px,108px) rotateX(145deg) rotateY(230deg)}}
+@keyframes beamDrift{0%,100%{opacity:.24}50%{opacity:.95}}
+@keyframes scanPlane{to{background-position:44px 0,0 44px}}
+
+@keyframes floatPanel{0%,100%{transform:rotateY(-8deg) rotateX(2.2deg) translateZ(36px) translateY(0)}50%{transform:rotateY(-5deg) rotateX(.7deg) translateZ(58px) translateY(-16px)}}
 @keyframes radar{to{transform:rotate(360deg)}}
 @keyframes marquee{to{transform:translateX(-12px)}}
 @keyframes draw{from{transform:scaleY(.35);transform-origin:bottom;opacity:.28}to{transform:scaleY(1);transform-origin:bottom;opacity:.78}}
@@ -165,7 +198,14 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
     <div class="hero-meta"><span><i></i>Dashboard web</span><span><i></i>Slash + préfixe</span><span><i></i>Configuration par serveur</span><span><i></i>Architecture HA</span></div>
   </div>
 
-  <div class="hero-art" id="heroArt" aria-label="Aperçu visuel du dashboard SentriX"><div class="fx-depth-label">SentriX // réseau 3D actif</div>
+  <div class="hero-art" id="heroArt" aria-label="Aperçu visuel du dashboard SentriX">
+    <div class="hero-world" aria-hidden="true">
+      <div class="scan-plane"></div>
+      <div class="holo-beam b1"></div><div class="holo-beam b2"></div><div class="holo-beam b3"></div>
+      <div class="holo-cube c1"></div><div class="holo-cube c2"></div><div class="holo-cube c3"></div>
+      <div class="holo-core"><div class="holo-ring r1"></div><div class="holo-ring r2"></div><div class="holo-ring r3"></div><img src="/sentrix-avatar.png?v=55" alt=""></div>
+    </div>
+    <div class="fx-depth-label">SentriX // réseau 3D actif</div>
     <div class="product-shell">
       <div class="product-top"><div class="product-title"><img src="/sentrix-avatar.png?v=55" alt=""><span>SentriX Dashboard</span></div><div class="product-live"><i></i>Interface réelle sur /app</div></div>
       <div class="product-body">
