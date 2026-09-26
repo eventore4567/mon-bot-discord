@@ -8,15 +8,15 @@ Ce fichier centralise les informations prêtes à copier dans les principaux ann
 - Application ID : `1532010415951839252`
 - Préfixes : `+` et `/`
 - Langue : Français
-- Site : `https://sentrix-standby-production.up.railway.app/home`
-- Installation : `https://sentrix-standby-production.up.railway.app/start`
-- Dashboard : `https://sentrix-standby-production.up.railway.app/app`
-- Stats : `https://sentrix-standby-production.up.railway.app/stats`
-- Support : `https://sentrix-standby-production.up.railway.app/support`
-- Confidentialité : `https://sentrix-standby-production.up.railway.app/privacy`
-- Conditions : `https://sentrix-standby-production.up.railway.app/terms`
-- Media kit : `https://sentrix-standby-production.up.railway.app/media-kit`
-- Avatar : `https://sentrix-standby-production.up.railway.app/sentrix-avatar.png`
+- Site : `https://sentrix.gg/`
+- Installation : `https://sentrix.gg/start`
+- Dashboard : `https://sentrix.gg/app`
+- Stats : `https://sentrix.gg/stats`
+- Support : `https://sentrix.gg/support`
+- Confidentialité : `https://sentrix.gg/privacy`
+- Conditions : `https://sentrix.gg/terms`
+- Media kit : `https://sentrix.gg/media-kit`
+- Avatar : `https://sentrix.gg/sentrix-avatar.png`
 
 ## Description courte
 
@@ -111,7 +111,7 @@ Les secrets ne doivent jamais être écrits dans GitHub. Le diagnostic sans secr
 
 Modération, sécurité, tickets, IA, logs, automatisations et dashboard web dans un seul bot.
 
-Site : https://sentrix-standby-production.up.railway.app/home
+Site : https://sentrix.gg/
 
 ## Ordre de publication recommandé
 
