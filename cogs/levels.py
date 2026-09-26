@@ -19,7 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from services import levels as levels_service
-from utils import embeds, checks, stats_service, design_system, visual_v5, temporary_boosts
+from utils import embeds, checks, helpers, stats_service, design_system, visual_v5, temporary_boosts
 from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
 
@@ -1356,6 +1356,12 @@ class Levels(commands.Cog, name="Levels"):
     @commands.hybrid_command(name="reset-levels", description="[Admin] Réinitialiser tous les niveaux du serveur.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")
     async def reset_levels(self, ctx: commands.Context):
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            "réinitialiser tous les niveaux du serveur",
+            detail="Toute la progression XP/niveaux enregistrée pour ce serveur sera supprimée.",
+        ):
+            return
         await self.bot.db.execute("DELETE FROM levels WHERE guild_id = ?", (ctx.guild.id,))
         stats_service.invalidate_rank_cache(self.bot, ctx.guild.id)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Tous les niveaux du serveur ont été réinitialisés.')))
@@ -1630,6 +1636,12 @@ class Levels(commands.Cog, name="Levels"):
     @app_commands.describe(membre="Le membre visé")
     @checks.is_owner_or_admin_for("configuration")
     async def represet(self, ctx: commands.Context, membre: discord.Member):
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            f"réinitialiser la réputation de {membre.display_name}",
+            detail="La réputation actuelle de ce membre sera remise à zéro.",
+        ):
+            return
         await self.bot.db.reset_reputation(ctx.guild.id, ctx.author.id, membre.id)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Réputation de {membre.mention} réinitialisée à **0**.')))
 
