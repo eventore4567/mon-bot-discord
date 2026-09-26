@@ -30,7 +30,9 @@ def _html() -> str:
 def test_shared_public_layout_is_responsive_and_interactive():
     page = _html()
     for marker in (
-        'id="publicPointer"',
+        # « id="publicPointer" » a quitté cette liste le 2026-09-26 : l'élément
+        # était display:none dans les trois media queries, donc jamais visible.
+        # C'était de la décoration morte, pas une interaction à garder.
         'querySelectorAll(".card,.media-grid img")',
         'requestAnimationFrame(()=>frame(el))',
         'e.pointerType!=="touch"',
@@ -50,8 +52,11 @@ def test_shared_public_layout_javascript_syntax(tmp_path: Path):
     if node.returncode != 0:
         pytest.skip("node indisponible")
     scripts = re.findall(r"<script>(.*?)</script>", _html(), re.S)
-    assert len(scripts) == 1
-    target = tmp_path / "shared-public-layout.js"
-    target.write_text(scripts[0], encoding="utf-8")
-    result = subprocess.run(["node", "--check", str(target)], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
+    # Deux scripts depuis le 2026-09-26 : le moteur de fond partagé
+    # (web/sentrix_fx_v1) et l'inclinaison des cartes propre à cette coquille.
+    assert len(scripts) == 2
+    for index, source in enumerate(scripts):
+        target = tmp_path / f"shared-public-layout-{index}.js"
+        target.write_text(source, encoding="utf-8")
+        result = subprocess.run(["node", "--check", str(target)], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr

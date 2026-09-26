@@ -12,6 +12,8 @@ from pathlib import Path
 
 from aiohttp import web
 
+from . import sentrix_fx_v1 as fx
+
 _INSTALLED = False
 _ASSET_ROOT = Path(__file__).resolve().parent.parent / "assets" / "sentrix"
 _MEDIA = {
@@ -40,6 +42,17 @@ def _support_url() -> str:
 
 
 def _layout(request: web.Request, *, title: str, description: str, heading: str, body: str) -> str:
+    """Coquille commune aux pages /start, /stats, /privacy, /terms et /media-kit.
+
+    Ces cinq pages partageaient un fond en dégradé CSS pendant que la landing
+    recevait un canvas animé : deux identités visuelles pour un même site.
+    Elles passent ici sur ``web.sentrix_fx_v1``, le même moteur que les pages
+    d'erreur — un seul canvas, une seule palette, une seule boucle.
+
+    Les noms de classes (``card``, ``grid``, ``legal``, ``media-grid``,
+    ``big``, ``status``…) sont conservés à l'identique : les corps de page les
+    utilisent et les réécrire aurait cassé cinq pages pour un gain nul.
+    """
     base = _base(request)
     canonical = f"{base}{request.path}"
     return f'''<!doctype html>
@@ -54,25 +67,106 @@ def _layout(request: web.Request, *, title: str, description: str, heading: str,
 <meta property="og:description" content="{html.escape(description, quote=True)}">
 <meta property="og:url" content="{html.escape(canonical, quote=True)}">
 <meta name="twitter:card" content="summary">
+{fx.styles()}
 <style>
-:root{{--bg:#0b0d10;--panel:#15191f;--panel2:#1a1f27;--line:#2a313c;--text:#f2f5f8;--muted:#929dac;--brand:#4da3ff;--brand2:#77bcff;--ok:#55d69a}}
-*{{box-sizing:border-box}}html{{background:var(--bg);scroll-behavior:smooth}}body{{margin:0;min-height:100vh;overflow-x:hidden;position:relative;background:radial-gradient(circle at 86% -12%,rgba(77,163,255,.22),transparent 38%),radial-gradient(circle at 8% 56%,rgba(89,110,255,.09),transparent 32%),var(--bg);color:var(--text);font:15px Inter,system-ui,-apple-system,"Segoe UI",sans-serif}}body:before{{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;background-image:linear-gradient(rgba(119,188,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(119,188,255,.025) 1px,transparent 1px);background-size:72px 72px;animation:publicGrid 12s linear infinite}}body:after{{content:"";position:fixed;width:44vw;height:44vw;right:-12vw;top:18%;z-index:-1;pointer-events:none;border-radius:50%;background:radial-gradient(circle,rgba(77,163,255,.13),transparent 68%);filter:blur(18px);animation:publicOrb 14s ease-in-out infinite}}
-a{{color:inherit}}header{{max-width:1120px;margin:auto;padding:20px 22px;display:flex;justify-content:space-between;align-items:center;gap:14px}}.brand{{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:900;text-decoration:none}}.brand img{{width:34px;height:34px;border-radius:10px}}nav{{display:flex;gap:7px;flex-wrap:wrap}}nav a,.btn{{border:1px solid var(--line);background:#151a29;border-radius:10px;padding:9px 12px;text-decoration:none;font-weight:750}}main{{max-width:1120px;margin:auto;padding:58px 22px 78px}}.hero{{max-width:860px}}.eyebrow{{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--brand2);font-weight:850}}h1{{font-size:clamp(34px,6.5vw,62px);line-height:1.04;letter-spacing:-.04em;margin:11px 0 15px}}h2{{font-size:20px;margin:0 0 9px}}h3{{margin:0 0 7px}}p{{line-height:1.65}}.lead{{font-size:18px;color:var(--muted);max-width:800px}}.actions{{display:flex;gap:9px;flex-wrap:wrap;margin:24px 0 8px}}.btn.primary{{background:linear-gradient(135deg,#2f7fd4,var(--brand),var(--brand2));color:#06111c;border-color:transparent}}.grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:36px}}.grid.two{{grid-template-columns:repeat(2,minmax(0,1fr))}}.card{{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel));border-radius:15px;padding:19px}}.muted{{color:var(--muted)}}.big{{font-size:32px;font-weight:950;letter-spacing:-.03em}}.status{{display:inline-flex;align-items:center;gap:7px;font-weight:800}}.dot{{width:8px;height:8px;border-radius:50%;background:var(--ok)}}.legal{{max-width:850px}}.legal h2{{margin-top:30px}}.legal li{{color:var(--muted);line-height:1.65;margin:5px 0}}.media-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:25px}}.media-grid img{{display:block;width:100%;border:1px solid var(--line);border-radius:14px;background:var(--panel)}}code{{background:#151a29;border:1px solid var(--line);padding:2px 6px;border-radius:6px}}footer{{max-width:1120px;margin:auto;padding:0 22px 34px;color:var(--muted);font-size:12px}}footer a{{margin-right:12px}}
-.card,.media-grid img{{transform-style:preserve-3d;will-change:transform;transition:border-color .18s ease,box-shadow .18s ease}}
-.card:before{{content:"";position:absolute;inset:-45% -25%;pointer-events:none;background:linear-gradient(110deg,transparent 38%,rgba(119,188,255,.07) 49%,transparent 60%);transform:translateX(-72%) rotate(7deg);transition:transform .75s ease}}.card{{position:relative;overflow:hidden}}.card:hover:before{{transform:translateX(72%) rotate(7deg)}}.card:hover,.media-grid img:hover{{border-color:#40516a;box-shadow:0 18px 44px rgba(0,0,0,.25),0 0 26px rgba(77,163,255,.05)}}
-.hero h1{{animation:publicTitle .75s cubic-bezier(.16,.84,.31,1) both}}.hero .lead{{animation:publicLead .85s .08s cubic-bezier(.16,.84,.31,1) both}}.grid .card,.media-grid img{{animation:publicCard .68s cubic-bezier(.16,.84,.31,1) both}}.grid .card:nth-child(2){{animation-delay:.06s}}.grid .card:nth-child(3){{animation-delay:.12s}}.grid .card:nth-child(4){{animation-delay:.18s}}.public-pointer{{display:none}}
-@keyframes publicGrid{{to{{background-position:72px 0,0 72px}}}}@keyframes publicOrb{{0%,100%{{transform:translate3d(0,0,0) scale(.9);opacity:.48}}50%{{transform:translate3d(-30vw,18vh,0) scale(1.18);opacity:.92}}}}@keyframes publicTitle{{0%{{opacity:0;filter:blur(9px);transform:translateY(36px)}}100%{{opacity:1;filter:none;transform:none}}}}@keyframes publicLead{{0%{{opacity:0;transform:translateY(22px)}}100%{{opacity:1;transform:none}}}}@keyframes publicCard{{0%{{opacity:0;transform:translateY(36px) rotateX(7deg) scale(.97)}}100%{{opacity:1;transform:none}}}}
-@media(max-width:1024px){{header{{padding-inline:18px}}main{{padding-inline:18px}}}}
-@media(max-width:760px){{header{{align-items:flex-start;flex-direction:column}}main{{padding-top:38px}}.grid,.grid.two,.media-grid{{grid-template-columns:1fr}}nav{{width:100%;overflow-x:auto;padding-bottom:3px}}nav a{{white-space:nowrap}}}}
-@media(max-width:430px){{header{{padding:15px 14px}}main{{padding:34px 14px 64px}}h1{{font-size:clamp(34px,11vw,48px)}}.lead{{font-size:16px}}.card{{padding:16px}}.actions .btn{{width:100%;text-align:center}}footer{{padding-inline:14px}}}}
-@media(max-width:360px){{main{{padding-inline:11px}}header{{padding-inline:11px}}.brand{{font-size:17px}}}}
-@media(pointer:coarse){{.public-pointer{{display:none}}.card,.media-grid img{{will-change:auto}}}}
-@media(prefers-reduced-motion:reduce){{html{{scroll-behavior:auto}}body:before,body:after,.hero h1,.hero .lead,.grid .card,.media-grid img{{animation:none!important}}.public-pointer{{display:none}}.card,.media-grid img{{transform:none!important;transition:none!important}}}}
-</style></head><body><div class="public-pointer" id="publicPointer" aria-hidden="true"></div>
-<header><a class="brand" href="/"><img src="/sentrix-avatar.png" alt=""><span>SentriX</span></a><nav><a href="/start">Commencer</a><a href="/docs">Documentation</a><a href="/stats">Stats</a><a href="/support">Support</a><a href="/app">Dashboard</a></nav></header>
+header{{max-width:1160px;margin:auto;padding:22px 24px;display:flex;justify-content:space-between;align-items:center;gap:14px}}
+.brand{{display:flex;align-items:center;gap:11px;font-size:19px;font-weight:900;text-decoration:none;letter-spacing:-.02em}}
+.brand img{{width:34px;height:34px;border-radius:11px;box-shadow:0 0 0 1px var(--ligne),0 8px 26px rgba(77,163,255,.22)}}
+nav{{display:flex;gap:7px;flex-wrap:wrap}}
+nav a,.btn{{border:1px solid var(--ligne);border-radius:11px;padding:10px 14px;text-decoration:none;font-weight:750;font-size:14.5px;
+ background:linear-gradient(170deg,rgba(32,45,70,.66),rgba(15,23,39,.66));
+ transition:transform .2s cubic-bezier(.2,.7,.3,1),border-color .2s,box-shadow .2s}}
+nav a:hover,.btn:hover{{transform:translateY(-2px);border-color:rgba(140,203,255,.44);box-shadow:0 14px 34px rgba(2,6,16,.48),0 0 24px rgba(77,163,255,.14)}}
+.btn.primary{{background:linear-gradient(135deg,#2f7fd4,var(--bleu),var(--bleu2));color:#04101d;border-color:transparent;font-weight:850}}
+main{{max-width:1160px;margin:auto;padding:62px 24px 86px}}
+.hero{{max-width:880px}}
+.eyebrow{{display:inline-flex;align-items:center;gap:8px;font-size:11px;text-transform:uppercase;letter-spacing:.11em;color:var(--bleu2);font-weight:850;
+ border:1px solid var(--ligne);border-radius:999px;padding:7px 13px;background:rgba(14,22,38,.62)}}
+h1{{font-size:clamp(36px,6.6vw,66px);line-height:1.03;letter-spacing:-.045em;margin:16px 0 16px;
+ background:linear-gradient(168deg,#fff 12%,var(--bleu2) 58%,var(--bleu));-webkit-background-clip:text;background-clip:text;color:transparent;
+ filter:drop-shadow(0 14px 38px rgba(77,163,255,.20))}}
+h2{{font-size:21px;margin:0 0 10px;letter-spacing:-.02em}}h3{{margin:0 0 8px}}
+p{{line-height:1.68}}
+.lead{{font-size:18px;color:var(--doux);max-width:820px}}
+.actions{{display:flex;gap:10px;flex-wrap:wrap;margin:28px 0 8px}}
+.grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:40px}}
+.grid.two{{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.card{{position:relative;border:1px solid var(--ligne);border-radius:18px;padding:21px;overflow:hidden;
+ background:linear-gradient(165deg,rgba(28,39,62,.72),rgba(13,20,34,.68));
+ box-shadow:0 22px 58px rgba(2,6,16,.42),inset 0 1px 0 rgba(160,200,255,.08);
+ backdrop-filter:blur(13px) saturate(118%);-webkit-backdrop-filter:blur(13px) saturate(118%);
+ transform-style:preserve-3d;transition:border-color .2s ease,box-shadow .2s ease}}
+.card::before{{content:"";position:absolute;inset:-42% -28%;pointer-events:none;
+ background:linear-gradient(112deg,transparent 40%,rgba(140,203,255,.09) 50%,transparent 61%);
+ transform:translateX(-78%) rotate(8deg);transition:transform .9s cubic-bezier(.2,.7,.3,1)}}
+.card:hover::before{{transform:translateX(78%) rotate(8deg)}}
+.card:hover{{border-color:rgba(140,203,255,.40);box-shadow:0 26px 66px rgba(2,6,16,.54),0 0 30px rgba(77,163,255,.10)}}
+.muted{{color:var(--doux)}}
+.big{{font-size:34px;font-weight:950;letter-spacing:-.035em;
+ background:linear-gradient(168deg,#fff,var(--bleu2));-webkit-background-clip:text;background-clip:text;color:transparent}}
+.status{{display:inline-flex;align-items:center;gap:8px;font-weight:800}}
+.dot{{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(85,214,154,.15)}}
+.legal{{max-width:870px;border:1px solid var(--ligne);border-radius:20px;padding:30px 36px 36px;background:linear-gradient(168deg,rgba(26,36,58,.70),rgba(12,18,32,.66));box-shadow:0 26px 70px rgba(2,6,16,.44),inset 0 1px 0 rgba(160,200,255,.07)}}.legal h2{{margin-top:32px;padding-top:26px;border-top:1px solid var(--ligne);display:flex;align-items:center;gap:11px;font-size:19px}}.legal h2::before{{content:"";flex:none;width:3px;height:17px;border-radius:2px;background:linear-gradient(180deg,#8ccbff,#7b6cff)}}.legal h2:first-of-type{{margin-top:2px;padding-top:0;border-top:0}}.legal p{{color:var(--doux);line-height:1.72}}.legal li{{color:var(--doux);line-height:1.68;margin:6px 0}}
+.media-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:28px}}
+.media-grid img{{display:block;width:100%;border:1px solid var(--ligne);border-radius:16px;background:rgba(14,22,38,.6);
+ transition:transform .2s cubic-bezier(.2,.7,.3,1),border-color .2s,box-shadow .2s}}
+.media-grid img:hover{{transform:translateY(-3px);border-color:rgba(140,203,255,.40);box-shadow:0 22px 52px rgba(2,6,16,.5)}}
+code{{background:rgba(10,17,30,.82);border:1px solid var(--ligne);padding:3px 7px;border-radius:7px;color:var(--bleu2);font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace}}
+footer{{max-width:1160px;margin:auto;padding:0 24px 38px;color:var(--doux);font-size:12.5px}}
+footer a{{margin-right:14px;text-decoration:none}}footer a:hover{{color:var(--bleu2)}}
+.hero .eyebrow{{animation:sxMonte .7s cubic-bezier(.16,.84,.31,1) both}}
+.hero h1{{animation:sxMonte .8s .06s cubic-bezier(.16,.84,.31,1) both}}
+.hero .lead{{animation:sxMonte .8s .13s cubic-bezier(.16,.84,.31,1) both}}
+.hero .actions{{animation:sxMonte .8s .2s cubic-bezier(.16,.84,.31,1) both}}
+.grid .card,.media-grid img{{animation:sxMonte .72s cubic-bezier(.16,.84,.31,1) both}}
+.grid .card:nth-child(2){{animation-delay:.07s}}.grid .card:nth-child(3){{animation-delay:.14s}}
+.grid .card:nth-child(4){{animation-delay:.21s}}.grid .card:nth-child(5){{animation-delay:.28s}}
+.grid .card:nth-child(6){{animation-delay:.35s}}
+.public-pointer{{display:none}}
+@media(max-width:1024px){{header,main,footer{{padding-inline:20px}}}}
+@media(max-width:760px){{header{{align-items:flex-start;flex-direction:column}}main{{padding-top:40px}}
+ .grid,.grid.two,.media-grid{{grid-template-columns:1fr}}
+ nav{{width:100%;overflow-x:auto;padding-bottom:3px}}nav a{{white-space:nowrap}}}}
+@media(max-width:430px){{header{{padding:16px 15px}}main{{padding:36px 15px 68px}}.legal{{padding:22px 19px 26px;border-radius:16px}}
+ h1{{font-size:clamp(32px,11vw,46px)}}.lead{{font-size:16px}}.card{{padding:17px}}
+ .actions .btn{{width:100%;text-align:center}}footer{{padding-inline:15px}}}}
+@media(max-width:360px){{header,main,footer{{padding-inline:12px}}.brand{{font-size:17px}}}}
+@media(pointer:coarse){{.card,.media-grid img{{will-change:auto}}}}
+@media(prefers-reduced-motion:reduce){{
+ .hero .eyebrow,.hero h1,.hero .lead,.hero .actions,.grid .card,.media-grid img{{animation:none!important}}
+ .card,.media-grid img,nav a,.btn{{transition:none!important;transform:none!important}}
+ .card::before{{display:none}}}}
+</style></head><body>{fx.fond()}
+<div class="sx-shell">
+<header><a class="brand" href="/"><img src="/sentrix-avatar.png" alt="" width="34" height="34"><span>SentriX</span></a><nav><a href="/start">Commencer</a><a href="/docs">Documentation</a><a href="/stats">Stats</a><a href="/support">Support</a><a href="/app">Dashboard</a></nav></header>
 <main><section class="hero"><div class="eyebrow">SentriX officiel</div><h1>{html.escape(heading)}</h1><p class="lead">{html.escape(description)}</p></section>{body}</main>
 <footer><a href="/sentrix">Bot Discord</a><a href="/docs">Documentation</a><a href="/media-kit">Media kit</a><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></footer>
-<script>(()=>{{"use strict";const reduced=matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;if(reduced)return;const pointer=document.getElementById("publicPointer"),items=Array.from(document.querySelectorAll(".card,.media-grid img")),states=new WeakMap();addEventListener("pointermove",e=>{{if(pointer){{pointer.style.left=e.clientX+"px";pointer.style.top=e.clientY+"px";pointer.style.opacity="1"}}}},{{passive:true}});addEventListener("pointerleave",()=>{{if(pointer)pointer.style.opacity="0"}});function state(el){{let s=states.get(el);if(!s){{s={{rx:0,ry:0,trx:0,try:0,raf:0}};states.set(el,s)}}return s}}function frame(el){{const s=state(el),k=.15;s.rx+=(s.trx-s.rx)*k;s.ry+=(s.try-s.ry)*k;el.style.transform="perspective(900px) rotateX("+s.rx.toFixed(2)+"deg) rotateY("+s.ry.toFixed(2)+"deg) translateY(-2px)";if(Math.abs(s.trx-s.rx)+Math.abs(s.try-s.ry)>.04)s.raf=requestAnimationFrame(()=>frame(el));else{{s.raf=0;if(!s.trx&&!s.try)el.style.transform=""}}}}function aim(el,e,scale=1){{const r=el.getBoundingClientRect(),x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))-.5,y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))-.5,s=state(el);s.trx=-y*3.8*scale;s.try=x*3.8*scale;if(!s.raf)s.raf=requestAnimationFrame(()=>frame(el))}}function release(el){{const s=state(el);s.trx=s.try=0;if(!s.raf)s.raf=requestAnimationFrame(()=>frame(el))}}items.forEach(el=>{{el.addEventListener("pointermove",e=>{{if(e.pointerType!=="touch")aim(el,e)}});el.addEventListener("pointerleave",()=>release(el));el.addEventListener("pointerdown",e=>{{if(e.pointerType==="touch"){{aim(el,e,.75);setTimeout(()=>release(el),200)}}}})}})}})();</script>
+</div>
+{fx.script()}
+<script>(()=>{{"use strict";
+// Inclinaison 3D des cartes au survol. Elle existait deja et reste ici : le
+// fond anime donne la profondeur de la page, ceci donne celle des elements.
+// L'ancien element publicPointer a disparu : il etait display:none dans les
+// trois media queries, donc jamais visible. C'etait de la decoration morte.
+if(matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+const items=Array.from(document.querySelectorAll(".card,.media-grid img")),etats=new WeakMap();
+function etat(el){{let s=etats.get(el);if(!s){{s={{rx:0,ry:0,crx:0,cry:0,raf:0}};etats.set(el,s);}}return s;}}
+function frame(el){{const s=etat(el),k=.15;
+ s.rx+=(s.crx-s.rx)*k;s.ry+=(s.cry-s.ry)*k;
+ el.style.transform="perspective(900px) rotateX("+s.rx.toFixed(2)+"deg) rotateY("+s.ry.toFixed(2)+"deg) translateY(-2px)";
+ if(Math.abs(s.crx-s.rx)+Math.abs(s.cry-s.ry)>.04){{s.raf=requestAnimationFrame(()=>frame(el));}}
+ else{{s.raf=0;if(!s.crx&&!s.cry)el.style.transform="";}}}}
+function viser(el,e,f){{f=f||1;const r=el.getBoundingClientRect(),
+ x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))-.5,
+ y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))-.5,s=etat(el);
+ s.crx=-y*4.4*f;s.cry=x*4.4*f;if(!s.raf)s.raf=requestAnimationFrame(()=>frame(el));}}
+function relacher(el){{const s=etat(el);s.crx=0;s.cry=0;if(!s.raf)s.raf=requestAnimationFrame(()=>frame(el));}}
+items.forEach(el=>{{
+ el.addEventListener("pointermove",e=>{{if(e.pointerType!=="touch")viser(el,e);}});
+ el.addEventListener("pointerleave",()=>relacher(el));
+ el.addEventListener("pointerdown",e=>{{if(e.pointerType==="touch"){{viser(el,e,.7);setTimeout(()=>relacher(el),200);}}}});
+}});
+}})();</script>
 </body></html>'''
 
 
@@ -160,12 +254,12 @@ async def support_page(request: web.Request) -> web.Response:
 
 
 async def privacy_page(request: web.Request) -> web.Response:
-    body = '''<section class="legal"><h2>Données nécessaires au fonctionnement</h2><p class="muted">SentriX peut enregistrer des identifiants Discord de serveurs, utilisateurs, rôles, salons et messages lorsque cela est nécessaire aux fonctions activées. Selon les réglages d’un serveur, cela peut inclure configurations, sanctions, tickets et transcripts, niveaux, économie, logs techniques et données liées aux automatisations.</p><h2>Dashboard</h2><p class="muted">La connexion au dashboard utilise Discord OAuth afin d’identifier l’utilisateur, ses serveurs et ses permissions. Des données de session techniques peuvent être conservées pour maintenir la connexion et sécuriser les actions.</p><h2>Fonctions IA</h2><p class="muted">Lorsqu’une fonction IA est utilisée, le contenu nécessaire à la demande peut être transmis au fournisseur IA configuré afin de produire la réponse. Évitez d’envoyer des secrets ou données sensibles dans les prompts.</p><h2>Conservation</h2><p class="muted">La durée dépend du type de donnée et de la fonctionnalité. Certaines données opérationnelles disposent de règles de rétention, tandis que des configurations ou historiques nécessaires peuvent rester jusqu’à leur suppression ou celle du serveur concerné.</p><h2>Partage et vente</h2><p class="muted">SentriX n’a pas pour fonction de vendre les données des utilisateurs. Les données ne sont transmises à des services tiers que lorsque cela est nécessaire au fonctionnement d’une fonction activée ou à l’infrastructure du service.</p><h2>Suppression</h2><p class="muted">Un propriétaire ou administrateur de serveur peut demander la suppression de données associées à son serveur via le support officiel. Certaines informations peuvent être conservées lorsqu’elles sont nécessaires à la sécurité, à la prévention des abus ou à des obligations applicables.</p><h2>Sécurité</h2><p class="muted">Les secrets du bot et les clés API ne sont pas destinés à être stockés dans le dépôt public. Les accès d’administration du dashboard sont contrôlés avec les permissions Discord.</p></section>'''
+    body = '''<section class="legal"><h2>Données nécessaires au fonctionnement</h2><p class="muted">SentriX peut enregistrer des identifiants Discord de serveurs, utilisateurs, rôles, salons et messages lorsque cela est nécessaire aux fonctions activées. Selon les réglages d’un serveur, cela peut inclure configurations, sanctions, tickets et transcripts, niveaux, économie, logs techniques et données liées aux automatisations.</p><h2>Dashboard</h2><p class="muted">La connexion au dashboard utilise Discord OAuth afin d’identifier l’utilisateur, ses serveurs et ses permissions. Des données de session techniques peuvent être conservées pour maintenir la connexion et sécuriser les actions.</p><h2>Fonctions IA</h2><p class="muted">Lorsqu’une fonction IA est utilisée, le contenu nécessaire à la demande peut être transmis au fournisseur IA configuré afin de produire la réponse. Évitez d’envoyer des secrets ou données sensibles dans les prompts.</p><h2>Conservation</h2><p class="muted">La durée dépend du type de donnée et de la fonctionnalité. Certaines données opérationnelles disposent de règles de rétention, tandis que des configurations ou historiques nécessaires peuvent rester jusqu’à leur suppression ou celle du serveur concerné.</p><h2>Partage et vente</h2><p class="muted">SentriX n’a pas pour fonction de vendre les données des utilisateurs. Les données ne sont transmises à des services tiers que lorsque cela est nécessaire au fonctionnement d’une fonction activée ou à l’infrastructure du service.</p><h2>Suppression</h2><p class="muted">Un propriétaire ou administrateur de serveur peut demander la suppression de données associées à son serveur via le support officiel. Certaines informations peuvent être conservées lorsqu’elles sont nécessaires à la sécurité, à la prévention des abus ou à des obligations applicables.</p><h2>Où les données sont stockées</h2><p class="muted">SentriX est hébergé sur Railway. Les données de configuration et d’historique sont conservées dans une base PostgreSQL gérée ; les sessions du dashboard et la coordination entre les deux instances passent par Redis. Des sauvegardes de la base sont réalisées vers un espace de stockage dédié au projet. Aucune de ces données n’est hébergée dans le dépôt de code.</p><h2>Haute disponibilité</h2><p class="muted">Deux instances du service tournent en parallèle et une seule traite les commandes à un instant donné. Les deux accèdent aux mêmes données : un basculement ne crée pas de copie supplémentaire.</p><h2>Sécurité</h2><p class="muted">Les secrets du bot et les clés API ne sont pas destinés à être stockés dans le dépôt public. Les accès d’administration du dashboard sont contrôlés avec les permissions Discord.</p><h2>Nous contacter</h2><p class="muted">Pour une question sur vos données ou une demande de suppression, passez par le serveur de support officiel, accessible depuis la page <a href="/support">Support</a>.</p></section>'''
     return web.Response(text=_layout(request, title="Politique de confidentialité SentriX", description="Politique de confidentialité du bot Discord et du dashboard SentriX.", heading="Politique de confidentialité", body=body), content_type="text/html")
 
 
 async def terms_page(request: web.Request) -> web.Response:
-    body = '''<section class="legal"><h2>Utilisation du service</h2><p class="muted">SentriX doit être utilisé conformément aux règles de Discord et aux lois applicables. L’utilisation pour contourner des restrictions, harceler, spammer, frauder ou nuire à d’autres utilisateurs n’est pas autorisée.</p><h2>Responsabilité des administrateurs</h2><p class="muted">Les propriétaires et administrateurs restent responsables de la configuration de leur serveur, des permissions accordées au bot et des décisions de modération prises avec ses outils.</p><h2>Disponibilité</h2><p class="muted">Le service est fourni sans garantie de disponibilité permanente. Des maintenances, limites Discord, incidents réseau ou mises à jour peuvent interrompre temporairement certaines fonctions.</p><h2>Fonctions automatisées</h2><p class="muted">Les protections et automatisations doivent être testées avant un déploiement important. Un administrateur doit vérifier que les rôles, salons, seuils et permissions correspondent à son serveur.</p><h2>Évolutions</h2><p class="muted">Les fonctions, limites et présentes conditions peuvent évoluer avec SentriX. La version publiée sur cette page constitue la version publique actuelle.</p></section>'''
+    body = '''<section class="legal"><h2>Utilisation du service</h2><p class="muted">SentriX doit être utilisé conformément aux règles de Discord et aux lois applicables. L’utilisation pour contourner des restrictions, harceler, spammer, frauder ou nuire à d’autres utilisateurs n’est pas autorisée.</p><h2>Responsabilité des administrateurs</h2><p class="muted">Les propriétaires et administrateurs restent responsables de la configuration de leur serveur, des permissions accordées au bot et des décisions de modération prises avec ses outils.</p><h2>Disponibilité</h2><p class="muted">Le service est fourni sans garantie de disponibilité permanente. Des maintenances, limites Discord, incidents réseau ou mises à jour peuvent interrompre temporairement certaines fonctions.</p><h2>Fonctions automatisées</h2><p class="muted">Les protections et automatisations doivent être testées avant un déploiement important. Un administrateur doit vérifier que les rôles, salons, seuils et permissions correspondent à son serveur.</p><h2>Limitation d’usage</h2><p class="muted">Certaines commandes appliquent un délai entre deux utilisations, et les récompenses de jeux sont plafonnées par jour et par serveur. Ces limites protègent le service et l’équilibre des serveurs ; les contourner volontairement, par automatisation ou par comptes multiples, n’est pas autorisé.</p><h2>Suspension</h2><p class="muted">L’accès peut être restreint pour un utilisateur ou un serveur en cas d’abus manifeste, d’usage contraire aux règles de Discord ou de tentative de nuire au service ou à ses autres utilisateurs.</p><h2>Évolutions</h2><p class="muted">Les fonctions, limites et présentes conditions peuvent évoluer avec SentriX. La version publiée sur cette page constitue la version publique actuelle.</p><h2>Contact et support</h2><p class="muted">Les questions, signalements et demandes passent par le serveur de support officiel, accessible depuis la page <a href="/support">Support</a>.</p></section>'''
     return web.Response(text=_layout(request, title="Conditions d’utilisation SentriX", description="Conditions d’utilisation du bot Discord et du dashboard SentriX.", heading="Conditions d’utilisation", body=body), content_type="text/html")
 
 
