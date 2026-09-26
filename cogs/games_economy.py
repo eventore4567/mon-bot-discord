@@ -62,6 +62,7 @@ from cogs.games_catalog import (
     WORDGAME_CLUES,
     valeur_objet,
 )
+from services import game_stakes
 from utils import checks, design_system, game_rewards, stats_service, temporary_boosts
 from utils import sentrix_panels as panels
 
@@ -75,6 +76,14 @@ def _game_icon(title: str) -> str:
     from utils.game_context import pictogramme_de_titre
 
     return pictogramme_de_titre(title)
+
+
+# Pile ou face à la mise. Le multiplicateur laisse trois points à la banque, le
+# même taux de retour que +bomb, +lava et +rocket : sans marge le jeu ne
+# coûterait jamais rien, au-delà de cinq il devient punitif.
+COINFLIP_MULTIPLICATEUR = 1.94
+COINFLIP_MISE_MIN = 10
+COINFLIP_MISE_MAX = 2_000
 
 
 async def _embed(bot, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
@@ -345,16 +354,47 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    @commands.hybrid_command(name="coinflip", description="Pile ou face — devinez le résultat.", with_app_command=False)
-    @app_commands.describe(cote="pile ou face")
-    async def coinflip(self, ctx: commands.Context, cote: str):
+    @commands.hybrid_command(name="coinflip", description="Pile ou face — devinez le résultat, avec ou sans mise.", with_app_command=False)
+    @app_commands.describe(cote="pile ou face", mise="Somme à engager (facultatif)")
+    async def coinflip(self, ctx: commands.Context, cote: str, mise: int | None = None):
+        """Pile ou face, désormais jouable à la mise.
+
+        Sans montant, la manche reste exactement celle d'avant : récompense
+        fixe, aucun risque. Avec un montant, elle passe par le cycle de mise
+        partagé de ``services.game_stakes`` — réservation atomique au départ,
+        règlement en gain ou en perte — le même que ``+bomb``, ``+lava`` et
+        ``+rocket``. Recopier une deuxième mécanique d'argent ici l'aurait fait
+        diverger de celle qui est déjà éprouvée.
+        """
         guild_id = ctx.guild.id if ctx.guild else None
         cote = cote.strip().lower()
         if cote not in ("pile", "face"):
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description='Précisez `pile` ou `face`.', kind='warning')))
+        if mise is not None and not COINFLIP_MISE_MIN <= int(mise) <= COINFLIP_MISE_MAX:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title='Pile ou face',
+                description=(
+                    f"La mise doit être comprise entre **{COINFLIP_MISE_MIN}** et "
+                    f"**{stats_service.format_number(COINFLIP_MISE_MAX)}**, "
+                    "ou omise pour jouer sans risque."
+                ), kind='warning')))
         started, err, sid = await _precheck(self.bot, ctx, "coinflip", 10)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Pile ou face', description=err, kind='warning')))
+
+        game_id = None
+        if mise is not None:
+            game_id = game_stakes.nouvel_identifiant("coinflip")
+            statut = await game_stakes.ouvrir_mise(
+                self.bot.db, ctx.guild.id, ctx.author.id, "coinflip", int(mise), game_id)
+            if statut != "ok":
+                game_rewards.release_play_lock(ctx.guild.id, ctx.author.id, "coinflip")
+                texte = {
+                    "insufficient": "Votre solde ne couvre pas cette mise.",
+                    "invalid": "Le montant de la mise est invalide.",
+                }.get(statut, "Jeu momentanément indisponible. Votre argent n'a pas bougé.")
+                return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                    self.bot, guild_id, title='Pile ou face', description=texte, kind='warning')))
         # Le résultat est tiré AVANT l'animation : ce qui tourne à l'écran ne
         # décide de rien, et une édition perdue ne peut pas changer la manche.
         result = game_rewards.secure_pick(["pile", "face"])
@@ -375,7 +415,31 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                 break
         await asyncio.sleep(0.7)
 
-        if result == cote:
+        gagne = result == cote
+        if game_id is not None:
+            # Manche à mise : l'argent passe par le cycle partagé, et _finish ne
+            # sert plus qu'au cooldown, au verrou et à l'historique — sinon le
+            # joueur serait crédité deux fois pour la même manche.
+            retour = int(round(int(mise) * COINFLIP_MULTIPLICATEUR)) if gagne else 0
+            if gagne:
+                await game_stakes.regler_gain(self.bot.db, game_id, retour)
+            else:
+                await game_stakes.regler_perte(self.bot.db, game_id)
+            await _finish(self.bot, ctx, "coinflip", sid, "win" if gagne else "loss", 0,
+                          metadata={"mise": int(mise), "retour": retour, "cote": cote})
+            emoji_monnaie = "🪙"
+            if gagne:
+                profit = retour - int(mise)
+                desc = (f"{faces[result]} **{result.upper()}** — vous aviez vu juste !\n"
+                        f"Retour **{stats_service.format_number(retour)}** {emoji_monnaie} "
+                        f"(profit **+{stats_service.format_number(profit)}**, "
+                        f"×{COINFLIP_MULTIPLICATEUR:g}).")
+                kind = "success"
+            else:
+                desc = (f"{faces[result]} **{result.upper()}** — raté, vous aviez dit {cote}.\n"
+                        f"Mise perdue : **{stats_service.format_number(int(mise))}** {emoji_monnaie}.")
+                kind = "danger"
+        elif gagne:
             reward = await _finish(self.bot, ctx, "coinflip", sid, "win", 12)
             desc = f"{faces[result]} **{result.upper()}** — vous aviez vu juste !" + _reward_line(reward)
             kind = "success"
