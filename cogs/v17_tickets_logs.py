@@ -501,4 +501,19 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     install_ticket_patches(bot)
 
 
-__all__ = ["install"]
+async def setup(bot: commands.Bot) -> None:
+    """Extension à part entière : ce module fournit des commandes annoncées ailleurs.
+
+    Il n'exposait qu'``install()``, appelé par l'enveloppe de chargement de
+    ``cogs/__init__`` — enveloppe posée sur une classe que la production
+    n'instancie plus depuis que ``railway_boot`` remplace ``commands.Bot``.
+    Résultat mesuré le 2026-09-26 sur la chaîne v8 : le cog V17TicketsLogs était
+    absent, et ``+logs``, ``+logevent`` et ``+logsearch`` n'existaient pas —
+    alors que ``HELP_VISIBLE_EXTRA_COMMANDS`` les déclare visibles dans l'aide.
+
+    ``install()`` reste idempotent : il ne rajoute le cog que s'il manque.
+    """
+    await install(bot)
+
+
+__all__ = ["install", "setup"]

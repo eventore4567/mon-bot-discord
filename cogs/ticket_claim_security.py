@@ -546,3 +546,25 @@ def install(bot: commands.Bot) -> None:
     logger.info(
         "Sécurité tickets activée : claims, anti-double ouverture, priorité masquée et logs-tickets canoniques."
     )
+
+
+async def setup(bot: commands.Bot) -> None:
+    """Extension à part entière : sans elle, des boutons staff sont ouverts.
+
+    Le module n'avait qu'``install()``, appelé par l'enveloppe de chargement de
+    ``cogs/__init__`` — posée sur une classe que la production n'instancie plus
+    depuis que ``railway_boot`` remplace ``commands.Bot``. Mesuré le 2026-09-26
+    sur la chaîne v8 : le module n'était pas installé.
+
+    Ce que son absence laissait passer : ``Tickets.handle_control_button`` ne
+    vérifie une autorisation que si un ``role_id`` est configuré pour ce bouton
+    précis. Sans configuration, aucun contrôle — le créateur du ticket pouvait
+    donc utiliser claim, add, remove, rename et transfer, dont ``add`` qui fait
+    entrer d'autres membres dans son salon privé. Ce module impose le contrôle
+    staff quelle que soit la configuration, et réserve la fermeture au créateur
+    ou au staff.
+
+    ``install()`` est idempotent : il garde un drapeau de module.
+    """
+    install(bot)
+

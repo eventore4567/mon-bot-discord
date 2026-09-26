@@ -58,6 +58,15 @@ EXTENSIONS = [
     "cogs.owner_sanction_immunity",
     "cogs.security_tools",
     "cogs.tickets",
+    # Fournit +logs, +logevent et +logsearch, que HELP_VISIBLE_EXTRA_COMMANDS
+    # déclare visibles dans l'aide, plus le pipeline de journalisation V17. Il
+    # n'avait qu'un install() suspendu à l'enveloppe morte de cogs/__init__ :
+    # mesuré sur la chaîne v8, aucune des trois commandes n'existait.
+    "cogs.v17_tickets_logs",
+    # Impose le contrôle staff sur les boutons de ticket même quand aucun rôle
+    # n'est configuré par bouton — sans quoi le créateur du ticket peut utiliser
+    # claim, add, remove, rename et transfer. Même cause de mort que ci-dessus.
+    "cogs.ticket_claim_security",
     "cogs.configuration",
     "cogs.server_builder",
     "cogs.logs",
