@@ -928,6 +928,12 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            f"supprimer tous les avertissements de {membre.display_name}",
+            detail="Tous les avertissements enregistrés pour ce membre seront effacés.",
+        ):
+            return
         await self.bot.db.execute(
             "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
@@ -1001,6 +1007,12 @@ class Moderation(commands.Cog):
         pas N cartes individuelles avant le récapitulatif.
         """
         requested = max(2, min(int(nombre), 100))
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            f"supprimer jusqu'à {requested} message(s) de ce salon",
+            detail="La suppression des messages est irréversible depuis Discord.",
+        ):
+            return
         if ctx.interaction is not None and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(ephemeral=True)
 
