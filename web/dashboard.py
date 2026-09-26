@@ -35,6 +35,7 @@ logger = logging.getLogger("bot.dashboard")
 START_TIME = time.time()
 DISCORD_API = "https://discord.com/api/v10"
 DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
+BOT_INSTALL_URL = "https://discord.com/oauth2/authorize?client_id=1532010415951839252"
 SESSION_COOKIE = "sentrix_session"
 OAUTH_STATE_COOKIE = "sentrix_oauth_state"
 SESSION_TTL = 12 * 60 * 60
@@ -166,20 +167,13 @@ def _verify_signed_oauth_state(request: web.Request, state: str) -> bool:
     return bool(_oauth_state_secret()) and secrets.compare_digest(signature, expected)
 
 
-def _invite_url(bot, guild_id: int | None = None) -> str | None:
-    client_id = _client_id(bot)
-    if not client_id:
-        return None
-    params = {
-        "client_id": client_id,
-        "permissions": "8",
-        "integration_type": "0",
-        "scope": "bot applications.commands",
-    }
-    if guild_id:
-        params["guild_id"] = str(guild_id)
-        params["disable_guild_select"] = "true"
-    return f"{DISCORD_AUTHORIZE}?{urlencode(params)}"
+def _invite_url(bot, guild_id: int | None = None) -> str:
+    """Lien canonique d'installation de SentriX.
+
+    Il est volontairement séparé du client OAuth du dashboard : modifier le bouton
+    « Ajouter SentriX » ne doit jamais changer le flux de connexion identify/guilds.
+    """
+    return BOT_INSTALL_URL
 
 
 def _avatar_url(user: dict) -> str | None:
