@@ -344,7 +344,7 @@ class Invites(commands.Cog, name="Invites"):
 
     @commands.hybrid_command(
         name="sync-invites",
-        aliases=["syncinvites"],
+        aliases=["syncinvites", "invite-sync", "invites-sync", "resync-invites"],
         description="[Admin] Synchroniser l'inventaire actuel des codes d'invitation.",
         with_app_command=False,
     )
@@ -386,6 +386,265 @@ class Invites(commands.Cog, name="Invites"):
                 )
             ),
         )
+
+
+    @commands.hybrid_command(
+        name="invite-stats",
+        aliases=["invitestats", "stats-invites"],
+        description="Afficher les statistiques détaillées d'invitations d'un membre.",
+        with_app_command=False,
+    )
+    @app_commands.describe(membre="Le membre à consulter")
+    async def invite_stats(self, ctx: commands.Context, membre: discord.Member = None):
+        membre = membre or ctx.author
+        b = await self.bot.db.get_invite_breakdown(ctx.guild.id, membre.id)
+        total = int(b["total"] or 0)
+        active = max(0, total - int(b["left"] or 0))
+        retention = round((active / total) * 100, 1) if total else 0.0
+        latest = await self.bot.db.fetchone(
+            "SELECT MAX(joined_at) AS ts FROM member_invites WHERE guild_id=? AND inviter_id=?",
+            (ctx.guild.id, membre.id),
+        )
+        last_ts = int(latest["ts"] or 0) if latest else 0
+        description = (
+            f"Réelles : **{b['real']}**\n"
+            f"Fake actives : **{b['fake']}**\n"
+            f"Reparties : **{b['left']}**\n"
+            f"Bonus staff : **{b['bonus']}**\n"
+            f"Total brut : **{b['total']}**\n"
+            f"Total crédité : **{b['credited']}**\n"
+            f"Rétention : **{retention}%**"
+        )
+        if last_ts:
+            description += f"\nDernière invitation attribuée : <t:{last_ts}:R>"
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(embeds.neutral(f"Statistiques d'invitations de {membre.display_name}", description)),
+        )
+
+    @commands.hybrid_command(
+        name="invite-rank",
+        aliases=["inviterank", "rank-invites"],
+        description="Afficher le rang d'un membre dans le classement des invitations.",
+        with_app_command=False,
+    )
+    @app_commands.describe(membre="Le membre à consulter")
+    async def invite_rank(self, ctx: commands.Context, membre: discord.Member = None):
+        membre = membre or ctx.author
+        rows = await self.bot.db.fetchall(
+            "SELECT DISTINCT inviter_id FROM member_invites WHERE guild_id=? AND inviter_id IS NOT NULL "
+            "UNION SELECT DISTINCT user_id AS inviter_id FROM invite_bonuses WHERE guild_id=?",
+            (ctx.guild.id, ctx.guild.id),
+        )
+        ranking = []
+        for row in rows:
+            inviter_id = int(row["inviter_id"])
+            breakdown = await self.bot.db.get_invite_breakdown(ctx.guild.id, inviter_id)
+            ranking.append((inviter_id, int(breakdown["credited"] or 0)))
+        ranking.sort(key=lambda item: item[1], reverse=True)
+        position = next((i for i, (uid, _score) in enumerate(ranking, start=1) if uid == membre.id), None)
+        score = next((score for uid, score in ranking if uid == membre.id), 0)
+        if position is None:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"{membre.mention} n'est pas encore classé.")))
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.neutral(
+                    f"Rang de {membre.display_name}",
+                    f"Position : **#{position}** sur **{len(ranking)}**\nInvitations créditées : **{score}**",
+                )
+            ),
+        )
+
+    @commands.hybrid_command(
+        name="invite-history",
+        aliases=["invitehistory", "history-invites"],
+        description="Afficher les dernières invitations attribuées à un membre.",
+        with_app_command=False,
+    )
+    @app_commands.describe(membre="L'invitant à consulter")
+    async def invite_history(self, ctx: commands.Context, membre: discord.Member = None):
+        membre = membre or ctx.author
+        rows = await self.bot.db.fetchall(
+            "SELECT member_id,invite_code,joined_at,left_at,account_age_days "
+            "FROM member_invites WHERE guild_id=? AND inviter_id=? ORDER BY joined_at DESC LIMIT 15",
+            (ctx.guild.id, membre.id),
+        )
+        if not rows:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"Aucun historique d'invitation pour {membre.mention}.")))
+        lines = []
+        for row in rows:
+            status = "reparti" if row["left_at"] is not None else "présent"
+            age = row["account_age_days"]
+            recent = age is not None and int(age) < FAKE_INVITE_ACCOUNT_AGE_DAYS
+            code = str(row["invite_code"] or "code inconnu")
+            suffix = " · compte récent" if recent else ""
+            lines.append(f"<@{row['member_id']}> · {code} · {status}{suffix} · <t:{row['joined_at']}:R>")
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(embeds.neutral(f"Historique d'invitations de {membre.display_name}", "\n".join(lines))),
+        )
+
+    @commands.hybrid_command(
+        name="invite-info",
+        aliases=["inviteinfo", "info-invite"],
+        description="Afficher les informations d'un code d'invitation actif.",
+        with_app_command=False,
+    )
+    async def invite_info(self, ctx: commands.Context, code: str):
+        code = str(code or "").strip()
+        try:
+            invites = await ctx.guild.invites()
+        except discord.Forbidden:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("SentriX a besoin de la permission Gérer le serveur pour lire les invitations.")),
+            )
+        invite = next((inv for inv in invites if str(inv.code) == code), None)
+        if invite is None:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f"Aucune invitation active trouvée avec le code {code}.")))
+        tracked = await self.bot.db.fetchone(
+            "SELECT COUNT(*) AS joins,SUM(CASE WHEN left_at IS NULL THEN 1 ELSE 0 END) AS active "
+            "FROM member_invites WHERE guild_id=? AND invite_code=?",
+            (ctx.guild.id, code),
+        )
+        description = (
+            f"Code : **{invite.code}**\n"
+            f"Créateur : {invite.inviter.mention if invite.inviter else 'Inconnu'}\n"
+            f"Salon : {invite.channel.mention if invite.channel else 'Inconnu'}\n"
+            f"Utilisations Discord : **{int(invite.uses or 0)}**\n"
+            f"Arrivées suivies par SentriX : **{int(tracked['joins'] or 0) if tracked else 0}**\n"
+            f"Encore présentes : **{int(tracked['active'] or 0) if tracked else 0}**"
+        )
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral("Informations de l'invitation", description)))
+
+    @commands.hybrid_command(
+        name="invite-sources",
+        aliases=["invitesources", "sources-invites"],
+        description="Afficher les sources d'arrivée réellement enregistrées.",
+        with_app_command=False,
+    )
+    async def invite_sources(self, ctx: commands.Context):
+        rows = await self.bot.db.fetchall(
+            "SELECT inviter_id,invite_code FROM member_invites WHERE guild_id=?",
+            (ctx.guild.id,),
+        )
+        attributed = sum(1 for r in rows if r["inviter_id"] is not None and r["invite_code"])
+        code_only = sum(1 for r in rows if r["inviter_id"] is None and r["invite_code"])
+        unknown = sum(1 for r in rows if not r["invite_code"])
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.neutral(
+                    "Sources d'arrivée",
+                    f"Invitation attribuée : **{attributed}**\n"
+                    f"Code sans invitant / vanity possible : **{code_only}**\n"
+                    f"Source inconnue : **{unknown}**\n"
+                    f"Total observé : **{len(rows)}**",
+                )
+            ),
+        )
+
+    @commands.hybrid_command(
+        name="invite-retention",
+        aliases=["inviteretention", "retention-invites"],
+        description="Afficher le taux de rétention des membres invités.",
+        with_app_command=False,
+    )
+    @app_commands.describe(membre="L'invitant à consulter")
+    async def invite_retention(self, ctx: commands.Context, membre: discord.Member = None):
+        membre = membre or ctx.author
+        stats = await self.bot.db.get_invite_stats(ctx.guild.id, membre.id)
+        total = int(stats["total"] or 0)
+        active = int(stats["active"] or 0)
+        left = int(stats["left"] or 0)
+        retention = round((active / total) * 100, 1) if total else 0.0
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.neutral(
+                    f"Rétention de {membre.display_name}",
+                    f"Invités suivis : **{total}**\nEncore présents : **{active}**\nRepartis : **{left}**\nRétention : **{retention}%**",
+                )
+            ),
+        )
+
+    @commands.hybrid_command(
+        name="invite-label",
+        aliases=["invitelabel", "label-invite"],
+        description="[Admin] Donner un label interne à un code d'invitation.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def invite_label(self, ctx: commands.Context, code: str, *, label: str):
+        code = str(code or "").strip()
+        label = str(label or "").strip()
+        if not code or len(code) > 64:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Code d'invitation invalide.")))
+        if not label or len(label) > 80:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Le label doit contenir entre 1 et 80 caractères.")))
+        await self.bot.db.execute(
+            "CREATE TABLE IF NOT EXISTS invite_code_meta ("
+            "guild_id INTEGER NOT NULL, code TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', "
+            "last_seen_uses INTEGER NOT NULL DEFAULT 0, last_seen_at INTEGER NOT NULL DEFAULT 0, "
+            "PRIMARY KEY (guild_id, code))"
+        )
+        await self.bot.db.execute(
+            "INSERT INTO invite_code_meta(guild_id,code,label,last_seen_uses,last_seen_at) "
+            "VALUES(?,?,?,0,0) ON CONFLICT(guild_id,code) DO UPDATE SET label=excluded.label",
+            (ctx.guild.id, code, label),
+        )
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Label **{label}** enregistré pour {code}.")))
+
+    @commands.hybrid_command(
+        name="invite-unlabel",
+        aliases=["inviteunlabel", "unlabel-invite"],
+        description="[Admin] Retirer le label interne d'un code d'invitation.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def invite_unlabel(self, ctx: commands.Context, code: str):
+        code = str(code or "").strip()
+        try:
+            await self.bot.db.execute(
+                "UPDATE invite_code_meta SET label='' WHERE guild_id=? AND code=?",
+                (ctx.guild.id, code),
+            )
+        except Exception:
+            pass
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Label retiré pour {code}.")))
+
+    @commands.hybrid_command(
+        name="invite-search",
+        aliases=["invitesearch", "search-invites"],
+        description="Rechercher un code, un invité ou un invitant dans l'historique.",
+        with_app_command=False,
+    )
+    async def invite_search(self, ctx: commands.Context, recherche: str):
+        term = str(recherche or "").strip()
+        if not term:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Indiquez un code ou un identifiant Discord.")))
+        params = [ctx.guild.id]
+        where = ["guild_id=?"]
+        if term.isdigit():
+            where.append("(member_id=? OR inviter_id=?)")
+            params.extend([int(term), int(term)])
+        else:
+            where.append("invite_code LIKE ?")
+            params.append("%" + term + "%")
+        rows = await self.bot.db.fetchall(
+            "SELECT member_id,inviter_id,invite_code,joined_at,left_at "
+            "FROM member_invites WHERE " + " AND ".join(where) + " ORDER BY joined_at DESC LIMIT 20",
+            tuple(params),
+        )
+        if not rows:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Aucun résultat dans l'historique des invitations.")))
+        lines = []
+        for row in rows:
+            inviter = f"<@{row['inviter_id']}>" if row["inviter_id"] else "inconnu"
+            code = str(row["invite_code"] or "code inconnu")
+            lines.append(f"<@{row['member_id']}> · invité par {inviter} · {code} · <t:{row['joined_at']}:R>")
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral("Recherche invitations", "\n".join(lines)[:4000])))
 
     # -------------------------------------------------------------- Bonus (staff)
 
