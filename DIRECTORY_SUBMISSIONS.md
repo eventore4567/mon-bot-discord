@@ -8,15 +8,15 @@ Ce fichier centralise les informations prêtes à copier dans les principaux ann
 - Application ID : `1532010415951839252`
 - Préfixes : `+` et `/`
 - Langue : Français
-- Site : `https://mon-bot-discord-production-8944.up.railway.app/`
-- Installation : `https://mon-bot-discord-production-8944.up.railway.app/start`
-- Dashboard : `https://mon-bot-discord-production-8944.up.railway.app/app`
-- Stats : `https://mon-bot-discord-production-8944.up.railway.app/stats`
-- Support : `https://mon-bot-discord-production-8944.up.railway.app/support`
-- Confidentialité : `https://mon-bot-discord-production-8944.up.railway.app/privacy`
-- Conditions : `https://mon-bot-discord-production-8944.up.railway.app/terms`
-- Media kit : `https://mon-bot-discord-production-8944.up.railway.app/media-kit`
-- Avatar : `https://mon-bot-discord-production-8944.up.railway.app/sentrix-avatar.png`
+- Site : `https://sentrix-standby-production.up.railway.app/home`
+- Installation : `https://sentrix-standby-production.up.railway.app/start`
+- Dashboard : `https://sentrix-standby-production.up.railway.app/app`
+- Stats : `https://sentrix-standby-production.up.railway.app/stats`
+- Support : `https://sentrix-standby-production.up.railway.app/support`
+- Confidentialité : `https://sentrix-standby-production.up.railway.app/privacy`
+- Conditions : `https://sentrix-standby-production.up.railway.app/terms`
+- Media kit : `https://sentrix-standby-production.up.railway.app/media-kit`
+- Avatar : `https://sentrix-standby-production.up.railway.app/sentrix-avatar.png`
 
 ## Description courte
 
@@ -111,7 +111,7 @@ Les secrets ne doivent jamais être écrits dans GitHub. Le diagnostic sans secr
 
 Modération, sécurité, tickets, IA, logs, automatisations et dashboard web dans un seul bot.
 
-Site : https://mon-bot-discord-production-8944.up.railway.app/
+Site : https://sentrix-standby-production.up.railway.app/home
 
 ## Ordre de publication recommandé
 
