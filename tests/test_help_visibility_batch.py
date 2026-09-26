@@ -36,12 +36,30 @@ class HelpVisibilityBatchTests(unittest.TestCase):
             "set-bio", "rep", "reputation", "repleaderboard", "rephistory",
             "voice-time",
             "addemoji", "deleteemoji", "emoji-list",
+            # Second lot, 2026-09-26 : 37 commandes publiques selon
+            # main.PUBLIC_COMMANDS, chargées et fonctionnelles, mais masquées et
+            # classées nulle part. +poll, +remind, +translate, +invites et
+            # +leaderboard-levels marchaient sans qu'on puisse les découvrir.
+            "ai", "botinfo", "changelog", "channelinfo", "choose",
+            "code", "correct", "event-join", "event-leave", "event-list",
+            "explain", "fact-check", "feedback", "image-prompt", "improve",
+            "info", "invite-leaderboard", "invited-by", "invites", "leaderboard-levels",
+            "membercount", "music", "permissions", "poll", "remind",
+            "reminder-cancel", "reminder-list", "report-bug", "roll", "sentrixpro",
+            "serverinfo", "suggest", "summarize", "tournament-join", "tournament-list",
+            "translate", "weather",
         }
         missing = expected - HELP_VISIBLE_EXTRA_COMMANDS
         self.assertEqual(missing, set(), f"toujours absentes : {missing}")
 
-    def test_aucune_de_ces_commandes_ne_consomme_le_budget_slash(self):
-        """Non-régression : ce lot d'orphelines reste +help uniquement.
+    def test_aucune_de_ces_commandes_n_est_promue_commande_directe(self):
+        """Ce lot reste hors des listes « directes ».
+
+        Le nom précédent — « ne consomme pas le budget slash » — était faux, et
+        la mesure du 2026-09-26 l'a montré : démasquer une commande suffit à ce
+        que la couche de surface l'expose aussi en slash. Les racines sont
+        passées de 69 à 71 et les feuilles de 262 à 295. Ce que ce test garde
+        réellement, c'est l'absence de chevauchement entre les listes.
         +stats a quitté ce lot : c'est désormais la surface profil canonique et une
         commande directe, donc elle est testée avec NORMAL_DIRECT_COMMANDS ailleurs."""
         overlap = HELP_VISIBLE_EXTRA_COMMANDS & NORMAL_DIRECT_COMMANDS

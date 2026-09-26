@@ -149,15 +149,38 @@ MERGED_COMMANDS = (
 # confirmé par audit (2026-09-09) sur les familles tickets/logs/notifications/server/
 # économie/niveaux/emoji : ce ne sont pas des doublons "fusionnés" dans /setup (ceux-là
 # restent dans MERGED_COMMANDS), juste des commandes qu'aucune liste ne réclamait. On
-# ne les rend visibles QUE dans +help, sans toucher au budget slash : aucune n'est
-# ajoutée à NORMAL_DIRECT_COMMANDS (qui contrôle aussi l'éligibilité slash — voir
-# command_hybrid_slash_restore_v3.py).
+# ne les ajoute PAS à NORMAL_DIRECT_COMMANDS (qui contrôle aussi la restauration
+# slash par command_hybrid_slash_restore_v3.py).
+#
+# Correction du 2026-09-26 : « sans toucher au budget slash » était faux. Mesuré
+# sur la chaîne v8, démasquer une commande suffit à ce que la couche de surface
+# l'expose aussi en slash — le second lot d'orphelines a fait passer les racines
+# de 69 à 71 et les feuilles de 262 à 295. Ce n'est pas un problème tant qu'on
+# reste loin des 100 racines de Discord, mais il faut le mesurer avant d'ajouter.
 # +logs et +level-roles en sont sorties le 2026-09-26 : main les supprime au boot
 # (COMMANDS_REPLACED_BY_SETUP) et elles n'existent donc jamais au runtime. +logs se
 # décrit elle-même comme « l'ancienne interface interne ; utilisez +logsetup ».
 # Annoncer dans l'aide une commande volontairement retirée est exactement le
 # « vieux nom obsolète affiché » qu'il faut éviter.
 HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
+    # Deuxième lot d'orphelines, 2026-09-26. Le lot du 2026-09-09 en avait
+    # rattrapé trente-quatre ; il en restait 108 chargées, masquées et classées
+    # nulle part, dont 47 que main.PUBLIC_COMMANDS déclare pourtant publiques.
+    # La politique de permissions disait « tout le monde peut s'en servir » et
+    # la surface répondait « invisible » : +poll, +remind, +translate, +invites,
+    # +leaderboard-levels fonctionnaient sans qu'on puisse les découvrir.
+    # Retenues ici : publiques, réellement chargées, avec une description et un
+    # cog, et non supprimées au démarrage. Aucune n'entre dans
+    # NORMAL_DIRECT_COMMANDS, mais les démasquer expose quand même 33 feuilles
+    # slash et 2 racines de plus : mesuré, 71 racines sur les 100 permises.
+    "ai", "botinfo", "changelog", "channelinfo", "choose",
+    "code", "correct", "event-join", "event-leave", "event-list",
+    "explain", "fact-check", "feedback", "image-prompt", "improve",
+    "info", "invite-leaderboard", "invited-by", "invites", "leaderboard-levels",
+    "membercount", "music", "permissions", "poll", "remind",
+    "reminder-cancel", "reminder-list", "report-bug", "roll", "sentrixpro",
+    "serverinfo", "suggest", "summarize", "tournament-join", "tournament-list",
+    "translate", "weather",
     # +ticketsetup ouvre le hub de config tickets (panels/types/formulaires/logs...) —
     # /setup ne fait qu'auto-créer UN panel "Support" par défaut
     # (setup_ticket_autoconfig_v72.py) ; un serveur voulant plusieurs types de tickets
