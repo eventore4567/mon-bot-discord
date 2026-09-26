@@ -79,6 +79,10 @@ EXTENSIONS = [
     # ET au niveau du moteur. Sans elle, utils.ai_service.generate n'est gardé
     # par personne et trois appelants directs vivants contournent le réglage.
     "cogs.ai_disable_guard",
+    # Porte V17Health, dont on_ready déclenche la reprise des mises de jeu
+    # interrompues par un redémarrage. Vérifié dans les journaux Railway : la
+    # ligne de bilan, journalisée même à zéro, n'apparaissait jamais.
+    "cogs.v17_health",
     "cogs.economy",
     "cogs.levels",
     "cogs.minigames",

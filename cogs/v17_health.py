@@ -413,4 +413,23 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     install_diagnostic_extension(bot)
 
 
-__all__ = ["build_health_embed", "install"]
+async def setup(bot: commands.Bot) -> None:
+    """Extension à part entière : ce cog porte la reprise des mises de jeu.
+
+    ``V17Health.on_ready`` appelle ``_recover_startup_tasks``, qui relance les
+    boucles de fond tombées pendant le chargement ET règle les mises de jeu
+    interrompues par un redémarrage — sans quoi une manche de ``+bomb``,
+    ``+lava`` ou ``+rocket`` coupée en plein vol laisse l'argent du joueur
+    réservé indéfiniment.
+
+    Le module n'avait qu'``install()``, appelé par l'enveloppe de chargement de
+    ``cogs/__init__`` — posée sur une classe que la production n'instancie plus
+    depuis que ``railway_boot`` remplace ``commands.Bot``. Vérifié dans les
+    journaux Railway du 2026-09-26 : la ligne « Reprise des mises de jeu au
+    démarrage », pourtant journalisée même à zéro précisément pour prouver son
+    passage, n'apparaissait nulle part. La reprise ne tournait jamais.
+    """
+    await install(bot)
+
+
+__all__ = ["build_health_embed", "install", "setup"]
