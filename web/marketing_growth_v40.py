@@ -58,11 +58,20 @@ def _layout(request: web.Request, *, title: str, description: str, heading: str,
 :root{{--bg:#080a11;--panel:#111522;--panel2:#151a2a;--line:#283047;--text:#f4f6ff;--muted:#a3acc2;--brand:#7667ff;--brand2:#a897ff;--ok:#62d99f}}
 *{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 10% -10%,#37297366,transparent 34%),var(--bg);color:var(--text);font:15px Inter,system-ui,-apple-system,"Segoe UI",sans-serif}}
 a{{color:inherit}}header{{max-width:1120px;margin:auto;padding:20px 22px;display:flex;justify-content:space-between;align-items:center;gap:14px}}.brand{{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:900;text-decoration:none}}.brand img{{width:34px;height:34px;border-radius:10px}}nav{{display:flex;gap:7px;flex-wrap:wrap}}nav a,.btn{{border:1px solid var(--line);background:#151a29;border-radius:10px;padding:9px 12px;text-decoration:none;font-weight:750}}main{{max-width:1120px;margin:auto;padding:58px 22px 78px}}.hero{{max-width:860px}}.eyebrow{{font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--brand2);font-weight:850}}h1{{font-size:clamp(34px,6.5vw,62px);line-height:1.04;letter-spacing:-.04em;margin:11px 0 15px}}h2{{font-size:20px;margin:0 0 9px}}h3{{margin:0 0 7px}}p{{line-height:1.65}}.lead{{font-size:18px;color:var(--muted);max-width:800px}}.actions{{display:flex;gap:9px;flex-wrap:wrap;margin:24px 0 8px}}.btn.primary{{background:linear-gradient(135deg,var(--brand),#5647dd);border-color:transparent}}.grid{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:36px}}.grid.two{{grid-template-columns:repeat(2,minmax(0,1fr))}}.card{{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel));border-radius:15px;padding:19px}}.muted{{color:var(--muted)}}.big{{font-size:32px;font-weight:950;letter-spacing:-.03em}}.status{{display:inline-flex;align-items:center;gap:7px;font-weight:800}}.dot{{width:8px;height:8px;border-radius:50%;background:var(--ok)}}.legal{{max-width:850px}}.legal h2{{margin-top:30px}}.legal li{{color:var(--muted);line-height:1.65;margin:5px 0}}.media-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:25px}}.media-grid img{{display:block;width:100%;border:1px solid var(--line);border-radius:14px;background:var(--panel)}}code{{background:#151a29;border:1px solid var(--line);padding:2px 6px;border-radius:6px}}footer{{max-width:1120px;margin:auto;padding:0 22px 34px;color:var(--muted);font-size:12px}}footer a{{margin-right:12px}}
-@media(max-width:760px){{header{{align-items:flex-start;flex-direction:column}}main{{padding-top:38px}}.grid,.grid.two,.media-grid{{grid-template-columns:1fr}}}}
-</style></head><body>
+.card,.media-grid img{{transform-style:preserve-3d;will-change:transform;transition:border-color .18s ease,box-shadow .18s ease}}
+.card:hover,.media-grid img:hover{{border-color:#39475e;box-shadow:0 14px 36px rgba(0,0,0,.20)}}
+.public-pointer{{display:none}}
+@media(max-width:1024px){{header{{padding-inline:18px}}main{{padding-inline:18px}}}}
+@media(max-width:760px){{header{{align-items:flex-start;flex-direction:column}}main{{padding-top:38px}}.grid,.grid.two,.media-grid{{grid-template-columns:1fr}}nav{{width:100%;overflow-x:auto;padding-bottom:3px}}nav a{{white-space:nowrap}}}}
+@media(max-width:430px){{header{{padding:15px 14px}}main{{padding:34px 14px 64px}}h1{{font-size:clamp(34px,11vw,48px)}}.lead{{font-size:16px}}.card{{padding:16px}}.actions .btn{{width:100%;text-align:center}}footer{{padding-inline:14px}}}}
+@media(max-width:360px){{main{{padding-inline:11px}}header{{padding-inline:11px}}.brand{{font-size:17px}}}}
+@media(pointer:coarse){{.public-pointer{{display:none}}.card,.media-grid img{{will-change:auto}}}}
+@media(prefers-reduced-motion:reduce){{html{{scroll-behavior:auto}}.public-pointer{{display:none}}.card,.media-grid img{{transform:none!important;transition:none!important}}}}
+</style></head><body><div class="public-pointer" id="publicPointer" aria-hidden="true"></div>
 <header><a class="brand" href="/"><img src="/sentrix-avatar.png" alt=""><span>SentriX</span></a><nav><a href="/start">Commencer</a><a href="/stats">Stats</a><a href="/support">Support</a><a href="/dashboard-sentrix">Dashboard</a></nav></header>
 <main><section class="hero"><div class="eyebrow">SentriX officiel</div><h1>{html.escape(heading)}</h1><p class="lead">{html.escape(description)}</p></section>{body}</main>
 <footer><a href="/sentrix">Bot Discord</a><a href="/media-kit">Media kit</a><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></footer>
+<script>(()=>{{"use strict";const reduced=matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;if(reduced)return;const pointer=document.getElementById("publicPointer"),items=Array.from(document.querySelectorAll(".card,.media-grid img")),states=new WeakMap();addEventListener("pointermove",e=>{{if(pointer){{pointer.style.left=e.clientX+"px";pointer.style.top=e.clientY+"px";pointer.style.opacity="1"}}}},{{passive:true}});addEventListener("pointerleave",()=>{{if(pointer)pointer.style.opacity="0"}});function state(el){{let s=states.get(el);if(!s){{s={{rx:0,ry:0,trx:0,try:0,raf:0}};states.set(el,s)}}return s}}function frame(el){{const s=state(el),k=.15;s.rx+=(s.trx-s.rx)*k;s.ry+=(s.try-s.ry)*k;el.style.transform="perspective(900px) rotateX("+s.rx.toFixed(2)+"deg) rotateY("+s.ry.toFixed(2)+"deg) translateY(-2px)";if(Math.abs(s.trx-s.rx)+Math.abs(s.try-s.ry)>.04)s.raf=requestAnimationFrame(()=>frame(el));else{{s.raf=0;if(!s.trx&&!s.try)el.style.transform=""}}}}function aim(el,e,scale=1){{const r=el.getBoundingClientRect(),x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))-.5,y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))-.5,s=state(el);s.trx=-y*3.8*scale;s.try=x*3.8*scale;if(!s.raf)s.raf=requestAnimationFrame(()=>frame(el))}}function release(el){{const s=state(el);s.trx=s.try=0;if(!s.raf)s.raf=requestAnimationFrame(()=>frame(el))}}items.forEach(el=>{{el.addEventListener("pointermove",e=>{{if(e.pointerType!=="touch")aim(el,e)}});el.addEventListener("pointerleave",()=>release(el));el.addEventListener("pointerdown",e=>{{if(e.pointerType==="touch"){{aim(el,e,.75);setTimeout(()=>release(el),200)}}}})}})}})();</script>
 </body></html>'''
 
 
@@ -76,6 +85,22 @@ async def start_page(request: web.Request) -> web.Response:
 <div class="card"><div class="big">3</div><h2>Configurez</h2><p class="muted">Activez sécurité, tickets, logs, IA, niveaux, économie, automatisations et outils communautaires serveur par serveur.</p></div>
 </section>'''
     return web.Response(text=_layout(request, title="Commencer avec SentriX — Bot Discord", description="Ajoutez SentriX à votre serveur Discord puis configurez sécurité, tickets, IA, logs et communauté depuis le dashboard.", heading="Installez SentriX en quelques minutes", body=body), content_type="text/html", headers={"Cache-Control":"public, max-age=300"})
+
+
+async def short_panel(request: web.Request) -> web.Response:
+    raise web.HTTPFound("/app")
+
+
+async def short_docs(request: web.Request) -> web.Response:
+    raise web.HTTPFound("/commands")
+
+
+async def short_support(request: web.Request) -> web.Response:
+    raise web.HTTPFound("/support")
+
+
+async def short_add(request: web.Request) -> web.Response:
+    raise web.HTTPFound(_invite(request))
 
 
 async def public_growth(request: web.Request) -> web.Response:
@@ -106,11 +131,17 @@ async def stats_page(request: web.Request) -> web.Response:
 
 
 async def support_page(request: web.Request) -> web.Response:
-    support = _support_url()
-    support_button = f'<a class="btn primary" href="{html.escape(support, quote=True)}" target="_blank" rel="noopener">Rejoindre le serveur support</a>' if support else '<a class="btn primary" href="/login">Ouvrir le dashboard</a>'
-    note = "Le serveur support officiel est disponible via le bouton ci-dessus." if support else "Le lien du serveur support public n’est pas encore configuré. Les administrateurs peuvent utiliser le dashboard en attendant."
-    body = f'''<div class="actions">{support_button}<a class="btn" href="/start">Guide de démarrage</a></div><section class="grid two"><div class="card"><h2>Avant de signaler un problème</h2><p class="muted">Vérifiez les permissions du bot, le rôle de SentriX dans la hiérarchie Discord et les réglages du serveur dans le dashboard.</p></div><div class="card"><h2>Support</h2><p class="muted">{html.escape(note)}</p></div><div class="card"><h2>Sécurité</h2><p class="muted">Ne partagez jamais le token du bot, un secret OAuth, une clé API ou un mot de passe dans un ticket ou un message.</p></div><div class="card"><h2>Informations utiles</h2><p class="muted">Pour accélérer un diagnostic, indiquez le serveur concerné, la fonction utilisée, le résultat attendu et le message d’erreur exact sans publier de secret.</p></div></section>'''
-    return web.Response(text=_layout(request, title="Support SentriX — Aide pour le bot Discord", description="Centre de support officiel de SentriX : démarrage, diagnostic et accès au support du bot Discord.", heading="Support SentriX", body=body), content_type="text/html")
+    from .public_support_v2 import render as render_support
+
+    dashboard = request.app["dashboard_module"]
+    return web.Response(
+        text=render_support(request, dashboard, _support_url()),
+        content_type="text/html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "X-SentriX-Surface": "support-v2",
+        },
+    )
 
 
 async def privacy_page(request: web.Request) -> web.Response:
@@ -151,6 +182,10 @@ def install(dashboard) -> None:
         app.router.add_get("/start", start_page)
         app.router.add_get("/stats", stats_page)
         app.router.add_get("/support", support_page)
+        app.router.add_get("/p", short_panel)
+        app.router.add_get("/d", short_docs)
+        app.router.add_get("/s", short_support)
+        app.router.add_get("/add", short_add)
         app.router.add_get("/privacy", privacy_page)
         app.router.add_get("/terms", terms_page)
         app.router.add_get("/media-kit", media_page)

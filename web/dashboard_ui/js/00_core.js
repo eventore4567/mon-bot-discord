@@ -299,10 +299,20 @@ function previewText(text) {
     .replace(/\{member_count\}/g, String(g.members || 42))
     .replace(/\{level\}/g, '5').replace(/\{xp\}/g, '1 250');
 }
+function renderDiscordCustomEmojis(html) {
+  return String(html || '').replace(
+    /&lt;(a?):([A-Za-z0-9_~]{1,64}):(\d{17,20})&gt;/g,
+    (_, animated, name, id) => {
+      const ext = animated ? 'gif' : 'webp';
+      return `<img class="d-custom-emoji" src="https://cdn.discordapp.com/emojis/${id}.${ext}?size=48&quality=lossless" alt=":${name}:" title=":${name}:" loading="lazy" decoding="async">`;
+    }
+  );
+}
 function md(text) {
-  return esc(previewText(text))
+  const html = esc(previewText(text))
     .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*(?!\*)(.+?)\*(?!\*)/g, '$1<i>$2</i>')
     .replace(/__(.+?)__/g, '<u>$1</u>').replace(/`([^`]+)`/g, '<code>$1</code>');
+  return renderDiscordCustomEmojis(html);
 }
 function discordMessage({ content: text = '', embed = null } = {}) {
   let embedHtml = '';

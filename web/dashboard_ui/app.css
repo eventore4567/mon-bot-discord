@@ -319,6 +319,8 @@ table.table th{color:var(--muted);font-weight:600;font-size:12px}
 .discord-preview .d-field div{font-size:13px}
 .discord-preview .d-embed .d-title{font-weight:700;color:#fff}
 .discord-preview .d-embed .d-desc{white-space:pre-wrap;font-size:13.5px}
+.discord-preview .d-text,.discord-preview .d-desc,.discord-preview .d-field{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI","Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.discord-preview .d-custom-emoji{display:inline-block;width:auto;height:1.35em;max-width:none;vertical-align:-.28em;object-fit:contain;margin:0 .04em}
 .discord-preview .d-embed img.d-image{max-width:100%;border-radius:6px;margin-top:4px}
 .discord-preview .d-embed .d-foot{font-size:11px;color:#949ba4}
 .discord-preview .d-empty{color:#949ba4;font-style:italic}
