@@ -1673,17 +1673,18 @@ class Tickets(commands.Cog):
         if not panel:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         types = await self.get_panel_types(panel["id"])
-        view = helpers.ConfirmView(ctx.author.id)
-        msg = await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(embeds.warning(f"Supprimer le panel **{panel['name']}** et ses **{len(types)}** type(s) de ticket associés ?")), view))
-        await view.wait()
-        if not view.value:
-            return await sx_panels.editer(msg, sx_panels.depuis_embed(embeds.error('Suppression annulée.')))
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            f"supprimer le panel {panel['name']}",
+            detail=f"{len(types)} type(s) de ticket associé(s) et leurs formulaires seront également supprimés.",
+        ):
+            return
         type_ids = [t["id"] for t in types]
         for tid in type_ids:
             await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE ticket_type_id = ?", (tid,))
         await self.bot.db.execute("DELETE FROM ticket_types WHERE panel_id = ?", (panel["id"],))
         await self.bot.db.execute("DELETE FROM ticket_panels_v2 WHERE id = ?", (panel["id"],))
-        await sx_panels.editer(msg, sx_panels.depuis_embed(embeds.success(f"Panel **{panel['name']}** supprimé.")))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f"Panel **{panel['name']}** supprimé.")))
 
     @ticketpanel.command(name="list", description="Lister tous les panels du serveur.")
     @checks.is_owner_or_admin_for("tickets")
@@ -1825,14 +1826,15 @@ class Tickets(commands.Cog):
         t = await self.get_type_by_name(ctx.guild.id, nom)
         if not t:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {nom} ».')))
-        view = helpers.ConfirmView(ctx.author.id)
-        msg = await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(embeds.warning(f"Supprimer le type **{t['name']}** et son formulaire ?")), view))
-        await view.wait()
-        if not view.value:
-            return await sx_panels.editer(msg, sx_panels.depuis_embed(embeds.error('Suppression annulée.')))
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            f"supprimer le type de ticket {t['name']}",
+            detail="Son formulaire associé sera également supprimé.",
+        ):
+            return
         await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE ticket_type_id = ?", (t["id"],))
         await self.bot.db.execute("DELETE FROM ticket_types WHERE id = ?", (t["id"],))
-        await sx_panels.editer(msg, sx_panels.depuis_embed(embeds.success(f"Type **{t['name']}** supprimé.")))
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f"Type **{t['name']}** supprimé.")))
 
     @tickettype.command(name="list", description="Lister tous les types de tickets du serveur.")
     @checks.is_owner_or_admin_for("tickets")
@@ -1885,6 +1887,12 @@ class Tickets(commands.Cog):
         if position < 1 or position > len(questions):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Position invalide (ce type a {len(questions)} question(s)).')))
         question = questions[position - 1]
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            f"supprimer la question {question['label']}",
+            detail=f"Elle sera retirée du formulaire du type {t['name']}.",
+        ):
+            return
         await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE id = ?", (question["id"],))
         remaining = await self.bot.db.fetchall("SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (t["id"],))
         for i, q in enumerate(remaining):
