@@ -251,6 +251,7 @@ def install(dashboard) -> None:
         growth_referrals_v43,
         marketing_growth_indexing_v40,
         marketing_growth_v40,
+        public_error_pages_v1,
         topgg_import_v45,
     )
 
@@ -260,3 +261,8 @@ def install(dashboard) -> None:
     topgg_import_v45.install(dashboard)
     dashboard_user_avatar_v46.install(dashboard)
     dashboard_confirm_modal_v47.install(dashboard)
+    # En dernier : aiohttp déroule les middlewares de l'extérieur vers
+    # l'intérieur, donc celui inscrit en dernier voit la réponse en premier au
+    # retour — c'est la position qu'il faut pour réécrire une page d'erreur
+    # sans masquer celles que les couches métier rendent elles-mêmes.
+    public_error_pages_v1.install(dashboard)
