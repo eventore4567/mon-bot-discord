@@ -62,15 +62,204 @@ async function renderAI() {
   bindEditable(); bindModuleButtons();
 }
 
-/* Invitations & webhooks (lecture seule) */
+/* Invitations & webhooks */
+let inviteWindow = '7d';
+const inviteAnalytics = (force = false) => cached('invite-analytics', () => gget('/invites/analytics'), { force, ttl: 20000 });
+
+function inviteGrowthChart(series = []) {
+  if (!series.length) return emptyState('Pas encore assez de données');
+  const max = Math.max(1, ...series.map(x => Math.max(Number(x.joins || 0), Number(x.leaves || 0))));
+  return `<div style="display:grid;grid-template-columns:repeat(${series.length},minmax(8px,1fr));gap:5px;align-items:end;height:150px;padding-top:8px">
+    ${series.map(x => {
+      const j = Math.max(2, Math.round((Number(x.joins || 0) / max) * 120));
+      const l = Math.max(2, Math.round((Number(x.leaves || 0) / max) * 120));
+      return `<div title="${esc(when(x.ts))} · ${number(x.joins)} arrivée(s) · ${number(x.leaves)} départ(s)" style="display:flex;gap:2px;align-items:end;height:130px"><span style="flex:1;height:${j}px;background:linear-gradient(180deg,#55d69a,#268c62);border-radius:5px 5px 2px 2px"></span><span style="flex:1;height:${l}px;background:linear-gradient(180deg,#ff788b,#a83e50);border-radius:5px 5px 2px 2px"></span></div>`;
+    }).join('')}
+  </div><div style="display:flex;gap:16px;margin-top:8px"><small><span style="color:#55d69a">■</span> Arrivées</small><small><span style="color:#ff788b">■</span> Départs</small></div>`;
+}
+
 async function renderInvites() {
   if (state.sub === 'webhooks') {
     let d; try { d = await gget('/growth/webhooks'); } catch (e) { return errorView(e); }
     content().innerHTML = `<div class="grid">${card('Webhooks du serveur', 'Inventaire sans exposer les jetons.', `<div class="list">${(d.items || []).length ? d.items.map(w => `<div class="row"><div class="row-main"><b>${esc(w.name || 'Webhook')}</b><small>#${esc(w.channel_name || 'inconnu')} · ${esc(w.type || 'webhook')}</small></div><code>${esc(w.id)}</code></div>`).join('') : emptyState('Aucun webhook')}</div>`, 'full')}</div>`;
     return;
   }
-  let d; try { d = await gget('/growth/invitations'); } catch (e) { return errorView(e); }
-  content().innerHTML = `<div class="grid">${card('Invitations actives', `${plural((d.items || []).length, 'lien')} · ${plural(d.total_uses, 'utilisation')}.`, `<div class="list">${(d.items || []).length ? d.items.map(i => `<div class="row"><div class="row-main"><b>${esc(i.code)}</b><small>#${esc(i.channel_name || 'inconnu')} · créée par ${esc(i.inviter_name || 'inconnu')}</small></div><strong>${plural(i.uses, 'utilisation')}</strong></div>`).join('') : emptyState('Aucune invitation active')}</div>`, 'full')}</div>`;
+
+  let d;
+  try { d = await inviteAnalytics(); } catch (e) { return errorView(e); }
+  const period = d.periods?.[inviteWindow] || d.periods?.['7d'] || {};
+  const board = (d.leaderboard || []).filter(x => !x.hidden);
+  const hidden = (d.leaderboard || []).filter(x => x.hidden);
+  const codes = d.codes || [];
+  const sourceRows = period.sources || [];
+
+  const leaderboardRows = board.length ? board.slice(0, 25).map((x, index) => {
+    const m = x.member || {};
+    const name = m.display_name || m.name || m.id || 'Utilisateur';
+    return `<div class="row">
+      <div class="row-main">
+        <b>#${index + 1} · ${esc(name)}</b>
+        <small>${number(x.real)} réelle(s) · ${number(x.fake)} fake · ${number(x.left)} repartie(s) · ${number(x.bonus)} bonus · rétention ${esc(x.retention)}%</small>
+      </div>
+      <div class="row-actions">
+        <strong>${number(x.credited)}</strong>
+        <button class="btn sm" type="button" data-invited-list="${esc(m.id)}">Invités</button>
+        <button class="btn sm ghost" type="button" data-hide-inviter="${esc(m.id)}" data-hidden="1">Masquer</button>
+      </div>
+    </div>`;
+  }).join('') : emptyState('Aucun classement', 'Les invitants apparaîtront après les premières arrivées attribuées.');
+
+  const codeRows = codes.length ? codes.map(i => `<div class="row">
+    <div class="row-main">
+      <b>${i.label ? esc(i.label) + ' · ' : ''}<code>${esc(i.code)}</code></b>
+      <small>#${esc(i.channel_name || 'inconnu')} · créateur ${esc(i.inviter_name || 'inconnu')} · ${number(i.tracked_joins)} arrivée(s) suivie(s) · ${number(i.tracked_active)} encore présente(s)</small>
+    </div>
+    <div class="row-actions">
+      <strong>${plural(i.uses, 'utilisation')}</strong>
+      <button class="btn sm" type="button" data-invite-label="${esc(i.code)}" data-current-label="${esc(i.label || '')}">Label</button>
+    </div>
+  </div>`).join('') : emptyState(
+    d.can_manage_invites ? 'Aucun code actif' : 'Invitations Discord illisibles',
+    d.can_manage_invites ? 'Créez une invitation sur Discord pour la voir ici.' : 'SentriX a besoin de la permission Gérer le serveur pour lire les codes actifs.'
+  );
+
+  const hiddenRows = hidden.length ? hidden.map(x => `<div class="row"><div class="row-main"><b>${esc(x.member?.display_name || x.member?.name || x.member?.id)}</b><small>${number(x.credited)} invitation(s) créditée(s)</small></div><button class="btn sm" type="button" data-hide-inviter="${esc(x.member?.id)}" data-hidden="0">Réafficher</button></div>`).join('') : emptyState('Aucun membre masqué');
+
+  content().innerHTML = `<div class="grid">
+    <section class="card full">
+      <div class="card-head">
+        <div><h2>Analytics invitations</h2><p>Historique réellement observé par SentriX. La synchronisation des codes ne reconstruit jamais rétroactivement qui a invité qui.</p></div>
+        <div class="toolbar">
+          ${['24h','7d','30d','all'].map(w => `<button class="btn sm ${inviteWindow === w ? 'primary' : 'ghost'}" type="button" data-invite-window="${w}">${w === 'all' ? 'Tout' : w}</button>`).join('')}
+          <button class="btn sm" id="inviteSync" type="button">Synchroniser</button>
+          <button class="btn sm ghost" id="inviteExport" type="button">Exporter CSV</button>
+          <button class="btn sm ghost" id="inviteRefresh" type="button">Actualiser</button>
+        </div>
+      </div>
+      <div class="kpis" style="margin-top:14px">
+        <div class="kpi"><small>Arrivées</small><b>${number(period.joins)}</b><span>${number(period.attributed)} attribuée(s)</span></div>
+        <div class="kpi"><small>Départs</small><b>${number(period.leaves)}</b><span>${number(period.fake_active)} compte(s) récent(s) actif(s)</span></div>
+        <div class="kpi"><small>Encore présents</small><b>${number(period.active)}</b><span>Croissance nette ${number(Number(period.joins || 0) - Number(period.leaves || 0))}</span></div>
+        <div class="kpi"><small>Rétention</small><b>${esc(period.retention || 0)}%</b><span>Membres encore présents</span></div>
+      </div>
+    </section>
+
+    ${card('Évolution', 'Arrivées et départs sur la période choisie.', inviteGrowthChart(period.series || []), 'full')}
+
+    <section class="card">
+      <div class="card-head"><div><h2>Sources d’arrivée</h2><p>Basé uniquement sur les données réellement enregistrées.</p></div></div>
+      <div class="list">${sourceRows.length ? sourceRows.map(s => `<div class="row"><div class="row-main"><b>${esc(s.name)}</b></div><strong>${number(s.count)}</strong></div>`).join('') : emptyState('Aucune source enregistrée')}</div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Recherche</h2><p>Filtre instantanément les invitants et les codes affichés sur cette page.</p></div></div>
+      <div class="field full"><label for="inviteSearch">Pseudo, ID, code ou label</label><input class="search-input" id="inviteSearch" type="search" placeholder="Ex. Tomioka, 123456…, youtube"></div>
+      <small id="inviteSearchCount"></small>
+    </section>
+
+    <section class="card full">
+      <div class="card-head"><div><h2>Classement des invitants</h2><p>Classement par invitations créditées : réelles + bonus staff. Les fake et les départs ne donnent pas de crédit.</p></div><span class="badge blue">${plural(board.length, 'invitant')}</span></div>
+      <div class="list" id="inviteLeaderboard">${leaderboardRows}</div>
+    </section>
+
+    <section class="card full">
+      <div class="card-head"><div><h2>Codes d’invitation actifs</h2><p>Utilisations Discord, attribution SentriX et labels internes staff.</p></div><span class="badge">${plural(codes.length, 'code')}</span></div>
+      <div class="list" id="inviteCodes">${codeRows}</div>
+    </section>
+
+    ${advanced(`<section class="card full"><div class="card-head"><div><h2>Membres masqués du classement</h2><p>Le suivi reste intact ; seul l’affichage du classement est masqué.</p></div><span class="badge">${number(hidden.length)}</span></div><div class="list">${hiddenRows}</div></section>`)}
+  </div>`;
+
+  content().querySelectorAll('[data-invite-window]').forEach(b => b.onclick = async () => {
+    inviteWindow = b.dataset.inviteWindow;
+    await renderInvites();
+  });
+
+  $('inviteRefresh').onclick = async () => {
+    invalidate('invite-analytics');
+    await renderInvites();
+  };
+
+  $('inviteSync').onclick = async () => {
+    const ok = await confirmDialog({
+      title: 'Synchroniser les invitations ?',
+      body: 'SentriX va relire les codes et leurs compteurs actuels sur Discord. Cette opération ne crée aucune attribution historique de membre.',
+      confirm: 'Synchroniser'
+    });
+    if (!ok) return;
+    const b = $('inviteSync'); b.disabled = true;
+    try {
+      const r = await gpost('/invites/sync', {});
+      toast(r.message || 'Invitations synchronisées.');
+      invalidate('invite-analytics');
+      await renderInvites();
+    } catch (e) { toast(e.message, true); b.disabled = false; }
+  };
+
+  $('inviteExport').onclick = () => {
+    const rows = [
+      ['rang','user_id','nom','reelles','fake','reparties','bonus','creditees','retention'],
+      ...board.map((x, i) => [i + 1, x.member?.id || '', x.member?.display_name || x.member?.name || '', x.real, x.fake, x.left, x.bonus, x.credited, x.retention]),
+    ];
+    const csv = rows.map(row => row.map(value => {
+      const s = String(value ?? '');
+      return /[",\n]/.test(s) ? '"' + s.replaceAll('"','""') + '"' : s;
+    }).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = `sentrix-invitations-${state.guildId}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 800);
+  };
+
+  content().querySelectorAll('[data-invite-label]').forEach(b => b.onclick = async () => {
+    const value = await promptDialog({
+      title: `Label du code ${b.dataset.inviteLabel}`,
+      label: 'Label interne',
+      value: b.dataset.currentLabel || '',
+      confirm: 'Enregistrer'
+    });
+    if (value === null) return;
+    try {
+      await gpost(`/invites/codes/${encodeURIComponent(b.dataset.inviteLabel)}`, { label: value }, 'PUT');
+      toast('Label enregistré.');
+      invalidate('invite-analytics');
+      await renderInvites();
+    } catch (e) { toast(e.message, true); }
+  });
+
+  content().querySelectorAll('[data-hide-inviter]').forEach(b => b.onclick = async () => {
+    try {
+      const hiddenValue = b.dataset.hidden === '1';
+      const r = await gpost('/invites/leaderboard-hidden', { user_id: b.dataset.hideInviter, hidden: hiddenValue });
+      toast(r.message || 'Classement mis à jour.');
+      invalidate('invite-analytics');
+      await renderInvites();
+    } catch (e) { toast(e.message, true); }
+  });
+
+  content().querySelectorAll('[data-invited-list]').forEach(b => b.onclick = async () => {
+    try {
+      const d = await gget(`/invites/inviters/${encodeURIComponent(b.dataset.invitedList)}`);
+      const rows = (d.items || []).map(x => `<div class="row"><div class="row-main"><b>${esc(x.member?.display_name || x.member?.name || x.member?.id)}</b><small>Code ${esc(x.invite_code || 'inconnu')} · arrivé ${esc(when(x.joined_at))}${x.left_at ? ' · reparti ' + esc(when(x.left_at)) : ''}${x.suspect_account ? ' · compte récent' : ''}</small></div><span class="badge ${x.left_at ? 'warn' : x.suspect_account ? 'bad' : 'ok'}">${x.left_at ? 'Reparti' : x.suspect_account ? 'Récent' : 'Présent'}</span></div>`).join('');
+      openModal({ title: `Membres invités · ${number(d.total)}`, body: `<div class="list">${rows || emptyState('Aucun membre invité')}</div>`, actions: [{ label: 'Fermer' }] });
+    } catch (e) { toast(e.message, true); }
+  });
+
+  const search = $('inviteSearch');
+  search.oninput = () => {
+    const q = search.value.trim().toLocaleLowerCase('fr');
+    const targets = [
+      ...$('inviteLeaderboard').querySelectorAll('.row'),
+      ...$('inviteCodes').querySelectorAll('.row'),
+    ];
+    let visible = 0;
+    for (const row of targets) {
+      const show = !q || row.textContent.toLocaleLowerCase('fr').includes(q);
+      row.style.display = show ? '' : 'none';
+      if (show) visible += 1;
+    }
+    $('inviteSearchCount').textContent = q ? `${visible} résultat(s) visible(s)` : '';
+  };
 }
 
 /* Sauvegardes & historique */
