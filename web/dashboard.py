@@ -1373,6 +1373,9 @@ def build_app(bot) -> web.Application:
     # Observabilité sécurité : score de risque, timeline, simulation et PANIC.
     from web.dashboard_api_security import register as register_security_routes
     register_security_routes(app, sys.modules[__name__])
+    # Analytics invitations : historique observé, labels, sync et classement.
+    from web.dashboard_api_invites import register as register_invite_routes
+    register_invite_routes(app, sys.modules[__name__])
     # Lecteur musique du dashboard : pilote directement le même Cog Music que Discord.
     from web.dashboard_api_music import register as register_music_routes
     register_music_routes(app, sys.modules[__name__])
