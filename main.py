@@ -75,6 +75,10 @@ EXTENSIONS = [
     "cogs.guild_arrival",
     "cogs.notifications",
     "cogs.ai",
+    # Autorité unique du réglage IA activée/désactivée, au niveau conversation
+    # ET au niveau du moteur. Sans elle, utils.ai_service.generate n'est gardé
+    # par personne et trois appelants directs vivants contournent le réglage.
+    "cogs.ai_disable_guard",
     "cogs.economy",
     "cogs.levels",
     "cogs.minigames",

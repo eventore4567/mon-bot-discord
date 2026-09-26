@@ -60,7 +60,7 @@ async def run() -> int:
         # produit blacklist-add/blacklist-users = 95. L'ancien alias `me` est aussi
         # marqué retiré, mais n'appartenait pas à ces 97 commandes directes : sa surface
         # canonique est désormais `stats`, qui reste directe.
-        expected_normal_direct = 122
+        expected_normal_direct = 120
         if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
             errors.append(
                 "la surface normale doit contenir exactement "

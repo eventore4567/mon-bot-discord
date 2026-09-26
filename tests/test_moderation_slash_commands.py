@@ -94,7 +94,7 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
-    def test_normal_direct_commands_reste_exactement_a_122(self):
+    def test_normal_direct_commands_reste_exactement_a_120(self):
         """Contrat imposé par tools/command_runtime_audit.py.
 
         Passé de 112 à 122 : les dix bascules AutoMod qui manquaient. Mesuré sur
@@ -106,8 +106,13 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
 
         +automod-status n'en fait PAS partie : elle reste dans
         SECURITY_MERGED_COMMANDS, et user_acceptance_audit exige son masquage.
+
+        Repassé de 122 à 120 le 2026-09-26 : chat-reset et leaderboard-money
+        sont sortis. main.EXACT_DUPLICATE_COMMANDS les supprime au démarrage
+        comme doublons exacts de +ai et +economyleaderboard, et les annoncer
+        ici promettait des commandes que le boot effaçait.
         """
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 122)
+        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 120)
 
 
 if __name__ == "__main__":

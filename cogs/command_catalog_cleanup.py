@@ -45,9 +45,14 @@ NORMAL_DIRECT_COMMANDS = frozenset({
     # dans /setup, et tools/user_acceptance_audit.py exige qu'elle reste masquée.
     # Je l'avais ajoutée par symétrie ; le contrat avait raison, pas moi — c'est
     # aussi pourquoi elle n'a jamais eu de feuille slash.
-    "sentrix", "image", "ai-translate", "chat-reset",
+    # Pas "chat-reset" ni "leaderboard-money" : main.EXACT_DUPLICATE_COMMANDS les
+    # supprime au démarrage comme doublons exacts de +ai et +economyleaderboard.
+    # Les annoncer ici promettait une commande visible et éligible au slash que le
+    # boot venait d'effacer — la même contradiction que +setprefix, mais dans
+    # l'autre sens : ici la suppression est juste, c'est l'annonce qui était fausse.
+    "sentrix", "image", "ai-translate",
     "balance", "daily", "work", "pay", "inventory", "banque",
-    "economyleaderboard", "leaderboard-money",
+    "economyleaderboard",
     "level", "stats", "set-xp", "add-xp", "set-level-role", "remove-level-role",
     "reset-levels",
     "ticket", "giveaway", "giveaway-reroll",

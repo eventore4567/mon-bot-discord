@@ -190,4 +190,25 @@ def install(bot: commands.Bot) -> None:
     )
 
 
-__all__ = ["install", "AI_DISABLED_CODE"]
+async def setup(bot: commands.Bot) -> None:
+    """Extension à part entière : c'est l'autorité du bouton IA on/off.
+
+    Le module n'avait qu'``install()``, appelé par l'enveloppe de chargement de
+    ``cogs/__init__`` — posée sur une classe que la production n'instancie plus
+    depuis que ``railway_boot`` remplace ``commands.Bot``. Mesuré le 2026-09-26
+    sur la chaîne v8 : ``utils.ai_service.generate`` était enveloppé par
+    ``ai_context_v9`` et par personne d'autre, donc le réglage
+    ``ai_settings.enabled`` n'était vérifié qu'au niveau de ``cogs/ai.py``.
+
+    Or trois appelants directs du service sont vivants en production —
+    ``cogs.sentrix_ultimate``, ``utils.ai_actions`` et ``utils.proof_service``.
+    Le docstring de tête décrit précisément ce que cette couche existe pour
+    empêcher : « aucune ancienne commande, aucun runtime ou appel direct ne
+    peut contourner le réglage ». Sans elle, cette garantie ne tenait plus.
+
+    ``install()`` est idempotent et attend le cog Ai s'il n'est pas encore là.
+    """
+    install(bot)
+
+
+__all__ = ["install", "setup", "AI_DISABLED_CODE"]

@@ -53,10 +53,6 @@ class HelpVisibilityBatchTests(unittest.TestCase):
         overlap = HELP_VISIBLE_EXTRA_COMMANDS & ADMIN_DIRECT_COMMANDS
         self.assertEqual(overlap, set())
 
-
-if __name__ == "__main__":
-    unittest.main()
-
     def test_aucune_commande_annoncee_n_est_supprimee_au_boot(self):
         """L'invariant qui manquait : annoncer et supprimer se contredisent.
 
@@ -82,3 +78,6 @@ if __name__ == "__main__":
                 conflit, [],
                 f"{nom} annonce des commandes que le démarrage supprime : {conflit}")
 
+
+if __name__ == "__main__":
+    unittest.main()
