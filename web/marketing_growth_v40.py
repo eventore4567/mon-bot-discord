@@ -41,7 +41,8 @@ def _support_url() -> str:
     return value if value.startswith(("https://", "http://")) else ""
 
 
-def _layout(request: web.Request, *, title: str, description: str, heading: str, body: str) -> str:
+def _layout(request: web.Request, *, title: str, description: str, heading: str, body: str,
+            styles_extra: str = "", script_extra: str = "") -> str:
     """Coquille commune aux pages /start, /stats, /privacy, /terms et /media-kit.
 
     Ces cinq pages partageaient un fond en dégradé CSS pendant que la landing
@@ -52,6 +53,10 @@ def _layout(request: web.Request, *, title: str, description: str, heading: str,
     Les noms de classes (``card``, ``grid``, ``legal``, ``media-grid``,
     ``big``, ``status``…) sont conservés à l'identique : les corps de page les
     utilisent et les réécrire aurait cassé cinq pages pour un gain nul.
+
+    ``styles_extra`` et ``script_extra`` servent aux pages qui ont besoin de
+    leur propre CSS ou de leur propre comportement — /commands et sa recherche.
+    Les cinq pages d'origine ne les passent pas et rendent exactement pareil.
     """
     base = _base(request)
     canonical = f"{base}{request.path}"
@@ -122,7 +127,6 @@ footer a{{margin-right:14px;text-decoration:none}}footer a:hover{{color:var(--bl
 .grid .card:nth-child(2){{animation-delay:.07s}}.grid .card:nth-child(3){{animation-delay:.14s}}
 .grid .card:nth-child(4){{animation-delay:.21s}}.grid .card:nth-child(5){{animation-delay:.28s}}
 .grid .card:nth-child(6){{animation-delay:.35s}}
-.public-pointer{{display:none}}
 @media(max-width:1024px){{header,main,footer{{padding-inline:20px}}}}
 @media(max-width:760px){{header{{align-items:flex-start;flex-direction:column}}main{{padding-top:40px}}
  .grid,.grid.two,.media-grid{{grid-template-columns:1fr}}
@@ -132,6 +136,7 @@ footer a{{margin-right:14px;text-decoration:none}}footer a:hover{{color:var(--bl
  .actions .btn{{width:100%;text-align:center}}footer{{padding-inline:15px}}}}
 @media(max-width:360px){{header,main,footer{{padding-inline:12px}}.brand{{font-size:17px}}}}
 @media(pointer:coarse){{.card,.media-grid img{{will-change:auto}}}}
+{styles_extra}
 @media(prefers-reduced-motion:reduce){{
  .hero .eyebrow,.hero h1,.hero .lead,.hero .actions,.grid .card,.media-grid img{{animation:none!important}}
  .card,.media-grid img,nav a,.btn{{transition:none!important;transform:none!important}}
@@ -167,7 +172,13 @@ items.forEach(el=>{{
  el.addEventListener("pointerdown",e=>{{if(e.pointerType==="touch"){{viser(el,e,.7);setTimeout(()=>relacher(el),200);}}}});
 }});
 }})();</script>
+{script_extra}
 </body></html>'''
+
+
+# Nom public de la coquille. Elle n'est plus interne a ce module : /commands
+# la partage pour que le site n'ait qu'une seule identite visuelle.
+coquille_publique = _layout
 
 
 async def start_page(request: web.Request) -> web.Response:

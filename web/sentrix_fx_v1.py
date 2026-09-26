@@ -40,6 +40,10 @@ CSS = """
 :root{--fond:#070b14;--fond2:#0b1220;--panneau:rgba(18,26,42,.72);--ligne:rgba(118,163,230,.16);
 --texte:#eef4ff;--doux:#9aabc4;--bleu:#4da3ff;--bleu2:#8ccbff;--indigo:#6f7dff;--ok:#55d69a}
 *{box-sizing:border-box}
+/* Visible seulement pour un lecteur d'écran : sert aux labels de champs
+   dont l'intitulé serait redondant à l'œil, comme la recherche de /commands. */
+.sx-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+clip-path:inset(50%);white-space:nowrap;border:0}
 html{background:var(--fond);scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 body{margin:0;min-height:100vh;position:relative;overflow-x:hidden;color:var(--texte);
 font:16px/1.6 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
