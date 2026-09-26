@@ -62,6 +62,9 @@ def test_support_v2_covers_phone_tablet_laptop_and_large_desktop():
         "768 px",
         "1024–1440 px",
         "1920 px+",
+        'id="supportMenu"',
+        'aria-controls="supportLinks"',
+        'aria-expanded="false"',
     ):
         assert marker in page
     assert "@media(prefers-reduced-motion:reduce)" in page
