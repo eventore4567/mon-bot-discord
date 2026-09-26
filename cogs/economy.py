@@ -23,7 +23,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, stats_service, design_system, temporary_boosts
+from utils import embeds, checks, helpers, stats_service, design_system, temporary_boosts
 # « panels » designe deja les panneaux de roles/boutique ici.
 from utils import sentrix_panels as sx_panels
 from database.db import now
@@ -1203,6 +1203,12 @@ class Economy(commands.Cog, name="Economy"):
     @commands.hybrid_command(name="reset-economy", description="[Admin] Réinitialiser l'économie du serveur.", with_app_command=False)
     @checks.is_owner_or_admin_for("economie")
     async def reset_economy(self, ctx: commands.Context):
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            "réinitialiser toute l'économie du serveur",
+            detail="Les soldes portefeuille et banque de tous les membres seront remis à zéro. L'historique d'audit reste conservé.",
+        ):
+            return
         await self.bot.db.execute("DELETE FROM economy WHERE guild_id = ?", (ctx.guild.id,))
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success("L'économie du serveur a été réinitialisée. (L'historique des transactions est conservé pour l'audit.)")))
 
