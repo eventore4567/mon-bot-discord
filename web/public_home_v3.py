@@ -47,6 +47,33 @@ body:before{content:"";position:fixed;inset:0;z-index:-4;pointer-events:none;bac
 body:after{content:"";position:fixed;inset:0;z-index:-3;pointer-events:none;background:radial-gradient(520px circle at var(--mx) var(--my),rgba(77,163,255,.045),transparent 70%)}
 canvas#fx{position:fixed;inset:0;z-index:-2;width:100%;height:100%;pointer-events:none;opacity:.82;filter:saturate(1.08)}
 .fx-depth-label{position:absolute;inset:auto 0 16px;display:flex;justify-content:center;pointer-events:none;color:rgba(119,188,255,.24);font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.22em;text-transform:uppercase}
+
+.ambient-space{position:fixed;inset:0;z-index:-3;pointer-events:none;overflow:hidden}
+.ambient-orb{position:absolute;border-radius:50%;filter:blur(14px);mix-blend-mode:screen;will-change:transform,opacity}
+.ambient-orb.o1{width:42vw;height:42vw;left:-12vw;top:6vh;background:radial-gradient(circle,rgba(77,163,255,.14),rgba(77,163,255,.02) 48%,transparent 72%);animation:orbOne 18s ease-in-out infinite}
+.ambient-orb.o2{width:34vw;height:34vw;right:-7vw;top:34vh;background:radial-gradient(circle,rgba(70,98,255,.14),rgba(70,98,255,.018) 50%,transparent 72%);animation:orbTwo 21s ease-in-out infinite}
+.ambient-orb.o3{width:30vw;height:30vw;left:35vw;bottom:-9vw;background:radial-gradient(circle,rgba(119,188,255,.11),rgba(119,188,255,.012) 48%,transparent 72%);animation:orbThree 16s ease-in-out infinite}
+.ambient-line{position:absolute;height:1px;width:55vw;opacity:.22;background:linear-gradient(90deg,transparent,rgba(119,188,255,.8),transparent);filter:drop-shadow(0 0 8px rgba(77,163,255,.45));transform-origin:left center}
+.ambient-line.l1{left:-10vw;top:20%;transform:rotate(-12deg);animation:lineDrift 12s ease-in-out infinite}
+.ambient-line.l2{right:-12vw;top:58%;transform:rotate(11deg);animation:lineDriftB 15s ease-in-out infinite}
+.ambient-line.l3{left:18vw;bottom:11%;width:70vw;transform:rotate(-5deg);opacity:.12;animation:lineDrift 18s ease-in-out infinite reverse}
+.ambient-code{position:absolute;color:rgba(119,188,255,.12);font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.18em;text-transform:uppercase;white-space:nowrap}
+.ambient-code.c1{left:4vw;top:31%;animation:codeFloat 13s ease-in-out infinite}.ambient-code.c2{right:4vw;top:72%;animation:codeFloatB 17s ease-in-out infinite}.ambient-code.c3{left:48vw;top:8%;animation:codeFloat 19s ease-in-out infinite reverse}
+.section{position:relative}
+.section:before{content:"";position:absolute;z-index:-1;pointer-events:none;width:420px;height:420px;border-radius:50%;left:-210px;top:10%;background:radial-gradient(circle,rgba(77,163,255,.075),transparent 68%);filter:blur(10px);animation:sectionAura 10s ease-in-out infinite}
+.section:nth-of-type(even):before{left:auto;right:-220px;background:radial-gradient(circle,rgba(83,112,255,.07),transparent 68%)}
+.section-head h2,.copy h2,.faq-copy h2{position:relative}
+.section-head h2:after,.copy h2:after,.faq-copy h2:after{content:"";display:block;width:72px;height:2px;margin-top:14px;background:linear-gradient(90deg,var(--blue),transparent);box-shadow:0 0 14px rgba(77,163,255,.5);transform-origin:left;animation:accentPulse 3.4s ease-in-out infinite}
+.status-strip{position:relative;overflow:hidden}
+.status-strip:after{content:"";position:absolute;inset:-100% -25%;pointer-events:none;background:linear-gradient(110deg,transparent 43%,rgba(119,188,255,.08) 49%,transparent 55%);animation:statusSweep 6.8s linear infinite}
+.card,.step,.security-box,.tour-screen,.ai-card,.terminal,.workflow-demo{transform-style:preserve-3d}
+.section.is-visible .section-head h2,.section.is-visible .copy h2,.section.is-visible .faq-copy h2{animation:titleImpact .72s cubic-bezier(.16,.84,.31,1) both}
+.section.is-visible .card,.section.is-visible .step{animation:cardRise .62s cubic-bezier(.16,.84,.31,1) both}
+.section.is-visible .card:nth-child(2),.section.is-visible .step:nth-child(2){animation-delay:.05s}.section.is-visible .card:nth-child(3),.section.is-visible .step:nth-child(3){animation-delay:.10s}.section.is-visible .card:nth-child(4),.section.is-visible .step:nth-child(4){animation-delay:.15s}.section.is-visible .card:nth-child(5){animation-delay:.20s}.section.is-visible .card:nth-child(6){animation-delay:.25s}
+.wow-burst{position:absolute;inset:0;pointer-events:none;overflow:hidden;border-radius:inherit;opacity:0}
+.section.is-visible .wow-burst{animation:wowFlash 1.2s ease-out both}
+.rail-track{animation-play-state:running!important;will-change:transform}
+
 a{color:inherit;text-decoration:none}button{font:inherit}img{display:block;max-width:100%}
 ::selection{background:rgba(77,163,255,.32)}
 :focus-visible{outline:2px solid var(--blue2);outline-offset:3px}
@@ -148,6 +175,21 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 @keyframes beamDrift{0%,100%{opacity:.24}50%{opacity:.95}}
 @keyframes scanPlane{to{background-position:44px 0,0 44px}}
 
+
+@keyframes orbOne{0%,100%{transform:translate3d(0,0,0) scale(.94);opacity:.58}40%{transform:translate3d(16vw,9vh,0) scale(1.12);opacity:.92}70%{transform:translate3d(7vw,20vh,0) scale(1.02);opacity:.72}}
+@keyframes orbTwo{0%,100%{transform:translate3d(0,0,0) scale(1);opacity:.55}45%{transform:translate3d(-18vw,-13vh,0) scale(1.18);opacity:.9}78%{transform:translate3d(-8vw,10vh,0) scale(.96);opacity:.66}}
+@keyframes orbThree{0%,100%{transform:translate3d(0,0,0) scale(.9);opacity:.45}50%{transform:translate3d(12vw,-20vh,0) scale(1.2);opacity:.82}}
+@keyframes lineDrift{0%,100%{transform:translateX(-8vw) rotate(-12deg);opacity:.08}50%{transform:translateX(34vw) rotate(-7deg);opacity:.34}}
+@keyframes lineDriftB{0%,100%{transform:translateX(8vw) rotate(11deg);opacity:.08}50%{transform:translateX(-35vw) rotate(5deg);opacity:.30}}
+@keyframes codeFloat{0%,100%{transform:translate3d(0,0,0);opacity:.06}50%{transform:translate3d(22px,-34px,0);opacity:.20}}
+@keyframes codeFloatB{0%,100%{transform:translate3d(0,0,0);opacity:.05}50%{transform:translate3d(-30px,28px,0);opacity:.18}}
+@keyframes sectionAura{0%,100%{transform:scale(.9);opacity:.45}50%{transform:scale(1.2);opacity:.9}}
+@keyframes accentPulse{0%,100%{transform:scaleX(.45);opacity:.55}50%{transform:scaleX(1.15);opacity:1}}
+@keyframes statusSweep{to{transform:translateX(72%)}}
+@keyframes titleImpact{0%{opacity:0;filter:blur(10px);transform:translateY(42px) scale(.95)}60%{filter:blur(0);transform:translateY(-4px) scale(1.015)}100%{opacity:1;transform:none}}
+@keyframes cardRise{0%{opacity:0;filter:blur(7px);transform:translateY(48px) rotateX(8deg) scale(.96)}100%{opacity:1;filter:none;transform:none}}
+@keyframes wowFlash{0%{opacity:0;background:radial-gradient(circle at 50% 50%,rgba(119,188,255,.30),transparent 22%)}24%{opacity:.8}100%{opacity:0;background:radial-gradient(circle at 50% 50%,rgba(119,188,255,0),transparent 68%)}}
+
 @keyframes floatPanel{0%,100%{transform:rotateY(-8deg) rotateX(2.2deg) translateZ(36px) translateY(0)}50%{transform:rotateY(-5deg) rotateX(.7deg) translateZ(58px) translateY(-16px)}}
 @keyframes radar{to{transform:rotate(360deg)}}
 @keyframes marquee{to{transform:translateX(-12px)}}
@@ -163,12 +205,17 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 @media(max-width:720px){.hero-world{inset:-2% -24% 12% -18%;opacity:.84}.holo-core{left:60%;top:40%;transform:translate(-50%,-50%) scale(.75)}.scan-plane{left:-8%;right:-12%;top:28%;height:48%}.product-shell{inset:92px 0 24px 24px}.hero-art{min-height:540px}}
 @media(max-width:430px){.hero-world{opacity:.64}.holo-core{left:57%;top:36%;transform:translate(-50%,-50%) scale(.60)}.holo-cube.c2,.holo-cube.c3,.holo-beam.b3{display:none}.product-shell{inset:102px 0 16px 10px}.hero-art{min-height:480px}}
 @media(pointer:coarse){.pointer-ring{display:none}.card:hover,.btn:hover{transform:none}}
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.product-shell,.radar,.spinner,.bars i,.hero-art:before,.holo-core,.holo-core img,.holo-ring,.holo-cube,.holo-beam,.scan-plane{animation:none!important}.card,.btn,.hero-art{transition:none!important}.pointer-ring{display:none!important}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.product-shell,.radar,.spinner,.bars i,.hero-art:before,.holo-core,.holo-core img,.holo-ring,.holo-cube,.holo-beam,.scan-plane,.ambient-orb,.ambient-line,.ambient-code,.section:before,.status-strip:after,.section-head h2:after,.copy h2:after,.faq-copy h2:after{animation:none!important}.card,.btn,.hero-art{transition:none!important}.pointer-ring{display:none!important}}
 </style>
 </head>
 <body>
 <a class="skip" href="#main">Aller au contenu</a>
 <canvas id="fx" aria-hidden="true"></canvas>
+<div class="ambient-space" aria-hidden="true">
+  <div class="ambient-orb o1"></div><div class="ambient-orb o2"></div><div class="ambient-orb o3"></div>
+  <div class="ambient-line l1"></div><div class="ambient-line l2"></div><div class="ambient-line l3"></div>
+  <div class="ambient-code c1">SENTRIX // SECURITY // LIVE</div><div class="ambient-code c2">AUTOMATION // DISCORD // ACTIVE</div><div class="ambient-code c3">MODERATION // LOGS // NETWORK</div>
+</div>
 <div class="pointer-ring" id="pointerRing" aria-hidden="true"></div>
 <div class="progress" id="progress"></div>
 
@@ -259,7 +306,7 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 <section class="wrap section" id="security">
   <div class="split">
     <div class="copy reveal"><span class="eyebrow">Sécurité</span><h2>Des protections visibles, pas des promesses vagues.</h2><p>SentriX donne au staff des outils pour détecter, agir et retrouver le contexte. Chaque serveur garde sa propre configuration.</p><div class="points"><div class="point"><i>01</i><span>AutoMod et protections configurables.</span></div><div class="point"><i>02</i><span>Contrôle de la hiérarchie et des permissions Discord.</span></div><div class="point"><i>03</i><span>Logs détaillés pour comprendre les actions.</span></div></div><a class="btn" href="/start">Guide de démarrage</a></div>
-    <div class="security-box reveal" id="securityBox"><div class="radar"></div><div class="alerts"><div class="alert"><i>AM</i><div><b>AutoMod</b><small>Règle évaluée selon le contexte.</small></div><em>Analysé</em></div><div class="alert"><i>LG</i><div><b>Logs</b><small>Contexte associé à l’événement.</small></div><em>Enregistré</em></div><div class="alert"><i>ST</i><div><b>Staff</b><small>Informations disponibles pour décision.</small></div><em>Prêt</em></div></div></div>
+    <div class="security-box reveal" id="securityBox"><div class="wow-burst"></div><div class="radar"></div><div class="alerts"><div class="alert"><i>AM</i><div><b>AutoMod</b><small>Règle évaluée selon le contexte.</small></div><em>Analysé</em></div><div class="alert"><i>LG</i><div><b>Logs</b><small>Contexte associé à l’événement.</small></div><em>Enregistré</em></div><div class="alert"><i>ST</i><div><b>Staff</b><small>Informations disponibles pour décision.</small></div><em>Prêt</em></div></div></div>
   </div>
 </section>
 
@@ -271,7 +318,7 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
       <button class="tour-tab" type="button" data-pane="pane-tickets"><b>Tickets</b><span>Organisation du support.</span></button>
       <button class="tour-tab" type="button" data-pane="pane-economy"><b>Économie</b><span>Progression communautaire.</span></button>
     </div>
-    <div class="tour-screen">
+    <div class="tour-screen"><div class="wow-burst"></div>
       <div class="tour-browser"><i></i><i></i><i></i><span>SentriX / Dashboard</span></div>
       <div class="tour-pane active" id="pane-security"><aside class="tour-side"><b>SentriX</b><span>Vue d’ensemble</span><span class="active">Sécurité</span><span>Logs</span><span>Tickets</span><span>Économie</span></aside><div class="tour-main"><h3>Protections</h3><p>Réglages isolés par serveur.</p><div class="config-grid"><div class="config-panel"><b>Modules</b><small>État de configuration</small><div class="settings"><div class="setting"><span>Anti-spam</span><i></i></div><div class="setting"><span>Anti-liens</span><i></i></div><div class="setting"><span>Anti-raid</span><i></i></div></div></div><div class="config-panel"><b>Permissions</b><small>Hiérarchie Discord</small><div class="settings"><div class="setting"><span>Staff</span><i></i></div><div class="setting"><span>Actions sensibles</span><i></i></div></div></div><div class="config-panel full"><b>Journalisation</b><small>Les changements importants restent traçables.</small></div></div></div></div>
       <div class="tour-pane ticket-pane" id="pane-tickets"><div class="ticket-stack"><h3>Tickets</h3><p>Configuration et suivi depuis la vraie interface.</p><div class="ticket-item"><span>Ouverture</span><span>Disponible</span></div><div class="ticket-item"><span>Claim staff</span><span>Contrôlé</span></div><div class="ticket-item"><span>Historique</span><span>Conservé</span></div></div></div>
@@ -284,14 +331,14 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 <section class="wrap section" id="automation">
   <div class="section-head reveal"><div><span class="eyebrow">Automatisation</span><h2>Moins de manipulations répétitives pour le staff.</h2></div><p>Bienvenue, rôles, notifications, niveaux et autres événements peuvent suivre les règles configurées pour le serveur.</p></div>
   <div class="timeline stagger"><article class="step"><div class="step-num">01</div><h3>Événement</h3><p>Discord déclenche une action.</p></article><article class="step"><div class="step-num">02</div><h3>Règle</h3><p>SentriX lit la configuration.</p></article><article class="step"><div class="step-num">03</div><h3>Action</h3><p>Le module agit si autorisé.</p></article><article class="step"><div class="step-num">04</div><h3>Trace</h3><p>Le staff garde le contexte.</p></article></div>
-  <div class="workflow-demo reveal"><div class="workflow-line"><div class="node"><b>Nouveau membre</b><span>Événement Discord</span></div><div class="connector"></div><div class="node"><b>Règles SentriX</b><span>Configuration du serveur</span></div><div class="connector"></div><div class="node"><b>Accueil + rôle</b><span>Action configurée</span></div></div></div>
+  <div class="workflow-demo reveal"><div class="wow-burst"></div><div class="workflow-line"><div class="node"><b>Nouveau membre</b><span>Événement Discord</span></div><div class="connector"></div><div class="node"><b>Règles SentriX</b><span>Configuration du serveur</span></div><div class="connector"></div><div class="node"><b>Accueil + rôle</b><span>Action configurée</span></div></div></div>
 </section>
 
 <section class="wrap section" id="ai">
   <div class="section-head reveal"><div><span class="eyebrow">IA & commandes</span><h2>Retrouvez plus vite la bonne fonction.</h2></div><p>SentriX conserve ses commandes slash et préfixées tout en proposant une assistance naturelle pour certaines demandes.</p></div>
   <div class="ai-grid">
-    <div class="ai-card reveal"><h3>Assistance naturelle</h3><p>Posez une question sur SentriX et obtenez une orientation vers les fonctions disponibles.</p><div class="chat" id="chatDemo"><div class="bubble user">Où je configure les logs ?</div><div class="bubble bot">Ouvrez le dashboard, choisissez votre serveur puis la section Logs.</div><div class="bubble user">Je peux encore utiliser + ?</div><div class="bubble bot">Oui, pour les commandes préfixées réellement chargées.</div></div></div>
-    <div class="terminal reveal"><div class="terminal-head"><i></i><i></i><i></i><span>Discord · SentriX</span></div><div class="terminal-body"><div><span class="prompt">membre</span> <span class="dim">›</span> <span class="command">+help</span></div><div class="dim">Commandes préfixées disponibles.</div><br><div><span class="prompt">membre</span> <span class="dim">›</span> <span class="command">/help</span></div><div class="dim">Commandes slash disponibles.</div><br><div><span class="prompt">membre</span> <span class="dim">›</span> <span class="command">SentriX, ouvre les logs</span></div></div></div>
+    <div class="ai-card reveal"><div class="wow-burst"></div><h3>Assistance naturelle</h3><p>Posez une question sur SentriX et obtenez une orientation vers les fonctions disponibles.</p><div class="chat" id="chatDemo"><div class="bubble user">Où je configure les logs ?</div><div class="bubble bot">Ouvrez le dashboard, choisissez votre serveur puis la section Logs.</div><div class="bubble user">Je peux encore utiliser + ?</div><div class="bubble bot">Oui, pour les commandes préfixées réellement chargées.</div></div></div>
+    <div class="terminal reveal"><div class="wow-burst"></div><div class="terminal-head"><i></i><i></i><i></i><span>Discord · SentriX</span></div><div class="terminal-body"><div><span class="prompt">membre</span> <span class="dim">›</span> <span class="command">+help</span></div><div class="dim">Commandes préfixées disponibles.</div><br><div><span class="prompt">membre</span> <span class="dim">›</span> <span class="command">/help</span></div><div class="dim">Commandes slash disponibles.</div><br><div><span class="prompt">membre</span> <span class="dim">›</span> <span class="command">SentriX, ouvre les logs</span></div></div></div>
   </div>
 </section>
 
@@ -326,7 +373,12 @@ function onScroll(){const y=scrollY,max=Math.max(1,document.documentElement.scro
 addEventListener("scroll",onScroll,{passive:true});onScroll();
 addEventListener("pointermove",e=>{document.documentElement.style.setProperty("--mx",e.clientX+"px");document.documentElement.style.setProperty("--my",e.clientY+"px")},{passive:true});
 
-const reveals=$$(".reveal,.stagger");
+const sections=$(".section");
+if("IntersectionObserver" in window){
+  const sio=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting)entry.target.classList.add("is-visible")}),{threshold:.16,rootMargin:"0px 0px -8% 0px"});
+  sections.forEach(s=>sio.observe(s));
+}
+const reveals=$(".reveal,.stagger");
 if(!reduced&&"IntersectionObserver" in window){const io=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.style.opacity="1";e.target.style.transform="none";io.unobserve(e.target)}}),{threshold:.1});reveals.forEach(x=>{x.style.opacity="0";x.style.transform="translateY(16px)";x.style.transition="opacity .45s ease,transform .45s ease";io.observe(x)})}
 
 $$(".tour-tab").forEach(tab=>tab.addEventListener("click",()=>{$$(".tour-tab").forEach(x=>x.classList.remove("active"));$$(".tour-pane").forEach(x=>x.classList.remove("active"));tab.classList.add("active");document.getElementById(tab.dataset.pane)?.classList.add("active")}));
