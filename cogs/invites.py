@@ -646,6 +646,57 @@ class Invites(commands.Cog, name="Invites"):
             lines.append(f"<@{row['member_id']}> · invité par {inviter} · {code} · <t:{row['joined_at']}:R>")
         await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral("Recherche invitations", "\n".join(lines)[:4000])))
 
+
+    @commands.hybrid_command(
+        name="reset-invites",
+        aliases=["resetinvites", "invites-reset"],
+        description="[Admin] Réinitialiser toutes les données d'invitations du serveur.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def reset_invites(self, ctx: commands.Context):
+        tracked = await self.bot.db.fetchone(
+            "SELECT COUNT(*) AS c FROM member_invites WHERE guild_id=?",
+            (ctx.guild.id,),
+        )
+        bonuses = await self.bot.db.fetchone(
+            "SELECT COUNT(*) AS c FROM invite_bonuses WHERE guild_id=?",
+            (ctx.guild.id,),
+        )
+        if not await helpers.double_confirm_destructive(
+            ctx,
+            "réinitialiser toutes les invitations du serveur",
+            detail=(
+                f"{int(tracked['c'] or 0) if tracked else 0} suivi(s) d'arrivée et "
+                f"{int(bonuses['c'] or 0) if bonuses else 0} ajustement(s) bonus seront supprimés. "
+                "Les codes Discord eux-mêmes ne seront pas supprimés."
+            ),
+        ):
+            return
+
+        await self.bot.db.execute("DELETE FROM member_invites WHERE guild_id=?", (ctx.guild.id,))
+        await self.bot.db.execute("DELETE FROM invite_bonuses WHERE guild_id=?", (ctx.guild.id,))
+        try:
+            await self.bot.db.execute("DELETE FROM invite_code_meta WHERE guild_id=?", (ctx.guild.id,))
+        except Exception:
+            pass
+        try:
+            await self.bot.db.execute("DELETE FROM invite_leaderboard_hidden WHERE guild_id=?", (ctx.guild.id,))
+        except Exception:
+            pass
+
+        await self.cache_guild_invites(ctx.guild)
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.success(
+                    "Les statistiques, bonus, labels et préférences de classement des invitations "
+                    "ont été réinitialisés. Les codes Discord actifs ont été conservés et le cache "
+                    "a été resynchronisé pour repartir proprement."
+                )
+            ),
+        )
+
     # -------------------------------------------------------------- Bonus (staff)
 
     @commands.hybrid_command(
