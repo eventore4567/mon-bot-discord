@@ -206,7 +206,7 @@ def register(app: web.Application, dashboard) -> None:
             "risk": {"score": risk, "protection_score": protection_score, "level": risk_level},
             "coverage": {"active": active, "total": len(_FILTERS)},
             "permissions": permissions,
-            "incidents_24h": len(last_24h),
+            "events_24h": len(last_24h),
             "severe_incidents_24h": severe,
             "panic": {
                 "active": bool(panic_row),
