@@ -299,7 +299,7 @@ class Invites(commands.Cog, name="Invites"):
             age = row["account_age_days"]
             suspect = age is not None and int(age) < FAKE_INVITE_ACCOUNT_AGE_DAYS
             extra = " · compte récent" if suspect else ""
-            code = f" · \`{row['invite_code']}\`" if row["invite_code"] else ""
+            code = f" · `{row['invite_code']}`" if row["invite_code"] else ""
             lines.append(
                 f"<@{row['member_id']}> · {state}{extra}{code} · <t:{row['joined_at']}:R>"
             )
@@ -334,7 +334,7 @@ class Invites(commands.Cog, name="Invites"):
             )
         own.sort(key=lambda inv: int(inv.uses or 0), reverse=True)
         lines = [
-            f"\`{inv.code}\` · **{int(inv.uses or 0)}** utilisation(s) · {getattr(inv.channel, 'mention', '#salon')}"
+            f"`{inv.code}` · **{int(inv.uses or 0)}** utilisation(s) · {getattr(inv.channel, 'mention', '#salon')}"
             for inv in own[:25]
         ]
         await panels.envoyer(
