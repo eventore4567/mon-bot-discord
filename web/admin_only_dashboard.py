@@ -224,10 +224,12 @@ def install(dashboard) -> None:
         # que de la télémétrie bornée et sans donnée utilisateur/secrète ; il doit pouvoir
         # recevoir les heartbeats des autres services Railway sans session OAuth Discord.
         public_appeal_api = path.startswith("/api/appeal/")
+        public_verification_api = path.startswith("/api/verify/")
         public_runtime_relay = path == _PUBLIC_RUNTIME_RELAY_PATH
         if (
             path in {"/health", "/login", "/oauth/callback", "/logout", "/api/public"}
             or public_appeal_api
+            or public_verification_api
             or public_runtime_relay
             or request.method == "OPTIONS"
         ):
