@@ -304,6 +304,307 @@ SETUP_EN_REPLACEMENTS = (
 )
 
 
+# Traductions de surface communes. Elles restent ciblées sur le texte d'interface
+# SentriX ; blocs de code, URLs et mentions Discord sont protégés.
+SURFACE_EN_REPLACEMENTS = (
+    ("Commande introuvable. Merci de consulter les commandes avec /help.", "Unknown command. Use /help to view available commands."),
+    ("Commande introuvable", "Unknown command"),
+    ("Merci de consulter les commandes avec /help", "Use /help to view available commands"),
+    ("Vous n'avez pas la permission nécessaire", "You do not have the required permission"),
+    ("Vous n'avez pas accès à cette commande", "You do not have access to this command"),
+    ("Permission Administrateur requise", "Administrator permission required"),
+    ("Cette commande doit être utilisée dans un serveur", "This command must be used in a server"),
+    ("Cette configuration doit être utilisée sur un serveur", "This configuration must be used in a server"),
+    ("Cette configuration est réservée au propriétaire ou aux administrateurs du serveur", "This configuration is restricted to the server owner or administrators"),
+    ("Discord a refusé cette action. Vérifiez les permissions du bot.", "Discord refused this action. Check the bot permissions."),
+    ("Cette commande a rencontré un problème technique.", "This command encountered a technical problem."),
+    ("Cette commande est en recharge. Réessayez dans", "This command is on cooldown. Try again in"),
+    ("Permissions manquantes", "Missing permissions"),
+    ("Permission manquante", "Missing permission"),
+    ("Impossible de", "Unable to"),
+    ("Réessayez dans", "Try again in"),
+    ("Réessaie dans", "Try again in"),
+    ("Réessayez", "Try again"),
+    ("Réessaie", "Try again"),
+
+    ("Vous êtes déjà vérifié", "You are already verified"),
+    ("Aucun rôle de vérification n'est configuré sur ce serveur", "No verification role is configured on this server"),
+    ("Règlement accepté", "Rules accepted"),
+    ("Lis et accepte d'abord le règlement", "Read and accept the rules first"),
+    ("Le règlement a changé ou n'a pas encore été accepté", "The rules changed or have not been accepted yet"),
+    ("Le règlement a changé", "The rules changed"),
+    ("Retourne dans", "Go back to"),
+    ("puis recommence", "then start again"),
+    ("Continue maintenant dans", "Continue now in"),
+    ("Continue la vérification renforcée dans", "Continue reinforced verification in"),
+    ("Vérification renforcée", "Reinforced verification"),
+    ("Vérification & Honeypot", "Verification & Honeypot"),
+    ("Portail & Honeypot", "Portal & Honeypot"),
+    ("Portail de vérification", "Verification portal"),
+    ("Rôle vérifié", "Verified role"),
+    ("Rôle Vérifié", "Verified role"),
+    ("Non vérifié", "Unverified"),
+    ("Vérifié", "Verified"),
+    ("Règlement du serveur", "Server rules"),
+    ("Règlement & accès", "Rules & access"),
+    ("Panneau du règlement", "Rules panel"),
+    ("Panneau public", "Public panel"),
+    ("Règlement", "Rules"),
+    ("Règles du serveur", "Server rules"),
+    ("Toute modification future invalidera automatiquement les anciennes acceptations.", "Any future change will automatically invalidate previous acceptances."),
+    ("Ce système gère le **règlement** séparément de la vérification renforcée.", "This system manages the **rules** separately from reinforced verification."),
+    ("Les membres acceptent d'abord la version actuelle des règles.", "Members first accept the current rules version."),
+    ("Si la vérification renforcée est active", "If reinforced verification is enabled"),
+    ("ils passent ensuite par son challenge avant de recevoir le rôle final.", "they then complete its challenge before receiving the final role."),
+    ("Le CAPTCHA ci-dessous sert uniquement de solution simple quand la vérification renforcée est désactivée.", "The CAPTCHA below is only a simple fallback when reinforced verification is disabled."),
+    ("Écrire / modifier le règlement", "Write / edit rules"),
+    ("Configurer l'image", "Configure image"),
+    ("Enregistrer et publier", "Save and publish"),
+    ("Règlement enregistré dans le configurateur.", "Rules saved in the configurator."),
+    ("Règlement enregistré et panneau publié dans", "Rules saved and panel published in"),
+    ("Aucun règlement écrit pour le moment.", "No rules written yet."),
+    ("Votre règlement", "Your rules"),
+    ("Image du règlement", "Rules image"),
+    ("Salon du règlement", "Rules channel"),
+    ("Choisir le salon du règlement", "Choose the rules channel"),
+    ("Choisir le rôle Vérifié", "Choose the Verified role"),
+    ("Choisissez d'abord un salon textuel valide.", "Choose a valid text channel first."),
+    ("Écrivez votre règlement avant de publier.", "Write your rules before publishing."),
+    ("Rôle de vérification invalide", "Invalid verification role"),
+    ("Le rôle de SentriX doit être placé au-dessus du rôle de vérification", "The SentriX role must be placed above the verification role"),
+    ("SentriX n'a pas la permission", "SentriX does not have the permission"),
+    ("SentriX ne peut pas modifier vos rôles", "SentriX cannot modify your roles"),
+    ("La configuration des rôles est incomplète", "The role configuration is incomplete"),
+    ("Votre accès n'est pas marqué comme étant en attente de vérification.", "Your access is not marked as pending verification."),
+    ("Vous devez d'abord accepter les **règles Discord du serveur**.", "You must first accept the **Discord server rules**."),
+    ("Votre compte Discord est trop récent pour la vérification automatique.", "Your Discord account is too new for automatic verification."),
+    ("Attends encore", "Wait another"),
+    ("avant de commencer la vérification", "before starting verification"),
+    ("Trop de tentatives incorrectes", "Too many incorrect attempts"),
+    ("Une vérification vient déjà d'être générée.", "A verification challenge was just generated."),
+    ("Attendez quelques secondes.", "Wait a few seconds."),
+    ("Étape 1/2 — challenge anti-automatisation", "Step 1/2 — anti-automation challenge"),
+    ("Compte Discord", "Discord account"),
+    ("règles Discord", "Discord rules"),
+    ("Cliquez dans cet ordre", "Click in this order"),
+    ("Ensuite SentriX ouvrira une seconde vérification avec un code unique et un calcul.", "SentriX will then open a second verification with a unique code and a math challenge."),
+    ("Le challenge expire dans", "The challenge expires in"),
+    ("Challenge expiré ou invalide.", "Challenge expired or invalid."),
+    ("Recommencez depuis le panneau de vérification.", "Restart from the verification panel."),
+    ("Code ou calcul incorrect.", "Incorrect code or calculation."),
+    ("Recommence depuis **Commencer la vérification**.", "Restart from **Start verification**."),
+    ("La vérification a été désactivée.", "Verification has been disabled."),
+    ("Les règles Discord du serveur ne sont plus validées.", "The Discord server rules are no longer accepted."),
+    ("Acceptez-les puis recommencez.", "Accept them and start again."),
+    ("La session de vérification n'est plus cohérente.", "The verification session is no longer valid."),
+    ("Votre compte est encore trop récent pour être validé.", "Your account is still too new to be verified."),
+    ("Vous avez été vérifié avec succès", "You have been successfully verified"),
+    ("Membre vérifié — contrôle renforcé réussi", "Member verified — reinforced checks passed"),
+    ("Vérification refusée — compte trop récent", "Verification denied — account too new"),
+    ("Commencer la vérification", "Start verification"),
+    ("Activer / réparer", "Enable / repair"),
+    ("Mode kick", "Kick mode"),
+    ("Désactiver", "Disable"),
+    ("Sanction du piège", "Honeypot sanction"),
+    ("Ce système est séparé du règlement.", "This system is separate from the rules."),
+    ("Les membres doivent d'abord accepter les règles", "Members must accept the rules first"),
+    ("puis réussir ce challenge.", "then pass this challenge."),
+    ("Activer / réparer peut créer les rôles/salons manquants uniquement après ton clic.", "Enable / repair can create missing roles/channels only after your click."),
+    ("Au démarrage, SentriX ne crée plus de nouveaux salons automatiquement.", "On startup, SentriX no longer creates new channels automatically."),
+    ("NE PAS ENVOYER DE MESSAGE DANS CE SALON", "DO NOT SEND MESSAGES IN THIS CHANNEL"),
+    ("Ce salon sert à détecter les **comptes automatisés et spam-bots**.", "This channel detects **automated accounts and spam bots**."),
+    ("Tout message envoyé ici peut entraîner", "Any message sent here may result in"),
+    ("Pour accéder au serveur, termine la vérification dans", "To access the server, complete verification in"),
+
+    ("Tracker d'invitations", "Invite tracker"),
+    ("Tracker public", "Public tracker"),
+    ("Salon public des invitations", "Public invite channel"),
+    ("Salon des logs d'invitations", "Invite logs channel"),
+    ("Basculer l'affichage", "Toggle display"),
+    ("Message de test envoyé.", "Test message sent."),
+    ("Active d'abord le tracker dans un salon valide.", "Enable the tracker in a valid channel first."),
+    ("Choisis d'abord le salon public des invitations.", "Choose the public invite channel first."),
+    ("Logs techniques", "Technical logs"),
+    ("Codes d'invitation", "Invite codes"),
+    ("Afficher qui a invité chaque nouveau membre", "Show who invited each new member"),
+    ("le total d'invitations", "the total invite count"),
+
+    ("Protection vanity URL", "Vanity URL protection"),
+    ("Détection member prune", "Member prune detection"),
+    ("Permissions dangereuses", "Dangerous permissions"),
+    ("Join Gate avancé", "Advanced Join Gate"),
+    ("Risk score comportemental", "Behavioral risk score"),
+    ("Bloquer les élévations critiques de rôles et salons.", "Block critical role and channel permission escalations."),
+    ("Combiner âge du compte, avatar et vitesse d'arrivée.", "Combine account age, avatar and join velocity."),
+    ("Combiner plusieurs signaux de risque avec décroissance temporelle.", "Combine multiple risk signals with time decay."),
+    ("Choisir les rôles et salons qui doivent être ignorés.", "Choose roles and channels that should be ignored."),
+    ("Vérifier permissions, hiérarchie et protections manquantes.", "Check permissions, hierarchy and missing protections."),
+
+    ("Configurer SentriX par module.", "Configure SentriX by module."),
+    ("Chaque page ne montre que ce qui concerne le réglage choisi.", "Each page only shows settings related to the selected option."),
+    ("Choisis un module dans le menu ci-dessous.", "Choose a module from the menu below."),
+    ("Choisir un module à configurer", "Choose a module to configure"),
+    ("choisir un réglage", "choose a setting"),
+    ("Ouvrir ce réglage", "Open this setting"),
+    ("Configuration rapide", "Quick setup"),
+    ("Créer ou réparer le salon de vérification.", "Create or repair the verification channel."),
+    ("Configurer le parcours renforcé anti-automatisation.", "Configure the reinforced anti-automation flow."),
+    ("Publier ou réparer les panneaux verification et stay-muted.", "Publish or repair the verification and stay-muted panels."),
+    ("Choisir le rôle attribué après validation.", "Choose the role granted after verification."),
+    ("Choisir le rôle reçu après la validation.", "Choose the role granted after verification."),
+    ("Choisir le rôle reçu après vérification.", "Choose the role granted after verification."),
+
+    ("Intelligence artificielle", "Artificial intelligence"),
+    ("Réponses IA", "AI responses"),
+    ("Génération d'images", "Image generation"),
+    ("Profil & affichage", "Profile & display"),
+    ("Rôle staff", "Staff role"),
+    ("Salon de bienvenue", "Welcome channel"),
+    ("Salon de départ", "Goodbye channel"),
+    ("Rôle automatique", "Automatic role"),
+    ("Rôle reçu après validation.", "Role granted after verification."),
+    ("Avertissements", "Warnings"),
+    ("Récompenses", "Rewards"),
+    ("Réputation", "Reputation"),
+    ("Monnaie", "Currency"),
+    ("Banque", "Bank"),
+    ("Boutique", "Shop"),
+    ("Inventaire", "Inventory"),
+    ("Économie", "Economy"),
+    ("Niveaux", "Levels"),
+    ("Membres", "Members"),
+    ("Bienvenue", "Welcome"),
+    ("Départ", "Goodbye"),
+    ("Rôles", "Roles"),
+    ("Salons", "Channels"),
+    ("Sécurité", "Security"),
+    ("Modération", "Moderation"),
+    ("Vocal", "Voice"),
+    ("Historique", "History"),
+    ("Résumé", "Summary"),
+    ("Accueil", "Home"),
+    ("Précédent", "Previous"),
+    ("Suivant", "Next"),
+    ("Terminer", "Finish"),
+    ("Fermer", "Close"),
+    ("Enregistrer", "Save"),
+    ("Annuler", "Cancel"),
+    ("Supprimer", "Delete"),
+    ("Retirer", "Remove"),
+    ("Ajouter", "Add"),
+    ("Créer", "Create"),
+    ("Actualiser", "Refresh"),
+    ("Tester", "Test"),
+    ("Configurer", "Configure"),
+    ("État", "Status"),
+    ("ACTIF", "ACTIVE"),
+    ("INACTIF", "INACTIVE"),
+    ("Non configuré", "Not configured"),
+    ("Non configurée", "Not configured"),
+    ("Introuvable", "Missing"),
+)
+
+_UI_PROTECTED_RE = re.compile(
+    r"(\x60\x60\x60.*?\x60\x60\x60|\x60[^\x60\n]*\x60|https?://[^\s)>]+|<@!?\d+>|<@&\d+>|<#\d+>|<t:\d+(?::[A-Za-z])?>|<a?:[A-Za-z0-9_]+:\d+>)",
+    re.DOTALL,
+)
+
+
+def _translate_surface_fragment(value: str, *, setup: bool = False) -> str:
+    text = str(value or "")
+    replacements = [*SURFACE_EN_REPLACEMENTS]
+    if setup:
+        replacements = [*SETUP_EN_REPLACEMENTS, *replacements]
+    for source, target in sorted(replacements, key=lambda pair: len(pair[0]), reverse=True):
+        text = text.replace(source, target)
+    return text
+
+
+def english_ui_text(value: object | None, *, setup: bool = False) -> str | None:
+    """Translate SentriX-owned UI text while preserving code, URLs and Discord mentions."""
+    if value is None:
+        return None
+    parts = _UI_PROTECTED_RE.split(str(value))
+    for index in range(0, len(parts), 2):
+        parts[index] = _translate_surface_fragment(parts[index], setup=setup)
+    return "".join(parts)
+
+
+def translate_embed_in_place(embed: discord.Embed, *, setup: bool = False) -> discord.Embed:
+    if embed.title:
+        embed.title = english_ui_text(embed.title, setup=setup)
+    if embed.description:
+        embed.description = english_ui_text(embed.description, setup=setup)
+    for index, field in enumerate(list(embed.fields)):
+        name = english_ui_text(field.name, setup=setup) or field.name
+        normalized = _strip_accents(str(field.name or "")).casefold()
+        user_text_field = any(
+            token in normalized
+            for token in ("raison", "reason", "prompt", "contenu", "content", "bio")
+        )
+        value = field.value if user_text_field else (english_ui_text(field.value, setup=setup) or field.value)
+        embed.set_field_at(index, name=name, value=value, inline=field.inline)
+    if embed.footer and embed.footer.text:
+        embed.set_footer(
+            text=english_ui_text(embed.footer.text, setup=setup),
+            icon_url=embed.footer.icon_url or None,
+        )
+    if embed.author and embed.author.name:
+        embed.set_author(
+            name=english_ui_text(embed.author.name, setup=setup) or embed.author.name,
+            url=embed.author.url or None,
+            icon_url=embed.author.icon_url or None,
+        )
+    return embed
+
+
+def translate_view_in_place(view, *, setup: bool = False):
+    """Translate labels and text in a discord.py View/LayoutView recursively."""
+    seen: set[int] = set()
+
+    def walk(item):
+        if item is None or id(item) in seen:
+            return
+        seen.add(id(item))
+
+        try:
+            content = getattr(item, "content", None)
+            if isinstance(content, str):
+                item.content = english_ui_text(content, setup=setup)
+        except Exception:
+            pass
+        try:
+            label = getattr(item, "label", None)
+            if isinstance(label, str) and label:
+                item.label = english_ui_text(label, setup=setup)
+        except Exception:
+            pass
+        try:
+            placeholder = getattr(item, "placeholder", None)
+            if isinstance(placeholder, str) and placeholder:
+                item.placeholder = english_ui_text(placeholder, setup=setup)
+        except Exception:
+            pass
+        for option in list(getattr(item, "options", ()) or ()):
+            try:
+                option.label = english_ui_text(option.label, setup=setup) or option.label
+            except Exception:
+                pass
+            try:
+                if option.description:
+                    option.description = english_ui_text(option.description, setup=setup)
+            except Exception:
+                pass
+        for child in list(getattr(item, "children", ()) or ()):
+            walk(child)
+        accessory = getattr(item, "accessory", None)
+        if accessory is not None:
+            walk(accessory)
+
+    walk(view)
+    return view
+
+
 def _strip_accents(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", str(value or ""))
     return "".join(ch for ch in normalized if not unicodedata.combining(ch))
