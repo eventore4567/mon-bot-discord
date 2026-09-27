@@ -417,6 +417,7 @@ SURFACE_EN_REPLACEMENTS = (
     ("Pour accéder au serveur, termine la vérification dans", "To access the server, complete verification in"),
 
     ("Tracker d'invitations", "Invite tracker"),
+    ("Invitations", "Invites"),
     ("Tracker public", "Public tracker"),
     ("Salon public des invitations", "Public invite channel"),
     ("Salon des logs d'invitations", "Invite logs channel"),
