@@ -374,7 +374,7 @@ def _install_unknown_command_hints(bot: commands.Bot) -> None:
             await panels.envoyer(
                 ctx,
                 panels.depuis_embed(embeds.warning(text)),
-                delete_after=2,
+                delete_after=5,
             )
         except discord.HTTPException:
             pass
