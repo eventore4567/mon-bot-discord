@@ -1231,7 +1231,7 @@ class LanguageChoiceView(discord.ui.View):
                 )
             await set_language(self.bot, interaction.guild.id, language)
             if language == LANG_EN:
-                e = embeds.success("English is now the server language. Command names in `+help` and the setup interface are displayed in English.", title="🇬🇧 Language selected")
+                e = embeds.success("English is now the server language. SentriX commands, panels, errors, setup, verification, security and other supported interfaces are displayed in English.", title="🇬🇧 Language selected")
             else:
                 e = embeds.success("Le francais est maintenant la langue du serveur. Les noms dans `+help` et l'interface de configuration sont affiches en francais.", title="🇫🇷 Langue selectionnee")
             await panels.editer(interaction.response, panels.depuis_embed(e))
