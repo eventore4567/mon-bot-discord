@@ -29,6 +29,7 @@ from . import ticket_ping_dashboard as _ticket_ping_dashboard
 from . import dashboard_oxyde_theme as _dashboard_oxyde_theme
 from . import dashboard_deeplinks as _dashboard_deeplinks
 from . import dashboard_safe_plus as _dashboard_safe_plus
+from . import dashboard_guidance_v56 as _dashboard_guidance_v56
 from . import dashboard_profile_images as _dashboard_profile_images
 from . import dashboard_role_channel_search as _dashboard_role_channel_search
 from . import dashboard_system_features as _dashboard_system_features
@@ -276,6 +277,9 @@ _dashboard_no_decorative_icons.install(
 # Feature Suite V37 est volontairement installée après les nettoyages visuels : sa page
 # autonome, ses API et son raccourci dans /app restent stables et ne sont pas réécrits.
 _feature_suite_dashboard_v37.install(_dashboard)
+
+# Accompagnement V56 : diagnostic, onboarding court et retours utilisateurs.
+_dashboard_guidance_v56.install(_dashboard)
 
 # SEO V38 est strictement final : Google voit les pages publiques SentriX, tandis que toutes
 # les pages d'administration restent noindex.
