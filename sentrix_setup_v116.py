@@ -48,10 +48,15 @@ def _s(key: str, label: str, description: str, action: str) -> SectionSpec:
 
 
 MODULES: tuple[ModuleSpec, ...] = (
-    ModuleSpec("security", "Sécurité", "AutoMod, anti-raid, anti-nuke et exceptions.", (
-        _s("automod", "Protections", "Activer et régler précisément les protections AutoMod.", "security"),
-        _s("raid", "Anti-Raid", "Renforcer les protections contre arrivées et actions massives.", "security"),
+    ModuleSpec("security", "Sécurité", "AutoMod, anti-raid, anti-nuke et protections avancées.", (
+        _s("automod", "Protections", "Activer et régler précisément toutes les protections AutoMod.", "security"),
+        _s("raid", "Anti-Raid", "Renforcer les protections contre les arrivées et actions massives.", "security"),
         _s("nuke", "Anti-Nuke", "Protéger les salons, rôles, webhooks et actions critiques.", "security"),
+        _s("vanity", "Vanity URL", "Détecter et restaurer les changements suspects du lien vanity.", "security"),
+        _s("prune", "Member Prune", "Détecter les prunes massifs via le journal d'audit.", "security"),
+        _s("permissions", "Permissions dangereuses", "Bloquer les élévations critiques de rôles et salons.", "security"),
+        _s("join_gate", "Join Gate", "Combiner âge du compte, avatar et vitesse d'arrivée.", "security"),
+        _s("risk", "Risk Score", "Combiner plusieurs signaux de risque avec décroissance temporelle.", "security"),
         _s("exceptions", "Exceptions", "Choisir les rôles et salons qui doivent être ignorés.", "security"),
         _s("diagnostic", "Diagnostic", "Vérifier permissions, hiérarchie et protections manquantes.", "diagnostic"),
     )),
@@ -78,6 +83,11 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("roles", "Rôles", "Création, suppression et modifications de rôles.", "logs"),
         _s("channels", "Salons", "Création, suppression et modifications de salons.", "logs"),
         _s("tickets", "Tickets", "Ouvertures, fermetures et actions liées aux tickets.", "logs"),
+    )),
+    ModuleSpec("invitations", "Invitations", "Tracker d'invitations, salon public et logs techniques.", (
+        _s("tracker", "Tracker public", "Afficher qui a invité chaque nouveau membre et le total d'invitations.", "internal:invitations"),
+        _s("history", "Historique", "Consulter l'historique et les statistiques d'invitations.", "hint:+invite-stats"),
+        _s("codes", "Codes d'invitation", "Voir et gérer les codes suivis par SentriX.", "hint:+invite-codes"),
     )),
     ModuleSpec("levels", "Niveaux", "XP, vocal, paliers, annonces et exclusions.", (
         _s("xp", "XP texte", "Cooldown, XP min/max, salons et rôles exclus.", "levels-config"),
