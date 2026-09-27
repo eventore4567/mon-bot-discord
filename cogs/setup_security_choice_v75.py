@@ -56,6 +56,11 @@ AUTOMOD_DESCRIPTIONS = {
     "antiaccount": "Filtre les comptes Discord trop récents.",
     "antiscam": "Détecte et bloque les contenus typiques de scam.",
     "antinuke": "Protège les rôles, salons et actions serveur sensibles.",
+    "security_vanity": "Détecte les changements suspects du vanity URL et tente de restaurer l'ancien code.",
+    "security_prune": "Détecte les prunes de membres via le journal d'audit et identifie l'auteur.",
+    "security_permissions": "Bloque et restaure les élévations de permissions dangereuses sur rôles et salons.",
+    "join_gate": "Combine âge du compte, avatar et vitesse d'arrivée avant d'accorder la confiance.",
+    "risk_engine": "Combine plusieurs signaux de risque avec décroissance temporelle et alertes graduées.",
 }
 
 
@@ -95,6 +100,11 @@ async def _selected_protections(view: v74.SentriXSetupV74) -> set[str]:
 
 async def _refresh_security_runtime(view: v74.SentriXSetupV74) -> None:
     security_v71._invalidate_automod(view.bot, view.guild.id)
+    automod = view.bot.get_cog("Automod")
+    if automod is not None:
+        cache = getattr(automod, "automod_cache", None)
+        if isinstance(cache, dict):
+            cache.pop(view.guild.id, None)
     runtime = getattr(view.bot, "_sentrix_security_v71_runtime", None)
     if runtime is not None:
         try:
@@ -155,6 +165,31 @@ async def _save_protections(
         bool(chosen),
         actor_id=actor_id,
     )
+
+    # Le vieux panneau marquait le honeypot "actif" en base sans republier les deux
+    # panneaux Discord. Résultat : les salons verification/stay-muted existaient mais
+    # restaient vides. On applique maintenant le runtime réel à chaque sauvegarde.
+    honeypot = view.bot.get_cog("HoneypotVerification")
+    if honeypot is not None:
+        try:
+            if "honeypot" in chosen:
+                result, error = await honeypot.create_or_refresh_system(view.guild)
+                if error:
+                    logger.warning("Setup sécurité : honeypot non activé guild=%s: %s", view.guild.id, error)
+                    await security_v71.update_setting(
+                        view.bot, view.guild.id, "honeypot_enabled", 0, actor_id,
+                    )
+                    await view.bot.db.execute(
+                        "UPDATE honeypot_verification SET enabled=0 WHERE guild_id=?",
+                        (view.guild.id,),
+                    )
+            else:
+                conf = await honeypot.config(view.guild.id, enabled_only=False)
+                if conf and conf["enabled"]:
+                    await honeypot.disable_system(view.guild)
+        except Exception:
+            logger.exception("Setup sécurité : synchronisation honeypot impossible guild=%s", view.guild.id)
+
     await _refresh_security_runtime(view)
 
 
