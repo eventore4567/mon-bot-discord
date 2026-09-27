@@ -4,6 +4,8 @@ from pathlib import Path
 
 SOURCE = Path("web/dashboard_guidance_v56.py").read_text(encoding="utf-8")
 INIT_SOURCE = Path("web/__init__.py").read_text(encoding="utf-8")
+SIMPLE_SOURCE = Path("web/dashboard_simple_mode.py").read_text(encoding="utf-8")
+SAFE_PLUS_SOURCE = Path("web/dashboard_safe_plus.py").read_text(encoding="utf-8")
 
 
 def test_guidance_v56_is_wired_into_dashboard():
@@ -72,3 +74,18 @@ def test_routes_are_guild_scoped_and_use_manageable_guild():
     assert "dashboard._manageable_guild(request, guild_id)" in SOURCE
     assert "/api/guilds/{guild_id}/diagnostic-v1" in SOURCE
     assert "/api/guilds/{guild_id}/feedback-v1" in SOURCE
+
+
+def test_guidance_is_visible_in_both_dashboard_modes():
+    assert "Configuration recommandée en 4 étapes" in SIMPLE_SOURCE
+    assert 'data-sx-destination="diagnostic"' in SIMPLE_SOURCE
+    assert 'data-sx-destination="onboarding"' in SIMPLE_SOURCE
+    assert 'data-sx-destination="feedback"' in SIMPLE_SOURCE
+    assert "/diagnostic?guild=" in SAFE_PLUS_SOURCE
+    assert "/onboarding?guild=" in SAFE_PLUS_SOURCE
+    assert "/feedback?guild=" in SAFE_PLUS_SOURCE
+
+
+def test_feedback_has_standalone_page_route():
+    assert 'app.router.add_get("/feedback", handle_feedback_page)' in SOURCE
+    assert "SentriX — Bug / Avis" in SOURCE
