@@ -50,6 +50,7 @@ jobs:
             tests/test_games_runtime_core.py \
             tests/test_ai_command_router.py \
             tests/test_automod_live_matrix.py \
+            tests/test_i18n_english_surface.py \
             tests/test_ticket_atomic_actions.py \
             tests/test_ticket_rating_persistence.py \
             tests/test_economy_race_conditions.py \
