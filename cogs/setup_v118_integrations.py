@@ -175,7 +175,7 @@ class VerificationSetupView(discord.ui.View):
         self.author_id = author_id
 
         repair_btn = discord.ui.Button(
-            label="Activer / réparer", style=discord.ButtonStyle.success, row=0
+            label="Activer / mettre à jour", style=discord.ButtonStyle.success, row=0
         )
 
         async def repair_cb(interaction: discord.Interaction):
@@ -223,16 +223,34 @@ class VerificationSetupView(discord.ui.View):
                 "Module de vérification indisponible.", ephemeral=True
             )
         await interaction.response.defer()
-        result, error = await honeypot.create_or_refresh_system(
-            interaction.guild, sanction=sanction
-        )
-        if error:
-            return await interaction.followup.send(error, ephemeral=True)
+        current = await honeypot.config(interaction.guild.id, enabled_only=False)
+        if current and current["enabled"]:
+            # Modification d'un système déjà actif : jamais de création de salon.
+            # Si un salon a été supprimé, on laisse le serveur tel quel.
+            await self.bot.db.execute(
+                "UPDATE honeypot_verification SET sanction=? WHERE guild_id=?",
+                (sanction, interaction.guild.id),
+            )
+            result, error = await honeypot.refresh_existing_panels(interaction.guild)
+            if error:
+                return await interaction.followup.send(error, ephemeral=True)
+            message = (
+                f"Panel web mis à jour dans {result['verify'].mention}. "
+                "Aucun salon ni catégorie n'a été créé."
+            )
+        else:
+            # Activation explicite depuis /setup : création initiale autorisée.
+            result, error = await honeypot.create_or_refresh_system(
+                interaction.guild, sanction=sanction
+            )
+            if error:
+                return await interaction.followup.send(error, ephemeral=True)
+            message = (
+                f"Vérification web activée : {result['verify'].mention} · "
+                f"Honeypot : {result['trap'].mention}."
+            )
         await interaction.edit_original_response(embed=await self.build_embed(), view=self)
-        await interaction.followup.send(
-            f"Portail réparé : {result['verify'].mention} · Honeypot : {result['trap'].mention}.",
-            ephemeral=True,
-        )
+        await interaction.followup.send(message, ephemeral=True)
 
     async def build_embed(self) -> discord.Embed:
         guild = self.bot.get_guild(self.guild_id)
@@ -255,10 +273,11 @@ class VerificationSetupView(discord.ui.View):
             f"Vérification : {verify.mention if verify else '**non publiée**'}\n"
             f"Honeypot : {trap.mention if trap else '**non publié**'}\n"
             f"Sanction du piège : **{sanction}**\n\n"
-            "Ce système est séparé du règlement. Les membres doivent d'abord accepter les règles, "
-            "puis réussir ce challenge.\n\n"
-            "Activer / réparer peut créer les rôles/salons manquants uniquement après ton clic. "
-            "Au démarrage, SentriX ne crée plus de nouveaux salons automatiquement."
+            "Le membre clique sur le panel Discord puis termine la vérification sur le site SentriX "
+            "(OAuth Discord, règlement, ancienneté du compte, CAPTCHA et calcul).\n\n"
+            "Si le système est déjà actif, **Mettre à jour** remplace seulement les panels existants. "
+            "Un salon supprimé n'est jamais recréé automatiquement. La création de structure n'arrive "
+            "que lors d'une nouvelle activation explicite."
         )
         return discord.Embed(
             title="Vérification & Honeypot",
