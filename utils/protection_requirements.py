@@ -49,6 +49,23 @@ EXIGENCES: dict[str, tuple[tuple[str, str, str], ...]] = {
     ),
     "antibot": (("kick_members", "Expulser des membres", INERTE),),
     "antiaccount": (("kick_members", "Expulser des membres", INERTE),),
+    "security_vanity": (
+        ("view_audit_log", "Voir le journal d'audit", INERTE),
+        ("manage_guild", "Gérer le serveur", DEGRADEE),
+    ),
+    "security_prune": (
+        ("view_audit_log", "Voir le journal d'audit", INERTE),
+        ("ban_members", "Bannir des membres", DEGRADEE),
+    ),
+    "security_permissions": (
+        ("view_audit_log", "Voir le journal d'audit", INERTE),
+        ("manage_roles", "Gérer les rôles", DEGRADEE),
+        ("manage_channels", "Gérer les salons", DEGRADEE),
+    ),
+    "join_gate": (("moderate_members", "Modérer les membres", DEGRADEE),),
+    # Le moteur Risk peut toujours calculer et journaliser son score sans permission
+    # destructive ; les protections qui alimentent le score portent leurs propres exigences.
+    "risk_engine": (),
 }
 
 
