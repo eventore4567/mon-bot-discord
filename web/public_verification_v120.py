@@ -324,6 +324,7 @@ def _landing_channel(member: discord.Member):
 
 
 async def _send_success_dm(
+    bot,
     member: discord.Member,
     guild: discord.Guild,
     channel,
@@ -335,7 +336,7 @@ async def _send_success_dm(
     )
     try:
         from cogs import language_runtime
-        language = await language_runtime.get_language(member._state._get_client(), guild.id)
+        language = await language_runtime.get_language(bot, guild.id)
     except Exception:
         language = "fr"
     english = language == "en"
@@ -514,7 +515,7 @@ async def _complete_verification(
     cog._lock_until.pop(key, None)
 
     landing = _landing_channel(member)
-    dm_sent = await _send_success_dm(member, guild, landing)
+    dm_sent = await _send_success_dm(bot, member, guild, landing)
 
     try:
         await cog._log(
