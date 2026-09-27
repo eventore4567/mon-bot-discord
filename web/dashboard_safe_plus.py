@@ -216,7 +216,10 @@ SAFE_PLUS_JS = r"""
         <div class="sx-safe-card">
           <h3>Accès rapides</h3>
           <div class="sx-safe-actions">
-            <button class="sx-safe-action primary" type="button" data-sx-tab="security">Sécurité</button>
+            <a class="sx-safe-action link primary" href="/diagnostic?guild=${encodeURIComponent(s.guildId)}">Centre de diagnostic</a>
+            <a class="sx-safe-action link primary" href="/onboarding?guild=${encodeURIComponent(s.guildId)}">Configuration guidée</a>
+            <a class="sx-safe-action link" href="/feedback?guild=${encodeURIComponent(s.guildId)}">Bug / Avis</a>
+            <button class="sx-safe-action" type="button" data-sx-tab="security">Sécurité</button>
             <button class="sx-safe-action" type="button" data-sx-tab="tickets">Tickets</button>
             <button class="sx-safe-action" type="button" data-sx-tab="sanctions">Sanctions</button>
             <button class="sx-safe-action" type="button" data-sx-tab="logs">Logs</button>
