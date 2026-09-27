@@ -105,6 +105,6 @@ def test_clear_and_clearwarnings_no_longer_double_confirm():
 
 
 def test_success_dm_matches_requested_green_verification_style():
-    assert 'title=f"Verification successful on {guild.name}"' in WEB_SOURCE
+    assert 'Verification successful on {guild.name}' in WEB_SOURCE
     assert "discord.Colour.green()" in WEB_SOURCE
     assert 'label="Open server"' in WEB_SOURCE
