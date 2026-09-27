@@ -1673,12 +1673,6 @@ class Tickets(commands.Cog):
         if not panel:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun panel nommé « {nom} ».')))
         types = await self.get_panel_types(panel["id"])
-        if not await helpers.double_confirm_destructive(
-            ctx,
-            f"supprimer le panel {panel['name']}",
-            detail=f"{len(types)} type(s) de ticket associé(s) et leurs formulaires seront également supprimés.",
-        ):
-            return
         type_ids = [t["id"] for t in types]
         for tid in type_ids:
             await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE ticket_type_id = ?", (tid,))
@@ -1826,12 +1820,6 @@ class Tickets(commands.Cog):
         t = await self.get_type_by_name(ctx.guild.id, nom)
         if not t:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Aucun type nommé « {nom} ».')))
-        if not await helpers.double_confirm_destructive(
-            ctx,
-            f"supprimer le type de ticket {t['name']}",
-            detail="Son formulaire associé sera également supprimé.",
-        ):
-            return
         await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE ticket_type_id = ?", (t["id"],))
         await self.bot.db.execute("DELETE FROM ticket_types WHERE id = ?", (t["id"],))
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f"Type **{t['name']}** supprimé.")))
@@ -1887,12 +1875,6 @@ class Tickets(commands.Cog):
         if position < 1 or position > len(questions):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f'Position invalide (ce type a {len(questions)} question(s)).')))
         question = questions[position - 1]
-        if not await helpers.double_confirm_destructive(
-            ctx,
-            f"supprimer la question {question['label']}",
-            detail=f"Elle sera retirée du formulaire du type {t['name']}.",
-        ):
-            return
         await self.bot.db.execute("DELETE FROM ticket_form_questions WHERE id = ?", (question["id"],))
         remaining = await self.bot.db.fetchall("SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (t["id"],))
         for i, q in enumerate(remaining):
