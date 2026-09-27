@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from web import public_home_v3
+from web import brand_avatar_v39, public_home_v3
 
 
 class _Dashboard:
@@ -83,9 +83,15 @@ def test_v3_preserves_dashboard_oauth_and_public_links():
     assert 'fetch("/api/me"' in page
     assert 'href="/commands"' in page
     assert 'href="/support"' in page
+    assert '<a class="btn ghost" href="/support">Support</a>' in page
     assert 'href="/privacy"' in page
     assert 'href="/terms"' in page
     assert "https://discord.com/oauth2/authorize?client_id=123&amp;scope=bot" in page
+
+
+def test_home_alias_receives_same_public_branding_as_root():
+    assert "/" in brand_avatar_v39._PUBLIC_HTML_PATHS
+    assert "/home" in brand_avatar_v39._PUBLIC_HTML_PATHS
 
 
 def test_v3_home_never_boots_private_guild_data():
