@@ -19,6 +19,7 @@ _AVATAR_PATH = "/sentrix-avatar.png"
 _FALLBACK_AVATAR = Path(__file__).resolve().parent.parent / "assets" / "sentrix" / "brand.png"
 _PUBLIC_HTML_PATHS = {
     "/",
+    "/home",
     "/sentrix",
     "/dashboard-sentrix",
     "/start",
