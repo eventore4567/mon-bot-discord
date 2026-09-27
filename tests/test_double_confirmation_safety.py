@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 
-from cogs import member_data_retention_v17
+from cogs import member_data_retention_v17, setup_auto_fix
 from utils import helpers
 
 
@@ -24,8 +24,6 @@ def test_only_high_impact_bulk_commands_are_covered_by_late_guard():
         "config-reset",
         "reset-logs-all",
         "delete-channel",
-        "security all",
-        "create-logs",
         "syncbl",
     }
     assert expected <= set(member_data_retention_v17.DOUBLE_CONFIRM_COMMANDS)
@@ -41,6 +39,8 @@ def test_only_high_impact_bulk_commands_are_covered_by_late_guard():
         "tickettype remove",
         "ticketform remove",
         "music clear",
+        "security all",
+        "create-logs",
     }
     assert not (low_risk & set(member_data_retention_v17.DOUBLE_CONFIRM_COMMANDS))
     assert "represet" not in member_data_retention_v17.RESET_COMMAND_LABELS
@@ -64,3 +64,8 @@ def test_bulk_guard_supports_standalone_commands_without_cog_self():
     source = inspect.getsource(member_data_retention_v17._install_destructive_confirmations)
     assert "async def wrapped(*args" in source
     assert "isinstance(value, commands.Context)" in source
+
+
+def test_setup_auto_profile_is_not_double_confirmed_anymore():
+    source = inspect.getsource(setup_auto_fix._run_auto_setup)
+    assert "double_confirm_destructive" not in source
