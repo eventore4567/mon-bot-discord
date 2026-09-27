@@ -135,7 +135,8 @@ def _secret() -> bytes:
     # partagé entre primary/standby, contrairement à des secrets Discord qui peuvent
     # dériver entre services. On l'utilise donc en priorité pour signer les jetons web.
     value = (
-        (os.getenv("SENTRIX_HTTP_PROXY_SECRET") or "").strip()
+        (os.getenv("SENTRIX_VERIFICATION_SECRET") or "").strip()
+        or (os.getenv("SENTRIX_HTTP_PROXY_SECRET") or "").strip()
         or (getattr(config, "DISCORD_CLIENT_SECRET", "") or "").strip()
         or (getattr(config, "DISCORD_TOKEN", "") or "").strip()
     )
@@ -309,8 +310,15 @@ def _json_error(message: str, status: int = 400, *, code: str = "verification_er
 
 
 async def _resolve_session(request: web.Request, guild_id: int):
-    payload = parse_session_token(request.cookies.get(SESSION_COOKIE, ""), guild_id=guild_id)
+    raw_session = request.cookies.get(SESSION_COOKIE, "")
+    payload = parse_session_token(raw_session, guild_id=guild_id)
     if not payload:
+        logger.warning(
+            "Verification session refused guild=%s cookie_present=%s ha_proxy=%s",
+            guild_id,
+            bool(raw_session),
+            request.headers.get("X-SentriX-HA-Proxy") == "1",
+        )
         return None, None, _json_error(
             "Connecte-toi avec Discord pour continuer.", 401, code="auth_required"
         )
