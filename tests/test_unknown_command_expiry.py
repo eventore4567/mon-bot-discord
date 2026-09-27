@@ -33,3 +33,11 @@ def test_legacy_unknown_listeners_do_not_leave_permanent_messages():
     v5 = _read("cogs/bot_experience_v5.py")
     assert "delete_after=2" in v16
     assert "delete_after=2" in v5
+
+
+def test_final_runtime_guard_deletes_the_actual_sentrix_unknown_reply():
+    source = _read("cogs/final_stability_guard.py")
+    assert "class UnknownCommandExpiryGuard" in source
+    assert 'content.startswith("commande introuvable")' in source
+    assert "await asyncio.sleep(2)" in source
+    assert "await message.delete()" in source
