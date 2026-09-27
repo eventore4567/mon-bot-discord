@@ -93,6 +93,11 @@ if "cogs.member_data_retention_v17" not in bot_main.EXTENSIONS:
 # Correctifs d'interface finaux : dashboard, +setup invitation, rôles-réactions et doublons.
 if "cogs.sentrix_regression_fix" not in bot_main.EXTENSIONS:
     bot_main.EXTENSIONS.append("cogs.sentrix_regression_fix")
+# Tracker public d'invitations + intégrations finales du setup guidé.
+if "cogs.invite_tracker_runtime" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.invite_tracker_runtime")
+if "cogs.setup_v118_integrations" not in bot_main.EXTENSIONS:
+    bot_main.EXTENSIONS.append("cogs.setup_v118_integrations")
 
 bot_main.CATEGORY_COMMANDS["economie"] = (
     bot_main.CATEGORY_COMMANDS.get("economie", frozenset()) | frozenset({"drop"})
