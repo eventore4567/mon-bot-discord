@@ -152,6 +152,17 @@ def test_adaptive_v5_is_web_gated_and_can_refresh_existing_panels():
     assert "member.remove_roles(" not in evaluate
 
 
+def test_verified_members_lose_access_to_verification_panel_without_deleting_it():
+    assert "async def ensure_verified_panel_hidden" in HONEYPOT_SOURCE
+    assert 'reason="SentriX : masquer le panneau après vérification"' in HONEYPOT_SOURCE
+    assert 'reason="SentriX : masquer le honeypot après vérification"' in HONEYPOT_SOURCE
+    complete_start = WEB_SOURCE.index("async def _complete_verification")
+    complete_end = WEB_SOURCE.index("COPY_FR =", complete_start)
+    complete = WEB_SOURCE[complete_start:complete_end]
+    assert 'getattr(cog, "ensure_verified_panel_hidden", None)' in complete
+    assert "message.delete" not in complete
+
+
 def test_existing_members_can_enroll_into_web_verification_on_demand():
     assert "async def _ensure_pending_enrollment" in WEB_SOURCE
     assert 'reason="SentriX : inscription à la vérification web"' in WEB_SOURCE
