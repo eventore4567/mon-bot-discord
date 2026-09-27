@@ -388,6 +388,49 @@ class VerifySetupView(discord.ui.View):
             "ON CONFLICT(guild_id) DO UPDATE SET rules_text=excluded.rules_text,image_url=excluded.image_url,message_id=excluded.message_id,updated_at=excluded.updated_at",
             (self.guild.id, rules, image_url or None, published.id, int(time.time())),
         )
+
+        # Si la vérification renforcée est active, le règlement reste obligatoirement
+        # visible aux membres "Non vérifié". Changer de salon ne doit jamais créer une
+        # porte de contournement : l'ancien salon redevient masqué et le nouveau est en lecture seule.
+        honeypot = self.bot.get_cog("HoneypotVerification")
+        if honeypot is not None:
+            try:
+                reinforced = await honeypot.config(self.guild.id)
+            except Exception:
+                reinforced = None
+            if reinforced:
+                unverified = self.guild.get_role(int(reinforced["unverified_role_id"] or 0))
+                if unverified is not None:
+                    if self.previous_channel_id and self.previous_channel_id != channel.id:
+                        previous_rules = self.guild.get_channel(int(self.previous_channel_id))
+                        protected_ids = {
+                            int(reinforced["verify_channel_id"] or 0),
+                            int(reinforced["trap_channel_id"] or 0),
+                            int(reinforced["category_id"] or 0),
+                        }
+                        if isinstance(previous_rules, discord.TextChannel) and previous_rules.id not in protected_ids:
+                            try:
+                                await previous_rules.set_permissions(
+                                    unverified,
+                                    overwrite=honeypot._unverified_overwrite(),
+                                    reason="SentriX : ancien salon de règlement masqué avant vérification",
+                                )
+                            except (discord.Forbidden, discord.HTTPException):
+                                logger.warning("Impossible de reverrouiller l'ancien salon de règlement guild=%s.", self.guild.id)
+                    try:
+                        await channel.set_permissions(
+                            unverified,
+                            view_channel=True,
+                            read_message_history=True,
+                            send_messages=False,
+                            add_reactions=False,
+                            create_public_threads=False,
+                            create_private_threads=False,
+                            reason="SentriX : règlement lisible avant vérification",
+                        )
+                    except (discord.Forbidden, discord.HTTPException):
+                        logger.warning("Impossible d'ouvrir le règlement aux non vérifiés guild=%s.", self.guild.id)
+
         try:
             await self.bot.db.add_setup_history(
                 self.guild.id,
