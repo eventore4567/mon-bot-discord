@@ -551,38 +551,14 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             excluded_ids,
         )
 
-        try:
-            await verify_channel.purge(limit=20, check=lambda message: message.author.id == self.bot.user.id)
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
-        verify_embed = discord.Embed(
-            title="🔐 Vérification renforcée SentriX",
-            description=(
-                "L'accès au serveur reste **bloqué** tant que la vérification complète n'est pas terminée.\n\nSentriX contrôle :\n• l'acceptation de la version actuelle du règlement SentriX, si un règlement est publié ;\n• les règles Discord / Membership Screening si elles sont activées ;\n• l'ancienneté minimale du compte ;\n• un challenge interactif anti-automatisation ;\n• un code unique + un calcul à usage unique ;\n• les tentatives répétées et les délais anormaux.\n\nCliquez sur **Commencer la vérification**. Un simple clic ne donne jamais accès au serveur."
-            ),
-            colour=discord.Color.blurple(),
+        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
+        await _purge_bot_messages(verify_channel, bot_user_id)
+        await _purge_bot_messages(trap_channel, bot_user_id)
+        await panels.envoyer(verify_channel, await _web_panel(self.bot, guild))
+        await panels.envoyer(
+            trap_channel,
+            panels.depuis_embed(_trap_embed(verify_channel, sanction)),
         )
-        verify_embed.set_footer(text="SentriX • Vérification renforcée")
-        await panels.envoyer(verify_channel, panels.avec_composants(panels.depuis_embed(verify_embed), HoneypotVerifyView()))
-
-        try:
-            await trap_channel.purge(limit=20, check=lambda message: message.author.id == self.bot.user.id)
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
-        sanction_label = "softban automatique" if sanction == "softban" else "expulsion automatique"
-        trap_embed = discord.Embed(
-            title="⚠️ NE PAS ENVOYER DE MESSAGE DANS CE SALON",
-            description=(
-                "Ce salon sert à détecter les **comptes automatisés et spam-bots**.\n"
-                f"Tout message envoyé ici peut entraîner un **{sanction_label}**.\n\n"
-                f"Pour accéder au serveur, termine la vérification dans {verify_channel.mention}."
-            ),
-            colour=discord.Color.red(),
-        )
-        trap_embed.set_footer(text="SentriX • Honeypot anti-bot")
-        await panels.envoyer(trap_channel, panels.depuis_embed(trap_embed))
 
         await self.bot.db.execute(
             "INSERT INTO honeypot_verification "
@@ -612,6 +588,39 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             "unverified": unverified,
             "verified": verified,
             "sanction": sanction,
+        }, None
+
+    async def refresh_existing_panels(self, guild: discord.Guild) -> tuple[dict | None, str | None]:
+        """Replace verification/honeypot panels in the channels already configured.
+
+        This method is intentionally non-creative: if a channel was deleted, nothing is
+        recreated. It only cleans SentriX messages and publishes one current panel.
+        """
+        conf = await self.config(guild.id, enabled_only=True)
+        if not conf:
+            return None, "La vérification renforcée n'est pas active sur ce serveur."
+
+        verify_channel = guild.get_channel(int(conf["verify_channel_id"] or 0))
+        trap_channel = guild.get_channel(int(conf["trap_channel_id"] or 0))
+        if not isinstance(verify_channel, discord.TextChannel):
+            return None, "Le salon de vérification configuré a été supprimé. SentriX ne le recrée pas automatiquement."
+        if not isinstance(trap_channel, discord.TextChannel):
+            return None, "Le salon stay-muted configuré a été supprimé. SentriX ne le recrée pas automatiquement."
+
+        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
+        removed_verify = await _purge_bot_messages(verify_channel, bot_user_id)
+        removed_trap = await _purge_bot_messages(trap_channel, bot_user_id)
+
+        await panels.envoyer(verify_channel, await _web_panel(self.bot, guild))
+        await panels.envoyer(
+            trap_channel,
+            panels.depuis_embed(_trap_embed(verify_channel, str(conf["sanction"] or "softban"))),
+        )
+        return {
+            "verify": verify_channel,
+            "trap": trap_channel,
+            "removed_verify_messages": removed_verify,
+            "removed_trap_messages": removed_trap,
         }, None
 
     async def disable_system(self, guild: discord.Guild) -> tuple[bool, str]:
