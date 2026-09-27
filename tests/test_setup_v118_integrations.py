@@ -45,7 +45,7 @@ def test_v118_integrates_verification_repair_inside_setup():
 
 def test_enabled_honeypot_repairs_missing_panels_on_ready_without_creating_structure():
     assert "async def _repair_enabled_systems" in HONEYPOT_SOURCE
-        assert "_repair_enabled_systems(bot)" in HONEYPOT_SOURCE
+    assert "_repair_enabled_systems(bot)" in HONEYPOT_SOURCE
     assert "sentrix-honeypot-repair" in HONEYPOT_SOURCE
     repair = HONEYPOT_SOURCE[HONEYPOT_SOURCE.index("async def _repair_enabled_systems"):]
     repair = repair[:repair.index("async def install")]
