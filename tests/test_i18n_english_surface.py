@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import discord
+import pytest
 
 from cogs import language_runtime
 
@@ -50,7 +51,8 @@ def test_embed_translation_preserves_free_form_body():
     assert embed.fields[0].value == "Règlement et Sécurité sont mes mots."
 
 
-def test_component_translation_changes_buttons_and_select_options():
+@pytest.mark.asyncio
+async def test_component_translation_changes_buttons_and_select_options():
     view = discord.ui.View()
     view.add_item(discord.ui.Button(label="Activer / réparer"))
     select = discord.ui.Select(
