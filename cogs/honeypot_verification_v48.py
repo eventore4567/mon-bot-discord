@@ -429,10 +429,29 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 reason="SentriX : salon piège anti-bot",
             )
 
+        rules_channel_id = await rules_flow.rules_channel_id(self.bot, guild.id)
+        rules_channel = guild.get_channel(rules_channel_id) if rules_channel_id else None
+        excluded_ids = {category.id, verify_channel.id, trap_channel.id}
+        if isinstance(rules_channel, discord.TextChannel):
+            excluded_ids.add(rules_channel.id)
+            try:
+                await rules_channel.set_permissions(
+                    unverified,
+                    view_channel=True,
+                    read_message_history=True,
+                    send_messages=False,
+                    add_reactions=False,
+                    create_public_threads=False,
+                    create_private_threads=False,
+                    reason="SentriX : le règlement doit rester lisible avant la vérification",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Impossible de rendre le règlement visible aux non vérifiés guild=%s.", guild.id)
+
         await self._lock_existing_channels(
             guild,
             unverified,
-            {category.id, verify_channel.id, trap_channel.id},
+            excluded_ids,
         )
 
         try:
@@ -881,6 +900,9 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             int(conf["verify_channel_id"] or 0),
             int(conf["trap_channel_id"] or 0),
         }
+        rules_channel_id = await rules_flow.rules_channel_id(self.bot, channel.guild.id)
+        if rules_channel_id:
+            excluded.add(int(rules_channel_id))
         if channel.id in excluded:
             return
         unverified = channel.guild.get_role(conf["unverified_role_id"])
