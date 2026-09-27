@@ -11,7 +11,7 @@ import discord
 from discord.ext import commands
 
 from utils import helpers
-from utils import sentrix_panels as panels
+from utils import sentrix_panels as panels, rules_flow
 
 logger = logging.getLogger("bot.security.honeypot-v50")
 _COG_NAME = "HoneypotVerification"
@@ -334,7 +334,31 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             return None, "Permissions manquantes : " + ", ".join(missing)
 
         unverified = await self._find_or_create_role(guild, "Non vérifié")
-        verified = await self._find_or_create_role(guild, "Vérifié")
+
+        # Une seule source de vérité pour le rôle final : si /setup ou le règlement a déjà
+        # choisi verify_role, la vérification renforcée réutilise exactement ce rôle au lieu
+        # de créer un deuxième rôle "Vérifié".
+        verified = None
+        try:
+            guild_conf = await self.bot.db.get_guild_config(guild.id)
+            configured_role_id = guild_conf["verify_role"] if guild_conf else None
+            if configured_role_id:
+                candidate = guild.get_role(int(configured_role_id))
+                if candidate is not None and not candidate.managed and not candidate.is_default():
+                    verified = candidate
+        except Exception:
+            logger.debug("Lecture du rôle Vérifié configuré impossible guild=%s", guild.id, exc_info=True)
+        if verified is None:
+            old_verified_id = old["verified_role_id"] if old and old["verified_role_id"] else None
+            verified = guild.get_role(int(old_verified_id)) if old_verified_id else None
+        if verified is None or verified.managed or verified.is_default():
+            verified = await self._find_or_create_role(guild, "Vérifié")
+        try:
+            await self.bot.db.set_guild_config(guild.id, "verify_role", verified.id)
+            await self.bot.db.set_guild_config(guild.id, "verification_role", verified.id)
+        except Exception:
+            logger.debug("Synchronisation du rôle Vérifié impossible guild=%s", guild.id, exc_info=True)
+
         me = guild.me
         if me is None:
             return None, "SentriX est introuvable sur ce serveur."
@@ -541,6 +565,23 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 "Votre accès n'est pas marqué comme étant en attente de vérification.", ephemeral=True
             )
 
+        # Le règlement SentriX et la vérification renforcée sont deux systèmes séparés mais
+        # chaînés. Si un règlement public existe, la version actuelle doit avoir été acceptée
+        # avant de lancer le challenge de sécurité.
+        try:
+            accepted = await rules_flow.has_accepted_current_rules(self.bot, interaction.guild.id, member.id)
+        except Exception:
+            logger.exception("Lecture acceptation règlement impossible guild=%s user=%s", interaction.guild.id, member.id)
+            accepted = False
+        if not accepted:
+            rules_channel_id = await rules_flow.rules_channel_id(self.bot, interaction.guild.id)
+            rules_channel = interaction.guild.get_channel(rules_channel_id) if rules_channel_id else None
+            destination = rules_channel.mention if isinstance(rules_channel, discord.TextChannel) else "le salon du règlement"
+            return await interaction.response.send_message(
+                f"Lis et accepte d'abord le règlement dans {destination}, puis recommence la vérification.",
+                ephemeral=True,
+            )
+
         # Discord Membership Screening : lorsqu'il est activé sur le serveur, Member.pending
         # reste vrai tant que les règles natives Discord n'ont pas été acceptées.
         if bool(getattr(member, "pending", False)):
@@ -673,6 +714,23 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             self._challenges.pop(key, None)
             return await interaction.response.send_message(
                 '⚠️ Les règles Discord du serveur ne sont plus validées. Acceptez-les puis recommencez.',
+                ephemeral=True,
+            )
+
+        # Le règlement peut être modifié pendant qu'un challenge est ouvert. On revalide la
+        # version juste avant d'accorder l'accès pour qu'une ancienne acceptation ne suffise
+        # jamais après une mise à jour des règles.
+        try:
+            accepted = await rules_flow.has_accepted_current_rules(self.bot, interaction.guild.id, member.id)
+        except Exception:
+            accepted = False
+        if not accepted:
+            self._challenges.pop(key, None)
+            rules_channel_id = await rules_flow.rules_channel_id(self.bot, interaction.guild.id)
+            rules_channel = interaction.guild.get_channel(rules_channel_id) if rules_channel_id else None
+            destination = rules_channel.mention if isinstance(rules_channel, discord.TextChannel) else "le salon du règlement"
+            return await interaction.response.send_message(
+                f"Le règlement a changé ou n'a pas encore été accepté. Retourne dans {destination}, accepte-le, puis recommence.",
                 ephemeral=True,
             )
 
@@ -1115,6 +1173,16 @@ async def _repair_enabled_systems(bot: commands.Bot) -> None:
                 continue
             verify_channel = guild.get_channel(conf["verify_channel_id"]) if conf["verify_channel_id"] else None
             trap_channel = guild.get_channel(conf["trap_channel_id"]) if conf["trap_channel_id"] else None
+            # Au démarrage, SentriX ne crée plus JAMAIS de nouveaux salons tout seul.
+            # Une réparation automatique ne republie des panneaux que si les deux salons
+            # configurés existent encore. Si un salon a été supprimé, l'administrateur doit
+            # explicitement utiliser "Activer / réparer" dans /setup.
+            if not isinstance(verify_channel, discord.TextChannel) or not isinstance(trap_channel, discord.TextChannel):
+                logger.warning(
+                    "Réparation automatique ignorée guild=%s : salon verification ou stay-muted manquant.",
+                    guild.id,
+                )
+                continue
             verify_ok = await _has_sentrix_panel(verify_channel, bot_user_id)
             trap_ok = await _has_sentrix_panel(trap_channel, bot_user_id)
             if verify_ok and trap_ok:
