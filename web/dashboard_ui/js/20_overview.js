@@ -104,13 +104,17 @@ function overviewServerBar() {
 
 async function renderOverview() {
   const d = await diagnostics();
+  let guide = null;
+  try { guide = await guidanceDiagnostic(); } catch (_) {}
   const mods = d.modules || {};
   const configured = Object.values(mods).some(m => m.configured || m.code === 'active');
   const cards = OVERVIEW_CARDS.map(c => moduleCard(c, mods[c.key])).join('');
   const onboarding = !configured ? `<section class="card full"><div class="card-head"><div><h2>Bienvenue dans SentriX</h2><p>Configurez les fonctions principales de votre serveur en quelques étapes. Rien n’est modifié avant la dernière étape.</p></div><button class="btn primary" type="button" id="startWizard">Commencer</button></div></section>` : '';
   const problems = (d.invalid_resources || []).length;
-  content().innerHTML = `<div class="grid">${overviewServerBar()}${onboarding}${problems ? `<div class="notice warn full">${plural(problems, 'ressource', 'ressources')} à corriger (salon ou rôle supprimé). <button class="btn link" type="button" data-go="diagnostic">Voir</button></div>` : ''}<div class="module-grid full">${cards}</div></div>`;
+  const assistant = guide ? guidanceOverviewBlock(guide) : '';
+  content().innerHTML = `<div class="grid">${overviewServerBar()}${assistant}${onboarding}${problems ? `<div class="notice warn full">${plural(problems, 'ressource', 'ressources')} à corriger (salon ou rôle supprimé). <button class="btn link" type="button" data-go="diagnostic">Voir</button></div>` : ''}<div class="module-grid full">${cards}</div></div>`;
   bindModuleButtons();
+  bindGuidanceOverview();
   renderNav();
   const w = $('startWizard'); if (w) w.onclick = openWizard;
 }
