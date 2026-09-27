@@ -92,6 +92,7 @@ def test_active_panel_is_web_link_and_startup_never_recreates_missing_channels()
 
 def test_one_time_cleanup_only_targets_old_duplicate_verification_channels():
     assert "_cleanup_spam_verification_channels" in HONEYPOT_SOURCE
+    assert 'if not conf or not conf["enabled"]' in HONEYPOT_SOURCE
     assert 'channel.name.casefold() not in {"verification", "stay-muted"}' in HONEYPOT_SOURCE
     assert "_channel_is_bot_only" in HONEYPOT_SOURCE
     assert "keep_ids" in HONEYPOT_SOURCE
