@@ -1164,13 +1164,22 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
     logger.info("Vérification renforcée V50 intégrée dans +setup > Sécurité.")
 
 
-async def _has_sentrix_panel(channel: discord.TextChannel | None, bot_user_id: int | None) -> bool:
+async def _has_sentrix_panel(
+    channel: discord.TextChannel | None,
+    bot_user_id: int | None,
+    *,
+    title_contains: str,
+) -> bool:
     if not isinstance(channel, discord.TextChannel) or not bot_user_id:
         return False
+    expected = str(title_contains or "").casefold()
     try:
-        async for message in channel.history(limit=12):
-            if getattr(message.author, "id", None) == bot_user_id:
-                return True
+        async for message in channel.history(limit=20):
+            if getattr(message.author, "id", None) != bot_user_id:
+                continue
+            for embed in getattr(message, "embeds", ()):
+                if expected in str(getattr(embed, "title", "") or "").casefold():
+                    return True
     except (discord.Forbidden, discord.HTTPException):
         return False
     return False
@@ -1205,8 +1214,12 @@ async def _repair_enabled_systems(bot: commands.Bot) -> None:
                     guild.id,
                 )
                 continue
-            verify_ok = await _has_sentrix_panel(verify_channel, bot_user_id)
-            trap_ok = await _has_sentrix_panel(trap_channel, bot_user_id)
+            verify_ok = await _has_sentrix_panel(
+                verify_channel, bot_user_id, title_contains="vérification renforcée"
+            )
+            trap_ok = await _has_sentrix_panel(
+                trap_channel, bot_user_id, title_contains="ne pas envoyer"
+            )
             if verify_ok and trap_ok:
                 continue
 
