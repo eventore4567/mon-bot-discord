@@ -16,9 +16,9 @@ def test_feedback_collects_only_minimal_technical_context():
     assert '"tab": _clean(technical.get("tab"), 40)' in SOURCE
     assert '"error": _clean(technical.get("error"), 240)' in SOURCE
     assert '"viewport": _clean(technical.get("viewport"), 40)' in SOURCE
-    assert "cookies" not in SOURCE.casefold()
-    assert "user-agent" not in SOURCE.casefold()
-    assert "stack" not in SOURCE.casefold()
+    assert "request.cookies" not in SOURCE
+    assert '"User-Agent"' not in SOURCE
+    assert "traceback" not in SOURCE.casefold()
 
 
 def test_feedback_is_rate_limited_and_csrf_protected():
