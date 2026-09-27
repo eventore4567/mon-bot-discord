@@ -51,6 +51,9 @@ jobs:
             tests/test_ai_command_router.py \
             tests/test_automod_live_matrix.py \
             tests/test_i18n_english_surface.py \
+            tests/test_web_verification_v120.py \
+            tests/test_double_confirmation_safety.py \
+            tests/test_setup_v118_integrations.py \
             tests/test_ticket_atomic_actions.py \
             tests/test_ticket_rating_persistence.py \
             tests/test_economy_race_conditions.py \
