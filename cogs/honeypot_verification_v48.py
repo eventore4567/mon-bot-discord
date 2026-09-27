@@ -1084,6 +1084,54 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
     logger.info("Vérification renforcée V50 intégrée dans +setup > Sécurité.")
 
 
+async def _has_sentrix_panel(channel: discord.TextChannel | None, bot_user_id: int | None) -> bool:
+    if not isinstance(channel, discord.TextChannel) or not bot_user_id:
+        return False
+    try:
+        async for message in channel.history(limit=12):
+            if getattr(message.author, "id", None) == bot_user_id:
+                return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+    return False
+
+
+async def _repair_enabled_systems(bot: commands.Bot) -> None:
+    """Répare les portails activés dont les panneaux ont disparu.
+
+    Une ancienne version du setup pouvait enregistrer le honeypot comme actif sans publier
+    les messages dans #verification et #stay-muted. Au premier ready du nouveau runtime,
+    on ne republie que les systèmes réellement incomplets.
+    """
+    await bot.wait_until_ready()
+    cog = bot.get_cog(_COG_NAME)
+    if cog is None:
+        return
+    bot_user_id = getattr(getattr(bot, "user", None), "id", None)
+    for guild in list(bot.guilds):
+        try:
+            conf = await cog.config(guild.id, enabled_only=True)
+            if not conf:
+                continue
+            verify_channel = guild.get_channel(conf["verify_channel_id"]) if conf["verify_channel_id"] else None
+            trap_channel = guild.get_channel(conf["trap_channel_id"]) if conf["trap_channel_id"] else None
+            verify_ok = await _has_sentrix_panel(verify_channel, bot_user_id)
+            trap_ok = await _has_sentrix_panel(trap_channel, bot_user_id)
+            if verify_ok and trap_ok:
+                continue
+            _result, error = await cog.create_or_refresh_system(
+                guild,
+                sanction=str(conf["sanction"] or "softban"),
+            )
+            if error:
+                logger.warning("Réparation vérification impossible guild=%s: %s", guild.id, error)
+            else:
+                logger.info("Portail vérification/honeypot réparé guild=%s.", guild.id)
+            await asyncio.sleep(0.25)
+        except Exception:
+            logger.exception("Réparation automatique vérification impossible guild=%s.", guild.id)
+
+
 async def install(bot: commands.Bot) -> None:
     """Installe le runtime sans créer aucune nouvelle commande publique."""
     if getattr(bot, "_sentrix_honeypot_verification_v50", False):
@@ -1102,5 +1150,11 @@ async def install(bot: commands.Bot) -> None:
 
     task = asyncio.create_task(_patch_setup_when_available(bot))
     bot._sentrix_honeypot_setup_task = task
+    if not getattr(bot, "_sentrix_honeypot_repair_task_started", False):
+        bot._sentrix_honeypot_repair_task_started = True
+        bot._sentrix_honeypot_repair_task = asyncio.create_task(
+            _repair_enabled_systems(bot),
+            name="sentrix-honeypot-repair",
+        )
     bot._sentrix_honeypot_verification_v50 = True
     logger.info("Vérification renforcée V50 chargée ; configuration via +setup uniquement.")
