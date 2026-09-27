@@ -532,6 +532,13 @@ def _install_context_send() -> None:
     async def context_send(self: commands.Context, *args, **kwargs):
         root = _root_name(getattr(self, "command", None)) or _COMMAND_ROOT.get()
         interaction = getattr(self, "interaction", None)
+        args, kwargs = await _localize_outgoing(
+            args,
+            kwargs,
+            bot=getattr(self, "bot", None),
+            guild_id=getattr(getattr(self, "guild", None), "id", None),
+            root=root,
+        )
 
         if _plain_root(root):
             if interaction is not None and panels.reponse_differee_a_finaliser(interaction):
@@ -593,6 +600,13 @@ def _install_messageable_send() -> None:
     async def messageable_send(self, *args, **kwargs):
         root = _COMMAND_ROOT.get()
         ctx = _COMMAND_CONTEXT.get()
+        bot = getattr(ctx, "bot", None) if ctx is not None else _client_from_messageable(self)
+        guild_id = getattr(getattr(self, "guild", None), "id", None)
+        if guild_id is None and ctx is not None:
+            guild_id = getattr(getattr(ctx, "guild", None), "id", None)
+        args, kwargs = await _localize_outgoing(
+            args, kwargs, bot=bot, guild_id=guild_id, root=root,
+        )
         if root and not _plain_root(root):
             pages = _payload_pages(args, kwargs, root=root)
             first = await _send_pages_with_callable(base, self, pages)
@@ -620,6 +634,15 @@ def _install_message_edit() -> None:
 
     async def message_edit(self: discord.Message, *args, **kwargs):
         root = _COMMAND_ROOT.get()
+        ctx = _COMMAND_CONTEXT.get()
+        bot = getattr(ctx, "bot", None) if ctx is not None else _client_from_messageable(self.channel)
+        args, kwargs = await _localize_outgoing(
+            args,
+            kwargs,
+            bot=bot,
+            guild_id=getattr(getattr(self, "guild", None), "id", None),
+            root=root,
+        )
         if not root or _plain_root(root):
             return await base(self, *args, **kwargs)
         pages = _payload_pages(args, kwargs, editing=True, root=root)
@@ -658,6 +681,13 @@ def _install_interactions() -> None:
         async def response_send(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             root = _root_from_interaction(interaction) or _COMMAND_ROOT.get()
+            args, kwargs = await _localize_outgoing(
+                args,
+                kwargs,
+                bot=getattr(interaction, "client", None),
+                guild_id=getattr(getattr(interaction, "guild", None), "id", None),
+                root=root,
+            )
             if _plain_root(root):
                 _remember_plain_interaction(interaction)
                 return await base_send(self, *args, **kwargs)
@@ -696,6 +726,13 @@ def _install_interactions() -> None:
         async def response_edit(self, *args, **kwargs):
             interaction = getattr(self, "_parent", None)
             root = _root_from_interaction(interaction) or _COMMAND_ROOT.get()
+            args, kwargs = await _localize_outgoing(
+                args,
+                kwargs,
+                bot=getattr(interaction, "client", None),
+                guild_id=getattr(getattr(interaction, "guild", None), "id", None),
+                root=root,
+            )
             if _plain_root(root):
                 _remember_plain_interaction(interaction)
                 return await base_edit(self, *args, **kwargs)
@@ -723,6 +760,13 @@ def _install_interactions() -> None:
 
         async def edit_original(self: discord.Interaction, *args, **kwargs):
             root = _root_from_interaction(self) or _COMMAND_ROOT.get()
+            args, kwargs = await _localize_outgoing(
+                args,
+                kwargs,
+                bot=getattr(self, "client", None),
+                guild_id=getattr(getattr(self, "guild", None), "id", None),
+                root=root,
+            )
             if _plain_root(root):
                 _remember_plain_interaction(self)
                 return await base_original(self, *args, **kwargs)
@@ -753,10 +797,20 @@ def _install_followups() -> None:
     async def webhook_send(self: discord.Webhook, *args, **kwargs):
         if getattr(self, "type", None) != discord.WebhookType.application:
             return await base(self, *args, **kwargs)
+        root = _COMMAND_ROOT.get()
+        ctx = _COMMAND_CONTEXT.get()
+        state = getattr(self, "_state", None)
+        interaction = getattr(state, "_interaction", None)
+        bot = getattr(interaction, "client", None) or (getattr(ctx, "bot", None) if ctx is not None else None)
+        guild_id = getattr(getattr(interaction, "guild", None), "id", None)
+        if guild_id is None and ctx is not None:
+            guild_id = getattr(getattr(ctx, "guild", None), "id", None)
+        args, kwargs = await _localize_outgoing(
+            args, kwargs, bot=bot, guild_id=guild_id, root=root,
+        )
         token = str(getattr(self, "token", "") or "")
         if token and token in _PLAIN_WEBHOOK_TOKENS:
             return await base(self, *args, **kwargs)
-        root = _COMMAND_ROOT.get()
         if _plain_root(root):
             # texte_court() (confirmation/erreur courte) : le followup reste du texte.
             return await base(self, *args, **kwargs)
