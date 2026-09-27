@@ -6,6 +6,7 @@ No route in this module creates Discord channels or categories.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -34,6 +35,8 @@ CAPTCHA_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 MAX_WEB_FAILURES = 5
 WEB_FAILURE_WINDOW = 10 * 60
 WEB_LOCK_SECONDS = 10 * 60
+SECURITY_SCAN_PASSES = 5
+SECURITY_SCAN_INTERVAL_SECONDS = 0.75
 
 _WEB_ATTEMPT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS web_verification_attempts (
@@ -101,32 +104,73 @@ async def _clear_failures(bot, guild_id: int, user_id: int) -> None:
     )
 
 
-async def _adaptive_security(cog, member: discord.Member) -> tuple[float, float, bool]:
-    """Run the currently installed SentriX adaptive engine as a web verification stage."""
+async def _adaptive_security(
+    cog,
+    member: discord.Member,
+) -> tuple[float, float, bool, int, int]:
+    """Run several real, time-separated snapshots of the installed adaptive engine.
+
+    V5 exposes exactly 40 independent signals. Five snapshots therefore evaluate
+    200 live observations (history, raid context and early behaviour can change
+    between passes) instead of flashing a single instantaneous result.
+    """
     settings = await cog.settings(member.guild.id)
     threshold = float(settings.get("threshold", 16))
-    signals = await cog.collect_factors(member)
+    scan_scores: list[float] = []
+    scan_passes: list[bool] = []
+    observation_count = 0
+    worst_signals = None
+    worst_score = float("inf")
 
-    if len(signals) >= 40:
-        from cogs.automatic_verification_v5 import score_signals
-        score, passed = score_signals(signals, threshold)
-    else:
-        from cogs.automatic_verification_v4 import score_factors
-        score, passed = score_factors(signals, int(threshold))
+    for pass_index in range(SECURITY_SCAN_PASSES):
+        signals = await cog.collect_factors(member)
+        observation_count += len(signals)
+
+        if len(signals) >= 40:
+            from cogs.automatic_verification_v5 import score_signals
+            score, passed = score_signals(signals, threshold)
+        else:
+            from cogs.automatic_verification_v4 import score_factors
+            score, passed = score_factors(signals, int(threshold))
+
+        score = float(score)
+        scan_scores.append(score)
+        scan_passes.append(bool(passed))
+        if score < worst_score:
+            worst_score = score
+            worst_signals = signals
+
+        if pass_index + 1 < SECURITY_SCAN_PASSES:
+            await asyncio.sleep(SECURITY_SCAN_INTERVAL_SECONDS)
+
+    # Fail closed on a transient blocker: every pass must be acceptable.
+    final_score = min(scan_scores) if scan_scores else 0.0
+    final_passed = bool(scan_passes) and all(scan_passes)
 
     save = getattr(cog, "_save_result", None)
-    if callable(save):
+    if callable(save) and worst_signals is not None:
         try:
             await save(
                 member,
-                score,
+                final_score,
                 threshold,
-                "web_ready" if passed else "web_review",
-                signals,
+                "web_ready" if final_passed else "web_review",
+                worst_signals,
             )
         except Exception:
             logger.debug("Adaptive web result persistence skipped.", exc_info=True)
-    return float(score), threshold, bool(passed)
+
+    logger.info(
+        "Web security scan guild=%s user=%s passes=%s observations=%s score=%.2f threshold=%.2f passed=%s",
+        member.guild.id,
+        member.id,
+        SECURITY_SCAN_PASSES,
+        observation_count,
+        final_score,
+        threshold,
+        final_passed,
+    )
+    return final_score, threshold, final_passed, observation_count, SECURITY_SCAN_PASSES
 
 
 def _secret() -> bytes:
@@ -593,12 +637,39 @@ async def _complete_verification(
                 "Le règlement a changé. Recharge la page et réessaie.", 409
             )
 
-    # Dernière étape : le moteur adaptatif V5 est recomputé au moment exact de la
-    # vérification web. Il ne peut plus attribuer le rôle tout seul en arrière-plan.
+    # Relecture Discord juste avant l'analyse : les rôles ou l'appartenance peuvent
+    # avoir changé pendant que l'utilisateur résolvait le CAPTCHA.
     try:
-        security_score, security_threshold, security_passed = await _adaptive_security(
-            cog, member
+        member = await guild.fetch_member(member.id)
+    except discord.NotFound:
+        return None, _json_error("Ton compte n'est plus membre de ce serveur.", 403)
+    except (discord.Forbidden, discord.HTTPException):
+        # Le cache reste utilisable si Discord refuse momentanément la lecture REST.
+        pass
+
+    me = guild.me
+    if me is None or not me.guild_permissions.manage_roles:
+        return None, _json_error(
+            "SentriX n'a pas la permission Gérer les rôles sur ce serveur.", 503
         )
+    for role in (verified, unverified):
+        if role.is_default() or role.managed or role >= me.top_role:
+            return None, _json_error(
+                "La hiérarchie des rôles de vérification n'est plus valide. Un administrateur doit la corriger.",
+                503,
+                code="role_hierarchy",
+            )
+
+    # Dernière étape : cinq snapshots réels du moteur adaptatif. Avec V5 cela
+    # représente 200 observations de sécurité, espacées dans le temps.
+    try:
+        (
+            security_score,
+            security_threshold,
+            security_passed,
+            security_observations,
+            security_scans,
+        ) = await _adaptive_security(cog, member)
     except Exception:
         logger.exception(
             "Adaptive security scan failed guild=%s user=%s", guild.id, member.id
@@ -686,7 +757,8 @@ async def _complete_verification(
                 f"{member.mention} ({member.id})\n"
                 f"Compte âgé de : **{account_age // 86400} jour(s)**\n"
                 f"Score sécurité : **{security_score:.1f}/{security_threshold:.0f}**\n"
-                "Méthode : **OAuth Discord + règlement courant + CAPTCHA web + calcul + analyse adaptative**."
+                f"Observations : **{security_observations}** sur **{security_scans} passes**\n"
+                "Méthode : **OAuth Discord + règlement courant + CAPTCHA web + calcul + analyse adaptative multi-passes**."
             ),
             colour=discord.Colour.green(),
         )
@@ -706,6 +778,8 @@ async def _complete_verification(
         "channel_id": str(landing.id) if landing else None,
         "security_score": round(security_score, 2),
         "security_threshold": security_threshold,
+        "security_observations": security_observations,
+        "security_scans": security_scans,
     }, None
 
 
@@ -727,6 +801,19 @@ COPY_FR = {
     "rulesAccept": "J'ai lu et j'accepte la version actuelle du règlement.",
     "verify": "Me vérifier",
     "checking": "Vérification en cours…",
+    "securityDetail": "Analyse multi-passes : identité, ancienneté, session, rôles, historique, anti-raid, comportement et confiance.",
+    "securityPhases": [
+        "Validation de la session et du challenge…",
+        "Contrôle de l'identité Discord…",
+        "Analyse de l'ancienneté et de la session…",
+        "Contrôle des rôles et privilèges…",
+        "Analyse de l'historique de sécurité…",
+        "Analyse anti-raid en temps réel…",
+        "Analyse comportementale…",
+        "Nouveau passage des 40 signaux…",
+        "Validation de la hiérarchie des rôles…",
+        "Décision de sécurité finale…",
+    ],
     "success": "Vérification réussie",
     "successText": (
         "Ton accès Discord a été débloqué. Un message privé SentriX vient de t'être envoyé."
@@ -761,6 +848,19 @@ COPY_EN = {
     "rulesAccept": "I have read and accept the current server rules.",
     "verify": "Verify me",
     "checking": "Verification in progress…",
+    "securityDetail": "Multi-pass analysis: identity, maturity, session, roles, history, anti-raid, behaviour and trust.",
+    "securityPhases": [
+        "Validating session and challenge…",
+        "Checking Discord identity…",
+        "Analysing account maturity and session…",
+        "Checking roles and privileges…",
+        "Analysing security history…",
+        "Running live anti-raid checks…",
+        "Analysing early behaviour…",
+        "Running another 40-signal pass…",
+        "Validating role hierarchy…",
+        "Computing final security decision…",
+    ],
     "success": "Verification successful",
     "successText": (
         "Your Discord access has been unlocked. SentriX has sent you a direct message."
@@ -813,7 +913,7 @@ button{appearance:none;border:0;border-radius:13px;padding:13px 17px;font:inheri
       <div class="sub" id="subtitle"></div>
       <div class="server">__GUILD_NAME__</div>
       <div class="stages" id="stages"></div>
-      <div id="loading"><div class="spinner"></div><div id="loadingText"></div></div>
+      <div id="loading"><div class="spinner"></div><div id="loadingText"></div><div id="securityDetail" class="small hidden"></div></div>
       <button id="start" class="primary hidden"></button>
 
       <section id="challenge" class="challenge hidden">
@@ -846,7 +946,7 @@ button{appearance:none;border:0;border-radius:13px;padding:13px 17px;font:inheri
 const GUILD_ID="__GUILD_ID__";
 const AUTHENTICATED=__AUTHENTICATED__;
 const C=__COPY__;
-let state=null,challengeToken=null,verifyInFlight=false,autoVerifyTimer=null;
+let state=null,challengeToken=null,verifyInFlight=false,autoVerifyTimer=null,securityPhaseTimer=null,securityPhaseIndex=0;
 const CAPTCHA_LENGTH=6;
 const $=id=>document.getElementById(id);
 $("eyebrow").textContent=C.eyebrow;$("title").textContent=C.title;$("subtitle").textContent=C.subtitle;
@@ -856,7 +956,23 @@ $("rulesTitle").textContent=C.rulesTitle;$("rulesAccept").textContent=C.rulesAcc
 $("successTitle").textContent=C.success;$("successText").textContent=C.successText;$("redirectText").textContent=C.redirect;
 C.stages.forEach((name,i)=>{const d=document.createElement("div");d.className="stage";d.dataset.i=i;const dot=document.createElement("i");const s=document.createElement("span");s.textContent=name;d.append(dot,s);$("stages").appendChild(d)});
 function mark(i,mode){const el=document.querySelector('.stage[data-i="'+i+'"]');if(el)el.className="stage "+mode}
-function fail(message){$("loading").classList.add("hidden");$("error").textContent=message;$("error").classList.remove("hidden");$("start").classList.remove("hidden");$("start").textContent=C.retry}
+function stopSecurityProgress(){
+  if(securityPhaseTimer){clearInterval(securityPhaseTimer);securityPhaseTimer=null}
+  $("securityDetail").classList.add("hidden");
+}
+function startSecurityProgress(){
+  stopSecurityProgress();
+  securityPhaseIndex=0;
+  const phases=Array.isArray(C.securityPhases)&&C.securityPhases.length?C.securityPhases:[C.checking];
+  $("loadingText").textContent=phases[0];
+  $("securityDetail").textContent=C.securityDetail||"";
+  $("securityDetail").classList.remove("hidden");
+  securityPhaseTimer=setInterval(()=>{
+    securityPhaseIndex=(securityPhaseIndex+1)%phases.length;
+    $("loadingText").textContent=phases[securityPhaseIndex];
+  },520);
+}
+function fail(message){stopSecurityProgress();$("loading").classList.add("hidden");$("error").textContent=message;$("error").classList.remove("hidden");$("start").classList.remove("hidden");$("start").textContent=C.retry}
 async function api(path,options={}){const r=await fetch(path,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(options.headers||{})},...options});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||("HTTP "+r.status));return data}
 function rulesReady(){return $("rulesWrap").classList.contains("hidden")||$("acceptRules").checked}
 function maybeAutoVerify(){
@@ -898,13 +1014,14 @@ $("verify").onclick=async()=>{
   if(verifyInFlight)return;
   verifyInFlight=true;clearTimeout(autoVerifyTimer);
   $("error").classList.add("hidden");$("verify").disabled=true;$("verify").textContent=C.checking;
-  $("challenge").classList.add("hidden");$("loadingText").textContent=C.checking;$("loading").classList.remove("hidden");
-  const stages=[0,1,2,3,4,5];let idx=0;const timer=setInterval(()=>{if(idx<stages.length){mark(stages[idx],"active");idx++}},280);
+  $("challenge").classList.add("hidden");$("loading").classList.remove("hidden");
+  [0,1,2,3].forEach(i=>mark(i,"done"));mark(4,"active");mark(5,"");
+  startSecurityProgress();
   try{
     const data=await api("/api/verify/"+GUILD_ID+"/complete",{method:"POST",body:JSON.stringify({challenge_token:challengeToken,captcha:$("captcha").value,math_answer:$("math").value,accept_rules:$("acceptRules").checked})});
-    clearInterval(timer);stages.forEach(i=>mark(i,"done"));showSuccess(data.channel_id);
+    stopSecurityProgress();mark(4,"done");mark(5,"done");showSuccess(data.channel_id);
   }catch(e){
-    clearInterval(timer);$("loading").classList.add("hidden");fail(e.message);
+    stopSecurityProgress();$("loading").classList.add("hidden");fail(e.message);
     $("challenge").classList.remove("hidden");$("start").classList.add("hidden");
   }
   finally{verifyInFlight=false;$("verify").disabled=false;$("verify").textContent=C.verify}
