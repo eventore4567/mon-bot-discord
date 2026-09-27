@@ -152,6 +152,17 @@ def test_adaptive_v5_is_web_gated_and_can_refresh_existing_panels():
     assert "member.remove_roles(" not in evaluate
 
 
+def test_existing_members_can_enroll_into_web_verification_on_demand():
+    assert "async def _ensure_pending_enrollment" in WEB_SOURCE
+    assert 'reason="SentriX : inscription à la vérification web"' in WEB_SOURCE
+    assert 'await mark_pending(guild.id, member.id, joined_at)' in WEB_SOURCE
+    challenge_start = WEB_SOURCE.index("async def handle_challenge")
+    challenge_end = WEB_SOURCE.index("async def handle_complete", challenge_start)
+    challenge = WEB_SOURCE[challenge_start:challenge_end]
+    assert "_ensure_pending_enrollment" in challenge
+    assert "pending_enrollment_failed" in challenge
+
+
 def test_web_completion_runs_adaptive_security_before_role_grant():
     complete_start = WEB_SOURCE.index("async def _complete_verification")
     complete_end = WEB_SOURCE.index("COPY_FR =", complete_start)
