@@ -113,13 +113,11 @@ RESET_COMMAND_LABELS = {
 }
 
 DOUBLE_CONFIRM_COMMANDS = {
-    # Deux confirmations uniquement pour les opérations réellement à fort impact :
-    # reset global, suppression de structure ou action de masse.
+    # Deux confirmations uniquement pour les opérations réellement dangereuses :
+    # reset global, suppression de structure ou modération de masse.
     "config-reset": "réinitialiser toute la configuration du serveur",
     "reset-logs-all": "réinitialiser toute la configuration des logs",
     "delete-channel": "supprimer le salon sélectionné",
-    "security all": "activer toutes les protections AutoMod d'un coup",
-    "create-logs": "créer et configurer tous les salons de logs d'un coup",
     "syncbl": "appliquer la liste noire à tous les membres concernés d'un coup",
 }
 
