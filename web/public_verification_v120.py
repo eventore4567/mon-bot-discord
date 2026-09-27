@@ -781,6 +781,20 @@ async def _complete_verification(
             503,
         )
 
+    # Le panneau Discord est collectif : on ne supprime donc jamais son message.
+    # On masque simplement le salon aux membres vérifiés via le rôle Vérifié.
+    hide_panel = getattr(cog, "ensure_verified_panel_hidden", None)
+    if callable(hide_panel):
+        try:
+            await hide_panel(guild)
+        except Exception:
+            logger.debug(
+                "Masquage du panneau après vérification ignoré guild=%s user=%s",
+                guild.id,
+                member.id,
+                exc_info=True,
+            )
+
     clear_pending = getattr(cog, "_clear_pending", None)
     if callable(clear_pending):
         await clear_pending(guild.id, member.id)
