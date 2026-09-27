@@ -538,6 +538,7 @@ def install(bot: commands.Bot) -> bool:
     command = commands.Command(
         _open_setup,
         name="verify-setup",
+        aliases=["rules-setup", "reglement-setup"],
         help="Configurer et publier le règlement, le rôle final, l'image et le mode CAPTCHA simple.",
         description="Ouvrir le configurateur du règlement SentriX.",
     )
