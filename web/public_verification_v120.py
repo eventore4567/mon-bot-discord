@@ -392,6 +392,80 @@ async def _resolve_session(request: web.Request, guild_id: int):
     return guild, member, None
 
 
+async def _ensure_pending_enrollment(
+    bot,
+    guild: discord.Guild,
+    member: discord.Member,
+) -> tuple[bool, web.Response | None]:
+    """Enroll an authenticated existing member when verification was enabled after they joined.
+
+    New members are enrolled by on_member_join. Existing members can legitimately have
+    neither verification role, so the web flow must be able to put only the requesting
+    member into the pending state instead of rejecting them forever.
+    """
+    cog = bot.get_cog("HoneypotVerification")
+    if cog is None:
+        return False, _json_error(
+            "Le système de vérification est momentanément indisponible.", 503
+        )
+
+    conf = await cog.config(guild.id)
+    if not conf:
+        return False, _json_error(
+            "La vérification renforcée n'est pas activée sur ce serveur.", 409
+        )
+
+    verified = guild.get_role(int(conf["verified_role_id"] or 0))
+    unverified = guild.get_role(int(conf["unverified_role_id"] or 0))
+    if verified is None or unverified is None:
+        return False, _json_error(
+            "La configuration des rôles de vérification est incomplète.", 409
+        )
+
+    if verified in member.roles:
+        return True, None
+
+    pending_lookup = getattr(cog, "_pending", None)
+    pending_row = await pending_lookup(guild.id, member.id) if callable(pending_lookup) else None
+
+    if unverified not in member.roles:
+        me = guild.me
+        if me is None or not me.guild_permissions.manage_roles:
+            return False, _json_error(
+                "SentriX n'a pas la permission Gérer les rôles sur ce serveur.", 503
+            )
+        if unverified.is_default() or unverified.managed or unverified >= me.top_role:
+            return False, _json_error(
+                "Le rôle Non vérifié ne peut pas être attribué. Un administrateur doit corriger la hiérarchie des rôles.",
+                503,
+                code="role_hierarchy",
+            )
+        try:
+            await member.add_roles(
+                unverified,
+                reason="SentriX : inscription à la vérification web",
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            return False, _json_error(
+                "SentriX ne peut pas ajouter le rôle Non vérifié. Vérifie ses permissions et la hiérarchie des rôles.",
+                503,
+            )
+
+    if not pending_row:
+        mark_pending = getattr(cog, "_mark_pending", None)
+        if callable(mark_pending):
+            joined_at = int(member.joined_at.timestamp()) if member.joined_at else int(time.time())
+            await mark_pending(guild.id, member.id, joined_at)
+
+    logger.info(
+        "Web verification enrollment guild=%s user=%s existing_member=%s",
+        guild.id,
+        member.id,
+        True,
+    )
+    return True, None
+
+
 async def _status_payload(
     bot,
     guild: discord.Guild,
@@ -1105,7 +1179,21 @@ async def handle_challenge(request: web.Request) -> web.Response:
     if payload["already_verified"]:
         return web.json_response({"ok": True, "already_verified": True})
     if not payload["pending_role"]:
-        return _json_error("Ton compte n'est pas en attente de vérification.", 409)
+        enrolled, enroll_error = await _ensure_pending_enrollment(
+            request.app["bot"], guild, member
+        )
+        if enroll_error:
+            return enroll_error
+        if enrolled:
+            payload, error = await _status_payload(request.app["bot"], guild, member)
+            if error:
+                return error
+        if not payload["pending_role"]:
+            return _json_error(
+                "SentriX n'a pas pu initialiser ta vérification. Recharge la page puis réessaie.",
+                409,
+                code="pending_enrollment_failed",
+            )
     if payload["locked_seconds"] > 0:
         return _json_error(
             "Trop de tentatives incorrectes. Réessaie plus tard.",
