@@ -424,10 +424,16 @@ async def install(bot: commands.Bot) -> None:
     logger.info("Tracker invitations actif : logs séparés + salon public arrivée/départ.")
 
 
+async def setup(bot: commands.Bot) -> None:
+    """Point d'entrée discord.py pour charger le tracker comme vraie extension Railway."""
+    await install(bot)
+
+
 __all__ = [
     "InviteTrackerRuntime",
     "ensure_schema",
     "get_feed_setting",
     "set_feed_setting",
     "install",
+    "setup",
 ]
