@@ -111,6 +111,8 @@ _APP_POLISH = r'''
   --sxa-bleu:#4da3ff;--sxa-bleu2:#8ccbff;--sxa-indigo:#6f7dff;
   --sxa-ligne:rgba(118,163,230,.16);--sxa-ligne2:rgba(140,203,255,.38);
 }
+html{scrollbar-gutter:stable;background:#090b12}
+body{overflow-x:hidden}
 body::before{
   content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
   background:
@@ -121,13 +123,13 @@ body::before{
 }
 .shell,.side,.workspace,header,main{position:relative;z-index:1}
 
-@keyframes sxAppSide{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+@keyframes sxAppSide{from{opacity:0}to{opacity:1}}
 @keyframes sxAppMain{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 @keyframes sxAppPanel{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes sxSoftPulse{0%,100%{box-shadow:0 0 0 rgba(124,108,255,0)}50%{box-shadow:0 0 30px rgba(124,108,255,.12)}}
 @keyframes sxSkel{from{background-position:-380px 0}to{background-position:380px 0}}
 
-.shell:not(.hidden) .side{animation:sxAppSide .42s cubic-bezier(.2,.8,.2,1) both}
+.shell:not(.hidden) .side{animation:sxAppSide .24s ease-out both}
 .shell:not(.hidden) .workspace{animation:sxAppMain .48s cubic-bezier(.2,.8,.2,1) .04s both}
 .shell:not(.hidden) .panel,.shell:not(.hidden) .sx-safe-card,
 .shell:not(.hidden) .sx-simple-card,.shell:not(.hidden) .sx53-section,
