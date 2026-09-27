@@ -703,6 +703,7 @@ COPY_FR = {
         "sur cette page. Aucun challenge ne se fait dans le salon Discord."
     ),
     "loading": "Connexion sécurisée avec Discord…",
+    "preparing": "Préparation du contrôle humain…",
     "start": "Commencer la vérification",
     "captchaTitle": "Vérification humaine",
     "captchaHint": "Recopie le code affiché puis réponds au calcul.",
@@ -736,6 +737,7 @@ COPY_EN = {
         "No challenge happens inside the Discord channel."
     ),
     "loading": "Securely connecting with Discord…",
+    "preparing": "Preparing the human check…",
     "start": "Start verification",
     "captchaTitle": "Human verification",
     "captchaHint": "Enter the code shown below and solve the quick math challenge.",
@@ -851,21 +853,26 @@ async function boot(){
   }catch(e){fail(e.message)}
 }
 $("start").onclick=async()=>{
-  $("error").classList.add("hidden");$("start").disabled=true;$("start").textContent=C.checking;
+  $("error").classList.add("hidden");$("start").disabled=true;$("start").classList.add("hidden");
+  $("loadingText").textContent=C.preparing;$("loading").classList.remove("hidden");mark(0,"done");mark(1,"active");
   try{
     const data=await api("/api/verify/"+GUILD_ID+"/challenge",{method:"POST",body:"{}"});
     challengeToken=data.challenge_token;$("captchaImage").src=data.captcha_image;$("math").placeholder=data.math_question;
     if(data.rules_published&&!data.rules_accepted){$("rulesText").textContent=data.rules_text||"";$("rulesWrap").classList.remove("hidden")}else{$("rulesWrap").classList.add("hidden")}
-    $("challenge").classList.remove("hidden");$("start").classList.add("hidden");mark(2,data.rules_published&&!data.rules_accepted?"active":"done");mark(3,"active");
+    $("loading").classList.add("hidden");$("challenge").classList.remove("hidden");mark(1,"done");mark(2,data.rules_published&&!data.rules_accepted?"active":"done");mark(3,"active");
   }catch(e){fail(e.message)}finally{$("start").disabled=false;$("start").textContent=C.start}
 };
 $("verify").onclick=async()=>{
   $("error").classList.add("hidden");$("verify").disabled=true;$("verify").textContent=C.checking;
+  $("challenge").classList.add("hidden");$("loadingText").textContent=C.checking;$("loading").classList.remove("hidden");
   const stages=[0,1,2,3,4,5];let idx=0;const timer=setInterval(()=>{if(idx<stages.length){mark(stages[idx],"active");idx++}},280);
   try{
     const data=await api("/api/verify/"+GUILD_ID+"/complete",{method:"POST",body:JSON.stringify({challenge_token:challengeToken,captcha:$("captcha").value,math_answer:$("math").value,accept_rules:$("acceptRules").checked})});
     clearInterval(timer);stages.forEach(i=>mark(i,"done"));showSuccess(data.channel_id);
-  }catch(e){clearInterval(timer);fail(e.message);$("challenge").classList.remove("hidden");$("start").classList.add("hidden")}
+  }catch(e){
+    clearInterval(timer);$("loading").classList.add("hidden");fail(e.message);
+    $("challenge").classList.remove("hidden");$("start").classList.add("hidden");
+  }
   finally{$("verify").disabled=false;$("verify").textContent=C.verify}
 };
 function showSuccess(channelId){
