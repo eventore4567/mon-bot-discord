@@ -19,7 +19,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from . import permission_guard
+from . import permission_guard, language_runtime
 from utils import embeds as sentrix_embeds
 from utils import sentrix_panels as panels
 
@@ -259,6 +259,85 @@ def _set_content(
     else:
         kwargs["content"] = value
     return tuple(mutable), kwargs
+
+
+async def _localize_outgoing(
+    args: tuple,
+    kwargs: dict,
+    *,
+    bot: Any = None,
+    guild_id: int | None = None,
+    root: str = "",
+) -> tuple[tuple, dict]:
+    """Apply the server language to the final Discord payload.
+
+    This is deliberately placed in the last transport layer: old cogs may still build
+    French strings, but once a guild selects English their SentriX-owned UI is translated
+    before Discord receives it. Free-form AI/translation bodies are preserved.
+    """
+    ctx = _COMMAND_CONTEXT.get()
+    if bot is None and ctx is not None:
+        bot = getattr(ctx, "bot", None)
+    if guild_id is None and ctx is not None:
+        guild_id = getattr(getattr(ctx, "guild", None), "id", None)
+    if bot is None or guild_id is None:
+        return tuple(args), dict(kwargs)
+
+    try:
+        language = await language_runtime.get_language(bot, int(guild_id))
+    except Exception:
+        logger.debug("Lecture langue impossible pour guild=%s", guild_id, exc_info=True)
+        return tuple(args), dict(kwargs)
+    if language != language_runtime.LANG_EN:
+        return tuple(args), dict(kwargs)
+
+    setup_surface = str(root or "").casefold() in {"setup", "configurer"}
+    preserve_body = str(root or "").casefold() in panels.COMMANDES_TEXTE_LIBRE
+
+    new_args = tuple(args)
+    new_kwargs = dict(kwargs)
+    content, positional = _content_from(new_args, new_kwargs)
+    if content is not None and not preserve_body:
+        translated = language_runtime.english_ui_text(content, setup=setup_surface)
+        new_args, new_kwargs = _set_content(
+            new_args,
+            new_kwargs,
+            positional=positional,
+            value=translated,
+        )
+
+    embed = new_kwargs.get("embed")
+    if isinstance(embed, discord.Embed):
+        new_kwargs["embed"] = language_runtime.translate_embed_in_place(
+            embed,
+            setup=setup_surface,
+            preserve_body=preserve_body,
+        )
+    if new_kwargs.get("embeds"):
+        new_kwargs["embeds"] = [
+            language_runtime.translate_embed_in_place(
+                item,
+                setup=setup_surface,
+                preserve_body=preserve_body,
+            ) if isinstance(item, discord.Embed) else item
+            for item in list(new_kwargs["embeds"])
+        ]
+    view = new_kwargs.get("view")
+    if view is not None:
+        language_runtime.translate_view_in_place(view, setup=setup_surface)
+
+    return new_args, new_kwargs
+
+
+def _client_from_messageable(value: Any):
+    state = getattr(value, "_state", None)
+    getter = getattr(state, "_get_client", None)
+    if callable(getter):
+        try:
+            return getter()
+        except Exception:
+            return None
+    return None
 
 
 def _normalize_existing(
