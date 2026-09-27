@@ -1209,14 +1209,45 @@ async def _repair_enabled_systems(bot: commands.Bot) -> None:
             trap_ok = await _has_sentrix_panel(trap_channel, bot_user_id)
             if verify_ok and trap_ok:
                 continue
-            _result, error = await cog.create_or_refresh_system(
-                guild,
-                sanction=str(conf["sanction"] or "softban"),
+
+            # Réparation douce uniquement : au démarrage on republie un panneau manquant
+            # dans un salon DÉJÀ configuré. Aucun rôle, salon ou catégorie n'est créé ici.
+            if not verify_ok:
+                verify_embed = discord.Embed(
+                    title="Vérification renforcée SentriX",
+                    description=(
+                        "L'accès au serveur reste bloqué tant que le parcours complet n'est pas terminé.\n\n"
+                        "Ordre : règlement SentriX si configuré, règles Discord / Membership Screening, "
+                        "ancienneté du compte, séquence anti-automatisation, code unique et calcul.\n\n"
+                        "Clique sur **Commencer la vérification**."
+                    ),
+                    colour=discord.Color.blurple(),
+                )
+                verify_embed.set_footer(text="SentriX • Vérification renforcée")
+                await panels.envoyer(
+                    verify_channel,
+                    panels.avec_composants(panels.depuis_embed(verify_embed), HoneypotVerifyView()),
+                )
+
+            if not trap_ok:
+                sanction = str(conf["sanction"] or "softban")
+                sanction_label = "softban automatique" if sanction == "softban" else "expulsion automatique"
+                trap_embed = discord.Embed(
+                    title="NE PAS ENVOYER DE MESSAGE DANS CE SALON",
+                    description=(
+                        "Ce salon est le honeypot SentriX réservé aux comptes non vérifiés.\n"
+                        f"Écrire ici peut entraîner un **{sanction_label}**.\n\n"
+                        f"Utilise {verify_channel.mention} pour terminer la vérification."
+                    ),
+                    colour=discord.Color.red(),
+                )
+                trap_embed.set_footer(text="SentriX • Honeypot anti-bot")
+                await panels.envoyer(trap_channel, panels.depuis_embed(trap_embed))
+
+            logger.info(
+                "Portail vérification/honeypot réparé sans création de structure guild=%s.",
+                guild.id,
             )
-            if error:
-                logger.warning("Réparation vérification impossible guild=%s: %s", guild.id, error)
-            else:
-                logger.info("Portail vérification/honeypot réparé guild=%s.", guild.id)
             await asyncio.sleep(0.25)
         except Exception:
             logger.exception("Réparation automatique vérification impossible guild=%s.", guild.id)
