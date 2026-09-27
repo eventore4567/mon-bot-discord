@@ -30,6 +30,102 @@ SESSION_COOKIE = "sentrix_verify_session"
 SESSION_TTL = 15 * 60
 CHALLENGE_TTL = 3 * 60
 CAPTCHA_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+MAX_WEB_FAILURES = 5
+WEB_FAILURE_WINDOW = 10 * 60
+WEB_LOCK_SECONDS = 10 * 60
+
+_WEB_ATTEMPT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS web_verification_attempts (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    failures INTEGER NOT NULL DEFAULT 0,
+    window_started INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER NOT NULL DEFAULT 0,
+    last_attempt INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
+
+
+async def _ensure_attempt_schema(bot) -> None:
+    await bot.db.execute(_WEB_ATTEMPT_SCHEMA)
+
+
+async def _attempt_row(bot, guild_id: int, user_id: int):
+    await _ensure_attempt_schema(bot)
+    return await bot.db.fetchone(
+        "SELECT failures,window_started,locked_until,last_attempt "
+        "FROM web_verification_attempts WHERE guild_id=? AND user_id=?",
+        (int(guild_id), int(user_id)),
+    )
+
+
+async def _locked_seconds(bot, guild_id: int, user_id: int) -> int:
+    row = await _attempt_row(bot, guild_id, user_id)
+    if not row:
+        return 0
+    return max(0, int(row["locked_until"] or 0) - int(time.time()))
+
+
+async def _record_failure(bot, guild_id: int, user_id: int) -> int:
+    now = int(time.time())
+    row = await _attempt_row(bot, guild_id, user_id)
+    failures = int(row["failures"] or 0) if row else 0
+    started = int(row["window_started"] or 0) if row else 0
+    locked_until = int(row["locked_until"] or 0) if row else 0
+
+    if locked_until > now:
+        return locked_until - now
+    if not started or now - started > WEB_FAILURE_WINDOW:
+        started = now
+        failures = 0
+    failures += 1
+    locked_until = now + WEB_LOCK_SECONDS if failures >= MAX_WEB_FAILURES else 0
+    await bot.db.execute(
+        "INSERT INTO web_verification_attempts"
+        "(guild_id,user_id,failures,window_started,locked_until,last_attempt) "
+        "VALUES(?,?,?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET "
+        "failures=excluded.failures,window_started=excluded.window_started,"
+        "locked_until=excluded.locked_until,last_attempt=excluded.last_attempt",
+        (int(guild_id), int(user_id), failures, started, locked_until, now),
+    )
+    return max(0, locked_until - now)
+
+
+async def _clear_failures(bot, guild_id: int, user_id: int) -> None:
+    await _ensure_attempt_schema(bot)
+    await bot.db.execute(
+        "DELETE FROM web_verification_attempts WHERE guild_id=? AND user_id=?",
+        (int(guild_id), int(user_id)),
+    )
+
+
+async def _adaptive_security(cog, member: discord.Member) -> tuple[float, float, bool]:
+    """Run the currently installed SentriX adaptive engine as a web verification stage."""
+    settings = await cog.settings(member.guild.id)
+    threshold = float(settings.get("threshold", 16))
+    signals = await cog.collect_factors(member)
+
+    if len(signals) >= 40:
+        from cogs.automatic_verification_v5 import score_signals
+        score, passed = score_signals(signals, threshold)
+    else:
+        from cogs.automatic_verification_v4 import score_factors
+        score, passed = score_factors(signals, int(threshold))
+
+    save = getattr(cog, "_save_result", None)
+    if callable(save):
+        try:
+            await save(
+                member,
+                score,
+                threshold,
+                "web_ready" if passed else "web_review",
+                signals,
+            )
+        except Exception:
+            logger.debug("Adaptive web result persistence skipped.", exc_info=True)
+    return float(score), threshold, bool(passed)
 
 
 def _secret() -> bytes:
@@ -276,7 +372,15 @@ async def _status_payload(
         bot, guild.id, member.id
     )
 
-    locked = int(cog._seconds_locked(guild.id, member.id))
+    try:
+        settings = await cog.settings(guild.id)
+        min_account_age_seconds = max(
+            0, int(settings.get("min_account_age_minutes", 30) or 0) * 60
+        )
+    except Exception:
+        min_account_age_seconds = 30 * 60
+
+    locked = await _locked_seconds(bot, guild.id, member.id)
     already_verified = verified in member.roles and unverified not in member.roles
     pending_role = unverified in member.roles
 
@@ -292,7 +396,8 @@ async def _status_payload(
         "pending_role": pending_role,
         "discord_screening_pending": bool(getattr(member, "pending", False)),
         "account_age_seconds": account_age,
-        "account_age_ok": account_age >= 30 * 60,
+        "account_age_ok": account_age >= min_account_age_seconds,
+        "min_account_age_seconds": min_account_age_seconds,
         "joined_for_seconds": joined_for,
         "join_delay_ok": joined_for >= 8,
         "locked_seconds": locked,
@@ -389,10 +494,7 @@ async def _complete_verification(
     *,
     accept_rules: bool,
 ):
-    from cogs.honeypot_verification_v48 import (
-        MIN_ACCOUNT_AGE_SECONDS,
-        MIN_JOIN_DELAY_SECONDS,
-    )
+    MIN_JOIN_DELAY_SECONDS = 8
 
     cog = bot.get_cog("HoneypotVerification")
     conf = await cog.config(guild.id) if cog else None
@@ -427,8 +529,15 @@ async def _complete_verification(
     account_age = max(
         0, int((discord.utils.utcnow() - member.created_at).total_seconds())
     )
-    if account_age < MIN_ACCOUNT_AGE_SECONDS:
-        remaining = max(60, MIN_ACCOUNT_AGE_SECONDS - account_age)
+    try:
+        settings = await cog.settings(guild.id)
+        min_account_age_seconds = max(
+            0, int(settings.get("min_account_age_minutes", 30) or 0) * 60
+        )
+    except Exception:
+        min_account_age_seconds = 30 * 60
+    if account_age < min_account_age_seconds:
+        remaining = max(60, min_account_age_seconds - account_age)
         return None, _json_error(
             f"Ton compte Discord est trop récent. Réessaie dans environ {max(1, remaining // 60)} minute(s).",
             429,
@@ -447,7 +556,7 @@ async def _complete_verification(
             code="join_delay",
         )
 
-    locked = int(cog._seconds_locked(guild.id, member.id))
+    locked = await _locked_seconds(bot, guild.id, member.id)
     if locked > 0:
         return None, _json_error(
             f"Trop de tentatives incorrectes. Réessaie dans environ {max(1, (locked + 59) // 60)} minute(s).",
@@ -470,8 +579,36 @@ async def _complete_verification(
                 "Le règlement a changé. Recharge la page et réessaie.", 409
             )
 
+    # Dernière étape : le moteur adaptatif V5 est recomputé au moment exact de la
+    # vérification web. Il ne peut plus attribuer le rôle tout seul en arrière-plan.
+    try:
+        security_score, security_threshold, security_passed = await _adaptive_security(
+            cog, member
+        )
+    except Exception:
+        logger.exception(
+            "Adaptive security scan failed guild=%s user=%s", guild.id, member.id
+        )
+        return None, _json_error(
+            "L'analyse de sécurité SentriX est momentanément indisponible. Réessaie.",
+            503,
+            code="security_scan_failed",
+        )
+    if not security_passed:
+        event = getattr(cog, "_event", None)
+        if callable(event):
+            try:
+                await event(guild.id, member.id, "web_review")
+            except Exception:
+                pass
+        return None, _json_error(
+            f"L'analyse de sécurité demande une revue staff ({security_score:.1f}/{security_threshold:.0f}). "
+            "Ton accès reste protégé et aucun bannissement n'est appliqué.",
+            403,
+            code="security_review",
+        )
+
     key = (guild.id, member.id)
-    cog._verification_in_progress.add(key)
     try:
         if verified not in member.roles:
             await member.add_roles(verified, reason="SentriX : vérification web réussie")
@@ -484,10 +621,15 @@ async def _complete_verification(
             "SentriX ne peut pas modifier tes rôles. Un administrateur doit vérifier la hiérarchie du bot.",
             503,
         )
-    finally:
-        cog._verification_in_progress.discard(key)
 
-    await cog._clear_pending(guild.id, member.id)
+    clear_pending = getattr(cog, "_clear_pending", None)
+    if callable(clear_pending):
+        await clear_pending(guild.id, member.id)
+    else:
+        await bot.db.execute(
+            "DELETE FROM honeypot_pending_members WHERE guild_id=? AND user_id=?",
+            (guild.id, member.id),
+        )
     await bot.db.execute(
         "INSERT INTO honeypot_verified_members "
         "(guild_id,user_id,verified_at,method,account_age_seconds) VALUES (?,?,?,?,?) "
@@ -511,29 +653,45 @@ async def _complete_verification(
     except Exception:
         logger.debug("verified_users compatibility write skipped", exc_info=True)
 
-    cog._failures.pop(key, None)
-    cog._lock_until.pop(key, None)
+    await _clear_failures(bot, guild.id, member.id)
+    event = getattr(cog, "_event", None)
+    if callable(event):
+        try:
+            await event(guild.id, member.id, "verified_web")
+        except Exception:
+            logger.debug("Adaptive verification event skipped.", exc_info=True)
 
     landing = _landing_channel(member)
     dm_sent = await _send_success_dm(bot, member, guild, landing)
 
     try:
-        await cog._log(
-            guild,
-            "Membre vérifié — site SentriX",
-            (
+        from utils import log_service
+        log_embed = discord.Embed(
+            title="Membre vérifié — site SentriX",
+            description=(
                 f"{member.mention} ({member.id})\n"
                 f"Compte âgé de : **{account_age // 86400} jour(s)**\n"
-                "Méthode : **OAuth Discord + CAPTCHA web + calcul + règlement courant**."
+                f"Score sécurité : **{security_score:.1f}/{security_threshold:.0f}**\n"
+                "Méthode : **OAuth Discord + règlement courant + CAPTCHA web + calcul + analyse adaptative**."
             ),
+            colour=discord.Colour.green(),
+        )
+        await log_service.send_log(
+            bot,
+            guild,
+            "security",
+            log_embed,
+            event_key=f"verification_web:{guild.id}:{member.id}:{int(time.time())}",
         )
     except Exception:
-        logger.debug("verification log skipped", exc_info=True)
+        logger.debug("Web verification log skipped.", exc_info=True)
 
     return {
         "already_verified": False,
         "dm_sent": dm_sent,
         "channel_id": str(landing.id) if landing else None,
+        "security_score": round(security_score, 2),
+        "security_threshold": security_threshold,
     }, None
 
 
@@ -565,6 +723,7 @@ COPY_FR = {
         "Compte et serveur",
         "Règlement",
         "CAPTCHA",
+        "Analyse de sécurité",
         "Attribution du rôle",
     ],
 }
@@ -597,6 +756,7 @@ COPY_EN = {
         "Account and server",
         "Server rules",
         "CAPTCHA",
+        "Security analysis",
         "Role assignment",
     ],
 }
@@ -701,7 +861,7 @@ $("start").onclick=async()=>{
 };
 $("verify").onclick=async()=>{
   $("error").classList.add("hidden");$("verify").disabled=true;$("verify").textContent=C.checking;
-  const stages=[0,1,2,3,4];let idx=0;const timer=setInterval(()=>{if(idx<stages.length){mark(stages[idx],"active");idx++}},280);
+  const stages=[0,1,2,3,4,5];let idx=0;const timer=setInterval(()=>{if(idx<stages.length){mark(stages[idx],"active");idx++}},280);
   try{
     const data=await api("/api/verify/"+GUILD_ID+"/complete",{method:"POST",body:JSON.stringify({challenge_token:challengeToken,captcha:$("captcha").value,math_answer:$("math").value,accept_rules:$("acceptRules").checked})});
     clearInterval(timer);stages.forEach(i=>mark(i,"done"));showSuccess(data.channel_id);
@@ -854,12 +1014,17 @@ async def handle_complete(request: web.Request) -> web.Response:
         captcha=captcha,
         math_answer=math_answer,
     ):
-        await cog._record_failure(guild.id, member.id)
-        return _json_error(
-            "CAPTCHA ou calcul incorrect. Un nouveau challenge sera nécessaire.",
-            400,
-            code="challenge_failed",
-        )
+        locked = await _record_failure(bot, guild.id, member.id)
+        event = getattr(cog, "_event", None)
+        if callable(event):
+            try:
+                await event(guild.id, member.id, "web_captcha_failed")
+            except Exception:
+                pass
+        message = "CAPTCHA ou calcul incorrect. Un nouveau challenge sera nécessaire."
+        if locked > 0:
+            message += f" Trop d'échecs : réessaie dans environ {max(1, (locked + 59) // 60)} minute(s)."
+        return _json_error(message, 429 if locked else 400, code="challenge_failed")
 
     result, error = await _complete_verification(
         bot,
