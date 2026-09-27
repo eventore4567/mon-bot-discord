@@ -12,6 +12,7 @@ from discord.ext import commands
 
 import sentrix_setup_compact_v113 as v4
 import sentrix_setup_guided_v117 as guided
+import sentrix_setup_v116 as v116
 from utils import log_service
 
 logger = logging.getLogger("bot.setup-v118")
@@ -310,6 +311,33 @@ def _extend_guided_catalogue() -> None:
         guided.GUIDED_SECTIONS["members"] = tuple(members)
 
 
+def _patch_v116_action() -> None:
+    current = v116._run_action
+    if getattr(current, "_sentrix_v118", False):
+        return
+
+    async def run_action_v118(view, interaction: discord.Interaction):
+        v116._ensure_state(view)
+        module = v116.MODULE_BY_KEY[view._v116_module]
+        section = next(s for s in module.sections if s.key == view._v116_section)
+        action = section.action
+        if action == "internal:invitations":
+            subview = InviteTrackerSetupView(view.bot, view.guild_id, interaction.user.id)
+            return await interaction.response.send_message(
+                embed=await subview.build_embed(), view=subview, ephemeral=True
+            )
+        if action == "internal:verification":
+            subview = VerificationSetupView(view.bot, view.guild_id, interaction.user.id)
+            return await interaction.response.send_message(
+                embed=await subview.build_embed(), view=subview, ephemeral=True
+            )
+        return await current(view, interaction)
+
+    run_action_v118._sentrix_v118 = True
+    run_action_v118._sentrix_original = current
+    v116._run_action = run_action_v118
+
+
 def _patch_internal_open() -> None:
     current = guided._open_internal
     if getattr(current, "_sentrix_v118", False):
@@ -337,6 +365,7 @@ def install(bot: commands.Bot) -> None:
     global _INSTALLED
     _extend_guided_catalogue()
     _patch_internal_open()
+    _patch_v116_action()
     _INSTALLED = True
     logger.info(
         "Setup V118 actif : sécurité avancée, vérification réparable et tracker invitations intégrés."
