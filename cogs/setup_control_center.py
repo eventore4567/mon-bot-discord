@@ -44,11 +44,14 @@ AUTOMOD = (
     ("antiinvite", "Anti-invitation"), ("antimention", "Anti-ping"), ("anticaps", "Anti-majuscules"),
     ("antiemoji", "Anti-emoji"), ("antibot", "Anti-bot"), ("antiaccount", "Anti-compte récent"),
     ("antiscam", "Anti-scam"), ("antinuke", "Anti-nuke"), ("antiinsult", "Anti-insultes"),
+    ("security_vanity", "Protection vanity URL"), ("security_prune", "Détection member prune"),
+    ("security_permissions", "Permissions dangereuses"), ("join_gate", "Join Gate avancé"),
+    ("risk_engine", "Risk score comportemental"),
 )
 
 BOT_PERMS = {
     "moderation": ("manage_messages", "moderate_members", "kick_members", "ban_members"),
-    "security": ("manage_messages", "manage_roles", "manage_channels", "view_audit_log"),
+    "security": ("manage_messages", "manage_roles", "manage_channels", "manage_guild", "view_audit_log", "moderate_members", "kick_members", "ban_members"),
     "logs": ("view_channel", "send_messages", "embed_links", "attach_files", "read_message_history", "view_audit_log"),
     "tickets": ("manage_channels", "manage_roles", "view_channel", "send_messages"),
     "welcome": ("view_channel", "send_messages", "embed_links", "manage_roles"),
