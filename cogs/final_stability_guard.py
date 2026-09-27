@@ -338,6 +338,38 @@ def _latency_text(bot: commands.Bot) -> str:
         return "indisponible"
 
 
+async def _delete_unknown_command_reply(message: discord.Message) -> None:
+    """Supprime les réponses de commande inconnue après deux secondes.
+
+    Plusieurs anciens handlers de CommandNotFound peuvent encore gagner la course selon
+    l'ordre des wrappers runtime. Ce garde observe la sortie finale réellement envoyée par
+    SentriX et ne cible que ses propres messages commençant par "Commande introuvable".
+    """
+    try:
+        await asyncio.sleep(2)
+        await message.delete()
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        pass
+
+
+class UnknownCommandExpiryGuard(commands.Cog, name="UnknownCommandExpiryGuard"):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        bot_user = getattr(self.bot, "user", None)
+        if bot_user is None or getattr(message.author, "id", None) != bot_user.id:
+            return
+        content = str(getattr(message, "content", "") or "").strip().casefold()
+        if not content.startswith("commande introuvable"):
+            return
+        asyncio.create_task(
+            _delete_unknown_command_reply(message),
+            name=f"sentrix-unknown-command-expiry-{message.id}",
+        )
+
+
 class StabilityDiagnostic(commands.Cog, name="StabilityDiagnostic"):
     """Diagnostic runtime staff de secours si aucun diagnostic canonique n'existe."""
 
@@ -483,6 +515,9 @@ def install(bot: commands.Bot) -> dict[str, Any]:
 async def setup(bot: commands.Bot) -> None:
     install(bot)
 
+    if bot.get_cog("UnknownCommandExpiryGuard") is None:
+        await bot.add_cog(UnknownCommandExpiryGuard(bot))
+
     command_conflict = (
         bot.get_command("diagnostic")
         or bot.get_command("diagnose")
@@ -500,6 +535,8 @@ async def setup(bot: commands.Bot) -> None:
 __all__ = [
     "install",
     "StabilityDiagnostic",
+    "UnknownCommandExpiryGuard",
+    "_delete_unknown_command_reply",
     "_disable_ai_local_throttle",
     "_install_safe_attachment_archive",
     "_reassert_zero_cooldown",
