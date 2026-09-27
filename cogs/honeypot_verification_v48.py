@@ -1145,18 +1145,18 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
             return
 
         menu = discord.ui.Select(
-            placeholder="🔐 Vérification renforcée + salon piège",
+            placeholder="Vérification web + honeypot",
             min_values=1,
             max_values=1,
             options=[
                 discord.SelectOption(
-                    label="Activer — Renforcée + Softban",
-                    description="Challenge humain complet + softban du honeypot.",
+                    label="Activer — Web + Softban",
+                    description="Site SentriX + CAPTCHA + softban du honeypot.",
                     value="enable_softban",
                 ),
                 discord.SelectOption(
-                    label="Activer — Renforcée + Expulsion",
-                    description="Challenge humain complet + kick du honeypot.",
+                    label="Activer — Web + Expulsion",
+                    description="Site SentriX + CAPTCHA + kick du honeypot.",
                     value="enable_kick",
                 ),
                 discord.SelectOption(
@@ -1189,7 +1189,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                         self.guild_id,
                         interaction.user.id,
                         "Sécurité",
-                        "vérification renforcée + honeypot désactivés",
+                        "vérification web + honeypot désactivés",
                         new_value="off",
                     )
                 except Exception:
@@ -1208,7 +1208,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                     self.guild_id,
                     interaction.user.id,
                     "Sécurité",
-                    "vérification renforcée + honeypot activés",
+                    "vérification web + honeypot activés",
                     new_value=sanction,
                 )
             except Exception:
@@ -1219,11 +1219,11 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
             await self._refresh_message(interaction)
             await interaction.followup.send(
                 (
-                    "✅ **Vérification renforcée activée.**\n"
+                    "**Vérification web SentriX activée.**\n"
                     f"Portail : {result['verify'].mention}\n"
                     f"Piège : {result['trap'].mention}\n"
                     f"Sanction honeypot : **{'Softban' if sanction == 'softban' else 'Expulsion'}**\n"
-                    "Accès : uniquement après Membership Screening + challenge interactif + code unique + calcul."
+                    "Accès : OAuth Discord + règlement + contrôle du compte + CAPTCHA web + calcul."
                 ),
                 ephemeral=True,
             )
@@ -1256,10 +1256,10 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
             trap = f"<#{conf['trap_channel_id']}>" if conf["trap_channel_id"] else "introuvable"
             sanction = "Softban" if str(conf["sanction"]) == "softban" else "Expulsion"
             value = (
-                f"● **Renforcée** — Honeypot : **{sanction}**\n"
+                f"● **Web** — Honeypot : **{sanction}**\n"
                 f"Vérification : {verify}\n"
                 f"Salon piège : {trap}\n"
-                "Contrôles : règles Discord + âge du compte + séquence + code unique + calcul"
+                "Contrôles : OAuth Discord + règlement + âge du compte + CAPTCHA web + calcul"
             )
         embed.add_field(name="🔐 Vérification d'accès", value=value, inline=False)
         return embed
