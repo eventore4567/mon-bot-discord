@@ -70,9 +70,10 @@ MODULES: tuple[ModuleSpec, ...] = (
     ModuleSpec("members", "Membres", "Bienvenue, départ, vérification, autorôles et règlement.", (
         _s("welcome", "Bienvenue", "Salon et paramètres d'accueil des nouveaux membres.", "config:welcome_channel"),
         _s("goodbye", "Départ", "Salon et comportement lors du départ d'un membre.", "config:goodbye_channel"),
-        _s("verify", "Vérification", "Rôle vérifié, salon et parcours de vérification.", "verification"),
+        _s("verify", "Rôle vérifié", "Choisir le rôle attribué après vérification.", "verification"),
+        _s("verify_portal", "Portail de vérification", "Activer ou réparer verification et stay-muted avec leurs panneaux SentriX.", "internal:verification"),
         _s("autorole", "Autorôle", "Rôle distribué automatiquement à l'arrivée.", "config:autorole"),
-        _s("rules", "Règlement", "Parcours règlement/validation et panneau dédié.", "hint:+verify-setup"),
+        _s("rules", "Règlement", "Parcours règlement/validation et panneau dédié.", "internal:verification"),
     )),
     ModuleSpec("logs", "Logs", "Journalisation granulaire du serveur.", (
         _s("general", "Général", "Salon principal et création/réparation des logs.", "logs"),
@@ -118,9 +119,9 @@ MODULES: tuple[ModuleSpec, ...] = (
     )),
     ModuleSpec("verification", "Vérification", "CAPTCHA, rôle, salon et panneau de validation.", (
         _s("role", "Rôle vérifié", "Choisir le rôle attribué après validation.", "verification"),
-        _s("channel", "Salon", "Choisir où publier le panneau de vérification.", "hint:+verify-setup"),
-        _s("captcha", "CAPTCHA", "Configurer le parcours et les contrôles de validation.", "hint:+verify-setup"),
-        _s("panel", "Panneau", "Publier ou mettre à jour le panneau de vérification.", "hint:+verify-panel"),
+        _s("channel", "Portail", "Créer ou réparer le salon de vérification.", "internal:verification"),
+        _s("captcha", "Contrôles humains", "Configurer le parcours renforcé anti-automatisation.", "internal:verification"),
+        _s("panel", "Panneaux", "Publier ou réparer les panneaux verification et stay-muted.", "internal:verification"),
     )),
     ModuleSpec("notifications", "Notifications", "YouTube, TikTok, Twitch et autres sources.", (
         _s("list", "Sources", "Voir les notifications actuellement configurées.", "hint:+notifs-list"),
