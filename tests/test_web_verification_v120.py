@@ -61,8 +61,17 @@ def test_dashboard_oauth_routes_back_to_verification():
     assert "register_public_verification" in DASHBOARD_SOURCE
 
 
+def test_verification_oauth_uses_identity_only_and_skips_guild_list():
+    assert '"scope": "identify" if verify_guild_id > 0 else "identify guilds"' in DASHBOARD_SOURCE
+    assert "if pending_verify is None:" in DASHBOARD_SOURCE
+    assert "/users/@me/guilds" in DASHBOARD_SOURCE
+
+
 def test_web_page_has_loading_success_close_and_discord_redirect():
     assert "spinner" in WEB_SOURCE
+    assert '"preparing"' in WEB_SOURCE
+    assert 'loadingText").textContent=C.preparing' in WEB_SOURCE
+    assert 'loadingText").textContent=C.checking' in WEB_SOURCE
     assert "showSuccess" in WEB_SOURCE
     assert "window.close()" in WEB_SOURCE
     assert "discord://-/channels/" in WEB_SOURCE
@@ -93,6 +102,16 @@ def test_existing_active_setup_updates_panels_without_creating_structure():
     assert "refresh_existing_panels(interaction.guild)" in SETUP_SOURCE
     assert "Aucun salon ni catégorie n'a été créé." in SETUP_SOURCE
     assert "create_or_refresh_system" in SETUP_SOURCE
+
+
+def test_legacy_setup_also_refreshes_active_panels_without_recreating_channels():
+    callback_start = HONEYPOT_SOURCE.index("async def callback(interaction: discord.Interaction):")
+    callback_end = HONEYPOT_SOURCE.index("menu.callback = callback", callback_start)
+    callback = HONEYPOT_SOURCE[callback_start:callback_end]
+    assert "current_conf" in callback
+    assert "refresh_existing_panels(interaction.guild)" in callback
+    assert "if current_conf and current_conf[\"enabled\"]" in callback
+    assert "create_or_refresh_system" in callback
 
 
 def test_clear_and_clearwarnings_no_longer_double_confirm():
