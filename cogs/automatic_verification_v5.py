@@ -559,67 +559,13 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             await self._log_result(member, score, threshold, "review", factors)
             return score, False
 
-        unverified = (
-            member.guild.get_role(conf["unverified_role_id"])
-            if conf["unverified_role_id"]
-            else None
-        )
-        verified = (
-            member.guild.get_role(conf["verified_role_id"])
-            if conf["verified_role_id"]
-            else None
-        )
-        if verified is None:
-            await self._save_result(member, score, threshold, "review", factors)
-            return score, False
-
-        try:
-            if verified not in member.roles:
-                await member.add_roles(
-                    verified,
-                    reason=f"SentriX V5 : vérification adaptative {score:.2f}/20",
-                )
-            if unverified and unverified in member.roles:
-                await member.remove_roles(
-                    unverified,
-                    reason="SentriX V5 : vérification adaptative réussie",
-                )
-        except (discord.Forbidden, discord.HTTPException):
-            logger.warning("Impossible d'appliquer les rôles de vérification à %s", member.id)
-            await self._save_result(member, score, threshold, "review", factors)
-            return score, False
-
-        await self._clear_pending(member.guild.id, member.id)
-        account_age = max(
-            0, int((discord.utils.utcnow() - member.created_at).total_seconds())
-        )
-        await self.bot.db.execute(
-            "INSERT INTO honeypot_verified_members(guild_id,user_id,verified_at,method,account_age_seconds) "
-            "VALUES(?,?,?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET "
-            "verified_at=excluded.verified_at,method=excluded.method,"
-            "account_age_seconds=excluded.account_age_seconds",
-            (
-                member.guild.id,
-                member.id,
-                int(time.time()),
-                f"adaptive-v5-{score:.2f}-of-20",
-                account_age,
-            ),
-        )
-        try:
-            await self.bot.db.execute(
-                "INSERT OR IGNORE INTO verified_users(guild_id,user_id,verified_at) "
-                "VALUES(?,?,strftime('%s','now'))",
-                (member.guild.id, member.id),
-            )
-        except Exception:
-            logger.warning("Étape non critique ignorée dans evaluate_member", exc_info=True)
-
-        await self._save_result(member, score, threshold, "verified", factors)
-        await self._event(member.guild.id, member.id, "verified")
-        await self._log_result(member, score, threshold, "verified", factors)
-        self._behavior.pop((member.guild.id, member.id), None)
-        return score, True
+        # V120 : le moteur adaptatif reste un signal de sécurité, mais il ne donne plus
+        # automatiquement le rôle final. Le membre doit terminer le parcours web
+        # (OAuth Discord + règlement + CAPTCHA + contrôle adaptatif courant).
+        await self._save_result(member, score, threshold, "web_ready", factors)
+        await self._event(member.guild.id, member.id, "web_ready")
+        await self._log_result(member, score, threshold, "web_ready", factors)
+        return score, False
 
     def schedule_evaluation(
         self,
@@ -647,51 +593,73 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
 
         self._tasks[key] = asyncio.create_task(runner())
 
+    async def refresh_existing_panels(
+        self,
+        guild: discord.Guild,
+    ) -> tuple[dict | None, str | None]:
+        """Refresh only the two channels already stored in the active config.
+
+        Missing channels are never recreated here. This is the method used by startup
+        migration and by /setup when verification is already active.
+        """
+        conf = await self.config(guild.id, enabled_only=True)
+        if conf is None:
+            return None, "La vérification n'est pas active sur ce serveur."
+
+        verify = guild.get_channel(int(conf["verify_channel_id"] or 0))
+        trap = guild.get_channel(int(conf["trap_channel_id"] or 0))
+        if not isinstance(verify, discord.TextChannel):
+            return None, (
+                "Le salon de vérification configuré a été supprimé. "
+                "SentriX ne le recrée pas automatiquement."
+            )
+        if not isinstance(trap, discord.TextChannel):
+            return None, (
+                "Le salon stay-muted configuré a été supprimé. "
+                "SentriX ne le recrée pas automatiquement."
+            )
+
+        from cogs.honeypot_verification_v48 import (
+            _purge_bot_messages,
+            _trap_embed,
+            _web_panel,
+        )
+
+        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
+        removed_verify = await _purge_bot_messages(verify, bot_user_id)
+        removed_trap = await _purge_bot_messages(trap, bot_user_id)
+        await panels.envoyer(verify, await _web_panel(self.bot, guild))
+        await panels.envoyer(
+            trap,
+            panels.depuis_embed(_trap_embed(verify, str(conf["sanction"] or "softban"))),
+        )
+        return {
+            "verify": verify,
+            "trap": trap,
+            "removed_verify_messages": removed_verify,
+            "removed_trap_messages": removed_trap,
+        }, None
+
     async def create_or_refresh_system(
         self,
         guild: discord.Guild,
         *,
         sanction: str = "softban",
     ):
+        """Explicit first activation may create structure; the published flow is web-only."""
         result, error = await super().create_or_refresh_system(guild, sanction=sanction)
         if error or result is None:
             return result, error
 
-        settings = await self.settings(guild.id)
-        verify = result["verify"]
-        try:
-            await verify.purge(
-                limit=20,
-                check=lambda message: (
-                    self.bot.user is not None
-                    and message.author.id == self.bot.user.id
-                ),
-            )
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
-        info = discord.Embed(
-            title="SentriX • Vérification adaptative",
-            description=(
-                f"Vous n'avez **rien à faire**. SentriX analyse **40 signaux** répartis dans **8 familles pondérées** et produit un score normalisé sur **20**.\n\nSeuil actuel : **{settings['threshold']}/20**. Les signaux indisponibles sont neutres et les comptes limites sont réévalués automatiquement. Un score insuffisant ne bannit jamais le membre."
-            ),
-            colour=discord.Color.blurple(),
-        )
-        info.add_field(
-            name="Familles analysées",
-            value=(
-                "Identité • ancienneté • onboarding • rôles/permissions • historique "
-                "• contexte de raid • comportement précoce • confiance"
-            ),
-            inline=False,
-        )
-        info.set_footer(
-            text="SentriX • 40 signaux • aucun captcha • score faible = revue, jamais ban"
-        )
-        try:
-            await panels.envoyer(verify, panels.depuis_embed(info))
-        except discord.HTTPException:
-            pass
+        # super() may publish its historical automatic panel during first activation.
+        # Replace it immediately with the single web-verification panel.
+        refreshed, refresh_error = await self.refresh_existing_panels(guild)
+        if refresh_error:
+            return None, refresh_error
+        result.update({
+            "verify": refreshed["verify"],
+            "trap": refreshed["trap"],
+        })
         return result, None
 
     @commands.Cog.listener()
