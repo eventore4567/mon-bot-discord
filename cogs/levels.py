@@ -1636,12 +1636,6 @@ class Levels(commands.Cog, name="Levels"):
     @app_commands.describe(membre="Le membre visé")
     @checks.is_owner_or_admin_for("configuration")
     async def represet(self, ctx: commands.Context, membre: discord.Member):
-        if not await helpers.double_confirm_destructive(
-            ctx,
-            f"réinitialiser la réputation de {membre.display_name}",
-            detail="La réputation actuelle de ce membre sera remise à zéro.",
-        ):
-            return
         await self.bot.db.reset_reputation(ctx.guild.id, ctx.author.id, membre.id)
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Réputation de {membre.mention} réinitialisée à **0**.')))
 
