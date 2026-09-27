@@ -102,6 +102,15 @@ def test_dashboard_entry_has_no_horizontal_layout_shift():
     assert "translateX(-12px)" not in polish
 
 
+def test_v3_hero_headline_stays_compact_and_balanced():
+    page = _html()
+    assert 'class="hero-line">Moins de chaos.</span>' in page
+    assert 'class="accent">Plus de contrôle.</span>' in page
+    assert "font-size:clamp(48px,5.2vw,76px)" in page
+    assert "@media(max-width:1180px)" in page
+    assert "font-size:clamp(38px,10.5vw,52px)" in page
+
+
 def test_v3_hero_has_richer_capability_cards():
     page = _html()
     assert 'class="hero-proof"' in page
