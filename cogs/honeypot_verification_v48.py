@@ -1382,12 +1382,16 @@ async def _cleanup_spam_verification_channels(bot: commands.Bot) -> None:
     for guild in list(bot.guilds):
         try:
             conf = await cog.config(guild.id, enabled_only=False)
+            # Le nettoyage V120 ne touche qu'aux serveurs où cette vérification était
+            # réellement active. Un ancien setup désactivé reste entièrement intact.
+            if not conf or not conf["enabled"]:
+                continue
+
             keep_ids = set()
-            if conf:
-                for key in ("category_id", "verify_channel_id", "trap_channel_id"):
-                    raw = conf[key]
-                    if raw:
-                        keep_ids.add(int(raw))
+            for key in ("category_id", "verify_channel_id", "trap_channel_id"):
+                raw = conf[key]
+                if raw:
+                    keep_ids.add(int(raw))
 
             for channel in list(guild.text_channels):
                 if channel.id in keep_ids:
