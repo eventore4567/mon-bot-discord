@@ -86,7 +86,7 @@ def _english(text: object | None) -> str | None:
         return None
     value = str(text)
     try:
-        translated = language_runtime._english_setup_text(value)
+        translated = language_runtime.english_ui_text(value, setup=True)
         value = str(translated if translated is not None else value)
     except Exception:
         logger.warning("Étape non critique ignorée dans _english", exc_info=True)
