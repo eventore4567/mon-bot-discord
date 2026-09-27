@@ -773,14 +773,16 @@ PAGE = r"""<!doctype html>
 <title>SentriX — Verification</title>
 <style>
 :root{--bg:#070918;--panel:#11162d;--panel2:#171e3c;--line:#2a3767;--text:#f6f8ff;--muted:#9aa6c7;--blue:#5ea4ff;--green:#38d879;--danger:#ff667a}
-*{box-sizing:border-box}html,body{min-height:100%;margin:0;background:radial-gradient(900px 600px at 50% -10%,rgba(74,112,255,.26),transparent 65%),linear-gradient(180deg,#070918,#0a0d20);color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif}
+*{box-sizing:border-box}
+html{min-height:100%;margin:0;background:#070918;color-scheme:dark;overscroll-behavior-y:none}
+body{min-height:100vh;min-height:100dvh;margin:0;background-color:#070918;background-image:radial-gradient(900px 600px at 50% -10%,rgba(74,112,255,.26),transparent 65%),linear-gradient(180deg,#070918,#0a0d20);color:var(--text);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;overflow-x:hidden;overscroll-behavior-y:none}
 body{display:grid;place-items:center;padding:24px}.shell{width:min(760px,100%)}.brand{display:flex;align-items:center;gap:10px;margin:0 0 18px;color:#dfe8ff;font-weight:800}.dot{width:11px;height:11px;border-radius:50%;background:var(--blue);box-shadow:0 0 24px var(--blue)}
 .card{position:relative;overflow:hidden;border:1px solid rgba(100,130,220,.24);background:linear-gradient(180deg,rgba(22,29,60,.95),rgba(13,18,41,.96));border-radius:24px;padding:30px;box-shadow:0 30px 80px rgba(0,0,0,.35)}
 .card:before{content:"";position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,transparent,var(--blue),transparent);opacity:.85}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:#8fbbff;font-weight:800}
 h1{font-size:clamp(30px,6vw,52px);line-height:1.02;margin:10px 0 14px;letter-spacing:-.04em}.sub{color:var(--muted);font-size:16px;max-width:640px}.server{display:inline-flex;margin-top:18px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:#0b1026;color:#dce6ff;font-weight:700}
 .stages{display:grid;gap:9px;margin:26px 0}.stage{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid rgba(100,130,220,.18);border-radius:14px;background:rgba(7,11,30,.5);color:#aab5d3;transition:.25s ease}.stage i{width:10px;height:10px;border-radius:50%;background:#394566;box-shadow:0 0 0 5px rgba(57,69,102,.12)}.stage.active{color:white;border-color:#4c71cf}.stage.active i{background:var(--blue);box-shadow:0 0 0 5px rgba(94,164,255,.14),0 0 18px rgba(94,164,255,.8)}.stage.done i{background:var(--green);box-shadow:0 0 0 5px rgba(56,216,121,.13)}
 button{appearance:none;border:0;border-radius:13px;padding:13px 17px;font:inherit;font-weight:800;cursor:pointer;transition:.18s ease}.primary{background:linear-gradient(180deg,#58a1ff,#3878e9);color:white;box-shadow:0 10px 28px rgba(56,120,233,.25)}.primary:hover{transform:translateY(-1px);filter:brightness(1.07)}button:disabled{opacity:.55;cursor:not-allowed;transform:none}
-.hidden{display:none!important}.challenge{margin-top:20px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#0a1027}.challenge img{display:block;width:100%;max-width:380px;border-radius:12px;border:1px solid #263768;margin:14px 0}
+.hidden{display:none!important}.challenge{margin-top:20px;padding:18px;border:1px solid var(--line);border-radius:16px;background:#0a1027}.challenge img{display:block;width:100%;max-width:380px;aspect-ratio:380/128;object-fit:cover;background:#080d1f;color:transparent;border-radius:12px;border:1px solid #263768;margin:14px 0}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:600px){.grid{grid-template-columns:1fr}.card{padding:22px}}input{width:100%;border:1px solid #2a3767;background:#080d20;color:white;padding:13px 14px;border-radius:12px;outline:none;font:inherit}input:focus{border-color:#5ea4ff;box-shadow:0 0 0 3px rgba(94,164,255,.12)}
 .rules{max-height:210px;overflow:auto;white-space:pre-wrap;margin:14px 0;padding:14px;border:1px solid #28355e;border-radius:12px;background:#080d20;color:#cbd6f5}.check{display:flex;gap:10px;align-items:flex-start;color:#cbd6f5}.check input{width:auto;margin-top:4px}
 .error{margin-top:14px;color:#ff9baa;font-weight:650}.success{display:grid;place-items:center;text-align:center;padding:20px 0}.tick{width:76px;height:76px;border-radius:50%;display:grid;place-items:center;background:rgba(56,216,121,.12);border:2px solid var(--green);font-size:38px;animation:pop .4s ease}.spinner{width:30px;height:30px;border-radius:50%;border:3px solid #25345d;border-top-color:var(--blue);animation:spin .7s linear infinite;margin:20px 0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes pop{0%{transform:scale(.65);opacity:0}100%{transform:scale(1);opacity:1}}
@@ -805,8 +807,8 @@ button{appearance:none;border:0;border-radius:13px;padding:13px 17px;font:inheri
         <div class="small" id="captchaHint"></div>
         <img id="captchaImage" alt="CAPTCHA">
         <div class="grid">
-          <input id="captcha" autocomplete="off" autocapitalize="characters">
-          <input id="math" inputmode="numeric">
+          <input id="captcha" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="6">
+          <input id="math" inputmode="numeric" autocomplete="off">
         </div>
         <div id="rulesWrap" class="hidden">
           <h3 id="rulesTitle"></h3>
@@ -830,7 +832,8 @@ button{appearance:none;border:0;border-radius:13px;padding:13px 17px;font:inheri
 const GUILD_ID=__GUILD_ID__;
 const AUTHENTICATED=__AUTHENTICATED__;
 const C=__COPY__;
-let state=null,challengeToken=null;
+let state=null,challengeToken=null,verifyInFlight=false,autoVerifyTimer=null;
+const CAPTCHA_LENGTH=6;
 const $=id=>document.getElementById(id);
 $("eyebrow").textContent=C.eyebrow;$("title").textContent=C.title;$("subtitle").textContent=C.subtitle;
 $("loadingText").textContent=C.loading;$("start").textContent=C.start;$("captchaTitle").textContent=C.captchaTitle;
@@ -841,6 +844,17 @@ C.stages.forEach((name,i)=>{const d=document.createElement("div");d.className="s
 function mark(i,mode){const el=document.querySelector('.stage[data-i="'+i+'"]');if(el)el.className="stage "+mode}
 function fail(message){$("loading").classList.add("hidden");$("error").textContent=message;$("error").classList.remove("hidden");$("start").classList.remove("hidden");$("start").textContent=C.retry}
 async function api(path,options={}){const r=await fetch(path,{credentials:"same-origin",headers:{"Content-Type":"application/json",...(options.headers||{})},...options});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||("HTTP "+r.status));return data}
+function rulesReady(){return $("rulesWrap").classList.contains("hidden")||$("acceptRules").checked}
+function maybeAutoVerify(){
+  clearTimeout(autoVerifyTimer);
+  const captcha=$("captcha").value.trim().toUpperCase();
+  const math=$("math").value.trim();
+  if(verifyInFlight||captcha.length!==CAPTCHA_LENGTH||!/^-?\d+$/.test(math)||!rulesReady())return;
+  autoVerifyTimer=setTimeout(()=>{if(!verifyInFlight&&rulesReady())$("verify").click()},900);
+}
+$("captcha").addEventListener("input",()=>{$("captcha").value=$("captcha").value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,CAPTCHA_LENGTH);maybeAutoVerify()});
+$("math").addEventListener("input",maybeAutoVerify);
+$("acceptRules").addEventListener("change",maybeAutoVerify);
 async function boot(){
   if(!AUTHENTICATED){setTimeout(()=>location.href="/login?verify_guild="+GUILD_ID,700);return}
   try{
@@ -857,12 +871,18 @@ $("start").onclick=async()=>{
   $("loadingText").textContent=C.preparing;$("loading").classList.remove("hidden");mark(0,"done");mark(1,"active");
   try{
     const data=await api("/api/verify/"+GUILD_ID+"/challenge",{method:"POST",body:"{}"});
-    challengeToken=data.challenge_token;$("captchaImage").src=data.captcha_image;$("math").placeholder=data.math_question;
+    challengeToken=data.challenge_token;
+    $("captcha").value="";$("math").value="";$("acceptRules").checked=false;
+    const captchaImage=$("captchaImage");captchaImage.src=data.captcha_image;$("math").placeholder=data.math_question;
+    try{if(captchaImage.decode)await captchaImage.decode()}catch(e){}
     if(data.rules_published&&!data.rules_accepted){$("rulesText").textContent=data.rules_text||"";$("rulesWrap").classList.remove("hidden")}else{$("rulesWrap").classList.add("hidden")}
     $("loading").classList.add("hidden");$("challenge").classList.remove("hidden");mark(1,"done");mark(2,data.rules_published&&!data.rules_accepted?"active":"done");mark(3,"active");
+    $("captcha").focus();
   }catch(e){fail(e.message)}finally{$("start").disabled=false;$("start").textContent=C.start}
 };
 $("verify").onclick=async()=>{
+  if(verifyInFlight)return;
+  verifyInFlight=true;clearTimeout(autoVerifyTimer);
   $("error").classList.add("hidden");$("verify").disabled=true;$("verify").textContent=C.checking;
   $("challenge").classList.add("hidden");$("loadingText").textContent=C.checking;$("loading").classList.remove("hidden");
   const stages=[0,1,2,3,4,5];let idx=0;const timer=setInterval(()=>{if(idx<stages.length){mark(stages[idx],"active");idx++}},280);
@@ -873,7 +893,7 @@ $("verify").onclick=async()=>{
     clearInterval(timer);$("loading").classList.add("hidden");fail(e.message);
     $("challenge").classList.remove("hidden");$("start").classList.add("hidden");
   }
-  finally{$("verify").disabled=false;$("verify").textContent=C.verify}
+  finally{verifyInFlight=false;$("verify").disabled=false;$("verify").textContent=C.verify}
 };
 function showSuccess(channelId){
   $("main").classList.add("hidden");$("success").classList.remove("hidden");
