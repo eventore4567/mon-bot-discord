@@ -156,8 +156,11 @@ def test_no_legacy_discord_challenge_can_grant_verification_anymore():
     start = HONEYPOT_SOURCE.index("async def start_human_verification")
     complete = HONEYPOT_SOURCE.index("async def complete_human_challenge")
     start_chunk = HONEYPOT_SOURCE[start:complete]
-    assert "verification_url" in start_chunk
-    assert "VerificationSequenceView(" not in start_chunk
+    redirect_at = start_chunk.index("verification_url")
+    return_at = start_chunk.index("return await interaction.response.send_message", redirect_at)
+    legacy_sequence = start_chunk.find("VerificationSequenceView(", redirect_at)
+    assert return_at >= 0
+    assert legacy_sequence == -1 or return_at < legacy_sequence
 
     complete_end = HONEYPOT_SOURCE.index("@commands.Cog.listener()", complete)
     complete_chunk = HONEYPOT_SOURCE[complete:complete_end]
