@@ -1199,7 +1199,26 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                 return await interaction.followup.send(message, ephemeral=True)
 
             sanction = "kick" if value == "enable_kick" else "softban"
-            result, error = await honeypot.create_or_refresh_system(interaction.guild, sanction=sanction)
+            current_conf = await honeypot.config(interaction.guild.id, enabled_only=False)
+            if current_conf and current_conf["enabled"]:
+                # Mise à jour d'un système actif : ne recrée jamais un salon/catégorie
+                # supprimé. On change le réglage puis on remplace uniquement les panels
+                # dans les deux salons encore existants.
+                await self.bot.db.execute(
+                    "UPDATE honeypot_verification SET sanction=? WHERE guild_id=?",
+                    (sanction, interaction.guild.id),
+                )
+                result, error = await honeypot.refresh_existing_panels(interaction.guild)
+                action_label = "vérification web mise à jour"
+            else:
+                # Seule une activation explicite d'un système inactif peut créer la
+                # structure initiale.
+                result, error = await honeypot.create_or_refresh_system(
+                    interaction.guild,
+                    sanction=sanction,
+                )
+                action_label = "vérification web activée"
+
             if error:
                 return await interaction.followup.send(f"⚠️ {error}", ephemeral=True)
 
@@ -1208,7 +1227,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                     self.guild_id,
                     interaction.user.id,
                     "Sécurité",
-                    "vérification web + honeypot activés",
+                    action_label,
                     new_value=sanction,
                 )
             except Exception:
@@ -1219,11 +1238,12 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
             await self._refresh_message(interaction)
             await interaction.followup.send(
                 (
-                    "**Vérification web SentriX activée.**\n"
+                    f"**{action_label.capitalize()}.**\n"
                     f"Portail : {result['verify'].mention}\n"
                     f"Piège : {result['trap'].mention}\n"
                     f"Sanction honeypot : **{'Softban' if sanction == 'softban' else 'Expulsion'}**\n"
-                    "Accès : OAuth Discord + règlement + contrôle du compte + CAPTCHA web + calcul."
+                    "Accès : OAuth Discord + règlement + contrôle du compte + CAPTCHA web + calcul. "
+                    "Une mise à jour ne crée aucun nouveau salon."
                 ),
                 ephemeral=True,
             )
