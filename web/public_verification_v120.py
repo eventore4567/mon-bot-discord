@@ -13,6 +13,7 @@ import html
 import io
 import json
 import logging
+import os
 import secrets
 import time
 from typing import Any
@@ -129,8 +130,13 @@ async def _adaptive_security(cog, member: discord.Member) -> tuple[float, float,
 
 
 def _secret() -> bytes:
+    # Les cookies de vérification peuvent être émis par l'instance HTTP passive puis
+    # validés par le pair Discord actif. Le secret de proxy HA est volontairement
+    # partagé entre primary/standby, contrairement à des secrets Discord qui peuvent
+    # dériver entre services. On l'utilise donc en priorité pour signer les jetons web.
     value = (
-        (getattr(config, "DISCORD_CLIENT_SECRET", "") or "").strip()
+        (os.getenv("SENTRIX_HTTP_PROXY_SECRET") or "").strip()
+        or (getattr(config, "DISCORD_CLIENT_SECRET", "") or "").strip()
         or (getattr(config, "DISCORD_TOKEN", "") or "").strip()
     )
     if not value:
@@ -829,7 +835,7 @@ button{appearance:none;border:0;border-radius:13px;padding:13px 17px;font:inheri
   </main>
 </div>
 <script>
-const GUILD_ID=__GUILD_ID__;
+const GUILD_ID="__GUILD_ID__";
 const AUTHENTICATED=__AUTHENTICATED__;
 const C=__COPY__;
 let state=null,challengeToken=null,verifyInFlight=false,autoVerifyTimer=null;
