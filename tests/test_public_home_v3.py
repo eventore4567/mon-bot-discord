@@ -29,6 +29,7 @@ def test_v3_has_premium_product_structure():
     for marker in (
         'id="fx"',
         'class="product-shell"',
+        'class="hero-proof"',
         'class="wrap status-strip reveal"',
         'class="rail-track"',
         'class="bento stagger"',
@@ -92,6 +93,21 @@ def test_v3_preserves_dashboard_oauth_and_public_links():
 def test_home_alias_receives_same_public_branding_as_root():
     assert "/" in brand_avatar_v39._PUBLIC_HTML_PATHS
     assert "/home" in brand_avatar_v39._PUBLIC_HTML_PATHS
+
+
+def test_dashboard_entry_has_no_horizontal_layout_shift():
+    polish = brand_avatar_v39._APP_POLISH
+    assert "scrollbar-gutter:stable" in polish
+    assert "@keyframes sxAppSide{from{opacity:0}to{opacity:1}}" in polish
+    assert "translateX(-12px)" not in polish
+
+
+def test_v3_hero_has_richer_capability_cards():
+    page = _html()
+    assert 'class="hero-proof"' in page
+    assert "Sécurité centralisée" in page
+    assert "Haute disponibilité" in page
+    assert "Configuration directe" in page
 
 
 def test_v3_home_never_boots_private_guild_data():
