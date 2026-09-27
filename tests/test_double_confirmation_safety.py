@@ -19,27 +19,31 @@ def test_reset_invites_is_in_late_reset_guard():
     assert member_data_retention_v17.RESET_COMMAND_LABELS["reset-invites"]
 
 
-def test_bulk_destructive_commands_are_covered_by_late_guard():
+def test_only_high_impact_bulk_commands_are_covered_by_late_guard():
     expected = {
         "config-reset",
-        "logs reset",
-        "chat-reset",
-        "ai reset",
-        "sanctiondm reset",
-        "resetnick",
         "reset-logs-all",
-        "clearwarnings",
-        "clear",
         "delete-channel",
-        "ticketpanel delete",
-        "tickettype remove",
-        "ticketform remove",
-        "music clear",
         "security all",
         "create-logs",
         "syncbl",
     }
     assert expected <= set(member_data_retention_v17.DOUBLE_CONFIRM_COMMANDS)
+    low_risk = {
+        "logs reset",
+        "chat-reset",
+        "ai reset",
+        "sanctiondm reset",
+        "resetnick",
+        "clearwarnings",
+        "clear",
+        "ticketpanel delete",
+        "tickettype remove",
+        "ticketform remove",
+        "music clear",
+    }
+    assert not (low_risk & set(member_data_retention_v17.DOUBLE_CONFIRM_COMMANDS))
+    assert "represet" not in member_data_retention_v17.RESET_COMMAND_LABELS
 
 
 def test_late_guard_calls_double_confirmation_before_original_callback():
