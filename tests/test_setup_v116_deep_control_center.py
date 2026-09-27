@@ -5,7 +5,7 @@ from sentrix_setup_v116 import MODULES, MODULE_BY_KEY, PAGE_V116_MODULE, module_
 
 def test_v116_exposes_all_primary_setup_domains():
     expected = {
-        "security", "moderation", "members", "logs", "invitations", "levels", "economy",
+        "security", "moderation", "members", "logs", "invitations", "rules", "levels", "economy",
         "tickets", "roles", "verification", "notifications", "ai",
         "suggestions", "profile",
     }
