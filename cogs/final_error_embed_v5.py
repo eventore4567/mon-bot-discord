@@ -39,7 +39,7 @@ _DUREE_AFFICHAGE = 30
 # Une simple faute de frappe ne doit pas polluer le salon aussi longtemps qu'une
 # vraie erreur détaillée. Les réponses "commande introuvable" restent juste assez
 # longtemps pour être lues puis disparaissent automatiquement.
-_DUREE_COMMANDE_INTROUVABLE = 8
+_DUREE_COMMANDE_INTROUVABLE = 2
 
 
 async def _effacer_plus_tard(message: discord.Message | None) -> None:
