@@ -398,7 +398,11 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             for signal in factors
             if signal.critical and signal.available and signal.passed is False
         ]
-        colour = discord.Color.green() if status == "verified" else discord.Color.orange()
+        colour = (
+            discord.Color.green()
+            if status in {"verified", "web_ready"}
+            else discord.Color.orange()
+        )
         embed = discord.Embed(
             title="SentriX • Vérification adaptative",
             description=(
@@ -407,11 +411,12 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             ),
             colour=colour,
         )
-        decision = (
-            "Vérifié automatiquement"
-            if status == "verified"
-            else "Reste Non vérifié — revue staff possible"
-        )
+        if status == "verified":
+            decision = "Vérifié"
+        elif status == "web_ready":
+            decision = "Analyse réussie — vérification web encore requise"
+        else:
+            decision = "Reste Non vérifié — revue staff possible"
         embed.add_field(name="Décision", value=decision, inline=False)
         if blockers:
             embed.add_field(
@@ -469,65 +474,42 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         self._followup_tasks[key] = asyncio.create_task(runner())
 
     async def start_human_verification(self, interaction: discord.Interaction):
-        """Compatibilité avec l'ancien bouton « Commencer » après passage au moteur V5.
-
-        Le moteur V5 est automatique : un clic déclenche immédiatement une évaluation
-        réelle des 40 signaux au lieu d'appeler l'ancien challenge supprimé.
-        """
-        if interaction.guild is None or not isinstance(interaction.user, discord.Member):
+        """Legacy compatibility: every old Discord button now opens the web verifier."""
+        if interaction.guild is None:
             embed = discord.Embed(
                 title="SentriX — Vérification",
                 description="Cette vérification fonctionne uniquement dans un serveur.",
                 colour=discord.Colour.red(),
             )
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embed),
+                ephemere=True,
+            )
 
-        member = interaction.user
-        if bool(getattr(member, "pending", False)):
-            embed = discord.Embed(
-                title="Règles Discord requises",
-                description="Acceptez d'abord les règles du serveur Discord, puis cliquez de nouveau sur **Commencer**.",
-                colour=discord.Colour.orange(),
-            )
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
+        from web.public_verification_v120 import verification_url
 
-        result = await self.evaluate_member(member, reason="manual-button")
-        if result is None:
-            embed = discord.Embed(
-                title="Vérification indisponible",
-                description="La vérification n'est pas activée ou ne peut pas être exécutée pour ce compte.",
-                colour=discord.Colour.orange(),
-            )
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
-
-        score, passed = result
-        settings = await self.settings(member.guild.id)
-        threshold = clamp_threshold(settings["threshold"])
-        if passed:
-            title = "Vérification réussie"
-            description = (
-                f"Ton accès est validé. Score de confiance : **{score:.2f}/{FACTOR_COUNT}** "
-                f"(seuil **{threshold}/{FACTOR_COUNT}**)."
-            )
-            colour = discord.Colour.green()
-        elif score >= threshold - BORDERLINE_MARGIN:
-            title = "Second contrôle en cours"
-            description = (
-                f"Score actuel : **{score:.2f}/{FACTOR_COUNT}**. Le compte est proche du seuil "
-                "et SentriX lancera automatiquement un second contrôle."
-            )
-            colour = discord.Colour.orange()
-        else:
-            title = "Vérification non validée"
-            description = (
-                f"Score actuel : **{score:.2f}/{FACTOR_COUNT}** pour un seuil de "
-                f"**{threshold}/{FACTOR_COUNT}**. Aucun bannissement automatique : "
-                "le compte reste en attente pour une nouvelle vérification ou une revue staff."
-            )
-            colour = discord.Colour.orange()
-        embed = discord.Embed(title=title, description=description, colour=colour)
-        embed.set_footer(text="SentriX • Vérification adaptative V5")
-        return await panels.envoyer(interaction.response, panels.depuis_embed(embed), ephemere=True)
+        embed = discord.Embed(
+            title="Vérification web SentriX",
+            description=(
+                "Le challenge ne se fait plus dans Discord. "
+                "Ouvre le site SentriX pour continuer."
+            ),
+            colour=discord.Colour.blurple(),
+        )
+        return await panels.envoyer(
+            interaction.response,
+            panels.depuis_embed(
+                embed,
+                boutons=(
+                    panels.Bouton(
+                        libelle="Se vérifier sur SentriX",
+                        url=verification_url(interaction.guild.id),
+                    ),
+                ),
+            ),
+            ephemere=True,
+        )
 
     async def evaluate_member(
         self,
