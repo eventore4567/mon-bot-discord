@@ -422,6 +422,15 @@ async def handle_onboarding_page(request: web.Request):
                         headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
 
+async def handle_feedback_page(request: web.Request):
+    dashboard = request.app["dashboard_module"]
+    session, error = dashboard._require_session(request)
+    if error or not session:
+        raise web.HTTPFound("/login?next=/feedback")
+    return web.Response(text=FEEDBACK_HTML, content_type="text/html",
+                        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
 INJECT_CSS = r"""
 <style id="sentrix-guidance-v56-css">
 .sx-guide-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 4px}
@@ -550,6 +559,7 @@ def install(dashboard) -> None:
         app["dashboard_module"] = dashboard
         app.router.add_get("/diagnostic", handle_diagnostic_page)
         app.router.add_get("/onboarding", handle_onboarding_page)
+        app.router.add_get("/feedback", handle_feedback_page)
         app.router.add_get("/api/guilds/{guild_id}/diagnostic-v1", lambda r: api_diagnostic(dashboard, r))
         app.router.add_post("/api/guilds/{guild_id}/diagnostic-v1/fix", lambda r: api_fix(dashboard, r))
         app.router.add_post("/api/guilds/{guild_id}/feedback-v1", lambda r: api_feedback(dashboard, r))
@@ -627,3 +637,11 @@ async function load(){
 load();
 })();
 </script></body></html>"""
+
+
+FEEDBACK_HTML = """<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SentriX — Bug / Avis</title><style>""" + COMMON_STYLE + """
+<style>.feedback{max-width:720px;margin:0 auto;border:1px solid var(--line);border-radius:16px;background:linear-gradient(150deg,var(--panel),#0c121b);padding:18px}.feedback label{display:grid;gap:6px;margin-bottom:12px;color:#aab4c5;font-size:11px;font-weight:800}.feedback select,.feedback textarea{width:100%;border:1px solid #303a50;border-radius:9px;background:#111925;color:#eef2f8;padding:10px 11px;font:inherit}.feedback textarea{min-height:150px;resize:vertical}.feedback .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.feedback .actions{display:flex;justify-content:flex-end;gap:8px}.feedback button{border:1px solid #3a465e;border-radius:9px;background:#286fb4;color:#07131f;padding:9px 12px;font-weight:850;cursor:pointer}.privacy{margin:8px 0 14px;color:var(--muted);font-size:10px;line-height:1.5}@media(max-width:620px){.feedback .row{grid-template-columns:1fr}}</style></head><body>
+<header class="top"><div class="brand">SentriX · Bug / Avis</div><a href="/app">Retour au dashboard</a></header>
+<main class="shell"><div class="head"><div><h1>Votre retour</h1><p>Signalez un bug ou proposez une amélioration sans exposer de données sensibles.</p></div></div>
+<section class="feedback"><div class="row"><label>Type<select id="kind"><option value="bug">Bug</option><option value="opinion">Avis</option></select></label><label>Note<select id="rating"><option value="">Sans note</option><option value="5">5 / 5</option><option value="4">4 / 5</option><option value="3">3 / 5</option><option value="2">2 / 5</option><option value="1">1 / 5</option></select></label></div><label>Message<textarea id="message" maxlength="1800" placeholder="Expliquez ce qui s'est passé ou ce que vous aimeriez améliorer."></textarea></label><div class="privacy">Contexte envoyé : serveur choisi, cette page, taille de fenêtre et éventuellement le dernier message d'erreur. Aucun cookie, token, secret ou contenu de message Discord.</div><div class="actions"><button id="send" type="button">Envoyer</button></div><div class="status" id="status"></div></section></main>
+<script>(function(){"use strict";var gid=new URLSearchParams(location.search).get("guild")||"",csrf="";async function load(){try{var r=await fetch("/api/me",{credentials:"same-origin",cache:"no-store"}),d=await r.json().catch(function(){return{}});if(!r.ok)throw new Error(d.error||"Session invalide");csrf=d.csrf||""}catch(e){var s=document.getElementById("status");s.textContent=e.message;s.className="status bad"}}async function send(){var s=document.getElementById("status"),b=document.getElementById("send"),m=document.getElementById("message").value||"";if(!/^\\d{10,24}$/.test(gid)){s.textContent="Choisissez d'abord un serveur dans le dashboard.";s.className="status bad";return}if(m.trim().length<8){s.textContent="Ajoutez un peu plus de détails.";s.className="status bad";return}b.disabled=true;try{var r=await fetch("/api/guilds/"+gid+"/feedback-v1",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json","X-CSRF-Token":csrf},body:JSON.stringify({kind:document.getElementById("kind").value,rating:document.getElementById("rating").value||null,message:m,page:location.pathname,technical:{tab:"feedback",viewport:String(innerWidth)+"x"+String(innerHeight),error:""}})}),d=await r.json().catch(function(){return{}});if(!r.ok)throw new Error(d.error||"Envoi impossible");s.textContent=d.message||"Retour enregistré.";s.className="status";document.getElementById("message").value=""}catch(e){s.textContent=e.message;s.className="status bad"}finally{b.disabled=false}}document.getElementById("send").addEventListener("click",send);load()})();</script></body></html>"""
