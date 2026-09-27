@@ -346,7 +346,7 @@ async def _delete_unknown_command_reply(message: discord.Message) -> None:
     SentriX et ne cible que ses propres messages commençant par "Commande introuvable".
     """
     try:
-        await asyncio.sleep(2)
+        await asyncio.sleep(5)
         await message.delete()
     except (discord.NotFound, discord.Forbidden, discord.HTTPException):
         pass
