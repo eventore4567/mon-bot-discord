@@ -27,6 +27,11 @@ def test_unified_dashboard_is_single_frontend_document():
         '/notifications',
         '/embeds',
         '/sanctions',
+        '/diagnostic-v1',
+        '/feedback-v1',
+        'Assistant SentriX',
+        'Démarrage guidé',
+        'Bug / Avis',
         'class="skeleton"',
         'class="error-state"',
         'class="empty"',
@@ -71,3 +76,16 @@ def test_freeze_accepts_finalized_unified_snapshot():
     assert getattr(dashboard.handle_index, "_sentrix_frontend_freeze_v55", False) is True
     assert dashboard._sentrix_frontend_snapshot_sha_v55
     assert 'id="sentrix-v60-features-inline"' not in dashboard._sentrix_frontend_snapshot_v55
+
+
+def test_guidance_is_visible_in_the_frozen_unified_dashboard():
+    html = unified.INDEX_HTML
+    assert "Assistant SentriX" in html
+    assert "Démarrage guidé" in html
+    assert "Bug / Avis" in html
+    assert "renderGuidanceDiagnostic" in html
+    assert "renderGuidanceOnboarding" in html
+    assert "renderGuidanceFeedback" in html
+    assert "/diagnostic-v1" in html
+    assert "/feedback-v1" in html
+    assert "p !== 'diagnostic' || state.developer || state.guildOwner" not in html
