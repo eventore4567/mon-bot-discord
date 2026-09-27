@@ -7,6 +7,7 @@ from web import public_verification_v120 as web_verify
 WEB_SOURCE = Path("web/public_verification_v120.py").read_text(encoding="utf-8")
 DASHBOARD_SOURCE = Path("web/dashboard.py").read_text(encoding="utf-8")
 HONEYPOT_SOURCE = Path("cogs/honeypot_verification_v48.py").read_text(encoding="utf-8")
+AUTO_V5_SOURCE = Path("cogs/automatic_verification_v5.py").read_text(encoding="utf-8")
 SETUP_SOURCE = Path("cogs/setup_v118_integrations.py").read_text(encoding="utf-8")
 MODERATION_SOURCE = Path("cogs/moderation.py").read_text(encoding="utf-8")
 
@@ -108,3 +109,25 @@ def test_success_dm_matches_requested_green_verification_style():
     assert 'Verification successful on {guild.name}' in WEB_SOURCE
     assert "discord.Colour.green()" in WEB_SOURCE
     assert 'label="Open server"' in WEB_SOURCE
+
+
+def test_adaptive_v5_is_web_gated_and_can_refresh_existing_panels():
+    assert "async def refresh_existing_panels" in AUTO_V5_SOURCE
+    assert "await _web_panel(self.bot, guild)" in AUTO_V5_SOURCE
+    assert '"web_ready"' in AUTO_V5_SOURCE
+    evaluate_start = AUTO_V5_SOURCE.index("async def evaluate_member")
+    evaluate_end = AUTO_V5_SOURCE.index("def schedule_evaluation", evaluate_start)
+    evaluate = AUTO_V5_SOURCE[evaluate_start:evaluate_end]
+    assert "member.add_roles(" not in evaluate
+    assert "member.remove_roles(" not in evaluate
+
+
+def test_web_completion_runs_adaptive_security_before_role_grant():
+    complete_start = WEB_SOURCE.index("async def _complete_verification")
+    complete_end = WEB_SOURCE.index("COPY_FR =", complete_start)
+    complete = WEB_SOURCE[complete_start:complete_end]
+    scan_at = complete.index("_adaptive_security")
+    grant_at = complete.index("member.add_roles", scan_at)
+    assert scan_at < grant_at
+    assert "security_review" in complete
+    assert "_clear_failures" in complete
