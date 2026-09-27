@@ -333,22 +333,43 @@ async def _send_success_dm(
         if channel is not None
         else f"https://discord.com/channels/{guild.id}"
     )
+    try:
+        from cogs import language_runtime
+        language = await language_runtime.get_language(member._state._get_client(), guild.id)
+    except Exception:
+        language = "fr"
+    english = language == "en"
 
     top = discord.Embed(
-        title=f"Verification successful on {guild.name}",
+        title=(
+            f"Verification successful on {guild.name}"
+            if english
+            else f"Vérification réussie sur {guild.name}"
+        ),
         colour=discord.Colour.green(),
     )
     body = discord.Embed(
         description=(
             "**Your Discord account has been verified successfully.**\n"
             "SentriX completed the security checks and unlocked your server access."
+            if english
+            else
+            "**Ton compte Discord a été vérifié avec succès.**\n"
+            "SentriX a terminé les contrôles de sécurité et débloqué ton accès au serveur."
         ),
         colour=discord.Colour.green(),
     )
-    body.set_footer(text="SentriX • Web Verification")
+    body.set_footer(
+        text="SentriX • Web Verification" if english else "SentriX • Vérification web"
+    )
 
     view = discord.ui.View(timeout=None)
-    view.add_item(discord.ui.Button(label="Open server", url=destination))
+    view.add_item(
+        discord.ui.Button(
+            label="Open server" if english else "Ouvrir le serveur",
+            url=destination,
+        )
+    )
     try:
         await member.send(
             embeds=[top, body],
