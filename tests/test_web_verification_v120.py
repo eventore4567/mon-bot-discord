@@ -72,7 +72,9 @@ def test_web_page_keeps_discord_snowflake_as_string_and_uses_ha_shared_secret():
     # be emitted as numeric JS literals or the guild ID gets rounded.
     assert 'const GUILD_ID="__GUILD_ID__";' in WEB_SOURCE
     assert 'const GUILD_ID=__GUILD_ID__;' not in WEB_SOURCE
+    assert 'SENTRIX_VERIFICATION_SECRET' in WEB_SOURCE
     assert 'SENTRIX_HTTP_PROXY_SECRET' in WEB_SOURCE
+    assert 'path="/"' in DASHBOARD_SOURCE
 
 
 def test_web_page_has_loading_success_close_and_discord_redirect():
