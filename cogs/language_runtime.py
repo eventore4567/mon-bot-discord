@@ -530,15 +530,20 @@ def english_ui_text(value: object | None, *, setup: bool = False) -> str | None:
     return "".join(parts)
 
 
-def translate_embed_in_place(embed: discord.Embed, *, setup: bool = False) -> discord.Embed:
+def translate_embed_in_place(
+    embed: discord.Embed,
+    *,
+    setup: bool = False,
+    preserve_body: bool = False,
+) -> discord.Embed:
     if embed.title:
         embed.title = english_ui_text(embed.title, setup=setup)
-    if embed.description:
+    if embed.description and not preserve_body:
         embed.description = english_ui_text(embed.description, setup=setup)
     for index, field in enumerate(list(embed.fields)):
         name = english_ui_text(field.name, setup=setup) or field.name
         normalized = _strip_accents(str(field.name or "")).casefold()
-        user_text_field = any(
+        user_text_field = preserve_body or any(
             token in normalized
             for token in ("raison", "reason", "prompt", "contenu", "content", "bio")
         )
