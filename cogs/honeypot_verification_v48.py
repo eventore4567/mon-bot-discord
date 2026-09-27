@@ -590,6 +590,65 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             "sanction": sanction,
         }, None
 
+    async def ensure_verified_panel_hidden(self, guild: discord.Guild) -> None:
+        """Hide verification-only channels from members once they receive the verified role.
+
+        This only repairs permission overwrites on channels that already exist. It never
+        creates/recreates channels or panels.
+        """
+        conf = await self.config(guild.id, enabled_only=True)
+        if not conf:
+            return
+
+        verified = guild.get_role(int(conf["verified_role_id"] or 0))
+        unverified = guild.get_role(int(conf["unverified_role_id"] or 0))
+        if verified is None or unverified is None:
+            return
+
+        verify_channel = guild.get_channel(int(conf["verify_channel_id"] or 0))
+        trap_channel = guild.get_channel(int(conf["trap_channel_id"] or 0))
+
+        if isinstance(verify_channel, discord.TextChannel):
+            try:
+                await verify_channel.set_permissions(
+                    unverified,
+                    view_channel=True,
+                    send_messages=False,
+                    read_message_history=True,
+                    reason="SentriX : salon visible uniquement avant vérification",
+                )
+                await verify_channel.set_permissions(
+                    verified,
+                    view_channel=False,
+                    reason="SentriX : masquer le panneau après vérification",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Impossible de réparer la visibilité du salon de vérification sur %s.",
+                    guild.id,
+                )
+
+        if isinstance(trap_channel, discord.TextChannel):
+            try:
+                await trap_channel.set_permissions(
+                    unverified,
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    add_reactions=False,
+                    reason="SentriX : honeypot visible uniquement avant vérification",
+                )
+                await trap_channel.set_permissions(
+                    verified,
+                    view_channel=False,
+                    reason="SentriX : masquer le honeypot après vérification",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning(
+                    "Impossible de réparer la visibilité du honeypot sur %s.",
+                    guild.id,
+                )
+
     async def refresh_existing_panels(self, guild: discord.Guild) -> tuple[dict | None, str | None]:
         """Replace verification/honeypot panels in the channels already configured.
 
@@ -606,6 +665,8 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             return None, "Le salon de vérification configuré a été supprimé. SentriX ne le recrée pas automatiquement."
         if not isinstance(trap_channel, discord.TextChannel):
             return None, "Le salon stay-muted configuré a été supprimé. SentriX ne le recrée pas automatiquement."
+
+        await self.ensure_verified_panel_hidden(guild)
 
         bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
         removed_verify = await _purge_bot_messages(verify_channel, bot_user_id)
