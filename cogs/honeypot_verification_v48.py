@@ -1291,85 +1291,155 @@ async def _has_sentrix_panel(
     return False
 
 
-async def _repair_enabled_systems(bot: commands.Bot) -> None:
-    """Répare les portails activés dont les panneaux ont disparu.
+async def _channel_is_bot_only(channel: discord.TextChannel, bot_user_id: int | None) -> bool:
+    """Only delete duplicate channels when recent history is empty or entirely SentriX-owned."""
+    if not bot_user_id:
+        return False
+    try:
+        messages = [message async for message in channel.history(limit=60)]
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+    return all(getattr(message.author, "id", None) == bot_user_id for message in messages)
 
-    Une ancienne version du setup pouvait enregistrer le honeypot comme actif sans publier
-    les messages dans #verification et #stay-muted. Au premier ready du nouveau runtime,
-    on ne republie que les systèmes réellement incomplets.
+
+async def _cleanup_spam_verification_channels(bot: commands.Bot) -> None:
+    """One-time cleanup for duplicate channels created by the old verification spam bug.
+
+    Current configured channel/category IDs are always preserved. Extra channels are
+    deleted only when they live under a SentriX verification category, use the exact
+    verification/stay-muted names and contain no user messages.
+    """
+    await bot.wait_until_ready()
+    await bot.db.execute(_MIGRATION_SCHEMA)
+    done = await bot.db.fetchone(
+        "SELECT applied_at FROM sentrix_runtime_migrations WHERE name=?",
+        (_WEB_CLEANUP_MIGRATION,),
+    )
+    if done:
+        return
+
+    cog = bot.get_cog(_COG_NAME)
+    if cog is None:
+        return
+    bot_user_id = getattr(getattr(bot, "user", None), "id", None)
+    deleted_channels = 0
+    deleted_categories = 0
+    failures = 0
+
+    for guild in list(bot.guilds):
+        try:
+            conf = await cog.config(guild.id, enabled_only=False)
+            keep_ids = set()
+            if conf:
+                for key in ("category_id", "verify_channel_id", "trap_channel_id"):
+                    raw = conf[key]
+                    if raw:
+                        keep_ids.add(int(raw))
+
+            for channel in list(guild.text_channels):
+                if channel.id in keep_ids:
+                    continue
+                if channel.name.casefold() not in {"verification", "stay-muted"}:
+                    continue
+                category = channel.category
+                category_name = (getattr(category, "name", "") or "").casefold()
+                if "sentrix" not in category_name or (
+                    "vérification" not in category_name and "verification" not in category_name
+                ):
+                    continue
+                if not await _channel_is_bot_only(channel, bot_user_id):
+                    logger.warning(
+                        "Canal doublon conservé guild=%s channel=%s : messages utilisateur présents.",
+                        guild.id,
+                        channel.id,
+                    )
+                    continue
+                try:
+                    await channel.delete(
+                        reason="SentriX V120 : nettoyage d'un doublon de vérification créé par l'ancien bug"
+                    )
+                    deleted_channels += 1
+                except (discord.Forbidden, discord.HTTPException):
+                    failures += 1
+                await asyncio.sleep(0.08)
+
+            for category in list(guild.categories):
+                if category.id in keep_ids:
+                    continue
+                name = category.name.casefold()
+                if "sentrix" not in name or (
+                    "vérification" not in name and "verification" not in name
+                ):
+                    continue
+                if category.channels:
+                    continue
+                try:
+                    await category.delete(
+                        reason="SentriX V120 : suppression d'une catégorie de vérification doublon vide"
+                    )
+                    deleted_categories += 1
+                except (discord.Forbidden, discord.HTTPException):
+                    failures += 1
+                await asyncio.sleep(0.08)
+        except Exception:
+            failures += 1
+            logger.exception("Nettoyage vérification V120 impossible guild=%s.", guild.id)
+
+    if failures == 0:
+        await bot.db.execute(
+            "INSERT INTO sentrix_runtime_migrations(name,applied_at) VALUES(?,?) "
+            "ON CONFLICT(name) DO UPDATE SET applied_at=excluded.applied_at",
+            (_WEB_CLEANUP_MIGRATION, int(time.time())),
+        )
+    logger.warning(
+        "Nettoyage vérification V120 : %s salon(s), %s catégorie(s) doublon supprimés, %s échec(s).",
+        deleted_channels,
+        deleted_categories,
+        failures,
+    )
+
+
+async def _repair_enabled_systems(bot: commands.Bot) -> None:
+    """Replace panels only in already-existing active verification channels.
+
+    No channel, category or role is ever created from this startup task. If an admin
+    deleted one of the configured channels, SentriX leaves the server untouched.
     """
     await bot.wait_until_ready()
     cog = bot.get_cog(_COG_NAME)
     if cog is None:
         return
-    bot_user_id = getattr(getattr(bot, "user", None), "id", None)
+
     for guild in list(bot.guilds):
         try:
             conf = await cog.config(guild.id, enabled_only=True)
             if not conf:
                 continue
-            verify_channel = guild.get_channel(conf["verify_channel_id"]) if conf["verify_channel_id"] else None
-            trap_channel = guild.get_channel(conf["trap_channel_id"]) if conf["trap_channel_id"] else None
-            # Au démarrage, SentriX ne crée plus JAMAIS de nouveaux salons tout seul.
-            # Une réparation automatique ne republie des panneaux que si les deux salons
-            # configurés existent encore. Si un salon a été supprimé, l'administrateur doit
-            # explicitement utiliser "Activer / réparer" dans /setup.
-            if not isinstance(verify_channel, discord.TextChannel) or not isinstance(trap_channel, discord.TextChannel):
-                logger.warning(
-                    "Réparation automatique ignorée guild=%s : salon verification ou stay-muted manquant.",
+            verify_channel = guild.get_channel(int(conf["verify_channel_id"] or 0))
+            trap_channel = guild.get_channel(int(conf["trap_channel_id"] or 0))
+            if not isinstance(verify_channel, discord.TextChannel) or not isinstance(
+                trap_channel, discord.TextChannel
+            ):
+                logger.info(
+                    "V120 : vérification active mais salon supprimé guild=%s ; aucune recréation.",
                     guild.id,
                 )
                 continue
-            verify_ok = await _has_sentrix_panel(
-                verify_channel, bot_user_id, title_contains="vérification renforcée"
-            )
-            trap_ok = await _has_sentrix_panel(
-                trap_channel, bot_user_id, title_contains="ne pas envoyer"
-            )
-            if verify_ok and trap_ok:
-                continue
 
-            # Réparation douce uniquement : au démarrage on republie un panneau manquant
-            # dans un salon DÉJÀ configuré. Aucun rôle, salon ou catégorie n'est créé ici.
-            if not verify_ok:
-                verify_embed = discord.Embed(
-                    title="Vérification renforcée SentriX",
-                    description=(
-                        "L'accès au serveur reste bloqué tant que le parcours complet n'est pas terminé.\n\n"
-                        "Ordre : règlement SentriX si configuré, règles Discord / Membership Screening, "
-                        "ancienneté du compte, séquence anti-automatisation, code unique et calcul.\n\n"
-                        "Clique sur **Commencer la vérification**."
-                    ),
-                    colour=discord.Color.blurple(),
+            result, error = await cog.refresh_existing_panels(guild)
+            if error:
+                logger.warning("V120 : panel non actualisé guild=%s : %s", guild.id, error)
+            else:
+                logger.info(
+                    "V120 : ancien(s) panel(s) remplacé(s) par un seul panel web guild=%s "
+                    "(verify=%s trap=%s).",
+                    guild.id,
+                    result["removed_verify_messages"],
+                    result["removed_trap_messages"],
                 )
-                verify_embed.set_footer(text="SentriX • Vérification renforcée")
-                await panels.envoyer(
-                    verify_channel,
-                    panels.avec_composants(panels.depuis_embed(verify_embed), HoneypotVerifyView()),
-                )
-
-            if not trap_ok:
-                sanction = str(conf["sanction"] or "softban")
-                sanction_label = "softban automatique" if sanction == "softban" else "expulsion automatique"
-                trap_embed = discord.Embed(
-                    title="NE PAS ENVOYER DE MESSAGE DANS CE SALON",
-                    description=(
-                        "Ce salon est le honeypot SentriX réservé aux comptes non vérifiés.\n"
-                        f"Écrire ici peut entraîner un **{sanction_label}**.\n\n"
-                        f"Utilise {verify_channel.mention} pour terminer la vérification."
-                    ),
-                    colour=discord.Color.red(),
-                )
-                trap_embed.set_footer(text="SentriX • Honeypot anti-bot")
-                await panels.envoyer(trap_channel, panels.depuis_embed(trap_embed))
-
-            logger.info(
-                "Portail vérification/honeypot réparé sans création de structure guild=%s.",
-                guild.id,
-            )
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.2)
         except Exception:
-            logger.exception("Réparation automatique vérification impossible guild=%s.", guild.id)
+            logger.exception("Actualisation panel web impossible guild=%s.", guild.id)
 
 
 async def install(bot: commands.Bot) -> None:
@@ -1380,6 +1450,7 @@ async def install(bot: commands.Bot) -> None:
     await bot.db.execute(_SCHEMA)
     await bot.db.execute(_PENDING_SCHEMA)
     await bot.db.execute(_VERIFIED_SCHEMA)
+    await bot.db.execute(_MIGRATION_SCHEMA)
 
     if bot.get_cog(_COG_NAME) is None:
         await bot.add_cog(HoneypotVerification(bot))
@@ -1395,6 +1466,12 @@ async def install(bot: commands.Bot) -> None:
         bot._sentrix_honeypot_repair_task = asyncio.create_task(
             _repair_enabled_systems(bot),
             name="sentrix-honeypot-repair",
+        )
+    if not getattr(bot, "_sentrix_honeypot_cleanup_v120_started", False):
+        bot._sentrix_honeypot_cleanup_v120_started = True
+        bot._sentrix_honeypot_cleanup_v120_task = asyncio.create_task(
+            _cleanup_spam_verification_channels(bot),
+            name="sentrix-honeypot-cleanup-v120",
         )
     bot._sentrix_honeypot_verification_v50 = True
     logger.info("Vérification renforcée V50 chargée ; configuration via +setup uniquement.")
