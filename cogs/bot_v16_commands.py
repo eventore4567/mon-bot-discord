@@ -310,7 +310,7 @@ def _install_unknown_command_listener(bot: commands.Bot) -> None:
             await panels.envoyer(
                 ctx,
                 panels.depuis_embed(embeds.warning(text, title='Commande introuvable')),
-                delete_after=2,
+                delete_after=5,
             )
         except (discord.Forbidden, discord.HTTPException):
             pass
