@@ -386,6 +386,12 @@ async def handle_login(request: web.Request):
     if redirect is not None:
         raise redirect
 
+    verify_guild = str(request.query.get("verify_guild") or "").strip()
+    try:
+        verify_guild_id = int(verify_guild) if verify_guild else 0
+    except (TypeError, ValueError):
+        verify_guild_id = 0
+
     state = _new_oauth_state(request)
     # Compatibilité avec les anciens tests/flux : la table mémoire reste un cache de
     # courte durée, mais la validation ne dépend plus d'elle.
@@ -395,7 +401,9 @@ async def handle_login(request: web.Request):
     params = {
         "response_type": "code",
         "client_id": _client_id(bot),
-        "scope": "identify guilds",
+        # La vérification publique n'a besoin que de l'identité Discord. Le scope
+        # guilds reste réservé au dashboard administrateur.
+        "scope": "identify" if verify_guild_id > 0 else "identify guilds",
         "state": state,
         "redirect_uri": redirect_uri,
         "prompt": "consent",
@@ -409,22 +417,16 @@ async def handle_login(request: web.Request):
         secure=_public_url(request).startswith("https://"),
         samesite="Lax",
     )
-    verify_guild = str(request.query.get("verify_guild") or "").strip()
-    if verify_guild:
-        try:
-            guild_id = int(verify_guild)
-        except (TypeError, ValueError):
-            guild_id = 0
-        if guild_id > 0:
-            from web.public_verification_v120 import PENDING_COOKIE, make_pending_token
-            response.set_cookie(
-                PENDING_COOKIE,
-                make_pending_token(guild_id),
-                max_age=10 * 60,
-                httponly=True,
-                secure=_public_url(request).startswith("https://"),
-                samesite="Lax",
-            )
+    if verify_guild_id > 0:
+        from web.public_verification_v120 import PENDING_COOKIE, make_pending_token
+        response.set_cookie(
+            PENDING_COOKIE,
+            make_pending_token(verify_guild_id),
+            max_age=10 * 60,
+            httponly=True,
+            secure=_public_url(request).startswith("https://"),
+            samesite="Lax",
+        )
     raise response
 
 
@@ -487,9 +489,15 @@ async def handle_callback(request: web.Request):
             async with client.get(f"{DISCORD_API}/users/@me", headers=headers) as user_response:
                 user_response.raise_for_status()
                 user = await user_response.json()
-            async with client.get(f"{DISCORD_API}/users/@me/guilds", headers=headers) as guild_response:
-                guild_response.raise_for_status()
-                oauth_guilds = await guild_response.json()
+
+            # Le flux de vérification est volontairement minimal : l'appartenance au
+            # serveur est contrôlée ensuite avec le bot lui-même, donc aucune lecture de
+            # la liste des serveurs Discord de l'utilisateur n'est nécessaire.
+            oauth_guilds = []
+            if pending_verify is None:
+                async with client.get(f"{DISCORD_API}/users/@me/guilds", headers=headers) as guild_response:
+                    guild_response.raise_for_status()
+                    oauth_guilds = await guild_response.json()
     except web.HTTPException:
         raise
     except Exception:
