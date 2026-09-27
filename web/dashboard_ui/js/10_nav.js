@@ -13,6 +13,7 @@ const NAV_SERVER = [
   ['Musique', [['music', 'Musique']]],
   ['Automatisation', [['notifications', 'Notifications'], ['automation', 'Automatisation']]],
   ['Création & personnalisation', [['embeds', 'Embeds'], ['ai', 'Intelligence artificielle']]],
+  ['Assistant SentriX', [['diagnostic', 'Diagnostic'], ['onboarding', 'Démarrage guidé'], ['feedback', 'Bug / Avis']]],
 ];
 const NAV = NAV_SERVER;
 /* Plus d'outils : trois groupes courts. Le groupe Développeur n'apparaît que pour le
@@ -20,7 +21,7 @@ const NAV = NAV_SERVER;
    anciennes interfaces dont toutes les fonctions ne sont pas encore reprises ici. */
 const TOOL_GROUPS = [
   ['Outils', [['invites', 'Invitations & webhooks']]],
-  ['Administration', [['settings', 'Paramètres'], ['backups', 'Sauvegardes & historique'], ['diagnostic', 'Diagnostic']]],
+  ['Administration', [['settings', 'Paramètres'], ['backups', 'Sauvegardes & historique']]],
   ['Développeur', [['advanced', 'Centre avancé']]],
 ];
 const TOOLS = TOOL_GROUPS.flatMap(([, items]) => items);
@@ -51,7 +52,9 @@ const META = {
   backups: ['Sauvegardes & historique', 'Exportez, importez ou restaurez une configuration.'],
   dm: ['Message privé', 'Envoyer un message à un membre au nom du serveur.'],
   advanced: ['Centre avancé', 'Membres, automations, templates, audit et accès délégué.'],
-  diagnostic: ['Diagnostic', 'Permissions, ressources cassées et état technique.'],
+  diagnostic: ['Diagnostic', 'Permissions, rôles, logs, tickets, IA et état technique.'],
+  onboarding: ['Démarrage guidé', 'Sécurité, Logs, Tickets, Bienvenue : quatre étapes pour partir sur une base propre.'],
+  feedback: ['Bug / Avis', 'Signalez un problème ou proposez une amélioration directement depuis SentriX.'],
 };
 const SUBS = {
   welcome: [['bienvenue', 'Bienvenue'], ['departs', 'Départs']],
@@ -90,7 +93,7 @@ function renderNav() {
   if (!globalMode) {
     html += TOOL_GROUPS.map(([g, items]) => {
       if (g === 'Développeur' && !state.developer) return '';
-      const visible = items.filter(([p]) => p !== 'diagnostic' || state.developer || state.guildOwner);
+      const visible = items;
       const links = g === 'Développeur' ? `<div class="nav-group">Migration</div>${MIGRATION_LINKS.map(([href, l]) => `<a class="nav-link ext" href="${href}" target="_blank" rel="noopener">${esc(l)}</a>`).join('')}` : '';
       return visible.length || links ? `<div class="nav-group">${esc(g)}</div>${visible.map(([p, l]) => navButton(p, l)).join('')}${links}` : '';
     }).join('');
@@ -181,7 +184,9 @@ const PALETTE_KEYWORDS = {
   automation: 'automation automatisation reaction auto starboard sticky programmé voicehub vocal',
   embeds: 'embed message annonce aperçu discord builder',
   ai: 'ia ai modèle mémoire intelligence artificielle',
-  diagnostic: 'diagnostic santé permissions erreur debug',
+  diagnostic: 'diagnostic santé permissions erreur debug logs tickets ia rôle',
+  onboarding: 'onboarding démarrage guidé nouveau serveur sécurité logs tickets bienvenue',
+  feedback: 'bug avis feedback retour suggestion problème erreur',
   backups: 'backup sauvegarde historique restaurer export import',
   settings: 'paramètre configuration serveur préfixe',
   access: 'accès commande permission staff',
