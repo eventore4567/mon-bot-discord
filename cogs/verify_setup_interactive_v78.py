@@ -65,12 +65,12 @@ async def _publish_public_panel(
     if verification_cog is not None and hasattr(verification_cog, "_embed"):
         public_embed = await verification_cog._embed(
             guild.id,
-            title="Règlement & vérification",
+            title="Règlement du serveur",
             description=rules,
         )
     else:
         public_embed = discord.Embed(
-            title="Règlement & vérification",
+            title="Règlement du serveur",
             description=rules,
             colour=discord.Colour(0x4DA3FF),
         )
@@ -283,10 +283,12 @@ class VerifySetupView(discord.ui.View):
         if not preview:
             preview = "*Aucun règlement écrit pour le moment.*"
         embed = discord.Embed(
-            title="Vérification & règlement",
+            title="Règlement & accès",
             description=(
-                "Configurez tout ici. **Le règlement est écrit par vous**, SentriX ne le génère pas.\n"
-                "Le bouton **Enregistrer et publier** envoie ou met à jour le panneau dans le salon choisi."
+                "Ce système gère le **règlement** séparément de la vérification renforcée.\n"
+                "Les membres acceptent d'abord la version actuelle des règles. Si la vérification renforcée est active, "
+                "ils passent ensuite par son challenge avant de recevoir le rôle final.\n"
+                "Le CAPTCHA ci-dessous sert uniquement de solution simple quand la vérification renforcée est désactivée."
             ),
             colour=discord.Colour(0x4DA3FF),
         )
@@ -294,7 +296,10 @@ class VerifySetupView(discord.ui.View):
         embed.add_field(name="Rôle Vérifié", value=role.mention if role else "Non configuré", inline=True)
         embed.add_field(
             name="CAPTCHA",
-            value=f"ACTIF · {self.captcha_max_attempts} tentative(s)" if self.captcha_enabled else "INACTIF",
+            value=(
+                f"ACTIF · {self.captcha_max_attempts} tentative(s) · mode simple"
+                if self.captcha_enabled else "INACTIF · mode simple"
+            ),
             inline=True,
         )
         embed.add_field(name="Votre règlement", value=preview, inline=False)
@@ -387,8 +392,8 @@ class VerifySetupView(discord.ui.View):
             await self.bot.db.add_setup_history(
                 self.guild.id,
                 self.owner_id,
-                "verification",
-                "Règlement / vérification",
+                "rules",
+                "Règlement",
                 f"salon={channel.id}; rôle={role.id}; captcha={self.captcha_enabled}",
             )
         except Exception:
@@ -398,7 +403,7 @@ class VerifySetupView(discord.ui.View):
         self.previous_channel_id = int(channel.id)
         await self.refresh_message()
         await interaction.followup.send(
-            f"Configuration enregistrée et panneau publié dans {channel.mention}.",
+            f"Règlement enregistré et panneau publié dans {channel.mention}. Toute modification future invalidera automatiquement les anciennes acceptations.",
             ephemeral=True,
         )
 
@@ -411,23 +416,23 @@ class VerifySetupView(discord.ui.View):
             pass
 
 
-async def _open_setup(ctx: commands.Context) -> None:
-    if ctx.guild is None:
-        return await ctx.send("Cette commande doit être utilisée sur un serveur.")
-    if not (ctx.author.id == ctx.guild.owner_id or ctx.author.guild_permissions.administrator):
-        return await ctx.send("Cette configuration est réservée au propriétaire ou aux administrateurs du serveur.")
-
-    await ctx.bot.db.execute(_SCHEMA)
-    conf = await ctx.bot.db.get_guild_config(ctx.guild.id)
-    row = await ctx.bot.db.fetchone(
+async def build_setup_view(
+    bot: commands.Bot,
+    guild: discord.Guild,
+    owner_id: int,
+) -> VerifySetupView:
+    """Construit le configurateur Règlement pour /setup et +verify-setup."""
+    await bot.db.execute(_SCHEMA)
+    conf = await bot.db.get_guild_config(guild.id)
+    row = await bot.db.fetchone(
         "SELECT rules_text,image_url,message_id FROM dashboard_verification_panels WHERE guild_id = ?",
-        (ctx.guild.id,),
+        (guild.id,),
     )
     row = dict(row) if row else {}
-    view = VerifySetupView(
-        ctx.bot,
-        ctx.guild,
-        ctx.author.id,
+    return VerifySetupView(
+        bot,
+        guild,
+        owner_id,
         channel_id=_conf(conf, "verification_channel"),
         role_id=_conf(conf, "verify_role", _conf(conf, "verification_role")),
         rules_text=row.get("rules_text") or "",
@@ -436,6 +441,36 @@ async def _open_setup(ctx: commands.Context) -> None:
         captcha_max_attempts=int(_conf(conf, "verify_captcha_max_attempts", 3) or 3),
         message_id=row.get("message_id"),
     )
+
+
+async def open_setup_interaction(interaction: discord.Interaction) -> None:
+    if interaction.guild is None:
+        return await interaction.response.send_message(
+            "Cette configuration doit être utilisée sur un serveur.", ephemeral=True
+        )
+    if not (
+        interaction.user.id == interaction.guild.owner_id
+        or getattr(interaction.user.guild_permissions, "administrator", False)
+    ):
+        return await interaction.response.send_message(
+            "Cette configuration est réservée au propriétaire ou aux administrateurs du serveur.",
+            ephemeral=True,
+        )
+    view = await build_setup_view(
+        interaction.client,
+        interaction.guild,
+        interaction.user.id,
+    )
+    await interaction.response.send_message(view=view, embed=view.embed(), ephemeral=True)
+
+
+async def _open_setup(ctx: commands.Context) -> None:
+    if ctx.guild is None:
+        return await ctx.send("Cette commande doit être utilisée sur un serveur.")
+    if not (ctx.author.id == ctx.guild.owner_id or ctx.author.guild_permissions.administrator):
+        return await ctx.send("Cette configuration est réservée au propriétaire ou aux administrateurs du serveur.")
+
+    view = await build_setup_view(ctx.bot, ctx.guild, ctx.author.id)
     view.message = await panels.envoyer(ctx, view.panel())
 
 
@@ -456,13 +491,13 @@ def install(bot: commands.Bot) -> bool:
     command = commands.Command(
         _open_setup,
         name="verify-setup",
-        help="Configurer et publier le règlement, le rôle Vérifié, l'image et le CAPTCHA.",
-        description="Ouvrir le configurateur complet de vérification SentriX.",
+        help="Configurer et publier le règlement, le rôle final, l'image et le mode CAPTCHA simple.",
+        description="Ouvrir le configurateur du règlement SentriX.",
     )
     bot.add_command(command)
     bot._sentrix_verify_setup_v78 = True
-    logger.info("V78 actif : +verify-setup complet en Components V2, verify-panel supprimé.")
+    logger.info("V78 actif : configurateur règlement séparé, +verify-setup conservé pour compatibilité.")
     return True
 
 
-__all__ = ["install", "VerifySetupView", "_safe_image"]
+__all__ = ["install", "VerifySetupView", "build_setup_view", "open_setup_interaction", "_safe_image"]
