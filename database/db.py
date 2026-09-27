@@ -194,6 +194,11 @@ CREATE TABLE IF NOT EXISTS automod_settings (
     antiscam INTEGER DEFAULT 0,
     antinuke INTEGER DEFAULT 0,
     antiinsult INTEGER DEFAULT 0,
+    security_vanity INTEGER DEFAULT 0,
+    security_prune INTEGER DEFAULT 0,
+    security_permissions INTEGER DEFAULT 0,
+    join_gate INTEGER DEFAULT 0,
+    risk_engine INTEGER DEFAULT 0,
     escalation INTEGER DEFAULT 0
 );
 
@@ -225,6 +230,14 @@ CREATE TABLE IF NOT EXISTS antinuke_whitelist (
     guild_id INTEGER,
     user_id INTEGER,
     PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS automod_bot_allowlist (
+    guild_id INTEGER NOT NULL,
+    bot_id INTEGER NOT NULL,
+    added_by INTEGER,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, bot_id)
 );
 
 CREATE TABLE IF NOT EXISTS disabled_commands (
@@ -1065,6 +1078,13 @@ AUTOMOD_SETTINGS_NEW_COLUMNS = {
     "escalation": "INTEGER DEFAULT 0",
     # Filtre multilingue d'insultes : un filtre comme les autres, désactivé par défaut.
     "antiinsult": "INTEGER DEFAULT 0",
+    # Protections anti-nuke avancées : séparées pour rester configurables depuis
+    # commandes/dashboard sans casser les serveurs qui veulent seulement le socle.
+    "security_vanity": "INTEGER DEFAULT 0",
+    "security_prune": "INTEGER DEFAULT 0",
+    "security_permissions": "INTEGER DEFAULT 0",
+    "join_gate": "INTEGER DEFAULT 0",
+    "risk_engine": "INTEGER DEFAULT 0",
 }
 
 # Même principe, pour la table tickets : "type_id" et "locked" ont été ajoutées avec

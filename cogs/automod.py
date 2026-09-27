@@ -340,6 +340,7 @@ def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
 TOGGLE_FIELDS = [
     "antispam", "antilink", "antilink_strict", "antiinvite", "antimention", "anticaps",
     "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "antiinsult",
+    "security_vanity", "security_prune", "security_permissions", "join_gate", "risk_engine",
 ]
 
 # Libellés lisibles des filtres AutoMod — réutilisés par /automod-status ET par la page
@@ -358,6 +359,11 @@ AUTOMOD_TOGGLE_LABELS = {
     "antiscam": "Anti-arnaques",
     "antinuke": "Anti-nuke (compte compromis)",
     "antiinsult": "Anti-insultes (filtre multilingue)",
+    "security_vanity": "Protection vanity URL",
+    "security_prune": "Détection des prunes membres",
+    "security_permissions": "Garde permissions dangereuses",
+    "join_gate": "Join Gate avancé",
+    "risk_engine": "Score Risk comportemental",
 }
 
 # Préréglages du niveau de sécurité global (/security-level et page "Sécurité" de /setup).
@@ -366,7 +372,8 @@ SECURITY_PRESETS = {
     "moyen": {"antispam": 1, "antilink": 0, "antiinvite": 1, "antiraid": 1, "antiscam": 1, "antinuke": 1},
     "eleve": {
         "antispam": 1, "antilink": 1, "antiinvite": 1, "antiraid": 1, "antiscam": 1,
-        "antimention": 1, "antiaccount": 1, "antinuke": 1,
+        "antimention": 1, "antiaccount": 1, "antinuke": 1, "security_permissions": 1,
+        "join_gate": 1, "risk_engine": 1,
     },
 }
 
@@ -401,6 +408,19 @@ RAID_SLOW_WINDOW = 600  # dix minutes
 RAID_SLOW_THRESHOLD = 60  # arrivées sur dix minutes avant alerte
 NUKE_ACTION_WINDOW = 30  # secondes
 NUKE_ACTION_THRESHOLD = 3  # actions destructrices avant déclenchement
+RISK_DECAY_SECONDS = 900
+RISK_ALERT_THRESHOLD = 70
+RISK_ACTION_THRESHOLD = 100
+JOIN_GATE_DEFAULT_AVATAR_POINTS = 20
+JOIN_GATE_RECENT_ACCOUNT_DAYS = 7
+
+
+def _member_has_default_avatar(member: discord.Member) -> bool:
+    return getattr(member, "avatar", None) is None
+
+
+def _dangerous_perm_names(perms: discord.Permissions) -> list[str]:
+    return [name for name in DANGEROUS_PERMS if bool(getattr(perms, name, False))]
 
 
 class AutoMod(commands.Cog, name="Automod"):
@@ -417,6 +437,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
         self.infraction_tracker = FenetreGlissante(fenetre=ESCALATION_WINDOW)
         self.repeat_tracker = FenetreGlissante(fenetre=REPEAT_WINDOW)
+        self.risk_scores: dict[tuple[int, int], tuple[float, float]] = {}
         self.incidents: dict[tuple[int, int], _Incident] = {}
         self.moderation_dataset = MultilingualModerationDataset()
         # Caches mémoire : évitent des allers-retours en base de données à CHAQUE
@@ -442,6 +463,54 @@ class AutoMod(commands.Cog, name="Automod"):
         db = getattr(self.bot, "db", None)
         if db is not None:
             db._sentrix_automod_change_hook = self._on_automod_setting_changed
+
+    def _risk_value(self, guild_id: int, user_id: int) -> float:
+        score, updated_at = self.risk_scores.get((guild_id, user_id), (0.0, time.monotonic()))
+        age = max(0.0, time.monotonic() - updated_at)
+        if age >= RISK_DECAY_SECONDS:
+            return 0.0
+        return max(0.0, score * (1.0 - (age / RISK_DECAY_SECONDS)))
+
+    async def add_risk_signal(
+        self,
+        guild: discord.Guild,
+        user_id: int | None,
+        signal: str,
+        points: int,
+        *,
+        reason: str,
+        target: discord.abc.User | int | None = None,
+    ) -> float:
+        if user_id is None:
+            return 0.0
+        conf = await self.get_automod_cached(guild.id)
+        if not conf.get("risk_engine"):
+            return 0.0
+
+        key = (guild.id, int(user_id))
+        score = min(150.0, self._risk_value(*key) + max(0, int(points)))
+        self.risk_scores[key] = (score, time.monotonic())
+        await self.bot.db.log_automod_action(guild.id, int(user_id), f"risk:{signal}", "score", f"{reason} (+{points}, total {score:.0f})")
+
+        if score >= RISK_ALERT_THRESHOLD:
+            extra = {"Signal": signal, "Score": f"{score:.0f}/{RISK_ACTION_THRESHOLD}", "Décroissance": f"{RISK_DECAY_SECONDS // 60} min"}
+            e = embeds.log_entry(
+                "🔥 Risk score élevé" if score < RISK_ACTION_THRESHOLD else "🚨 Risk score critique",
+                config.COLOR_WARNING if score < RISK_ACTION_THRESHOLD else config.COLOR_ERROR,
+                cible=target or user_id,
+                cible_label="Membre / acteur",
+                raison=reason,
+                extra=extra,
+            )
+            await self.log_action(guild, e)
+        return score
+
+    async def _bot_is_allowlisted(self, guild_id: int, bot_id: int) -> bool:
+        row = await self.bot.db.fetchone(
+            "SELECT 1 FROM automod_bot_allowlist WHERE guild_id = ? AND bot_id = ?",
+            (guild_id, bot_id),
+        )
+        return row is not None
 
     async def cog_load(self) -> None:
         self._native_automod_bootstrap_task = asyncio.create_task(
@@ -1092,6 +1161,63 @@ class AutoMod(commands.Cog, name="Automod"):
     @checks.is_owner_or_admin_for("securite")
     async def antinuke(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antinuke", etat)
+
+    @commands.hybrid_command(name="vanity-guard", description="Activer/désactiver la protection vanity URL.", with_app_command=False)
+    @app_commands.describe(etat="Activer ou désactiver cette protection")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin_for("securite")
+    async def vanity_guard(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "security_vanity", etat)
+
+    @commands.hybrid_command(name="prune-guard", description="Activer/désactiver la détection des prunes membres.", with_app_command=False)
+    @app_commands.describe(etat="Activer ou désactiver cette protection")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin_for("securite")
+    async def prune_guard(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "security_prune", etat)
+
+    @commands.hybrid_command(name="permission-guard", description="Activer/désactiver la garde des permissions dangereuses.", with_app_command=False)
+    @app_commands.describe(etat="Activer ou désactiver cette protection")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin_for("securite")
+    async def permission_guard(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "security_permissions", etat)
+
+    @commands.hybrid_command(name="join-gate", description="Activer/désactiver le Join Gate avancé.", with_app_command=False)
+    @app_commands.describe(etat="Activer ou désactiver cette protection")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin_for("securite")
+    async def join_gate(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "join_gate", etat)
+
+    @commands.hybrid_command(name="risk-engine", description="Activer/désactiver le score Risk comportemental.", with_app_command=False)
+    @app_commands.describe(etat="Activer ou désactiver cette protection")
+    @app_commands.choices(etat=TOGGLE_CHOICES)
+    @checks.is_owner_or_admin_for("securite")
+    async def risk_engine(self, ctx: commands.Context, etat: str):
+        await self.toggle(ctx, "risk_engine", etat)
+
+    @commands.hybrid_command(name="antibot-allow", description="Autoriser un bot approuvé malgré l'anti-bot.", with_app_command=False)
+    @app_commands.describe(bot="Le bot approuvé à autoriser")
+    @checks.is_owner_or_admin_for("securite")
+    async def antibot_allow(self, ctx: commands.Context, bot: discord.Member):
+        if not bot.bot:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce membre n'est pas un bot.")))
+        await self.bot.db.execute(
+            "INSERT OR REPLACE INTO automod_bot_allowlist (guild_id, bot_id, added_by, created_at) VALUES (?, ?, ?, ?)",
+            (ctx.guild.id, bot.id, ctx.author.id, int(time.time())),
+        )
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{bot.mention} est autorisé par l'anti-bot SentriX.")))
+
+    @commands.hybrid_command(name="antibot-deny", description="Retirer un bot de l'allowlist anti-bot.", with_app_command=False)
+    @app_commands.describe(bot="Le bot à retirer de l'allowlist")
+    @checks.is_owner_or_admin_for("securite")
+    async def antibot_deny(self, ctx: commands.Context, bot: discord.Member):
+        await self.bot.db.execute(
+            "DELETE FROM automod_bot_allowlist WHERE guild_id = ? AND bot_id = ?",
+            (ctx.guild.id, bot.id),
+        )
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{bot.mention} n'est plus dans l'allowlist anti-bot.")))
 
     @commands.hybrid_command(name="antinuke-whitelist-add", description="Exempter un membre de confiance de l'anti-nuke.", with_app_command=False)
     @app_commands.describe(membre="Le membre à exempter")
@@ -2130,8 +2256,12 @@ class AutoMod(commands.Cog, name="Automod"):
             return
 
         if conf["antibot"] and member.bot:
+            if await self._bot_is_allowlisted(member.guild.id, member.id):
+                await self.add_risk_signal(member.guild, member.id, "bot_allowlisted_join", 5, reason="Bot allowlisté ajouté au serveur", target=member)
+                return
             try:
                 await member.kick(reason="AutoMod : bot non autorisé")
+                await self.add_risk_signal(member.guild, member.id, "bot_suspect", 60, reason="Bot non approuvé ajouté au serveur", target=member)
                 e = embeds.log_entry(
                     "🛡️ AutoMod - Antibot", config.COLOR_ERROR,
                     cible=member, cible_label="🤖 Bot expulsé", raison="Bot non autorisé sur ce serveur",
@@ -2141,11 +2271,47 @@ class AutoMod(commands.Cog, name="Automod"):
                 pass
             return
 
+        account_age = (discord.utils.utcnow() - member.created_at).days
+        default_avatar = _member_has_default_avatar(member)
+
+        if conf.get("join_gate"):
+            join_points = 0
+            join_reasons: list[str] = []
+            if account_age < JOIN_GATE_RECENT_ACCOUNT_DAYS:
+                join_points += 45
+                join_reasons.append(f"compte {account_age}j")
+            if default_avatar:
+                join_points += JOIN_GATE_DEFAULT_AVATAR_POINTS
+                join_reasons.append("avatar par défaut")
+            fast_count = self.join_tracker.ajouter(member.guild.id)
+            slow_count = self.slow_join_tracker.ajouter(member.guild.id)
+            if fast_count >= max(3, RAID_JOIN_THRESHOLD // 2):
+                join_points += 25
+                join_reasons.append(f"arrivées rapides {fast_count}/{RAID_JOIN_WINDOW}s")
+            if slow_count >= max(20, RAID_SLOW_THRESHOLD // 2):
+                join_points += 20
+                join_reasons.append(f"arrivées lentes {slow_count}/{RAID_SLOW_WINDOW // 60}min")
+            if join_points:
+                score = await self.add_risk_signal(
+                    member.guild,
+                    member.id,
+                    "join_gate",
+                    join_points,
+                    reason=", ".join(join_reasons),
+                    target=member,
+                )
+                if score >= RISK_ACTION_THRESHOLD and member.guild.me and member.guild.me.guild_permissions.moderate_members and member.top_role < member.guild.me.top_role:
+                    try:
+                        until = discord.utils.utcnow() + timedelta(seconds=SPAM_TIMEOUT_SECONDS)
+                        await member.timeout(until, reason="AutoMod Join Gate : score Risk critique")
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+
         if conf["antiaccount"]:
-            account_age = (discord.utils.utcnow() - member.created_at).days
             if account_age < 7:
                 try:
                     await member.kick(reason="AutoMod : compte créé il y a moins de 7 jours")
+                    await self.add_risk_signal(member.guild, member.id, "recent_account", 50, reason="Compte très récent expulsé", target=member)
                     e = embeds.log_entry(
                         "🛡️ AutoMod - Antiaccount", config.COLOR_ERROR,
                         cible=member, cible_label="👤 Membre expulsé",
@@ -2177,6 +2343,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     },
                 )
                 await self.log_action(member.guild, e)
+                await self.add_risk_signal(member.guild, member.id, "raid_join_velocity", 35, reason="Arrivée pendant un raid potentiel", target=member)
                 # Réponse automatique : relever le niveau de vérification du serveur
                 # freine immédiatement les faux comptes fraîchement créés, sans avoir
                 # à verrouiller manuellement tous les salons.
@@ -2289,6 +2456,126 @@ class AutoMod(commands.Cog, name="Automod"):
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             pass
 
+    async def _handle_security_actor(
+        self,
+        guild: discord.Guild,
+        *,
+        actor: discord.abc.User | None,
+        reason: str,
+        signal: str,
+        points: int,
+        punish: bool = True,
+    ) -> None:
+        if await self.is_antinuke_exempt(guild, actor):
+            return
+        await self.add_risk_signal(guild, actor.id, signal, points, reason=reason, target=actor)
+        if punish and await self.record_nuke_action(guild, actor.id):
+            await self.punish_nuker(guild, actor.id, reason)
+
+    @commands.Cog.listener()
+    async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+        before_code = getattr(before, "vanity_url_code", None)
+        after_code = getattr(after, "vanity_url_code", None)
+        if before_code == after_code:
+            return
+        conf = await self.get_automod_cached(after.id)
+        if not conf or not conf.get("security_vanity"):
+            return
+        actor = await self.get_audit_actor(after, discord.AuditLogAction.guild_update)
+        await self._handle_security_actor(
+            after,
+            actor=actor,
+            reason="Modification suspecte du vanity URL",
+            signal="vanity_update",
+            points=80,
+        )
+        if before_code and before_code != after_code:
+            try:
+                await after.edit(vanity_code=before_code, reason="SentriX vanity guard : restauration du vanity URL")
+                await self.log_action(
+                    after,
+                    embeds.log_entry(
+                        "🔗 Vanity URL restauré",
+                        config.COLOR_WARNING,
+                        cible=actor,
+                        cible_label="Auteur suspecté",
+                        raison=f"`{after_code or 'aucun'}` → `{before_code}`",
+                    ),
+                )
+            except (discord.Forbidden, discord.HTTPException, TypeError):
+                await self.log_action(
+                    after,
+                    embeds.log_entry(
+                        "⚠️ Vanity URL modifié",
+                        config.COLOR_ERROR,
+                        cible=actor,
+                        cible_label="Auteur suspecté",
+                        raison="SentriX a détecté la modification mais Discord a refusé la restauration automatique.",
+                    ),
+                )
+
+    @commands.Cog.listener()
+    async def on_audit_log_entry_create(self, entry: discord.AuditLogEntry):
+        guild = getattr(entry, "guild", None)
+        if guild is None:
+            return
+        conf = await self.get_automod_cached(guild.id)
+        if not conf:
+            return
+        action = getattr(entry, "action", None)
+        if conf.get("security_prune") and action == getattr(discord.AuditLogAction, "member_prune", None):
+            actor = getattr(entry, "user", None)
+            await self._handle_security_actor(
+                guild,
+                actor=actor,
+                reason="Prune de membres détecté",
+                signal="member_prune",
+                points=90,
+            )
+            await self.log_action(
+                guild,
+                embeds.log_entry(
+                    "🚨 Prune de membres détecté",
+                    config.COLOR_ERROR,
+                    cible=actor,
+                    cible_label="Auteur",
+                    raison="Un prune a été vu dans le journal d'audit Discord.",
+                ),
+            )
+
+    @commands.Cog.listener()
+    async def on_guild_role_create(self, role: discord.Role):
+        conf = await self.get_automod_cached(role.guild.id)
+        if not conf or not conf.get("security_permissions"):
+            return
+        dangerous = _dangerous_perm_names(role.permissions)
+        if not dangerous:
+            return
+        actor = await self.get_audit_actor(role.guild, discord.AuditLogAction.role_create, role.id)
+        await self._handle_security_actor(
+            role.guild,
+            actor=actor,
+            reason="Création d'un rôle avec permissions dangereuses",
+            signal="dangerous_role_create",
+            points=55,
+        )
+        try:
+            await role.edit(permissions=discord.Permissions.none(), reason="SentriX permission guard : permissions dangereuses retirées")
+            action = "Permissions retirées"
+        except (discord.Forbidden, discord.HTTPException):
+            action = "Retrait impossible"
+        await self.log_action(
+            role.guild,
+            embeds.log_entry(
+                "🛡️ Garde permissions",
+                config.COLOR_WARNING,
+                cible=actor,
+                cible_label="Auteur suspecté",
+                raison="Rôle créé avec permissions dangereuses",
+                extra={"Rôle": f"{role.mention} (`{role.id}`)", "Permissions": ", ".join(dangerous), "Action": action},
+            ),
+        )
+
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         conf = await self.get_automod_cached(channel.guild.id)
@@ -2316,7 +2603,8 @@ class AutoMod(commands.Cog, name="Automod"):
         # Un "nuke" ne supprime pas forcément les salons : il arrive très souvent qu'il les
         # renomme en masse (ex: "NUKED-BY-...") sans rien supprimer, ce qui passait avant
         # complètement inaperçu par l'anti-nuke (qui ne regardait que les suppressions).
-        if before.name == after.name:
+        overwrites_changed = before.overwrites != after.overwrites
+        if before.name == after.name and not overwrites_changed:
             return
         conf = await self.get_automod_cached(after.guild.id)
         if not conf or not conf["antinuke"]:
@@ -2324,8 +2612,15 @@ class AutoMod(commands.Cog, name="Automod"):
         actor = await self.get_audit_actor(after.guild, discord.AuditLogAction.channel_update, after.id)
         if await self.is_antinuke_exempt(after.guild, actor):
             return
+        reason = "Modification massive de permissions de salons" if overwrites_changed else "Renommage massif de salons"
+        if conf.get("security_permissions") and overwrites_changed:
+            await self.add_risk_signal(after.guild, actor.id, "channel_permission_update", 45, reason=reason, target=actor)
+            try:
+                await after.edit(overwrites=before.overwrites, reason="SentriX permission guard : restauration permissions salon")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
         if await self.record_nuke_action(after.guild, actor.id):
-            await self.punish_nuker(after.guild, actor.id, "Renommage massif de salons")
+            await self.punish_nuker(after.guild, actor.id, reason)
 
     @commands.Cog.listener()
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
@@ -2344,6 +2639,28 @@ class AutoMod(commands.Cog, name="Automod"):
         if await self.is_antinuke_exempt(after.guild, actor):
             return
         reason = "Élévation de permissions suspecte sur un rôle" if perms_escalated else "Renommage massif de rôles"
+        if conf.get("security_permissions") and perms_escalated:
+            gained = [
+                p for p in DANGEROUS_PERMS
+                if not getattr(before.permissions, p, False) and getattr(after.permissions, p, False)
+            ]
+            await self.add_risk_signal(after.guild, actor.id, "role_permission_escalation", 60, reason=reason, target=actor)
+            try:
+                await after.edit(permissions=before.permissions, reason="SentriX permission guard : restauration permissions rôle")
+                restored = "oui"
+            except (discord.Forbidden, discord.HTTPException):
+                restored = "non"
+            await self.log_action(
+                after.guild,
+                embeds.log_entry(
+                    "🛡️ Permissions dangereuses bloquées",
+                    config.COLOR_WARNING,
+                    cible=actor,
+                    cible_label="Auteur suspecté",
+                    raison=reason,
+                    extra={"Rôle": f"{after.mention} (`{after.id}`)", "Permissions ajoutées": ", ".join(gained), "Restauré": restored},
+                ),
+            )
         if await self.record_nuke_action(after.guild, actor.id):
             await self.punish_nuker(after.guild, actor.id, reason)
 

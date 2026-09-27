@@ -46,7 +46,8 @@ MANAGE_GUILD = 1 << 5
 AUTOMOD_FIELDS = {
     "antispam", "antilink", "antiinvite", "antimention", "anticaps",
     "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
-    "antinuke", "antiinsult", "escalation",
+    "antinuke", "antiinsult", "escalation", "security_vanity", "security_prune",
+    "security_permissions", "join_gate", "risk_engine",
 }
 
 AI_BOOL_FIELDS = {"enabled", "memory_enabled", "logs_enabled"}
@@ -1567,7 +1568,7 @@ INDEX_HTML = r"""<!doctype html>
       security:{title:"Sécurité et AutoMod",description:"Filtres appliqués automatiquement aux nouveaux messages et événements.",automod:true,fields:[
         ["antispam","Anti-spam","Limite les messages envoyés trop rapidement.","Messages et contenu"],["antilink","Bloquer les liens","Interdit les liens web non autorisés.","Messages et contenu"],["antiinvite","Bloquer les invitations","Interdit les invitations Discord.","Messages et contenu"],["antimention","Anti-mentions","Bloque les mentions massives.","Messages et contenu"],["anticaps","Anti-majuscules","Limite les messages presque entièrement en majuscules.","Messages et contenu"],["antiemoji","Anti-spam emojis","Limite les messages remplis d'emojis.","Messages et contenu"],
         ["antiraid","Anti-raid","Réagit aux arrivées massives de comptes.","Arrivées et comptes"],["antibot","Anti-bot","Contrôle l'arrivée de nouveaux bots.","Arrivées et comptes"],["antiaccount","Comptes récents","Surveille les comptes trop récents.","Arrivées et comptes"],
-        ["antiscam","Anti-arnaque","Détecte les liens et messages suspects.","Protection avancée"],["antinuke","Anti-nuke","Protège les rôles, salons et bannissements massifs.","Protection avancée"],["escalation","Sanctions progressives","Augmente la sanction lors des récidives.","Protection avancée"]
+        ["antiscam","Anti-arnaque","Détecte les liens et messages suspects.","Protection avancée"],["antinuke","Anti-nuke","Protège les rôles, salons et bannissements massifs.","Protection avancée"],["security_vanity","Vanity URL","Détecte et restaure les changements suspects de lien vanity.","Protection avancée"],["security_prune","Member prune","Détecte les prunes massifs dans le journal d'audit.","Protection avancée"],["security_permissions","Permissions dangereuses","Bloque les élévations de rôles et permissions critiques.","Protection avancée"],["join_gate","Join Gate avancé","Combine âge du compte, avatar et vitesse d'arrivée.","Protection avancée"],["risk_engine","Risk score","Combine plusieurs signaux avec décroissance temporelle.","Protection avancée"],["escalation","Sanctions progressives","Augmente la sanction lors des récidives.","Protection avancée"]
       ].map(x=>({key:x[0],label:x[1],hint:x[2],type:"switch",group:x[3]}))},
       sanctions:{title:"Sanctions",description:"Historique des bannissements, mutes et avertissements appliqués par SentriX sur ce serveur.",sanctions:true,fields:[]},
       logs:{title:"Système de logs",description:"Choisissez un salon différent pour chaque type d'événement.",fields:[

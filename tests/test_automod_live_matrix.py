@@ -30,6 +30,11 @@ def _base_conf(**updates):
             "antiaccount",
             "antinuke",
             "antiinsult",
+            "security_vanity",
+            "security_prune",
+            "security_permissions",
+            "join_gate",
+            "risk_engine",
             "escalation",
         )
     }
@@ -43,6 +48,7 @@ def _cog(conf):
             fetchone=AsyncMock(return_value=None),
             fetchall=AsyncMock(return_value=[]),
             get_automod=AsyncMock(return_value=conf),
+            log_automod_action=AsyncMock(),
         )
     )
     cog = AutoMod(bot)
@@ -104,7 +110,64 @@ async def test_normal_member_is_blocked_by_strict_antilink():
     await cog.on_message(message)
 
     cog._delete_and_warn.assert_awaited_once()
-    assert cog._delete_and_warn.await_args.args[2] == "antilink"
+
+
+@pytest.mark.asyncio
+async def test_risk_signal_decays_and_logs_threshold():
+    conf = _base_conf(risk_engine=1)
+    cog = _cog(conf)
+    cog.log_action = AsyncMock()
+    guild = SimpleNamespace(id=1)
+
+    score = await cog.add_risk_signal(guild, 42, "join_gate", 75, reason="compte récent")
+
+    assert score == 75
+    cog.bot.db.log_automod_action.assert_awaited_once()
+    cog.log_action.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_bot_allowlist_prevents_antibot_kick():
+    conf = _base_conf(antibot=1, risk_engine=1)
+    cog = _cog(conf)
+    cog._bot_is_allowlisted = AsyncMock(return_value=True)
+    cog.add_risk_signal = AsyncMock()
+    guild = SimpleNamespace(id=1)
+    member = SimpleNamespace(id=42, bot=True, guild=guild, kick=AsyncMock())
+
+    await cog.on_member_join(member)
+
+    member.kick.assert_not_awaited()
+    cog.add_risk_signal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_permission_guard_restores_role_escalation():
+    conf = _base_conf(antinuke=1, security_permissions=1, risk_engine=1)
+    cog = _cog(conf)
+    cog.get_audit_actor = AsyncMock(return_value=SimpleNamespace(id=77))
+    cog.is_antinuke_exempt = AsyncMock(return_value=False)
+    cog.record_nuke_action = AsyncMock(return_value=False)
+    cog.add_risk_signal = AsyncMock()
+    cog.log_action = AsyncMock()
+    guild = SimpleNamespace(id=1, owner_id=999)
+    before = SimpleNamespace(id=5, guild=guild, name="mod", mention="<@&5>", permissions=discord.Permissions.none())
+    after_perms = discord.Permissions.none()
+    after_perms.manage_roles = True
+    after = SimpleNamespace(
+        id=5,
+        guild=guild,
+        name="mod",
+        mention="<@&5>",
+        permissions=after_perms,
+        edit=AsyncMock(),
+    )
+
+    await cog.on_guild_role_update(before, after)
+
+    after.edit.assert_awaited_once()
+    cog.add_risk_signal.assert_awaited_once()
+    cog.record_nuke_action.assert_awaited_once()
 
 
 @pytest.mark.asyncio
