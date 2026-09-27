@@ -54,7 +54,7 @@ def install(bot: commands.Bot) -> None:
             await language_runtime.set_language(self.bot, interaction.guild.id, language)
             if language == language_runtime.LANG_EN:
                 embed = embeds.success(
-                    "English is now the server language. Command names in `+help` and the setup interface are displayed in English.",
+                    "English is now the server language. SentriX commands, panels, errors, setup, verification, security and other supported interfaces are displayed in English.",
                     title="🇬🇧 Language selected",
                 )
             else:
