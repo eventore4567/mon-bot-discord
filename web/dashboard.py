@@ -409,6 +409,22 @@ async def handle_login(request: web.Request):
         secure=_public_url(request).startswith("https://"),
         samesite="Lax",
     )
+    verify_guild = str(request.query.get("verify_guild") or "").strip()
+    if verify_guild:
+        try:
+            guild_id = int(verify_guild)
+        except (TypeError, ValueError):
+            guild_id = 0
+        if guild_id > 0:
+            from web.public_verification_v120 import PENDING_COOKIE, make_pending_token
+            response.set_cookie(
+                PENDING_COOKIE,
+                make_pending_token(guild_id),
+                max_age=10 * 60,
+                httponly=True,
+                secure=_public_url(request).startswith("https://"),
+                samesite="Lax",
+            )
     raise response
 
 
@@ -440,7 +456,14 @@ async def handle_callback(request: web.Request):
         logger.warning("OAuth : callback refusé sur %s (%s, state %s).", _request_host(request), reason, state[:6] or "—")
         return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=403)
     logger.info("OAuth : callback accepté sur %s (state %s).", _request_host(request), state[:6])
+    from web.public_verification_v120 import PENDING_COOKIE, parse_pending_token
+    pending_verify = parse_pending_token(request.cookies.get(PENDING_COOKIE, ""))
     if request.query.get("error"):
+        if pending_verify:
+            guild_id = int(pending_verify["gid"])
+            response = web.HTTPFound(f"/verify/{guild_id}?auth=denied")
+            response.del_cookie(PENDING_COOKIE)
+            raise response
         raise web.HTTPFound("/?auth=denied")
 
     if not code:
@@ -486,6 +509,26 @@ async def handle_callback(request: web.Request):
                 "owner": owner,
                 "access_level": access_level,
             })
+
+    if pending_verify:
+        from web.public_verification_v120 import (
+            PENDING_COOKIE,
+            SESSION_COOKIE as VERIFY_SESSION_COOKIE,
+            make_session_token as make_verify_session_token,
+        )
+        verify_guild_id = int(pending_verify["gid"])
+        response = web.HTTPFound(f"/verify/{verify_guild_id}")
+        response.set_cookie(
+            VERIFY_SESSION_COOKIE,
+            make_verify_session_token(verify_guild_id, int(user["id"])),
+            max_age=15 * 60,
+            httponly=True,
+            secure=_public_url(request).startswith("https://"),
+            samesite="Lax",
+        )
+        response.del_cookie(PENDING_COOKIE)
+        response.del_cookie(OAUTH_STATE_COOKIE)
+        raise response
 
     session_id = secrets.token_urlsafe(48)
     request.app["sessions"][session_id] = {
@@ -1380,6 +1423,9 @@ def build_app(bot) -> web.Application:
     # Lecteur musique du dashboard : pilote directement le même Cog Music que Discord.
     from web.dashboard_api_music import register as register_music_routes
     register_music_routes(app, sys.modules[__name__])
+    # Vérification publique : OAuth Discord + CAPTCHA web + attribution du rôle.
+    from web.public_verification_v120 import register as register_public_verification
+    register_public_verification(app, sys.modules[__name__])
     return app
 
 
