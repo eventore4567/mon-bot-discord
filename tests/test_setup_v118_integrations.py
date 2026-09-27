@@ -21,6 +21,9 @@ def test_v116_exposes_invite_and_advanced_security_sections():
     assert "internal:invitations" in invite_actions
     verification_actions = {section.action for section in v116.MODULE_BY_KEY["verification"].sections}
     assert "internal:verification" in verification_actions
+    assert "rules" in v116.MODULE_BY_KEY
+    rule_actions = {section.action for section in v116.MODULE_BY_KEY["rules"].sections}
+    assert "internal:rules" in rule_actions
 
 
 def test_v118_integrates_invite_tracker_inside_setup():
@@ -36,13 +39,21 @@ def test_v118_integrates_verification_repair_inside_setup():
     assert "create_or_refresh_system" in SETUP_SOURCE
     assert "Activer / réparer" in SETUP_SOURCE
     assert 'action == "internal:verification"' in SETUP_SOURCE
+    assert 'action == "internal:rules"' in SETUP_SOURCE
+    assert "open_setup_interaction" in SETUP_SOURCE
 
 
-def test_enabled_honeypot_repairs_missing_panels_on_ready():
+def test_enabled_honeypot_repairs_missing_panels_on_ready_without_creating_structure():
     assert "async def _repair_enabled_systems" in HONEYPOT_SOURCE
     assert "async def _has_sentrix_panel" in HONEYPOT_SOURCE
     assert "_repair_enabled_systems(bot)" in HONEYPOT_SOURCE
     assert "sentrix-honeypot-repair" in HONEYPOT_SOURCE
+    repair = HONEYPOT_SOURCE[HONEYPOT_SOURCE.index("async def _repair_enabled_systems"):]
+    repair = repair[:repair.index("async def install")]
+    assert "create_or_refresh_system(" not in repair
+    assert "create_text_channel(" not in repair
+    assert "create_category(" not in repair
+    assert "Aucun rôle, salon ou catégorie n'est créé ici" in repair
 
 
 def test_setup_security_catalogue_contains_new_guards():
