@@ -204,6 +204,10 @@ if not _dashboard_control_center_v3.install(dashboard_web):
     raise RuntimeError("Backend Control Center V3 absent avant build_app.")
 logger.info("Backends vérification V6 et Control Center V3 installés avant la capture build_app.")
 
+from web import dashboard_guidance_v56 as _dashboard_guidance_v56  # noqa: E402
+_dashboard_guidance_v56.install(dashboard_web)
+logger.info("Backend Guidance V56 confirmé avant la capture build_app.")
+
 # Certaines couches dashboard historiques sont importées pendant le bootstrap HA. Elles
 # peuvent encore modifier INDEX_HTML après la première réparation. On entoure donc la
 # fonction build_app réellement utilisée : juste avant que les routes aiohttp soient figées,
