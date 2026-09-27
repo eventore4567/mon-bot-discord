@@ -62,6 +62,85 @@ CREATE TABLE IF NOT EXISTS honeypot_verified_members (
 """
 
 
+_MIGRATION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_runtime_migrations (
+    name TEXT PRIMARY KEY,
+    applied_at INTEGER NOT NULL
+)
+"""
+
+_WEB_CLEANUP_MIGRATION = "verification_web_v120_cleanup_1"
+
+
+async def _web_panel(bot: commands.Bot, guild: discord.Guild):
+    from cogs import language_runtime
+    from web.public_verification_v120 import verification_url
+
+    language = await language_runtime.get_language(bot, guild.id)
+    english = language == language_runtime.LANG_EN
+    embed = discord.Embed(
+        title="SentriX Web Verification" if english else "Vérification web SentriX",
+        description=(
+            "Verification now happens on the secure SentriX website.\n\n"
+            "The site checks your Discord identity, server membership, account age, "
+            "current rules and a human CAPTCHA. Once approved, SentriX unlocks your role "
+            "and sends you a confirmation DM."
+            if english
+            else
+            "La vérification se fait maintenant sur le site sécurisé SentriX.\n\n"
+            "Le site contrôle ton identité Discord, ton appartenance au serveur, "
+            "l'ancienneté du compte, le règlement actuel et un CAPTCHA humain. "
+            "Une fois validé, SentriX débloque ton rôle et t'envoie un MP de confirmation."
+        ),
+        colour=discord.Color.blurple(),
+    )
+    embed.set_footer(
+        text="SentriX • Web Verification" if english else "SentriX • Vérification web"
+    )
+    return panels.depuis_embed(
+        embed,
+        boutons=(
+            panels.Bouton(
+                libelle="Verify on SentriX" if english else "Se vérifier sur SentriX",
+                url=verification_url(guild.id),
+            ),
+        ),
+    )
+
+
+def _trap_embed(verify_channel: discord.TextChannel, sanction: str) -> discord.Embed:
+    sanction_label = "softban automatique" if sanction == "softban" else "expulsion automatique"
+    embed = discord.Embed(
+        title="NE PAS ENVOYER DE MESSAGE DANS CE SALON",
+        description=(
+            "Ce salon est le honeypot SentriX réservé aux comptes non vérifiés.\n"
+            f"Écrire ici peut entraîner un **{sanction_label}**.\n\n"
+            f"Utilise {verify_channel.mention} pour ouvrir le site de vérification."
+        ),
+        colour=discord.Color.red(),
+    )
+    embed.set_footer(text="SentriX • Honeypot anti-bot")
+    return embed
+
+
+async def _purge_bot_messages(channel: discord.TextChannel, bot_user_id: int | None) -> int:
+    if not bot_user_id:
+        return 0
+    deleted = 0
+    try:
+        async for message in channel.history(limit=100):
+            if getattr(message.author, "id", None) != bot_user_id:
+                continue
+            try:
+                await message.delete()
+                deleted += 1
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+    return deleted
+
+
 @dataclass
 class ChallengeState:
     token: str
