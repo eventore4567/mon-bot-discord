@@ -266,22 +266,40 @@ class VerificationSequenceView(discord.ui.View):
 
 
 class HoneypotVerifyView(discord.ui.View):
+    """Compatibilité avec les anciens panels Discord.
+
+    Les anciens boutons persistants ne lancent plus aucun challenge dans Discord :
+    ils renvoient uniquement vers le site web, puis les nouveaux panels utilisent
+    directement un bouton-lien.
+    """
+
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Commencer la vérification",
+        label="Se vérifier",
         style=discord.ButtonStyle.success,
         custom_id="sentrix:honeypot:verify",
     )
     async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
-        cog = interaction.client.get_cog(_COG_NAME)
-        if cog is None:
+        if interaction.guild is None:
             return await interaction.response.send_message(
-                "La vérification SentriX est temporairement indisponible.",
+                "Cette vérification doit être ouverte depuis un serveur Discord.",
                 ephemeral=True,
             )
-        await cog.start_human_verification(interaction)
+        from web.public_verification_v120 import verification_url
+        view = discord.ui.View(timeout=60)
+        view.add_item(
+            discord.ui.Button(
+                label="Ouvrir la vérification SentriX",
+                url=verification_url(interaction.guild.id),
+            )
+        )
+        await interaction.response.send_message(
+            "La vérification se fait maintenant sur le site SentriX.",
+            view=view,
+            ephemeral=True,
+        )
 
 
 class HoneypotVerification(commands.Cog, name=_COG_NAME):
