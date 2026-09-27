@@ -373,6 +373,13 @@ def install(bot: commands.Bot) -> None:
 
 
 async def setup(bot: commands.Bot) -> None:
+    # Le setup V118 dépend du vrai moteur de vérification. L'installation est idempotente
+    # et garantit aussi la réparation automatique des anciens salons vides.
+    try:
+        from cogs.honeypot_verification_v48 import install as install_honeypot
+        await install_honeypot(bot)
+    except Exception:
+        logger.exception("Setup V118 : moteur honeypot/vérification indisponible.")
     install(bot)
 
     async def on_ready_reapply():
