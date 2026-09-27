@@ -665,10 +665,26 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         return True, "Vérification renforcée + salon piège désactivés. Les salons ont été conservés."
 
     async def start_human_verification(self, interaction: discord.Interaction):
+        # V120 : aucune étape de vérification ne se déroule plus dans Discord.
+        # Cette méthode reste uniquement pour compatibilité avec d'anciens callbacks.
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message(
                 "Cette vérification fonctionne uniquement dans un serveur.", ephemeral=True
             )
+        from web.public_verification_v120 import verification_url
+        view = discord.ui.View(timeout=60)
+        view.add_item(
+            discord.ui.Button(
+                label="Se vérifier sur SentriX",
+                url=verification_url(interaction.guild.id),
+            )
+        )
+        return await interaction.response.send_message(
+            "La vérification complète se fait maintenant sur le site SentriX.",
+            view=view,
+            ephemeral=True,
+        )
+
 
         member = interaction.user
         conf = await self.config(interaction.guild.id)
@@ -796,8 +812,25 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         typed_code: str,
         typed_math: str,
     ):
+        # Les anciens modals persistants peuvent encore être soumis quelques instants après
+        # un déploiement. Ils ne doivent jamais attribuer le rôle : on renvoie vers le web.
+        del token, typed_code, typed_math
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Vérification invalide.", ephemeral=True)
+        from web.public_verification_v120 import verification_url
+        view = discord.ui.View(timeout=60)
+        view.add_item(
+            discord.ui.Button(
+                label="Ouvrir la vérification SentriX",
+                url=verification_url(interaction.guild.id),
+            )
+        )
+        return await interaction.response.send_message(
+            "Cette ancienne vérification Discord n'est plus utilisée. Continue sur le site SentriX.",
+            view=view,
+            ephemeral=True,
+        )
+
 
         key = (interaction.guild.id, interaction.user.id)
         state = self._challenges.get(key)
