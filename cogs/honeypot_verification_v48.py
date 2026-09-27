@@ -462,7 +462,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         verify_embed = discord.Embed(
             title="🔐 Vérification renforcée SentriX",
             description=(
-                "L'accès au serveur reste **bloqué** tant que la vérification complète n'est pas terminée.\n\nSentriX contrôle :\n• les règles Discord / Membership Screening si elles sont activées ;\n• l'ancienneté minimale du compte ;\n• un challenge interactif anti-automatisation ;\n• un code unique + un calcul à usage unique ;\n• les tentatives répétées et les délais anormaux.\n\nCliquez sur **Commencer la vérification**. Un simple clic ne donne jamais accès au serveur."
+                "L'accès au serveur reste **bloqué** tant que la vérification complète n'est pas terminée.\n\nSentriX contrôle :\n• l'acceptation de la version actuelle du règlement SentriX, si un règlement est publié ;\n• les règles Discord / Membership Screening si elles sont activées ;\n• l'ancienneté minimale du compte ;\n• un challenge interactif anti-automatisation ;\n• un code unique + un calcul à usage unique ;\n• les tentatives répétées et les délais anormaux.\n\nCliquez sur **Commencer la vérification**. Un simple clic ne donne jamais accès au serveur."
             ),
             colour=discord.Color.blurple(),
         )
@@ -822,7 +822,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 f"{member.mention} (`{member.id}`)\n"
                 f"Compte âgé de : **{account_age // 86400} jour(s)**\n"
                 f"Challenge terminé en : **{elapsed}s**\n"
-                "Contrôles : Membership Screening + séquence + code unique + calcul."
+                "Contrôles : règlement SentriX courant + Membership Screening + séquence + code unique + calcul."
             ),
         )
 
