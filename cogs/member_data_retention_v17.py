@@ -109,25 +109,15 @@ CORE_SNAPSHOT_COLUMNS: dict[str, tuple[str, ...]] = {
 RESET_COMMAND_LABELS = {
     "reset-levels": "tous les niveaux et XP du serveur",
     "reset-economy": "tous les soldes économiques du serveur",
-    "represet": "la réputation du membre sélectionné",
     "reset-invites": "toutes les données d'invitations du serveur",
 }
 
 DOUBLE_CONFIRM_COMMANDS = {
+    # Deux confirmations uniquement pour les opérations réellement à fort impact :
+    # reset global, suppression de structure ou action de masse.
     "config-reset": "réinitialiser toute la configuration du serveur",
-    "logs reset": "réinitialiser ce type de logs",
-    "chat-reset": "réinitialiser l'historique de conversation IA",
-    "ai reset": "réinitialiser la conversation IA du salon",
-    "sanctiondm reset": "réinitialiser le message privé de sanction",
-    "resetnick": "réinitialiser le pseudo du membre",
     "reset-logs-all": "réinitialiser toute la configuration des logs",
-    "clearwarnings": "supprimer tous les avertissements du membre",
-    "clear": "supprimer plusieurs messages du salon",
     "delete-channel": "supprimer le salon sélectionné",
-    "ticketpanel delete": "supprimer le panel et ses types associés",
-    "tickettype remove": "supprimer le type de ticket et son formulaire",
-    "ticketform remove": "supprimer la question du formulaire",
-    "music clear": "vider toute la file d'attente musicale",
     "security all": "activer toutes les protections AutoMod d'un coup",
     "create-logs": "créer et configurer tous les salons de logs d'un coup",
     "syncbl": "appliquer la liste noire à tous les membres concernés d'un coup",
