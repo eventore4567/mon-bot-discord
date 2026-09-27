@@ -462,6 +462,10 @@ async def open_setup_interaction(interaction: discord.Interaction) -> None:
         interaction.user.id,
     )
     await interaction.response.send_message(view=view, embed=view.embed(), ephemeral=True)
+    try:
+        view.message = await interaction.original_response()
+    except (discord.NotFound, discord.HTTPException):
+        view.message = None
 
 
 async def _open_setup(ctx: commands.Context) -> None:
