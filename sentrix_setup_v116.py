@@ -73,7 +73,7 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("verify", "Rôle vérifié", "Choisir le rôle attribué après vérification.", "verification"),
         _s("verify_portal", "Portail de vérification", "Activer ou réparer verification et stay-muted avec leurs panneaux SentriX.", "internal:verification"),
         _s("autorole", "Autorôle", "Rôle distribué automatiquement à l'arrivée.", "config:autorole"),
-        _s("rules", "Règlement", "Parcours règlement/validation et panneau dédié.", "internal:verification"),
+        _s("rules", "Règlement", "Configurer le texte, le salon, l'image et l'acceptation versionnée des règles.", "internal:rules"),
     )),
     ModuleSpec("logs", "Logs", "Journalisation granulaire du serveur.", (
         _s("general", "Général", "Salon principal et création/réparation des logs.", "logs"),
@@ -89,6 +89,13 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("tracker", "Tracker public", "Afficher qui a invité chaque nouveau membre et le total d'invitations.", "internal:invitations"),
         _s("history", "Historique", "Consulter l'historique et les statistiques d'invitations.", "hint:+invite-stats"),
         _s("codes", "Codes d'invitation", "Voir et gérer les codes suivis par SentriX.", "hint:+invite-codes"),
+    )),
+    ModuleSpec("rules", "Règlement", "Règles du serveur, acceptation versionnée et lien avec la vérification.", (
+        _s("panel", "Panneau public", "Choisir le salon, écrire les règles et publier le panneau d'acceptation.", "internal:rules"),
+        _s("image", "Image", "Ajouter ou retirer l'image du règlement.", "internal:rules"),
+        _s("role", "Rôle final", "Choisir le rôle reçu après le parcours de vérification complet.", "verification"),
+        _s("simple_captcha", "CAPTCHA simple", "Configurer le CAPTCHA de secours utilisé si la vérification renforcée est désactivée.", "internal:rules"),
+        _s("chain", "Chaînage", "Règlement d'abord, puis vérification renforcée si elle est active.", "internal:rules"),
     )),
     ModuleSpec("levels", "Niveaux", "XP, vocal, paliers, annonces et exclusions.", (
         _s("xp", "XP texte", "Cooldown, XP min/max, salons et rôles exclus.", "levels-config"),
@@ -203,7 +210,27 @@ async def _module_status(view, module_key: str) -> str:
     if module_key == "roles":
         return f"Staff : {_mention(guild, conf, 'mod_role', role=True)} · Autorôle : {_mention(guild, conf, 'autorole', role=True)}"
     if module_key == "verification":
-        return f"Rôle : {_mention(guild, conf, 'verify_role', role=True)}"
+        try:
+            row = await view.bot.db.fetchone(
+                "SELECT enabled,verify_channel_id,trap_channel_id FROM honeypot_verification WHERE guild_id=?",
+                (view.guild_id,),
+            )
+            active = bool(row and row["enabled"])
+            verify = guild.get_channel(int(row["verify_channel_id"])) if active and row["verify_channel_id"] else None
+            return f"Rôle : {_mention(guild, conf, 'verify_role', role=True)} · Portail : {verify.mention if verify else 'non actif'}"
+        except Exception:
+            return f"Rôle : {_mention(guild, conf, 'verify_role', role=True)}"
+    if module_key == "rules":
+        try:
+            row = await view.bot.db.fetchone(
+                "SELECT message_id,updated_at FROM dashboard_verification_panels WHERE guild_id=?",
+                (view.guild_id,),
+            )
+            published = bool(row and row["message_id"])
+            channel = _mention(guild, conf, "verification_channel")
+            return f"Panneau : {'publié' if published else 'non publié'} · Salon : {channel}"
+        except Exception:
+            return f"Salon : {_mention(guild, conf, 'verification_channel')}"
     if module_key == "suggestions":
         return f"Salon : {_mention(guild, conf, 'suggest_channel')}"
     if module_key == "tickets":
