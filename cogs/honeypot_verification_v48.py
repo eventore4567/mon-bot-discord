@@ -333,6 +333,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         if missing:
             return None, "Permissions manquantes : " + ", ".join(missing)
 
+        old = await self.config(guild.id, enabled_only=False)
         unverified = await self._find_or_create_role(guild, "Non vérifié")
 
         # Une seule source de vérité pour le rôle final : si /setup ou le règlement a déjà
@@ -369,7 +370,6 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                 "Déplace-les puis réessaie depuis +setup."
             )
 
-        old = await self.config(guild.id, enabled_only=False)
         category = guild.get_channel(old["category_id"]) if old and old["category_id"] else None
         if not isinstance(category, discord.CategoryChannel):
             category = await guild.create_category(
