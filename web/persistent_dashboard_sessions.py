@@ -87,8 +87,13 @@ def _peer_dashboard_url() -> str:
 
 
 def _proxy_candidate_path(path: str) -> bool:
-    """Seules les API qui ont besoin du cache Discord doivent suivre le leader HA."""
-    return path == "/api/public" or path == "/api/guilds" or path.startswith("/api/guilds/")
+    """Les API qui ont besoin du cache Discord doivent suivre le leader HA."""
+    return (
+        path == "/api/public"
+        or path == "/api/guilds"
+        or path.startswith("/api/guilds/")
+        or path.startswith("/api/verify/")
+    )
 
 
 def _same_host(request: web.Request, peer_url: str) -> bool:
