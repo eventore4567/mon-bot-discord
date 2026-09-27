@@ -15,7 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, checks, design_system, visual_v5
+from utils import embeds, checks, design_system, visual_v5, rules_flow
 from utils import sentrix_panels as panels
 from database.db import now
 
@@ -532,9 +532,37 @@ class Verification(commands.Cog, name="Verification"):
         if problem:
             logger.warning("Vérification bloquée guild=%s role=%s : %s", guild.id, role_id, problem)
             return await interaction.response.send_message(f"Vérification impossible pour le moment : {problem}", ephemeral=True)
+        # Cliquer sur le panneau de règlement valide la VERSION actuellement publiée.
+        # Si la vérification renforcée est active, le règlement ne donne jamais directement
+        # le rôle final : il ouvre la deuxième étape de sécurité.
+        try:
+            await rules_flow.accept_current_rules(self.bot, guild.id, member.id)
+        except Exception:
+            logger.exception("Enregistrement acceptation règlement impossible guild=%s user=%s", guild.id, member.id)
+
         if role in member.roles:
             await _clear_captcha_session(self.bot, guild.id, member.id)
             return await interaction.response.send_message("Vous êtes déjà vérifié !", ephemeral=True)
+
+        honeypot = self.bot.get_cog("HoneypotVerification")
+        if honeypot is not None:
+            try:
+                reinforced = await honeypot.config(guild.id)
+            except Exception:
+                reinforced = None
+            if reinforced:
+                from cogs.honeypot_verification_v48 import HoneypotVerifyView
+                verify_channel = guild.get_channel(int(reinforced["verify_channel_id"] or 0))
+                destination = verify_channel.mention if isinstance(verify_channel, discord.TextChannel) else "le portail de vérification"
+                return await interaction.response.send_message(
+                    (
+                        f"Règlement accepté. Continue maintenant dans {destination}.\n"
+                        "La vérification renforcée contrôle ensuite l'ancienneté du compte, "
+                        "la séquence anti-automatisation, le code unique et le calcul."
+                    ),
+                    view=HoneypotVerifyView(),
+                    ephemeral=True,
+                )
 
         captcha_on = bool(conf["verify_captcha_enabled"]) if conf and "verify_captcha_enabled" in conf.keys() else True
         if not captcha_on:
@@ -612,6 +640,26 @@ class Verification(commands.Cog, name="Verification"):
             )
 
         await _clear_captcha_session(self.bot, guild.id, member.id)
+
+        # Un administrateur peut activer la vérification renforcée pendant qu'un ancien
+        # CAPTCHA simple est encore ouvert. Dans ce cas, ne contourne jamais la nouvelle
+        # étape de sécurité.
+        honeypot = self.bot.get_cog("HoneypotVerification")
+        if honeypot is not None:
+            try:
+                reinforced = await honeypot.config(guild.id)
+            except Exception:
+                reinforced = None
+            if reinforced:
+                from cogs.honeypot_verification_v48 import HoneypotVerifyView
+                verify_channel = guild.get_channel(int(reinforced["verify_channel_id"] or 0))
+                destination = verify_channel.mention if isinstance(verify_channel, discord.TextChannel) else "le portail de vérification"
+                return await interaction.response.send_message(
+                    f"Règlement accepté. Continue la vérification renforcée dans {destination}.",
+                    view=HoneypotVerifyView(),
+                    ephemeral=True,
+                )
+
         await self._grant_verified_role(interaction, role)
 
     @commands.hybrid_command(name="verify-setup", description="Définir le rôle attribué lors de la vérification.")
