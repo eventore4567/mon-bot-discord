@@ -372,7 +372,8 @@ SECURITY_PRESETS = {
     "moyen": {"antispam": 1, "antilink": 0, "antiinvite": 1, "antiraid": 1, "antiscam": 1, "antinuke": 1},
     "eleve": {
         "antispam": 1, "antilink": 1, "antiinvite": 1, "antiraid": 1, "antiscam": 1,
-        "antimention": 1, "antiaccount": 1, "antinuke": 1, "security_permissions": 1,
+        "antimention": 1, "antiaccount": 1, "antinuke": 1,
+        "security_vanity": 1, "security_prune": 1, "security_permissions": 1,
         "join_gate": 1, "risk_engine": 1,
     },
 }
@@ -382,7 +383,10 @@ TOGGLE_CHOICES = [
     app_commands.Choice(name="Désactiver", value="off"),
 ]
 
-DANGEROUS_PERMS = ["administrator", "manage_guild", "manage_roles", "manage_channels", "ban_members", "kick_members"]
+DANGEROUS_PERMS = [
+    "administrator", "manage_guild", "manage_roles", "manage_channels", "manage_webhooks",
+    "ban_members", "kick_members", "moderate_members", "mention_everyone",
+]
 SPAM_WINDOW = 6  # secondes observées pour le comptage anti-spam
 SPAM_THRESHOLD = 5  # messages dans la fenêtre avant sanction
 
@@ -413,6 +417,19 @@ RISK_ALERT_THRESHOLD = 70
 RISK_ACTION_THRESHOLD = 100
 JOIN_GATE_DEFAULT_AVATAR_POINTS = 20
 JOIN_GATE_RECENT_ACCOUNT_DAYS = 7
+RISK_SIGNAL_POINTS = {
+    "antispam": 18,
+    "antispam_duplicate": 22,
+    "antiemoji": 14,
+    "antimention": 28,
+    "antilink": 20,
+    "antiinvite": 28,
+    "antiscam": 45,
+    "blacklist_word": 18,
+    "blacklist_link": 25,
+    "blacklist_word_link": 35,
+    "multilingual_toxicity": 25,
+}
 
 
 def _member_has_default_avatar(member: discord.Member) -> bool:
@@ -2105,6 +2122,15 @@ class AutoMod(commands.Cog, name="Automod"):
                     self.incidents.pop(candidate, None)
 
         await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, "suppression", reason)
+        risk_points = RISK_SIGNAL_POINTS.get(filter_name, 10)
+        await self.add_risk_signal(
+            message.guild,
+            message.author.id,
+            filter_name,
+            risk_points,
+            reason=reason,
+            target=message.author,
+        )
         action, infraction_count = await self._maybe_escalate(message.guild, message.author, reason)
         if action is None and filter_name in SPAM_FILTERS:
             action = await self._spam_timeout(message.guild, message.author, reason)
@@ -2273,6 +2299,9 @@ class AutoMod(commands.Cog, name="Automod"):
 
         account_age = (discord.utils.utcnow() - member.created_at).days
         default_avatar = _member_has_default_avatar(member)
+        track_joins = bool(conf.get("join_gate") or conf.get("antiraid"))
+        fast_count = self.join_tracker.ajouter(member.guild.id) if track_joins else 0
+        slow_count = self.slow_join_tracker.ajouter(member.guild.id) if track_joins else 0
 
         if conf.get("join_gate"):
             join_points = 0
@@ -2283,8 +2312,6 @@ class AutoMod(commands.Cog, name="Automod"):
             if default_avatar:
                 join_points += JOIN_GATE_DEFAULT_AVATAR_POINTS
                 join_reasons.append("avatar par défaut")
-            fast_count = self.join_tracker.ajouter(member.guild.id)
-            slow_count = self.slow_join_tracker.ajouter(member.guild.id)
             if fast_count >= max(3, RAID_JOIN_THRESHOLD // 2):
                 join_points += 25
                 join_reasons.append(f"arrivées rapides {fast_count}/{RAID_JOIN_WINDOW}s")
@@ -2324,8 +2351,8 @@ class AutoMod(commands.Cog, name="Automod"):
                 return
 
         if conf["antiraid"]:
-            arrivees = self.join_tracker.ajouter(member.guild.id)
-            arrivees_lentes = self.slow_join_tracker.ajouter(member.guild.id)
+            arrivees = fast_count
+            arrivees_lentes = slow_count
             raid_rapide = arrivees >= RAID_JOIN_THRESHOLD
             raid_lent = arrivees_lentes >= RAID_SLOW_THRESHOLD
             if raid_rapide or raid_lent:
@@ -2465,12 +2492,13 @@ class AutoMod(commands.Cog, name="Automod"):
         signal: str,
         points: int,
         punish: bool = True,
-    ) -> None:
+    ) -> bool:
         if await self.is_antinuke_exempt(guild, actor):
-            return
+            return False
         await self.add_risk_signal(guild, actor.id, signal, points, reason=reason, target=actor)
         if punish and await self.record_nuke_action(guild, actor.id):
             await self.punish_nuker(guild, actor.id, reason)
+        return True
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
@@ -2482,13 +2510,15 @@ class AutoMod(commands.Cog, name="Automod"):
         if not conf or not conf.get("security_vanity"):
             return
         actor = await self.get_audit_actor(after, discord.AuditLogAction.guild_update)
-        await self._handle_security_actor(
+        suspicious = await self._handle_security_actor(
             after,
             actor=actor,
             reason="Modification suspecte du vanity URL",
             signal="vanity_update",
             points=80,
         )
+        if not suspicious:
+            return
         if before_code and before_code != after_code:
             try:
                 await after.edit(vanity_code=before_code, reason="SentriX vanity guard : restauration du vanity URL")
@@ -2552,13 +2582,15 @@ class AutoMod(commands.Cog, name="Automod"):
         if not dangerous:
             return
         actor = await self.get_audit_actor(role.guild, discord.AuditLogAction.role_create, role.id)
-        await self._handle_security_actor(
+        suspicious = await self._handle_security_actor(
             role.guild,
             actor=actor,
             reason="Création d'un rôle avec permissions dangereuses",
             signal="dangerous_role_create",
             points=55,
         )
+        if not suspicious:
+            return
         try:
             await role.edit(permissions=discord.Permissions.none(), reason="SentriX permission guard : permissions dangereuses retirées")
             action = "Permissions retirées"
