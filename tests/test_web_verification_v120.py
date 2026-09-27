@@ -150,3 +150,20 @@ def test_web_completion_runs_adaptive_security_before_role_grant():
     assert scan_at < grant_at
     assert "security_review" in complete
     assert "_clear_failures" in complete
+
+
+def test_no_legacy_discord_challenge_can_grant_verification_anymore():
+    start = HONEYPOT_SOURCE.index("async def start_human_verification")
+    complete = HONEYPOT_SOURCE.index("async def complete_human_challenge")
+    start_chunk = HONEYPOT_SOURCE[start:complete]
+    assert "verification_url" in start_chunk
+    assert "VerificationSequenceView(" not in start_chunk
+
+    complete_end = HONEYPOT_SOURCE.index("@commands.Cog.listener()", complete)
+    complete_chunk = HONEYPOT_SOURCE[complete:complete_end]
+    redirect_at = complete_chunk.index("verification_url")
+    legacy_grant = complete_chunk.find("member.add_roles", redirect_at)
+    # Any historical role-grant code is unreachable after the mandatory early return.
+    return_at = complete_chunk.index("return await interaction.response.send_message", redirect_at)
+    assert return_at >= 0
+    assert legacy_grant == -1 or return_at < legacy_grant
