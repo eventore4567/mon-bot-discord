@@ -255,8 +255,10 @@ class VerificationSetupView(discord.ui.View):
             f"Vérification : {verify.mention if verify else '**non publiée**'}\n"
             f"Honeypot : {trap.mention if trap else '**non publié**'}\n"
             f"Sanction du piège : **{sanction}**\n\n"
-            "Activer / réparer recrée les rôles ou salons manquants et republie les panneaux "
-            "dans verification et stay-muted."
+            "Ce système est séparé du règlement. Les membres doivent d'abord accepter les règles, "
+            "puis réussir ce challenge.\n\n"
+            "Activer / réparer peut créer les rôles/salons manquants uniquement après ton clic. "
+            "Au démarrage, SentriX ne crée plus de nouveaux salons automatiquement."
         )
         return discord.Embed(
             title="Vérification & Honeypot",
@@ -267,7 +269,7 @@ class VerificationSetupView(discord.ui.View):
 
 def _extend_guided_catalogue() -> None:
     keys = list(guided.HOME_MODULE_KEYS)
-    for key in ("verification", "roles", "invitations", "profile"):
+    for key in ("verification", "roles", "invitations", "rules", "profile"):
         if key not in keys:
             if key == "invitations" and "logs" in keys:
                 keys.insert(keys.index("logs") + 1, key)
@@ -298,6 +300,15 @@ def _extend_guided_catalogue() -> None:
         ),
     )
 
+    guided.GUIDED_SECTIONS["rules"] = (
+        guided._s(
+            "panel",
+            "Panneau du règlement",
+            "Écris les règles, choisis le salon et publie le panneau d'acceptation.",
+            "internal:rules",
+        ),
+    )
+
     members = list(guided.GUIDED_SECTIONS.get("members", ()))
     if not any(section.key == "verification_portal" for section in members):
         members.append(
@@ -306,6 +317,14 @@ def _extend_guided_catalogue() -> None:
                 "Portail de vérification",
                 "Active ou répare verification et stay-muted avec leurs panneaux SentriX.",
                 "internal:verification",
+            )
+        )
+        members.append(
+            guided._s(
+                "rules",
+                "Règlement",
+                "Configure le texte, le salon et l'acceptation des règles avant la vérification.",
+                "internal:rules",
             )
         )
         guided.GUIDED_SECTIONS["members"] = tuple(members)
@@ -331,6 +350,9 @@ def _patch_v116_action() -> None:
             return await interaction.response.send_message(
                 embed=await subview.build_embed(), view=subview, ephemeral=True
             )
+        if action == "internal:rules":
+            from cogs.verify_setup_interactive_v78 import open_setup_interaction
+            return await open_setup_interaction(interaction)
         return await current(view, interaction)
 
     run_action_v118._sentrix_v118 = True
@@ -354,6 +376,9 @@ def _patch_internal_open() -> None:
             return await interaction.response.send_message(
                 embed=await subview.build_embed(), view=subview, ephemeral=True
             )
+        if name == "rules":
+            from cogs.verify_setup_interactive_v78 import open_setup_interaction
+            return await open_setup_interaction(interaction)
         return await current(view, interaction, name)
 
     open_internal_v118._sentrix_v118 = True
