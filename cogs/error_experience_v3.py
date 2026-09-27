@@ -135,7 +135,7 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
             text = f"Commande introuvable. Essayez {rendered}."
         else:
             text = "Commande introuvable. Utilisez `/help` pour voir les commandes disponibles."
-        await _send_plain(ctx, text, delete_after=8)
+        await _send_plain(ctx, text, delete_after=2)
         return True
 
     if isinstance(base, commands.MissingRequiredArgument):
