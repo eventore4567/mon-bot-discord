@@ -4,7 +4,8 @@ const PAGES = {
   overview: renderOverview, welcome: renderWelcome, levels: renderLevels, economy: renderEconomy, games: renderGames, music: renderMusic, roles: renderRoles,
   moderation: renderSanctions, security: renderSecurity, logs: renderLogs, tickets: renderTickets, notifications: renderNotifications, automation: renderAutomation,
   settings: renderSettings, access: renderAccess, embeds: renderEmbeds, ai: renderAI, invites: renderInvites, backups: renderBackups,
-  dm: renderDM, advanced: renderAdvanced, diagnostic: renderDiagnostic,
+  dm: renderDM, advanced: renderAdvanced, diagnostic: renderGuidanceDiagnostic,
+  onboarding: renderGuidanceOnboarding, feedback: renderGuidanceFeedback,
 };
 const GLOBAL_PAGES = new Set(['profile', 'servers', 'preferences']);
 let renderToken = 0;
