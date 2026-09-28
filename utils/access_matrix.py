@@ -68,6 +68,13 @@ PUBLIC_COMMANDS = frozenset({
     "ticket", "giveaway-list", "giveaway", "event-join", "event-leave",
     "event-list", "tournament-join", "tournament-list", "invites",
     "invite-leaderboard", "invited-by",
+    # Statistiques d'invitation en lecture seule. Elles n'ont aucun check dans
+    # cogs/invites.py : leur auteur les a voulues publiques, comme
+    # invite-leaderboard et invited-by juste au-dessus. Sans classement elles
+    # tombaient en fail-closed — refusées à tout le monde, y compris au staff.
+    "invite-codes", "invite-history", "invite-info", "invite-rank",
+    "invite-retention", "invite-search", "invite-sources", "invite-stats",
+    "invited-list",
     # Statistiques publiques
     "bot-status", "server-growth", "command-stats", "latency", "changelog",
     "feedback", "botinfo",
@@ -257,6 +264,10 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
 
 CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     "configuration": frozenset({
+        # Actions d'invitation réservées : elles écrivent ou effacent des
+        # données. Chacune porte is_owner_or_admin_for("configuration") dans
+        # cogs/invites.py.
+        "invite-label", "invite-unlabel", "reset-invites", "sync-invites",
         # Classees explicitement : elles tombaient en fail-closed, donc admin
         # par accident plutot que par declaration.
         "server-managed", "verification", "verification-review", "verification-calibration",
@@ -311,6 +322,11 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         # Anciennement fail-closed par oubli
         "security", "antigif", "antinuke-config", "backup-now", "incidents",
         "nukewhitelist", "serversnapshot",
+        # Interrupteurs des protections ajoutées avec le lot sécurité : chacune
+        # porte déjà @checks.is_owner_or_admin_for("securite") dans
+        # cogs/automod.py. On classe donc au niveau que l'auteur a choisi.
+        "antibot-allow", "antibot-deny", "join-gate", "permission-guard",
+        "prune-guard", "risk-engine", "vanity-guard",
     }),
     "economie": frozenset({
         "shopsetup", "shoppanel", "shoprole", "give-money", "reset-economy",

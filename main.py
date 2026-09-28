@@ -168,6 +168,15 @@ PUBLIC_COMMANDS = frozenset({
     # +leaderboard celui vers leaderboard-levels : deux racines en lecture seule
     # dont les cibles sont deja publiques, mais qui n'avaient jamais ete classees.
     "serverinfo",
+    # Statistiques d'invitation en lecture seule, sans aucun check dans
+    # cogs/invites.py : leur auteur les a voulues publiques. Elles doivent être
+    # listées ICI *aussi* — main.PUBLIC_COMMANDS et
+    # utils/access_matrix.PUBLIC_COMMANDS sont deux listes distinctes qui
+    # doivent rester d'accord, et c'est exactement cet écart qui les avait
+    # laissées en fail-closed.
+    "invite-codes", "invite-history", "invite-info", "invite-rank",
+    "invite-retention", "invite-search", "invite-sources", "invite-stats",
+    "invited-list",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
     "report-bug", "afk", "roll", "choose",

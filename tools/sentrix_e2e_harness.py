@@ -397,8 +397,23 @@ def next_id() -> int:
     return STATE["cmd_seq"]
 
 
+# Rôles par défaut DÉDUITS de l'auteur. Avant, build_message imposait
+# author_roles=(ADMIN_ROLE_ID,) quel que soit author_id : passer author_id=SECOND_ID
+# (un simple membre) produisait quand même un administrateur, et tout test de
+# permission écrit avec ce défaut validait silencieusement le mauvais persona.
+# Je m'y suis laissé prendre : j'ai cru avoir trouvé un trou permettant à un
+# membre de bannir, alors que mon « membre » avait le rôle Admin.
+ROLES_PAR_PERSONA = {
+    AUTHOR_ID: (ADMIN_ROLE_ID,),
+    ADMIN_ID: (ADMIN_ROLE_ID,),
+    MOD_ID: (MOD_ROLE_ID,),
+    TARGET_ID: (MEMBER_ROLE_ID,),
+    SECOND_ID: (MEMBER_ROLE_ID,),
+}
+
+
 def build_message(bot, guild, content: str, *, author_id: int = AUTHOR_ID, author_name: str = "jayden",
-                  author_roles=(ADMIN_ROLE_ID,)) -> discord.Message:
+                  author_roles=None) -> discord.Message:
     channel = guild.get_channel(CID)
     mentions = [user(int(x), "cible") for x in re.findall(r"<@!?(\d+)>", content)]
     mid = next_id()
@@ -407,6 +422,10 @@ def build_message(bot, guild, content: str, *, author_id: int = AUTHOR_ID, autho
     STATE["last_cmd_content"] = content
     data["mentions"] = [dict(u, member=member_payload(int(u["id"]), u["username"], [MEMBER_ROLE_ID])) for u in mentions]
     data["mention_roles"] = re.findall(r"<@&(\d+)>", content)
+    if author_roles is None:
+        # Un persona inconnu n'hérite de rien : sans cette règle, un identifiant
+        # de test arbitraire deviendrait administrateur sans le dire.
+        author_roles = ROLES_PAR_PERSONA.get(int(author_id), (MEMBER_ROLE_ID,))
     data["member"] = member_payload(author_id, author_name, list(author_roles))
     return discord.Message(state=bot._connection, channel=channel, data=data)
 
