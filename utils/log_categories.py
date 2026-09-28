@@ -68,6 +68,8 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "ticket_close": ("tickets", "🔒", "special"),
     "ticket_claim": ("tickets", "🙋", "info"),
     "automod_link": ("automod", "🔗", "error"),
+    "automod_invite": ("automod", "🔗", "security"),
+    "automod_scam": ("automod", "🛡️", "security"),
     "automod_word": ("automod", "🛑", "error"),
     "automod_mention": ("automod", "📣", "error"),
     "automod_spam": ("spam", "🚫", "error"),
