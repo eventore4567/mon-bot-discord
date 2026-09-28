@@ -115,10 +115,78 @@ def _normalize_link_text(content: str) -> str:
     value = re.sub(r"(?<!\s)(?=(?:https?|hxxps?)://)", " ", value, flags=re.IGNORECASE)
     return value.strip()
 SCAM_KEYWORDS = [
-    "free nitro", "nitro gratuit", "steamcommunity", "airdrop gratuit", "crypto giveaway",
-    "discord nitro free", "gagnez des nitro", "claim your nitro", "gift nitro free",
-    "double your crypto", "investissement garanti", "steam gift free",
+    "free nitro", "nitro gratuit", "discord nitro free", "free discord nitro",
+    "gagnez des nitro", "claim your nitro", "gift nitro free", "nitro giveaway",
+    "free robux", "robux gratuit", "claim robux", "robux giveaway",
+    "free vbucks", "vbucks gratuit", "claim vbucks",
+    "airdrop gratuit", "crypto giveaway", "double your crypto",
+    "investissement garanti", "connect your wallet", "wallet verification",
+    "steam gift free", "free steam gift",
 ]
+
+# Détection locale plus robuste que la simple liste de mots-clés. Elle reste
+# volontairement conservative : un domaine officiel n'est jamais déclaré frauduleux
+# uniquement parce qu'il contient "discord", "roblox" ou "steam".
+_SCAM_TRUSTED_DOMAINS = (
+    "discord.com", "discord.gg", "discordapp.com",
+    "roblox.com",
+    "steamcommunity.com", "steampowered.com",
+    "epicgames.com",
+)
+_SCAM_BRANDS = ("discord", "nitro", "roblox", "robux", "steam", "vbucks", "crypto", "wallet")
+_SCAM_LURES = ("free", "gift", "claim", "bonus", "verify", "airdrop", "giveaway", "reward")
+
+
+def _iter_link_hosts(content: str):
+    normalized = _normalize_link_text(content)
+    for match in LINK_RE.finditer(normalized):
+        raw = str(match.group(0) or "").strip("<>()[]{}.,;!?").casefold()
+        raw = re.sub(r"^(?:https?|hxxps?)://", "", raw, flags=re.IGNORECASE)
+        raw = raw.split("/", 1)[0]
+        raw = raw.rsplit("@", 1)[-1]
+        raw = raw.split(":", 1)[0].strip(".")
+        if raw.startswith("www."):
+            raw = raw[4:]
+        if raw:
+            yield raw
+
+
+def _trusted_scam_host(host: str) -> bool:
+    host = str(host or "").casefold().strip(".")
+    return any(host == domain or host.endswith("." + domain) for domain in _SCAM_TRUSTED_DOMAINS)
+
+
+def _scam_hit(content: str) -> str | None:
+    """Détecte une arnaque sans bloquer les domaines officiels par simple ressemblance.
+
+    1) phrases d'arnaque connues avec la normalisation anti-obfuscation SentriX ;
+    2) domaines non officiels combinant une marque et un appât classique ;
+    3) message avec lien + combinaison marque/appât.
+    """
+    motif = text_normalization.contient(content, SCAM_KEYWORDS)
+    if motif:
+        return motif
+
+    hosts = list(_iter_link_hosts(content))
+    for host in hosts:
+        if _trusted_scam_host(host):
+            continue
+        compact = re.sub(r"[^a-z0-9]", "", host)
+        if any(brand in compact for brand in _SCAM_BRANDS) and any(
+            lure in compact for lure in _SCAM_LURES
+        ):
+            return f"domaine suspect: {host[:80]}"
+        # Typosquats Steam très fréquents : steamcomrnunity / steamcommunnity, etc.
+        if re.search(r"steamcom(?:rn|nn|m)unity", compact):
+            return f"faux domaine Steam: {host[:80]}"
+
+    if hosts:
+        normalized = text_normalization.normaliser(content)
+        brand_hit = any(text_normalization.normaliser(x) in normalized for x in _SCAM_BRANDS)
+        lure_hit = any(text_normalization.normaliser(x) in normalized for x in _SCAM_LURES)
+        if brand_hit and lure_hit:
+            return "lien + promesse de cadeau/validation suspecte"
+    return None
 
 # Règle Discord AutoMod native créée par SentriX lorsque l'anti-liens est actif.
 # Les motifs sont volontairement compatibles avec le moteur Rust Regex de Discord :
@@ -141,6 +209,8 @@ NATIVE_HARMFUL_CUSTOM_MESSAGE = "Ce contenu est bloqué par la modération du se
 NATIVE_INVITE_REGEX_PATTERNS = (
     r"(?i)\bdiscord\.gg/[^\s<]+",
     r"(?i)\bdiscord(?:app)?\.com/invite/[^\s<]+",
+    r"(?i)\b(?:dsc\.gg|invite\.gg|discord\.me|discord\.io|discord\.link)/[^\s<]+",
+    r"(?i)\bdisboard\.org/server/join/[^\s<]+",
 )
 NATIVE_ANTILINK_REGEX_PATTERNS = (
     r"(?i)\b(?:https?|hxxps?)://[^\s<]+",
@@ -272,6 +342,13 @@ def _censor_scam(content: str) -> str | None:
             flags=re.IGNORECASE,
         )
         count += hits
+
+    # Si la détection vient d'un domaine suspect plutôt que d'une phrase exacte,
+    # on masque quand même l'URL avant tout éventuel repost webhook.
+    masked_links = _censor_links(redacted)
+    if masked_links is not None:
+        redacted = masked_links
+        count += 1
     return redacted if count else None
 
 
@@ -846,10 +923,15 @@ class AutoMod(commands.Cog, name="Automod"):
         # Serveur neuf : réconcilie toutes les protections natives utiles.
         await self._sync_native_suite(guild)
 
-    async def log_action(self, guild: discord.Guild, embed: discord.Embed):
-        # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
-        # retombe sur le salon de logs général — jamais de log perdu.
-        await helpers.send_log(self.bot, guild, "automod", embed)
+    async def log_action(
+        self,
+        guild: discord.Guild,
+        embed: discord.Embed,
+        log_type: str = "automod",
+    ):
+        # Le type d'événement pilote aussi la bannière. Anti-scam et anti-invitation
+        # utilisent ainsi la bannière Sécurité au lieu d'un bandeau générique.
+        await helpers.send_log(self.bot, guild, log_type, embed)
 
     # ---------------------------------------------------------------- CACHES
 
@@ -1732,7 +1814,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # Comparaison tolérante aux obfuscations : avant, sept variantes sur huit
         # de la même arnaque passaient — majuscules, leet, gras mathématique ou
         # une lettre cyrillique suffisaient (voir utils/text_normalization).
-        motif_scam = text_normalization.contient(message.content, SCAM_KEYWORDS) if conf["antiscam"] else None
+        motif_scam = _scam_hit(message.content) if conf["antiscam"] else None
         if motif_scam:
             return await self._delete_and_warn(
                 message,
@@ -2042,7 +2124,14 @@ class AutoMod(commands.Cog, name="Automod"):
             if incident.infractions:
                 extra["🔢 Infractions (1h)"] = str(incident.infractions)
             e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
-            await self.log_action(guild, e)
+            event_type = {
+                "antiscam": "automod_scam",
+                "antiinvite": "automod_invite",
+                "antilink": "automod_link",
+                "blacklist_link": "automod_link",
+                "blacklist_word_link": "automod_link",
+            }.get(incident.filter_name, "automod")
+            await self.log_action(guild, e, event_type)
         except Exception:
             logger.exception(
                 "Journal AutoMod impossible guild=%s user=%s filtre=%s",
