@@ -209,63 +209,119 @@ def _encode_static_emoji(data: bytes) -> bytes:
     raise ValueError("L'image reste trop lourde après conversion en PNG 128 × 128.")
 
 
+def _gif_palette_frame(canvas: Image.Image, colors: int) -> Image.Image:
+    """Convertit une frame RGBA complète vers GIF sans perdre les zones transparentes.
+
+    Un index de palette est réservé à la transparence. Cela évite les GIF partiellement
+    effacés/coupés que Pillow peut produire quand une frame delta est quantifiée seule.
+    """
+    rgba = canvas.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    rgb = Image.new("RGB", rgba.size, (0, 0, 0))
+    rgb.paste(rgba.convert("RGB"), mask=alpha)
+    indexed = rgb.quantize(
+        colors=max(2, min(int(colors), 255)),
+        method=Image.Quantize.MEDIANCUT,
+        dither=Image.Dither.NONE,
+    )
+    palette = list(indexed.getpalette() or [])
+    if len(palette) < 768:
+        indexed.putpalette(palette + [0] * (768 - len(palette)))
+    transparent = alpha.point(lambda value: 255 if value <= 8 else 0)
+    indexed.paste(255, mask=transparent)
+    indexed.info["transparency"] = 255
+    return indexed
+
+
+def _animated_source_frames(data: bytes, size: int) -> tuple[list[Image.Image], list[int], int]:
+    """Lit séquentiellement le GIF pour obtenir des frames COMPLÈTES et leur timing réel."""
+    try:
+        with Image.open(io.BytesIO(data)) as source:
+            frame_count = int(getattr(source, "n_frames", 1) or 1)
+            if frame_count <= 1:
+                raise ValueError("Le GIF ne contient pas plusieurs images.")
+            if frame_count > 400:
+                raise ValueError("Le GIF contient trop d'images pour un emoji Discord.")
+            if source.width * source.height > 16_777_216:
+                raise ValueError("Le GIF source est trop grand pour être traité.")
+
+            loop = int(source.info.get("loop", 0) or 0)
+            default_duration = max(20, int(source.info.get("duration", 100) or 100))
+            frames: list[Image.Image] = []
+            durations: list[int] = []
+
+            # seek() dans l'ordre force Pillow à appliquer correctement les rectangles
+            # partiels et les méthodes de disposal du GIF source avant conversion RGBA.
+            for index in range(frame_count):
+                source.seek(index)
+                duration = int(source.info.get("duration", default_duration) or default_duration)
+                durations.append(max(20, min(10_000, duration)))
+                frames.append(_emoji_canvas(source.convert("RGBA").copy(), size))
+    except (UnidentifiedImageError, OSError, EOFError) as exc:
+        raise ValueError("Impossible de décoder ce GIF animé.") from exc
+
+    return frames, durations, loop
+
+
+def _sample_animation(
+    frames: list[Image.Image],
+    durations: list[int],
+    frame_step: int,
+) -> tuple[list[Image.Image], list[int]]:
+    """Réduit le nombre de frames SANS accélérer l'animation.
+
+    La durée des frames supprimées est ajoutée à la frame conservée précédente. Le temps
+    total d'une boucle reste donc identique au GIF original, même avec des durées variables.
+    """
+    step = max(1, int(frame_step))
+    if step == 1:
+        return list(frames), list(durations)
+
+    kept_frames: list[Image.Image] = []
+    kept_durations: list[int] = []
+    for start in range(0, len(frames), step):
+        kept_frames.append(frames[start])
+        kept_durations.append(sum(durations[start:start + step]))
+    return kept_frames, kept_durations
+
+
 def _encode_animated_emoji(data: bytes) -> bytes:
-    # Plusieurs niveaux sont essayés : l'animation est conservée, puis réduite
-    # progressivement uniquement si elle dépasse encore la limite Discord.
+    # Priorité à la fidélité : on réduit d'abord palette/dimensions et on ne retire
+    # des frames qu'en dernier recours. Le timing d'origine est toujours conservé.
     strategies = [
-        (128, 256, 1),
+        (128, 255, 1),
         (112, 192, 1),
         (96, 128, 1),
-        (80, 96, 2),
+        (80, 96, 1),
+        (72, 80, 2),
         (64, 64, 2),
+        (56, 48, 3),
     ]
     last_size = 0
     for size, colors, frame_step in strategies:
-        try:
-            with Image.open(io.BytesIO(data)) as source:
-                frame_count = getattr(source, "n_frames", 1)
-                if frame_count <= 1:
-                    raise ValueError("Le GIF ne contient pas plusieurs images.")
-                if frame_count > 400:
-                    raise ValueError("Le GIF contient trop d'images pour un emoji Discord.")
-                if source.width * source.height > 16_777_216:
-                    raise ValueError("Le GIF source est trop grand pour être traité.")
-                default_duration = max(20, int(source.info.get("duration", 100) or 100))
-                loop = int(source.info.get("loop", 0) or 0)
-                frames: list[Image.Image] = []
-                durations: list[int] = []
-                for index, frame in enumerate(ImageSequence.Iterator(source)):
-                    if index % frame_step:
-                        continue
-                    canvas = _emoji_canvas(frame, size)
-                    indexed = canvas.quantize(
-                        colors=colors,
-                        method=Image.Quantize.FASTOCTREE,
-                        dither=Image.Dither.NONE,
-                    )
-                    frames.append(indexed)
-                    duration = int(frame.info.get("duration", default_duration) or default_duration)
-                    durations.append(max(20, min(1000, duration * frame_step)))
-        except (UnidentifiedImageError, OSError) as exc:
-            raise ValueError("Impossible de décoder ce GIF animé.") from exc
-
+        frames, durations, loop = _animated_source_frames(data, size)
+        frames, durations = _sample_animation(frames, durations, frame_step)
         if len(frames) <= 1:
             raise ValueError("Le GIF ne contient pas assez d'images pour rester animé.")
+
+        palette_frames = [_gif_palette_frame(frame, colors) for frame in frames]
         output = io.BytesIO()
-        frames[0].save(
+        palette_frames[0].save(
             output,
             format="GIF",
             save_all=True,
-            append_images=frames[1:],
+            append_images=palette_frames[1:],
             duration=durations,
             loop=loop,
             disposal=2,
-            optimize=True,
+            transparency=255,
+            optimize=False,
         )
         encoded = output.getvalue()
         last_size = len(encoded)
         if len(encoded) <= MAX_EMOJI_BYTES:
             return encoded
+
     raise ValueError(
         f"Le GIF reste trop lourd après optimisation ({last_size // 1024} Ko). "
         "Utilisez une animation plus courte."
