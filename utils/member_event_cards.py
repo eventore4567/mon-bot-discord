@@ -2,13 +2,10 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 import discord
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_BACKGROUND = _ROOT / "assets" / "sentrix" / "card-background-v5.png"
 _SIZE = (1200, 420)
 
 
@@ -26,15 +23,48 @@ def _font(size: int, *, bold: bool = False):
     return ImageFont.load_default()
 
 
-def _background() -> Image.Image:
-    if _DEFAULT_BACKGROUND.exists():
-        with Image.open(_DEFAULT_BACKGROUND) as source:
-            bg = ImageOps.fit(source.convert("RGB"), _SIZE, method=Image.Resampling.LANCZOS)
-            return ImageEnhance.Contrast(bg).enhance(1.06)
-    return Image.new("RGB", _SIZE, (18, 20, 28))
+def _background(kind: str) -> Image.Image:
+    """Fond toujours visible, généré localement : aucun asset externe requis."""
+    width, height = _SIZE
+    goodbye = str(kind).casefold() == "goodbye"
+
+    top = (74, 31, 103) if goodbye else (46, 38, 126)
+    bottom = (16, 18, 37) if goodbye else (10, 24, 59)
+    image = Image.new("RGB", _SIZE)
+    pixels = image.load()
+
+    for y in range(height):
+        t = y / max(1, height - 1)
+        for x in range(width):
+            center_glow = 1.0 - min(1.0, abs(x - width * 0.58) / (width * 0.58))
+            r = int(top[0] * (1 - t) + bottom[0] * t + 20 * center_glow)
+            g = int(top[1] * (1 - t) + bottom[1] * t + 12 * center_glow)
+            b = int(top[2] * (1 - t) + bottom[2] * t + 38 * center_glow)
+            pixels[x, y] = (min(r, 255), min(g, 255), min(b, 255))
+
+    glow = Image.new("RGBA", _SIZE, (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    accent = (236, 76, 146, 125) if goodbye else (130, 92, 255, 140)
+    gd.ellipse((670, -180, 1320, 470), fill=accent)
+    gd.ellipse((-260, 180, 380, 700), fill=(58, 176, 255, 90))
+    glow = glow.filter(ImageFilter.GaussianBlur(86))
+    image = Image.alpha_composite(image.convert("RGBA"), glow)
+
+    lines = Image.new("RGBA", _SIZE, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(lines)
+    for x in range(-350, 1500, 150):
+        ld.line((x, height, x + 430, 0), fill=(255, 255, 255, 22), width=2)
+
+    return Image.alpha_composite(image, lines).convert("RGB")
 
 
-def _fit_text(draw: ImageDraw.ImageDraw, text: str, max_width: int, start_size: int, min_size: int = 30):
+def _fit_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    max_width: int,
+    start_size: int,
+    min_size: int = 30,
+):
     size = start_size
     while size > min_size:
         font = _font(size, bold=True)
@@ -46,41 +76,71 @@ def _fit_text(draw: ImageDraw.ImageDraw, text: str, max_width: int, start_size: 
 
 
 def build_member_event_card(member: discord.Member, *, kind: str) -> discord.File:
-    """Construit une carte 1200×420 avec texte dynamique, sans requête réseau."""
-    image = _background().convert("RGBA")
-    overlay = Image.new("RGBA", image.size, (7, 9, 15, 122))
-    image = Image.alpha_composite(image, overlay)
-
+    """Construit une carte 1200×420 avec fond, texte et identité dynamique."""
+    image = _background(kind).convert("RGBA")
     draw = ImageDraw.Draw(image)
-    name = (getattr(member, "display_name", None) or getattr(member, "name", None) or "Membre").strip()
-    server = (getattr(getattr(member, "guild", None), "name", None) or "le serveur").strip()
+
+    name = (
+        getattr(member, "display_name", None)
+        or getattr(member, "name", None)
+        or "Membre"
+    ).strip()
+    server = (
+        getattr(getattr(member, "guild", None), "name", None)
+        or "le serveur"
+    ).strip()
 
     if str(kind).casefold() == "goodbye":
         title = f"Au revoir {name}"
-        subtitle = f"Merci d'avoir fait partie de {server}."
+        subtitle = f"Merci d’avoir fait partie de {server}."
         filename = "sentrix_goodbye.png"
     else:
         title = f"Bienvenue {name}"
-        subtitle = f"Heureux de t'accueillir sur {server}."
+        subtitle = f"Heureux de t’accueillir sur {server}."
         filename = "sentrix_welcome.png"
 
     title_font = _fit_text(draw, title, 1040, 66)
-    subtitle_font = _font(32, bold=False)
+    subtitle_font = _fit_text(draw, subtitle, 980, 34, 24)
     brand_font = _font(24, bold=True)
 
     title_box = draw.textbbox((0, 0), title, font=title_font)
-    title_w = title_box[2] - title_box[0]
     subtitle_box = draw.textbbox((0, 0), subtitle, font=subtitle_font)
-    subtitle_w = subtitle_box[2] - subtitle_box[0]
 
-    draw.rounded_rectangle((55, 55, 1145, 365), radius=34, fill=(11, 13, 21, 150), outline=(255, 255, 255, 32), width=2)
-    draw.text(((1200 - title_w) / 2, 132), title, font=title_font, fill=(255, 255, 255, 255))
-    draw.text(((1200 - subtitle_w) / 2, 225), subtitle, font=subtitle_font, fill=(219, 222, 232, 255))
+    draw.rounded_rectangle(
+        (55, 55, 1145, 365),
+        radius=34,
+        fill=(7, 10, 22, 112),
+        outline=(255, 255, 255, 52),
+        width=2,
+    )
+    draw.text(
+        ((1200 - (title_box[2] - title_box[0])) / 2, 125),
+        title,
+        font=title_font,
+        fill=(255, 255, 255, 255),
+    )
+    draw.text(
+        ((1200 - (subtitle_box[2] - subtitle_box[0])) / 2, 220),
+        subtitle,
+        font=subtitle_font,
+        fill=(225, 229, 241, 255),
+    )
 
-    count = int(getattr(getattr(member, "guild", None), "member_count", 0) or 0)
-    brand = f"SentriX  •  {count} membre{'s' if count > 1 else ''}" if count else "SentriX"
+    count = int(
+        getattr(getattr(member, "guild", None), "member_count", 0) or 0
+    )
+    brand = (
+        f"SentriX  •  {count} membre{'s' if count > 1 else ''}"
+        if count
+        else "SentriX"
+    )
     brand_box = draw.textbbox((0, 0), brand, font=brand_font)
-    draw.text(((1200 - (brand_box[2] - brand_box[0])) / 2, 300), brand, font=brand_font, fill=(185, 176, 255, 255))
+    draw.text(
+        ((1200 - (brand_box[2] - brand_box[0])) / 2, 300),
+        brand,
+        font=brand_font,
+        fill=(199, 191, 255, 255),
+    )
 
     buffer = io.BytesIO()
     image.convert("RGB").save(buffer, format="PNG", optimize=True)
