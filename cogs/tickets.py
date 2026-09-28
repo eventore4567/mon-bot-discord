@@ -409,6 +409,15 @@ class TicketNoteModal(discord.ui.Modal, title="📝 Note interne"):
             (self.ticket_id, interaction.user.id, self.note.value, now()),
         )
         await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success('📝 Note interne enregistrée (invisible pour le membre).')), ephemere=True)
+        # Le journal enregistre QU'UNE note a été prise et par qui, jamais son
+        # contenu : une note interne est invisible du membre par construction,
+        # la recopier dans un salon de logs annulerait exactement cela.
+        await tickets_service.journaliser_evenement(
+            self.cog.bot, interaction.guild, "ticket_note",
+            ticket_id=self.ticket_id, channel=interaction.channel,
+            acteur=interaction.user,
+            extra={"✍️ Longueur": f"{len(self.note.value)} caractères"},
+        )
 
 
 class TicketRenameModal(discord.ui.Modal, title="✏️ Renommer le ticket"):
@@ -420,9 +429,51 @@ class TicketRenameModal(discord.ui.Modal, title="✏️ Renommer le ticket"):
         self.add_item(self.new_name)
 
     async def on_submit(self, interaction: discord.Interaction):
-        name = slugify_channel_name(self.new_name.value, self.channel.name)
-        await self.channel.edit(name=name)
+        ancien_nom = self.channel.name
+        name = slugify_channel_name(self.new_name.value, ancien_nom)
+        if name == ancien_nom:
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(embeds.info(f'Le salon porte déjà le nom **{name}**.')),
+                ephemere=True,
+            )
+        try:
+            await self.channel.edit(name=name)
+        except discord.Forbidden:
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(embeds.error(
+                    "SentriX n'a pas la permission **Gérer les salons** sur ce ticket."
+                )),
+                ephemere=True,
+            )
+        except discord.HTTPException as e:
+            # Discord limite les renommages de salon à 2 par 10 minutes. Le
+            # troisième attend longtemps puis échoue : sans ce message, le staff
+            # voit l'erreur générique de Discord et croit le bouton cassé.
+            logger.warning(
+                "Renommage de ticket refusé guild=%s channel=%s : %s",
+                getattr(interaction.guild, "id", None), self.channel.id, e,
+            )
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(embeds.error(
+                    "Discord a refusé le renommage. Un salon ne peut être renommé que "
+                    "**2 fois par 10 minutes** — réessayez un peu plus tard."
+                )),
+                ephemere=True,
+            )
         await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.success(f'Salon renommé en **{name}**.')), ephemere=True)
+        ticket = await self.cog.get_ticket_by_channel(self.channel.id)
+        await tickets_service.journaliser_evenement(
+            self.cog.bot, interaction.guild, "ticket_rename",
+            ticket_id=(ticket["id"] if ticket else None), channel=self.channel,
+            acteur=interaction.user,
+            # L'ancien nom doit être capturé AVANT channel.edit() : après, il
+            # n'existe plus nulle part et le journal ne pourrait dire que le
+            # nouveau, ce qui rend le renommage intraçable.
+            extra={"📛 Avant": f"`{ancien_nom}`", "🏷️ Après": f"`{name}`"},
+        )
 
 
 # =============================================================================
@@ -541,8 +592,11 @@ class TicketRatingButton(
         return cls(int(match["value"]), int(match["ticket_id"]))
 
     async def callback(self, interaction: discord.Interaction):
+        # guild_id est indispensable : ce bouton arrive en message privé, donc
+        # interaction.guild vaut None et le journal n'aurait aucun serveur où
+        # aller. Le salon du ticket, lui, est déjà supprimé à ce stade.
         ticket = await interaction.client.db.fetchone(
-            "SELECT id, user_id, status, rating FROM tickets WHERE id = ?",
+            "SELECT id, guild_id, user_id, status, rating FROM tickets WHERE id = ?",
             (self.ticket_id,),
         )
         if not ticket:
@@ -579,6 +633,15 @@ class TicketRatingButton(
             content=f"Merci pour votre note : {'⭐' * self.value}",
             view=None,
         )
+        guild = interaction.client.get_guild(int(ticket["guild_id"])) if ticket["guild_id"] else None
+        if guild is not None:
+            await tickets_service.journaliser_evenement(
+                interaction.client, guild, "ticket_rating",
+                ticket_id=self.ticket_id, acteur=interaction.user,
+                extra={"⭐ Note": f"{'⭐' * self.value} ({self.value}/5)"},
+                # Le salon est supprimé depuis longtemps quand la note arrive.
+                avec_bouton=False,
+            )
 
 
 class RatingView(discord.ui.View):
@@ -1160,18 +1223,29 @@ class Tickets(commands.Cog):
 
         ticket_extra = {
             "📂 Type": ticket_type["name"],
-            "📌 Salon": channel.mention,
             "🔢 Numéro": f"#{number}",
-            "🆔 Ticket": f"`{ticket_id}`",
             "🕒 Ouvert": f"<t:{int(now())}:F>",
         }
         if staff_role:
             ticket_extra["👥 Rôle support"] = staff_role.mention
-        log_e = embeds.log_entry(
-            "🎫 Ticket ouvert", 0x5865F2, cible=user,
+        # Passe par la primitive plutôt que par log_action : l'ouverture gagne
+        # ainsi sa ligne d'audit, sa référence citable et le bouton « Voir le
+        # ticket ». Le titre était « 🎫 Ticket ouvert » et ne tombait juste que
+        # par le repli de l'ancienne heuristique — « ferm » n'y figure pas. Le
+        # type est explicite maintenant.
+        #
+        # « 📌 Salon » et « 🆔 Ticket » sont retirés d'ici : la primitive les
+        # pose elle-même, à l'identique pour les quatorze événements. Les laisser
+        # les aurait dupliqués dans l'embed.
+        await tickets_service.journaliser_evenement(
+            self.bot, guild, "ticket_open",
+            ticket_id=ticket_id, channel=channel,
+            # Pas de `cible` : sur une ouverture, l'auteur EST le membre
+            # concerné, et le renseigner deux fois afficherait la même personne
+            # sur deux champs côte à côte.
+            acteur=user,
             extra=ticket_extra,
         )
-        await self.log_action(guild, log_e, ticket_type["log_channel_id"])
 
     # ---------------------------------------------------------------- BOUTONS STAFF
 
@@ -1297,6 +1371,14 @@ class Tickets(commands.Cog):
             member = select.values[0]
             await inter.channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
             await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'➕ {member.mention} a été ajouté au ticket.')))
+            # Journalisé APRÈS le succès, jamais avant : un ajout de membre dans
+            # un salon privé est précisément ce qu'un audit doit pouvoir
+            # reconstituer, et journaliser une tentative échouée le brouillerait.
+            await tickets_service.journaliser_evenement(
+                self.bot, inter.guild, "ticket_member_add",
+                ticket_id=ticket["id"], channel=inter.channel,
+                acteur=inter.user, cible=member,
+            )
 
         select.callback = cb
         view.add_item(select)
@@ -1312,6 +1394,11 @@ class Tickets(commands.Cog):
                 return await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.error('Impossible de retirer le créateur du ticket.')), ephemere=True)
             await inter.channel.set_permissions(member, overwrite=None)
             await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'➖ {member.mention} a été retiré du ticket.')))
+            await tickets_service.journaliser_evenement(
+                self.bot, inter.guild, "ticket_member_remove",
+                ticket_id=ticket["id"], channel=inter.channel,
+                acteur=inter.user, cible=member,
+            )
 
         select.callback = cb
         view.add_item(select)
@@ -1326,9 +1413,19 @@ class Tickets(commands.Cog):
 
         async def cb(inter: discord.Interaction):
             member = select.values[0]
+            ancien_id = ticket["claimed_by"]
             await self.bot.db.execute("UPDATE tickets SET claimed_by = ? WHERE id = ?", (member.id, ticket["id"]))
             await inter.channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
             await sx_panels.envoyer(inter.response, sx_panels.depuis_embed(embeds.success(f'🔀 Ticket transféré à {member.mention}.')))
+            ancien = inter.guild.get_member(int(ancien_id)) if ancien_id else None
+            await tickets_service.journaliser_evenement(
+                self.bot, inter.guild, "ticket_transfer",
+                ticket_id=ticket["id"], channel=inter.channel,
+                acteur=inter.user, cible=member,
+                # Qui perd la charge est l'information la plus utile d'un
+                # transfert ; sans elle le journal dit seulement qui l'a reçue.
+                extra={"↩️ Précédemment en charge": (ancien.mention if ancien else "personne")},
+            )
 
         select.callback = cb
         view.add_item(select)
@@ -1340,6 +1437,11 @@ class Tickets(commands.Cog):
     async def btn_bump(self, interaction: discord.Interaction, ticket):
         owner = interaction.guild.get_member(ticket["user_id"])
         await interaction.response.send_message(f"🔔 {owner.mention if owner else 'Utilisateur'}, rappel : nous attendons votre réponse sur ce ticket.")
+        await tickets_service.journaliser_evenement(
+            self.bot, interaction.guild, "ticket_bump",
+            ticket_id=ticket["id"], channel=interaction.channel,
+            acteur=interaction.user, cible=owner,
+        )
 
     async def btn_close(self, interaction: discord.Interaction, ticket):
         await interaction.response.send_modal(CloseReasonModal(self, ticket["id"]))
@@ -1449,6 +1551,13 @@ class Tickets(commands.Cog):
         if not current or current["status"] != "ferme":
             return  # rouvert entre-temps (+ticket-reopen), on annule la suppression
         await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (ticket_id,))
+        # ATTENTION — cette méthode est REMPLACÉE au démarrage par
+        # cogs/v17_tickets_logs.py::auto_delete_v17, qui la réimplémente avec
+        # une fenêtre de réouverture et n'appelle jamais celle-ci. Mesuré sur le
+        # bot booté le 28/09/2026 : _auto_delete pointe sur v17_tickets_logs.py.
+        # Le journal ticket_delete est donc posé LÀ-BAS, pas ici. En ajouter un
+        # ici donnerait un journal qui ne s'exécute jamais — ou, si l'ordre de
+        # chargement changeait un jour, deux journaux pour une suppression.
         try:
             await channel.delete(reason="Ticket fermé : suppression automatique.")
         except discord.HTTPException:
@@ -1477,8 +1586,18 @@ class Tickets(commands.Cog):
             await self.bot.db.execute("UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 WHERE id = ?", (now(), row["id"]))
             transcript = await self.generate_transcript(channel)
             await sx_panels.envoyer(channel, sx_panels.depuis_embed(embeds.warning('🔒 Ticket fermé automatiquement pour inactivité.')), file=transcript)
-            e = embeds.log_entry("🔒 Fermeture automatique (inactivité)", 0xFEE75C, extra={"📌 Salon": channel.name})
-            await self.log_action(guild, e, row["log_channel_id"])
+            # Événement PROPRE : ticket_autoclose, pas ticket_close. Ces deux
+            # lignes passaient par log_action, dont le classement était
+            # « "ferm" in title » — une fermeture automatique par inactivité
+            # arrivait donc dans le journal indistinguable d'une fermeture
+            # décidée par un humain, sans acteur et sans durée d'inactivité.
+            await tickets_service.journaliser_evenement(
+                self.bot, guild, "ticket_autoclose",
+                ticket_id=row["id"], channel=channel,
+                cible=guild.get_member(int(row["user_id"])) if row["user_id"] else None,
+                raison=f"Aucune activité depuis {helpers.format_duration(int(elapsed))}.",
+                extra={"⏳ Seuil configuré": helpers.format_duration(int(row["autoclose_hours"]) * 3600)},
+            )
             conf = await self.bot.db.get_guild_config(guild.id)
             delay = (conf["ticket_delete_delay"] if conf else 30) or 30
             asyncio.create_task(self._auto_delete(channel, row["id"], delay))
@@ -1495,13 +1614,31 @@ class Tickets(commands.Cog):
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
         if ticket["status"] != "ferme":
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce ticket n'est pas fermé.")))
-        await self.bot.db.execute("UPDATE tickets SET status = 'ouvert', closed_at = NULL, locked = 0, last_activity_at = ? WHERE id = ?", (now(), ticket["id"]))
+        # Compare-and-set sur le statut : deux +ticket-reopen simultanés passaient
+        # tous les deux le contrôle ci-dessus et rouvraient deux fois. Le second
+        # journaliserait une réouverture qui n'a rien rouvert.
+        curseur = await self.bot.db.execute(
+            "UPDATE tickets SET status = 'ouvert', closed_at = NULL, locked = 0, last_activity_at = ? "
+            "WHERE id = ? AND status = 'ferme'",
+            (now(), ticket["id"]),
+        )
+        if getattr(curseur, "rowcount", 0) != 1:
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning("Ce ticket vient d'être rouvert par quelqu'un d'autre.")))
         owner = ctx.guild.get_member(ticket["user_id"])
         if owner:
             overwrite = ctx.channel.overwrites_for(owner)
             overwrite.send_messages = True
             await ctx.channel.set_permissions(owner, overwrite=overwrite)
-        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success('🔓 Le ticket a été rouvert.')))
+        reference = await tickets_service.journaliser_evenement(
+            self.bot, ctx.guild, "ticket_reopen",
+            ticket_id=ticket["id"], channel=ctx.channel,
+            acteur=ctx.author, cible=owner,
+            # La suppression automatique programmée à la fermeture s'annule
+            # d'elle-même en relisant le statut (voir _auto_delete) — le dire
+            # évite au staff de croire le ticket encore condamné.
+            extra={"🛑 Suppression automatique": "annulée"},
+        )
+        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'🔓 Le ticket a été rouvert.\nRéférence : `{reference}`')))
 
     # ---------------------------------------------------------------- COMMANDES : OUVERTURE (MEMBRES)
 

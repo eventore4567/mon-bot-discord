@@ -290,6 +290,28 @@ def _with_id(mention: str) -> str:
     return f"{mention} (`{snowflake}`)" if snowflake else mention
 
 
+#: Une phrase par événement de ticket. ``{membre}`` est le membre concerné,
+#: ``{acteur}`` celui qui agit — les deux diffèrent sur tout ce que fait le
+#: staff, et les confondre était l'autre défaut du rendu : « Un membre a fermé
+#: le ticket » quand c'est un modérateur qui l'a fermé.
+_PHRASES_TICKET: dict[str, str] = {
+    "ticket_open": "{membre} a ouvert un ticket.",
+    "ticket_close": "{acteur} a fermé le ticket de {membre}.",
+    "ticket_autoclose": "Le ticket de {membre} a été fermé automatiquement pour inactivité.",
+    "ticket_claim": "{acteur} a pris en charge le ticket de {membre}.",
+    "ticket_unclaim": "{acteur} a abandonné la prise en charge du ticket de {membre}.",
+    "ticket_member_add": "{acteur} a ajouté {membre} au ticket.",
+    "ticket_member_remove": "{acteur} a retiré {membre} du ticket.",
+    "ticket_rename": "{acteur} a renommé le salon du ticket.",
+    "ticket_transfer": "{acteur} a transféré le ticket à {membre}.",
+    "ticket_reopen": "{acteur} a rouvert le ticket de {membre}.",
+    "ticket_delete": "Le salon du ticket de {membre} a été supprimé.",
+    "ticket_rating": "{membre} a noté le support reçu.",
+    "ticket_note": "{acteur} a ajouté une note interne au ticket.",
+    "ticket_bump": "{acteur} a relancé {membre} sur son ticket.",
+}
+
+
 def narrative_body(
     embed: discord.Embed,
     *,
@@ -455,26 +477,78 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} a quitté {channel or 'un salon vocal'}" + (f", après **{duration}**" if duration else "") + ".")
     elif event_type == "voice_move":
         lines.append(_strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id) or f"{member or 'Un membre'} a été déplacé en vocal.")
-    elif event_type == "ticket_open":
-        lines.append(f"{member or 'Un membre'} a ouvert un ticket.")
-        ticket_type = _field_value(embed, "type")
-        ticket_channel = _field_value(embed, "salon", "channel")
-        ticket_number = _field_value(embed, "numéro", "numero", "ticket")
-        staff_role = _field_value(embed, "rôle support", "role support", "staff")
-        if ticket_number:
-            lines.append(f"**Ticket :** {ticket_number}")
-        if ticket_type:
-            lines.append(f"**Type :** {ticket_type}")
-        if ticket_channel:
-            lines.append(f"**Salon :** {ticket_channel}")
-        if staff_role:
-            lines.append(f"**Support :** {staff_role}")
-    elif event_type == "ticket_close":
+    elif event_type in _PHRASES_TICKET:
+        # Les quatorze événements de ticket passent ici. Avant, seuls
+        # ticket_open et ticket_close avaient leur branche ; les douze autres
+        # tombaient dans le `else` final, qui ne sait rendre que
+        # ``embed.description`` — or ces embeds n'en ont pas, tout est dans les
+        # champs. Résultat mesuré sur le bot booté : un transfert de ticket
+        # arrivait avec « Membre concerné » et « Transféré par », et RIEN
+        # d'autre. Ni le numéro, ni le salon, ni la référence d'incident.
+        #
+        # C'est structurel, pas un oubli : compact_fields() écarte
+        # délibérément toute valeur de moins de 70 caractères (les
+        # métadonnées courtes sont censées être composées en prose ici) et
+        # écarte aussi « salon » et « membre » par leur nom. Un champ court
+        # ajouté à l'embed n'apparaît donc JAMAIS tant que cette fonction ne
+        # le rend pas explicitement.
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
-        lines.append(base or "Le ticket a été fermé.")
-        reason_value = _field_value(embed, "raison", "reason")
-        if reason_value and reason_value not in (base or ""):
-            lines.append(f"**Raison :** {reason_value}")
+        # ``moderator`` (plus haut) se résout sur « modérateur / staff / acteur /
+        # créateur ». Les libellés d'acteur des tickets sont parlants — « Fermé
+        # par », « Transféré par », « Pris en charge par » — donc AUCUN ne
+        # correspond, et le repli `or member` faisait dire à la phrase « X a
+        # transféré le ticket à X », le même membre des deux côtés. On relit donc
+        # l'acteur sur les libellés réellement utilisés.
+        acteur_ticket = _with_id(_first_user_ref(_field_value(
+            embed, "ouvert par", "fermé par", "ferme par", "pris en charge par",
+            "abandonnée par", "abandonnee par", "ajouté par", "ajoute par",
+            "retiré par", "retire par", "renommé par", "renomme par",
+            "transféré par", "transfere par", "rouvert par", "supprimé par",
+            "supprime par", "noté par", "note par", "auteur", "envoyé par",
+            "envoye par", "déclencheur", "declencheur",
+        ))) or moderator
+        lines.append(base or _PHRASES_TICKET[event_type].format(
+            membre=member or "Un membre",
+            acteur=acteur_ticket or "Un membre du staff",
+        ))
+        details: list[str] = []
+        numero = _field_value(embed, "ticket", "numéro", "numero")
+        if numero:
+            details.append(f"Ticket : {numero}")
+        salon_ticket = _field_value(embed, "salon", "channel")
+        if salon_ticket:
+            details.append(f"Salon : {salon_ticket}")
+        type_ticket = _field_value(embed, "type")
+        if type_ticket:
+            details.append(f"Type : {type_ticket}")
+        for libelle, *noms in (
+            ("Support", "rôle support", "role support"),
+            ("Note", "note"),
+            ("Reprise sur", "reprise sur"),
+            ("Titulaire retiré", "titulaire retiré", "titulaire retire"),
+            ("Précédemment en charge", "précédemment en charge", "precedemment en charge"),
+            ("Avant", "avant"),
+            ("Après", "après", "apres"),
+            ("Seuil", "seuil configuré", "seuil configure"),
+            ("Suppression automatique", "suppression automatique"),
+            ("Longueur", "longueur"),
+            ("Ouvert", "ouvert"),
+        ):
+            valeur = _field_value(embed, *noms)
+            if valeur:
+                details.append(f"{libelle} : {valeur}")
+        if details:
+            lines.append(" · ".join(details))
+        raison_ticket = _field_value(embed, "raison", "reason")
+        if raison_ticket and raison_ticket not in (base or ""):
+            lines.append(f"**Raison :** {raison_ticket}")
+        # La référence en dernier et sur sa propre ligne : c'est ce que le
+        # staff recopie pour retrouver l'événement en base longtemps après la
+        # suppression du salon. Noyée dans la liste de détails, elle serait
+        # illisible.
+        reference = _field_value(embed, "référence", "reference")
+        if reference:
+            lines.append(f"**Référence :** {reference}")
     elif event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"):
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         lines.append(base or f"Une protection SentriX s'est déclenchée pour {member or 'un membre'}.")

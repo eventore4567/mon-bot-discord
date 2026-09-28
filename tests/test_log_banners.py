@@ -55,7 +55,15 @@ def test_style_comes_from_the_registry_not_from_the_title():
     # Même avec un titre trompeur, le registre gagne.
     assert log_banners.banner_kind("member_unban", "Bannissement définitif") == "success"
     assert log_banners.banner_kind("message_delete", "") == "error"
-    assert log_banners.banner_kind("ticket_close", "") == "special"
+    # Les événements de ticket portent depuis le 28/09/2026 le style de DOMAINE
+    # « tickets » (turquoise) et non plus un état, exactement comme automod_scam
+    # porte « security ». Sur un journal de tickets, la bannière dit quel
+    # système a parlé et l'emoji du titre dit ce qui s'est passé ; deux
+    # événements de tickets ne se distinguent plus par la couleur du bandeau.
+    assert log_banners.banner_kind("ticket_close", "") == "tickets"
+    assert log_banners.banner_kind("ticket_open", "") == "tickets"
+    # Et toujours pas depuis le titre : « fermé » ne décide plus rien.
+    assert log_banners.banner_kind("ticket_autoclose", "Ticket fermé") == "tickets"
 
 
 def test_every_registry_entry_maps_to_a_generated_banner():

@@ -1210,6 +1210,36 @@ CREATE INDEX IF NOT EXISTS idx_game_stakes_joueur ON game_stakes (guild_id, user
 """
 
 
+TICKET_EVENTS_SCHEMA = """
+-- Journal d'audit des tickets. Sa raison d'être première est l'identifiant
+-- d'incident : `id` est la seule source d'un numéro stable, unique et
+-- reproductible. Un identifiant tiré au hasard à l'envoi ne serait
+-- retrouvable nulle part une fois le message du salon supprimé — et le salon
+-- d'un ticket EST supprimé, automatiquement, quelques secondes après la
+-- fermeture.
+--
+-- La table survit donc au salon : « TK-0042-317 » reste consultable en base
+-- longtemps après la disparition du ticket 42.
+CREATE TABLE IF NOT EXISTS ticket_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    ticket_id INTEGER,
+    channel_id INTEGER,
+    event TEXT NOT NULL,
+    actor_id INTEGER,
+    target_id INTEGER,
+    details TEXT,
+    created_at INTEGER NOT NULL
+);
+-- Consultation par ticket (reconstituer son histoire) et par serveur
+-- (dernière activité tickets). Sans ces index, les deux parcourent tout.
+CREATE INDEX IF NOT EXISTS idx_ticket_events_ticket
+    ON ticket_events (ticket_id, id);
+CREATE INDEX IF NOT EXISTS idx_ticket_events_guild
+    ON ticket_events (guild_id, created_at DESC);
+"""
+
+
 AUTO_DROP_SCHEMA = """
 CREATE TABLE IF NOT EXISTS auto_drop_config (
     guild_id INTEGER PRIMARY KEY,
@@ -1290,6 +1320,12 @@ LEGACY_LOG_TYPE_TO_CATEGORY: dict[str, str] = {
     "role_create": "roles", "role_delete": "roles", "role_update": "roles",
     "voice_join": "voice", "voice_leave": "voice", "voice_move": "voice",
     "ticket_open": "tickets", "ticket_close": "tickets", "ticket_claim": "tickets",
+    "ticket_unclaim": "tickets", "ticket_member_add": "tickets",
+    "ticket_member_remove": "tickets", "ticket_rename": "tickets",
+    "ticket_transfer": "tickets", "ticket_reopen": "tickets",
+    "ticket_delete": "tickets", "ticket_rating": "tickets",
+    "ticket_autoclose": "tickets", "ticket_note": "tickets",
+    "ticket_bump": "tickets",
     "guild_update": "server",
 }
 
@@ -1372,6 +1408,7 @@ class Database:
         await self._conn.executescript(LOG_CONFIG_SCHEMA)
         await self._conn.executescript(AUTO_DROP_SCHEMA)
         await self._conn.executescript(GAME_STAKES_SCHEMA)
+        await self._conn.executescript(TICKET_EVENTS_SCHEMA)
         await self._migrate()
         await self._conn.execute(
             "INSERT INTO bot_creators (user_id, display_name, username, is_primary, added_at) "

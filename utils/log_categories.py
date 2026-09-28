@@ -64,9 +64,38 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "soundboard_delete": ("soundboard", "🔇", "error"),
     "soundboard_play": ("soundboard", "▶️", "info"),
     "guild_update": ("server", "⚙️", "info"),
-    "ticket_open": ("tickets", "📬", "success"),
-    "ticket_close": ("tickets", "🔒", "special"),
-    "ticket_claim": ("tickets", "🙋", "info"),
+    # Tickets — un événement par action réelle. Avant, TOUT passait par deux
+    # types seulement : ``ticket_close`` si le titre contenait « ferm », sinon
+    # ``ticket_open`` (voir cogs/ticket_claim_security.secure_log_action). Une
+    # prise en charge, un renommage et un transfert arrivaient donc dans le
+    # journal étiquetés « ouverture ».
+    #
+    # PIÈGE : un ``ticket_*`` absent de ce registre n'est PAS routé vers
+    # Tickets. resolve() retombe sur DEFAULT_CATEGORY, c'est-à-dire "server" :
+    # l'événement part silencieusement dans le journal Serveur, avec la
+    # bannière Serveur. tests/test_ticket_events_registry.py refuse tout
+    # ``ticket_*`` émis par le code et non inscrit ici.
+    # Le 3ᵉ emplacement est le STYLE de bannière, pas un état : log_banners.
+    # banner_kind() lit resolve()[2] et get_banner() en fait directement un nom
+    # de fichier dans assets/log_banners/. "tickets" y est un style déclaré
+    # (turquoise) et banner_tickets.webp existe. Les quatorze événements portent
+    # donc la bannière Tickets — la bannière dit quel système a parlé, l'emoji du
+    # titre dit ce qui s'est passé. C'est le motif posé par le lot anti-scam, où
+    # automod_scam et automod_invite portent "security" et non un état.
+    "ticket_open": ("tickets", "📬", "tickets"),
+    "ticket_close": ("tickets", "🔒", "tickets"),
+    "ticket_claim": ("tickets", "🙋", "tickets"),
+    "ticket_unclaim": ("tickets", "↩️", "tickets"),
+    "ticket_member_add": ("tickets", "➕", "tickets"),
+    "ticket_member_remove": ("tickets", "➖", "tickets"),
+    "ticket_rename": ("tickets", "✏️", "tickets"),
+    "ticket_transfer": ("tickets", "🔀", "tickets"),
+    "ticket_reopen": ("tickets", "🔓", "tickets"),
+    "ticket_delete": ("tickets", "🗑️", "tickets"),
+    "ticket_rating": ("tickets", "⭐", "tickets"),
+    "ticket_autoclose": ("tickets", "⏱️", "tickets"),
+    "ticket_note": ("tickets", "📝", "tickets"),
+    "ticket_bump": ("tickets", "🔔", "tickets"),
     "automod_link": ("automod", "🔗", "error"),
     "automod_invite": ("automod", "🔗", "security"),
     "automod_scam": ("automod", "🛡️", "security"),

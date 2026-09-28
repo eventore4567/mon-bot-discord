@@ -154,3 +154,233 @@ async def count_genuinely_open_tickets(bot, guild: discord.Guild, user_id: int, 
             continue
         count += 1
     return count
+
+
+# =============================================================================
+# JOURNALISATION DES ÉVÉNEMENTS DE TICKET
+# =============================================================================
+#
+# Avant ce lot, la journalisation des tickets tenait à une seule ligne, dans
+# cogs/ticket_claim_security.secure_log_action :
+#
+#     log_type = "ticket_close" if "ferm" in title else "ticket_open"
+#
+# Tout ce qui n'était pas une fermeture arrivait donc dans le journal étiqueté
+# « ouverture de ticket » — et, comme la bannière et la catégorie découlent du
+# type, avec la bannière d'ouverture. Mesuré sur le code : seules trois actions
+# journalisaient quoi que ce soit (ouverture, fermeture, fermeture
+# automatique). Prise en charge, abandon, ajout/retrait de membre, renommage,
+# transfert, note, rappel, réouverture, suppression et notation ne laissaient
+# aucune trace.
+#
+# La fermeture, elle, est un cas à part et il faut être exact : le
+# ``Tickets.close_ticket`` qu'on lit dans cogs/tickets.py refait le routage à la
+# main et retombe sur ``helpers.send_log(bot, guild, "moderation", embed)`` — le
+# journal Modération pour un événement de ticket. Mais ce code est MORT :
+# ``cogs/ticket_claim_security`` réassigne ``Tickets.close_ticket`` au
+# démarrage, et sa version passe bien par ``"ticket_close"``. Ce qui lui
+# manquait n'était donc pas le routage mais la traçabilité — aucune ligne
+# d'audit, aucune référence citable, aucun bouton vers le salon.
+#
+# Le piège vaut d'être retenu : quatre méthodes de Tickets sont réassignées au
+# boot (log_action, handle_control_button, create_ticket, close_ticket,
+# btn_claim, btn_unclaim). Lire le corps de l'une d'elles dans cogs/tickets.py
+# ne dit RIEN de ce qui tourne en production.
+
+#: Un titre et un libellé d'acteur par événement. Le type d'événement — et non
+#: le texte du titre — décide seul de la catégorie et de la bannière
+#: (utils/log_categories.LOG_REGISTRY).
+EVENEMENTS_TICKET: dict[str, tuple[str, str]] = {
+    "ticket_open": ("📬 Ticket ouvert", "Ouvert par"),
+    "ticket_close": ("🔒 Ticket fermé", "Fermé par"),
+    "ticket_autoclose": ("⏱️ Ticket fermé automatiquement", "Déclencheur"),
+    "ticket_claim": ("🙋 Ticket pris en charge", "Pris en charge par"),
+    "ticket_unclaim": ("↩️ Prise en charge abandonnée", "Abandonnée par"),
+    "ticket_member_add": ("➕ Membre ajouté au ticket", "Ajouté par"),
+    "ticket_member_remove": ("➖ Membre retiré du ticket", "Retiré par"),
+    "ticket_rename": ("✏️ Ticket renommé", "Renommé par"),
+    "ticket_transfer": ("🔀 Ticket transféré", "Transféré par"),
+    "ticket_reopen": ("🔓 Ticket rouvert", "Rouvert par"),
+    "ticket_delete": ("🗑️ Ticket supprimé", "Supprimé par"),
+    "ticket_rating": ("⭐ Ticket noté", "Noté par"),
+    "ticket_note": ("📝 Note interne ajoutée", "Auteur"),
+    "ticket_bump": ("🔔 Rappel envoyé au membre", "Envoyé par"),
+}
+
+
+def reference_incident(ticket_id: object, ligne_id: object) -> str:
+    """``TK-0042-317`` — ticket 42, 317ᵉ événement enregistré sur ce serveur.
+
+    Les deux nombres sont nécessaires : la ligne seule est unique mais ne dit
+    pas de quel ticket il s'agit, le ticket seul ne distingue pas ses propres
+    événements. Un ticket inconnu donne ``TK-????-317`` plutôt que rien : la
+    référence reste retrouvable en base, c'est son seul rôle.
+    """
+    try:
+        ticket = f"{int(ticket_id):04d}"
+    except (TypeError, ValueError):
+        ticket = "????"
+    try:
+        ligne = str(int(ligne_id))
+    except (TypeError, ValueError):
+        return f"TK-{ticket}"
+    return f"TK-{ticket}-{ligne}"
+
+
+async def enregistrer_evenement(
+    bot,
+    guild_id: int,
+    evenement: str,
+    *,
+    ticket_id: int | None = None,
+    channel_id: int | None = None,
+    actor_id: int | None = None,
+    target_id: int | None = None,
+    details: str | None = None,
+) -> int | None:
+    """Écrit la ligne d'audit et retourne son ``id``, source de la référence.
+
+    Ne lève jamais : un journal d'audit indisponible ne doit pas annuler
+    l'action métier qui vient de réussir. Retourne None si l'écriture échoue,
+    et l'appelant produit alors une référence dégradée plutôt qu'aucune.
+    """
+    import time
+
+    try:
+        curseur = await bot.db.execute(
+            "INSERT INTO ticket_events "
+            "(guild_id, ticket_id, channel_id, event, actor_id, target_id, details, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                int(guild_id),
+                int(ticket_id) if ticket_id else None,
+                int(channel_id) if channel_id else None,
+                str(evenement),
+                int(actor_id) if actor_id else None,
+                int(target_id) if target_id else None,
+                (str(details)[:500] if details else None),
+                int(time.time()),
+            ),
+        )
+        return int(getattr(curseur, "lastrowid", 0)) or None
+    except Exception:
+        logger.exception(
+            "Audit ticket non écrit guild=%s événement=%s ; action métier conservée.",
+            guild_id,
+            evenement,
+        )
+        return None
+
+
+def vue_voir_le_ticket(guild_id: int | None, channel_id: int | None) -> discord.ui.View | None:
+    """Bouton lien vers le salon du ticket, ou None s'il n'y a rien à ouvrir.
+
+    Un bouton lien ne porte aucun ``custom_id`` et n'a pas besoin d'être
+    réenregistré au démarrage — contrairement à un bouton d'action, il survit
+    donc indéfiniment au redémarrage du bot.
+
+    Retourne None sans salon : un bouton « Voir le ticket » qui mène à un salon
+    supprimé est pire que pas de bouton. C'est le cas normal de
+    ``ticket_delete``, où le salon vient justement de disparaître.
+    """
+    if not guild_id or not channel_id:
+        return None
+    vue = discord.ui.View(timeout=None)
+    vue.add_item(
+        discord.ui.Button(
+            style=discord.ButtonStyle.link,
+            label="Voir le ticket",
+            emoji="🎫",
+            url=f"https://discord.com/channels/{int(guild_id)}/{int(channel_id)}",
+        )
+    )
+    return vue
+
+
+async def journaliser_evenement(
+    bot,
+    guild: discord.Guild,
+    evenement: str,
+    *,
+    ticket_id: int | None = None,
+    channel=None,
+    acteur=None,
+    cible=None,
+    raison: str | None = None,
+    extra: dict | None = None,
+    details: str | None = None,
+    avec_bouton: bool = True,
+    file: discord.File | None = None,
+) -> str:
+    """Enregistre l'événement, l'envoie au journal Tickets, rend la référence.
+
+    Un seul chemin pour les quatorze événements : le type décide de la
+    catégorie, de l'emoji et de la bannière, et rien ne se déduit du texte du
+    titre.
+
+    Ne lève jamais. La valeur de retour est la référence d'incident, à afficher
+    dans la réponse au staff pour qu'un membre puisse la citer.
+    """
+    from utils import embeds as _embeds
+
+    titre, libelle_acteur = EVENEMENTS_TICKET.get(
+        evenement, (f"🎫 {evenement}", "Acteur")
+    )
+    guild_id = getattr(guild, "id", None)
+    channel_id = getattr(channel, "id", None)
+
+    ligne_id = await enregistrer_evenement(
+        bot,
+        guild_id,
+        evenement,
+        ticket_id=ticket_id,
+        channel_id=channel_id,
+        actor_id=getattr(acteur, "id", None),
+        target_id=getattr(cible, "id", None),
+        details=details or raison,
+    )
+    reference = reference_incident(ticket_id, ligne_id)
+
+    champs: dict = {}
+    if ticket_id:
+        champs["🎟️ Ticket"] = f"#{int(ticket_id)}"
+    if channel is not None:
+        # Le nom EN PLUS de la mention : après suppression du salon, une mention
+        # s'affiche « #deleted-channel » et l'information est perdue.
+        nom = getattr(channel, "name", None)
+        mention = getattr(channel, "mention", None)
+        champs["📌 Salon"] = f"{mention} (`{nom}`)" if mention and nom else (mention or f"`{nom}`")
+    if extra:
+        champs.update(extra)
+    champs["🔖 Référence"] = f"`{reference}`"
+
+    embed = _embeds.log_entry(
+        titre,
+        cible=cible,
+        cible_label="Membre concerné",
+        acteur=acteur,
+        acteur_label=libelle_acteur,
+        raison=raison,
+        extra=champs,
+    )
+    vue = vue_voir_le_ticket(guild_id, channel_id) if avec_bouton else None
+    # event_key a un format imposé — « guild:event:cible:acteur:audit:message:
+    # discriminant » — et log_service._event_from_key relit parts[1] comme type
+    # d'événement, en PRIORITÉ sur le log_type passé juste à côté. Une chaîne
+    # libre (la référence brute, par exemple) n'a pas de parts[1] : elle passe,
+    # mais seulement parce que le repli se déclenche. On le construit donc
+    # correctement, ce qui rend en plus la déduplication opérante contre un
+    # double envoi du même événement. La référence sert de discriminant : elle
+    # est unique par événement, donc jamais deux événements distincts ne se
+    # dédupliquent l'un l'autre.
+    cle = log_service.make_event_key(
+        guild_id or 0,
+        evenement,
+        target_id=getattr(cible, "id", None),
+        executor_id=getattr(acteur, "id", None),
+        discriminator=reference,
+    )
+    await safe_ticket_log(
+        bot, guild, evenement, embed, file=file, view=vue, event_key=cle
+    )
+    return reference

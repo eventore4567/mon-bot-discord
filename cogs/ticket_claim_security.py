@@ -191,6 +191,16 @@ async def _private_reply(interaction: discord.Interaction, embed: discord.Embed)
         pass
 
 
+#: Titre canonique -> événement, retourné depuis la source unique
+#: ``services.tickets.EVENEMENTS_TICKET``. Construit ici une seule fois : une
+#: correspondance exacte ne peut pas se tromper, là où un « in » confondait
+#: « Ticket fermé » et « Ticket fermé automatiquement ».
+_TITRES_CANONIQUES: dict[str, str] = {
+    titre: evenement
+    for evenement, (titre, _libelle) in tickets_service.EVENEMENTS_TICKET.items()
+}
+
+
 async def _safe_ticket_log(cog, guild: discord.Guild, log_type: str, embed: discord.Embed, **kwargs) -> bool:
     """Journalise sans jamais casser l'action métier qui vient de réussir.
 
@@ -211,16 +221,41 @@ def install(bot: commands.Bot) -> None:
     original_handle = tickets.Tickets.handle_control_button
     original_create_ticket = tickets.Tickets.create_ticket
 
-    async def secure_log_action(self, guild: discord.Guild, embed: discord.Embed, log_channel_id=None):
+    async def secure_log_action(self, guild: discord.Guild, embed: discord.Embed,
+                                log_channel_id=None, *, log_type: str | None = None):
         """Ignore les anciens IDs par type : la route officielle est ``logs-tickets``.
 
         C'est volontaire : un ancien ``ticket_types.log_channel_id`` pouvait pointer vers
         un salon supprimé ou vers l'ancienne modération. Le nouveau Setup configure la
         catégorie Tickets dans ``log_config`` ; c'est désormais l'unique source de vérité.
+
+        **Le classement du type d'événement a changé.** Il était :
+
+            log_type = "ticket_close" if "ferm" in title else "ticket_open"
+
+        Deux événements seulement, décidés sur un bout de texte. Tout ce qui
+        n'était pas une fermeture — prise en charge, renommage, transfert,
+        ajout de membre — arrivait donc dans le journal étiqueté « ouverture de
+        ticket », et la fermeture automatique par inactivité était
+        indistinguable d'une fermeture décidée par un humain.
+
+        Trois niveaux maintenant, du plus sûr au moins sûr :
+
+        1. ``log_type`` passé explicitement par l'appelant — la seule voie
+           correcte, et celle que ``services.tickets.journaliser_evenement``
+           emprunte pour les quatorze événements ;
+        2. correspondance EXACTE du titre avec un titre canonique
+           (``EVENEMENTS_TICKET``), pour un appelant historique qui reprend un
+           de ces titres au mot près ;
+        3. l'ancienne heuristique, conservée pour ne rien casser d'un appelant
+           tiers inconnu, mais qui ne décide plus rien dans le bot.
         """
         del log_channel_id
         title = _plain(embed.title)
-        log_type = "ticket_close" if "ferm" in title else "ticket_open"
+        if log_type is None:
+            log_type = _TITRES_CANONIQUES.get(title.strip())
+        if log_type is None:
+            log_type = "ticket_close" if "ferm" in title else "ticket_open"
         return await _safe_ticket_log(self, guild, log_type, embed)
 
     async def secure_handle_control_button(self, interaction: discord.Interaction, key: str):
@@ -299,13 +334,50 @@ def install(bot: commands.Bot) -> None:
         """
         guild = interaction.guild
         if guild is None:
-            return
+            return await _private_reply(
+                interaction,
+                tickets.embeds.error("Un ticket ne peut être fermé que depuis son serveur."),
+            )
         ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
         if not ticket:
-            return
+            # Trois `return` nus vivaient ici. Le membre cliquait « Fermer »,
+            # remplissait le formulaire de raison, et STRICTEMENT rien ne se
+            # passait : sans réponse à l'interaction, Discord affiche « L'appli-
+            # cation n'a pas répondu » et le ticket reste ouvert. Un bouton qui
+            # ne fait rien est le pire état possible, parce que rien n'indique
+            # quoi faire ensuite.
+            return await _private_reply(
+                interaction,
+                tickets.embeds.error(
+                    "Ce ticket n'existe plus en base. Le salon peut être supprimé "
+                    "manuellement sans risque."
+                ),
+            )
         channel = guild.get_channel(int(ticket["channel_id"]))
         if not isinstance(channel, discord.TextChannel):
-            return
+            # Salon supprimé à la main alors que la ligne dit « ouvert » : le
+            # ticket était bloqué dans cet état pour toujours — impossible à
+            # fermer, et il continuait de compter dans la limite par membre.
+            # On solde la ligne ici, c'est le seul endroit qui le peut.
+            await self.bot.db.execute(
+                "UPDATE tickets SET status='supprime', closed_at=? WHERE id=? AND status<>'supprime'",
+                (tickets.now(), ticket_id),
+            )
+            await tickets_service.journaliser_evenement(
+                self.bot, guild, "ticket_delete",
+                ticket_id=ticket_id,
+                cible=guild.get_member(int(ticket["user_id"])),
+                acteur=interaction.user,
+                raison="Salon supprimé manuellement ; ticket soldé à la fermeture.",
+                avec_bouton=False,
+            )
+            return await _private_reply(
+                interaction,
+                tickets.embeds.warning(
+                    "Le salon de ce ticket n'existe plus. Le ticket a été marqué comme "
+                    "clos — il ne compte plus dans votre limite."
+                ),
+            )
 
         conf = await self.bot.db.get_guild_config(guild.id)
         closed_at = tickets.now()
@@ -364,12 +436,25 @@ def install(bot: commands.Bot) -> None:
             timestamp=discord.utils.utcnow(),
         )
         log_embed.set_footer(text="SentriX")
+        # Ligne d'audit + référence citable. Cet embed-ci est construit à la main
+        # plutôt que par journaliser_evenement() parce qu'il porte des champs que
+        # lui seul a : les participants et la date de création. Les perdre pour
+        # uniformiser serait une régression — on lui ajoute donc ce qui manque
+        # au lieu de le remplacer.
+        ligne_id = await tickets_service.enregistrer_evenement(
+            self.bot, guild.id, "ticket_close",
+            ticket_id=ticket_id, channel_id=channel.id,
+            actor_id=interaction.user.id, target_id=int(ticket["user_id"]),
+            details=reason_text,
+        )
+        reference = tickets_service.reference_incident(ticket_id, ligne_id)
+        log_embed.add_field(name="🔖 Référence", value=f"`{reference}`", inline=False)
         event_key = log_service.make_event_key(
             guild.id,
             "ticket_close",
             target_id=int(ticket["user_id"]),
             executor_id=interaction.user.id,
-            discriminator=ticket_id,
+            discriminator=reference,
         )
         await _safe_ticket_log(
             self,
@@ -377,6 +462,7 @@ def install(bot: commands.Bot) -> None:
             "ticket_close",
             log_embed,
             file=self._transcript_file(channel, transcript_text),
+            view=tickets_service.vue_voir_le_ticket(guild.id, channel.id),
             event_key=event_key,
             identity_name=(owner.display_name if owner else f"Membre {ticket['user_id']}"),
             identity_id=int(ticket["user_id"]),
@@ -479,12 +565,24 @@ def install(bot: commands.Bot) -> None:
                 ephemere=True,
             )
 
+        # Journalisé après le compare-and-set ET après l'octroi des permissions :
+        # un claim qui échoue sur Forbidden a déjà rendu la base à son état
+        # précédent plus haut, il ne doit donc rien laisser dans le journal.
+        ancien = guild.get_member(int(current_id)) if current_id else None
+        reference = await tickets_service.journaliser_evenement(
+            self.bot, guild, "ticket_claim",
+            ticket_id=ticket["id"], channel=channel,
+            acteur=member,
+            cible=guild.get_member(int(ticket["user_id"])),
+            extra=({"↩️ Reprise sur": ancien.mention} if ancien and ancien.id != member.id else None),
+        )
         await panels.envoyer(
             interaction.followup,
             panels.depuis_embed(
                 tickets.embeds.success(
                     f"{member.mention} a pris en charge ce ticket. "
-                    "L'accès est maintenant réservé au créateur, au membre en charge et aux Administrateurs."
+                    "L'accès est maintenant réservé au créateur, au membre en charge et aux Administrateurs.\n"
+                    f"Référence : `{reference}`"
                 )
             ),
         )
@@ -527,10 +625,23 @@ def install(bot: commands.Bot) -> None:
         claimant = guild.get_member(int(current_id))
         await _remove_claimant_override(channel, claimant, int(ticket["user_id"]))
         await _set_staff_role_visibility(self, channel, ticket, visible=True)
+        reference = await tickets_service.journaliser_evenement(
+            self.bot, guild, "ticket_unclaim",
+            ticket_id=ticket["id"], channel=channel,
+            acteur=member,
+            cible=guild.get_member(int(ticket["user_id"])),
+            # Un administrateur peut abandonner la charge d'un AUTRE : sans ce
+            # champ, le journal laisserait croire que le titulaire s'est retiré
+            # lui-même.
+            extra=({"🙋 Titulaire retiré": claimant.mention} if claimant and claimant.id != member.id else None),
+        )
         await panels.envoyer(
             interaction.followup,
             panels.depuis_embed(
-                tickets.embeds.success("Prise en charge annulée. L'accès du rôle staff a été rétabli.")
+                tickets.embeds.success(
+                    "Prise en charge annulée. L'accès du rôle staff a été rétabli.\n"
+                    f"Référence : `{reference}`"
+                )
             ),
         )
 

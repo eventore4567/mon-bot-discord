@@ -18,6 +18,28 @@ from . import runtime_finish_v89 as v89
 logger = logging.getLogger("bot.runtime-finish-v90")
 
 
+def _type_depuis_titre(embed) -> str:
+    """Type d'événement de ticket déduit du titre canonique de l'embed.
+
+    Correspondance EXACTE, jamais une sous-chaîne : « 🔒 Ticket fermé » et
+    « ⏱️ Ticket fermé automatiquement » sont deux événements distincts, et un
+    ``in`` les confondrait — c'est exactement l'erreur que faisait l'ancien
+    ``log_type = "ticket_close" if "ferm" in title else "ticket_open"``.
+    """
+    try:
+        from services.tickets import EVENEMENTS_TICKET
+    except Exception:  # pragma: no cover - import circulaire improbable
+        return "ticket_open"
+    titre = str(getattr(embed, "title", "") or "").strip()
+    for evenement, (titre_canonique, _libelle) in EVENEMENTS_TICKET.items():
+        if titre == titre_canonique:
+            return evenement
+    # Repli : un type d'événement RÉEL, pas le nom de la catégorie. La
+    # différence est visible — bannière Tickets contre bannière info, emoji 📬
+    # contre 📋 générique.
+    return "ticket_open"
+
+
 def _patch_ticket_class(bot: commands.Bot) -> bool:
     classes = []
     cog = bot.get_cog("Tickets")
@@ -39,15 +61,33 @@ def _patch_ticket_class(bot: commands.Bot) -> bool:
         if current is None or getattr(current, "_sentrix_v90_safe_ticket_log", False):
             continue
 
-        async def safe_ticket_log(self, guild, embed, log_channel_id=None, *, _previous=current):
+        async def safe_ticket_log(self, guild, embed, log_channel_id=None, *,
+                                  _previous=current, log_type=None):
             # La SEULE destination fonctionnelle est la catégorie canonique Tickets du
             # Setup. Un ancien log_channel_id ne doit jamais renvoyer le journal dans
             # Modération, ni réactiver un log volontairement désactivé.
+            #
+            # CORRIGÉ le 28/09/2026. Cette fonction passait ``"tickets"`` à
+            # send_log — le nom de la CATÉGORIE, pas un type d'événement. Le
+            # routage tombait juste par chance (« tickets » est aussi une clé de
+            # CATEGORIES), mais tout le reste se perdait :
+            # ``resolve("tickets")`` rend ``('tickets', '📋', 'info')``, donc
+            # emoji générique, bannière `info` au lieu de la bannière Tickets, et
+            # aucune phrase narrative puisque wide_logs cherche un ``ticket_*``.
+            # Chaque journal passé par log_action arrivait ainsi plat, quel que
+            # soit l'événement qu'il décrivait.
+            #
+            # Mesuré sur le bot booté : c'est bien CETTE fonction qui est
+            # branchée sur Tickets.log_action — elle remplace sans jamais
+            # appeler ``_previous``, donc le classement par titre de
+            # cogs/ticket_claim_security n'a jamais tourné en production.
             try:
                 setting = await log_service.get_log_setting(self.bot, guild.id, "tickets")
                 if not setting.get("enabled"):
                     return False
-                return await log_service.send_log(self.bot, guild, "tickets", embed)
+                return await log_service.send_log(
+                    self.bot, guild, log_type or _type_depuis_titre(embed), embed
+                )
             except Exception:
                 # L'action ticket est déjà réussie : une panne de journal ne remonte jamais
                 # vers start_ticket_flow(), donc aucune seconde réponse rouge n'est envoyée.

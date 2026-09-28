@@ -320,7 +320,34 @@ def install_ticket_patches(bot: commands.Bot) -> None:
                     current = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id=?", (ticket_id,))
                     if not current or current["status"] != "ferme":
                         return
-            await self.bot.db.execute("UPDATE tickets SET status='supprime' WHERE id=? AND status='ferme'", (ticket_id,))
+            curseur = await self.bot.db.execute("UPDATE tickets SET status='supprime' WHERE id=? AND status='ferme'", (ticket_id,))
+            # Journalisé ici et NULLE PART AILLEURS. Cette fonction remplace
+            # ``Tickets._auto_delete`` sans jamais appeler l'originale : tout
+            # journal posé là-bas ne tournerait pas en production. Mesuré sur le
+            # bot booté le 28/09/2026.
+            #
+            # Conditionné au compare-and-set : sans cela, deux tâches de
+            # suppression concurrentes (fermeture puis réouverture puis
+            # refermeture) journaliseraient deux suppressions pour un seul
+            # salon réellement supprimé.
+            #
+            # Et AVANT channel.delete(), sans bouton : après la suppression, le
+            # nom du salon n'est plus lisible et la dernière trace de ce ticket
+            # serait illisible.
+            if getattr(curseur, "rowcount", 0) == 1:
+                from services import tickets as tickets_service
+
+                await tickets_service.journaliser_evenement(
+                    self.bot, channel.guild, "ticket_delete",
+                    ticket_id=ticket_id, channel=channel,
+                    cible=channel.guild.get_member(int(current["user_id"])) if current["user_id"] else None,
+                    raison=(
+                        f"Fenêtre de réouverture de {reopen_minutes} min terminée."
+                        if reopen_minutes > 0
+                        else "Suppression automatique après la fermeture."
+                    ),
+                    avec_bouton=False,
+                )
             try:
                 await channel.delete(reason="Ticket fermé : fenêtre de réouverture terminée.")
             except discord.HTTPException:
