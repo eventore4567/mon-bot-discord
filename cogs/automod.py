@@ -43,7 +43,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds, checks, helpers, log_service, text_normalization
+from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
 from utils.sliding_window import FenetreGlissante
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
@@ -115,10 +115,184 @@ def _normalize_link_text(content: str) -> str:
     value = re.sub(r"(?<!\s)(?=(?:https?|hxxps?)://)", " ", value, flags=re.IGNORECASE)
     return value.strip()
 SCAM_KEYWORDS = [
-    "free nitro", "nitro gratuit", "steamcommunity", "airdrop gratuit", "crypto giveaway",
-    "discord nitro free", "gagnez des nitro", "claim your nitro", "gift nitro free",
-    "double your crypto", "investissement garanti", "steam gift free",
+    "free nitro", "nitro gratuit", "discord nitro free", "free discord nitro",
+    "gagnez des nitro", "claim your nitro", "gift nitro free", "nitro giveaway",
+    "free robux", "robux gratuit", "claim robux", "robux giveaway",
+    "free vbucks", "vbucks gratuit", "claim vbucks",
+    "airdrop gratuit", "crypto giveaway", "double your crypto",
+    "investissement garanti", "connect your wallet", "wallet verification",
+    "steam gift free", "free steam gift",
 ]
+
+SCAM_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+SCAM_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+SCAM_IMAGE_TIMEOUT_SECONDS = 4.5
+SCAM_IMAGE_MIN_CONFIDENCE = 98
+SCAM_IMAGE_MAX_PARALLEL = 4
+_SCAM_IMAGE_CATEGORIES = frozenset({
+    "fake_nitro", "fake_robux", "fake_vbucks", "fake_giveaway",
+    "crypto_airdrop", "phishing_login", "qr_phishing",
+})
+_SCAM_IMAGE_SEMAPHORE = asyncio.Semaphore(SCAM_IMAGE_MAX_PARALLEL)
+_SCAM_IMAGE_PROMPT = (
+    "Tu es un classifieur anti-arnaque Discord très strict. Analyse uniquement l'image. "
+    "Réponds EXACTEMENT sur une ligne: VERDICT|CONFIDENCE|CATEGORY|REASON. "
+    "VERDICT = SCAM, SAFE ou UNCERTAIN. CONFIDENCE = entier 0-100. "
+    "CATEGORY, si SCAM, doit être l'une de: fake_nitro, fake_robux, fake_vbucks, "
+    "fake_giveaway, crypto_airdrop, phishing_login, qr_phishing. "
+    "Ne mets SCAM que si des éléments VISIBLES prouvent clairement une promotion frauduleuse "
+    "ou du phishing (faux gain/cadeau, faux login, QR/lien de récupération, crypto/airdrop). "
+    "Une simple capture Discord, un meme, une discussion sur les scams, un logo Nitro/Roblox, "
+    "une offre officielle ou un doute = SAFE/UNCERTAIN. N'invente aucun texte ou lien."
+)
+
+
+def _is_scam_image_attachment(attachment: discord.Attachment) -> bool:
+    content_type = str(getattr(attachment, "content_type", "") or "").casefold()
+    filename = str(getattr(attachment, "filename", "") or "").casefold()
+    size = int(getattr(attachment, "size", 0) or 0)
+    if size <= 0 or size > SCAM_IMAGE_MAX_BYTES:
+        return False
+    return content_type.startswith("image/") or filename.endswith(SCAM_IMAGE_EXTENSIONS)
+
+
+def _parse_scam_image_result(value: str) -> str | None:
+    """Accepte uniquement un verdict SCAM explicite, très confiant et catégorisé."""
+    parts = [part.strip() for part in str(value or "").split("|", 3)]
+    if len(parts) != 4 or parts[0].upper() != "SCAM":
+        return None
+    try:
+        confidence = int(parts[1])
+    except (TypeError, ValueError):
+        return None
+    category = parts[2].casefold()
+    if confidence < SCAM_IMAGE_MIN_CONFIDENCE or category not in _SCAM_IMAGE_CATEGORIES:
+        return None
+    reason = re.sub(r"\s+", " ", parts[3]).strip()
+    if not reason:
+        return None
+    return f"{category}: {reason[:100]}"
+
+
+async def _scan_scam_image(attachment: discord.Attachment) -> str | None:
+    """Vision rapide et conservatrice : en cas de doute, timeout ou erreur => aucune sanction."""
+    if not _is_scam_image_attachment(attachment):
+        return None
+    client = ai_service.get_client()
+    if client is None:
+        return None
+    try:
+        async with _SCAM_IMAGE_SEMAPHORE:
+            response = await asyncio.wait_for(
+                client.responses.create(
+                    model=ai_service.MODEL_IDS.get(ai_service.MODEL_LUNA, config.OPENAI_MODEL),
+                    instructions=_SCAM_IMAGE_PROMPT,
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "Classe l'image avec le format imposé."},
+                                {"type": "input_image", "image_url": attachment.url},
+                            ],
+                        }
+                    ],
+                    reasoning={"effort": "none"},
+                    max_output_tokens=36,
+                ),
+                timeout=SCAM_IMAGE_TIMEOUT_SECONDS,
+            )
+        text = (getattr(response, "output_text", None) or ai_service._extract_text(response) or "").strip()
+    except asyncio.TimeoutError:
+        logger.debug("Analyse anti-scam image timeout attachment=%s", getattr(attachment, "id", None))
+        return None
+    except Exception as exc:
+        logger.debug(
+            "Analyse anti-scam image indisponible attachment=%s erreur=%s",
+            getattr(attachment, "id", None), type(exc).__name__,
+        )
+        return None
+    return _parse_scam_image_result(text)
+
+
+# Détection locale plus robuste que la simple liste de mots-clés. Elle reste
+# volontairement conservative : un domaine officiel n'est jamais déclaré frauduleux
+# uniquement parce qu'il contient "discord", "roblox" ou "steam".
+_SCAM_TRUSTED_DOMAINS = (
+    "discord.com", "discord.gg", "discordapp.com", "discord.gift",
+    "roblox.com",
+    "steamcommunity.com", "steampowered.com",
+    "epicgames.com",
+)
+_SCAM_BRANDS = ("discord", "nitro", "roblox", "robux", "steam", "vbucks", "crypto", "wallet")
+_SCAM_LURES = ("free", "gift", "claim", "bonus", "verify", "airdrop", "giveaway", "reward")
+_SCAM_CTA = (
+    "click", "clique", "claim", "reclame", "recupere", "récupère", "redeem",
+    "get now", "maintenant", "dm me", "mp moi", "scan", "connect", "verify",
+)
+_SCAM_DISCUSSION_MARKERS = (
+    "is this scam", "is it a scam", "est ce une arnaque", "est-ce une arnaque",
+    "c est une arnaque", "c'est une arnaque", "scam ?", "fake ?", "c est fake",
+    "c'est fake", "est ce fake", "est-ce fake", "attention arnaque", "warning scam",
+)
+_NATIVE_SCAM_KEYWORDS = (
+    "claim your nitro", "claim robux", "claim vbucks",
+    "double your crypto", "wallet verification",
+)
+
+
+def _iter_link_hosts(content: str):
+    normalized = _normalize_link_text(content)
+    for match in LINK_RE.finditer(normalized):
+        raw = str(match.group(0) or "").strip("<>()[]{}.,;!?").casefold()
+        raw = re.sub(r"^(?:https?|hxxps?)://", "", raw, flags=re.IGNORECASE)
+        raw = raw.split("/", 1)[0]
+        raw = raw.rsplit("@", 1)[-1]
+        raw = raw.split(":", 1)[0].strip(".")
+        if raw.startswith("www."):
+            raw = raw[4:]
+        if raw:
+            yield raw
+
+
+def _trusted_scam_host(host: str) -> bool:
+    host = str(host or "").casefold().strip(".")
+    return any(host == domain or host.endswith("." + domain) for domain in _SCAM_TRUSTED_DOMAINS)
+
+
+def _scam_hit(content: str) -> str | None:
+    """Détection à haute précision : domaine suspect d'abord, texte ambigu ensuite."""
+    hosts = list(_iter_link_hosts(content))
+    suspicious_hosts: list[str] = []
+    for host in hosts:
+        if _trusted_scam_host(host):
+            continue
+        compact = re.sub(r"[^a-z0-9]", "", host)
+        if any(brand in compact for brand in _SCAM_BRANDS) and any(
+            lure in compact for lure in _SCAM_LURES
+        ):
+            suspicious_hosts.append(host)
+            continue
+        if re.search(r"steamcom(?:rn|nn|m)unity", compact):
+            suspicious_hosts.append(host)
+
+    if suspicious_hosts:
+        return f"domaine suspect: {suspicious_hosts[0][:80]}"
+
+    normalized = text_normalization.normaliser(content)
+    if any(text_normalization.normaliser(marker) in normalized for marker in _SCAM_DISCUSSION_MARKERS):
+        return None
+
+    motif = text_normalization.contient(content, SCAM_KEYWORDS)
+    if not motif:
+        return None
+
+    if hosts and all(_trusted_scam_host(host) for host in hosts):
+        return None
+
+    cta = any(text_normalization.normaliser(token) in normalized for token in _SCAM_CTA)
+    if hosts or cta:
+        return motif
+    return None
 
 # Règle Discord AutoMod native créée par SentriX lorsque l'anti-liens est actif.
 # Les motifs sont volontairement compatibles avec le moteur Rust Regex de Discord :
@@ -141,6 +315,8 @@ NATIVE_HARMFUL_CUSTOM_MESSAGE = "Ce contenu est bloqué par la modération du se
 NATIVE_INVITE_REGEX_PATTERNS = (
     r"(?i)\bdiscord\.gg/[^\s<]+",
     r"(?i)\bdiscord(?:app)?\.com/invite/[^\s<]+",
+    r"(?i)\b(?:dsc\.gg|invite\.gg|discord\.me|discord\.io|discord\.link)/[^\s<]+",
+    r"(?i)\bdisboard\.org/server/join/[^\s<]+",
 )
 NATIVE_ANTILINK_REGEX_PATTERNS = (
     r"(?i)\b(?:https?|hxxps?)://[^\s<]+",
@@ -272,6 +448,11 @@ def _censor_scam(content: str) -> str | None:
             flags=re.IGNORECASE,
         )
         count += hits
+
+    masked_links = _censor_links(redacted)
+    if masked_links is not None:
+        redacted = masked_links
+        count += 1
     return redacted if count else None
 
 
@@ -784,7 +965,8 @@ class AutoMod(commands.Cog, name="Automod"):
     async def _sync_native_antiscam_rule(self, guild: discord.Guild) -> bool:
         conf = await self.bot.db.get_automod(guild.id)
         enabled = bool(conf and conf["antiscam"])
-        keywords = [k[:60] for k in SCAM_KEYWORDS if k and len(k) <= 60]
+        # Discord AutoMod ne comprend pas le contexte : seulement les formulations les plus explicites.
+        keywords = [k[:60] for k in _NATIVE_SCAM_KEYWORDS if k and len(k) <= 60]
         trigger = discord.AutoModTrigger(keyword_filter=keywords)
         return await self._upsert_native_rule(
             guild,
@@ -932,10 +1114,14 @@ class AutoMod(commands.Cog, name="Automod"):
         # Serveur neuf : réconcilie toutes les protections natives utiles.
         await self._sync_native_suite(guild)
 
-    async def log_action(self, guild: discord.Guild, embed: discord.Embed):
-        # Utilise le salon "logs-securite" dédié s'il existe (via /create-logs), sinon
-        # retombe sur le salon de logs général — jamais de log perdu.
-        await helpers.send_log(self.bot, guild, "automod", embed)
+    async def log_action(
+        self,
+        guild: discord.Guild,
+        embed: discord.Embed,
+        log_type: str = "automod",
+    ):
+        # Le type d'événement pilote aussi la bannière.
+        await helpers.send_log(self.bot, guild, log_type, embed)
 
     # ---------------------------------------------------------------- CACHES
 
@@ -1875,7 +2061,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # Comparaison tolérante aux obfuscations : avant, sept variantes sur huit
         # de la même arnaque passaient — majuscules, leet, gras mathématique ou
         # une lettre cyrillique suffisaient (voir utils/text_normalization).
-        motif_scam = text_normalization.contient(message.content, SCAM_KEYWORDS) if conf["antiscam"] else None
+        motif_scam = _scam_hit(message.content) if conf["antiscam"] else None
         if motif_scam:
             return await self._delete_and_warn(
                 message,
@@ -1883,6 +2069,23 @@ class AutoMod(commands.Cog, name="Automod"):
                 "antiscam",
                 censored_content=_compose_censored_content(message.content, scam=True),
             )
+
+        if conf["antiscam"] and message.attachments:
+            candidates = [
+                attachment for attachment in message.attachments[:2]
+                if _is_scam_image_attachment(attachment)
+            ]
+            if candidates:
+                verdicts = await asyncio.gather(
+                    *(_scan_scam_image(attachment) for attachment in candidates)
+                )
+                image_scam_reason = next((reason for reason in verdicts if reason), None)
+                if image_scam_reason:
+                    return await self._delete_and_warn(
+                        message,
+                        f"Image d'arnaque détectée avec haute confiance ({image_scam_reason}).",
+                        "antiscam",
+                    )
 
         contenu_invitation = _recoller_hotes_invitation(
             text_normalization.normaliser(message.content)
@@ -2194,7 +2397,14 @@ class AutoMod(commands.Cog, name="Automod"):
             if incident.infractions:
                 extra["🔢 Infractions (1h)"] = str(incident.infractions)
             e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
-            await self.log_action(guild, e)
+            event_type = {
+                "antiscam": "automod_scam",
+                "antiinvite": "automod_invite",
+                "antilink": "automod_link",
+                "blacklist_link": "automod_link",
+                "blacklist_word_link": "automod_link",
+            }.get(incident.filter_name, "automod")
+            await self.log_action(guild, e, event_type)
         except Exception:
             logger.exception(
                 "Journal AutoMod impossible guild=%s user=%s filtre=%s",
