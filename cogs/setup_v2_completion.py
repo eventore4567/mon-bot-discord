@@ -28,7 +28,7 @@ from . import server_builder_existing_bootstrap as managed_builder
 logger = logging.getLogger("bot.setup-v2-completion")
 
 WELCOME_DEFAULT_TITLE = "Bienvenue sur {server}"
-WELCOME_DEFAULT_TEXT = "Bienvenue {member} ! Heureux de t’accueillir parmi nous sur **{server}**."
+WELCOME_DEFAULT_TEXT = "Heureux de t’accueillir parmi nous sur **{server}**."
 GOODBYE_DEFAULT_TEXT = "Au revoir **{username}**. Merci d’avoir fait partie de **{server}**."
 
 
@@ -152,18 +152,29 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     presentation = await _welcome_presentation(bot, member.guild.id)
     body = _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member)
     if presentation.get("mode") == "text":
-        # Message simple : le texte seul, la mention en tête (sauf en test).
+        # Une seule mention visible : si le texte contient déjà @membre, on ne rajoute
+        # pas une seconde ligne au-dessus. Sinon la mention de notification est ajoutée.
         try:
-            await channel.send(
-                content=body if test else f"{member.mention}\n{body}",
-                allowed_mentions=(discord.AllowedMentions.none() if test else discord.AllowedMentions(users=[member], roles=False, everyone=False)),
-            )
+            if test:
+                content = body
+                mentions = discord.AllowedMentions.none()
+            elif member.mention in body:
+                content = body
+                mentions = discord.AllowedMentions(users=[member], roles=False, everyone=False)
+            else:
+                content = f"{member.mention}\n{body}"
+                mentions = discord.AllowedMentions(users=[member], roles=False, everyone=False)
+            await channel.send(content=content, allowed_mentions=mentions)
         except discord.HTTPException as exc:
             return False, f"Discord a refusé l’envoi : {exc}"
         return True, f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
+    # Dans l'encadré, le ping reste uniquement au-dessus du message pour notifier le
+    # membre. Si l'ancien texte contient {member}, on affiche son nom au milieu au lieu
+    # d'une seconde mention identique.
+    visual_body = body.replace(member.mention, f"**{member.display_name}**")
     panel = embeds.brand(
         _format_welcome(presentation["title"], member),
-        body,
+        visual_body,
     )
     if presentation["show_avatar"]:
         panel.set_thumbnail(url=member.display_avatar.url)
