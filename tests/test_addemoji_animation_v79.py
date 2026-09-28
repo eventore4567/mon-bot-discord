@@ -64,3 +64,12 @@ def test_partial_delta_frames_are_composited_before_resize():
     assert durations == [80, 120, 200, 100]
     assert all(frame.size == (128, 128) for frame in frames)
     assert all(frame.getbbox() is not None for frame in frames)
+
+
+def test_direct_discord_copy_prefers_original_gif_before_resized_cdn_variant():
+    from pathlib import Path
+    source = Path("cogs/emoji_name_lookup.py").read_text(encoding="utf-8")
+    original = 'f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}",'
+    resized = 'f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}?size=128&quality=lossless",'
+    assert source.index(original) < source.index(resized)
+    assert "Discord n'a pas renvoyé le GIF original" in source
