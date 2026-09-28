@@ -16,6 +16,7 @@ from discord.ext import commands
 from utils import checks, embeds, log_service
 from utils import sentrix_panels as panels
 from utils import join_dedup
+from utils.member_event_cards import build_member_event_card
 from . import bot_tracker
 from . import control_center_v3
 from . import setup_control_center as setup_ui
@@ -27,7 +28,8 @@ from . import server_builder_existing_bootstrap as managed_builder
 logger = logging.getLogger("bot.setup-v2-completion")
 
 WELCOME_DEFAULT_TITLE = "Bienvenue sur {server}"
-WELCOME_DEFAULT_TEXT = "Bienvenue {member} ! Content de t’accueillir parmi nous sur **{server}**."
+WELCOME_DEFAULT_TEXT = "Bienvenue {member} ! Heureux de t’accueillir parmi nous sur **{server}**."
+GOODBYE_DEFAULT_TEXT = "Au revoir **{username}**. Merci d’avoir fait partie de **{server}**."
 
 
 async def ensure_schema(bot) -> None:
@@ -169,12 +171,21 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         count = int(member.guild.member_count or 0)
         panel.add_field(name="Membres", value=f"{count} membre{'s' if count > 1 else ''}", inline=True)
     image_url = _conf_value(conf, "welcome_image_url")
+    card_file = None
     if image_url and str(image_url).startswith(("https://", "http://")):
         panel.set_image(url=str(image_url))
+    else:
+        try:
+            card_file = build_member_event_card(member, kind="welcome")
+            panel.set_image(url="attachment://sentrix_welcome.png")
+        except Exception:
+            logger.exception("Carte de bienvenue automatique impossible guild=%s user=%s", member.guild.id, member.id)
+            card_file = None
     try:
         await channel.send(
             content=None if test else member.mention,
             embed=panel,
+            file=card_file,
             allowed_mentions=(discord.AllowedMentions.none() if test else discord.AllowedMentions(users=[member], roles=False, everyone=False)),
         )
     except discord.HTTPException as exc:
@@ -194,7 +205,7 @@ async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable 
     channel = member.guild.get_channel(int(channel_id))
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
         return None
-    template = _conf_value(conf, "goodbye_message", "**{username}** a quitté **{server}**.")
+    template = _conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT)
     presentation = await _welcome_presentation(bot, member.guild.id)
     if presentation.get("goodbye_mode") == "text":
         try:
@@ -205,8 +216,20 @@ async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable 
     panel = embeds.neutral("Départ d’un membre", _format_welcome(template, member))
     if presentation["show_avatar"]:
         panel.set_thumbnail(url=member.display_avatar.url)
+    card_file = None
     try:
-        await panels.envoyer(channel, panels.depuis_embed(panel), allowed_mentions=discord.AllowedMentions.none())
+        card_file = build_member_event_card(member, kind="goodbye")
+        panel.set_image(url="attachment://sentrix_goodbye.png")
+    except Exception:
+        logger.exception("Carte de départ automatique impossible guild=%s user=%s", member.guild.id, member.id)
+        card_file = None
+    try:
+        await panels.envoyer(
+            channel,
+            panels.depuis_embed(panel),
+            file=card_file,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
     except discord.HTTPException:
         return None
     return channel
@@ -278,7 +301,7 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         self.owner = owner
         self.title_input = discord.ui.TextInput(label="Titre de bienvenue", default=str(presentation["title"] or WELCOME_DEFAULT_TITLE)[:200], max_length=200)
         self.welcome_input = discord.ui.TextInput(label="Message de bienvenue", default=str(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT))[:1000], max_length=1000, style=discord.TextStyle.paragraph)
-        self.goodbye_input = discord.ui.TextInput(label="Message de départ", default=str(_conf_value(conf, "goodbye_message", "{username} a quitté {server}."))[:1000], max_length=1000, style=discord.TextStyle.paragraph)
+        self.goodbye_input = discord.ui.TextInput(label="Message de départ", default=str(_conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT))[:1000], max_length=1000, style=discord.TextStyle.paragraph)
         self.image_input = discord.ui.TextInput(label="URL bannière / image (facultatif)", default=str(_conf_value(conf, "welcome_image_url", "") or "")[:400], required=False, max_length=400)
         self.options_input = discord.ui.TextInput(label="Options : avatar=on/off ; membres=on/off", default=f"avatar={'on' if presentation['show_avatar'] else 'off'}; membres={'on' if presentation['show_member_count'] else 'off'}", max_length=80)
         for child in (self.title_input, self.welcome_input, self.goodbye_input, self.image_input, self.options_input):
