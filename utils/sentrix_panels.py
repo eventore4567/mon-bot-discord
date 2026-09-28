@@ -504,6 +504,29 @@ async def envoyer(
     if tous:
         kwargs["files"] = tous
 
+    def _rafraichir_fichiers_apres_echec_edit() -> None:
+        """Ne réutilise jamais un discord.File consommé par edit_original_response().
+
+        discord.py ferme les fichiers après une tentative d'envoi, même si Discord
+        refuse ensuite l'édition. Le repli follow-up doit donc recréer la bannière,
+        sinon il lève ValueError: I/O operation on closed file.
+        """
+        frais = fabrique() if callable(fabrique) else []
+        supplements_ouverts = [
+            item for item in supplements
+            if not bool(getattr(getattr(item, "fp", None), "closed", False))
+        ]
+        if len(supplements_ouverts) != len(supplements):
+            logger.warning(
+                "Pièce jointe appelant déjà consommée pendant l'édition différée ; "
+                "le repli conserve la bannière fraîche et les fichiers encore ouverts."
+            )
+        nouveaux = [*frais, *supplements_ouverts]
+        if nouveaux:
+            kwargs["files"] = nouveaux
+        else:
+            kwargs.pop("files", None)
+
     # Garde-fou : un content glissé ici ferait échouer l'envoi côté Discord, et
     # l'erreur (400 Bad Request) ne dirait pas pourquoi.
     if kwargs.pop("content", None) is not None:
@@ -532,6 +555,7 @@ async def envoyer(
                     return result
                 except (discord.NotFound, discord.HTTPException):
                     logger.debug("Edition du panneau différé impossible, repli follow-up.", exc_info=True)
+                    _rafraichir_fichiers_apres_echec_edit()
             return await parent.followup.send(**kwargs)
         raise RuntimeError(
             "Reponse d'interaction deja envoyee et followup inaccessible."
@@ -552,6 +576,7 @@ async def envoyer(
                 return result
             except (discord.NotFound, discord.HTTPException):
                 logger.debug("Edition du panneau différé impossible, repli follow-up.", exc_info=True)
+                _rafraichir_fichiers_apres_echec_edit()
         return await interaction.followup.send(**kwargs)
 
     # Webhook (interaction.followup), Messageable (ctx, salon, membre).
