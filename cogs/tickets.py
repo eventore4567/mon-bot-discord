@@ -884,22 +884,29 @@ class Tickets(commands.Cog):
             await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (row["id"],))
 
     async def restore_panel_views(self) -> int:
-        """Réenregistre une vue persistante pour chaque panel actif après un redémarrage,
-        avec ses VRAIES options (types de tickets), pour que les menus/boutons déjà envoyés
-        sur Discord continuent de fonctionner exactement comme avant l'arrêt du bot.
-        Retourne le nombre de panels effectivement restaurés (utilisé pour le log de
-        démarrage — voir main.py)."""
-        panels = await self.bot.db.fetchall("SELECT * FROM ticket_panels_v2 WHERE enabled = 1 AND message_id IS NOT NULL")
+        """Réenregistre les vrais panels persistants, bannière SentriX comprise.
+
+        Les panels publics utilisent maintenant Components V2. Après un redémarrage,
+        on doit donc restaurer la LayoutView complète (pas seulement l'ancien Select/View),
+        sinon le menu visible reste présent mais ses callbacks ne sont plus reliés.
+        """
+        panels = await self.bot.db.fetchall(
+            "SELECT * FROM ticket_panels_v2 WHERE enabled = 1 AND message_id IS NOT NULL"
+        )
         restored = 0
         for panel in panels:
             types = await self.get_panel_types(panel["id"])
             if not types:
                 continue
             try:
-                self.bot.add_view(TicketPanelView(panel, types), message_id=panel["message_id"])
+                persistent = sx_panels.avec_composants(
+                    sx_panels.depuis_embed(self.build_panel_embed(panel), kind="tickets"),
+                    TicketPanelView(panel, types),
+                )
+                self.bot.add_view(persistent, message_id=panel["message_id"])
                 restored += 1
-            except discord.HTTPException:
-                pass
+            except (discord.HTTPException, ValueError):
+                logger.exception("Restauration du panel Tickets #%s impossible.", panel["id"])
         return restored
 
     # ---------------------------------------------------------------- ACCÈS DB
@@ -982,7 +989,14 @@ class Tickets(commands.Cog):
         types = await self.get_panel_types(panel_id)
         if not types:
             return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`.")), ephemere=True)
-        await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemere=True)
+        await sx_panels.envoyer(
+            interaction.response,
+            sx_panels.avec_composants(
+                sx_panels.depuis_embed(self.build_panel_embed(panel), kind="tickets"),
+                TicketPanelView(panel, types),
+            ),
+            ephemere=True,
+        )
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
@@ -1003,7 +1017,13 @@ class Tickets(commands.Cog):
                 await old.delete()
             except discord.HTTPException:
                 pass
-        msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
+        msg = await sx_panels.envoyer(
+            channel,
+            sx_panels.avec_composants(
+                sx_panels.depuis_embed(self.build_panel_embed(panel), kind="tickets"),
+                TicketPanelView(panel, types),
+            ),
+        )
         await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (msg.id, channel.id, panel_id))
         await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')), ephemere=True)
 
