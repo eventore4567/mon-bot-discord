@@ -43,7 +43,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds, checks, helpers, log_service, text_normalization
+from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
 from utils.sliding_window import FenetreGlissante
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
@@ -123,6 +123,68 @@ SCAM_KEYWORDS = [
     "investissement garanti", "connect your wallet", "wallet verification",
     "steam gift free", "free steam gift",
 ]
+
+SCAM_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+SCAM_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+SCAM_IMAGE_TIMEOUT_SECONDS = 8.0
+_SCAM_IMAGE_PROMPT = (
+    "Tu es un filtre anti-arnaque Discord. Analyse uniquement cette image. "
+    "Réponds sur UNE ligne exactement sous la forme SAFE ou SCAM: raison_courte. "
+    "SCAM uniquement si l'image promeut clairement une arnaque/phishing : faux Nitro, "
+    "Robux/V-Bucks gratuits, faux cadeau, faux airdrop/crypto, faux login, QR code ou "
+    "lien présenté comme moyen de réclamer un gain. SAFE si c'est une image normale, "
+    "un meme, une capture innocente, une vraie offre non manifestement frauduleuse, "
+    "ou si tu n'es pas certain. N'invente pas de lien absent."
+)
+
+
+def _is_scam_image_attachment(attachment: discord.Attachment) -> bool:
+    content_type = str(getattr(attachment, "content_type", "") or "").casefold()
+    filename = str(getattr(attachment, "filename", "") or "").casefold()
+    size = int(getattr(attachment, "size", 0) or 0)
+    if size <= 0 or size > SCAM_IMAGE_MAX_BYTES:
+        return False
+    return content_type.startswith("image/") or filename.endswith(SCAM_IMAGE_EXTENSIONS)
+
+
+async def _scan_scam_image(attachment: discord.Attachment) -> str | None:
+    """Analyse visuelle à haute confiance. Échec API = fail-open, jamais de sanction."""
+    if not _is_scam_image_attachment(attachment):
+        return None
+    client = ai_service.get_client()
+    if client is None:
+        return None
+    try:
+        response = await asyncio.wait_for(
+            client.responses.create(
+                model=ai_service.MODEL_IDS.get(ai_service.MODEL_LUNA, config.OPENAI_MODEL),
+                instructions=_SCAM_IMAGE_PROMPT,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Classe cette image."},
+                            {"type": "input_image", "image_url": attachment.url},
+                        ],
+                    }
+                ],
+                reasoning={"effort": "none"},
+                max_output_tokens=40,
+            ),
+            timeout=SCAM_IMAGE_TIMEOUT_SECONDS,
+        )
+        text = (getattr(response, "output_text", None) or ai_service._extract_text(response) or "").strip()
+    except (asyncio.TimeoutError, Exception) as exc:
+        logger.debug(
+            "Analyse anti-scam image indisponible attachment=%s erreur=%s",
+            getattr(attachment, "id", None), type(exc).__name__,
+        )
+        return None
+
+    match = re.match(r"(?is)^\s*SCAM\s*:\s*(.{1,120})", text)
+    if not match:
+        return None
+    return re.sub(r"\s+", " ", match.group(1)).strip()[:120] or "image d'arnaque détectée"
 
 # Détection locale plus robuste que la simple liste de mots-clés. Elle reste
 # volontairement conservative : un domaine officiel n'est jamais déclaré frauduleux
@@ -1822,6 +1884,20 @@ class AutoMod(commands.Cog, name="Automod"):
                 "antiscam",
                 censored_content=_compose_censored_content(message.content, scam=True),
             )
+
+        # Une image seule ne contient aucun texte dans message.content. Lorsque
+        # l'anti-scam est actif, SentriX analyse donc aussi la première pièce jointe
+        # image. Le classifieur est volontairement strict : SAFE en cas de doute ou
+        # d'indisponibilité API, afin d'éviter les faux positifs.
+        if conf["antiscam"] and message.attachments:
+            for attachment in message.attachments[:2]:
+                image_scam_reason = await _scan_scam_image(attachment)
+                if image_scam_reason:
+                    return await self._delete_and_warn(
+                        message,
+                        f"Image d'arnaque potentielle détectée ({image_scam_reason}).",
+                        "antiscam",
+                    )
 
         contenu_invitation = _recoller_hotes_invitation(
             text_normalization.normaliser(message.content)
