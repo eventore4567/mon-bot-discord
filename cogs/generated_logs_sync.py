@@ -131,8 +131,28 @@ async def sync_generated_logs(bot: commands.Bot, guild: discord.Guild) -> int:
         except Exception:
             logger.exception("Lecture log_config impossible guild=%s category=%s", guild.id, category)
             continue
-        if config is None or config.get("channel_id"):
+        if config is None:
             continue
+
+        if config.get("channel_id"):
+            legacy_column = (log_service.LOG_TYPES.get(category) or {}).get("legacy_column")
+            legacy_writer = getattr(bot.db, "set_guild_config", None)
+            if legacy_column and callable(legacy_writer):
+                try:
+                    await legacy_writer(
+                        guild.id,
+                        str(legacy_column),
+                        int(config["channel_id"]) if config.get("enabled") else None,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Miroir route logs impossible guild=%s category=%s column=%s",
+                        guild.id,
+                        category,
+                        legacy_column,
+                    )
+            continue
+
         if not config.get("enabled") and await _explicitly_disabled(bot, guild.id, category):
             continue
         if not config.get("enabled"):

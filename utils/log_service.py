@@ -533,6 +533,31 @@ async def set_log_config(
         "channel_id=excluded.channel_id,enabled=excluded.enabled,updated_at=excluded.updated_at",
         (int(guild_id), canonical, normalized, 1 if enabled else 0, _now()),
     )
+
+    # Compatibilité avec les quelques producteurs historiques qui lisent encore
+    # guild_config. +setup/reset-logs mettaient déjà ces colonnes à jour, alors que le
+    # dashboard n'écrivait que log_config : une route pouvait donc apparaître « active »
+    # dans le dashboard mais rester invisible pour un ancien listener. log_config reste
+    # la source de vérité ; ce miroir évite simplement deux états contradictoires.
+    legacy_column = (LOG_TYPES.get(canonical) or {}).get("legacy_column")
+    legacy_writer = getattr(bot.db, "set_guild_config", None)
+    if legacy_column and callable(legacy_writer):
+        try:
+            await legacy_writer(
+                int(guild_id),
+                str(legacy_column),
+                normalized if bool(enabled) else None,
+            )
+        except Exception:
+            logger.exception(
+                "SENTRIX LEGACY LOG MIRROR FAILED guild=%s category=%s column=%s channel=%s enabled=%s",
+                guild_id,
+                canonical,
+                legacy_column,
+                normalized,
+                bool(enabled),
+            )
+
     # Relecture systématique : l'appelant reçoit ce que la base contient vraiment, jamais
     # la valeur qu'il vient de demander. C'est ce qui empêche un panneau d'afficher
     # "ACTIF" pour une route qui n'a pas été écrite.

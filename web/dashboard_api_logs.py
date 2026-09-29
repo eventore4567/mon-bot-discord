@@ -44,7 +44,7 @@ def register(app: web.Application, dashboard) -> None:
         for key in CATEGORY_ORDER:
             item = settings.get(key) or {}
             channel_id = item.get("channel_id")
-            ok, problem = log_service.validate_channel(guild, channel_id) if channel_id else (False, "aucun salon configuré")
+            ok, problem = log_service.validate_channel(guild, channel_id, needs_file=True) if channel_id else (False, "aucun salon configuré")
             routes.append({
                 "key": key,
                 "label": CATEGORIES[key],
@@ -85,7 +85,7 @@ def register(app: web.Application, dashboard) -> None:
                 channel_id = int(raw_channel)
             except (TypeError, ValueError):
                 return dashboard._json_error("Salon invalide.", 400)
-            ok, problem = log_service.validate_channel(guild, channel_id)
+            ok, problem = log_service.validate_channel(guild, channel_id, needs_file=True)
             if not ok:
                 return dashboard._json_error(f"Ce salon ne peut pas recevoir les logs : {problem}.", 409)
 
@@ -100,9 +100,51 @@ def register(app: web.Application, dashboard) -> None:
             channel_id=channel_id,
             enabled=enabled,
         )
+
+        # Le dashboard doit garantir la même chose que reset-logs/+setup : une route
+        # marquée active doit avoir réellement réussi un envoi Components V2. Cela
+        # détecte immédiatement un salon sans pièce jointe, une bannière manquante,
+        # une erreur de renderer ou un refus Discord au lieu d'afficher « Actif » à tort.
+        test_detail = None
+        if enabled:
+            author = guild.me
+            if author is None:
+                await log_service.set_log_config(
+                    bot,
+                    guild.id,
+                    key,
+                    channel_id=channel_id,
+                    enabled=False,
+                )
+                return dashboard._json_error(
+                    "Configuration enregistrée, mais SentriX ne peut pas vérifier ce salon pour le moment.",
+                    409,
+                )
+            test_ok, test_detail = await log_service.send_test_log(
+                bot,
+                guild,
+                key,
+                author,
+            )
+            if not test_ok:
+                await log_service.set_log_config(
+                    bot,
+                    guild.id,
+                    key,
+                    channel_id=channel_id,
+                    enabled=False,
+                )
+                return dashboard._json_error(
+                    f"Le salon a été enregistré mais le test réel a échoué : {test_detail}",
+                    409,
+                )
+
         return web.json_response({
             "ok": True,
-            "message": f"Logs {CATEGORIES[key]} enregistrés.",
+            "message": (
+                f"Logs {CATEGORIES[key]} enregistrés"
+                + (f" — {test_detail}" if test_detail else ".")
+            ),
             "route": {
                 "key": key,
                 "label": CATEGORIES[key],
