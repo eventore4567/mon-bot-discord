@@ -542,6 +542,17 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning("Impossible d'enregistrer les boutons de logs :\n" + traceback.format_exc())
 
+        # « Supprimer le salon » du message de fermeture. Ce bouton-ci survit
+        # obligatoirement au redémarrage : quand la suppression est manuelle, il
+        # est le SEUL moyen de supprimer le ticket depuis Discord. S'il cessait
+        # de répondre après un redéploiement, les salons fermés s'accumuleraient
+        # sans que personne ne puisse rien y faire.
+        try:
+            from services.tickets import BoutonSupprimerTicket
+            self.add_dynamic_items(BoutonSupprimerTicket)
+        except Exception:
+            logger.warning("Impossible d'enregistrer le bouton de suppression de ticket :\n" + traceback.format_exc())
+
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
         # cogs/permission_guard.py::install() s'enregistre désormais lui-même dès

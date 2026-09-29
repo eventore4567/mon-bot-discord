@@ -2541,7 +2541,7 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         # dernières manches — sinon « votre jeu » changerait à chaque partie.
         favori = await self.bot.db.get_favourite_game(guild_id, target.id)
 
-        issues = {"win": "🏆 gagnée", "loss": "○ perdue", "draw": "🤝 nulle"}
+        issues = {"win": "🏆 gagnée", "loss": "💥 perdue", "draw": "🤝 nulle"}
         dernieres = [
             panels.Ligne(
                 GAME_CATALOG.get(r["game_name"], (r["game_name"], ""))[0],

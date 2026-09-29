@@ -418,7 +418,11 @@ def test_le_profil_de_jeu_est_un_panneau_lisible():
     assert "▰" in texte, "la barre de progression a disparu"
     assert "🎰 Machine à sous" in texte, "le jeu préféré n'apparaît pas"
     assert "9 manche(s) jouée(s)" in texte
-    assert "🏆 gagnée" in texte and "○ perdue" in texte
+    # « 💥 perdue » et non « ○ perdue » : le rond blanc a été retiré de tous les
+    # jeux le 29/09/2026. Un rond blanc ne dit rien — il se lit comme une puce
+    # de liste, pas comme un résultat — et il détonnait à côté de 🏆 et 🤝 dans
+    # ce même couple.
+    assert "🏆 gagnée" in texte and "💥 perdue" in texte
     assert "1 540" in texte, "le total gagné n'est plus formaté"
 
 

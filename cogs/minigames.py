@@ -163,7 +163,7 @@ class Minigames(commands.Cog, name="Minigames"):
         elif (choix, bot_choice) in [("pierre", "ciseaux"), ("feuille", "pierre"), ("ciseaux", "feuille")]:
             result, kind, game_result = "🎉 **Vous avez gagné !**", "success", "win"
         else:
-            result, kind, game_result = "○ **Vous avez perdu.**", "danger", "loss"
+            result, kind, game_result = "💥 **Vous avez perdu.**", "danger", "loss"
 
         reward = await self._finish(ctx, "rps", session_id, game_result, REWARD_RPS)
         # Le geste se lit d'un coup d'œil : « pierre | feuille » demandait de relire.
@@ -341,7 +341,7 @@ class Minigames(commands.Cog, name="Minigames"):
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='●' + self._reward_line(reward), kind='success')))
         else:
             await self._finish(ctx, "trivia", session_id, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Mauvaise réponse', description=f'○ La bonne réponse était **{answer}**.', kind='danger')))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Mauvaise réponse', description=f'❌ La bonne réponse était **{answer}**.', kind='danger')))
 
     @commands.hybrid_command(name="tictactoe", description="Jouer au morpion contre un autre membre.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre contre qui jouer")
@@ -379,7 +379,7 @@ class Minigames(commands.Cog, name="Minigames"):
             )
 
         view = TicTacToeView(ctx.author, adversaire, cog=self, session_id=session_id)
-        e = await self._embed(guild_id, title="Morpion", description=f"{ctx.author.mention} (○) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
+        e = await self._embed(guild_id, title="Morpion", description=f"{ctx.author.mention} (❌) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
         msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
         view.message = msg
 
@@ -423,7 +423,7 @@ class Minigames(commands.Cog, name="Minigames"):
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Gagné !', description=f'🎉 Le mot était **{word}** !' + self._reward_line(reward), kind='success')))
         else:
             await self._finish(ctx, "hangman", session_id, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Perdu', description=f'○ Le mot était **{word}**.', kind='danger')))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Perdu', description=f'💥 Le mot était **{word}**.', kind='danger')))
 
     @commands.hybrid_command(name="math-quiz", description="Répondre à une opération mathématique rapide.", with_app_command=False)
     async def math_quiz(self, ctx: commands.Context):
@@ -451,10 +451,10 @@ class Minigames(commands.Cog, name="Minigames"):
                 await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='●' + self._reward_line(reward), kind='success')))
             else:
                 await self._finish(ctx, "math-quiz", session_id, "loss", 0)
-                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Faux', description=f'○ La réponse était **{answer}**.', kind='danger')))
+                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Faux', description=f'❌ La réponse était **{answer}**.', kind='danger')))
         except ValueError:
             await self._finish(ctx, "math-quiz", session_id, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Réponse invalide', description=f"○ Ce n'est pas un nombre. La réponse était **{answer}**.", kind='danger')))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Réponse invalide', description=f"⚠️ Ce n'est pas un nombre. La réponse était **{answer}**.", kind='danger')))
 
     # ---- Blackjack : un vrai paquet de 52 cartes, joué aux boutons ----------
     # Il fallait taper « hit » ou « stand » dans le chat, et la main s'affichait
@@ -582,7 +582,7 @@ class Minigames(commands.Cog, name="Minigames"):
         elif moi == lui:
             issue, kind, resultat = f"🤝 **Égalité à {moi}.**", "primary", "draw"
         else:
-            issue, kind, resultat = f"○ **{lui} contre {moi}** — le croupier l'emporte.", "danger", "loss"
+            issue, kind, resultat = f"💥 **{lui} contre {moi}** — le croupier l'emporte.", "danger", "loss"
         recompense = await self._finish(ctx, "blackjack", session_id, resultat, REWARD_BLACKJACK)
         await panels.editer(message, panels.depuis_embed(await self._embed(
             guild_id, title='Blackjack',
@@ -713,7 +713,7 @@ class Minigames(commands.Cog, name="Minigames"):
         else:
             await self._finish(ctx, "slots", session_id, "loss", 0)
             description = (
-                f"{grille}\n\n○ **{game_rewards.secure_pick(list(self._SLOTS_PERDU))}**\n"
+                f"{grille}\n\n💥 **{game_rewards.secure_pick(list(self._SLOTS_PERDU))}**\n"
                 f"-# {self._table_des_gains()}"
             )
             kind = "danger"
@@ -802,9 +802,9 @@ class TicTacToeButton(discord.ui.Button):
         view: "TicTacToeView" = self.view
         if interaction.user.id != view.current_player.id:
             return await interaction.response.send_message("Ce n'est pas votre tour !", ephemeral=True)
-        symbol = "○" if view.current_player == view.player_x else "⭕"
+        symbol = "❌" if view.current_player == view.player_x else "⭕"
         self.label = symbol
-        self.style = discord.ButtonStyle.danger if symbol == "○" else discord.ButtonStyle.primary
+        self.style = discord.ButtonStyle.danger if symbol == "❌" else discord.ButtonStyle.primary
         self.disabled = True
         view.board[self.y][self.x] = symbol
 

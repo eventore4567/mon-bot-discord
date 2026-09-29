@@ -399,6 +399,25 @@ async def _journaliser(
         champs.update(extra)
     champs["🔖 Référence"] = f"`{reference}`"
 
+    # Le champ « Membre concerné » n'est posé que si la phrase narrative ne
+    # nomme PAS déjà le membre. Sinon le journal affichait la même personne
+    # trois fois :
+    #
+    #     « X a fermé le ticket de Y. »
+    #     **Membre concerné :** Y
+    #     `123456789012345678`
+    #
+    # La règle se déduit du gabarit de phrase (wide_logs), donc ajouter un
+    # événement ne peut pas réintroduire le doublon.
+    # Les champs cible/acteur RESTENT : wide_logs.narrative_body compose sa
+    # phrase en les lisant, et les retirer faisait dire au journal « Un membre
+    # du staff a fermé le ticket » au lieu de nommer la personne — mesuré, et
+    # c'est précisément ce qu'un audit ne doit jamais perdre.
+    #
+    # Le doublon qu'on voulait supprimer ne venait pas d'ici mais de
+    # compact_fields, qui réaffiche tout champ contenant un saut de ligne — or
+    # embeds._who() rend « <@id>\n`id` », donc deux lignes. Il est corrigé
+    # là-bas, à sa source.
     embed = _embeds.log_entry(
         titre,
         cible=cible,
@@ -425,7 +444,192 @@ async def _journaliser(
         executor_id=getattr(acteur, "id", None),
         discriminator=reference,
     )
+    # L'en-tête du panneau lisait son identité DANS le champ qu'on vient de
+    # retirer (wide_logs.derive_identity balaie les libellés de cible). On la
+    # passe donc explicitement, sans quoi retirer le doublon ferait aussi
+    # disparaître le nom et l'avatar en tête de journal.
+    identite = cible if cible is not None else acteur
     await safe_ticket_log(
-        bot, guild, evenement, embed, file=file, view=vue, event_key=cle
+        bot, guild, evenement, embed, file=file, view=vue, event_key=cle,
+        identity_name=(getattr(identite, "display_name", None)
+                       or getattr(identite, "name", None)),
+        identity_id=getattr(identite, "id", None),
+        identity_icon=(str(getattr(identite, "display_avatar", "") or "") or None),
     )
     return reference
+
+
+# =============================================================================
+# FERMER N'EST PAS SUPPRIMER
+# =============================================================================
+#
+# Jusqu'ici, fermer un ticket programmait sa suppression automatique, et il
+# n'existait aucun moyen de l'empêcher : ``ticket_delete_delay`` valait 30
+# secondes par défaut, et les six endroits qui le lisaient écrivaient tous
+#
+#     delay = (conf["ticket_delete_delay"] if conf else 30) or 30
+#
+# où ``0 or 30`` rend 30. Mettre zéro pour dire « ne supprime pas » était donc
+# impossible : la valeur était silencieusement ramenée à 30 secondes.
+#
+# Zéro veut maintenant dire ce qu'on attend : le salon reste, et un membre du
+# staff décide. C'est aussi ce qui permet de relire un ticket le lendemain — 30
+# secondes après la fermeture, personne n'a eu le temps de revenir dessus.
+
+#: Valeur de ``ticket_delete_delay`` qui signifie « suppression manuelle ».
+SUPPRESSION_MANUELLE = 0
+
+#: Utilisé quand la configuration est absente. Inchangé, pour ne pas modifier le
+#: comportement des serveurs qui n'ont jamais touché ce réglage.
+DELAI_SUPPRESSION_DEFAUT = 30
+
+
+def delai_de_suppression(config) -> int | None:
+    """Secondes avant suppression automatique, ou None si c'est au staff.
+
+    Le ``or`` des appelants historiques traitait 0 comme « non renseigné ».
+    Ici on distingue vraiment les trois cas : absent (défaut), zéro (manuel),
+    valeur (délai).
+    """
+    if config is None:
+        return DELAI_SUPPRESSION_DEFAUT
+    try:
+        brut = config["ticket_delete_delay"]
+    except (KeyError, TypeError, IndexError):
+        return DELAI_SUPPRESSION_DEFAUT
+    if brut is None:
+        return DELAI_SUPPRESSION_DEFAUT
+    try:
+        valeur = int(brut)
+    except (TypeError, ValueError):
+        return DELAI_SUPPRESSION_DEFAUT
+    if valeur <= SUPPRESSION_MANUELLE:
+        return None
+    return valeur
+
+
+def duree_du_ticket(ticket, *, fin: int | None = None) -> str | None:
+    """« 2 h 14 min » entre l'ouverture et la fermeture, ou None si incalculable.
+
+    Demandé par Jayden : à la lecture d'un journal, savoir combien de temps un
+    ticket est resté ouvert dit bien plus que deux horodatages qu'il faudrait
+    soustraire de tête. C'est aussi le seul chiffre qui permet de voir qu'un
+    ticket a traîné.
+    """
+    import time
+
+    from utils import helpers
+
+    try:
+        debut = int(ticket["created_at"])
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+    if debut <= 0:
+        return None
+    arrivee = int(fin) if fin else int(time.time())
+    ecoule = arrivee - debut
+    if ecoule < 0:
+        return None
+    if ecoule < 60:
+        # format_duration arrondit à la minute et rendrait « 0 min » pour un
+        # ticket réglé en trente secondes — ce qui se lit comme une erreur.
+        return f"{ecoule} s"
+    return helpers.format_duration(ecoule)
+
+
+class BoutonSupprimerTicket(discord.ui.DynamicItem[discord.ui.Button],
+                            template=r"sx_ticket_del:(?P<ticket_id>[0-9]+)"):
+    """« Supprimer le salon » — l'action explicite que Jayden a demandée.
+
+    DynamicItem et non un bouton de vue ordinaire : son ``custom_id`` porte
+    l'identifiant du ticket, donc Discord le fait fonctionner même après un
+    redémarrage du bot. Un bouton de vue classique cesserait de répondre au
+    premier redéploiement, et le salon resterait là sans que personne ne puisse
+    le supprimer autrement qu'à la main — exactement le genre de bouton mort
+    qu'on vient de retirer partout ailleurs.
+    """
+
+    def __init__(self, ticket_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label="Supprimer le salon",
+                emoji="🗑️",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"sx_ticket_del:{int(ticket_id)}",
+            )
+        )
+        self.ticket_id = int(ticket_id)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(int(match["ticket_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        from utils import embeds as _embeds
+        from utils import sentrix_panels as _panels
+
+        salon = interaction.channel
+        guild = interaction.guild
+        if guild is None or salon is None:
+            return
+
+        # Supprimer un salon est irréversible : réservé à qui peut gérer les
+        # salons. Le créateur du ticket peut le FERMER, pas le supprimer — c'est
+        # toute la séparation demandée.
+        perms = getattr(interaction.user, "guild_permissions", None)
+        autorise = bool(
+            (perms and (perms.manage_channels or perms.administrator))
+            or interaction.user.id == guild.owner_id
+        )
+        if not autorise:
+            return await _panels.envoyer(
+                interaction.response,
+                _panels.depuis_embed(_embeds.error(
+                    "Seul un membre pouvant **gérer les salons** peut supprimer ce ticket."
+                )),
+                ephemere=True,
+            )
+
+        ligne = await interaction.client.db.fetchone(
+            "SELECT status FROM tickets WHERE id = ?", (self.ticket_id,)
+        )
+        if ligne is not None and str(ligne["status"]) == "ouvert":
+            return await _panels.envoyer(
+                interaction.response,
+                _panels.depuis_embed(_embeds.warning(
+                    "Ce ticket a été rouvert. Fermez-le d'abord."
+                )),
+                ephemere=True,
+            )
+
+        await interaction.client.db.execute(
+            "UPDATE tickets SET status = 'supprime' WHERE id = ? AND status <> 'supprime'",
+            (self.ticket_id,),
+        )
+        await journaliser_evenement(
+            interaction.client, guild, "ticket_delete",
+            ticket_id=self.ticket_id, channel=salon,
+            acteur=interaction.user,
+            raison="Suppression demandée par le staff.",
+            avec_bouton=False,
+        )
+        try:
+            await interaction.response.send_message(
+                "🗑️ Suppression du salon…", ephemeral=True
+            )
+        except discord.HTTPException:
+            pass
+        try:
+            await salon.delete(reason=f"Ticket supprimé par {interaction.user}.")
+        except discord.HTTPException:
+            logger.warning(
+                "Suppression manuelle du ticket %s refusée par Discord (salon=%s).",
+                self.ticket_id, getattr(salon, "id", None),
+            )
+
+
+def vue_supprimer_ticket(ticket_id: int) -> discord.ui.View:
+    """La vue qui porte le bouton, à joindre au message de fermeture."""
+    vue = discord.ui.View(timeout=None)
+    vue.add_item(BoutonSupprimerTicket(int(ticket_id)))
+    return vue

@@ -821,7 +821,7 @@ class _VueTarget(VueReflexe):
                 f"La cible était {self.cible}."
             )
         if self.terminee:
-            return f"○ Raté. La cible était {self.cible}."
+            return f"❌ Raté. La cible était {self.cible}."
         return f"🎯 Cliquez sur **{self.cible}** — le plus vite possible !"
 
     async def tirer(self, interaction: discord.Interaction, position: int) -> None:
@@ -870,7 +870,7 @@ ARCHERY_ZONES = (
     (0.10, "🎯", "Parfait", 3.0),
     (0.25, "✨", "Excellent", 2.0),
     (0.45, "👍", "Bon", 1.0),
-    (1.00, "○", "Raté", 0.0),
+    (1.00, "❌", "Raté", 0.0),
 )
 ARCHERY_BASE = 20
 
@@ -918,7 +918,7 @@ class _VueArchery(VueReflexe):
         if self.ecart is None:
             return (
                 "🏹 La cible oscille. Tirez quand vous la jugez au centre.\n"
-                "-# 🎯 Parfait · ✨ Excellent · 👍 Bon · ○ Raté"
+                "-# 🎯 Parfait · ✨ Excellent · 👍 Bon · ❌ Raté"
             )
         emoji, libelle, _facteur = zone_archery(self.ecart)
         return (
@@ -998,7 +998,7 @@ class _VueGhost(VueReflexe):
         return (
             f"{portes}\n\n"
             + (f"👻 **Trouvé en {self.reaction_ms} ms !**" if gagne
-               else f"○ Raté — il était derrière la porte **{self.bonne_porte + 1}**.")
+               else f"❌ Raté — il était derrière la porte **{self.bonne_porte + 1}**.")
         )
 
     async def ouvrir(self, interaction: discord.Interaction, index: int) -> None:
@@ -1075,7 +1075,7 @@ class _VueSequence(VueDeJeu):
         return (
             f"## {' '.join(self.suite)}\n\n"
             + (f"🧩 **Exact !** Il manquait {self.manquant}." if gagne
-               else f"○ Non — il manquait {self.manquant}, pas {self.reponse}.")
+               else f"❌ Non — il manquait {self.manquant}, pas {self.reponse}.")
         )
 
     async def repondre(self, interaction: discord.Interaction, symbole: str) -> None:

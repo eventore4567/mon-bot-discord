@@ -266,10 +266,51 @@ def derive_identity(
     return identity_name, identity_id, identity_icon
 
 
+def _libelles_dacteur_ticket() -> tuple[tuple[str, str], ...]:
+    """(titre, libellé d'acteur) des événements de ticket, depuis la source
+    unique ``services.tickets.EVENEMENTS_TICKET``. Import différé : ce module
+    est importé très tôt dans le boot."""
+    try:
+        from services.tickets import EVENEMENTS_TICKET
+    except Exception:  # pragma: no cover - import circulaire improbable
+        return ()
+    return tuple(EVENEMENTS_TICKET.values())
+
+
+class _LibellesDacteurTicket:
+    """Évalué au premier usage, pas à l'import : services.tickets importe
+    utils.log_service, qui importe ce module."""
+
+    def __iter__(self):
+        return iter(_libelles_dacteur_ticket())
+
+
+_LIBELLES_DACTEUR_TICKET = _LibellesDacteurTicket()
+
+
 def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
     """Compatibilité : ne conserve que les détails longs, jamais une ligne de métadonnées plate."""
     blocks: list[str] = []
     ignored = {"auteur", "author", "salon", "channel", "membre", "member", "modérateur", "moderateur", "staff", "rôle", "role"}
+    # Les libellés d'identité des tickets sont parlants — « Fermé par »,
+    # « Transféré par », « Membre concerné » — donc aucun ne figurait dans la
+    # liste ci-dessus, et leur valeur contient un saut de ligne (embeds._who
+    # rend « <@id> » puis l'identifiant en dessous). La règle « garder tout
+    # champ multi-ligne » les réaffichait donc intégralement SOUS la phrase qui
+    # venait déjà de les nommer :
+    #
+    #     « X a fermé le ticket de Y. »
+    #     **Fermé par :** X
+    #     `123456789012345678`
+    #
+    # narrative_body a besoin de ces champs pour composer sa phrase ; c'est leur
+    # RÉ-AFFICHAGE qu'il faut supprimer, pas les champs.
+    ignored |= {
+        libelle.casefold()
+        for _titre, libelle in _LIBELLES_DACTEUR_TICKET
+    }
+    ignored.add("membre concerné")
+    ignored.add("membre concerne")
     for name, value in _field_map(embed):
         low = name.casefold().strip(" :")
         if any(token == low for token in ignored):
@@ -294,6 +335,36 @@ def _with_id(mention: str) -> str:
 #: ``{acteur}`` celui qui agit — les deux diffèrent sur tout ce que fait le
 #: staff, et les confondre était l'autre défaut du rendu : « Un membre a fermé
 #: le ticket » quand c'est un modérateur qui l'a fermé.
+def phrase_nomme_lacteur(evenement: str) -> bool:
+    """La phrase de cet événement nomme-t-elle déjà celui qui agit ?
+
+    Symétrique de ``phrase_nomme_le_membre``. Les deux sont nécessaires :
+    retirer seulement le doublon du membre laissait celui de l'acteur, et le
+    journal disait encore
+
+        « X a fermé le ticket de Y. »
+        **Fermé par :** X
+        `123456789012345678`
+    """
+    return "{acteur}" in _PHRASES_TICKET.get(str(evenement), "")
+
+
+def phrase_nomme_le_membre(evenement: str) -> bool:
+    """La phrase de cet événement nomme-t-elle déjà le membre concerné ?
+
+    Sert à ne pas répéter l'information. Avant, un journal de fermeture disait
+
+        « X a fermé le ticket de Y. »
+        **Membre concerné :** Y
+        `123456789012345678`
+
+    soit le même membre trois fois, dont une en identifiant brut. La règle se
+    déduit du gabarit de phrase et non d'une liste tenue à la main : ajouter un
+    événement ne peut donc pas réintroduire le doublon.
+    """
+    return "{membre}" in _PHRASES_TICKET.get(str(evenement), "")
+
+
 _PHRASES_TICKET: dict[str, str] = {
     "ticket_open": "{membre} a ouvert un ticket.",
     "ticket_close": "{acteur} a fermé le ticket de {membre}.",
@@ -499,14 +570,18 @@ def narrative_body(
         # correspond, et le repli `or member` faisait dire à la phrase « X a
         # transféré le ticket à X », le même membre des deux côtés. On relit donc
         # l'acteur sur les libellés réellement utilisés.
-        acteur_ticket = _with_id(_first_user_ref(_field_value(
+        # Mention SEULE, sans son identifiant entre parenthèses : l'en-tête du
+        # panneau en affiche déjà un. Répéter des identifiants de dix-huit
+        # chiffres dans la phrase est précisément ce qui rendait ces journaux
+        # illisibles.
+        acteur_ticket = _first_user_ref(_field_value(
             embed, "ouvert par", "fermé par", "ferme par", "pris en charge par",
             "abandonnée par", "abandonnee par", "ajouté par", "ajoute par",
             "retiré par", "retire par", "renommé par", "renomme par",
             "transféré par", "transfere par", "rouvert par", "supprimé par",
             "supprime par", "noté par", "note par", "auteur", "envoyé par",
             "envoye par", "déclencheur", "declencheur",
-        ))) or moderator
+        )) or moderator
         lines.append(base or _PHRASES_TICKET[event_type].format(
             membre=member or "Un membre",
             acteur=acteur_ticket or "Un membre du staff",
@@ -521,14 +596,18 @@ def narrative_body(
         type_ticket = _field_value(embed, "type")
         if type_ticket:
             details.append(f"Type : {type_ticket}")
+        # « Avant » et « Après » ne sont PAS dans cette liste, volontairement :
+        # compact_fields() les rend déjà en blocs de code (ils font partie de sa
+        # courte liste de champs toujours conservés), et les ajouter ici les
+        # affichait DEUX fois — une fois dans la ligne de détails, une fois en
+        # bloc en dessous. Le bloc de code est le meilleur rendu pour un nom de
+        # salon : il ne s'interprète pas et les espaces se voient.
         for libelle, *noms in (
             ("Support", "rôle support", "role support"),
             ("Note", "note"),
             ("Reprise sur", "reprise sur"),
             ("Titulaire retiré", "titulaire retiré", "titulaire retire"),
             ("Précédemment en charge", "précédemment en charge", "precedemment en charge"),
-            ("Avant", "avant"),
-            ("Après", "après", "apres"),
             ("Seuil", "seuil configuré", "seuil configure"),
             ("Suppression automatique", "suppression automatique"),
             ("Longueur", "longueur"),

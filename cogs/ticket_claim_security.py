@@ -406,12 +406,41 @@ def install(bot: commands.Bot) -> None:
         except discord.HTTPException:
             transcript_text = "Transcription indisponible (erreur lors de la lecture du salon)."
 
-        delay = (conf["ticket_delete_delay"] if conf else 30) or 30
-        asyncio.create_task(self._auto_delete(channel, ticket_id, delay))
+        # Fermer n'est plus forcément supprimer. `ticket_delete_delay` à 0 veut
+        # dire « le staff décide » — ce qui était impossible à exprimer avant,
+        # parce que les six lecteurs de ce réglage écrivaient tous
+        # `(...) or 30`, et `0 or 30` rend 30.
+        delay = tickets_service.delai_de_suppression(conf)
+        duree = tickets_service.duree_du_ticket(ticket, fin=closed_at)
 
         reason_text = (reason or "Non précisée").strip()[:1200]
+        if delay is None:
+            suite = (
+                "Le salon reste ouvert à la relecture. "
+                "Un membre du staff le supprimera avec le bouton ci-dessous."
+            )
+            vue_fermeture = tickets_service.vue_supprimer_ticket(ticket_id)
+        else:
+            asyncio.create_task(self._auto_delete(channel, ticket_id, delay))
+            suite = f"Suppression automatique dans **{tickets.helpers.format_duration(delay)}**."
+            # Le bouton est proposé même avec un délai : il sert à supprimer
+            # tout de suite, sans attendre.
+            vue_fermeture = tickets_service.vue_supprimer_ticket(ticket_id)
+
+        ligne_duree = f"\nOuvert pendant : **{duree}**" if duree else ""
         try:
-            await panels.envoyer(channel, panels.depuis_embed(tickets.embeds.warning(f'🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason_text}\n\nSuppression automatique dans **{tickets.helpers.format_duration(delay)}**.')), file=self._transcript_file(channel, transcript_text), allowed_mentions=discord.AllowedMentions.none())
+            await panels.envoyer(
+                channel,
+                panels.avec_composants(
+                    panels.depuis_embed(tickets.embeds.warning(
+                        f'🔒 Ticket fermé par {interaction.user.mention}.'
+                        f'\nRaison : {reason_text}{ligne_duree}\n\n{suite}'
+                    )),
+                    vue_fermeture,
+                ),
+                file=self._transcript_file(channel, transcript_text),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except discord.HTTPException:
             pass
 
@@ -448,6 +477,11 @@ def install(bot: commands.Bot) -> None:
             details=reason_text,
         )
         reference = tickets_service.reference_incident(ticket_id, ligne_id)
+        if duree:
+            # Demandé par Jayden : combien de temps le ticket est resté ouvert.
+            # Deux horodatages qu'il faut soustraire de tête ne disent rien ;
+            # « 2 h 14 min » se lit d'un coup d'œil et montre ce qui a traîné.
+            log_embed.add_field(name="⏳ Ouvert pendant", value=f"**{duree}**", inline=True)
         log_embed.add_field(name="🔖 Référence", value=f"`{reference}`", inline=False)
         event_key = log_service.make_event_key(
             guild.id,

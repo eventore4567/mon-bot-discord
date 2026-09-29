@@ -472,7 +472,11 @@ class TicketRenameModal(discord.ui.Modal, title="✏️ Renommer le ticket"):
             # L'ancien nom doit être capturé AVANT channel.edit() : après, il
             # n'existe plus nulle part et le journal ne pourrait dire que le
             # nouveau, ce qui rend le renommage intraçable.
-            extra={"📛 Avant": f"`{ancien_nom}`", "🏷️ Après": f"`{name}`"},
+            # Nom BRUT, sans backticks : compact_fields encadre déjà « Avant »
+            # et « Après » dans un bloc de code, et les backticks s'affichaient
+            # alors à l'intérieur du bloc. Le bloc de code est le bon rendu ici —
+            # il ne s'interprète pas, et un espace en fin de nom se voit.
+            extra={"📛 Avant": ancien_nom, "🏷️ Après": name},
         )
 
 
