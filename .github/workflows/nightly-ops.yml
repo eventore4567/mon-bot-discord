@@ -13,6 +13,11 @@ jobs:
   reliability:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      DISCORD_TOKEN: "ci.fake.token"
+      OPENAI_API_KEY: ""
+      POSTGRES_URL: ""
+      REDIS_URL: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
