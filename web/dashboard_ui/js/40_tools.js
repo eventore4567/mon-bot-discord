@@ -11,14 +11,49 @@ async function renderSettings() {
 }
 
 /* Commandes & accès : commandes désactivées, gestionnaires, accès dashboard par rôle */
+function multiCommandPicker(id, selected = [], catalog = [], placeholder = 'Ajouter des commandes') {
+  const chosen = new Set((selected || []).map(String));
+  const label = name => catalog.find(c => String(c.name) === String(name))?.name || name;
+  return `<div class="chips" id="${esc(id)}" data-multi-commands="${esc([...chosen].join(','))}">${[...chosen].map(name => `<span class="chip on">+${esc(label(name))} <button type="button" class="btn link sm" aria-label="Retirer" data-command-chip-remove="${esc(name)}">×</button></span>`).join('')}<button class="btn sm ghost" type="button" data-command-chip-add="${esc(id)}">${esc(placeholder)}</button></div>`;
+}
+function readMultiCommands(id) {
+  const raw = $(id)?.dataset.multiCommands || '';
+  return raw.split(',').filter(Boolean);
+}
+function bindMultiCommandPickers(root, catalog, onChange) {
+  root.querySelectorAll('[data-command-chip-add]').forEach(button => button.onclick = async () => {
+    const box = $(button.dataset.commandChipAdd);
+    const current = new Set(readMultiCommands(box.id));
+    const items = catalog
+      .filter(c => !current.has(String(c.name)))
+      .map(c => ({ value: c.name, label: `+${c.name}` }));
+    const pick = await pickDialog({ title: 'Ajouter une commande', items });
+    if (!pick) return;
+    current.add(String(pick.value));
+    box.outerHTML = multiCommandPicker(box.id, [...current], catalog);
+    bindMultiCommandPickers(root, catalog, onChange);
+    onChange?.();
+  });
+  root.querySelectorAll('[data-command-chip-remove]').forEach(button => button.onclick = () => {
+    const box = button.closest('[data-multi-commands]');
+    const list = readMultiCommands(box.id).filter(name => name !== button.dataset.commandChipRemove);
+    box.outerHTML = multiCommandPicker(box.id, list, catalog);
+    bindMultiCommandPickers(root, catalog, onChange);
+    onChange?.();
+  });
+}
 async function renderAccess() {
   let data = null, error = null;
   try { data = await setupTools(); } catch (e) { error = e; }
   let access = null; try { access = await gget('/ops/access'); } catch (_) {}
   const disabled = new Set(data?.disabled_commands || []), commands = data?.commands || [];
   const blockedChannels = data?.command_blocked_channels || [];
+  const commandRules = data?.command_channel_rules || [];
+  const ruleRows = commandRules.length
+    ? commandRules.map(r => `<div class="row"><div class="row-main"><b>+${esc(r.command_name)}</b><small>#${esc(channelName(r.channel_id) || 'salon supprimé')}</small></div><button class="btn sm danger" type="button" data-rule-command="${esc(r.command_name)}" data-rule-channel="${esc(r.channel_id)}">Retirer</button></div>`).join('')
+    : emptyState('Aucune restriction précise', 'Choisissez des commandes et plusieurs salons ci-dessous.');
   const tiers = access?.tiers || access?.levels || [['viewer', 'Lecture'], ['operator', 'Opérateur'], ['admin', 'Administrateur dashboard']];
-  content().innerHTML = `<div class="grid">${error ? notice(`Liste des commandes indisponible : ${error.message}`, 'warn') : card('Commandes', 'Désactivez une commande pour ce serveur sans toucher au bot.', `<div class="toolbar"><input class="search-input" id="commandSearch" type="search" placeholder="Rechercher une commande…"><select class="search-input" id="commandFilter"><option value="all">Toutes</option><option value="enabled">Actives</option><option value="disabled">Désactivées</option></select></div><div class="list" id="commandList"></div>`, 'full')}${data ? card('Salons interdits aux commandes', 'Dans ces salons, les commandes + et / sont refusées. SentriX répond seulement par une phrase en texte simple.', `<div class="field"><span class="label">Salons bloqués</span>${multiChannelPicker('commandBlockedChannels', blockedChannels)}</div><div class="toolbar" style="margin-top:10px"><button class="btn primary" type="button" id="commandChannelsSave">Enregistrer</button></div>`, 'full') : ''}${data ? `<section class="card full"><div class="card-head"><div><h2>Gestionnaires</h2><p>Membres avec des accès supplémentaires à SentriX.</p></div><span class="badge blue">${number((data.managers || []).length)}</span></div><div class="list">${(data.managers || []).length ? (data.managers || []).map(m => `<div class="row"><div class="row-main"><b>${esc(m.name || m.id)}</b><small>${esc((m.categories || []).join(', '))}</small></div><button class="btn sm danger" type="button" data-manager-remove="${esc(m.id)}">Retirer</button></div>`).join('') : emptyState('Aucun gestionnaire supplémentaire')}</div></section>` : ''}${access ? `<section class="card full"><div class="card-head"><div><h2>Accès au dashboard par rôle</h2><p>Donnez à un rôle Discord un accès limité à ce dashboard.</p></div><button class="btn primary" type="button" id="accessAdd">Ajouter un rôle</button></div><div class="list">${(access.roles || access.items || []).length ? (access.roles || access.items).map(r => `<div class="row"><div class="row-main"><b>${esc(roleName(r.role_id) || r.role_name || r.role_id)}</b><small>${esc(r.tier || r.level || '')}</small></div><button class="btn sm danger" type="button" data-access-remove="${esc(r.role_id)}">Retirer</button></div>`).join('') : emptyState('Aucun accès délégué', 'Seuls les administrateurs Discord voient ce dashboard.')}</div></section>` : ''}</div>`;
+  content().innerHTML = `<div class="grid">${error ? notice(`Liste des commandes indisponible : ${error.message}`, 'warn') : card('Commandes', 'Désactivez une commande pour ce serveur sans toucher au bot.', `<div class="toolbar"><input class="search-input" id="commandSearch" type="search" placeholder="Rechercher une commande…"><select class="search-input" id="commandFilter"><option value="all">Toutes</option><option value="enabled">Actives</option><option value="disabled">Désactivées</option></select></div><div class="list" id="commandList"></div>`, 'full')}${data ? card('Bloquer toutes les commandes', 'Dans les salons choisis, aucune commande + ou / ne fonctionne.', `<div class="field"><span class="label">Salons bloqués</span>${multiChannelPicker('commandBlockedChannels', blockedChannels)}</div><div class="toolbar" style="margin-top:10px"><button class="btn primary" type="button" id="commandChannelsSave">Enregistrer</button></div>`, 'full') : ''}${data ? card('Bloquer certaines commandes', 'Choisissez plusieurs salons et plusieurs commandes. Seules les commandes sélectionnées seront interdites dans ces salons.', `<div class="field"><span class="label">Salons</span>${multiChannelPicker('commandRuleChannels', [])}</div><div class="field" style="margin-top:10px"><span class="label">Commandes</span>${multiCommandPicker('commandRuleCommands', [], commands)}</div><div class="toolbar" style="margin-top:10px"><button class="btn primary" type="button" id="commandRuleAdd">Ajouter les restrictions</button></div><div class="list" style="margin-top:12px">${ruleRows}</div>`, 'full') : ''}${data ? `<section class="card full"><div class="card-head"><div><h2>Gestionnaires</h2><p>Membres avec des accès supplémentaires à SentriX.</p></div><span class="badge blue">${number((data.managers || []).length)}</span></div><div class="list">${(data.managers || []).length ? (data.managers || []).map(m => `<div class="row"><div class="row-main"><b>${esc(m.name || m.id)}</b><small>${esc((m.categories || []).join(', '))}</small></div><button class="btn sm danger" type="button" data-manager-remove="${esc(m.id)}">Retirer</button></div>`).join('') : emptyState('Aucun gestionnaire supplémentaire')}</div></section>` : ''}${access ? `<section class="card full"><div class="card-head"><div><h2>Accès au dashboard par rôle</h2><p>Donnez à un rôle Discord un accès limité à ce dashboard.</p></div><button class="btn primary" type="button" id="accessAdd">Ajouter un rôle</button></div><div class="list">${(access.roles || access.items || []).length ? (access.roles || access.items).map(r => `<div class="row"><div class="row-main"><b>${esc(roleName(r.role_id) || r.role_name || r.role_id)}</b><small>${esc(r.tier || r.level || '')}</small></div><button class="btn sm danger" type="button" data-access-remove="${esc(r.role_id)}">Retirer</button></div>`).join('') : emptyState('Aucun accès délégué', 'Seuls les administrateurs Discord voient ce dashboard.')}</div></section>` : ''}</div>`;
   if (data) {
     const draw = () => {
       const q = $('commandSearch').value.toLowerCase(), f = $('commandFilter').value;
@@ -28,6 +63,7 @@ async function renderAccess() {
     };
     $('commandSearch').oninput = draw; $('commandFilter').onchange = draw; draw();
     bindMultiPickers(content(), () => {});
+    bindMultiCommandPickers(content(), commands, () => {});
     const saveChannels = $('commandChannelsSave');
     if (saveChannels) saveChannels.onclick = async () => {
       try {
@@ -35,6 +71,28 @@ async function renderAccess() {
         await renderAccess();
       } catch (e) { toast(e.message, true); }
     };
+    const addRule = $('commandRuleAdd');
+    if (addRule) addRule.onclick = async () => {
+      const channelIds = readMulti('commandRuleChannels');
+      const commandNames = readMultiCommands('commandRuleCommands');
+      if (!channelIds.length) return toast('Choisissez au moins un salon.', true);
+      if (!commandNames.length) return toast('Choisissez au moins une commande.', true);
+      try {
+        await setupAction({ action: 'command_channel_rule', channel_ids: channelIds, commands: commandNames, blocked: true });
+        await renderAccess();
+      } catch (e) { toast(e.message, true); }
+    };
+    content().querySelectorAll('[data-rule-command]').forEach(button => button.onclick = async () => {
+      try {
+        await setupAction({
+          action: 'command_channel_rule',
+          channel_ids: [button.dataset.ruleChannel],
+          commands: [button.dataset.ruleCommand],
+          blocked: false,
+        });
+        await renderAccess();
+      } catch (e) { toast(e.message, true); }
+    });
     content().querySelectorAll('[data-manager-remove]').forEach(b => b.onclick = async () => { if (!(await confirmDialog({ title: 'Retirer ce gestionnaire ?', body: 'Il perdra ses accès supplémentaires.', confirm: 'Retirer', danger: true }))) return; try { await setupAction({ action: 'manager', user_id: b.dataset.managerRemove, enabled: false }); await renderAccess(); } catch (e) { toast(e.message, true); } });
   }
   const add = $('accessAdd');

@@ -9,7 +9,7 @@ const NAV_SERVER = [
   ['Communauté', [['welcome', 'Accueil & Départs'], ['roles', 'Rôles']]],
   ['Progression', [['levels', 'Niveaux'], ['economy', 'Économie']]],
   ['Modération', [['moderation', 'Centre de modération'], ['security', 'Sécurité'], ['logs', 'Logs'], ['tickets', 'Tickets']]],
-  ['Administration', [['access', 'Commandes & accès']]],
+  ['Administration', [['access', 'Commandes & accès'], ['settings', 'Paramètres'], ['backups', 'Sauvegardes & historique']]],
   ['Jeux', [['games', 'Jeux']]],
   ['Musique', [['music', 'Musique']]],
   ['Automatisation', [['notifications', 'Notifications'], ['automation', 'Automatisation']]],
@@ -22,7 +22,6 @@ const NAV = NAV_SERVER;
    anciennes interfaces dont toutes les fonctions ne sont pas encore reprises ici. */
 const TOOL_GROUPS = [
   ['Outils', [['invites', 'Invitations & webhooks']]],
-  ['Administration', [['settings', 'Paramètres'], ['backups', 'Sauvegardes & historique']]],
   ['Développeur', [['advanced', 'Centre avancé']]],
 ];
 const TOOLS = TOOL_GROUPS.flatMap(([, items]) => items);

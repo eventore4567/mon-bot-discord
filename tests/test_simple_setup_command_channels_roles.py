@@ -29,7 +29,9 @@ def test_command_channels_are_separate_from_automod_and_plain_text():
     gate = (ROOT / "cogs" / "command_channel_gate.py").read_text()
 
     assert "CREATE TABLE IF NOT EXISTS command_blocked_channels" in schema
+    assert "CREATE TABLE IF NOT EXISTS command_channel_blocks" in schema
     assert "SELECT 1 FROM command_blocked_channels" in gate
+    assert "SELECT 1 FROM command_channel_blocks" in gate
     assert "panels.texte_court" in gate
     assert "class CommandChannelBlocked" in gate
     assert "_sentrix_channel_blocked" not in gate
@@ -44,13 +46,19 @@ def test_dashboard_can_choose_blocked_command_channels():
     assert 'action == "command_channels"' in backend
     assert "commandBlockedChannels" in frontend
     assert "action: 'command_channels'" in frontend
+    assert '"command_channel_rules"' in backend
+    assert 'action == "command_channel_rule"' in backend
+    assert "commandRuleChannels" in frontend
+    assert "commandRuleCommands" in frontend
+    assert "multiCommandPicker" in frontend
 
 
 def test_commands_access_page_is_visible_in_main_navigation():
     nav = (ROOT / "web" / "dashboard_ui" / "js" / "10_nav.js").read_text()
     boot = (ROOT / "web" / "dashboard_ui" / "js" / "90_boot.js").read_text()
 
-    assert "['Administration', [['access', 'Commandes & accès']]]" in nav
+    assert nav.count("['Administration'") == 1
+    assert "['Administration', [['access', 'Commandes & accès'], ['settings', 'Paramètres'], ['backups', 'Sauvegardes & historique']]]" in nav
     assert "access: renderAccess" in boot
 
 

@@ -258,6 +258,13 @@ CREATE TABLE IF NOT EXISTS command_blocked_channels (
     PRIMARY KEY (guild_id, channel_id)
 );
 
+CREATE TABLE IF NOT EXISTS command_channel_blocks (
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    command_name TEXT NOT NULL COLLATE NOCASE,
+    PRIMARY KEY (guild_id, channel_id, command_name)
+);
+
 CREATE TABLE IF NOT EXISTS tickets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER,

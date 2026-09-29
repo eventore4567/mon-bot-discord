@@ -87,6 +87,11 @@ async def handle_setup_data(request: web.Request) -> web.Response:
         "SELECT channel_id FROM command_blocked_channels WHERE guild_id = ? ORDER BY channel_id",
         (guild_id,),
     )
+    command_rule_rows = await db.fetchall(
+        "SELECT channel_id, command_name FROM command_channel_blocks "
+        "WHERE guild_id = ? ORDER BY command_name, channel_id",
+        (guild_id,),
+    )
     exempt_rows = await db.fetchall(
         "SELECT role_id FROM automod_exempt_roles WHERE guild_id = ? ORDER BY role_id",
         (guild_id,),
@@ -129,6 +134,10 @@ async def handle_setup_data(request: web.Request) -> web.Response:
         "disabled_commands": [row["command_name"] for row in disabled_rows],
         "ignored_channels": [str(row["channel_id"]) for row in ignored_rows],
         "command_blocked_channels": [str(row["channel_id"]) for row in command_blocked_rows],
+        "command_channel_rules": [
+            {"channel_id": str(row["channel_id"]), "command_name": row["command_name"]}
+            for row in command_rule_rows
+        ],
         "automod_exempt_roles": [str(row["role_id"]) for row in exempt_rows],
         "antinuke_whitelist": [_member_data(guild, int(row["user_id"])) for row in whitelist_rows],
         "managers": managers,
@@ -223,6 +232,61 @@ async def handle_setup_action(request: web.Request) -> web.Response:
             f"Les commandes sont maintenant bloquées dans {len(channel_ids)} salon(s)."
             if channel_ids else
             "Les commandes sont de nouveau autorisées dans tous les salons."
+        )
+
+    elif action == "command_channel_rule":
+        raw_channel_ids = payload.get("channel_ids") or []
+        raw_commands = payload.get("commands") or []
+        blocked = bool(payload.get("blocked", True))
+
+        if not isinstance(raw_channel_ids, list) or not isinstance(raw_commands, list):
+            return dashboard._json_error("Les salons ou commandes sélectionnés sont invalides.", 400)
+        if not raw_channel_ids or not raw_commands:
+            return dashboard._json_error("Choisissez au moins un salon et une commande.", 400)
+        if len(raw_channel_ids) > 50 or len(raw_commands) > 50:
+            return dashboard._json_error("Choisissez au maximum 50 salons et 50 commandes à la fois.", 400)
+
+        channel_ids = []
+        for raw in raw_channel_ids:
+            try:
+                channel_id = int(raw)
+            except (TypeError, ValueError):
+                return dashboard._json_error("Un salon sélectionné est invalide.", 400)
+            channel = guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                return dashboard._json_error("Seuls les salons textuels peuvent être utilisés.", 400)
+            if channel_id not in channel_ids:
+                channel_ids.append(channel_id)
+
+        catalog = {item["name"]: item for item in _command_catalog(bot)}
+        command_names = []
+        for raw in raw_commands:
+            command_name = str(raw or "").strip().lower()
+            if command_name not in catalog:
+                return dashboard._json_error(f"La commande +{command_name} n'existe pas.", 404)
+            if command_name not in command_names:
+                command_names.append(command_name)
+
+        for channel_id in channel_ids:
+            for command_name in command_names:
+                if blocked:
+                    await db.execute(
+                        "INSERT OR IGNORE INTO command_channel_blocks "
+                        "(guild_id, channel_id, command_name) VALUES (?, ?, ?)",
+                        (guild_id, channel_id, command_name),
+                    )
+                else:
+                    await db.execute(
+                        "DELETE FROM command_channel_blocks "
+                        "WHERE guild_id = ? AND channel_id = ? AND command_name = ?",
+                        (guild_id, channel_id, command_name),
+                    )
+
+        pair_count = len(channel_ids) * len(command_names)
+        message = (
+            f"{pair_count} restriction(s) de commande ont été ajoutées."
+            if blocked else
+            f"{pair_count} restriction(s) de commande ont été retirées."
         )
 
     elif action == "ignored_channel":
@@ -431,7 +495,9 @@ async def handle_setup_action(request: web.Request) -> web.Response:
             return dashboard._json_error("Écrivez exactement le nom du serveur pour confirmer.", 400)
         if scope == "commands":
             await db.execute("DELETE FROM disabled_commands WHERE guild_id = ?", (guild_id,))
-            message = "Toutes les commandes ont été réactivées."
+            await db.execute("DELETE FROM command_blocked_channels WHERE guild_id = ?", (guild_id,))
+            await db.execute("DELETE FROM command_channel_blocks WHERE guild_id = ?", (guild_id,))
+            message = "Toutes les commandes et restrictions par salon ont été réinitialisées."
         elif scope == "ignored":
             await db.execute("DELETE FROM ignored_channels WHERE guild_id = ?", (guild_id,))
             message = "Tous les salons ignorés ont été retirés."
@@ -449,7 +515,7 @@ async def handle_setup_action(request: web.Request) -> web.Response:
         elif scope == "all":
             for table in (
                 "guild_config", "automod_settings", "disabled_commands", "ignored_channels",
-                "command_blocked_channels", "automod_exempt_roles", "antinuke_whitelist", "game_settings", "log_settings",
+                "command_blocked_channels", "command_channel_blocks", "automod_exempt_roles", "antinuke_whitelist", "game_settings", "log_settings",
             ):
                 await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
             cache = getattr(db, "_guild_config_cache", None)

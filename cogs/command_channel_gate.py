@@ -21,6 +21,7 @@ async def is_command_channel_blocked(
     bot: commands.Bot,
     guild_id: int | None,
     channel_id: int | None,
+    command_name: str | None = None,
 ) -> bool:
     if guild_id is None or channel_id is None:
         return False
@@ -30,10 +31,21 @@ async def is_command_channel_blocked(
             "WHERE guild_id = ? AND channel_id = ? LIMIT 1",
             (int(guild_id), int(channel_id)),
         )
+        if row is not None:
+            return True
+
+        name = str(command_name or "").strip().lower()
+        if not name:
+            return False
+        row = await bot.db.fetchone(
+            "SELECT 1 FROM command_channel_blocks "
+            "WHERE guild_id = ? AND channel_id = ? AND command_name = ? LIMIT 1",
+            (int(guild_id), int(channel_id), name),
+        )
+        return row is not None
     except Exception:
-        logger.exception("Lecture des salons interdits aux commandes impossible.")
+        logger.exception("Lecture des restrictions de commandes par salon impossible.")
         return False
-    return row is not None
 
 
 def install(bot: commands.Bot) -> None:
@@ -44,7 +56,12 @@ def install(bot: commands.Bot) -> None:
         if getattr(ctx, "command", None) is None or ctx.guild is None:
             return True
         channel_id = getattr(getattr(ctx, "channel", None), "id", None)
-        if not await is_command_channel_blocked(bot, ctx.guild.id, channel_id):
+        command = getattr(ctx, "command", None)
+        root = getattr(command, "root_parent", None) or command
+        command_name = str(getattr(root, "name", "") or "").strip().lower()
+        if not await is_command_channel_blocked(
+            bot, ctx.guild.id, channel_id, command_name
+        ):
             return True
         await panels.texte_court(ctx, BLOCKED_MESSAGE)
         raise CommandChannelBlocked(BLOCKED_MESSAGE)
@@ -70,8 +87,13 @@ def install(bot: commands.Bot) -> None:
             getattr(interaction, "channel_id", None)
             or getattr(getattr(interaction, "channel", None), "id", None)
         )
+        data = getattr(interaction, "data", None)
+        command_name = (
+            str(data.get("name") or "").strip().lower()
+            if isinstance(data, dict) else ""
+        )
         if not await is_command_channel_blocked(
-            bot, interaction.guild_id, channel_id
+            bot, interaction.guild_id, channel_id, command_name
         ):
             return True
 
