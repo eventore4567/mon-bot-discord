@@ -9,6 +9,7 @@ const NAV_SERVER = [
   ['Communauté', [['welcome', 'Accueil & Départs'], ['roles', 'Rôles']]],
   ['Progression', [['levels', 'Niveaux'], ['economy', 'Économie']]],
   ['Modération', [['moderation', 'Centre de modération'], ['security', 'Sécurité'], ['logs', 'Logs'], ['tickets', 'Tickets']]],
+  ['Administration', [['access', 'Commandes & accès']]],
   ['Jeux', [['games', 'Jeux']]],
   ['Musique', [['music', 'Musique']]],
   ['Automatisation', [['notifications', 'Notifications'], ['automation', 'Automatisation']]],

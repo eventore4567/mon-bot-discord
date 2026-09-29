@@ -46,6 +46,14 @@ def test_dashboard_can_choose_blocked_command_channels():
     assert "action: 'command_channels'" in frontend
 
 
+def test_commands_access_page_is_visible_in_main_navigation():
+    nav = (ROOT / "web" / "dashboard_ui" / "js" / "10_nav.js").read_text()
+    boot = (ROOT / "web" / "dashboard_ui" / "js" / "90_boot.js").read_text()
+
+    assert "['Administration', [['access', 'Commandes & accès']]]" in nav
+    assert "access: renderAccess" in boot
+
+
 def test_roles_offer_simple_no_emoji_and_reaction_modes():
     backend = (ROOT / "web" / "setup_dashboard.py").read_text()
     frontend = (ROOT / "web" / "dashboard_ui" / "js" / "35_community.js").read_text()
