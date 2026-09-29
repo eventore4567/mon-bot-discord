@@ -64,6 +64,19 @@ def test_commands_access_page_is_visible_in_main_navigation():
     assert "access: renderAccess" in boot
 
 
+
+def test_dashboard_navigation_does_not_shift_layout():
+    boot = (ROOT / "web" / "dashboard_ui" / "js" / "90_boot.js").read_text()
+    css = (ROOT / "web" / "dashboard_ui" / "app.css").read_text()
+
+    assert "navigation && !hadContent" in boot
+    assert "navigation ? setTimeout" not in boot
+    assert "scrollbar-gutter:stable" in css
+
+    transition = css[css.index("#content.page-leave"):css.index(".grid{", css.index("#content.page-leave"))]
+    assert "translateY" not in transition
+    assert "scale(" not in transition
+
 def test_roles_offer_simple_no_emoji_and_reaction_modes():
     backend = (ROOT / "web" / "setup_dashboard.py").read_text()
     frontend = (ROOT / "web" / "dashboard_ui" / "js" / "35_community.js").read_text()

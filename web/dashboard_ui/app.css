@@ -10,6 +10,7 @@
 }
 *{box-sizing:border-box}
 html{color-scheme:dark;background:var(--bg);overscroll-behavior-y:none}
+html{scrollbar-gutter:stable}
 body{margin:0;min-height:100vh;background:radial-gradient(circle at 88% -8%,var(--accent-soft),transparent 34%),linear-gradient(180deg,var(--bg),var(--bg2) 145%);background-attachment:fixed;color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,sans-serif;-webkit-font-smoothing:antialiased}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:inherit;text-decoration:none}
@@ -187,10 +188,10 @@ html[data-theme="oled"] .sidebar{background:var(--sidebar-bg,var(--bg2))}
 .subnav button.active{color:var(--text);border-bottom-color:var(--blue)}
 #content{min-height:200px}
 /* Transition de navigation : uniquement posée par render({navigation:true}). */
-#content.page-leave{opacity:.28;transform:translateY(-3px);transition:opacity 110ms ease,transform 110ms ease}
-@keyframes sxPageIn{from{opacity:0;transform:translateY(14px) scale(.995)}to{opacity:1;transform:translateY(0) scale(1)}}
-#content.page-enter{animation:sxPageIn 240ms cubic-bezier(.2,.75,.2,1) both}
-@media (prefers-reduced-motion:reduce){#content.page-leave{opacity:1;transform:none;transition:none}#content.page-enter{animation:none}}
+#content.page-leave{opacity:.58;transition:opacity 100ms ease}
+@keyframes sxPageIn{from{opacity:.72}to{opacity:1}}
+#content.page-enter{animation:sxPageIn 150ms ease both}
+@media (prefers-reduced-motion:reduce){#content.page-leave{opacity:1;transition:none}#content.page-enter{animation:none}}
 
 /* ---------- cartes & grilles ---------- */
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
