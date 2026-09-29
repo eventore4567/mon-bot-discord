@@ -241,10 +241,16 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     return True, f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
 
 
-async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable | None:
+async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> discord.abc.Messageable | None:
     """Renvoie le salon utilisé en cas d'envoi réussi (None sinon) : sert au filet de
-    sécurité anti-doublon après coup, voir cogs/bot_tracker.py::_cleanup_presence_duplicates."""
-    if not await core.module_enabled(bot, member.guild.id, "goodbye"):
+    sécurité anti-doublon après coup, voir cogs/bot_tracker.py::_cleanup_presence_duplicates.
+
+    ``test=True`` permet de prévisualiser le départ depuis /setup, exactement
+    comme la bienvenue. Sans lui, un administrateur configurait son message de
+    départ à l'aveugle et ne le découvrait qu'au premier vrai départ — trop tard
+    pour corriger une faute de frappe.
+    """
+    if not test and not await core.module_enabled(bot, member.guild.id, "goodbye"):
         return None
     conf = await bot.db.get_guild_config(member.guild.id)
     channel_id = _conf_value(conf, "goodbye_channel")
@@ -257,7 +263,7 @@ async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable 
     presentation = await _welcome_presentation(bot, member.guild.id)
     mentions_depart = (
         discord.AllowedMentions(users=[member], roles=False, everyone=False)
-        if presentation.get("goodbye_ping", False)
+        if (presentation.get("goodbye_ping", False) and not test)
         else discord.AllowedMentions.none()
     )
     if presentation.get("goodbye_mode") == "text":
@@ -356,7 +362,20 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         self.welcome_input = discord.ui.TextInput(label="Message de bienvenue", default=str(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT))[:1000], max_length=1000, style=discord.TextStyle.paragraph)
         self.goodbye_input = discord.ui.TextInput(label="Message de départ", default=str(_conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT))[:1000], max_length=1000, style=discord.TextStyle.paragraph)
         self.image_input = discord.ui.TextInput(label="URL bannière / image (facultatif)", default=str(_conf_value(conf, "welcome_image_url", "") or "")[:400], required=False, max_length=400)
-        self.options_input = discord.ui.TextInput(label="Options : avatar=on/off ; membres=on/off", default=f"avatar={'on' if presentation['show_avatar'] else 'off'}; membres={'on' if presentation['show_member_count'] else 'off'}", max_length=80)
+        # Discord limite une modale à CINQ champs, et les cinq sont pris. Le
+        # champ d'options est donc l'endroit où loger les réglages suivants —
+        # c'est déjà ce qu'il fait pour l'avatar et le compteur de membres.
+        self.options_input = discord.ui.TextInput(
+            label="Options",
+            placeholder="avatar=on; membres=on; ping=on; ping-depart=off",
+            default=(
+                f"avatar={'on' if presentation['show_avatar'] else 'off'}; "
+                f"membres={'on' if presentation['show_member_count'] else 'off'}; "
+                f"ping={'on' if presentation.get('ping', True) else 'off'}; "
+                f"ping-depart={'on' if presentation.get('goodbye_ping', False) else 'off'}"
+            ),
+            max_length=140,
+        )
         for child in (self.title_input, self.welcome_input, self.goodbye_input, self.image_input, self.options_input):
             self.add_item(child)
 
@@ -368,14 +387,34 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, "welcome_message", str(self.welcome_input.value).strip() or None)
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, "goodbye_message", str(self.goodbye_input.value).strip() or None)
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, "welcome_image_url", image)
+        ping = "ping=off" not in options
+        ping_depart = "ping-depart=on" in options
         await _save_welcome_presentation(
             self.owner.bot, self.owner.guild.id,
             title=str(self.title_input.value).strip() or WELCOME_DEFAULT_TITLE,
             show_avatar="avatar=off" not in options,
             show_member_count=not ("membres=off" in options or "members=off" in options),
             actor_id=interaction.user.id,
+            ping=ping,
+            goodbye_ping=ping_depart,
         )
-        await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.success('Bienvenue enregistrée. Le test n’effectue aucun ping.', title='Configuration bienvenue')), WelcomeTestView(self.owner.bot, self.owner.guild, interaction.user.id)), ephemere=True)
+        # Le récapitulatif nomme les DEUX. Il disait « Bienvenue enregistrée »
+        # alors que le message de départ venait aussi d'être sauvegardé : on ne
+        # voyait donc jamais que le départ était pris en compte, et Jayden l'a
+        # signalé — « on voit que bienvenue ».
+        recapitulatif = (
+            f"**Bienvenue** — message enregistré · ping {'activé' if ping else 'désactivé'}\n"
+            f"**Départ** — message enregistré · ping {'activé' if ping_depart else 'désactivé'}\n\n"
+            "Les deux tests ci-dessous n'envoient rien aux membres et ne pinguent personne."
+        )
+        await panels.envoyer(
+            interaction.response,
+            panels.avec_composants(
+                panels.depuis_embed(embeds.success(recapitulatif, title="Bienvenue et départ enregistrés")),
+                WelcomeTestView(self.owner.bot, self.owner.guild, interaction.user.id),
+            ),
+            ephemere=True,
+        )
 
 
 class WelcomeTestView(discord.ui.View):
@@ -385,12 +424,34 @@ class WelcomeTestView(discord.ui.View):
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("Ce test ne vous appartient pas.", ephemeral=True); return False
         return True
-    @discord.ui.button(label="Tester la bienvenue", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Tester la bienvenue", emoji="👋", style=discord.ButtonStyle.secondary)
     async def test(self, interaction, _button):
         if not isinstance(interaction.user, discord.Member):
             return await interaction.response.send_message("Membre Discord introuvable.", ephemeral=True)
         ok, message = await _send_welcome(self.bot, interaction.user, test=True)
         await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(message) if ok else embeds.error(message)), ephemere=True)
+
+    @discord.ui.button(label="Tester le départ", emoji="🚪", style=discord.ButtonStyle.secondary)
+    async def test_depart(self, interaction, _button):
+        """Le départ n'avait aucun bouton de test : on configurait son message à
+        l'aveugle et on le découvrait au premier vrai départ, trop tard pour
+        corriger une faute de frappe."""
+        if not isinstance(interaction.user, discord.Member):
+            return await interaction.response.send_message("Membre Discord introuvable.", ephemeral=True)
+        salon = await _send_goodbye(self.bot, interaction.user, test=True)
+        if salon is None:
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embeds.error(
+                    "Aucun salon de départ configuré, ou Discord a refusé l'envoi."
+                )),
+                ephemere=True,
+            )
+        await panels.envoyer(
+            interaction.response,
+            panels.depuis_embed(embeds.success(f"Test envoyé dans {salon.mention}.")),
+            ephemere=True,
+        )
 
 
 class PaginatedNotificationSelect(discord.ui.Select):

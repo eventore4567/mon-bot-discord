@@ -151,3 +151,74 @@ def test_le_depart_a_son_propre_reglage():
 
     source = inspect.getsource(sv._send_goodbye)
     assert 'presentation.get("goodbye_ping"' in source
+
+
+# =============================================================================
+# Le setup montre le DÉPART autant que la bienvenue
+# =============================================================================
+#
+# Jayden : « pour le setup de bienvenue et départ on voit que bienvenue ».
+#
+# Le champ du message de départ existait pourtant, et il était bien enregistré.
+# Ce qui manquait, c'était la RESTITUTION : la confirmation disait « Bienvenue
+# enregistrée » alors que le départ venait d'être sauvegardé lui aussi, et le
+# seul bouton de test ne testait que la bienvenue. On configurait donc son
+# message de départ à l'aveugle et on le découvrait au premier vrai départ —
+# trop tard pour corriger une faute de frappe.
+
+
+def test_la_confirmation_nomme_les_deux():
+    import inspect
+
+    from cogs import setup_v2_completion as sv
+
+    source = inspect.getsource(sv.WelcomeSettingsModal.on_submit)
+    assert "**Départ**" in source, "la confirmation ne parle toujours que de bienvenue"
+    assert "**Bienvenue**" in source
+
+
+def test_il_existe_un_bouton_de_test_du_depart():
+    from cogs import setup_v2_completion as sv
+
+    libelles = {
+        str(getattr(enfant, "label", ""))
+        for enfant in sv.WelcomeTestView(None, None, 1).children
+    }
+    assert "Tester la bienvenue" in libelles
+    assert "Tester le départ" in libelles
+
+
+def test_le_test_de_depart_ne_notifie_personne():
+    """Un test qui pingue le salon à chaque essai de configuration est le
+    meilleur moyen de faire couper le module."""
+    import inspect
+
+    from cogs import setup_v2_completion as sv
+
+    source = inspect.getsource(sv._send_goodbye)
+    assert "and not test" in source, (
+        "le mode test peut encore notifier le membre"
+    )
+
+
+def test_le_test_de_depart_ignore_le_module_coupe():
+    """Sinon on ne peut pas prévisualiser son message avant d'activer le
+    module, ce qui est précisément le moment où on en a besoin."""
+    import inspect
+
+    from cogs import setup_v2_completion as sv
+
+    source = inspect.getsource(sv._send_goodbye)
+    assert 'if not test and not await core.module_enabled' in source
+
+
+def test_le_champ_doptions_porte_les_deux_pings():
+    """Discord limite une modale à cinq champs, et les cinq sont pris : les
+    réglages suivants passent par le champ d'options, comme le font déjà
+    l'avatar et le compteur de membres."""
+    import inspect
+
+    from cogs import setup_v2_completion as sv
+
+    source = inspect.getsource(sv.WelcomeSettingsModal.__init__)
+    assert "ping=" in source and "ping-depart=" in source
