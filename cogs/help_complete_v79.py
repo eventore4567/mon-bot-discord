@@ -366,6 +366,11 @@ class SentriXHelpV79(discord.ui.LayoutView):
     async def prepare(self) -> None:
         self.rebuild()
 
+    def fichiers(self) -> list[discord.File]:
+        """Bannière neuve correspondant à setup_v73.entete_banniere()."""
+        fichier = setup_v73.fichier_banniere()
+        return [fichier] if fichier is not None else []
+
     def show_home(self) -> None:
         self.mode = "home"
         self.category_key = None
@@ -427,10 +432,9 @@ class SentriXHelpV79(discord.ui.LayoutView):
         # Le fichier est refabriqué à chaque édition : celui de l'envoi
         # précédent est consommé, et le réutiliser donnerait une pièce jointe
         # vide — donc une bannière cassée, sans erreur pour le dire.
-        fichier = setup_v73.fichier_banniere()
         await interaction.edit_original_response(
             content=None, embed=None,
-            attachments=[fichier] if fichier else [],
+            attachments=self.fichiers(),
             view=self,
         )
 
@@ -702,19 +706,9 @@ async def _send_help_v79(self, target, query: str | None = None):
             view.show_search(query, rows)
     await view.prepare()
 
-    if isinstance(target, commands.Context):
-        fichier = setup_v73.fichier_banniere()
-        return await target.send(content=None, embed=None, view=view,
-                                 **({"file": fichier} if fichier else {}))
-    if target.response.is_done():
-        fichier = setup_v73.fichier_banniere()
-        return await target.followup.send(content=None, embed=None, view=view,
-                                          **({"file": fichier} if fichier else {}))
-    # Un fichier par branche : un discord.File consommé par un envoi ne peut
-    # pas servir au suivant.
-    fichier = setup_v73.fichier_banniere()
-    return await target.response.send_message(content=None, embed=None, view=view,
-                                              **({"file": fichier} if fichier else {}))
+    # Même transport que le reste des panneaux : impossible d'oublier la
+    # bannière référencée par la galerie.
+    return await panels.envoyer(target, view)
 
 
 def install(bot: commands.Bot) -> None:

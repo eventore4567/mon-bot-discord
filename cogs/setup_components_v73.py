@@ -314,6 +314,15 @@ class SentriXSetupV73(discord.ui.LayoutView):
     async def prepare(self) -> None:
         await self.rebuild()
 
+    def fichiers(self) -> list[discord.File]:
+        """Pièces jointes correspondant exactement à la galerie de cette vue.
+
+        Un fichier neuf est créé à chaque appel : discord.File est consommé après
+        un envoi et ne doit jamais être réutilisé.
+        """
+        fichier = fichier_banniere()
+        return [fichier] if fichier is not None else []
+
     async def refresh(self, interaction: discord.Interaction) -> None:
         # Les opérations Setup peuvent inclure SQL/API Discord. ACK immédiat pour éviter
         # « L'application ne répond plus », puis réédition du message d'origine.
@@ -574,16 +583,9 @@ async def _send_setup_v73(self, target):
     view = SentriXSetupV73(self.bot, guild, member.id)
     await view.prepare()
 
-    # Le fichier est refabriqué pour CHAQUE branche : un discord.File consommé
-    # par un envoi ne peut pas servir au suivant.
-    if isinstance(target, commands.Context):
-        fichier = fichier_banniere()
-        return await target.send(view=view, **({"file": fichier} if fichier else {}))
-    if target.response.is_done():
-        fichier = fichier_banniere()
-        return await target.followup.send(view=view, **({"file": fichier} if fichier else {}))
-    fichier = fichier_banniere()
-    return await target.response.send_message(view=view, **({"file": fichier} if fichier else {}))
+    # Un seul transport : panels.envoyer() appelle view.fichiers() et joint
+    # banner_config.webp dans le même payload que la galerie.
+    return await panels.envoyer(target, view)
 
 
 def install(bot: commands.Bot) -> None:

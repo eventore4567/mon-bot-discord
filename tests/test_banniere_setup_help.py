@@ -120,19 +120,51 @@ def test_les_pages_de_v74_portent_la_banniere():
     )
 
 
-def test_lenvoi_initial_joint_la_banniere_sur_chaque_branche():
-    """Trois branches d'envoi — Context, followup, réponse d'interaction — et
-    un fichier par branche, jamais partagé."""
+def test_setup_initial_passe_par_un_transport_unique():
+    """Aucun chemin Context/followup/response ne peut oublier la bannière."""
     import inspect
+    from cogs import setup_components_v73 as v73
 
-    from cogs import setup_experience_v74 as v74
+    source = inspect.getsource(v73)
+    assert "def fichiers(self)" in source
+    debut = source.index("async def _send_setup_v73")
+    fin = source.index("def install", debut)
+    envoi = source[debut:fin]
+    assert "return await panels.envoyer(target, view)" in envoi
+    assert "target.send(view=view" not in envoi
+    assert "target.followup.send(view=view" not in envoi
+    assert "target.response.send_message(view=view" not in envoi
 
-    source = inspect.getsource(v74)
-    debut = source.rindex("isinstance(target, commands.Context)")
-    envoi = source[debut:debut + 900]
-    assert envoi.count("v73.fichier_banniere()") >= 3, (
-        "une branche d'envoi partage son fichier avec une autre"
-    )
+
+def test_setup_invitations_ne_peut_plus_oublier_banner_config():
+    """Le bug production venait de cette quatrième route d'envoi directe."""
+    import inspect
+    from cogs import setup_invitations
+
+    source = inspect.getsource(setup_invitations)
+    debut = source.index("async def final_send_setup")
+    fin = source.index("current = setup_ui.OfficialSetup.send_setup", debut)
+    envoi = source[debut:fin]
+    assert "return await panels.envoyer(target, view)" in envoi
+    assert "target.send(view=view" not in envoi
+    assert "target.followup.send(view=view" not in envoi
+    assert "target.response.send_message(view=view" not in envoi
+
+
+def test_help_initial_et_navigation_utilisent_la_meme_fabrique_de_fichier():
+    """Help doit recréer banner_config.webp pour l'envoi ET chaque édition."""
+    import inspect
+    from cogs import help_complete_v79 as help79
+
+    cls = inspect.getsource(help79.SentriXHelpV79)
+    assert "def fichiers(self)" in cls
+    assert "attachments=self.fichiers()" in cls
+
+    source = inspect.getsource(help79)
+    debut = source.index("async def _send_help_v79")
+    fin = source.index("def install", debut)
+    envoi = source[debut:fin]
+    assert "return await panels.envoyer(target, view)" in envoi
 
 
 # =============================================================================

@@ -431,11 +431,10 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             view.page = CATEGORY
             view.backend = view._new_backend(CATEGORY)
         await view.prepare()
-        if isinstance(target, commands.Context):
-            return await target.send(view=view)
-        if target.response.is_done():
-            return await target.followup.send(view=view)
-        return await target.response.send_message(view=view)
+        # Ne jamais envoyer cette vue directement : elle référence
+        # attachment://banner_config.webp et doit donc passer par le transport
+        # qui joint view.fichiers() dans le même payload.
+        return await panels.envoyer(target, view)
 
     current = setup_ui.OfficialSetup.send_setup
     if not getattr(current, "_sentrix_invitation_v74_final", False):
