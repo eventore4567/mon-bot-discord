@@ -1381,35 +1381,45 @@ class AutoMod(commands.Cog, name="Automod"):
     async def antinuke(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "antinuke", etat)
 
-    @commands.hybrid_command(name="vanity-guard", description="Activer/désactiver la protection vanity URL.", with_app_command=False)
+    @commands.hybrid_command(name="vanity-guard", aliases=["protection-lien-perso"],
+                             description="Empêcher le vol du lien personnalisé du serveur (discord.gg/votre-nom).",
+                             with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver cette protection")
     @app_commands.choices(etat=TOGGLE_CHOICES)
     @checks.is_owner_or_admin_for("securite")
     async def vanity_guard(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "security_vanity", etat)
 
-    @commands.hybrid_command(name="prune-guard", description="Activer/désactiver la détection des prunes membres.", with_app_command=False)
+    @commands.hybrid_command(name="prune-guard", aliases=["anti-purge-membres"],
+                             description="Alerter quand quelqu'un expulse massivement des membres inactifs.",
+                             with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver cette protection")
     @app_commands.choices(etat=TOGGLE_CHOICES)
     @checks.is_owner_or_admin_for("securite")
     async def prune_guard(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "security_prune", etat)
 
-    @commands.hybrid_command(name="permission-guard", description="Activer/désactiver la garde des permissions dangereuses.", with_app_command=False)
+    @commands.hybrid_command(name="permission-guard", aliases=["surveiller-permissions"],
+                             description="Surveiller l'attribution de permissions dangereuses (Administrateur, Bannir…).",
+                             with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver cette protection")
     @app_commands.choices(etat=TOGGLE_CHOICES)
     @checks.is_owner_or_admin_for("securite")
     async def permission_guard(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "security_permissions", etat)
 
-    @commands.hybrid_command(name="join-gate", description="Activer/désactiver le Join Gate avancé.", with_app_command=False)
+    @commands.hybrid_command(name="join-gate", aliases=["filtre-arrivees"],
+                             description="Filtrer les arrivées suspectes : comptes récents, sans avatar, vagues d'inscriptions.",
+                             with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver cette protection")
     @app_commands.choices(etat=TOGGLE_CHOICES)
     @checks.is_owner_or_admin_for("securite")
     async def join_gate(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "join_gate", etat)
 
-    @commands.hybrid_command(name="risk-engine", description="Activer/désactiver le score Risk comportemental.", with_app_command=False)
+    @commands.hybrid_command(name="risk-engine", aliases=["score-de-risque"],
+                             description="Noter chaque membre selon son comportement pour repérer les comptes à risque.",
+                             with_app_command=False)
     @app_commands.describe(etat="Activer ou désactiver cette protection")
     @app_commands.choices(etat=TOGGLE_CHOICES)
     @checks.is_owner_or_admin_for("securite")
