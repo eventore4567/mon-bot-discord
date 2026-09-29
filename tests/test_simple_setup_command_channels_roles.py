@@ -51,6 +51,8 @@ def test_dashboard_can_choose_blocked_command_channels():
     assert "commandRuleChannels" in frontend
     assert "commandRuleCommands" in frontend
     assert "multiCommandPicker" in frontend
+    assert frontend.index("Bloquer toutes les commandes") < frontend.index("card('Commandes'")
+    assert frontend.index("Bloquer certaines commandes") < frontend.index("card('Commandes'")
 
 
 def test_commands_access_page_is_visible_in_main_navigation():
