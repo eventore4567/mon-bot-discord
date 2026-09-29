@@ -13,6 +13,10 @@ logger = logging.getLogger("bot.command-channel-gate")
 BLOCKED_MESSAGE = "Les commandes sont désactivées dans ce salon."
 
 
+class CommandChannelBlocked(commands.CheckFailure):
+    """Le garde a déjà répondu en texte brut : aucun rendu d'erreur à ajouter."""
+
+
 async def is_command_channel_blocked(
     bot: commands.Bot,
     guild_id: int | None,
@@ -42,9 +46,8 @@ def install(bot: commands.Bot) -> None:
         channel_id = getattr(getattr(ctx, "channel", None), "id", None)
         if not await is_command_channel_blocked(bot, ctx.guild.id, channel_id):
             return True
-        ctx._sentrix_channel_blocked = True
         await panels.texte_court(ctx, BLOCKED_MESSAGE)
-        return False
+        raise CommandChannelBlocked(BLOCKED_MESSAGE)
 
     prefix_gate._sentrix_command_channel_gate = True
     bot.add_check(prefix_gate)
@@ -72,7 +75,6 @@ def install(bot: commands.Bot) -> None:
         ):
             return True
 
-        interaction._sentrix_channel_blocked = True
         await panels.texte_court(
             interaction.response,
             BLOCKED_MESSAGE,
@@ -91,4 +93,7 @@ async def setup(bot: commands.Bot):
     install(bot)
 
 
-__all__ = ["BLOCKED_MESSAGE", "is_command_channel_blocked", "install"]
+__all__ = [
+    "BLOCKED_MESSAGE", "CommandChannelBlocked",
+    "is_command_channel_blocked", "install",
+]

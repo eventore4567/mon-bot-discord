@@ -866,8 +866,6 @@ def _install_errors(bot: commands.Bot) -> None:
     permission_guard._send_interaction_denial = _permission_denial
 
     async def tree_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-        if getattr(interaction, "_sentrix_channel_blocked", False):
-            return
         panel = _slash_error_embed(error)
         try:
             if not interaction.response.is_done():

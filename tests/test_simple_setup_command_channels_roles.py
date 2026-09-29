@@ -31,6 +31,8 @@ def test_command_channels_are_separate_from_automod_and_plain_text():
     assert "CREATE TABLE IF NOT EXISTS command_blocked_channels" in schema
     assert "SELECT 1 FROM command_blocked_channels" in gate
     assert "panels.texte_court" in gate
+    assert "class CommandChannelBlocked" in gate
+    assert "_sentrix_channel_blocked" not in gate
     assert "ignored_channels" not in gate
 
 
