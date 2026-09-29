@@ -1416,27 +1416,47 @@ class AutoMod(commands.Cog, name="Automod"):
     async def risk_engine(self, ctx: commands.Context, etat: str):
         await self.toggle(ctx, "risk_engine", etat)
 
+    # Le paramètre s'appelle `membre` et non `bot`, comme la commande voisine
+    # +antinuke-whitelist-add. Ce n'est pas cosmétique : les gates V18
+    # (tools/command_integrity_v18_gate, tools/audit_registre) refusent tout
+    # paramètre dont le nom est dans {self, ctx, context, interaction, bot,
+    # _bot}, parce qu'un paramètre ainsi nommé est normalement l'instance du
+    # bot, jamais un argument d'utilisateur. Les deux commandes antibot
+    # laissaient donc deux portes rouges en permanence.
+    #
+    # Mesuré avant de renommer, pour ne pas confondre faux positif et vraie
+    # régression : après le boot complet, la signature restait
+    # `(self, ctx, bot: discord.Member)` — aucune couche n'injectait l'instance
+    # du bot dans ce paramètre, et la commande fonctionnait. C'était donc bien
+    # un faux positif de nom, pas un bug. La preuve que les gates ne se
+    # trompent pas toujours : +wipe-server, lui, avait de vrais paramètres
+    # internes, et la couche de réparation les a bel et bien retirés
+    # (clean_params vide après le boot).
+    #
+    # Le renommage est sans risque côté membres : les deux commandes sont en
+    # with_app_command=False, donc aucune surface slash où le nom s'afficherait,
+    # et en préfixé seul l'ordre des arguments compte.
     @commands.hybrid_command(name="antibot-allow", description="Autoriser un bot approuvé malgré l'anti-bot.", with_app_command=False)
-    @app_commands.describe(bot="Le bot approuvé à autoriser")
+    @app_commands.describe(membre="Le bot approuvé à autoriser")
     @checks.is_owner_or_admin_for("securite")
-    async def antibot_allow(self, ctx: commands.Context, bot: discord.Member):
-        if not bot.bot:
+    async def antibot_allow(self, ctx: commands.Context, membre: discord.Member):
+        if not membre.bot:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce membre n'est pas un bot.")))
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO automod_bot_allowlist (guild_id, bot_id, added_by, created_at) VALUES (?, ?, ?, ?)",
-            (ctx.guild.id, bot.id, ctx.author.id, int(time.time())),
+            (ctx.guild.id, membre.id, ctx.author.id, int(time.time())),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{bot.mention} est autorisé par l'anti-bot SentriX.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{membre.mention} est autorisé par l'anti-bot SentriX.")))
 
     @commands.hybrid_command(name="antibot-deny", description="Retirer un bot de l'allowlist anti-bot.", with_app_command=False)
-    @app_commands.describe(bot="Le bot à retirer de l'allowlist")
+    @app_commands.describe(membre="Le bot à retirer de l'allowlist")
     @checks.is_owner_or_admin_for("securite")
-    async def antibot_deny(self, ctx: commands.Context, bot: discord.Member):
+    async def antibot_deny(self, ctx: commands.Context, membre: discord.Member):
         await self.bot.db.execute(
             "DELETE FROM automod_bot_allowlist WHERE guild_id = ? AND bot_id = ?",
-            (ctx.guild.id, bot.id),
+            (ctx.guild.id, membre.id),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{bot.mention} n'est plus dans l'allowlist anti-bot.")))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{membre.mention} n'est plus dans l'allowlist anti-bot.")))
 
     @commands.hybrid_command(name="antinuke-whitelist-add", description="Exempter un membre de confiance de l'anti-nuke.", with_app_command=False)
     @app_commands.describe(membre="Le membre à exempter")
