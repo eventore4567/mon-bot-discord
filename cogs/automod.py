@@ -44,6 +44,7 @@ from discord.ext import commands
 
 import config
 from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
+from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
@@ -274,9 +275,24 @@ def _scam_hit(content: str) -> str | None:
             continue
         if re.search(r"steamcom(?:rn|nn|m)unity", compact):
             suspicious_hosts.append(host)
+            continue
+        # Domaines sosies. La règle « marque ET appât » juste au-dessus est
+        # précise mais laisse passer tout le typosquatting, où la marque n'est
+        # justement PAS écrite correctement : mesuré le 29/09/2026, un seul
+        # lien d'hameçonnage sur dix était vu (discrod.com, disc0rd.gg,
+        # dlscord.com, robiox.com, steamcommunnity.com, du punycode et un « а »
+        # cyrillique passaient tous).
+        #
+        # utils/lookalike_domains décide, avec sa propre liste blanche — qui
+        # contient les vrais domaines hérités de Discord, discordapp.com et
+        # discordapp.net, parce qu'un détecteur qui les signale casse les CDN.
+        sosie = lookalike_domains.examiner(host)
+        if sosie is not None:
+            marque, motif_sosie = sosie
+            suspicious_hosts.append(f"{host} (imite {marque} — {motif_sosie})")
 
     if suspicious_hosts:
-        return f"domaine suspect: {suspicious_hosts[0][:80]}"
+        return f"domaine suspect: {suspicious_hosts[0][:120]}"
 
     normalized = text_normalization.normaliser(content)
     if any(text_normalization.normaliser(marker) in normalized for marker in _SCAM_DISCUSSION_MARKERS):

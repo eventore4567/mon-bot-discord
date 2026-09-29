@@ -222,3 +222,70 @@ class JournalisationTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JamaisLeverTests(unittest.IsolatedAsyncioTestCase):
+    """« Ne lève jamais » est une garantie, pas une intention.
+
+    Ces appels arrivent APRÈS que l'action métier a réussi. Le ticket est
+    créé, fermé, rouvert ; le membre est ajouté au salon. Une exception ici
+    afficherait une erreur pour quelque chose qui a parfaitement fonctionné,
+    et c'est exactement ce que Jayden a demandé de supprimer.
+
+    Le cas du milieu n'est pas théorique : il s'est produit pendant le lot.
+    ``ctx.author`` sur un objet de contexte qui n'en avait pas faisait
+    remonter un AttributeError depuis ``ticket_reopen``, sur une réouverture
+    déjà écrite en base.
+    """
+
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = Database(os.path.join(self._tmp.name, "t.db"))
+        await self.db.connect()
+        self.bot = _Bot(self.db)
+        self.guild = SimpleNamespace(id=700, name="Serveur")
+
+    async def asyncTearDown(self):
+        await self.db._conn.close()
+        self._tmp.cleanup()
+
+    async def _appeler(self, **kwargs):
+        with patch("utils.log_service.send_log", new=AsyncMock(return_value=True)):
+            return await tickets_service.journaliser_evenement(
+                self.bot, self.guild, "ticket_reopen", **kwargs
+            )
+
+    async def test_un_acteur_absent_ne_leve_pas(self):
+        reference = await self._appeler(ticket_id=7, acteur=None)
+        assert reference.startswith("TK-0007-")
+
+    async def test_un_acteur_sans_identifiant_ne_leve_pas(self):
+        """Le cas réel : un objet de contexte minimal, sans .id exploitable."""
+        reference = await self._appeler(ticket_id=7, acteur=object())
+        assert reference.startswith("TK-0007-")
+
+    async def test_un_salon_sans_nom_ni_mention_ne_leve_pas(self):
+        reference = await self._appeler(ticket_id=7, channel=object())
+        assert reference.startswith("TK-0007-")
+
+    async def test_un_serveur_sans_identifiant_ne_leve_pas(self):
+        with patch("utils.log_service.send_log", new=AsyncMock(return_value=True)):
+            reference = await tickets_service.journaliser_evenement(
+                self.bot, object(), "ticket_close", ticket_id=7,
+            )
+        assert reference.startswith("TK-0007")
+
+    async def test_un_extra_non_iterable_ne_leve_pas(self):
+        reference = await self._appeler(ticket_id=7, extra="pas un dictionnaire")
+        assert reference.startswith("TK-0007")
+
+    async def test_la_reference_reste_citable_meme_en_cas_de_panne_totale(self):
+        """Pire cas : la construction de l'embed elle-même échoue. Le staff doit
+        quand même recevoir quelque chose qu'il peut citer, pas une chaîne vide
+        au milieu d'une phrase."""
+        with patch("utils.embeds.log_entry", side_effect=RuntimeError("embeds morts")):
+            reference = await tickets_service.journaliser_evenement(
+                self.bot, self.guild, "ticket_reopen", ticket_id=7,
+            )
+        assert reference == "TK-0007"
+        assert reference.strip(), "une référence vide dans un message est pire que rien"

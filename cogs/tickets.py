@@ -1632,7 +1632,12 @@ class Tickets(commands.Cog):
         reference = await tickets_service.journaliser_evenement(
             self.bot, ctx.guild, "ticket_reopen",
             ticket_id=ticket["id"], channel=ctx.channel,
-            acteur=ctx.author, cible=owner,
+            # getattr et non ctx.author : à ce point le ticket EST déjà rouvert
+            # en base. Toute exception levée ici transformerait une réouverture
+            # réussie en erreur affichée au staff — la faute exacte que ce lot
+            # est censé supprimer. Un Context réel a toujours .author ; ce qui
+            # appelle sans en avoir un n'a pas à en pâtir.
+            acteur=getattr(ctx, "author", None), cible=owner,
             # La suppression automatique programmée à la fermeture s'annule
             # d'elle-même en relisant le statut (voir _auto_delete) — le dire
             # évite au staff de croire le ticket encore condamné.

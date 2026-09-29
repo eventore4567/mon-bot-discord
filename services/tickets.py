@@ -318,9 +318,54 @@ async def journaliser_evenement(
     catégorie, de l'emoji et de la bannière, et rien ne se déduit du texte du
     titre.
 
-    Ne lève jamais. La valeur de retour est la référence d'incident, à afficher
-    dans la réponse au staff pour qu'un membre puisse la citer.
+    Ne lève jamais — et c'est une garantie, pas une intention. Elle est
+    appelée APRÈS que l'action métier a réussi : le ticket est créé, fermé,
+    rouvert, le membre ajouté. Une exception ici afficherait une erreur pour
+    quelque chose qui a parfaitement fonctionné. C'est le défaut que Jayden a
+    signalé nommément, et il s'est produit pendant ce lot même : un objet de
+    contexte sans ``.author`` faisait remonter un AttributeError depuis un
+    appel, sur une réouverture déjà écrite en base.
+
+    Les deux écritures (audit, envoi) se protègent séparément plus bas ; cette
+    enveloppe couvre tout le reste — construction des champs, lecture des
+    attributs de l'acteur et de la cible, résolution du salon.
     """
+    try:
+        return await _journaliser(
+            bot, guild, evenement,
+            ticket_id=ticket_id, channel=channel, acteur=acteur, cible=cible,
+            raison=raison, extra=extra, details=details,
+            avec_bouton=avec_bouton, file=file,
+        )
+    except Exception:
+        logger.exception(
+            "Journalisation ticket impossible guild=%s événement=%s ; "
+            "l'action métier reste acquise.",
+            getattr(guild, "id", None), evenement,
+        )
+        # Une référence dégradée plutôt que rien : le staff peut toujours citer
+        # le numéro de ticket, et une chaîne vide dans un message le
+        # déconcerterait.
+        return reference_incident(ticket_id, None)
+
+
+async def _journaliser(
+    bot,
+    guild: discord.Guild,
+    evenement: str,
+    *,
+    ticket_id: int | None = None,
+    channel=None,
+    acteur=None,
+    cible=None,
+    raison: str | None = None,
+    extra: dict | None = None,
+    details: str | None = None,
+    avec_bouton: bool = True,
+    file: discord.File | None = None,
+) -> str:
+    """Corps de ``journaliser_evenement`` — voir sa docstring. Séparé pour que
+    l'enveloppe qui garantit « ne lève jamais » n'ait rien d'autre à faire."""
     from utils import embeds as _embeds
 
     titre, libelle_acteur = EVENEMENTS_TICKET.get(
