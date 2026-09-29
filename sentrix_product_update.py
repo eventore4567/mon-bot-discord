@@ -464,6 +464,37 @@ def _unwrap_error_handler(handler):
 
 
 async def _plain_send(ctx: commands.Context, text: str):
+    """Le message d'une commande inconnue, dans un panneau SentriX.
+
+    Il partait en TEXTE NU. Cette fonction est installée en DERNIER sur
+    ``bot.on_command_error`` — elle l'emporte donc sur les deux autres chemins
+    du dépôt qui traitent déjà ce cas en panneau (cogs/error_experience_v3 et
+    cogs/bot_v16_commands). Résultat mesuré sur le bot booté : `+rank` sortait
+    en ligne de texte sans conteneur ni bannière, alors que `+dice` rendait un
+    panneau complet. Deux apparences pour le même bot selon la commande tapée.
+
+    Le TEXTE ne change pas — il est figé par
+    tests/test_product_update_contract.py, et c'est volontaire : ce module
+    existe pour garantir un message exact. Seule son enveloppe change.
+
+    Repli sur l'envoi brut si le panneau échoue : un message même nu vaut mieux
+    que rien, et cette fonction ne doit jamais faire échouer la gestion
+    d'erreur qui l'appelle.
+    """
+    try:
+        from utils import embeds
+        from utils import sentrix_panels as panels
+
+        return await panels.envoyer(
+            ctx,
+            panels.depuis_embed(embeds.warning(text, title="Commande introuvable")),
+            # Une faute de frappe s'efface toute seule : elle n'a pas à
+            # encombrer le salon comme une vraie erreur.
+            delete_after=5,
+        )
+    except Exception:
+        logger.debug("Panneau « commande inconnue » indisponible, repli texte.", exc_info=True)
+
     sender = discord.abc.Messageable.send
     seen = set()
     while hasattr(sender, "_sentrix_original") and id(sender) not in seen:

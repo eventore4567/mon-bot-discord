@@ -135,7 +135,20 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
             text = f"Commande introuvable. Essayez {rendered}."
         else:
             text = "Commande introuvable. Utilisez `/help` pour voir les commandes disponibles."
-        await _send_plain(ctx, text, delete_after=5)
+        # Panneau, comme la branche « argument manquant » juste en dessous. Les
+        # deux étaient voisines dans ce fichier et rendaient deux choses
+        # différentes : un panneau avec bannière d'un côté, du texte nu de
+        # l'autre. Mesuré sur le bot booté, c'est ce qui donnait au bot deux
+        # apparences selon la longueur du message — « plein de trucs n'ont pas
+        # de bannière, ça fait très moche », dit Jayden.
+        #
+        # `delete_after` est conservé : une faute de frappe disparaît toute
+        # seule au bout de quelques secondes, elle n'a pas à encombrer le salon.
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(embeds.warning(text, title="Commande introuvable")),
+            delete_after=5,
+        )
         return True
 
     if isinstance(base, commands.MissingRequiredArgument):

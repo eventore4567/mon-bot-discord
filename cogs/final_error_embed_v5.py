@@ -380,14 +380,77 @@ def _rembobiner(fichier: discord.File | None) -> None:
         logger.debug("Rembobinage de la bannière impossible.", exc_info=True)
 
 
-async def _raw_prefix_send(ctx: commands.Context, panneau: panels.Panneau) -> None:
+#: Titre et couleur de bannière selon CE QUI s'est passé. Une faute de frappe,
+#: un argument oublié et un refus de permission ne sont pas la même chose, et
+#: les afficher tous en rouge les rendrait tous également alarmants.
+#:
+#: Ordre significatif : la première classe qui correspond gagne, donc les
+#: sous-classes viennent avant leurs parents (MissingPermissions avant
+#: CheckFailure, qui est son parent).
+_ERREURS_CONNUES: tuple[tuple[type, str, str], ...] = (
+    (commands.CommandNotFound, "Commande introuvable", "warning"),
+    (commands.MissingRequiredArgument, "Argument manquant", "warning"),
+    (commands.BadArgument, "Argument invalide", "warning"),
+    (commands.TooManyArguments, "Trop d'arguments", "warning"),
+    (commands.CommandOnCooldown, "Un instant", "info"),
+    (commands.MaxConcurrencyReached, "Déjà en cours", "info"),
+    (commands.BotMissingPermissions, "Permission manquante pour SentriX", "danger"),
+    (commands.MissingPermissions, "Permission requise", "danger"),
+    (commands.NoPrivateMessage, "Serveur requis", "warning"),
+    (commands.PrivateMessageOnly, "Message privé requis", "warning"),
+    (commands.NotOwner, "Réservé au propriétaire", "danger"),
+    (commands.CheckFailure, "Accès refusé", "danger"),
+    (commands.UserInputError, "Syntaxe de la commande", "warning"),
+)
+
+
+def _titre_et_couleur(error: commands.CommandError) -> tuple[str, str]:
+    base = getattr(error, "original", error)
+    for classe, titre, kind in _ERREURS_CONNUES:
+        if isinstance(base, classe):
+            return titre, kind
+    return "Commande impossible", "danger"
+
+
+def _panneau_erreur_simple(ctx: commands.Context, error: commands.CommandError, texte: str) -> panels.Panneau:
+    """Une erreur simple devient un panneau, comme tout le reste.
+
+    Avant, ces erreurs partaient en TEXTE BRUT — pas de conteneur, pas de
+    bannière, pas de couleur. Mesuré sur le bot booté : sur vingt-cinq
+    commandes, les huit sans bannière étaient toutes des phrases courtes de ce
+    type. Jayden l'a résumé ainsi : « plein de trucs n'ont pas de bannière, ça
+    fait très moche ; juste les petites phrases sont en texte, pas le gros
+    texte. » Deux rendus visuels pour le même bot selon la longueur du message.
+
+    Le texte ne change pas — il est déjà rédigé et partagé avec le transport
+    slash (utils/error_texts). Seule son enveloppe change.
+    """
+    titre, kind = _titre_et_couleur(error)
+    sections: list[panels.Section] = []
+    usage = _usage(ctx)
+    if usage:
+        # La syntaxe attendue vaut mieux qu'une explication : on la montre.
+        sections.append(panels.Section("Commande", [panels.Ligne("Vous avez tapé", f"`{usage}`")]))
+    return _panneau(titre, texte, kind=kind, sections=sections)
+
+
+async def _raw_prefix_send(
+    ctx: commands.Context,
+    panneau: panels.Panneau,
+    *,
+    supprimer_apres: float = _DUREE_AFFICHAGE,
+) -> None:
     """Envoie le panneau d'erreur en repondant au message d'origine.
 
     La banniere part dans le MEME message que le panneau : c'est une piece jointe
     referencee par la MediaGallery du conteneur, pas un second envoi.
+
+    ``supprimer_apres`` est paramétrable parce que toutes les erreurs ne se
+    valent pas : une faute de frappe disparaît vite, une erreur technique avec
+    une référence de support doit rester le temps d'être lue.
     """
     raw_send = policy._unwrap(discord.abc.Messageable.send)
-    kwargs = {"view": panneau, "allowed_mentions": _ALLOWED, "delete_after": _DUREE_AFFICHAGE}
+    kwargs = {"view": panneau, "allowed_mentions": _ALLOWED, "delete_after": supprimer_apres}
     fichiers = panneau.fichiers()
     if fichiers:
         kwargs["files"] = fichiers
@@ -561,7 +624,14 @@ def install(bot: commands.Bot) -> None:
         try:
             if texte is not None:
                 duree = _DUREE_COMMANDE_INTROUVABLE if isinstance(base, commands.CommandNotFound) else _DUREE_AFFICHAGE
-                await _texte_prefix_send(ctx, texte, supprimer_apres=duree)
+                if getattr(ctx, "_sentrix_response_sent", False):
+                    # Une réponse est déjà partie : on la remplace par le texte
+                    # plutôt que d'empiler un second message dans le salon.
+                    await _texte_prefix_send(ctx, texte, supprimer_apres=duree)
+                    return
+                await _raw_prefix_send(
+                    ctx, _panneau_erreur_simple(ctx, error, texte), supprimer_apres=duree
+                )
                 return
             panel = _prefix_error_panel(ctx, error)
             if getattr(ctx, "_sentrix_response_sent", False):
