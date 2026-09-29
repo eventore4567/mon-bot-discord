@@ -35,6 +35,7 @@ CATEGORY_ORDER = (
     "security",
     "tickets",
     "welcome",
+    "goodbye",
     "roles",
     "logs",
     "levels",

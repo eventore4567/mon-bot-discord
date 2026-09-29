@@ -252,6 +252,12 @@ CREATE TABLE IF NOT EXISTS ignored_channels (
     PRIMARY KEY (guild_id, channel_id)
 );
 
+CREATE TABLE IF NOT EXISTS command_blocked_channels (
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, channel_id)
+);
+
 CREATE TABLE IF NOT EXISTS tickets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER,

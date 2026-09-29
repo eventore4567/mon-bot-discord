@@ -886,8 +886,9 @@ class SetupView(discord.ui.LayoutView):
                 self.ajouter(toggle)
         elif self.category == "welcome":
             self.ajouter(FieldChannelSelect(self, "welcome_channel", "Salon de bienvenue", 2))
-            self.ajouter(FieldChannelSelect(self, "goodbye_channel", "Salon de départ", 3))
-            self.ajouter(FieldRoleSelect(self, "autorole", "Rôle automatique", 4))
+            self.ajouter(FieldRoleSelect(self, "autorole", "Rôle automatique", 3))
+        elif self.category == "goodbye":
+            self.ajouter(FieldChannelSelect(self, "goodbye_channel", "Salon de départ", 2))
         elif self.category == "roles":
             self.ajouter(FieldRoleSelect(self, "autorole", "Autorole", 2))
             self.ajouter(FieldRoleSelect(self, "verify_role", "Rôle vérifié", 3))
@@ -1185,15 +1186,24 @@ class SetupView(discord.ui.LayoutView):
         if cle == "welcome":
             return [
                 panels.Section(
-                    "Salons et rôles",
+                    "Bienvenue",
                     [
-                        panels.Ligne("Bienvenue", _channel(self.guild, _get(conf, "welcome_channel"))),
-                        panels.Ligne("Départ", _channel(self.guild, _get(conf, "goodbye_channel"))),
+                        panels.Ligne("Salon", _channel(self.guild, _get(conf, "welcome_channel"))),
                         panels.Ligne("Rôle automatique", _role(self.guild, _get(conf, "autorole"))),
                         panels.Ligne(
                             "Image d'accueil",
                             "Configurée" if _get(conf, "welcome_image_url") else "Aucune",
                         ),
+                    ],
+                )
+            ]
+        if cle == "goodbye":
+            return [
+                panels.Section(
+                    "Départs",
+                    [
+                        panels.Ligne("Salon", _channel(self.guild, _get(conf, "goodbye_channel"))),
+                        panels.Ligne("Message", _get(conf, "goodbye_message") or "Message par défaut SentriX"),
                     ],
                 )
             ]

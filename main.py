@@ -68,6 +68,7 @@ EXTENSIONS = [
     # claim, add, remove, rename et transfer. Même cause de mort que ci-dessus.
     "cogs.ticket_claim_security",
     "cogs.configuration",
+    "cogs.command_channel_gate",
     "cogs.server_builder",
     "cogs.logs",
     "cogs.soundboard_logs",
@@ -812,6 +813,8 @@ class BotAllInOne(commands.Bot):
             pass
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+        if getattr(ctx, "_sentrix_channel_blocked", False):
+            return
         error = getattr(error, "original", error)
 
         if isinstance(error, commands.CommandNotFound):
@@ -923,6 +926,8 @@ class BotAllInOne(commands.Bot):
         interaction: discord.Interaction,
         error: discord.app_commands.AppCommandError,
     ):
+        if getattr(interaction, "_sentrix_channel_blocked", False):
+            return
         original = getattr(error, "original", error)
 
         if isinstance(original, BotPermissionError):

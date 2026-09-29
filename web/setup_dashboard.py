@@ -83,6 +83,10 @@ async def handle_setup_data(request: web.Request) -> web.Response:
         "SELECT channel_id FROM ignored_channels WHERE guild_id = ? ORDER BY channel_id",
         (guild_id,),
     )
+    command_blocked_rows = await db.fetchall(
+        "SELECT channel_id FROM command_blocked_channels WHERE guild_id = ? ORDER BY channel_id",
+        (guild_id,),
+    )
     exempt_rows = await db.fetchall(
         "SELECT role_id FROM automod_exempt_roles WHERE guild_id = ? ORDER BY role_id",
         (guild_id,),
@@ -124,6 +128,7 @@ async def handle_setup_data(request: web.Request) -> web.Response:
         "commands": _command_catalog(bot),
         "disabled_commands": [row["command_name"] for row in disabled_rows],
         "ignored_channels": [str(row["channel_id"]) for row in ignored_rows],
+        "command_blocked_channels": [str(row["channel_id"]) for row in command_blocked_rows],
         "automod_exempt_roles": [str(row["role_id"]) for row in exempt_rows],
         "antinuke_whitelist": [_member_data(guild, int(row["user_id"])) for row in whitelist_rows],
         "managers": managers,
@@ -188,6 +193,37 @@ async def handle_setup_action(request: web.Request) -> web.Response:
                 (guild_id, command_name),
             )
             message = f"La commande +{command_name} est désactivée sur ce serveur."
+
+    elif action == "command_channels":
+        raw_ids = payload.get("channel_ids") or []
+        if not isinstance(raw_ids, list):
+            return dashboard._json_error("La liste des salons est invalide.", 400)
+        if len(raw_ids) > 100:
+            return dashboard._json_error("Vous pouvez bloquer au maximum 100 salons.", 400)
+
+        channel_ids = []
+        for raw in raw_ids:
+            try:
+                channel_id = int(raw)
+            except (TypeError, ValueError):
+                return dashboard._json_error("Un salon sélectionné est invalide.", 400)
+            channel = guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                return dashboard._json_error("Seuls les salons textuels peuvent bloquer les commandes.", 400)
+            if channel_id not in channel_ids:
+                channel_ids.append(channel_id)
+
+        await db.execute("DELETE FROM command_blocked_channels WHERE guild_id = ?", (guild_id,))
+        for channel_id in channel_ids:
+            await db.execute(
+                "INSERT OR IGNORE INTO command_blocked_channels (guild_id, channel_id) VALUES (?, ?)",
+                (guild_id, channel_id),
+            )
+        message = (
+            f"Les commandes sont maintenant bloquées dans {len(channel_ids)} salon(s)."
+            if channel_ids else
+            "Les commandes sont de nouveau autorisées dans tous les salons."
+        )
 
     elif action == "ignored_channel":
         try:
@@ -336,12 +372,37 @@ async def handle_setup_action(request: web.Request) -> web.Response:
         channel = guild.get_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
             return dashboard._json_error("Le panneau doit être envoyé dans un salon textuel.", 400)
-        title = str(payload.get("title") or "Choisissez vos notifications").strip()[:256]
+        title = str(payload.get("title") or "Choisissez vos rôles").strip()[:256] or "Choisissez vos rôles"
         cog = bot.get_cog("Verification")
         if cog is None:
             return dashboard._json_error("Le module des rôles est indisponible.", 503)
-        from cogs.verification import SelfRolePublicView
-        options = await cog._self_role_options(guild, 0)
+
+        from cogs.verification import SelfRolePublicView, _self_role_error
+
+        selected_roles = []
+        raw_role_ids = payload.get("role_ids") or []
+        if not isinstance(raw_role_ids, list):
+            return dashboard._json_error("La liste des rôles est invalide.", 400)
+        for raw in raw_role_ids[:25]:
+            try:
+                role = guild.get_role(int(raw))
+            except (TypeError, ValueError):
+                role = None
+            if role is None:
+                return dashboard._json_error("Un rôle sélectionné n'existe plus.", 404)
+            problem = _self_role_error(guild, role)
+            if problem:
+                return dashboard._json_error(problem, 409)
+            if all(existing.id != role.id for existing in selected_roles):
+                selected_roles.append(role)
+
+        if selected_roles:
+            options = [discord.SelectOption(label=role.name[:100], value=str(role.id)) for role in selected_roles]
+        else:
+            options = await cog._self_role_options(guild, 0)
+        if not options:
+            return dashboard._json_error("Choisissez au moins un rôle à proposer.", 400)
+
         temporary_panel = {"title": title}
         embed = await cog._self_role_embed(guild, temporary_panel, options)
         sent = await channel.send(embed=embed, view=SelfRolePublicView(options))
@@ -350,6 +411,17 @@ async def handle_setup_action(request: web.Request) -> web.Response:
             "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_id, message_id) DO NOTHING",
             (guild_id, channel_id, sent.id, title, actor_id, now()),
         )
+        if selected_roles:
+            await db.execute(
+                "DELETE FROM self_role_items WHERE guild_id = ? AND panel_message_id = ?",
+                (guild_id, sent.id),
+            )
+            for position, role in enumerate(selected_roles):
+                await db.execute(
+                    "INSERT OR REPLACE INTO self_role_items "
+                    "(guild_id, panel_message_id, role_id, position) VALUES (?, ?, ?, ?)",
+                    (guild_id, sent.id, role.id, position),
+                )
         message = f"Le panneau de rôles a été publié dans #{channel.name}."
 
     elif action == "reset":
@@ -377,7 +449,7 @@ async def handle_setup_action(request: web.Request) -> web.Response:
         elif scope == "all":
             for table in (
                 "guild_config", "automod_settings", "disabled_commands", "ignored_channels",
-                "automod_exempt_roles", "antinuke_whitelist", "game_settings", "log_settings",
+                "command_blocked_channels", "automod_exempt_roles", "antinuke_whitelist", "game_settings", "log_settings",
             ):
                 await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
             cache = getattr(db, "_guild_config_cache", None)

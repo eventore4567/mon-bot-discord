@@ -328,7 +328,31 @@ class Verification(commands.Cog, name="Verification"):
         )
 
     async def _self_role_options(self, guild: discord.Guild, panel_message_id: int) -> list[discord.SelectOption]:
+        configured = []
+        if panel_message_id:
+            configured = await self.bot.db.fetchall(
+                "SELECT role_id FROM self_role_items WHERE guild_id = ? AND panel_message_id = ? "
+                "ORDER BY position, role_id",
+                (guild.id, panel_message_id),
+            )
+        if not configured:
+            configured = await self.bot.db.fetchall(
+                "SELECT role_id FROM self_role_items WHERE guild_id = ? AND panel_message_id = 0 "
+                "ORDER BY position, role_id",
+                (guild.id,),
+            )
+
         options = []
+        seen = set()
+        if configured:
+            for row in configured:
+                role = guild.get_role(int(row["role_id"]))
+                if role is None or role.id in seen or _self_role_error(guild, role):
+                    continue
+                seen.add(role.id)
+                options.append(discord.SelectOption(label=role.name[:100], value=str(role.id)))
+            return options[:25]
+
         for role in reversed(guild.roles):
             if not _is_notification_role(role) or _self_role_error(guild, role):
                 continue

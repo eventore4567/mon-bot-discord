@@ -52,8 +52,13 @@ CATEGORY_META: dict[str, tuple[str, str, str]] = {
     ),
     "welcome": (
         "👋",
-        "Bienvenue & départ",
-        "Messages d’arrivée, de départ et rôles automatiques.",
+        "Bienvenue",
+        "Message d’arrivée, salon et rôle automatique.",
+    ),
+    "goodbye": (
+        "🚪",
+        "Départs",
+        "Message envoyé quand un membre quitte le serveur.",
     ),
     "roles": (
         "🏷️",
@@ -93,6 +98,7 @@ CATEGORY_ORDER = (
     "security",
     "tickets",
     "welcome",
+    "goodbye",
     "roles",
     "logs",
     "levels",
