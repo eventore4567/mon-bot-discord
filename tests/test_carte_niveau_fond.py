@@ -45,21 +45,62 @@ def test_le_fond_na_pas_de_marches_visibles():
 
 
 def test_le_fond_a_bien_plus_de_couleurs_que_lancien_repli():
-    """L'ancien repli n'en avait que 80 pour 480 000 pixels."""
+    """L'ancien repli n'en avait que 80 pour 480 000 pixels, réparties en cent
+    bandes plates. Un fond neutre en a forcément moins qu'un fond coloré — c'est
+    l'ÉCART entre pixels voisins qui dit s'il est lisse, pas le décompte — mais
+    il doit rester largement au-dessus du repli."""
     image = fond_de_carte(1200, 400, ACCENT, SECONDAIRE).convert("RGB")
     couleurs = len(set(image.getdata()))
-    assert couleurs > 400, f"seulement {couleurs} couleurs : le dégradé est plat"
+    assert couleurs > 110, f"seulement {couleurs} couleurs : le dégradé est plat"
 
 
-def test_le_fond_prend_les_couleurs_du_serveur():
-    """Sinon toutes les cartes de tous les serveurs se ressemblent, et le
-    réglage de couleurs du serveur ne sert à rien."""
+def test_le_fond_est_neutre_quelles_que_soient_les_couleurs_du_serveur():
+    """Changement de parti pris, demandé par Jayden : « enlève le style bleu
+    violet, je veux une couleur simple, pas IA ».
+
+    Le fond était teinté par l'accent, ce qui donnait avec les couleurs par
+    défaut de SentriX un dégradé violet vers bleu — le cliché visuel par
+    excellence. Il est maintenant une ardoise neutre, identique partout, et
+    l'accent ne sert plus qu'aux éléments qui doivent ressortir.
+    """
     violet = fond_de_carte(300, 100, (108, 92, 231), (76, 125, 255)).convert("RGB")
     vert = fond_de_carte(300, 100, (33, 208, 122), (15, 163, 163)).convert("RGB")
-    assert violet.getpixel((250, 20)) != vert.getpixel((250, 20))
-    # Et la teinte suit vraiment : le vert doit dominer sur la carte verte.
-    r, v, b = vert.getpixel((280, 10))
-    assert v > b and v > r, f"la carte verte tire vers {(r, v, b)}"
+    assert violet.getpixel((250, 20)) == vert.getpixel((250, 20)), (
+        "le fond est encore teinté par l'accent du serveur"
+    )
+    # Neutre veut dire neutre : aucune composante ne domine.
+    for x, y in ((280, 10), (30, 90), (150, 50)):
+        r, v, b = violet.getpixel((x, y))
+        assert max(r, v, b) - min(r, v, b) <= 8, f"teinte résiduelle en {(x, y)} : {(r, v, b)}"
+
+
+def test_laccent_du_serveur_reste_visible_sur_la_carte():
+    """Le fond devient neutre, mais la personnalisation ne disparaît pas : elle
+    se déplace sur la barre de progression, l'anneau de l'avatar et le liseré.
+    Sans ce test, « fond neutre » pourrait silencieusement devenir « plus aucune
+    couleur nulle part », et le réglage du dashboard ne servirait plus à rien.
+    """
+    import io
+
+    from PIL import Image, ImageDraw
+
+    from utils.visual_v5 import _render_card_sync
+
+    avatar = io.BytesIO()
+    Image.new("RGB", (64, 64), (70, 72, 80)).save(avatar, "PNG")
+    stats = {"current_level": 5, "current_level_xp": 10, "required_xp": 100,
+             "rank": 1, "is_ranked": True, "message_count": 1, "total_money": 1}
+
+    def couleurs(reglages):
+        sortie = _render_card_sync(avatar.getvalue(), "A", "S", stats, reglages,
+                                   5, True, True)
+        return set(Image.open(sortie).convert("RGB").getdata())
+
+    ambre = couleurs({"primary_color": 0xE8B04B, "secondary_color": 0xC08A2E})
+    # Un orange franc doit apparaître quelque part sur la carte ambre.
+    assert any(r > 180 and v > 130 and b < 120 for r, v, b in ambre), (
+        "l'accent du serveur n'apparaît nulle part : la personnalisation est perdue"
+    )
 
 
 def test_le_fond_va_du_sombre_au_clair():

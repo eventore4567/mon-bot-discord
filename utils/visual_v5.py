@@ -190,11 +190,19 @@ def fond_de_carte(largeur: int, hauteur: int, accent: tuple[int, int, int],
     """
     from PIL import Image, ImageDraw, ImageFilter
 
-    # Base sombre tirée de l'accent plutôt qu'un gris neutre : un dégradé qui
-    # part d'une teinte proche de l'accent se lit comme choisi, pas comme un
-    # fond par défaut sur lequel on aurait posé une couleur.
-    base = tuple(max(6, round(c * 0.12)) for c in accent)
-    haut = tuple(min(255, round(a * 0.42 + s * 0.18)) for a, s in zip(accent, secondaire))
+    # Fond NEUTRE, volontairement. Il était teinté par l'accent, ce qui donnait
+    # avec les couleurs par défaut de SentriX un dégradé violet vers bleu — le
+    # cliché visuel par excellence, et Jayden l'a dit : « une couleur simple,
+    # pas IA ». Un fond qui voyage d'une teinte à une autre attire l'œil sur
+    # lui-même au lieu de laisser lire ce qu'il porte.
+    #
+    # Ardoise très sombre, avec une variation de luminosité si faible qu'on ne
+    # lit pas un dégradé mais une surface. L'accent ne sert plus qu'aux
+    # éléments qui doivent ressortir : la barre de progression, l'anneau de
+    # l'avatar, le liseré. Une seule couleur forte, et du calme autour.
+    del accent, secondaire
+    base = (14, 15, 18)
+    haut = (32, 34, 40)
 
     # Dégradé PAR PIXEL sur la diagonale. Calculé sur une petite image puis
     # agrandi : Pillow interpole alors les valeurs intermédiaires, ce qui donne
@@ -211,14 +219,15 @@ def fond_de_carte(largeur: int, hauteur: int, accent: tuple[int, int, int],
             )
     toile = petit.resize((largeur, hauteur), Image.Resampling.BICUBIC).convert("RGBA")
 
-    # Une seule lueur, derrière l'emplacement de l'avatar : elle donne du relief
-    # sans rien raconter. Floutée largement pour qu'aucun contour ne se voie.
+    # Une lueur BLANCHE et très discrète derrière l'avatar, pas une lueur
+    # colorée : elle donne un peu de relief sans réintroduire la teinte qu'on
+    # vient d'enlever. Floutée largement pour qu'aucun contour ne se voie.
     lueur = Image.new("RGBA", (largeur, hauteur), (0, 0, 0, 0))
     rayon = int(hauteur * 0.62)
     centre = (int(largeur * 0.16), hauteur // 2)
     ImageDraw.Draw(lueur).ellipse(
         (centre[0] - rayon, centre[1] - rayon, centre[0] + rayon, centre[1] + rayon),
-        fill=(*secondaire, 46),
+        fill=(255, 255, 255, 14),
     )
     lueur = lueur.filter(ImageFilter.GaussianBlur(rayon // 2))
     return Image.alpha_composite(toile, lueur)
@@ -234,8 +243,16 @@ def _render_card_sync(
     show_levels: bool,
     show_economy: bool,
 ) -> io.BytesIO:
-    accent = _hex_rgb(int(settings.get("primary_color", 0x6C5CE7)))
-    secondary = _hex_rgb(int(settings.get("secondary_color", 0x4C7DFF)))
+    # Défauts NEUTRES. Ils valaient 0x6C5CE7 (violet) et 0x4C7DFF (bleu) : le
+    # dégradé violet-vers-bleu, c'est-à-dire exactement le cliché que Jayden a
+    # demandé de retirer — « une couleur simple, pas IA ».
+    #
+    # Un serveur qui choisit ses couleurs dans le dashboard les garde : ces
+    # valeurs ne s'appliquent qu'à ceux qui n'ont rien réglé, et c'est le cas de
+    # l'immense majorité. Gris clair pour la structure, ardoise claire pour
+    # l'anneau : la carte se lit sans qu'aucune couleur ne réclame l'attention.
+    accent = _hex_rgb(int(settings.get("primary_color", 0xE6E8EC)))
+    secondary = _hex_rgb(int(settings.get("secondary_color", 0x8A8F99)))
 
     # Fond généré, plus d'image à charger : l'asset card-background-v5.png ne se
     # décodait pas et la production peignait donc toujours le repli en bandes.
@@ -245,9 +262,9 @@ def _render_card_sync(
     # Opacité 96 et non 150 : à 150 le panneau masquait le dégradé sur 92 % de
     # la carte, et soigner le fond n'aurait servi à rien. Le texte reste sur un
     # fond sombre, donc lisible.
-    draw.rounded_rectangle((34, 32, 1166, 368), radius=34, fill=(6, 10, 36, 96), outline=(*accent, 210), width=3)
+    draw.rounded_rectangle((34, 32, 1166, 368), radius=34, fill=(10, 11, 14, 120), outline=(*accent, 210), width=3)
     if show_levels:
-        draw.rounded_rectangle((315, 286, 1110, 320), radius=17, fill=(15, 20, 55, 210))
+        draw.rounded_rectangle((315, 286, 1110, 320), radius=17, fill=(24, 26, 31, 220))
 
     avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
     avatar = ImageOps.fit(avatar, (222, 222), method=Image.Resampling.LANCZOS)
@@ -265,30 +282,30 @@ def _render_card_sync(
     rank = f"#{stats.get('rank')}" if stats.get("is_ranked") and stats.get("rank") else "Non classé"
 
     title, title_font = _fit_text(draw, display_name, 700, 50, bold=True)
-    draw.text((340, 75), title, font=title_font, fill=(250, 251, 255, 255))
+    draw.text((340, 75), title, font=title_font, fill=(245, 246, 248, 255))
     label = "NOUVEAU NIVEAU" if level_up is not None else "PROFIL SENTRIX"
     draw.text((342, 45), label, font=_font(20, bold=True), fill=(*secondary, 255))
     if show_levels:
-        draw.text((342, 143), f"Niveau {level}  •  Rang {rank}", font=_font(28, bold=True), fill=(213, 222, 255, 255))
+        draw.text((342, 143), f"Niveau {level}  •  Rang {rank}", font=_font(28, bold=True), fill=(214, 216, 222, 255))
     else:
-        draw.text((342, 143), "Profil membre", font=_font(28, bold=True), fill=(213, 222, 255, 255))
-    draw.text((342, 196), f"{guild_name}", font=_font(21), fill=(170, 181, 220, 255))
+        draw.text((342, 143), "Profil membre", font=_font(28, bold=True), fill=(214, 216, 222, 255))
+    draw.text((342, 196), f"{guild_name}", font=_font(21), fill=(150, 154, 163, 255))
 
     if show_levels:
         bar_left, bar_top, bar_right, bar_bottom = 340, 286, 1110, 320
         progress_right = bar_left + round((bar_right - bar_left) * ratio)
         if progress_right > bar_left:
             draw.rounded_rectangle((bar_left, bar_top, progress_right, bar_bottom), radius=17, fill=(*accent, 245))
-        draw.text((342, 332), f"{current_xp:,} / {required_xp:,} XP".replace(",", " "), font=_font(20, bold=True), fill=(235, 238, 255, 255))
+        draw.text((342, 332), f"{current_xp:,} / {required_xp:,} XP".replace(",", " "), font=_font(20, bold=True), fill=(228, 230, 235, 255))
         message_x = 620
         economy_x = 910
     else:
         message_x = 342
         economy_x = 700
 
-    draw.text((message_x, 332), f"Messages  {int(stats.get('message_count', 0) or 0):,}".replace(",", " "), font=_font(20), fill=(194, 203, 235, 255))
+    draw.text((message_x, 332), f"Messages  {int(stats.get('message_count', 0) or 0):,}".replace(",", " "), font=_font(20), fill=(168, 172, 181, 255))
     if show_economy:
-        draw.text((economy_x, 332), f"Économie  {int(stats.get('total_money', 0) or 0):,}".replace(",", " "), font=_font(20), fill=(194, 203, 235, 255))
+        draw.text((economy_x, 332), f"Économie  {int(stats.get('total_money', 0) or 0):,}".replace(",", " "), font=_font(20), fill=(168, 172, 181, 255))
 
     output = io.BytesIO()
     canvas.convert("RGB").save(output, format="PNG", optimize=True)
