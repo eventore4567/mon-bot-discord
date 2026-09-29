@@ -81,7 +81,9 @@ def test_web_page_has_loading_success_close_and_discord_redirect():
     assert "spinner" in WEB_SOURCE
     assert '"preparing"' in WEB_SOURCE
     assert 'loadingText").textContent=C.preparing' in WEB_SOURCE
-    assert 'loadingText").textContent=C.checking' in WEB_SOURCE
+    assert "startSecurityProgress()" in WEB_SOURCE
+    assert "C.securityPhases" in WEB_SOURCE
+    assert "[C.checking]" in WEB_SOURCE
     assert "showSuccess" in WEB_SOURCE
     assert "window.close()" in WEB_SOURCE
     assert "discord://-/channels/" in WEB_SOURCE
