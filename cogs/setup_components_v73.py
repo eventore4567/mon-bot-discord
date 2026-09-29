@@ -21,7 +21,18 @@ from . import setup_ticket_autoconfig_v72 as v72
 logger = logging.getLogger("bot.setup-components-v73")
 
 RUNTIME_MARKER = "Control Center Components V2 V73"
-ACCENT = discord.Colour(0x6D5DFB)
+# Liseré des conteneurs de +setup et +help, et de dix-neuf autres écrans.
+#
+# Il valait 0x6D5DFB — le violet. Jayden : « enlève le style bleu violet, je
+# veux une couleur simple, pas IA ». Le violet-vers-bleu est le cliché visuel
+# qu'on reconnaît au premier coup d'œil, et il tirait toute la surface de
+# configuration avec lui.
+#
+# Même valeur que la structure de la carte de niveau (utils/visual_v5), pour
+# que le bot ait UNE palette et non une par module. Un gris très clair se lit
+# comme un trait dessiné, pas comme une couleur qui veut dire quelque chose —
+# et c'est bien le rôle d'un liseré.
+ACCENT = discord.Colour(0xE6E8EC)
 
 CATEGORY_META: dict[str, tuple[str, str, str]] = {
     "moderation": (
@@ -120,6 +131,47 @@ def _short_state(state: str) -> str:
     if "ACTIF" in state:
         return "🟢 Activé"
     return state or "—"
+
+
+#: Famille de bannière de ces écrans. « config » est le violet clair de
+#: utils/log_banners.COLORS — un domaine, pas un état, comme pour les tickets
+#: et la sécurité.
+BANNIERE = "config"
+
+
+def fichier_banniere() -> "discord.File | None":
+    """Un fichier NEUF à chaque appel, jamais réutilisé.
+
+    C'est le piège de ce lot : un ``discord.File`` porte un curseur de lecture.
+    Une fois envoyé, il est consommé — le réutiliser pour l'édition suivante
+    produit une pièce jointe VIDE, donc une bannière cassée, sans la moindre
+    erreur pour le signaler. Et ces vues se réaffichent à chaque clic de
+    navigation, en vidant leurs pièces jointes (``attachments=[]``) : il faut
+    donc en refabriquer une à chaque fois.
+    """
+    # fichier_de_famille et NON fichier_banniere : le second re-décide la
+    # famille à partir du contexte de commande en cours. Hors commande — et une
+    # édition de navigation en est hors — il retombe sur « info » et joint
+    # banner_info.webp, alors que la galerie référence banner_config.webp. La
+    # pièce jointe est alors absente et Discord affiche une image cassée, sans
+    # la moindre erreur. Le docstring de fichier_de_famille prévient exactement
+    # de ce piège ; mesuré ici avant de le commettre.
+    from utils.sentrix_panels import fichier_de_famille
+
+    try:
+        return fichier_de_famille(BANNIERE)
+    except Exception:
+        logger.debug("Bannière %s indisponible pour cet écran.", BANNIERE, exc_info=True)
+        return None
+
+
+def entete_banniere() -> "discord.ui.MediaGallery":
+    """La galerie qui affiche la bannière en tête de conteneur."""
+    from utils.log_banners import nom_fichier
+
+    galerie = discord.ui.MediaGallery()
+    galerie.add_item(media=f"attachment://{nom_fichier(BANNIERE)}")
+    return galerie
 
 
 def _thumbnail(bot: commands.Bot) -> discord.ui.Thumbnail:
@@ -268,10 +320,15 @@ class SentriXSetupV73(discord.ui.LayoutView):
         if not interaction.response.is_done():
             await interaction.response.defer()
         await self.rebuild()
+        # attachments=[fichier] et non [] : la galerie du conteneur référence
+        # « attachment://banner_config.webp ». Sans le fichier joint, Discord
+        # affiche une image cassée. Un fichier NEUF à chaque édition — celui de
+        # l'envoi précédent est consommé.
+        fichier = fichier_banniere()
         await interaction.edit_original_response(
             content=None,
             embed=None,
-            attachments=[],
+            attachments=[fichier] if fichier else [],
             view=self,
         )
 
@@ -301,6 +358,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         problems = sum("CORRIGER" in value for value in states.values())
 
         container = discord.ui.Container(accent_colour=ACCENT)
+        container.add_item(entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -366,6 +424,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
 
         container = discord.ui.Container(accent_colour=ACCENT)
+        container.add_item(entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -481,10 +540,15 @@ class SentriXSetupV73(discord.ui.LayoutView):
             accent_colour=ACCENT,
         )
         self.add_item(closed)
+        # attachments=[fichier] et non [] : la galerie du conteneur référence
+        # « attachment://banner_config.webp ». Sans le fichier joint, Discord
+        # affiche une image cassée. Un fichier NEUF à chaque édition — celui de
+        # l'envoi précédent est consommé.
+        fichier = fichier_banniere()
         await interaction.edit_original_response(
             content=None,
             embed=None,
-            attachments=[],
+            attachments=[fichier] if fichier else [],
             view=self,
         )
         self.stop()
@@ -510,11 +574,16 @@ async def _send_setup_v73(self, target):
     view = SentriXSetupV73(self.bot, guild, member.id)
     await view.prepare()
 
+    # Le fichier est refabriqué pour CHAQUE branche : un discord.File consommé
+    # par un envoi ne peut pas servir au suivant.
     if isinstance(target, commands.Context):
-        return await target.send(view=view)
+        fichier = fichier_banniere()
+        return await target.send(view=view, **({"file": fichier} if fichier else {}))
     if target.response.is_done():
-        return await target.followup.send(view=view)
-    return await target.response.send_message(view=view)
+        fichier = fichier_banniere()
+        return await target.followup.send(view=view, **({"file": fichier} if fichier else {}))
+    fichier = fichier_banniere()
+    return await target.response.send_message(view=view, **({"file": fichier} if fichier else {}))
 
 
 def install(bot: commands.Bot) -> None:

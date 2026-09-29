@@ -185,6 +185,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         actifs = sum(1 for etat in switch_states.values() if etat == "enabled")
 
         container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -278,6 +279,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         problems = sum("CORRIGER" in states.get(key, "") for key in CATEGORY_ORDER)
 
         container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -420,6 +422,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             disabled=True,
         )
         container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -470,6 +473,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
         container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -596,6 +600,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
 
         container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -778,10 +783,16 @@ async def _send_setup_v74(self, target):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        return await target.send(view=view)
+        fichier = v73.fichier_banniere()
+        return await target.send(view=view, **({"file": fichier} if fichier else {}))
     if target.response.is_done():
-        return await target.followup.send(view=view)
-    return await target.response.send_message(view=view)
+        fichier = v73.fichier_banniere()
+        return await target.followup.send(view=view, **({"file": fichier} if fichier else {}))
+    # Un fichier par branche : un discord.File consommé par un envoi ne peut pas
+    # servir au suivant. Les éditions de navigation passent par le refresh
+    # hérité de V73, qui rejoint déjà le fichier.
+    fichier = v73.fichier_banniere()
+    return await target.response.send_message(view=view, **({"file": fichier} if fichier else {}))
 
 
 def install(bot: commands.Bot) -> None:

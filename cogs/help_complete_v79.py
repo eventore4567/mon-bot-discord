@@ -424,7 +424,15 @@ class SentriXHelpV79(discord.ui.LayoutView):
 
     async def _edit(self, interaction: discord.Interaction) -> None:
         self.rebuild()
-        await interaction.edit_original_response(content=None, embed=None, attachments=[], view=self)
+        # Le fichier est refabriqué à chaque édition : celui de l'envoi
+        # précédent est consommé, et le réutiliser donnerait une pièce jointe
+        # vide — donc une bannière cassée, sans erreur pour le dire.
+        fichier = setup_v73.fichier_banniere()
+        await interaction.edit_original_response(
+            content=None, embed=None,
+            attachments=[fichier] if fichier else [],
+            view=self,
+        )
 
     def rebuild(self) -> None:
         self.clear_items()
@@ -456,6 +464,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         page_keys = keys[start:start + HOME_PAGE_SIZE]
 
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container.add_item(setup_v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -541,6 +550,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         self.index = min(max(self.index, 0), len(pages) - 1)
         chunk = pages[self.index]
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container.add_item(setup_v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -622,6 +632,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
             usage_lines.append(f"`{prefix_usage}`")
 
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container.add_item(setup_v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(f"# {_title(entry, self.prefix)}\n{_description(entry)}"),
@@ -692,10 +703,18 @@ async def _send_help_v79(self, target, query: str | None = None):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        return await target.send(content=None, embed=None, view=view)
+        fichier = setup_v73.fichier_banniere()
+        return await target.send(content=None, embed=None, view=view,
+                                 **({"file": fichier} if fichier else {}))
     if target.response.is_done():
-        return await target.followup.send(content=None, embed=None, view=view)
-    return await target.response.send_message(content=None, embed=None, view=view)
+        fichier = setup_v73.fichier_banniere()
+        return await target.followup.send(content=None, embed=None, view=view,
+                                          **({"file": fichier} if fichier else {}))
+    # Un fichier par branche : un discord.File consommé par un envoi ne peut
+    # pas servir au suivant.
+    fichier = setup_v73.fichier_banniere()
+    return await target.response.send_message(content=None, embed=None, view=view,
+                                              **({"file": fichier} if fichier else {}))
 
 
 def install(bot: commands.Bot) -> None:
