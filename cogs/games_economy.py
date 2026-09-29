@@ -193,8 +193,9 @@ def _reaction_round() -> tuple[list[str], str]:
         if token not in options:
             options.append(token)
     target = game_rewards.secure_pick(options)
-    random.shuffle(options)
-    return options, target
+    # La POSITION de la bonne réponse parmi les autres. Tirée de la suite
+    # globale, elle était devinable alors que c'est tout le jeu.
+    return game_rewards.secure_shuffle(options), target
 
 
 async def _precheck(bot, ctx: commands.Context, game_name: str, cooldown: int) -> tuple[bool, str, str | None]:
@@ -742,7 +743,9 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
                 )
             ),
         )
-        await asyncio.sleep(random.uniform(1.8, 4.2))
+        # secure_delay : dans un jeu de reflexe, celui qui sait QUAND les
+        # boutons apparaissent a deja gagne. Le delai fait partie du jeu.
+        await asyncio.sleep(game_rewards.secure_delay(1.8, 4.2))
 
         view = _ReactionSoloView(author_id=ctx.author.id, options=options, target=target)
         await panels.editer(
@@ -839,9 +842,9 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         started, err, sid = await _precheck(self.bot, ctx, "colorquiz", 10)
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description=err, kind='warning')))
-        options = list(COLOR_EMOJIS.items())
-        random.shuffle(options)
-        options = options[:4]
+        # Quelles quatre couleurs sont proposées, et dans quel ordre : les deux
+        # décident de la difficulté de la manche, donc du gain.
+        options = game_rewards.secure_shuffle(COLOR_EMOJIS.items())[:4]
         target_name, target_emoji = game_rewards.secure_pick(options)
         view = _ColorQuizView(author_id=ctx.author.id, options=options, target=target_name)
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description=f'🎨 Cliquez sur **{target_name.upper()}**')), view))
@@ -1025,9 +1028,8 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
         return await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Devine le mot', description=err, kind='warning')))
     if mode == "scramble":
         word = game_rewards.secure_pick(pool)
-        letters = list(word)
-        random.shuffle(letters)
-        scrambled = "".join(letters)
+        # L'anagramme est le seul obstacle entre le joueur et la récompense.
+        scrambled = "".join(game_rewards.secure_shuffle(word))
         prompt = f"🔤 Remettez les lettres dans l'ordre : **{scrambled.upper()}**"
         answer = word
     else:
@@ -1421,7 +1423,9 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=err, kind='warning')))
 
         msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=f'⚡ {ctx.author.mention} vs {adversaire.mention}\n⏳ Préparez-vous...')))
-        await asyncio.sleep(random.uniform(2.0, 6.0))
+        # Duel 1v1 pour une recompense : il suffit qu'un des deux puisse
+        # pre-calibrer son clic pour gagner a tous les coups.
+        await asyncio.sleep(game_rewards.secure_delay(2.0, 6.0))
         view = _ReactionDuelView(p1=ctx.author, p2=adversaire)
         await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description='🔴 **MAINTENANT !**')), view))
         await view.wait()
@@ -1910,20 +1914,26 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
     @commands.hybrid_command(name="wordrace", description="Lancer une course pour deviner un mot mélangé.", with_app_command=False)
     async def wordrace(self, ctx: commands.Context):
         word = game_rewards.secure_pick(COMMUNITY_WORDS)
-        letters = list(word)
-        random.shuffle(letters)
+        # secure_shuffle rend une COPIE : `letters` reste l'anagramme affichée
+        # et `word` la réponse, sans que l'un réécrive l'autre. random.shuffle
+        # mélangeait en place, et surtout depuis la suite globale — l'anagramme
+        # d'une course dotée d'une récompense était donc prévisible.
+        letters = game_rewards.secure_shuffle(word)
         await self._run_text_race(ctx, "wordrace", "Course au mot", f"🔤 Remettez les lettres dans l'ordre : **{''.join(letters).upper()}**", word, 25, 20)
 
     @commands.hybrid_command(name="mathrace", description="Lancer une course de calcul mental.", with_app_command=False)
     async def mathrace(self, ctx: commands.Context):
-        a, b = random.randint(5, 80), random.randint(5, 80)
-        op = random.choice(list(COMMUNITY_MATH_OPS))
+        # Les opérandes ET l'opérateur sont la réponse : les tirer de la suite
+        # globale les rendait devinables par quiconque observe un autre jeu.
+        a, b = game_rewards.secure_randint(5, 80), game_rewards.secure_randint(5, 80)
+        op = game_rewards.secure_pick(list(COMMUNITY_MATH_OPS))
         answer = str(COMMUNITY_MATH_OPS[op](a, b))
         await self._run_text_race(ctx, "mathrace", "Course mathématique", f"🧮 Combien font **{a} {op} {b}** ?", answer, 15, 18)
 
     @commands.hybrid_command(name="guessrace", description="Lancer une course pour deviner un nombre secret.", with_app_command=False)
     async def guessrace(self, ctx: commands.Context):
-        target = random.randint(1, 50)
+        # Le nombre secret EST la réponse de la course.
+        target = game_rewards.secure_randint(1, 50)
         await self._run_text_race(ctx, "guessrace", "Course au nombre", "🔢 Le bot a choisi un nombre secret entre 1 et 50.", str(target), 25, 20)
 
     @commands.hybrid_command(name="reactionevent", description="Lancer un évènement réaction : premier clic gagne.", with_app_command=False)
@@ -1961,7 +1971,7 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
                     )
                 ),
             )
-            await asyncio.sleep(random.uniform(2.0, 5.0))
+            await asyncio.sleep(game_rewards.secure_delay(2.0, 5.0))
 
             view = _CommunityRaceButtonView(options, target)
             await panels.editer(
@@ -2274,7 +2284,14 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
         )
         chance = max(0.15, min(0.95, float(chance) + chance_shift))
 
-        if random.random() >= chance:
+        # secure_chance et non random.random() : ce tirage décide seul si la
+        # manche rapporte ou échoue. `random` est le Mersenne Twister, une
+        # instance GLOBALE partagée par tous les jeux du processus — toutes ces
+        # manches puisaient dans une seule suite, celle qu'un joueur peut
+        # observer ailleurs dans le bot. Le module utilisait déjà secure_pick
+        # pour choisir le chemin et le texte ; le tirage qui décide de l'argent
+        # était resté sur random.
+        if not game_rewards.secure_chance(chance):
             await _finish(self.bot, ctx, game_name, sid, "loss", 0)
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
                 self.bot, guild_id, title=titre,
@@ -2285,7 +2302,8 @@ class GamesSolo(commands.Cog, name="GamesSolo"):
                 kind="danger",
             )))
 
-        base = random.randint(30, 70)
+        # Le MONTANT du gain, même raison que le tirage juste au-dessus.
+        base = game_rewards.secure_randint(30, 70)
         texte = game_rewards.secure_pick(succes)
         butin = tirer_butin(game_name)
         butin_text = ""

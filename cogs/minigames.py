@@ -154,7 +154,10 @@ class Minigames(commands.Cog, name="Minigames"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Pierre-feuille-ciseaux', description=err, kind='warning')))
 
-        bot_choice = random.choice(options)
+        # Le coup du bot DECIDE de la manche : source sure, comme partout
+        # ailleurs dans le module. `random` est une suite globale partagee
+        # par tous les jeux du processus, donc observable ailleurs.
+        bot_choice = game_rewards.secure_pick(options)
         if choix == bot_choice:
             result, kind, game_result = "🤝 **Égalité !**", "primary", "draw"
         elif (choix, bot_choice) in [("pierre", "ciseaux"), ("feuille", "pierre"), ("ciseaux", "feuille")]:
@@ -237,7 +240,7 @@ class Minigames(commands.Cog, name="Minigames"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Partie déjà active', description='Une partie collective est déjà en cours dans ce salon. Rejoignez-la en envoyant un nombre.', kind='warning')))
 
         self._guess_number_channels.add(channel_key)
-        target = random.randint(1, 100)
+        target = game_rewards.secure_randint(1, 100)  # le nombre EST la reponse
         attempts: dict[int, int] = {}
         participants: set[int] = set()
         denied_notified: set[int] = set()
@@ -322,7 +325,7 @@ class Minigames(commands.Cog, name="Minigames"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Question de culture générale', description=err, kind='warning')))
 
-        question, answer = random.choice(TRIVIA_QUESTIONS)
+        question, answer = game_rewards.secure_pick(TRIVIA_QUESTIONS)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Question de culture générale', description=f'❓ {question}\nVous avez 15 secondes.')))
 
         def check(m):
@@ -388,7 +391,7 @@ class Minigames(commands.Cog, name="Minigames"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=err, kind='warning')))
 
         words = ["python", "discord", "ordinateur", "clavier", "programmation", "serveur", "aventure", "reaction"]
-        word = random.choice(words)
+        word = game_rewards.secure_pick(words)
         guessed = set()
         tries = 6
         display = "".join(c if c in guessed else "_" for c in word)
@@ -429,8 +432,8 @@ class Minigames(commands.Cog, name="Minigames"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Quiz mathématique', description=err, kind='warning')))
 
-        a, b = random.randint(2, 50), random.randint(2, 50)
-        op = random.choice(list(MATH_OPS))
+        a, b = game_rewards.secure_randint(2, 50), game_rewards.secure_randint(2, 50)
+        op = game_rewards.secure_pick(list(MATH_OPS))
         answer = MATH_OPS[op](a, b)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Quiz mathématique', description=f"🧮 Combien font **{a} {('×' if op == '*' else op)} {b}** ? (10 secondes)")))
 
@@ -471,8 +474,8 @@ class Minigames(commands.Cog, name="Minigames"):
             for enseigne in cls.ENSEIGNES
             for figure, valeur in cls.VALEURS
         ]
-        random.shuffle(paquet)
-        return paquet
+        # L'ordre du paquet decide de toutes les mains distribuees ensuite.
+        return game_rewards.secure_shuffle(paquet)
 
     @staticmethod
     def _total(main: list[tuple[str, int]]) -> int:

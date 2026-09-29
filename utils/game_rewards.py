@@ -439,3 +439,79 @@ def secure_randint(low: int, high: int) -> int:
     if high <= low:
         return low
     return low + secrets.randbelow(high - low + 1)
+
+
+#: Dénominateur du tirage de probabilité. Un million de graduations : très
+#: au-delà de la précision des chances réellement utilisées (deux décimales au
+#: plus), donc aucun biais observable, et un entier que ``secrets`` sait tirer
+#: sans le détour flottant qui introduirait justement un biais.
+_GRADUATIONS = 1_000_000
+
+
+def secure_chance(probabilite: float) -> bool:
+    """Vrai avec la probabilité donnée, tiré sûrement.
+
+    Remplace ``random.random() < p``. La raison n'est pas théorique : le tirage
+    qui décide si une expédition rapporte ou échoue, et celui qui fixe le
+    montant, passaient par ``random`` — le Mersenne Twister, une instance
+    GLOBALE partagée par tous les jeux du processus. Toutes ces manches
+    puisaient donc dans une seule et même suite, celle qu'un joueur peut
+    observer ailleurs. Le reste du module avait déjà tranché pour ``secrets`` ;
+    ces sites n'avaient simplement pas été convertis.
+
+    Une probabilité hors [0, 1] est ramenée dedans plutôt que refusée : mieux
+    vaut une manche jouable qu'une exception au milieu d'une partie où la mise
+    est déjà débitée.
+    """
+    p = max(0.0, min(1.0, float(probabilite)))
+    if p <= 0.0:
+        return False
+    if p >= 1.0:
+        return True
+    return secrets.randbelow(_GRADUATIONS) < round(p * _GRADUATIONS)
+
+
+def secure_delay(minimum: float, maximum: float) -> float:
+    """Délai en secondes, tiré sûrement, à la milliseconde près.
+
+    Remplace ``random.uniform`` — mais seulement là où le délai DÉCIDE de
+    quelque chose, et c'est le cas de tous les jeux de réflexe : le joueur
+    attend que les boutons apparaissent, et celui qui sait quand ils
+    apparaîtront a déjà gagné. Le pire cas est ``+reactionduel``, deux joueurs
+    face à face pour une seule récompense : il suffit qu'un des deux puisse
+    pré-calibrer son clic.
+
+    Un délai purement décoratif n'a pas besoin de ceci, et le convertir serait
+    du bruit.
+
+    La milliseconde est la granularité utile : Discord n'acheminera pas un clic
+    plus finement, et descendre plus bas ne ferait que compliquer le tirage.
+    """
+    # Les deux bornes sont ramenées à zéro AVANT le tirage, pas seulement sur
+    # la branche des bornes inversées : un intervalle entièrement négatif
+    # rendait sinon un délai négatif. asyncio.sleep() l'accepte sans broncher et
+    # revient immédiatement — le jeu de réflexe démarrerait donc sans aucune
+    # attente, et le défaut ne se verrait qu'à l'usage.
+    bas = max(0.0, float(minimum))
+    haut = max(0.0, float(maximum))
+    if haut <= bas:
+        return bas
+    return secure_randint(int(bas * 1000), int(haut * 1000)) / 1000.0
+
+
+def secure_shuffle(sequence) -> list:
+    """Mélange sur une COPIE, tiré sûrement, et rend la copie.
+
+    Ne modifie pas l'original, contrairement à ``random.shuffle`` : un appelant
+    qui garde une référence à la liste d'origine — l'ordre canonique d'une
+    grille, le mot dont on fait une anagramme — ne se la voit pas réécrite sous
+    les pieds.
+
+    Fisher-Yates à l'envers, la seule forme qui donne une permutation
+    uniforme ; tirer un indice au hasard pour chaque position ne la donne pas.
+    """
+    restants = list(sequence)
+    for i in range(len(restants) - 1, 0, -1):
+        j = secrets.randbelow(i + 1)
+        restants[i], restants[j] = restants[j], restants[i]
+    return restants
