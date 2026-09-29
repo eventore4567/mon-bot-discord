@@ -1703,10 +1703,20 @@ class Ai(commands.Cog, name="Ai"):
         if spec is None:
             return False
 
-        if (
-            not confirmed
-            and action.intent in {"tickets.grant_access", "category.restrict_role"}
-        ):
+        # La confirmation vient de ai_actions.exige_confirmation(), pas d'une
+        # liste d'intentions écrite ici. Avant, cette condition était
+        #
+        #     action.intent in {"tickets.grant_access", "category.restrict_role"}
+        #
+        # et ni `spec.risk` ni `spec.confirm` n'étaient lus sur ce chemin. Seul
+        # le chemin multi-actions les lisait. Conséquence mesurée :
+        # `moderation.purge`, pourtant classé `high`, s'exécutait sans
+        # confirmation dès qu'il arrivait seul — « SentriX supprime 100
+        # messages » partait directement. `security.antinuke` aussi.
+        #
+        # Une source unique pour les deux chemins : classer une action `high`
+        # suffit maintenant à lui donner sa confirmation, sans revenir ici.
+        if not confirmed and ai_actions.exige_confirmation(spec):
             view = _NaturalPlanConfirmView(
                 self,
                 message=message,
@@ -1715,7 +1725,7 @@ class Ai(commands.Cog, name="Ai"):
                 author_id=message.author.id,
             )
             sent = await message.reply(
-                "Cette action modifie les accès du serveur :\n\n"
+                "Cette action est sensible :\n\n"
                 f"**1.** {ai_actions.describe_action(action)}\n\n"
                 "Voulez-vous vraiment l’exécuter ?",
                 view=view,
@@ -2139,9 +2149,12 @@ class Ai(commands.Cog, name="Ai"):
         if plan:
             # Les plans ordinaires s'exécutent immédiatement : pas de clic artificiel.
             # Confirmation uniquement si une étape l'exige explicitement ou est à haut risque.
+            # Meme source de decision que le chemin a action unique. Un plan
+            # est sensible des qu'UNE de ses etapes l'est : ne pas decouper un
+            # plan mixte est volontaire, on ne veut pas executer la moitie
+            # d'une demande puis demander la permission pour le reste.
             sensitive = any(
-                action.spec is not None and (action.spec.confirm or action.spec.risk == "high")
-                for action in plan
+                ai_actions.exige_confirmation(action.spec) for action in plan
             )
             if not sensitive:
                 await self._execute_action_plan(message, plan, prefix)

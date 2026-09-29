@@ -71,35 +71,96 @@ class ChannelResolution:
     error: str | None = None
 
 
+# =============================================================================
+# NIVEAUX DE RISQUE
+# =============================================================================
+#
+# Trois niveaux, tels que Jayden les a définis :
+#
+#   low      LECTURE. Ne change rien sur le serveur. Part directement.
+#            balance, warnings, modhistory, queue, serverinfo, help.
+#
+#   medium   MODÉRATION. Change quelque chose et les permissions décident
+#            seules — pas de clic supplémentaire, le staff modère à la
+#            journée et une confirmation à chaque mute serait un obstacle,
+#            pas une sécurité.
+#
+#   high     DESTRUCTIF. Confirmation supplémentaire OBLIGATOIRE, en plus des
+#            permissions. Ce qui ne se défait pas, ou ne se défait pas
+#            proprement : bannir, supprimer des messages en masse, toucher à
+#            l'anti-nuke, changer les accès du serveur.
+#
+# Ce que la mesure a montré avant ce lot :
+#
+#   * mute, unmute et warn étaient classés `low`, au même niveau que
+#     `economy.balance` et `music.play`. Un mute n'est pas une lecture.
+#   * ban, tempban et kick étaient `medium` sans confirmation. Un
+#     bannissement demandé en langage naturel partait donc sur un seul
+#     message, sans que personne ne relise la cible.
+#   * et surtout, le chemin à action unique de cogs/ai.py n'utilisait NI
+#     `risk` NI `confirm` : il décidait sur un ensemble de deux noms
+#     d'intentions écrits en dur. `moderation.purge`, pourtant déjà `high`,
+#     passait sans confirmation. Seul le chemin multi-actions lisait les
+#     champs. Deux chemins, deux règles différentes.
+#
+# D'où ``exige_confirmation()`` plus bas : une seule fonction, lue par les
+# deux chemins. Ajouter une action à haut risque suffit désormais à lui
+# donner sa confirmation, sans toucher à cogs/ai.py.
+
+#: Les trois niveaux, pour qu'un test puisse refuser une valeur inventée.
+NIVEAUX_DE_RISQUE: frozenset[str] = frozenset({"low", "medium", "high"})
+
+
+def exige_confirmation(spec: "ActionSpec | None") -> bool:
+    """Cette action réclame-t-elle une confirmation en plus des permissions ?
+
+    Source UNIQUE de la décision, pour les deux chemins d'exécution de l'IA.
+    Un ``spec`` absent exige la confirmation : une action que l'on ne sait pas
+    classer ne doit jamais partir toute seule (fail-closed, comme la matrice
+    d'accès).
+    """
+    if spec is None:
+        return True
+    return bool(spec.confirm or spec.risk == "high")
+
+
 ACTIONS: dict[str, ActionSpec] = {
+    # Destructif : bannir ne se défait pas proprement — le membre a perdu ses
+    # rôles, ses messages restent orphelins, et un débannissement ne le
+    # ramène pas. Confirmation obligatoire.
     "moderation.ban": ActionSpec(
-        "moderation.ban", "ban", ("target",), ("reason",), "member", "medium",
+        "moderation.ban", "ban", ("target",), ("reason",), "member", "high",
         description="bannir définitivement un membre",
     ),
     "moderation.tempban": ActionSpec(
-        "moderation.tempban", "tempban", ("target", "duration"), ("reason",), "member", "medium",
+        "moderation.tempban", "tempban", ("target", "duration"), ("reason",), "member", "high",
         description="bannir temporairement un membre pendant une durée",
     ),
+    # Débannir RESTAURE un accès : c'est l'inverse d'un acte destructif, et
+    # une confirmation n'y protégerait de rien.
     "moderation.unban": ActionSpec(
         "moderation.unban", "unban", ("user_id",), ("reason",), None, "medium",
         description="débannir un utilisateur via son identifiant Discord",
     ),
+    # Expulser est réversible : le membre peut revenir avec une invitation.
     "moderation.kick": ActionSpec(
         "moderation.kick", "kick", ("target",), ("reason",), "member", "medium",
         description="expulser un membre",
     ),
+    # Modération, pas lecture. Ces trois-là étaient `low`.
     "moderation.warn": ActionSpec(
-        "moderation.warn", "warn", ("target",), ("reason",), "member", "low",
+        "moderation.warn", "warn", ("target",), ("reason",), "member", "medium",
         description="avertir un membre",
     ),
     "moderation.mute": ActionSpec(
-        "moderation.mute", "mute", ("target", "duration"), ("reason",), "member", "low",
+        "moderation.mute", "mute", ("target", "duration"), ("reason",), "member", "medium",
         description="mettre un membre en mute/timeout pendant une durée",
     ),
     "moderation.unmute": ActionSpec(
-        "moderation.unmute", "unmute", ("target",), ("reason",), "member", "low",
+        "moderation.unmute", "unmute", ("target",), ("reason",), "member", "medium",
         description="retirer le mute/timeout d'un membre",
     ),
+    # Destructif et irréversible : les messages supprimés ne reviennent pas.
     "moderation.purge": ActionSpec(
         "moderation.purge", "clear", ("count",), (), None, "high",
         description="supprimer les derniers messages du salon",
