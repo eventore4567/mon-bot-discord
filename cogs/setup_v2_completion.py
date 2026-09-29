@@ -57,6 +57,14 @@ async def ensure_schema(bot) -> None:
             await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN mode TEXT NOT NULL DEFAULT 'embed'")
         if "goodbye_mode" not in names:
             await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN goodbye_mode TEXT NOT NULL DEFAULT 'embed'")
+        # « ping » : le membre est-il NOTIFIÉ ? La mention s'affiche et reste
+        # cliquable dans les deux cas — c'est la notification qui se règle ici,
+        # pas la présence du @. Par défaut 1, donc aucun serveur existant ne
+        # change de comportement.
+        if "ping" not in names:
+            await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN ping INTEGER NOT NULL DEFAULT 1")
+        if "goodbye_ping" not in names:
+            await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN goodbye_ping INTEGER NOT NULL DEFAULT 0")
     except Exception:
         logger.debug("Colonne mode de welcome_presentation_v2 non vérifiable", exc_info=True)
     await managed_builder.ensure_managed_schema(bot)
@@ -73,11 +81,21 @@ def _conf_value(conf, key, default=None):
 async def _welcome_presentation(bot, guild_id: int) -> dict:
     await ensure_schema(bot)
     row = await bot.db.fetchone(
-        "SELECT title,show_avatar,show_member_count,mode,goodbye_mode FROM welcome_presentation_v2 WHERE guild_id=?",
+        "SELECT title,show_avatar,show_member_count,mode,goodbye_mode,ping,goodbye_ping "
+        "FROM welcome_presentation_v2 WHERE guild_id=?",
         (guild_id,),
     )
     if row is None:
-        return {"title": WELCOME_DEFAULT_TITLE, "show_avatar": True, "show_member_count": True, "mode": "embed", "goodbye_mode": "embed"}
+        return {"title": WELCOME_DEFAULT_TITLE, "show_avatar": True, "show_member_count": True,
+                "mode": "embed", "goodbye_mode": "embed", "ping": True, "goodbye_ping": False}
+
+    def _drapeau(key: str, defaut: bool) -> bool:
+        """Colonne ajoutée après coup : absente sur les bases non migrées."""
+        try:
+            valeur = row[key]
+        except (KeyError, IndexError, TypeError):
+            return defaut
+        return defaut if valeur is None else bool(valeur)
 
     def _mode(key: str) -> str:
         try:
@@ -92,24 +110,35 @@ async def _welcome_presentation(bot, guild_id: int) -> dict:
         "show_member_count": bool(row["show_member_count"]),
         "mode": _mode("mode"),
         "goodbye_mode": _mode("goodbye_mode"),
+        "ping": _drapeau("ping", True),
+        # Un départ ne notifie personne par défaut : la personne est partie,
+        # la notifier n'aurait aucun sens, et pinguer le salon à chaque départ
+        # est le meilleur moyen de faire couper le module.
+        "goodbye_ping": _drapeau("goodbye_ping", False),
     }
 
 
-async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, show_avatar: bool, show_member_count: bool, actor_id: int, mode: str | None = None, goodbye_mode: str | None = None) -> None:
+async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, show_avatar: bool, show_member_count: bool, actor_id: int, mode: str | None = None, goodbye_mode: str | None = None, ping: bool | None = None, goodbye_ping: bool | None = None) -> None:
     await ensure_schema(bot)
-    if mode is None or goodbye_mode is None:
-        # Appel historique (modale /setup) : les modes déjà enregistrés sont conservés.
+    if mode is None or goodbye_mode is None or ping is None or goodbye_ping is None:
+        # Appel historique (modale /setup) : les réglages déjà enregistrés sont
+        # conservés. Chacun est repris séparément — écraser le ping parce qu'on
+        # change le titre serait une surprise désagréable.
         current = await _welcome_presentation(bot, guild_id)
         mode = current["mode"] if mode is None else mode
         goodbye_mode = current["goodbye_mode"] if goodbye_mode is None else goodbye_mode
+        ping = current["ping"] if ping is None else ping
+        goodbye_ping = current["goodbye_ping"] if goodbye_ping is None else goodbye_ping
     mode = "text" if str(mode) == "text" else "embed"
     goodbye_mode = "text" if str(goodbye_mode) == "text" else "embed"
     await bot.db.execute(
         "INSERT INTO welcome_presentation_v2 "
-        "(guild_id,title,show_avatar,show_member_count,mode,goodbye_mode,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?) "
+        "(guild_id,title,show_avatar,show_member_count,mode,goodbye_mode,ping,goodbye_ping,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(guild_id) DO UPDATE SET title=excluded.title,show_avatar=excluded.show_avatar,"
-        "show_member_count=excluded.show_member_count,mode=excluded.mode,goodbye_mode=excluded.goodbye_mode,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
-        (guild_id, title or None, int(show_avatar), int(show_member_count), mode, goodbye_mode, actor_id, int(time.time())),
+        "show_member_count=excluded.show_member_count,mode=excluded.mode,goodbye_mode=excluded.goodbye_mode,"
+        "ping=excluded.ping,goodbye_ping=excluded.goodbye_ping,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+        (guild_id, title or None, int(show_avatar), int(show_member_count), mode, goodbye_mode,
+         int(bool(ping)), int(bool(goodbye_ping)), actor_id, int(time.time())),
     )
 
 
@@ -151,30 +180,38 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     conf = await bot.db.get_guild_config(member.guild.id)
     presentation = await _welcome_presentation(bot, member.guild.id)
     body = _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member)
+    # La mention et la NOTIFICATION sont deux choses distinctes, et les
+    # confondre était le défaut. Un vrai @ s'affiche, se clique et ouvre le
+    # profil ; allowed_mentions décide seul s'il fait sonner le téléphone.
+    # C'est le réglage « ping / pas ping » demandé par Jayden.
+    mentions = (
+        discord.AllowedMentions.none()
+        if (test or not presentation.get("ping", True))
+        else discord.AllowedMentions(users=[member], roles=False, everyone=False)
+    )
     if presentation.get("mode") == "text":
-        # Une seule mention visible : si le texte contient déjà @membre, on ne rajoute
-        # pas une seconde ligne au-dessus. Sinon la mention de notification est ajoutée.
+        # La ligne de mention en tête est TOUJOURS posée. La retirer quand le
+        # texte contenait déjà @membre paraissait logique, mais elle ne fait pas
+        # le même travail : elle ouvre le message sur la personne accueillie, et
+        # sans elle un message long noyait l'arrivant au milieu du texte.
         try:
-            if test:
-                content = body
-                mentions = discord.AllowedMentions.none()
-            elif member.mention in body:
-                content = body
-                mentions = discord.AllowedMentions(users=[member], roles=False, everyone=False)
-            else:
-                content = f"{member.mention}\n{body}"
-                mentions = discord.AllowedMentions(users=[member], roles=False, everyone=False)
+            # La prévisualisation n'a pas la ligne de notification : elle ne
+            # pingue personne, donc l'afficher donnerait une fausse idée du
+            # message. Elle montre le texte tel qu'il se lira.
+            content = body if test else f"{member.mention}\n{body}"
             await channel.send(content=content, allowed_mentions=mentions)
         except discord.HTTPException as exc:
             return False, f"Discord a refusé l’envoi : {exc}"
         return True, f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
-    # Dans l'encadré, le ping reste uniquement au-dessus du message pour notifier le
-    # membre. Si l'ancien texte contient {member}, on affiche son nom au milieu au lieu
-    # d'une seconde mention identique.
-    visual_body = body.replace(member.mention, f"**{member.display_name}**")
+    # Le corps GARDE son vrai @. Il était remplacé par « **Nom** » pour éviter
+    # « deux mentions identiques », mais un nom en gras n'est plus cliquable :
+    # on perdait l'accès au profil, et le message de bienvenue ne saluait plus
+    # vraiment la personne. C'est exactement ce que Jayden a signalé — « un vrai
+    # @ ». La duplication apparente n'en est pas une : celle du haut notifie,
+    # celle du corps salue.
     panel = embeds.brand(
         _format_welcome(presentation["title"], member),
-        visual_body,
+        body,
     )
     if presentation["show_avatar"]:
         panel.set_thumbnail(url=member.display_avatar.url)
@@ -197,7 +234,7 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
             content=None if test else member.mention,
             embed=panel,
             file=card_file,
-            allowed_mentions=(discord.AllowedMentions.none() if test else discord.AllowedMentions(users=[member], roles=False, everyone=False)),
+            allowed_mentions=mentions,
         )
     except discord.HTTPException as exc:
         return False, f"Discord a refusé l’envoi : {exc}"
@@ -218,9 +255,14 @@ async def _send_goodbye(bot, member: discord.Member) -> discord.abc.Messageable 
         return None
     template = _conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT)
     presentation = await _welcome_presentation(bot, member.guild.id)
+    mentions_depart = (
+        discord.AllowedMentions(users=[member], roles=False, everyone=False)
+        if presentation.get("goodbye_ping", False)
+        else discord.AllowedMentions.none()
+    )
     if presentation.get("goodbye_mode") == "text":
         try:
-            await channel.send(content=_format_welcome(template, member), allowed_mentions=discord.AllowedMentions.none())
+            await channel.send(content=_format_welcome(template, member), allowed_mentions=mentions_depart)
         except discord.HTTPException:
             return None
         return channel
