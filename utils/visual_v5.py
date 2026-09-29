@@ -113,18 +113,45 @@ def seasonal_accent(base: int, now: datetime | None = None) -> int:
 
 
 def _font(size: int, *, bold: bool = False):
+    # Plusieurs emplacements, parce que les deux d'origine n'existent que sur
+    # l'image Debian de Railway. Ailleurs — une machine de développement, une
+    # image plus légère — on retombait sur la police par défaut de Pillow, qui
+    # n'a ni « É » ni « • » : la carte affichait « ⊠conomie » et un carré à la
+    # place du séparateur. Personne ne le voyait en production, et c'est
+    # exactement le genre de défaut qui surgit le jour où l'image de base change.
     candidates = [
+        # Debian / Ubuntu, dont l'image Railway.
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
         else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold
         else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        # Arch / Alpine.
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf" if bold
+        else "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        # macOS, pour que le rendu local corresponde à la production.
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold
+        else "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
     ]
     for candidate in candidates:
         try:
             return ImageFont.truetype(candidate, size=size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    # load_default() SANS taille rend une police de taille fixe minuscule : la
+    # carte entière s'affiche alors au même corps, quel que soit le 50, 28 ou 20
+    # demandé, et les accents sortent en carrés. Ce n'est visible que si DejaVu
+    # et Liberation manquent tous les deux — ce qui n'arrive pas sur l'image
+    # Debian de Railway, mais rendrait chaque carte illisible le jour où ça
+    # change, sans aucune erreur pour le signaler.
+    try:
+        return ImageFont.load_default(size)
+    except TypeError:  # Pillow < 9.2 n'accepte pas de taille
+        return ImageFont.load_default()
 
 
 def _fit_text(draw: ImageDraw.ImageDraw, text: str, max_width: int, size: int, *, bold: bool = False):
@@ -141,6 +168,62 @@ def _hex_rgb(value: int) -> tuple[int, int, int]:
     return ((value >> 16) & 255, (value >> 8) & 255, value & 255)
 
 
+def fond_de_carte(largeur: int, hauteur: int, accent: tuple[int, int, int],
+                  secondaire: tuple[int, int, int]):
+    """Fond de carte généré : un dégradé lisse aux couleurs du serveur.
+
+    **Pourquoi générer plutôt que charger une image.** ``card-background-v5.png``
+    pèse 786 Ko et ne se décode pas — mesuré le 29/09/2026 :
+    ``OSError: unrecognized data stream contents``. La production tombait donc
+    systématiquement dans le repli de secours, qui peignait cent bandes plates
+    de douze pixels : quatre-vingts couleurs en tout, et des marches visibles à
+    l'œil. Ce n'est pas un fond « trop chargé » que voyaient les membres, c'est
+    un dégradé cassé.
+
+    Un fond généré n'a aucun fichier à corrompre, pèse quelques kilo-octets une
+    fois compressé, et prend les couleurs choisies par le serveur — donc la
+    carte ressemble au serveur et pas à tous les autres.
+
+    Le dessin est volontairement sobre : un dégradé diagonal, une lueur douce
+    derrière l'avatar, rien d'autre. C'est la demande de Jayden — « un
+    background mieux et simple ».
+    """
+    from PIL import Image, ImageDraw, ImageFilter
+
+    # Base sombre tirée de l'accent plutôt qu'un gris neutre : un dégradé qui
+    # part d'une teinte proche de l'accent se lit comme choisi, pas comme un
+    # fond par défaut sur lequel on aurait posé une couleur.
+    base = tuple(max(6, round(c * 0.12)) for c in accent)
+    haut = tuple(min(255, round(a * 0.42 + s * 0.18)) for a, s in zip(accent, secondaire))
+
+    # Dégradé PAR PIXEL sur la diagonale. Calculé sur une petite image puis
+    # agrandi : Pillow interpole alors les valeurs intermédiaires, ce qui donne
+    # un dégradé continu au lieu des paliers du repli précédent — et coûte
+    # quelques milliers d'opérations au lieu d'un demi-million.
+    petit = Image.new("RGB", (64, 64))
+    pixels = petit.load()
+    for y in range(64):
+        for x in range(64):
+            # 0 en bas à gauche, 1 en haut à droite.
+            d = (x / 63 * 0.72) + ((63 - y) / 63 * 0.28)
+            pixels[x, y] = tuple(
+                round(b + (h - b) * d) for b, h in zip(base, haut)
+            )
+    toile = petit.resize((largeur, hauteur), Image.Resampling.BICUBIC).convert("RGBA")
+
+    # Une seule lueur, derrière l'emplacement de l'avatar : elle donne du relief
+    # sans rien raconter. Floutée largement pour qu'aucun contour ne se voie.
+    lueur = Image.new("RGBA", (largeur, hauteur), (0, 0, 0, 0))
+    rayon = int(hauteur * 0.62)
+    centre = (int(largeur * 0.16), hauteur // 2)
+    ImageDraw.Draw(lueur).ellipse(
+        (centre[0] - rayon, centre[1] - rayon, centre[0] + rayon, centre[1] + rayon),
+        fill=(*secondaire, 46),
+    )
+    lueur = lueur.filter(ImageFilter.GaussianBlur(rayon // 2))
+    return Image.alpha_composite(toile, lueur)
+
+
 def _render_card_sync(
     avatar_bytes: bytes,
     display_name: str,
@@ -151,26 +234,18 @@ def _render_card_sync(
     show_levels: bool,
     show_economy: bool,
 ) -> io.BytesIO:
-    try:
-        background = Image.open(CARD_BACKGROUND).convert("RGBA")
-        canvas = ImageOps.fit(background, (1200, 400), method=Image.Resampling.LANCZOS)
-    except (OSError, ValueError):
-        # Dernier filet de sécurité si l'asset est absent ou corrompu sur l'hébergeur.
-        canvas = Image.new("RGBA", (1200, 400), (10, 13, 42, 255))
-        backdrop = ImageDraw.Draw(canvas, "RGBA")
-        for x in range(0, 1200, 12):
-            ratio = x / 1200
-            backdrop.rectangle(
-                (x, 0, x + 12, 400),
-                fill=(35 + round(50 * ratio), 28, 105 + round(65 * ratio), 255),
-            )
-    overlay = Image.new("RGBA", canvas.size, (4, 8, 28, 30))
-    canvas = Image.alpha_composite(canvas, overlay)
-    draw = ImageDraw.Draw(canvas, "RGBA")
-
     accent = _hex_rgb(int(settings.get("primary_color", 0x6C5CE7)))
     secondary = _hex_rgb(int(settings.get("secondary_color", 0x4C7DFF)))
-    draw.rounded_rectangle((34, 32, 1166, 368), radius=34, fill=(6, 10, 36, 150), outline=(*accent, 210), width=3)
+
+    # Fond généré, plus d'image à charger : l'asset card-background-v5.png ne se
+    # décodait pas et la production peignait donc toujours le repli en bandes.
+    # Voir fond_de_carte() pour le détail de la mesure.
+    canvas = fond_de_carte(1200, 400, accent, secondary)
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    # Opacité 96 et non 150 : à 150 le panneau masquait le dégradé sur 92 % de
+    # la carte, et soigner le fond n'aurait servi à rien. Le texte reste sur un
+    # fond sombre, donc lisible.
+    draw.rounded_rectangle((34, 32, 1166, 368), radius=34, fill=(6, 10, 36, 96), outline=(*accent, 210), width=3)
     if show_levels:
         draw.rounded_rectangle((315, 286, 1110, 320), radius=17, fill=(15, 20, 55, 210))
 
