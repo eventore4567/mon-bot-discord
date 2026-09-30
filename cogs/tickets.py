@@ -956,20 +956,39 @@ class Tickets(commands.Cog):
             await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (row["id"],))
 
     async def restore_panel_views(self) -> int:
-        """Réenregistre une vue persistante pour chaque panel actif après un redémarrage,
-        avec ses VRAIES options (types de tickets), pour que les menus/boutons déjà envoyés
-        sur Discord continuent de fonctionner exactement comme avant l'arrêt du bot.
-        Retourne le nombre de panels effectivement restaurés (utilisé pour le log de
-        démarrage — voir main.py)."""
-        panels = await self.bot.db.fetchall("SELECT * FROM ticket_panels_v2 WHERE enabled = 1 AND message_id IS NOT NULL")
+        """Restaure les panels persistants et migre les anciens embeds vers le rendu V2."""
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM ticket_panels_v2 WHERE enabled = 1 AND message_id IS NOT NULL"
+        )
         restored = 0
-        for panel in panels:
+        for panel in rows:
             types = await self.get_panel_types(panel["id"])
             if not types:
                 continue
+            language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
+            message_id = int(panel["message_id"])
+            guild = self.bot.get_guild(int(panel["guild_id"]))
+            channel = guild.get_channel(int(panel["channel_id"])) if guild and panel["channel_id"] else None
+
+            # Migration non destructive : un ancien message embed est remplacé par le
+            # nouveau panel Components V2 dans le même salon, puis son ID est persisté.
+            if channel is not None:
+                try:
+                    old = await channel.fetch_message(message_id)
+                    if old.embeds:
+                        public = await self.build_public_panel(panel, types)
+                        new_message = await sx_panels.envoyer(channel, public)
+                        await old.delete()
+                        message_id = int(new_message.id)
+                        await self.bot.db.execute(
+                            "UPDATE ticket_panels_v2 SET message_id=? WHERE id=?",
+                            (message_id, panel["id"]),
+                        )
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
             try:
-                language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
-                self.bot.add_view(TicketPanelView(panel, types, language), message_id=panel["message_id"])
+                self.bot.add_view(TicketPanelView(panel, types, language), message_id=message_id)
                 restored += 1
             except discord.HTTPException:
                 pass
