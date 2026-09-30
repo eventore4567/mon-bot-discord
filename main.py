@@ -34,6 +34,16 @@ from utils.checks import (
 from utils import access_matrix
 from utils import log_hygiene
 from web.dashboard import start_dashboard
+import web.dashboard as dashboard_module
+from web.dashboard_api_forbidden_words import register as register_forbidden_words_routes
+
+_dashboard_build_app = dashboard_module.build_app
+def _build_app_with_forbidden_words(bot):
+    app = _dashboard_build_app(bot)
+    register_forbidden_words_routes(app, dashboard_module)
+    return app
+
+dashboard_module.build_app = _build_app_with_forbidden_words
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 # Compresse les journaux répétitifs SANS jamais toucher aux ERROR/CRITICAL : une
