@@ -80,6 +80,11 @@ CATEGORY_META: dict[str, tuple[str, str, str]] = {
         "Notifications",
         "YouTube, Twitch, TikTok, salons et rôles de notification.",
     ),
+    "music": (
+        "🎵",
+        "Musique",
+        "Activer le lecteur, choisir le vocal musique et afficher le panneau dans le chat vocal.",
+    ),
     "ai": (
         "🧠",
         "Intelligence artificielle",
@@ -103,6 +108,7 @@ CATEGORY_ORDER = (
     "logs",
     "levels",
     "notifications",
+    "music",
     "ai",
     "permissions",
 )
