@@ -513,9 +513,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         toggle = discord.ui.Button(
             label=(
-                "Disable AI" if settings["enabled"] else "Enable AI"
+                ("Disable AI" if settings["enabled"] else "Enable AI")
                 if english
-                else "Désactiver l’IA" if settings["enabled"] else "Activer l’IA"
+                else ("Désactiver l’IA" if settings["enabled"] else "Activer l’IA")
             ),
             style=discord.ButtonStyle.danger if settings["enabled"] else discord.ButtonStyle.success,
         )
