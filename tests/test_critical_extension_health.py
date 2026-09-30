@@ -38,3 +38,10 @@ def test_healthcheck_fails_when_critical_extension_is_missing():
     assert '"critical_failed"' in source
     assert "ok = bool(ready and not critical_failed)" in source
     assert "status=200 if ok else 503" in source
+
+
+def test_v45_uses_critical_extension_health():
+    source = (ROOT / "web" / "health_runtime_v45.py").read_text(encoding="utf-8")
+    assert "_sentrix_extension_health" in source
+    assert "critical_extensions_failed" in source
+    assert "failed_extensions" in source
