@@ -40,6 +40,7 @@ CATEGORY_ORDER = (
     "logs",
     "levels",
     "notifications",
+    "music",
     "ai",
 )
 
@@ -53,6 +54,11 @@ CATEGORY_META["security"] = (
     "🔒",
     "Sécurité",
     "Un seul interrupteur : SentriX applique automatiquement le profil recommandé.",
+)
+CATEGORY_META["music"] = (
+    "🎵",
+    "Musique",
+    "Choisissez le vocal musique puis activez le lecteur SentriX.",
 )
 CATEGORY_META["tickets"] = (
     "🎫",
