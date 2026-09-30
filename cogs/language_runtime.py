@@ -14,6 +14,7 @@ slash continuent d'utiliser leurs noms publies par Discord.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -720,6 +721,35 @@ def cached_language(bot: commands.Bot, guild_id: int | None) -> str:
     return getattr(bot, "guild_language_cache", {}).get(int(guild_id), DEFAULT_LANGUAGE)
 
 
+def text_for_language(language: str, fr: str, en: str) -> str:
+    """Retourne une chaîne SentriX dans la langue canonique du serveur."""
+    return en if language == LANG_EN else fr
+
+
+async def localized_text(bot: commands.Bot, guild_id: int | None, fr: str, en: str) -> str:
+    return text_for_language(await get_language(bot, guild_id), fr, en)
+
+
+def cached_text(bot: commands.Bot, guild_id: int | None, fr: str, en: str) -> str:
+    return text_for_language(cached_language(bot, guild_id), fr, en)
+
+
+async def _refresh_language_bound_surfaces(bot: commands.Bot, guild_id: int) -> None:
+    """Rafraîchit les surfaces persistantes qui ne passent pas par une commande.
+
+    Les réponses de commandes sont déjà traduites par final_interaction_policy.
+    Les panels persistants (tickets, etc.) doivent eux être réécrits quand la
+    langue du serveur change, sinon un serveur peut rester moitié FR / moitié EN.
+    """
+    tickets = bot.get_cog("Tickets")
+    refresh = getattr(tickets, "refresh_public_panels", None) if tickets is not None else None
+    if callable(refresh):
+        try:
+            await refresh(int(guild_id))
+        except Exception:
+            logger.exception("Rafraîchissement des panels tickets impossible guild=%s", guild_id)
+
+
 async def set_language(bot: commands.Bot, guild_id: int, language: str) -> None:
     language = language if language in _VALID_LANGUAGES else DEFAULT_LANGUAGE
     await _ensure_table(bot)
@@ -737,6 +767,16 @@ async def set_language(bot: commands.Bot, guild_id: int, language: str) -> None:
         (int(guild_id), language, timestamp),
     )
     bot.guild_language_cache[int(guild_id)] = language
+
+    # Ne bloque pas le clic de sélection de langue pendant la réédition de tous les
+    # panels persistants du serveur.
+    try:
+        asyncio.create_task(
+            _refresh_language_bound_surfaces(bot, int(guild_id)),
+            name=f"sentrix-language-refresh-{int(guild_id)}",
+        )
+    except RuntimeError:
+        pass
 
 
 def _register_alias(bot: commands.Bot, command: commands.Command, alias: str) -> bool:
