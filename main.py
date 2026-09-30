@@ -136,6 +136,20 @@ EXTENSIONS = [
     "cogs.visual_experience_v5",
 ]
 
+# Extensions dont l'absence rendrait SentriX partiellement fonctionnel tout en donnant
+# l'impression qu'il est sain. Les projets Discord matures séparent la vivacité du
+# processus de la disponibilité réelle des fonctions critiques ; on applique ici ce
+# principe sans rendre tous les modules optionnels bloquants.
+CRITICAL_EXTENSIONS = frozenset({
+    "cogs.moderation",
+    "cogs.automod",
+    "cogs.security_runtime_hardening",
+    "cogs.tickets",
+    "cogs.configuration",
+    "cogs.logs",
+    "cogs.utility",
+})
+
 # Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
 # implémentés dans leurs cogs afin que les boutons et les données historiques continuent
 # de fonctionner, mais ne sont plus enregistrés comme commandes publiques.
@@ -522,12 +536,48 @@ class BotAllInOne(commands.Bot):
 
         _install_slash_command_budget(self)
 
+        loaded_extensions: list[str] = []
+        failed_extensions: list[dict[str, str]] = []
         for ext in EXTENSIONS:
             try:
                 await self.load_extension(ext)
-                logger.info(f"Module chargé : {ext}")
-            except Exception:
-                logger.error(f"Échec du chargement du module {ext} :\n{traceback.format_exc()}")
+                loaded_extensions.append(ext)
+                logger.info("Module chargé : %s", ext)
+            except Exception as exc:
+                failed_extensions.append({
+                    "name": ext,
+                    "error": type(exc).__name__,
+                })
+                logger.error("Échec du chargement du module %s :\n%s", ext, traceback.format_exc())
+
+        critical_failed = sorted(
+            item["name"] for item in failed_extensions if item["name"] in CRITICAL_EXTENSIONS
+        )
+        self._sentrix_extension_health = {
+            "expected": len(EXTENSIONS),
+            "loaded": len(loaded_extensions),
+            "failed": failed_extensions,
+            "critical_failed": critical_failed,
+        }
+        if critical_failed:
+            logger.critical(
+                "Démarrage dégradé : %s extension(s) critique(s) absente(s) — %s. "
+                "Le healthcheck restera en échec tant que ces modules ne chargent pas.",
+                len(critical_failed),
+                ", ".join(critical_failed),
+            )
+        elif failed_extensions:
+            logger.warning(
+                "Démarrage partiellement dégradé : %s extension(s) optionnelle(s) en échec, "
+                "aucune extension critique touchée.",
+                len(failed_extensions),
+            )
+        else:
+            logger.info(
+                "Santé extensions : %s/%s chargées, toutes les extensions critiques sont actives.",
+                len(loaded_extensions),
+                len(EXTENSIONS),
+            )
 
         self._prune_redundant_commands()
         self._audit_command_permissions()
