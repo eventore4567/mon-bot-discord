@@ -1678,21 +1678,67 @@ class Levels(commands.Cog, name="Levels"):
     @commands.hybrid_command(
         name="test-events",
         aliases=["test-evenements", "preview-events"],
-        description="[Admin] Tester une arrivée, un départ et une montée de niveau sans modifier de données.",
+        description="[Admin] Auto-configurer puis tester arrivée, départ et niveau sans modifier les données membre.",
     )
     @app_commands.describe(niveau="Niveau fictif affiché dans le test")
     @checks.is_owner_or_admin_for("configuration")
     async def test_events(self, ctx: commands.Context, niveau: int = 1):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Cette commande doit être utilisée sur un serveur.")))
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("Cette commande doit être utilisée sur un serveur.")),
+            )
+
+        # La commande doit être utilisable sans repasser dans /setup :
+        # si une destination manque (ou a été supprimée), le salon courant devient
+        # la destination persistante. Aucun salon n'est créé et une config valide
+        # déjà existante n'est jamais écrasée.
+        fallback = ctx.channel
+        if not isinstance(fallback, (discord.TextChannel, discord.Thread)):
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.warning("Lance cette commande dans un salon texte du serveur.")
+                ),
+            )
+
+        me = ctx.guild.me
+        if me is None:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("SentriX n’est pas disponible dans le cache du serveur.")),
+            )
+        perms = fallback.permissions_for(me)
+        missing_perms = []
+        if not perms.view_channel:
+            missing_perms.append("Voir le salon")
+        if not perms.send_messages:
+            missing_perms.append("Envoyer des messages")
+        if not perms.embed_links:
+            missing_perms.append("Intégrer des liens")
+        if not perms.attach_files:
+            missing_perms.append("Joindre des fichiers")
+        if missing_perms:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.warning(
+                        f"Il manque dans {fallback.mention} : **{', '.join(missing_perms)}**."
+                    )
+                ),
+            )
+
+        from cogs import setup_v2_completion, setup_v2_core
+        from utils.system_features import set_system_feature
 
         conf = await self.bot.db.get_guild_config(ctx.guild.id)
-        missing = []
         configured = {}
+        auto_configured = []
+
         for field, label in (
-            ("welcome_channel", "salon de bienvenue"),
-            ("goodbye_channel", "salon de départ"),
-            ("level_channel", "salon des niveaux"),
+            ("welcome_channel", "Bienvenue"),
+            ("goodbye_channel", "Départ"),
+            ("level_channel", "Niveaux"),
         ):
             try:
                 channel_id = conf[field] if conf else None
@@ -1700,31 +1746,79 @@ class Levels(commands.Cog, name="Levels"):
                 channel_id = None
             channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
             if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-                missing.append(label)
-            else:
-                configured[field] = channel
+                await self.bot.db.set_guild_config(ctx.guild.id, field, fallback.id)
+                channel = fallback
+                auto_configured.append(label)
+            configured[field] = channel
 
-        if missing:
-            return await panels.envoyer(
-                ctx,
-                panels.depuis_embed(
-                    embeds.warning(
-                        "Configure d’abord : " + ", ".join(missing) + ". "
-                        "Le test ne crée aucun salon automatiquement."
-                    )
-                ),
+        # Pose uniquement les textes par défaut manquants. Une personnalisation existante
+        # reste intacte, même quand la commande répare un salon supprimé.
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+        try:
+            welcome_message = conf["welcome_message"] if conf else None
+        except (KeyError, IndexError, TypeError):
+            welcome_message = None
+        if not str(welcome_message or "").strip():
+            await self.bot.db.set_guild_config(
+                ctx.guild.id,
+                "welcome_message",
+                setup_v2_completion.WELCOME_DEFAULT_TEXT,
             )
+            auto_configured.append("message de bienvenue")
 
-        from cogs import setup_v2_completion
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+        try:
+            goodbye_message = conf["goodbye_message"] if conf else None
+        except (KeyError, IndexError, TypeError):
+            goodbye_message = None
+        if not str(goodbye_message or "").strip():
+            await self.bot.db.set_guild_config(
+                ctx.guild.id,
+                "goodbye_message",
+                setup_v2_completion.GOODBYE_DEFAULT_TEXT,
+            )
+            auto_configured.append("message de départ")
 
-        ok_welcome, welcome_message = await setup_v2_completion._send_welcome(
+        # Même état pour le dashboard, +setup, les commandes + et les commandes /.
+        for module in ("welcome", "goodbye", "levels"):
+            await setup_v2_core.set_module_enabled(
+                self.bot,
+                ctx.guild.id,
+                module,
+                True,
+                actor_id=ctx.author.id,
+            )
+        await set_system_feature(self.bot.db, ctx.guild.id, "levels", True)
+
+        # Si aucune présentation n'existe encore, crée une seule configuration neutre
+        # et cohérente pour arrivée/départ. Ne touche jamais à une présentation existante.
+        presentation_row = await self.bot.db.fetchone(
+            "SELECT guild_id FROM welcome_presentation_v2 WHERE guild_id=?",
+            (ctx.guild.id,),
+        )
+        if presentation_row is None:
+            await setup_v2_completion._save_welcome_presentation(
+                self.bot,
+                ctx.guild.id,
+                title=setup_v2_completion.WELCOME_DEFAULT_TITLE,
+                show_avatar=True,
+                show_member_count=True,
+                actor_id=ctx.author.id,
+                mode="embed",
+                goodbye_mode="embed",
+                ping=True,
+                goodbye_ping=False,
+            )
+            auto_configured.append("présentation arrivée/départ")
+
+        ok_welcome, welcome_result = await setup_v2_completion._send_welcome(
             self.bot, ctx.author, test=True
         )
         goodbye_channel = await setup_v2_completion._send_goodbye(
             self.bot, ctx.author, test=True
         )
         if not ok_welcome or goodbye_channel is None:
-            detail = welcome_message if not ok_welcome else "Le test de départ n’a pas pu être envoyé."
+            detail = welcome_result if not ok_welcome else "Le test de départ n’a pas pu être envoyé."
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(detail)))
 
         fake_level = max(1, min(int(niveau), 1_000_000))
@@ -1739,12 +1833,18 @@ class Levels(commands.Cog, name="Levels"):
                 panels.depuis_embed(embeds.error("Le test de niveau a été refusé par Discord.")),
             )
 
+        setup_note = (
+            " Configuration automatique : " + ", ".join(auto_configured) + "."
+            if auto_configured else
+            " La configuration existante a été conservée."
+        )
         await panels.envoyer(
             ctx,
             panels.depuis_embed(
                 embeds.success(
                     "Tests envoyés : fausse arrivée, faux départ et fausse montée de niveau. "
                     "Aucune XP, aucun rôle et aucune donnée membre n’ont été modifiés."
+                    + setup_note
                 )
             ),
         )

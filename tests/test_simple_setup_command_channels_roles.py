@@ -166,6 +166,13 @@ def test_level_system_requires_or_reuses_a_level_channel_and_stays_synced():
 def test_test_events_command_previews_all_three_without_mutating_member_data():
     source = (ROOT / "cogs" / "levels.py").read_text()
     assert 'name="test-events"' in source
+    assert 'await self.bot.db.set_guild_config(ctx.guild.id, field, fallback.id)' in source
+    assert '"welcome_message"' in source
+    assert '"goodbye_message"' in source
+    assert 'for module in ("welcome", "goodbye", "levels")' in source
+    assert "setup_v2_core.set_module_enabled(" in source
+    assert 'set_system_feature(self.bot.db, ctx.guild.id, "levels", True)' in source
+    assert "presentation_row is None" in source
     assert "setup_v2_completion._send_welcome(" in source
     assert "setup_v2_completion._send_goodbye(" in source
     assert "self._send_level_announcement(" in source
@@ -173,6 +180,7 @@ def test_test_events_command_previews_all_three_without_mutating_member_data():
     assert 'title="🏆 Niveau supérieur"' in source
     assert "content=member.mention if ping else None" in source
     assert "Aucune XP, aucun rôle et aucune donnée membre n’ont été modifiés." in source
+    assert "Aucun salon n'est créé" in source
 
 
 
