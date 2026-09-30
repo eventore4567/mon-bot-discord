@@ -153,6 +153,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.moderation_profile = "moderator"
         self.avance = False
 
+    async def rebuild(self) -> None:
+        await super().rebuild()
+        # Le Setup est reconstruit après chaque clic. Sans cette passe finale,
+        # certaines pages repassaient en français après avoir choisi English.
+        language = await language_runtime.get_language(self.bot, self.guild.id)
+        if language == language_runtime.LANG_EN:
+            language_runtime.translate_view_in_place(self, setup=True)
+
     async def _effective_states(self) -> dict[str, str]:
         states = await super()._effective_states()
 
