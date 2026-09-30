@@ -913,11 +913,11 @@ def _help_home(bot: commands.Bot, guild: discord.Guild | None, prefix: str, is_s
     else:
         e = embeds.brand(
             "✦ Centre de commandes SentriX",
-            f'Les commandes de **{server}** sont affichees en francais. Choisissez une categorie ou recherche une commande.\n\n**{total} commandes actives** • prefixe `{prefix}`',
+            f'Les commandes de **{server}** sont affichées en français. Choisissez une catégorie ou recherche une commande.\n\n**{total} commandes actives** • prefixe `{prefix}`',
         )
         section_names = {"essential": "⭐ Essentiels", "community": "🎉 Communaute", "staff": "🛡️ Administration"}
         quick_name = "⌕ Navigation rapide"
-        quick_value = f"`{prefix}aide bannir` → detail d'une commande\n**Rechercher** → trouver une commande par nom\nLangue : **Francais**"
+        quick_value = f"`{prefix}aide bannir` → détail d'une commande\n**Rechercher** → trouver une commande par nom\nLangue : **Français**"
     if bot.user:
         e.set_thumbnail(url=bot.user.display_avatar.url)
     for section in ("essential", "community", "staff"):
@@ -1028,7 +1028,7 @@ class LanguageHelpSelect(discord.ui.Select):
                 description=f"{len(commands_list)} • {summary}"[:100],
             ))
         super().__init__(
-            placeholder="Choose a category..." if language == LANG_EN else 'Choisissez une categorie...',
+            placeholder="Choose a category..." if language == LANG_EN else 'Choisissez une catégorie...',
             options=options[:25],
             row=0,
         )
@@ -1232,7 +1232,7 @@ def _install_setup_patch(bot: commands.Bot) -> None:
             min_values=1,
             max_values=1,
             options=[
-                discord.SelectOption(label="🇫🇷 Francais", value=LANG_FR, description="Noms de commandes et interfaces en francais"),
+                discord.SelectOption(label="🇫🇷 Français", value=LANG_FR, description="Noms de commandes et interfaces en français"),
                 discord.SelectOption(label="🇬🇧 English", value=LANG_EN, description="Command names and interfaces in English"),
             ],
             row=3,
@@ -1259,7 +1259,7 @@ class LanguageChoiceView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-        fr = discord.ui.Button(label="Francais", emoji="🇫🇷", style=discord.ButtonStyle.primary, custom_id="sentrix:language:fr")
+        fr = discord.ui.Button(label="Français", emoji="🇫🇷", style=discord.ButtonStyle.primary, custom_id="sentrix:language:fr")
         en = discord.ui.Button(label="English", emoji="🇬🇧", style=discord.ButtonStyle.secondary, custom_id="sentrix:language:en")
 
         async def choose(interaction: discord.Interaction, language: str):
@@ -1274,7 +1274,7 @@ class LanguageChoiceView(discord.ui.View):
             if language == LANG_EN:
                 e = embeds.success("English is now the server language. SentriX commands, panels, errors, setup, verification, security and other supported interfaces are displayed in English.", title="🇬🇧 Language selected")
             else:
-                e = embeds.success("Le francais est maintenant la langue du serveur. Les noms dans `+help` et l'interface de configuration sont affiches en francais.", title="🇫🇷 Langue selectionnee")
+                e = embeds.success("Le français est maintenant la langue du serveur. Les noms dans `+help` et l'interface de configuration sont affichées en français.", title="🇫🇷 Langue sélectionnée")
             await panels.editer(interaction.response, panels.depuis_embed(e))
 
         async def fr_callback(interaction: discord.Interaction): await choose(interaction, LANG_FR)
