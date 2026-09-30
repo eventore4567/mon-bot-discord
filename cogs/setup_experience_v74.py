@@ -172,6 +172,18 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             )
         else:
             states["tickets"] = "○ INACTIF"
+        music = self.bot.get_cog("Music")
+        if music is None:
+            states["music"] = "! À CORRIGER"
+        else:
+            music_settings = await music.get_system_settings(self.guild.id)
+            states["music"] = (
+                "● ACTIF"
+                if music_settings.get("enabled")
+                else "○ INACTIF"
+                if music_settings.get("voice_channel_id")
+                else "— À CONFIGURER"
+            )
         states.pop("permissions", None)
         return states
 
@@ -234,6 +246,30 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             container.add_item(
                 discord.ui.Section(discord.ui.TextDisplay(f"**{label}** — {texte_etat}"), accessory=bouton)
             )
+
+        music = self.bot.get_cog("Music")
+        music_settings = await music.get_system_settings(self.guild.id) if music else {}
+        music_state = (
+            "**ON**"
+            if music_settings.get("enabled")
+            else "OFF · vocal configuré"
+            if music_settings.get("voice_channel_id")
+            else "OFF · non configuré"
+        )
+        music_button = discord.ui.Button(label="Configurer", style=discord.ButtonStyle.primary)
+
+        async def open_music(interaction: discord.Interaction):
+            self.page = "music"
+            self.backend = self._new_backend("music")
+            await self.refresh(interaction)
+
+        music_button.callback = open_music
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(f"**Musique** — {music_state}"),
+                accessory=music_button,
+            )
+        )
 
         # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
         options = [
@@ -353,7 +389,108 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             return await self._build_tickets()
         if page == "moderation":
             return await self._build_moderation()
+        if page == "music":
+            return await self._build_music()
         return await super()._build_page(page)
+
+    async def _build_music(self) -> None:
+        music = self.bot.get_cog("Music")
+        settings = await music.get_system_settings(self.guild.id) if music else {
+            "enabled": False,
+            "voice_channel_id": None,
+        }
+        channel = (
+            self.guild.get_channel(int(settings["voice_channel_id"]))
+            if settings.get("voice_channel_id")
+            else None
+        )
+        status = discord.ui.Button(
+            label="Activé" if settings.get("enabled") else "Désactivé",
+            style=discord.ButtonStyle.success if settings.get("enabled") else discord.ButtonStyle.secondary,
+            disabled=True,
+        )
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "# 🎵 Musique\n"
+                    "Choisissez le **vocal musique** puis activez le système. "
+                    "Quand un membre rejoint ce vocal, SentriX le mentionne dans le chat du vocal "
+                    "et affiche le petit lecteur musique.\n\n"
+                    f"Vocal actuel : **{channel.mention if channel else 'Non configuré'}**"
+                ),
+                accessory=status,
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        voice_select = discord.ui.ChannelSelect(
+            placeholder="Choisir le vocal musique",
+            min_values=1,
+            max_values=1,
+            channel_types=[discord.ChannelType.voice],
+        )
+
+        async def choose_voice(interaction: discord.Interaction):
+            runtime = self.bot.get_cog("Music")
+            if runtime is None:
+                return await interaction.response.send_message("Le module musique n’est pas chargé.", ephemeral=True)
+            chosen = voice_select.values[0]
+            current = await runtime.get_system_settings(self.guild.id)
+            try:
+                await runtime.configure_system(
+                    self.guild,
+                    enabled=bool(current.get("enabled")),
+                    voice_channel_id=chosen.id,
+                    actor_id=interaction.user.id,
+                )
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
+            await self.refresh(interaction)
+
+        voice_select.callback = choose_voice
+        container.add_item(discord.ui.ActionRow(voice_select))
+
+        activate = discord.ui.Button(label="Activer la musique", style=discord.ButtonStyle.success)
+        disable = discord.ui.Button(label="Désactiver la musique", style=discord.ButtonStyle.danger)
+
+        async def activate_music(interaction: discord.Interaction):
+            runtime = self.bot.get_cog("Music")
+            if runtime is None:
+                return await interaction.response.send_message("Le module musique n’est pas chargé.", ephemeral=True)
+            current = await runtime.get_system_settings(self.guild.id)
+            if not current.get("voice_channel_id"):
+                return await interaction.response.send_message("Choisissez d’abord le vocal musique.", ephemeral=True)
+            try:
+                await runtime.configure_system(
+                    self.guild,
+                    enabled=True,
+                    voice_channel_id=int(current["voice_channel_id"]),
+                    actor_id=interaction.user.id,
+                )
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
+            await self.refresh(interaction)
+
+        async def disable_music(interaction: discord.Interaction):
+            runtime = self.bot.get_cog("Music")
+            if runtime is None:
+                return await interaction.response.send_message("Le module musique n’est pas chargé.", ephemeral=True)
+            current = await runtime.get_system_settings(self.guild.id)
+            await runtime.configure_system(
+                self.guild,
+                enabled=False,
+                voice_channel_id=current.get("voice_channel_id"),
+                actor_id=interaction.user.id,
+            )
+            await self.refresh(interaction)
+
+        activate.callback = activate_music
+        disable.callback = disable_music
+        container.add_item(discord.ui.ActionRow(activate, disable))
+        self._add_navigation(container)
+        self.add_item(container)
 
     def _add_navigation(self, container: discord.ui.Container) -> None:
         back = discord.ui.Button(label="Retour", style=discord.ButtonStyle.primary, emoji="↩️")
