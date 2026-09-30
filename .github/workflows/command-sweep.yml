@@ -55,6 +55,7 @@ jobs:
             tests/test_double_confirmation_safety.py \
             tests/test_setup_v118_integrations.py \
             tests/test_simple_setup_command_channels_roles.py \
+            tests/test_ha_product_boot_contract.py \
             tests/test_welcome_single_source_of_truth.py \
             tests/test_welcome_text_mode.py \
             tests/test_ticket_atomic_actions.py \

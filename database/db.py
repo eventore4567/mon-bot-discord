@@ -16,6 +16,40 @@ import time
 logger = logging.getLogger("bot.database")
 
 
+_CONFIG_PERSISTENCE_MARKERS = (
+    "guild_config",
+    "module_settings",
+    "automod_settings",
+    "log_config",
+    "welcome_presentation_v2",
+    "ticket_panels_v2",
+    "ticket_types_v2",
+    "ticket_settings",
+    "self_role_panels",
+    "self_role_items",
+    "reaction_role",
+    "disabled_commands",
+    "command_blocked_channels",
+    "command_channel_blocks",
+    "dashboard_role_access",
+    "bot_managers",
+    "social_notifications",
+    "notification_sources",
+    "automatic_verification_v4",
+    "honeypot_verification",
+    "starboard",
+    "sticky",
+    "scheduled_messages",
+)
+
+
+def _is_configuration_write(query: str) -> bool:
+    normalized = " ".join(str(query or "").strip().lower().split())
+    if not normalized.startswith(("insert ", "update ", "delete ", "replace ")):
+        return False
+    return any(marker in normalized for marker in _CONFIG_PERSISTENCE_MARKERS)
+
+
 def _parse_bank_amount(value: str, available: int) -> int | None:
     """Même logique que cogs/economy.py::_parse_amount, dupliquée ici pour que la
     résolution de 'all'/'tout' se fasse contre le solde lu SOUS _economy_lock (voir
@@ -1393,6 +1427,12 @@ class Database:
         # jamais. On garde donc la config de chaque serveur en mémoire, invalidée uniquement
         # quand elle est explicitement modifiée (set_guild_config / reset).
         self._guild_config_cache: dict[int, "aiosqlite.Row"] = {}
+        # HA : une modification de configuration déclenche un snapshot durable
+        # rapproché afin qu'un rolling deploy ne puisse pas restaurer une config ancienne.
+        self._config_snapshot_callback = None
+        self._config_snapshot_task: asyncio.Task | None = None
+        self._config_snapshot_dirty = False
+        self._config_snapshot_delay = 0.8
         # Protège toute opération économique qui fait "vérifier le solde/cooldown PUIS
         # écrire" (paiement, daily, weekly, work, réputation) contre une double exécution
         # simultanée (deux clics rapides, ou /daily lancé deux fois avant la première
@@ -1598,13 +1638,61 @@ class Database:
                 written, backup,
             )
 
+    def set_config_snapshot_callback(self, callback, *, delay: float = 0.8) -> None:
+        self._config_snapshot_callback = callback
+        self._config_snapshot_delay = max(0.1, min(float(delay), 5.0))
+
+    def _schedule_config_snapshot(self) -> None:
+        if self._config_snapshot_callback is None:
+            return
+        self._config_snapshot_dirty = True
+        task = self._config_snapshot_task
+        if task is not None and not task.done():
+            return
+
+        async def runner():
+            try:
+                while self._config_snapshot_dirty:
+                    await asyncio.sleep(self._config_snapshot_delay)
+                    self._config_snapshot_dirty = False
+                    result = await self._config_snapshot_callback(
+                        reason="config_change",
+                        clean_shutdown=False,
+                    )
+                    if not result.get("stored"):
+                        logger.warning("Snapshot config durable non stocké: %s", result)
+                    else:
+                        logger.info(
+                            "Snapshot config durable stocké id=%s.",
+                            result.get("snapshot_id"),
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Snapshot config durable impossible.")
+
+        self._config_snapshot_task = asyncio.create_task(
+            runner(),
+            name="sentrix-config-durable-snapshot",
+        )
+
     async def close(self):
+        task = self._config_snapshot_task
+        if task is not None and not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=30)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                logger.warning("Snapshot config encore en cours pendant la fermeture.")
+            except Exception:
+                logger.warning("Fin du snapshot config impossible.", exc_info=True)
         if self._conn:
             await self._conn.close()
 
     async def execute(self, query: str, params: tuple = ()):
         cur = await self._conn.execute(query, params)
         await self._conn.commit()
+        if cur.rowcount != 0 and _is_configuration_write(query):
+            self._schedule_config_snapshot()
         return cur
 
     async def fetchone(self, query: str, params: tuple = ()):

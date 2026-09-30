@@ -196,6 +196,10 @@ async def _prepare_leader_storage(
         )
 
     _guard_durable_snapshots(durable)
+    # Dès qu'une instance devient leader, les écritures de configuration déclenchent
+    # un snapshot PostgreSQL rapproché. Le snapshot périodique reste un filet de sécurité.
+    if hasattr(bot.db, "set_config_snapshot_callback"):
+        bot.db.set_config_snapshot_callback(durable.snapshot, delay=0.8)
 
     # Reprendre la main après SON PROPRE redémarrage n'est pas un takeover : le volume
     # SQLite local est alors la copie la plus récente. Restaurer un snapshot y ferait
