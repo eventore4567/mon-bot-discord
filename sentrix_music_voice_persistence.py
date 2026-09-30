@@ -147,6 +147,42 @@ class PersistentVoiceState:
             return
         async with self._restore_lock:
             await self.ensure_schema()
+
+            # Source de vérité : si le système musique est activé dans +setup/dashboard,
+            # SentriX DOIT être présent dans le vocal configuré sur chaque serveur.
+            # On resynchronise donc les épingles depuis sentrix_music_settings à chaque
+            # passage du watchdog, y compris pour les serveurs configurés avant V104.
+            try:
+                configured = await self.bot.db.fetchall(
+                    "SELECT guild_id, voice_channel_id FROM sentrix_music_settings "
+                    "WHERE enabled=1 AND voice_channel_id IS NOT NULL ORDER BY guild_id"
+                )
+            except Exception:
+                configured = []
+
+            configured_ids: set[int] = set()
+            for item in configured:
+                guild_id = int(item["guild_id"])
+                voice_channel_id = int(item["voice_channel_id"])
+                configured_ids.add(guild_id)
+                guild = self.bot.get_guild(guild_id)
+                if guild is None:
+                    continue
+                channel = guild.get_channel(voice_channel_id)
+                if channel is None or not hasattr(channel, "connect"):
+                    continue
+                await self.remember(guild_id, voice_channel_id, voice_channel_id)
+
+            # Une vieille épingle ne doit jamais maintenir SentriX dans un vocal
+            # si le système musique a été désactivé depuis le setup/dashboard.
+            pinned = await self.bot.db.fetchall(
+                "SELECT guild_id FROM music_voice_sessions ORDER BY guild_id"
+            )
+            for item in pinned:
+                guild_id = int(item["guild_id"])
+                if guild_id not in configured_ids:
+                    await self.forget(guild_id)
+
             rows = await self.bot.db.fetchall(
                 "SELECT guild_id, voice_channel_id, text_channel_id "
                 "FROM music_voice_sessions ORDER BY guild_id"
