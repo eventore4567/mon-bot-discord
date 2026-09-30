@@ -103,6 +103,6 @@ def test_goodbye_embed_uses_same_visual_shell_as_welcome():
     kwargs = channel.send.call_args.kwargs
     assert kwargs["embed"].title == "Un membre vient de partir"
     assert kwargs["embed"].image.url == "attachment://sentrix_goodbye.png"
-    assert kwargs["embed"].colour.value == 0x6C5CE7
+    assert kwargs["embed"].colour.value == 0x4E5058
     assert kwargs["content"] is None
     assert kwargs["file"] is not None
