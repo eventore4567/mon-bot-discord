@@ -48,6 +48,7 @@ from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
+from services import moderation as moderation_service
 
 logger = logging.getLogger("bot")
 
@@ -368,7 +369,23 @@ ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "
 INCIDENT_WINDOW_SECONDS = 30.0
 INCIDENT_LOG_DELAY_SECONDS = 4.0
 SPAM_FILTERS = frozenset({"antispam", "antispam_duplicate", "antiemoji", "antimention"})
-SPAM_TIMEOUT_SECONDS = 600
+
+# Progression dédiée au spam :
+# 1) rappel public avec ping ; 2) vrai warn enregistré ; 3+) timeout croissant.
+# Après 24 h sans nouvel incident de spam, la progression repart au premier rappel.
+SPAM_INCIDENT_WINDOW_SECONDS = 8.0
+SPAM_ESCALATION_RESET_SECONDS = 86400
+SPAM_MUTE_DURATIONS_SECONDS = (600, 1800, 3600, 10800, 21600, 43200, 86400)
+SPAM_TIMEOUT_SECONDS = SPAM_MUTE_DURATIONS_SECONDS[0]
+SPAM_ESCALATION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_spam_escalation (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    stage INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
 
 
 def _sans_accents(texte: str) -> str:
@@ -383,7 +400,9 @@ class _Incident:
     channel_id: int
     deleted: int = 1
     action: str | None = None
+    action_label: str | None = None
     infractions: int = 0
+    spam_stage: int = 0
 
 
 def _normalize_blocked_link_rule(value: str) -> str:
@@ -1262,6 +1281,127 @@ class AutoMod(commands.Cog, name="Automod"):
         if exempt_ids and any(r.id in exempt_ids for r in member.roles):
             return True
         return False
+
+    async def _next_spam_stage(self, guild_id: int, user_id: int) -> int:
+        await self.bot.db.execute(SPAM_ESCALATION_SCHEMA)
+        now = int(time.time())
+        row = await self.bot.db.fetchone(
+            "SELECT stage,updated_at FROM sentrix_spam_escalation WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        )
+        previous_stage = int(row["stage"] or 0) if row else 0
+        updated_at = int(row["updated_at"] or 0) if row else 0
+        if not updated_at or now - updated_at > SPAM_ESCALATION_RESET_SECONDS:
+            previous_stage = 0
+        stage = previous_stage + 1
+        await self.bot.db.execute(
+            "INSERT INTO sentrix_spam_escalation (guild_id,user_id,stage,updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(guild_id,user_id) DO UPDATE SET stage=excluded.stage,updated_at=excluded.updated_at",
+            (int(guild_id), int(user_id), int(stage), now),
+        )
+        return stage
+
+    async def _spam_progressive_action(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        reason: str,
+    ) -> tuple[str | None, int, int | None, str]:
+        """Rappel -> warn -> timeout 10m, 30m, 1h, 3h, 6h, 12h, 24h."""
+        stage = await self._next_spam_stage(guild.id, member.id)
+
+        if stage == 1:
+            return (
+                "warning_ping",
+                stage,
+                None,
+                "⚠️ arrête le spam. Si tu continues, tu recevras un avertissement.",
+            )
+
+        if stage == 2:
+            actor = guild.me
+            if actor is None:
+                return (
+                    "warn",
+                    stage,
+                    None,
+                    "⚠️ avertissement : spam répété. Prochaine récidive : mute 10 minutes.",
+                )
+            try:
+                conf = await self.bot.db.get_guild_config(guild.id)
+                warn_role_id = conf["warn_role"] if conf else None
+                warn_role = guild.get_role(int(warn_role_id)) if warn_role_id else None
+            except Exception:
+                warn_role = None
+            outcome = await moderation_service.warn(
+                self.bot,
+                guild=guild,
+                actor=actor,
+                target=member,
+                reason=f"AutoMod : spam répété — {reason}",
+                dm_text=(
+                    f"Vous avez reçu un avertissement automatique sur {guild.name} pour spam répété. "
+                    "Une nouvelle récidive entraînera un mute de 10 minutes."
+                ),
+                warn_role=warn_role,
+                ban_threshold=0,
+            )
+            if outcome.executed:
+                return (
+                    "warn",
+                    stage,
+                    None,
+                    "⚠️ avertissement enregistré pour spam répété. Prochaine récidive : mute 10 minutes.",
+                )
+            return (
+                "warn",
+                stage,
+                None,
+                "⚠️ spam répété détecté. SentriX n’a pas pu enregistrer le warn, mais la prochaine récidive entraînera un mute.",
+            )
+
+        duration = SPAM_MUTE_DURATIONS_SECONDS[
+            min(stage - 3, len(SPAM_MUTE_DURATIONS_SECONDS) - 1)
+        ]
+        me = guild.me
+        if (
+            me is None
+            or not me.guild_permissions.moderate_members
+            or member.id == guild.owner_id
+            or member.top_role >= me.top_role
+        ):
+            return (
+                "mute_failed",
+                stage,
+                duration,
+                f"⚠️ spam répété détecté. Timeout prévu : {helpers.format_duration(duration)}, "
+                "mais SentriX n’a pas la permission ou la hiérarchie nécessaire.",
+            )
+
+        until = discord.utils.utcnow() + timedelta(seconds=duration)
+        current_timeout = member.timed_out_until
+        try:
+            if not current_timeout or current_timeout < until:
+                log_service.mark_sanction(guild.id, member.id, "timeout")
+                await member.timeout(
+                    until,
+                    reason=f"AutoMod : récidive spam niveau {stage} — {reason}",
+                )
+        except (discord.Forbidden, discord.HTTPException):
+            return (
+                "mute_failed",
+                stage,
+                duration,
+                f"⚠️ spam répété détecté. Timeout prévu : {helpers.format_duration(duration)}, "
+                "mais Discord a refusé la sanction.",
+            )
+
+        return (
+            "mute",
+            stage,
+            duration,
+            f"🔇 spam répété : mute de {helpers.format_duration(duration)}.",
+        )
 
     async def _maybe_escalate(self, guild: discord.Guild, member: discord.Member, reason: str) -> tuple[str | None, int]:
         """Enregistre une infraction pour ce membre et, si le nombre d'infractions récentes
@@ -2378,7 +2518,12 @@ class AutoMod(commands.Cog, name="Automod"):
         key = (message.guild.id, message.author.id)
         now_ts = time.monotonic()
         incident = self.incidents.get(key)
-        if incident is not None and now_ts - incident.started < INCIDENT_WINDOW_SECONDS:
+        incident_window = (
+            SPAM_INCIDENT_WINDOW_SECONDS
+            if incident is not None and incident.filter_name in SPAM_FILTERS
+            else INCIDENT_WINDOW_SECONDS
+        )
+        if incident is not None and now_ts - incident.started < incident_window:
             incident.deleted += 1
             return
         incident = _Incident(started=now_ts, filter_name=filter_name, reason=reason, channel_id=message.channel.id)
@@ -2399,17 +2544,43 @@ class AutoMod(commands.Cog, name="Automod"):
             reason=reason,
             target=message.author,
         )
-        action, infraction_count = await self._maybe_escalate(message.guild, message.author, reason)
-        if action is None and filter_name in SPAM_FILTERS:
-            action = await self._spam_timeout(message.guild, message.author, reason)
+        spam_duration = None
+        spam_public_text = None
+        if filter_name in SPAM_FILTERS:
+            action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
+                message.guild,
+                message.author,
+                reason,
+            )
+            infraction_count = 0
+            incident.spam_stage = spam_stage
+            if action == "warning_ping":
+                incident.action_label = "⚠️ Rappel anti-spam"
+            elif action == "warn":
+                incident.action_label = "⚠️ Avertissement enregistré"
+            elif action == "mute":
+                incident.action_label = f"🔇 Mute {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)}"
+            elif action == "mute_failed":
+                incident.action_label = f"⚠️ Mute prévu {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)} — non appliqué"
+        else:
+            action, infraction_count = await self._maybe_escalate(message.guild, message.author, reason)
+
         incident.action = action
         incident.infractions = infraction_count
-        if action:
-            await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, action, reason)
+        if action and action != "warning_ping":
+            await self.bot.db.log_automod_action(
+                message.guild.id,
+                message.author.id,
+                filter_name,
+                action,
+                reason,
+            )
 
-        public_text = self._public_automod_message(filter_name, reason)
-        if action == "mute":
-            public_text += f" Exclusion temporaire de {helpers.format_duration(SPAM_TIMEOUT_SECONDS)}."
+        public_text = (
+            spam_public_text
+            if filter_name in SPAM_FILTERS and spam_public_text
+            else self._public_automod_message(filter_name, reason)
+        )
         try:
             if filter_name in {"blacklist_word", "blacklist_link", "blacklist_word_link", "antilink", "antiinvite", "antiscam"}:
                 note = await panels.envoyer(
@@ -2456,9 +2627,18 @@ class AutoMod(commands.Cog, name="Automod"):
             color = config.COLOR_WARNING
             extra = {"📍 Salon": f"<#{incident.channel_id}>", "🗑️ Messages": str(incident.deleted)}
             if incident.action:
-                title = "🚨 Action AutoMod — sanction appliquée"
+                title = (
+                    "🚨 Action AutoMod — sanction appliquée"
+                    if incident.action not in ("warning_ping",)
+                    else "🛡️ Action AutoMod — rappel anti-spam"
+                )
                 color = config.COLOR_ERROR if incident.action in ("kick", "ban") else config.COLOR_WARNING
-                extra["⚔️ Action"] = ESCALATION_LABELS.get(incident.action, incident.action)
+                extra["⚔️ Action"] = (
+                    incident.action_label
+                    or ESCALATION_LABELS.get(incident.action, incident.action)
+                )
+            if incident.spam_stage:
+                extra["📈 Niveau anti-spam"] = str(incident.spam_stage)
             if incident.infractions:
                 extra["🔢 Infractions (1h)"] = str(incident.infractions)
             e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
