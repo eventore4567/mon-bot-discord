@@ -219,6 +219,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(discord.ui.Separator())
 
         for key, label in setup_ui.MODULE_SWITCHES:
+            # Le premier écran Components V2 est limité à 40 composants Discord.
+            # Notifications reste disponible dans le menu détaillé ; on réserve sa
+            # ligne directe à Musique, demandée comme réglage principal.
+            if key == "notifications":
+                continue
             etat = switch_states.get(key, "not_configured")
             actif = etat == "enabled"
             bouton = discord.ui.Button(
