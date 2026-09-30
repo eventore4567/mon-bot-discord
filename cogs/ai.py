@@ -680,6 +680,13 @@ class Ai(commands.Cog, name="Ai"):
 
         guild_id/channel_id/user_id/command : contexte optionnel transmis à ai_service.generate()
         uniquement pour les logs serveur en cas d'erreur (jamais envoyé à OpenIA côté prompt)."""
+        if guild_id is not None and channel_id is not None:
+            settings = await ai_service.get_settings(self.bot, guild_id)
+            if not settings["enabled"]:
+                return ai_service.ERROR_DISABLED
+            if not ai_service.is_channel_allowed(settings, channel_id):
+                return ai_service.ERROR_CHANNEL_NOT_ALLOWED
+
         model_key = ai_service.pick_model(prompt if isinstance(prompt, str) else "")
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, "medium")
         instructions = await self._build_system_instructions(user_id, author_name)
