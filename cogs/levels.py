@@ -791,9 +791,7 @@ class Levels(commands.Cog, name="Levels"):
                             )
                             file = discord.File(buffer, filename="sentrix-level-up.png")
                             level_embed = discord.Embed(
-                                title="Niveau atteint",
-                                description=f"**{message.author.display_name}** passe au niveau **{level}**.",
-                                colour=discord.Colour(design_settings.get("primary_color", 0x6C5CE7)),
+                                colour=discord.Colour(0x2B2D31),
                             )
                             level_embed.set_image(url="attachment://sentrix-level-up.png")
                             await channel.send(

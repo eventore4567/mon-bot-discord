@@ -282,6 +282,7 @@ GUILD_CONFIG_FIELD_MODULE: dict[str, str] = {
     "welcome_image_url": "welcome",
     "goodbye_channel": "goodbye",
     "goodbye_message": "goodbye",
+    "goodbye_image_url": "goodbye",
     "autorole": "roles",
     "level_channel": "levels",
     "ticket_category": "tickets",

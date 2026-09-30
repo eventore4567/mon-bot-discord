@@ -254,6 +254,32 @@ def _render_card_sync(
     accent = _hex_rgb(int(settings.get("primary_color", 0xE6E8EC)))
     secondary = _hex_rgb(int(settings.get("secondary_color", 0x8A8F99)))
 
+    # Une montée de niveau ne réutilise plus toute la carte de profil. Le résultat
+    # demandé est volontairement neutre : fond sombre uni, petite phrase, rien d'autre.
+    if level_up is not None:
+        canvas = Image.new("RGBA", (1200, 280), (24, 25, 28, 255))
+        draw = ImageDraw.Draw(canvas, "RGBA")
+        draw.rounded_rectangle(
+            (24, 24, 1176, 256),
+            radius=24,
+            fill=(31, 32, 36, 255),
+            outline=(62, 64, 71, 255),
+            width=2,
+        )
+        text = f"Bravo {display_name}, tu es passé niveau {int(level_up)}"
+        font = _font(34, bold=True)
+        box = draw.textbbox((0, 0), text, font=font)
+        draw.text(
+            ((1200 - (box[2] - box[0])) / 2, 122),
+            text,
+            font=font,
+            fill=(238, 239, 242, 255),
+        )
+        output = io.BytesIO()
+        canvas.convert("RGB").save(output, format="PNG", optimize=True)
+        output.seek(0)
+        return output
+
     # Fond généré, plus d'image à charger : l'asset card-background-v5.png ne se
     # décodait pas et la production peignait donc toujours le repli en bandes.
     # Voir fond_de_carte() pour le détail de la mesure.

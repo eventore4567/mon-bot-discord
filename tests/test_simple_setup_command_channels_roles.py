@@ -89,13 +89,14 @@ def test_dashboard_exposes_and_reuses_server_emojis():
     assert '"emojis": emojis' in dashboard
     assert '"emojis": emojis' in hotfix
     assert "function guildEmojis()" in core
-    assert "function pickServerEmoji()" in core
     assert "function bindEmojiPickers" in core
+    assert "pickDialog({" not in core[core.index("function emojiControl"):core.index("function resourceIssue")]
+    assert "emoji-picker-inline" in core
     css = (ROOT / "web" / "dashboard_ui" / "app.css").read_text()
-    assert ".emoji-option img{width:32px;height:32px" in css
+    assert ".emoji-picker-inline" in css
     assert "emojiControl('rrEmoji')" in roles
     assert "emojiControl('ttEmoji'" in modules
-    assert "reactEmojiServer" in modules
+    assert "emojiControl('reactEmojiInput'" in modules
     assert "emojiControl('ticketActionEmoji'" in ticket_actions
 
 def test_roles_offer_simple_no_emoji_and_reaction_modes():
@@ -112,3 +113,22 @@ def test_roles_offer_simple_no_emoji_and_reaction_modes():
     assert 'payload.get("role_ids")' in backend
     assert "self_role_items" in backend
     assert "self_role_items" in runtime
+
+
+
+def test_welcome_departure_backgrounds_and_level_card_are_simple():
+    schema = (ROOT / "database" / "db.py").read_text()
+    dashboard = (ROOT / "web" / "dashboard.py").read_text()
+    welcome = (ROOT / "cogs" / "setup_v2_completion.py").read_text()
+    cards = (ROOT / "utils" / "member_event_cards.py").read_text()
+    visual = (ROOT / "utils" / "visual_v5.py").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "command-sweep.yml").read_text()
+
+    assert "goodbye_image_url TEXT" in schema
+    assert '"goodbye_image_url"' in dashboard
+    assert "fetch_background_image(image_url)" in welcome
+    assert "_without_duplicate_member_mention" in welcome
+    assert "background_bytes=background_bytes" in welcome
+    assert "ImageOps.fit(source, _SIZE" in cards
+    assert 'Bravo {display_name}, tu es passé niveau' in visual
+    assert "if: github.event_name != 'push'" in workflow

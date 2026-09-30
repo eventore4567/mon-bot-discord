@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
     welcome_channel INTEGER,
     welcome_message TEXT,
     welcome_image_url TEXT,
+    goodbye_image_url TEXT,
     goodbye_channel INTEGER,
     goodbye_message TEXT,
     rules_channel INTEGER,
@@ -1043,6 +1044,7 @@ MANAGER_CATEGORIES = {
 # via ALTER TABLE au démarrage. Voir Database._migrate().
 GUILD_CONFIG_NEW_COLUMNS = {
     "welcome_image_url": "TEXT",
+    "goodbye_image_url": "TEXT",
     "log_messages": "INTEGER",
     "log_members": "INTEGER",
     "log_voice": "INTEGER",

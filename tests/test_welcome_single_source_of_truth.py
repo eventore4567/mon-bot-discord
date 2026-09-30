@@ -175,7 +175,7 @@ async def _run_send_welcome_pair():
     conf = {
         "welcome_channel": 42,
         "welcome_message": "Bienvenue {membre} sur **{serveur}** !",
-        "welcome_image_url": "https://example.com/banner.png",
+        "welcome_image_url": None,
     }
     presentation = {"title": "Salut {membre} !", "show_avatar": 1, "show_member_count": 1}
     bot = _FakeBot(conf, presentation)
@@ -203,11 +203,11 @@ def test_preview_and_real_send_produce_the_identical_embed():
     # prefixe une barre decorative a la description (mise en forme commune a tout SentriX,
     # sans rapport avec la bienvenue) : on verifie donc le contenu utile avec un "endswith"
     # plutot qu'une egalite exacte a une chaine tapee a la main.
-    assert embed_test.title == embed_real.title == "Salut <@111> !"
+    assert embed_test.title == embed_real.title == "Salut Jayden !"
     assert embed_test.description == embed_real.description
-    assert embed_real.description.endswith("Bienvenue <@111> sur **Le Repaire** !")
+    assert embed_real.description.endswith("Bienvenue Jayden sur **Le Repaire** !")
     assert embed_test.colour == embed_real.colour
-    assert embed_test.image.url == embed_real.image.url == "https://example.com/banner.png"
+    assert embed_test.image.url == embed_real.image.url == "attachment://sentrix_welcome.png"
     assert embed_test.thumbnail.url == embed_real.thumbnail.url
     # Variable francaise remplacee, jamais laissee telle quelle dans le message envoye.
     assert "{membre}" not in embed_real.description

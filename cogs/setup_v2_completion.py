@@ -16,7 +16,7 @@ from discord.ext import commands
 from utils import checks, embeds, log_service
 from utils import sentrix_panels as panels
 from utils import join_dedup
-from utils.member_event_cards import build_member_event_card
+from utils.member_event_cards import build_member_event_card, fetch_background_image
 from . import bot_tracker
 from . import control_center_v3
 from . import setup_control_center as setup_ui
@@ -143,12 +143,22 @@ async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, s
 
 
 def _format_welcome(value: str, member: discord.Member) -> str:
-    # Seul renderer de variables pour la bienvenue/le départ (source unique avec le
-    # bouton "Tester la bienvenue" ci-dessous, qui appelle exactement la même fonction) :
-    # {member}/{membre}, {mention}, {user}, {username}, {display_name}, {server}/{serveur}
-    # et {member_count} sont tous supportés, y compris les alias déjà utilisés ailleurs
-    # dans SentriX (ex: DM de sanction) pour rester cohérent d'une fonction à l'autre.
+    # Seul renderer de variables pour la bienvenue/le départ.
     return control_center_v3.render_member_template(value, member)
+
+
+def _without_duplicate_member_mention(value: str, member: discord.Member) -> str:
+    """Le @ cliquable est déjà envoyé une fois au-dessus du message de bienvenue."""
+    text = str(value or "")
+    name = str(getattr(member, "display_name", None) or getattr(member, "name", None) or "Membre")
+    for token in {
+        str(getattr(member, "mention", "") or ""),
+        f"<@{getattr(member, 'id', 0)}>",
+        f"<@!{getattr(member, 'id', 0)}>",
+    }:
+        if token:
+            text = text.replace(token, name)
+    return text
 
 
 async def _welcome_destination(bot, guild: discord.Guild):
@@ -179,7 +189,10 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         return False, error or "Salon de bienvenue indisponible."
     conf = await bot.db.get_guild_config(member.guild.id)
     presentation = await _welcome_presentation(bot, member.guild.id)
-    body = _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member)
+    body = _without_duplicate_member_mention(
+        _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member),
+        member,
+    )
     # La mention et la NOTIFICATION sont deux choses distinctes, et les
     # confondre était le défaut. Un vrai @ s'affiche, se clique et ouvre le
     # profil ; allowed_mentions décide seul s'il fait sonner le téléphone.
@@ -210,7 +223,7 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     # @ ». La duplication apparente n'en est pas une : celle du haut notifie,
     # celle du corps salue.
     panel = embeds.brand(
-        _format_welcome(presentation["title"], member),
+        _without_duplicate_member_mention(_format_welcome(presentation["title"], member), member),
         body,
     )
     if presentation["show_avatar"]:
@@ -220,15 +233,17 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         panel.add_field(name="Membres", value=f"{count} membre{'s' if count > 1 else ''}", inline=True)
     image_url = _conf_value(conf, "welcome_image_url")
     card_file = None
-    if image_url and str(image_url).startswith(("https://", "http://")):
-        panel.set_image(url=str(image_url))
-    else:
-        try:
-            card_file = build_member_event_card(member, kind="welcome")
-            panel.set_image(url="attachment://sentrix_welcome.png")
-        except Exception:
-            logger.exception("Carte de bienvenue automatique impossible guild=%s user=%s", member.guild.id, member.id)
-            card_file = None
+    try:
+        background_bytes = await fetch_background_image(image_url) if image_url else None
+        card_file = build_member_event_card(
+            member,
+            kind="welcome",
+            background_bytes=background_bytes,
+        )
+        panel.set_image(url="attachment://sentrix_welcome.png")
+    except Exception:
+        logger.exception("Carte de bienvenue automatique impossible guild=%s user=%s", member.guild.id, member.id)
+        card_file = None
     try:
         await channel.send(
             content=None if test else member.mention,
@@ -277,7 +292,13 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
         panel.set_thumbnail(url=member.display_avatar.url)
     card_file = None
     try:
-        card_file = build_member_event_card(member, kind="goodbye")
+        image_url = _conf_value(conf, "goodbye_image_url")
+        background_bytes = await fetch_background_image(image_url) if image_url else None
+        card_file = build_member_event_card(
+            member,
+            kind="goodbye",
+            background_bytes=background_bytes,
+        )
         panel.set_image(url="attachment://sentrix_goodbye.png")
     except Exception:
         logger.exception("Carte de départ automatique impossible guild=%s user=%s", member.guild.id, member.id)
@@ -585,7 +606,7 @@ async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
             for key in ("welcome_channel","welcome_message","welcome_image_url"): await bot.db.set_guild_config(gid, key, None)
             await bot.db.execute("DELETE FROM welcome_presentation_v2 WHERE guild_id=?", (gid,))
         elif item == "goodbye":
-            for key in ("goodbye_channel","goodbye_message"): await bot.db.set_guild_config(gid, key, None)
+            for key in ("goodbye_channel","goodbye_message","goodbye_image_url"): await bot.db.set_guild_config(gid, key, None)
         elif item == "roles":
             for key in ("autorole","verify_role","verification_role","member_role","booster_role"): await bot.db.set_guild_config(gid, key, None)
             await bot.db.execute("DELETE FROM level_roles WHERE guild_id=?", (gid,))

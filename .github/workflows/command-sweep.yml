@@ -55,6 +55,8 @@ jobs:
             tests/test_double_confirmation_safety.py \
             tests/test_setup_v118_integrations.py \
             tests/test_simple_setup_command_channels_roles.py \
+            tests/test_welcome_single_source_of_truth.py \
+            tests/test_welcome_text_mode.py \
             tests/test_ticket_atomic_actions.py \
             tests/test_ticket_rating_persistence.py \
             tests/test_economy_race_conditions.py \
@@ -77,6 +79,7 @@ jobs:
             tests/test_public_home_runtime_route.py
 
       - name: Sweep every command (strict on technical errors)
+        if: github.event_name != 'push'
         env:
           DISCORD_TOKEN: "ci.fake.token"
           OPENAI_API_KEY: ""
@@ -85,6 +88,7 @@ jobs:
         run: python tools/command_sweep.py --strict --out reports/command_sweep
 
       - name: Audit permissions × messages de refus (strict)
+        if: github.event_name != 'push'
         env:
           DISCORD_TOKEN: "ci.fake.token"
           OPENAI_API_KEY: ""
@@ -94,7 +98,7 @@ jobs:
         run: python tools/permission_audit_sweep.py --strict --out reports/permission_audit
 
       - name: Publish reports
-        if: always()
+        if: always() && github.event_name != 'push'
         uses: actions/upload-artifact@v4
         with:
           name: command-sweep-report

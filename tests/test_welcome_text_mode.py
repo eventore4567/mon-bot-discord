@@ -47,12 +47,12 @@ def test_text_mode_sends_plain_content_without_embed():
     assert ok, message
     kwargs = channel.send.call_args.kwargs
     assert "embed" not in kwargs
-    assert kwargs["content"] == "<@111>\nBienvenue <@111> sur Le Repaire !"
+    assert kwargs["content"] == "<@111>\nBienvenue Jayden sur Le Repaire !"
 
     channel.send.reset_mock()
     ok, _ = asyncio.run(setup_v2_completion._send_welcome(bot, _member(guild), test=True))
     assert ok
-    assert channel.send.call_args.kwargs["content"] == "Bienvenue <@111> sur Le Repaire !"
+    assert channel.send.call_args.kwargs["content"] == "Bienvenue Jayden sur Le Repaire !"
 
 
 def test_default_and_legacy_rows_stay_in_embed_mode():
