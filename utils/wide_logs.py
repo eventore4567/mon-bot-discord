@@ -751,6 +751,7 @@ class WideLogView(discord.ui.LayoutView):
         identity_icon: str | None = None,
         emoji: str = "",
         log_type: str = "",
+        media_items: list[tuple[str, str, str]] | None = None,
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(
@@ -820,6 +821,55 @@ class WideLogView(discord.ui.LayoutView):
         footer = safe_text(getattr(embed.footer, "text", None))[:250]
         if footer:
             container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
+
+        # Médias du log toujours APRÈS le texte de l'événement. La bannière reste
+        # donc visuellement tout en haut, tandis que les images/vidéos/fichiers
+        # supprimés sont présentés en bas comme demandé.
+        if media_items:
+            gallery = discord.ui.MediaGallery()
+            gallery_count = 0
+            fallback_files: list[tuple[str, str]] = []
+
+            for source, filename, content_type in list(media_items)[:10]:
+                source = str(source or "").strip()
+                filename = safe_text(filename or "fichier")[:120]
+                content_type = str(content_type or "").casefold()
+                if not source:
+                    continue
+
+                if content_type.startswith(("image/", "video/")):
+                    try:
+                        gallery.add_item(media=source)
+                        gallery_count += 1
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "SENTRIX V2 media gallery item failed filename=%s type=%s",
+                            filename,
+                            content_type,
+                        )
+                fallback_files.append((source, filename))
+
+            if gallery_count:
+                try:
+                    container.add_item(gallery)
+                except Exception:
+                    logger.exception("SENTRIX V2 media gallery failed")
+
+            file_cls = getattr(discord.ui, "File", None)
+            for source, filename in fallback_files[:5]:
+                if file_cls is not None:
+                    try:
+                        container.add_item(file_cls(media=source))
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "SENTRIX V2 file component failed filename=%s",
+                            filename,
+                        )
+                container.add_item(
+                    discord.ui.TextDisplay(f"📎 **{filename}**")
+                )
 
         # Les boutons restent DANS le Container, en ActionRow, tous en secondary.
         rows = build_rows(old_view)
@@ -1011,6 +1061,8 @@ async def send_wide_log(
     log_type: str,
     old_view: discord.ui.View | None = None,
     extra_file: discord.File | None = None,
+    extra_files: list[discord.File] | None = None,
+    media_items: list[tuple[str, str, str]] | None = None,
     identity_name: str | None = None,
     identity_id: int | None = None,
     identity_icon: str | None = None,
@@ -1063,6 +1115,7 @@ async def send_wide_log(
             identity_icon,
             emoji,
             event_type,
+            media_items,
         )
     except Exception as exc:
         logger.error(
@@ -1083,9 +1136,21 @@ async def send_wide_log(
         return False
 
     files: list[discord.File] = [banner_file]
+    payload_files: list[discord.File] = []
     if extra_file is not None:
-        _rewind_file(extra_file)
-        files.append(extra_file)
+        payload_files.append(extra_file)
+    payload_files.extend(list(extra_files or []))
+
+    seen_names: set[str] = set()
+    for candidate in payload_files:
+        filename = str(getattr(candidate, "filename", "") or "")
+        if not filename or filename in seen_names:
+            continue
+        seen_names.add(filename)
+        _rewind_file(candidate)
+        files.append(candidate)
+        if len(files) >= 10:
+            break
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=before-send channel=%s event_type=%s files=%s view=%s",
