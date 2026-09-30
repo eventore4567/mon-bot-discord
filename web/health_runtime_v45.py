@@ -68,10 +68,25 @@ async def _database_probe(bot) -> tuple[bool, float | None]:
     return ok, round((time.perf_counter() - started) * 1000, 2)
 
 
-def _extension_state(bot) -> tuple[int, int, bool]:
+def _extension_state(bot) -> tuple[int, int, bool, list[str], list[dict]]:
+    """Retourne la santé des extensions avec priorité aux modules critiques.
+
+    Les extensions optionnelles peuvent échouer sans rendre l'instance indisponible.
+    Les modules critiques (modération, AutoMod, tickets, logs, configuration, utilitaires)
+    doivent tous être chargés pour que la readiness passe.
+    """
+    runtime = getattr(bot, "_sentrix_extension_health", None)
+    if isinstance(runtime, dict):
+        loaded = int(runtime.get("loaded") or 0)
+        expected = int(runtime.get("expected") or loaded)
+        critical_failed = [str(name) for name in (runtime.get("critical_failed") or [])]
+        failed = [dict(item) for item in (runtime.get("failed") or []) if isinstance(item, dict)]
+        return loaded, expected, not critical_failed, critical_failed, failed
+
     loaded = len(getattr(bot, "extensions", {}) or {})
     expected = int(getattr(bot, "expected_extension_count", loaded) or loaded)
-    return loaded, expected, loaded >= expected
+    # Fallback historique avant que setup_hook ait publié l'état détaillé.
+    return loaded, expected, loaded >= expected, [], []
 
 
 def _command_policy_state(bot) -> tuple[bool, int, int]:
@@ -113,7 +128,13 @@ def _backup_state(bot) -> bool | None:
 
 async def _snapshot(bot, dashboard) -> dict:
     database_ok, database_latency_ms = await _database_probe(bot)
-    loaded_extensions, expected_extensions, extensions_ok = _extension_state(bot)
+    (
+        loaded_extensions,
+        expected_extensions,
+        extensions_ok,
+        critical_extensions_failed,
+        failed_extensions,
+    ) = _extension_state(bot)
     command_policy_ok, unknown_commands, dangerous_public_commands = _command_policy_state(bot)
     discord_ready = bool(bot.is_ready())
 
@@ -148,6 +169,8 @@ async def _snapshot(bot, dashboard) -> dict:
         "extensions_ok": extensions_ok,
         "extensions_loaded": loaded_extensions,
         "extensions_expected": expected_extensions,
+        "critical_extensions_failed": critical_extensions_failed,
+        "failed_extensions": failed_extensions[:12],
         "command_policy_ok": command_policy_ok,
         "unknown_command_policy_count": unknown_commands,
         "dangerous_public_command_count": dangerous_public_commands,
@@ -193,6 +216,7 @@ async def _alert_degraded_startup(bot, data: dict) -> None:
             "Démarrage dégradé détecté : "
             f"status={data['status']}, Discord={data['discord_ready']}, DB={data['database_ok']}, "
             f"extensions={data['extensions_loaded']}/{data['extensions_expected']}, "
+            f"critical_failed={','.join(data.get('critical_extensions_failed') or []) or 'none'}, "
             f"policy={data['command_policy_ok']}."
         )
         await sender(bot, "startup-health-v45", detail)
