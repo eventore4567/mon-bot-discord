@@ -12,6 +12,7 @@ import logging
 import discord
 from discord.ext import commands
 
+from cogs import language_runtime
 from utils import embeds, log_service
 from utils import sentrix_panels as panels
 
@@ -110,6 +111,9 @@ async def _build_invitation_page(view) -> None:
     from . import setup_components_v73 as v73
 
     await ensure_schema(view.bot)
+    language = await language_runtime.get_language(view.bot, view.guild.id)
+    t = lambda fr, en: en if language == language_runtime.LANG_EN else fr
+
     feed = await get_feed_setting(view.bot, view.guild.id)
     feed_channel, feed_problem = _channel_ok(view.guild, feed["feed_channel_id"])
     feed_enabled = bool(feed["feed_enabled"] and feed_channel and not feed_problem)
@@ -123,10 +127,12 @@ async def _build_invitation_page(view) -> None:
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
-                "# 🔗 Invitations\n"
-                "Configurez le tracker d'invitations de **SentriX**.\n"
-                "Vous pouvez garder un salon de logs techniques séparé et choisir, en dessous, "
-                "le salon public où les arrivées et les départs seront affichés."
+                t(
+                    "# 🔗 Invitations\nConfigurez le tracker d’invitations de **SentriX**.\n"
+                    "Gardez les logs techniques séparés du salon public affiché aux membres.",
+                    "# 🔗 Invites\nConfigure the **SentriX** invite tracker.\n"
+                    "Keep technical logs separate from the public feed shown to members.",
+                )
             ),
             accessory=v73._thumbnail(view.bot),
         )
@@ -135,15 +141,20 @@ async def _build_invitation_page(view) -> None:
     container.add_item(discord.ui.Separator())
     container.add_item(
         discord.ui.TextDisplay(
-            "### 1. Logs d'invitations\n"
-            "Salon réservé aux informations techniques : invitation utilisée, code créé/supprimé et détails de détection.\n"
-            f"**Salon :** {log_channel.mention if log_channel else 'Non configuré'} · "
-            f"**État :** {'Activé' if logs_enabled else 'Inactif'}"
+            t("### 1. Logs d’invitations\n", "### 1. Invite logs\n")
+            + t(
+                "Salon réservé aux informations techniques : invitation utilisée, code créé/supprimé et détails de détection.\n",
+                "Technical channel: used invite, created/deleted codes and detection details.\n",
+            )
+            + f"**{t('Salon', 'Channel')} :** "
+            + (log_channel.mention if log_channel else t("Non configuré", "Not configured"))
+            + f" · **{t('État', 'State')} :** "
+            + t("Activé" if logs_enabled else "Inactif", "Enabled" if logs_enabled else "Disabled")
         )
     )
 
     log_select = discord.ui.ChannelSelect(
-        placeholder="Choisir le salon des logs d'invitations",
+        placeholder=t("Choisir le salon des logs d’invitations", "Choose the invite logs channel"),
         min_values=0,
         max_values=1,
         channel_types=[discord.ChannelType.text, discord.ChannelType.news],
@@ -172,7 +183,10 @@ async def _build_invitation_page(view) -> None:
     container.add_item(discord.ui.ActionRow(log_select))
 
     log_toggle = discord.ui.Button(
-        label="Désactiver les logs" if logs_enabled else "Activer les logs",
+        label=t(
+            "Désactiver les logs" if logs_enabled else "Activer les logs",
+            "Disable logs" if logs_enabled else "Enable logs",
+        ),
         style=discord.ButtonStyle.danger if logs_enabled else discord.ButtonStyle.secondary,
     )
 
@@ -201,17 +215,25 @@ async def _build_invitation_page(view) -> None:
     problem_text = f"\n⚠️ {feed_problem}" if feed_problem else ""
     container.add_item(
         discord.ui.TextDisplay(
-            "### 2. Salon où afficher les invitations\n"
-            "C'est le salon visible par les membres, comme sur votre exemple. SentriX y envoie des messages texte simples.\n\n"
-            "**Arrivée :** `@membre has been invited by @inviter and has now 10 invites.`\n"
-            "**Départ :** `pseudo has left the server. They had been invited by @inviter.`\n\n"
-            f"**Salon :** {feed_channel.mention if feed_channel else 'Non configuré'} · "
-            f"**État :** {'Activé' if feed_enabled else 'Inactif'}{problem_text}"
+            t("### 2. Salon public\n", "### 2. Public feed\n")
+            + t(
+                "Les arrivées et départs sont affichés dans la langue choisie pour ce serveur.\n\n"
+                "**Arrivée :** `@membre a été invité par @inviteur et possède maintenant 10 invitations.`\n"
+                "**Départ :** `pseudo a quitté le serveur. Il avait été invité par @inviteur.`\n\n",
+                "Joins and leaves are displayed in the language selected for this server.\n\n"
+                "**Join:** `@member was invited by @inviter and now has 10 invites.`\n"
+                "**Leave:** `name left the server. They had been invited by @inviter.`\n\n",
+            )
+            + f"**{t('Salon', 'Channel')} :** "
+            + (feed_channel.mention if feed_channel else t("Non configuré", "Not configured"))
+            + f" · **{t('État', 'State')} :** "
+            + t("Activé" if feed_enabled else "Inactif", "Enabled" if feed_enabled else "Disabled")
+            + problem_text
         )
     )
 
     feed_select = discord.ui.ChannelSelect(
-        placeholder="Choisir le salon où afficher les invitations",
+        placeholder=t("Choisir le salon public des invitations", "Choose the public invite feed channel"),
         min_values=0,
         max_values=1,
         channel_types=[discord.ChannelType.text, discord.ChannelType.news],
@@ -241,10 +263,13 @@ async def _build_invitation_page(view) -> None:
     container.add_item(discord.ui.ActionRow(feed_select))
 
     feed_toggle = discord.ui.Button(
-        label="Désactiver l'affichage" if feed_enabled else "Activer l'affichage",
+        label=t(
+            "Désactiver l’affichage" if feed_enabled else "Activer l’affichage",
+            "Disable feed" if feed_enabled else "Enable feed",
+        ),
         style=discord.ButtonStyle.danger if feed_enabled else discord.ButtonStyle.success,
     )
-    feed_test = discord.ui.Button(label="Tester le tracker", style=discord.ButtonStyle.secondary)
+    feed_test = discord.ui.Button(label=t("Tester le tracker", "Test tracker"), style=discord.ButtonStyle.secondary)
 
     async def toggle_feed(interaction: discord.Interaction):
         current = await get_feed_setting(view.bot, view.guild.id)
@@ -274,7 +299,10 @@ async def _build_invitation_page(view) -> None:
                 ephemere=True,
             )
         await destination.send(
-            "Invitation tracker test — `@member has been invited by @inviter and has now 1 invite.`",
+            t(
+                "Test invitations — `@membre a été invité par @inviteur et possède maintenant 1 invitation.`",
+                "Invite tracker test — `@member was invited by @inviter and now has 1 invite.`",
+            ),
             allowed_mentions=discord.AllowedMentions.none(),
         )
         await panels.envoyer(
@@ -375,16 +403,28 @@ class InviteTrackerRuntime(commands.Cog):
         await asyncio.sleep(0.8)
         row = await self.bot.db.get_invited_by(member.guild.id, member.id)
         inviter_id = row["inviter_id"] if row and row["inviter_id"] else None
+        language = await language_runtime.get_language(self.bot, member.guild.id)
         if inviter_id:
             stats = await self.bot.db.get_invite_stats(member.guild.id, int(inviter_id))
             count = int(stats.get("active", 0))
-            suffix = "invite" if count == 1 else "invites"
-            text = (
-                f"{member.mention} has been invited by <@{int(inviter_id)}> "
-                f"and has now **{count}** {suffix}."
-            )
+            if language == language_runtime.LANG_EN:
+                suffix = "invite" if count == 1 else "invites"
+                text = (
+                    f"{member.mention} was invited by <@{int(inviter_id)}> "
+                    f"and now has **{count}** {suffix}."
+                )
+            else:
+                suffix = "invitation" if count == 1 else "invitations"
+                text = (
+                    f"{member.mention} a été invité par <@{int(inviter_id)}> "
+                    f"et possède maintenant **{count}** {suffix}."
+                )
         else:
-            text = f"{member.mention} joined the server, but SentriX couldn't determine who invited them."
+            text = (
+                f"{member.mention} joined the server, but SentriX couldn't determine who invited them."
+                if language == language_runtime.LANG_EN
+                else f"{member.mention} a rejoint le serveur, mais SentriX n’a pas pu déterminer qui l’a invité."
+            )
         await _send_feed_message(self.bot, member.guild, text)
 
     @commands.Cog.listener()
@@ -395,12 +435,19 @@ class InviteTrackerRuntime(commands.Cog):
         row = await self.bot.db.get_invited_by(member.guild.id, member.id)
         inviter_id = row["inviter_id"] if row and row["inviter_id"] else None
         display = discord.utils.escape_markdown(member.display_name or member.name)
+        language = await language_runtime.get_language(self.bot, member.guild.id)
         if inviter_id:
-            text = f"**{display}** has left the server. They had been invited by <@{int(inviter_id)}> ."
-            # Retire l'espace avant le point tout en gardant le format lisible dans le code.
-            text = text.replace("> .", ">.")
+            text = (
+                f"**{display}** left the server. They had been invited by <@{int(inviter_id)}>."
+                if language == language_runtime.LANG_EN
+                else f"**{display}** a quitté le serveur. Il avait été invité par <@{int(inviter_id)}>."
+            )
         else:
-            text = f"**{display}** has left the server. Their inviter was unknown."
+            text = (
+                f"**{display}** left the server. Their inviter was unknown."
+                if language == language_runtime.LANG_EN
+                else f"**{display}** a quitté le serveur. Son invitant était inconnu."
+            )
         await _send_feed_message(self.bot, member.guild, text)
 
 
