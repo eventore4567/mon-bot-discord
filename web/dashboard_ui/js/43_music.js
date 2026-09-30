@@ -13,7 +13,7 @@ function musicTrackName(track) {
     ? `${track.artist} — ${track.title}` : (track.title || 'Titre inconnu');
 }
 function musicVoiceOptions(data) {
-  const current = String(data.voice_channel_id || '');
+  const current = String(data.configured_voice_channel_id || data.voice_channel_id || '');
   const rows = data.voice_channels || [];
   return '<option value="">Choisir un salon vocal</option>' + rows.map(ch => {
     const disabled = !ch.can_connect || !ch.can_speak;
@@ -35,7 +35,7 @@ async function musicRequest(path, body = {}, method = 'POST') {
   }
 }
 function musicSelectedVoice(data) {
-  return $('musicVoice')?.value || data.voice_channel_id || '';
+  return data.configured_voice_channel_id || $('musicVoice')?.value || data.voice_channel_id || '';
 }
 
 async function renderMusicPlayer(data) {
@@ -50,7 +50,24 @@ async function renderMusicPlayer(data) {
       </div>
     </div>` : emptyState('Aucune musique en cours', 'Choisissez un vocal puis recherchez un titre, un artiste ou collez un lien.');
 
+  const musicSystemCard = card(
+    'Système musique',
+    data.system_enabled
+      ? 'Actif : le petit lecteur apparaît dans le chat du vocal quand un membre le rejoint.'
+      : 'Désactivé : choisissez un vocal puis activez le système.',
+    '<div class="fields">' +
+      '<label class="switch-row"><span class="switch-copy"><b>Activer le système musique</b><span>Coupe aussi la connexion vocale quand il est désactivé.</span></span>' +
+      '<input id="musicSystemEnabled" class="switch" type="checkbox" ' + (data.system_enabled ? 'checked' : '') + '></label>' +
+      '<div class="field full"><label for="musicSystemVoice">Vocal musique</label><select id="musicSystemVoice">' + musicVoiceOptions(data) + '</select>' +
+      '<small>Ce vocal devient le hub musique. Les membres y reçoivent le panneau de choix de musique.</small></div>' +
+    '</div>' +
+    '<div class="toolbar"><button class="btn primary" id="musicSystemSave" type="button">Enregistrer</button></div>',
+    'full'
+  );
+
   content().innerHTML = `<div class="grid">
+    ${musicSystemCard}
+
     ${card('Connexion vocale', 'Choisissez exactement le salon que SentriX doit rejoindre.', `
       <div class="fields">
         <div class="field full"><label for="musicVoice">Salon vocal</label><select id="musicVoice">${musicVoiceOptions(data)}</select>
@@ -58,7 +75,7 @@ async function renderMusicPlayer(data) {
         </div>
       </div>
       <div class="toolbar">
-        <button class="btn primary" type="button" id="musicConnect">Rejoindre / déplacer</button>
+        <button class="btn primary" type="button" id="musicConnect" ${data.system_enabled ? '' : 'disabled'}>Rejoindre le vocal configuré</button>
         <button class="btn danger" type="button" id="musicLeave" ${data.connected ? '' : 'disabled'}>Quitter le vocal</button>
       </div>`, 'full')}
 
@@ -66,7 +83,7 @@ async function renderMusicPlayer(data) {
       <div class="fields"><div class="field full"><label for="musicQuery">Titre, artiste ou lien</label>
         <input id="musicQuery" type="text" maxlength="1000" placeholder="Ex. Faded Alan Walker ou https://…">
       </div></div>
-      <div class="toolbar"><button class="btn primary" type="button" id="musicPlay">Lire / ajouter à la file</button></div>`, 'full')}
+      <div class="toolbar"><button class="btn primary" type="button" id="musicPlay" ${data.system_enabled ? '' : 'disabled'}>Lire / ajouter à la file</button></div>`, 'full')}
 
     ${card('En lecture', '', currentBody, 'full')}
 
@@ -93,13 +110,21 @@ async function renderMusicPlayer(data) {
     </section>
   </div>`;
 
+  $('musicSystemSave').onclick = () => {
+    const enabled = $('musicSystemEnabled').checked;
+    const channelId = $('musicSystemVoice').value;
+    if (enabled && !channelId) return toast('Choisissez le vocal musique avant d’activer le système.', true);
+    musicRequest('/music/settings', { enabled, voice_channel_id: channelId || null });
+  };
   $('musicConnect').onclick = () => {
-    const channelId = $('musicVoice').value;
-    if (!channelId) return toast('Choisissez un salon vocal.', true);
+    if (!data.system_enabled) return toast('Activez d’abord le système musique.', true);
+    const channelId = data.configured_voice_channel_id || $('musicVoice').value;
+    if (!channelId) return toast('Configurez d’abord le vocal musique.', true);
     musicRequest('/music/connect', { channel_id: channelId });
   };
   $('musicLeave').onclick = () => musicRequest('/music/control', { action: 'leave' });
   $('musicPlay').onclick = () => {
+    if (!data.system_enabled) return toast('Activez d’abord le système musique.', true);
     const query = $('musicQuery').value.trim();
     if (!query) return toast('Entrez un titre, un artiste ou un lien.', true);
     musicRequest('/music/play', { query, channel_id: musicSelectedVoice(data) });

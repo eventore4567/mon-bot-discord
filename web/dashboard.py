@@ -38,6 +38,7 @@ DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
 BOT_INSTALL_URL = "https://discord.com/oauth2/authorize?client_id=1532010415951839252"
 SESSION_COOKIE = "sentrix_session"
 OAUTH_STATE_COOKIE = "sentrix_oauth_state"
+INSTALL_FLOW_COOKIE = "sentrix_install_flow"
 SESSION_TTL = 12 * 60 * 60
 OAUTH_STATE_TTL = 10 * 60
 ADMINISTRATOR = 1 << 3
@@ -171,12 +172,17 @@ def _verify_signed_oauth_state(request: web.Request, state: str) -> bool:
 
 
 def _invite_url(bot, guild_id: int | None = None) -> str:
-    """Lien canonique d'installation de SentriX.
+    """Lien officiel d'installation.
 
-    Il est volontairement séparé du client OAuth du dashboard : modifier le bouton
-    « Ajouter SentriX » ne doit jamais changer le flux de connexion identify/guilds.
+    Quand le dashboard public est configuré, on passe par /install : Discord ajoute
+    le bot puis renvoie le même navigateur vers /app. Le lien Discord direct reste
+    le repli si OAuth n'est pas disponible.
     """
-    return BOT_INSTALL_URL
+    base = (config.DASHBOARD_PUBLIC_URL or "").strip().rstrip("/")
+    if not base:
+        return BOT_INSTALL_URL
+    suffix = f"?guild_id={int(guild_id)}" if guild_id else ""
+    return f"{base}/install{suffix}"
 
 
 def _avatar_url(user: dict) -> str | None:
@@ -380,6 +386,66 @@ def _canonical_redirect(request: web.Request) -> web.HTTPFound | None:
     return web.HTTPFound(target)
 
 
+async def handle_install(request: web.Request):
+    bot = request.app["bot"]
+    if not _oauth_ready(bot):
+        raise web.HTTPFound(BOT_INSTALL_URL)
+    redirect = _canonical_redirect(request)
+    if redirect is not None:
+        raise redirect
+
+    state = _new_oauth_state(request)
+    request.app["oauth_states"][state] = time.time() + OAUTH_STATE_TTL
+    redirect_uri = f"{_public_url(request)}/oauth/callback"
+    permissions = discord.Permissions(
+        view_audit_log=True,
+        manage_guild=True,
+        manage_roles=True,
+        manage_channels=True,
+        kick_members=True,
+        ban_members=True,
+        moderate_members=True,
+        manage_messages=True,
+        embed_links=True,
+        attach_files=True,
+        read_message_history=True,
+        add_reactions=True,
+        connect=True,
+        speak=True,
+    ).value
+    params = {
+        "response_type": "code",
+        "client_id": _client_id(bot),
+        "scope": "identify guilds bot applications.commands",
+        "state": state,
+        "redirect_uri": redirect_uri,
+        "prompt": "consent",
+        "permissions": str(permissions),
+    }
+    guild_id = str(request.query.get("guild_id") or "").strip()
+    if guild_id.isdigit():
+        params["guild_id"] = guild_id
+    response = web.HTTPFound(f"{DISCORD_AUTHORIZE}?{urlencode(params)}")
+    secure = _public_url(request).startswith("https://")
+    response.set_cookie(
+        OAUTH_STATE_COOKIE,
+        state,
+        max_age=OAUTH_STATE_TTL,
+        httponly=True,
+        secure=secure,
+        samesite="Lax",
+    )
+    response.set_cookie(
+        INSTALL_FLOW_COOKIE,
+        "1",
+        max_age=OAUTH_STATE_TTL,
+        httponly=True,
+        secure=secure,
+        samesite="Lax",
+    )
+    raise response
+
+
 async def handle_login(request: web.Request):
     bot = request.app["bot"]
     if not _oauth_ready(bot):
@@ -434,6 +500,7 @@ async def handle_login(request: web.Request):
 
 
 async def handle_callback(request: web.Request):
+    install_flow = request.cookies.get(INSTALL_FLOW_COOKIE) == "1"
     state = request.query.get("state", "")
     code = request.query.get("code", "")
     oauth_error = request.query.get("error", "")
@@ -553,7 +620,8 @@ async def handle_callback(request: web.Request):
         "csrf": secrets.token_urlsafe(32),
         "expires_at": time.time() + SESSION_TTL,
     }
-    response = web.HTTPFound("/app")
+    response = web.HTTPFound("/app?installed=1" if install_flow else "/app")
+    response.del_cookie(INSTALL_FLOW_COOKIE)
     response.set_cookie(
         SESSION_COOKIE,
         session_id,
@@ -1420,6 +1488,7 @@ def build_app(bot) -> web.Application:
     app.router.add_get("/", handle_index)
     app.router.add_get("/app", handle_index)
     app.router.add_get("/health", handle_health)
+    app.router.add_get("/install", handle_install)
     app.router.add_get("/login", handle_login)
     app.router.add_get("/oauth/callback", handle_callback)
     app.router.add_post("/logout", handle_logout)

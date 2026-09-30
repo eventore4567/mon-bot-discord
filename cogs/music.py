@@ -39,6 +39,74 @@ FFMPEG_OPTIONS = {
 }
 INACTIVITY_DISCONNECT_SECONDS = 5 * 60
 
+MUSIC_SETTINGS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_music_settings (
+    guild_id INTEGER PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    voice_channel_id INTEGER,
+    updated_by INTEGER,
+    updated_at INTEGER NOT NULL DEFAULT 0
+)
+"""
+
+
+async def ensure_music_settings_schema(bot) -> None:
+    await bot.db.execute(MUSIC_SETTINGS_SCHEMA)
+
+
+async def get_music_settings(bot, guild_id: int) -> dict:
+    await ensure_music_settings_schema(bot)
+    row = await bot.db.fetchone(
+        "SELECT enabled,voice_channel_id,updated_by,updated_at "
+        "FROM sentrix_music_settings WHERE guild_id=?",
+        (int(guild_id),),
+    )
+    if row is None:
+        return {
+            "enabled": False,
+            "voice_channel_id": None,
+            "updated_by": None,
+            "updated_at": 0,
+        }
+    return {
+        "enabled": bool(row["enabled"]),
+        "voice_channel_id": int(row["voice_channel_id"]) if row["voice_channel_id"] else None,
+        "updated_by": int(row["updated_by"]) if row["updated_by"] else None,
+        "updated_at": int(row["updated_at"] or 0),
+    }
+
+
+async def save_music_settings(
+    bot,
+    guild_id: int,
+    *,
+    enabled: bool,
+    voice_channel_id: int | None,
+    actor_id: int | None = None,
+) -> dict:
+    await ensure_music_settings_schema(bot)
+    now = int(time.time())
+    await bot.db.execute(
+        "INSERT INTO sentrix_music_settings "
+        "(guild_id,enabled,voice_channel_id,updated_by,updated_at) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET "
+        "enabled=excluded.enabled,voice_channel_id=excluded.voice_channel_id,"
+        "updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+        (
+            int(guild_id),
+            1 if enabled else 0,
+            int(voice_channel_id) if voice_channel_id else None,
+            int(actor_id) if actor_id else None,
+            now,
+        ),
+    )
+    return {
+        "enabled": bool(enabled),
+        "voice_channel_id": int(voice_channel_id) if voice_channel_id else None,
+        "updated_by": int(actor_id) if actor_id else None,
+        "updated_at": now,
+    }
+
 
 class GuildMusicQueue:
     """État musical d'UN serveur — jamais partagé entre serveurs (demande
@@ -80,11 +148,141 @@ def _classify_engine_error(exc: MusicEngineError) -> tuple[str, str]:
     return "Lecture impossible", "Une erreur est survenue pendant la résolution de ce morceau."
 
 
+class MusicSearchModal(discord.ui.Modal, title="Choisir une musique"):
+    recherche = discord.ui.TextInput(
+        label="Titre, artiste ou lien",
+        placeholder="Ex. Faded Alan Walker ou un lien YouTube / Spotify",
+        max_length=1000,
+    )
+
+    def __init__(self, bot: commands.Bot, guild_id: int, voice_channel_id: int):
+        super().__init__()
+        self.bot = bot
+        self.guild_id = int(guild_id)
+        self.voice_channel_id = int(voice_channel_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        music = self.bot.get_cog("Music")
+        if music is None or interaction.guild is None:
+            return await interaction.response.send_message(
+                "Le lecteur musique est indisponible pour le moment.",
+                ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        ok, message = await music.play_from_voice_panel(
+            interaction.guild,
+            interaction.user,
+            self.voice_channel_id,
+            str(self.recherche.value or "").strip(),
+            text_channel=interaction.channel,
+        )
+        await interaction.followup.send(message, ephemeral=True)
+
+
+class MusicVoicePanel(discord.ui.View):
+    def __init__(self, bot: commands.Bot, guild_id: int, voice_channel_id: int):
+        super().__init__(timeout=10 * 60)
+        self.bot = bot
+        self.guild_id = int(guild_id)
+        self.voice_channel_id = int(voice_channel_id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        member = interaction.user
+        voice = getattr(member, "voice", None)
+        channel = getattr(voice, "channel", None)
+        if interaction.guild_id != self.guild_id or channel is None or channel.id != self.voice_channel_id:
+            await interaction.response.send_message(
+                "Rejoins ce salon vocal pour utiliser son lecteur musique.",
+                ephemeral=True,
+            )
+            return False
+        settings = await get_music_settings(self.bot, self.guild_id)
+        if not settings["enabled"] or settings["voice_channel_id"] != self.voice_channel_id:
+            await interaction.response.send_message(
+                "Le système musique de ce salon est désactivé ou a été reconfiguré.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Choisir une musique", style=discord.ButtonStyle.primary, row=0)
+    async def choose_music(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(
+            MusicSearchModal(self.bot, self.guild_id, self.voice_channel_id)
+        )
+
+    @discord.ui.button(label="Pause / Reprendre", style=discord.ButtonStyle.secondary, row=0)
+    async def pause_resume(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        music = self.bot.get_cog("Music")
+        if music is None:
+            return await interaction.response.send_message("Lecteur indisponible.", ephemeral=True)
+        queue = music.get_queue(self.guild_id)
+        voice = queue.voice_client or interaction.guild.voice_client
+        if voice and voice.is_playing():
+            voice.pause()
+            message = "Musique mise en pause."
+        elif voice and voice.is_paused():
+            voice.resume()
+            message = "Lecture reprise."
+        else:
+            message = "Aucune musique n'est en lecture."
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary, row=0)
+    async def skip(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        music = self.bot.get_cog("Music")
+        if music is None:
+            return await interaction.response.send_message("Lecteur indisponible.", ephemeral=True)
+        queue = music.get_queue(self.guild_id)
+        voice = queue.voice_client or interaction.guild.voice_client
+        if not voice or not (voice.is_playing() or voice.is_paused()):
+            return await interaction.response.send_message("Aucune musique à passer.", ephemeral=True)
+        queue.loop_track = False
+        voice.stop()
+        await interaction.response.send_message("Passage au titre suivant.", ephemeral=True)
+
+    @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger, row=0)
+    async def stop(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        music = self.bot.get_cog("Music")
+        if music is None:
+            return await interaction.response.send_message("Lecteur indisponible.", ephemeral=True)
+        queue = music.get_queue(self.guild_id)
+        voice = queue.voice_client or interaction.guild.voice_client
+        queue.tracks.clear()
+        queue.loop_track = False
+        queue.loop_queue = False
+        queue.autoplay = False
+        if voice and (voice.is_playing() or voice.is_paused()):
+            voice.stop()
+        queue.current = None
+        await interaction.response.send_message("Lecture arrêtée et file vidée.", ephemeral=True)
+
+    @discord.ui.button(label="Voir la file", style=discord.ButtonStyle.secondary, row=1)
+    async def queue(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        music = self.bot.get_cog("Music")
+        if music is None:
+            return await interaction.response.send_message("Lecteur indisponible.", ephemeral=True)
+        queue = music.get_queue(self.guild_id)
+        lines = []
+        if queue.current:
+            lines.append(f"En cours : **{queue.current.display_title()}**")
+        for index, track in enumerate(queue.tracks[:10], 1):
+            lines.append(f"{index}. {track.display_title()}")
+        if len(queue.tracks) > 10:
+            lines.append(f"... et {len(queue.tracks) - 10} autre(s).")
+        await interaction.response.send_message(
+            "\n".join(lines) if lines else "La file d'attente est vide.",
+            ephemeral=True,
+        )
+
+
 class Music(commands.Cog, name="Music"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.manager = ProviderManager()
         self.queues: dict[int, GuildMusicQueue] = {}
+        self._panel_locks: dict[int, asyncio.Lock] = {}
+        self._join_panel_cooldowns: dict[tuple[int, int], float] = {}
         self._inactivity_checker.start()
 
     def cog_unload(self):
@@ -94,6 +292,150 @@ class Music(commands.Cog, name="Music"):
         if guild_id not in self.queues:
             self.queues[guild_id] = GuildMusicQueue(guild_id)
         return self.queues[guild_id]
+
+    async def get_system_settings(self, guild_id: int) -> dict:
+        return await get_music_settings(self.bot, guild_id)
+
+    async def configure_system(
+        self,
+        guild: discord.Guild,
+        *,
+        enabled: bool,
+        voice_channel_id: int | None,
+        actor_id: int | None = None,
+    ) -> dict:
+        channel = None
+        if voice_channel_id:
+            channel = guild.get_channel(int(voice_channel_id))
+            if not isinstance(channel, discord.VoiceChannel):
+                raise ValueError("Choisissez un salon vocal valide.")
+            me = guild.me
+            if me is not None:
+                perms = channel.permissions_for(me)
+                missing = []
+                if not perms.view_channel:
+                    missing.append("Voir le salon")
+                if not perms.connect:
+                    missing.append("Se connecter")
+                if not perms.speak:
+                    missing.append("Parler")
+                if not getattr(perms, "send_messages", True):
+                    missing.append("Envoyer des messages")
+                if missing:
+                    raise ValueError(
+                        "SentriX n'a pas les permissions nécessaires dans ce vocal : "
+                        + ", ".join(missing)
+                        + "."
+                    )
+        if enabled and channel is None:
+            raise ValueError("Choisissez le salon vocal du système musique avant de l'activer.")
+
+        settings = await save_music_settings(
+            self.bot,
+            guild.id,
+            enabled=bool(enabled),
+            voice_channel_id=channel.id if channel else None,
+            actor_id=actor_id,
+        )
+        if not enabled:
+            await self.shutdown_guild_music(guild.id)
+        return settings
+
+    async def shutdown_guild_music(self, guild_id: int) -> None:
+        queue = self.get_queue(guild_id)
+        self._cancel_disconnect(queue)
+        voice = queue.voice_client
+        queue.tracks.clear()
+        queue.history.clear()
+        queue.loop_track = False
+        queue.loop_queue = False
+        queue.autoplay = False
+        queue.current = None
+        if voice and (voice.is_playing() or voice.is_paused()):
+            voice.stop()
+        if voice and voice.is_connected():
+            try:
+                await voice.disconnect()
+            except discord.HTTPException:
+                pass
+        queue.voice_client = None
+
+    async def _connect_configured_voice(
+        self,
+        guild: discord.Guild,
+        channel: discord.VoiceChannel,
+        *,
+        text_channel=None,
+    ) -> GuildMusicQueue:
+        me = guild.me
+        if me is None:
+            raise RuntimeError("SentriX n'est pas encore prêt sur ce serveur.")
+        perms = channel.permissions_for(me)
+        if not perms.view_channel or not perms.connect or not perms.speak:
+            raise PermissionError("SentriX n'a pas les permissions pour rejoindre et parler dans ce vocal.")
+
+        queue = self.get_queue(guild.id)
+        voice = queue.voice_client or guild.voice_client
+        if voice and voice.is_connected():
+            if voice.channel.id != channel.id:
+                await voice.move_to(channel)
+        else:
+            voice = await channel.connect()
+        queue.voice_client = voice
+        if text_channel is not None:
+            queue.text_channel = text_channel
+        self._cancel_disconnect(queue)
+        return queue
+
+    async def play_from_voice_panel(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        voice_channel_id: int,
+        query: str,
+        *,
+        text_channel=None,
+    ) -> tuple[bool, str]:
+        query = str(query or "").strip()
+        if not query:
+            return False, "Entre un titre, un artiste ou un lien."
+        settings = await self.get_system_settings(guild.id)
+        if not settings["enabled"]:
+            return False, "Le système musique est désactivé."
+        if settings["voice_channel_id"] != int(voice_channel_id):
+            return False, "Ce vocal n'est plus le salon musique configuré."
+        member_voice = getattr(member, "voice", None)
+        if member_voice is None or member_voice.channel is None or member_voice.channel.id != int(voice_channel_id):
+            return False, "Rejoins le vocal musique avant de choisir un titre."
+        channel = guild.get_channel(int(voice_channel_id))
+        if not isinstance(channel, discord.VoiceChannel):
+            return False, "Le vocal musique configuré n'existe plus."
+
+        lock = self._panel_locks.setdefault(guild.id, asyncio.Lock())
+        async with lock:
+            try:
+                queue = await self._connect_configured_voice(
+                    guild,
+                    channel,
+                    text_channel=text_channel,
+                )
+                resolved = await self.manager.resolve(query, requested_by=member.id)
+            except MusicEngineError as exc:
+                _title, description = _classify_engine_error(exc)
+                return False, description
+            except (PermissionError, RuntimeError, discord.Forbidden, discord.HTTPException) as exc:
+                return False, str(exc) or "Connexion vocale impossible."
+
+            if not resolved.tracks:
+                return False, "Aucun titre jouable n'a été trouvé."
+            queue.tracks.extend(resolved.tracks)
+            started = False
+            if not (queue.voice_client.is_playing() or queue.voice_client.is_paused()) and not queue.current:
+                await self._advance(queue)
+                started = queue.current is not None
+            if started and queue.current:
+                return True, f"Lecture démarrée : **{queue.current.display_title()}**."
+            return True, f"{len(resolved.tracks)} titre(s) ajouté(s) à la file."
 
     async def _embed(self, guild_id: int, *, title: str, description: str | None = None, kind: str = "primary") -> discord.Embed:
         design = await self.bot.db.get_design_settings(guild_id)
@@ -114,18 +456,67 @@ class Music(commands.Cog, name="Music"):
     # ------------------------------------------------------------ VOIX / LECTURE
 
     async def _ensure_voice(self, ctx: commands.Context) -> GuildMusicQueue | None:
-        if not ctx.author.voice:
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Salon vocal requis", description="Vous devez être dans un salon vocal.", kind="danger")))
+        settings = await self.get_system_settings(ctx.guild.id)
+        if not settings["enabled"]:
+            await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await self._embed(
+                        ctx.guild.id,
+                        title="Musique désactivée",
+                        description="Activez d'abord le système musique dans `+setup` ou le dashboard.",
+                        kind="danger",
+                    )
+                ),
+            )
             return None
-        queue = self.get_queue(ctx.guild.id)
-        queue.text_channel = ctx.channel
-        if queue.voice_client and queue.voice_client.is_connected():
-            if queue.voice_client.channel.id != ctx.author.voice.channel.id:
-                await queue.voice_client.move_to(ctx.author.voice.channel)
-        else:
-            queue.voice_client = await ctx.author.voice.channel.connect()
-        self._cancel_disconnect(queue)
-        return queue
+        channel_id = settings["voice_channel_id"]
+        channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+        if not isinstance(channel, discord.VoiceChannel):
+            await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await self._embed(
+                        ctx.guild.id,
+                        title="Vocal musique non configuré",
+                        description="Choisissez le salon vocal du système musique dans `+setup` ou le dashboard.",
+                        kind="danger",
+                    )
+                ),
+            )
+            return None
+        if not ctx.author.voice or ctx.author.voice.channel.id != channel.id:
+            await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await self._embed(
+                        ctx.guild.id,
+                        title="Rejoignez le vocal musique",
+                        description=f"Rejoignez **{channel.name}** pour utiliser le lecteur.",
+                        kind="danger",
+                    )
+                ),
+            )
+            return None
+        try:
+            return await self._connect_configured_voice(
+                ctx.guild,
+                channel,
+                text_channel=ctx.channel,
+            )
+        except (PermissionError, RuntimeError, discord.Forbidden, discord.HTTPException) as exc:
+            await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await self._embed(
+                        ctx.guild.id,
+                        title="Connexion vocale impossible",
+                        description=str(exc) or "SentriX ne peut pas rejoindre ce vocal.",
+                        kind="danger",
+                    )
+                ),
+            )
+            return None
 
     def _cancel_disconnect(self, queue: GuildMusicQueue) -> None:
         if queue.disconnect_task and not queue.disconnect_task.done():
@@ -263,6 +654,72 @@ class Music(commands.Cog, name="Music"):
                 await queue.text_channel.send(embed=embed)
             except discord.HTTPException:
                 pass
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ):
+        if member.bot or after.channel is None:
+            return
+        if before.channel is not None and before.channel.id == after.channel.id:
+            return
+
+        settings = await self.get_system_settings(member.guild.id)
+        configured_id = settings["voice_channel_id"]
+        if not settings["enabled"] or configured_id != after.channel.id:
+            return
+
+        key = (member.guild.id, member.id)
+        now = time.monotonic()
+        if now - self._join_panel_cooldowns.get(key, 0.0) < 90:
+            return
+        self._join_panel_cooldowns[key] = now
+
+        me = member.guild.me
+        if me is None:
+            return
+        perms = after.channel.permissions_for(me)
+        if not perms.view_channel or not getattr(perms, "send_messages", False):
+            logger.warning(
+                "music voice panel skipped: missing chat permission guild=%s channel=%s",
+                member.guild.id,
+                after.channel.id,
+            )
+            return
+
+        try:
+            try:
+                target = self.bot.get_partial_messageable(
+                    after.channel.id,
+                    guild_id=member.guild.id,
+                    type=discord.ChannelType.voice,
+                )
+            except TypeError:
+                target = self.bot.get_partial_messageable(after.channel.id)
+
+            await target.send(
+                content=(
+                    f"{member.mention} bienvenue dans le vocal musique. "
+                    "Choisis un titre avec le petit lecteur ci-dessous."
+                ),
+                view=MusicVoicePanel(self.bot, member.guild.id, after.channel.id),
+                allowed_mentions=discord.AllowedMentions(
+                    users=[member],
+                    roles=False,
+                    everyone=False,
+                    replied_user=False,
+                ),
+                delete_after=10 * 60,
+            )
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            logger.exception(
+                "Impossible d'envoyer le panneau musique dans le chat vocal guild=%s channel=%s",
+                member.guild.id,
+                after.channel.id,
+            )
 
     @tasks.loop(minutes=1)
     async def _inactivity_checker(self):

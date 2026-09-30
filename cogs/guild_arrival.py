@@ -38,6 +38,9 @@ def _dashboard_url() -> str | None:
 
 
 def _invite_url(bot: commands.Bot) -> str | None:
+    public = _safe_url(getattr(config, "DASHBOARD_PUBLIC_URL", None))
+    if public:
+        return f"{public.rstrip('/')}/install"
     user = getattr(bot, "user", None)
     if user is None:
         return None
