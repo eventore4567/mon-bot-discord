@@ -6,9 +6,11 @@ Discord Event -> Audit Log corrélé -> normalisation -> déduplication -> grand
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
+from types import SimpleNamespace
 
 import discord
 from discord.ext import commands
@@ -162,6 +164,54 @@ class Logs(commands.Cog, name="Logs"):
             return None, None
         return None, None
 
+    async def _message_delete_actor(
+        self,
+        guild: discord.Guild,
+        author_id: int,
+        channel_id: int,
+    ) -> tuple[discord.abc.User | None, discord.AuditLogEntry | None]:
+        """Essaie d'identifier qui a supprimé le message.
+
+        Discord ne fournit pas l'ID du message dans l'audit log. On corrèle donc
+        strictement l'auteur cible + le salon + une fenêtre très courte. Une
+        suppression faite par l'auteur lui-même ne produit pas d'entrée d'audit :
+        dans ce cas on laisse explicitement l'exécuteur inconnu au lieu d'inventer.
+        """
+        if guild.me is None or not guild.me.guild_permissions.view_audit_log:
+            return None, None
+
+        for delay in (0.15, 0.45, 0.85):
+            if delay:
+                await asyncio.sleep(delay)
+            now = discord.utils.utcnow()
+            try:
+                async for entry in guild.audit_logs(
+                    limit=12,
+                    action=discord.AuditLogAction.message_delete,
+                ):
+                    if getattr(entry.target, "id", None) != int(author_id):
+                        continue
+                    if abs((now - entry.created_at).total_seconds()) > 4:
+                        continue
+                    extra_channel = getattr(getattr(entry, "extra", None), "channel", None)
+                    extra_channel_id = getattr(extra_channel, "id", None)
+                    if extra_channel_id is not None and int(extra_channel_id) != int(channel_id):
+                        continue
+                    return entry.user, entry
+            except (discord.Forbidden, discord.HTTPException):
+                return None, None
+        return None, None
+
+    @staticmethod
+    def _delete_actor_text(actor) -> str:
+        if actor is None:
+            return "Exécuteur inconnu · suppression par l’auteur possible"
+        actor_id = getattr(actor, "id", None)
+        name = getattr(actor, "display_name", None) or getattr(actor, "name", None) or str(actor)
+        if actor_id:
+            return f"{getattr(actor, 'mention', name)}\nID : `{actor_id}`"
+        return str(name)
+
     async def _cache_message(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot:
             return
@@ -233,8 +283,14 @@ class Logs(commands.Cog, name="Logs"):
             attachments = json.loads(row["attachments"] or "[]")
         except (TypeError, ValueError, json.JSONDecodeError):
             attachments = []
+        actor, audit = await self._message_delete_actor(
+            guild,
+            author_id,
+            channel_id,
+        ) if channel_id else (None, None)
         fields = [
             ("Auteur", _user_ref(author_id), True),
+            ("Supprimé par", self._delete_actor_text(actor), True),
             ("Salon", _channel_ref(channel_id) if channel_id else None, True),
             ("Contenu", _short(content, 1024) if content else None, False),
             (
@@ -244,7 +300,17 @@ class Logs(commands.Cog, name="Logs"):
             ),
         ]
         member = guild.get_member(author_id)
-        panel = self._embed("Message supprimé", identity=member, fields=fields)
+        identity = member
+        if identity is None:
+            cached_name = str(row["author_name"] or "").strip()
+            if cached_name:
+                identity = SimpleNamespace(
+                    id=author_id,
+                    display_name=cached_name,
+                    name=cached_name,
+                    display_avatar=None,
+                )
+        panel = self._embed("Message supprimé", identity=identity, fields=fields)
         view = log_service.log_actions(
             ids=[
                 ("Copier l'ID de l'auteur", author_id),
@@ -284,8 +350,14 @@ class Logs(commands.Cog, name="Logs"):
         if log_service.is_purged(message.id):
             # Supprimé par +clear : le récapitulatif de purge remplace la carte individuelle.
             return
+        actor, audit = await self._message_delete_actor(
+            message.guild,
+            message.author.id,
+            message.channel.id,
+        )
         fields = [
             ("Auteur", _user_ref(message.author.id), True),
+            ("Supprimé par", self._delete_actor_text(actor), True),
             ("Salon", _channel_ref(message.channel.id), True),
             ("Contenu", _short(message.content, 1024) if message.content else None, False),
             (
