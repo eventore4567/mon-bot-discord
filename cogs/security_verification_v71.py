@@ -764,8 +764,23 @@ class SecurityVerificationRuntimeV71:
         failures = getattr(engine, "_failures", {}).get((member.guild.id, member.id), [])
         recent_failures = [stamp for stamp in failures if time.time() - float(stamp) <= 600]
 
-        unverified_present = any(role.name == "Non vérifié" for role in member.roles)
-        verified_preassigned = any(role.name == "Vérifié" for role in member.roles)
+        reinforced = None
+        config_fn = getattr(engine, "config", None)
+        if callable(config_fn):
+            try:
+                reinforced = await config_fn(member.guild.id)
+            except Exception:
+                reinforced = None
+        unverified_id = int(_get(reinforced, "unverified_role_id", 0) or 0)
+        verified_id = int(_get(reinforced, "verified_role_id", 0) or 0)
+        unverified_present = (
+            any(role.id == unverified_id for role in member.roles)
+            if unverified_id else False
+        )
+        verified_preassigned = (
+            any(role.id == verified_id for role in member.roles)
+            if verified_id else False
+        )
         role_state_ok = unverified_present and not verified_preassigned
 
         gateway_checks: dict[str, bool | None] = {
