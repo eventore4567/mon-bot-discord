@@ -24,6 +24,22 @@ _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _DISCORD_MARKUP_RE = re.compile(r"<(?:@!?|@&|#)\d+>|<a?:[A-Za-z0-9_]+:\d+>")
 _NO_SPACE_SCRIPT_RE = re.compile(r"[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u9fff]")
 
+# Termes pouvant être vulgaires, sexuels ou familiers sans constituer à eux seuls
+# une insulte envers quelqu'un. L'anti-insulte ne doit pas supprimer un message
+# simplement parce qu'il contient l'un de ces mots isolés. Les PHRASES/groupes du
+# dataset restent analysés : par exemple un terme ambigu intégré à une attaque
+# explicite peut toujours être détecté par le moteur contextuel.
+_AMBIGUOUS_STANDALONE_TERMS = frozenset({
+    "anal", "anus", "bdsm", "bite", "bobo", "boob", "butt", "caca", "cul",
+    "fan", "guro", "meuf", "milf", "mama", "nsfw", "nude", "orgy", "pipi",
+    "porn", "porno", "pot", "scat", "sex", "sexo", "sexy", "sm", "smut",
+    "trio", "xx", "xxx", "yaoi", "zizi",
+})
+
+# Les tokens de 1–2 caractères sont beaucoup trop ambigus dans un dataset
+# multilingue pour justifier une suppression de message à eux seuls.
+_MIN_STANDALONE_LENGTH = 3
+
 
 @dataclass(frozen=True)
 class ModerationMatch:
@@ -243,6 +259,12 @@ class MultilingualModerationDataset:
             elif self._ordered_token_group(tokens, group_tokens, max_gap):
                 return ModerationMatch("groupe_de_mots")
 
-        if any(token in self._terms for token in _tokens_candidats(tokens)):
+        for token in _tokens_candidats(tokens):
+            if token not in self._terms:
+                continue
+            if len(token) < _MIN_STANDALONE_LENGTH:
+                continue
+            if token in _AMBIGUOUS_STANDALONE_TERMS:
+                continue
             return ModerationMatch("mot")
         return None
