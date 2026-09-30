@@ -74,7 +74,7 @@ MODULES: tuple[ModuleSpec, ...] = (
     ModuleSpec("music", "Musique", "Lecteur vocal, salon musique et panneau interactif dans le chat du vocal.", (
         _s("system", "Système musique", "Activer ou désactiver la musique et choisir le vocal qui héberge le lecteur.", "music-config"),
     )),
-    ModuleSpec("members", "Membres", "Bienvenue, départ, vérification, autorôles et règlement.", (
+    ModuleSpec("members", "Bienvenue & Départ", "Arrivées, départs, vérification et rôles choisis manuellement.", (
         _s("welcome", "Bienvenue", "Salon et paramètres d'accueil des nouveaux membres.", "config:welcome_channel"),
         _s("goodbye", "Départ", "Salon et comportement lors du départ d'un membre.", "config:goodbye_channel"),
         _s("verify", "Rôle vérifié", "Choisir le rôle attribué après vérification.", "verification"),
