@@ -622,6 +622,25 @@ class Ai(commands.Cog, name="Ai"):
     def cog_unload(self):
         self._cleanup_memory.cancel()
 
+    async def _channel_blocks_ai(self, guild_id: int | None, channel_id: int | None) -> bool:
+        if guild_id is None or channel_id is None:
+            return False
+        try:
+            from cogs import channel_message_rules
+            return await channel_message_rules.restricts_bot_text(
+                self.bot,
+                int(guild_id),
+                int(channel_id),
+            )
+        except Exception:
+            logger.debug(
+                "Lecture règle de salon IA impossible guild=%s channel=%s",
+                guild_id,
+                channel_id,
+                exc_info=True,
+            )
+            return False
+
     @tasks.loop(minutes=10)
     async def _cleanup_memory(self):
         try:
@@ -790,6 +809,13 @@ class Ai(commands.Cog, name="Ai"):
     @commands.hybrid_command(name="sentrix", description="Demandez n'importe quoi à SentriX, l'IA du bot.")
     @app_commands.describe(question="Votre question, sur n'importe quel sujet")
     async def sentrix(self, ctx: commands.Context, *, question: str):
+        if ctx.guild and await self._channel_blocks_ai(ctx.guild.id, ctx.channel.id):
+            if ctx.interaction:
+                return await ctx.send(
+                    "Ce salon est réservé aux médias ou aux messages bloqués.",
+                    ephemeral=True,
+                )
+            return
         if ctx.interaction:
             await ctx.defer()
         # ctx.typing() donne un retour immédiat ("SentriX est en train d'écrire...") même
@@ -2263,6 +2289,8 @@ class Ai(commands.Cog, name="Ai"):
         settings = await ai_service.get_settings(self.bot, message.guild.id)
         if not settings["enabled"] or not ai_service.is_channel_allowed(settings, message.channel.id):
             return
+        if await self._channel_blocks_ai(message.guild.id, message.channel.id):
+            return
 
         question = content
         if mentioned:
@@ -2567,6 +2595,13 @@ class Ai(commands.Cog, name="Ai"):
             settings = await ai_service.get_settings(self.bot, guild_id)
             if not ai_service.is_channel_allowed(settings, channel_id):
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("L'IA n'est pas autorisée dans ce salon sur ce serveur.")))
+            if await self._channel_blocks_ai(guild_id, channel_id):
+                if ctx.interaction:
+                    return await ctx.send(
+                        "Ce salon est réservé aux médias ou aux messages bloqués.",
+                        ephemeral=True,
+                    )
+                return
             role_ids = [r.id for r in getattr(ctx.author, "roles", [])]
             if not ai_service.is_role_allowed(settings, role_ids):
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Vous n'avez pas le rôle nécessaire pour utiliser l'IA sur ce serveur.")))
