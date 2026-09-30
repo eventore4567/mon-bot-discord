@@ -381,6 +381,41 @@ class VerifySetupView(discord.ui.View):
         await self.bot.db.set_guild_config(self.guild.id, "verify_role", role.id)
         await self.bot.db.set_guild_config(self.guild.id, "verification_role", role.id)
         await self.bot.db.set_guild_config(self.guild.id, "verification_channel", channel.id)
+
+        # Le rôle choisi ici est l'unique rôle final. Synchronise aussi la
+        # vérification renforcée et nettoie l'ancien rôle final uniquement chez
+        # les membres encore "Non vérifié" (donc encore en attente).
+        reinforced_row = await self.bot.db.fetchone(
+            "SELECT unverified_role_id,verified_role_id FROM honeypot_verification WHERE guild_id=?",
+            (self.guild.id,),
+        )
+        if reinforced_row:
+            old_verified_id = int(reinforced_row["verified_role_id"] or 0)
+            unverified_id = int(reinforced_row["unverified_role_id"] or 0)
+            await self.bot.db.execute(
+                "UPDATE honeypot_verification SET verified_role_id=? WHERE guild_id=?",
+                (role.id, self.guild.id),
+            )
+            old_verified = self.guild.get_role(old_verified_id) if old_verified_id else None
+            unverified = self.guild.get_role(unverified_id) if unverified_id else None
+            if (
+                old_verified is not None
+                and old_verified.id != role.id
+                and unverified is not None
+            ):
+                for pending_member in list(unverified.members):
+                    if old_verified in pending_member.roles:
+                        try:
+                            await pending_member.remove_roles(
+                                old_verified,
+                                reason="SentriX : ancien rôle final remplacé dans +setup",
+                            )
+                        except (discord.Forbidden, discord.HTTPException):
+                            logger.warning(
+                                "Impossible de retirer l'ancien rôle final user=%s guild=%s.",
+                                pending_member.id,
+                                self.guild.id,
+                            )
         await self.bot.db.set_guild_config(self.guild.id, "verify_captcha_enabled", int(self.captcha_enabled))
         await self.bot.db.set_guild_config(self.guild.id, "verify_captcha_max_attempts", self.captcha_max_attempts)
         await self.bot.db.execute(
