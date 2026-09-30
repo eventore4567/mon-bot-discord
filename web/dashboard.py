@@ -35,6 +35,60 @@ logger = logging.getLogger("bot.dashboard")
 START_TIME = time.time()
 DISCORD_API = "https://discord.com/api/v10"
 DISCORD_AUTHORIZE = "https://discord.com/oauth2/authorize"
+DISCORD_API_RETRY_STATUSES = {429, 500, 502, 503, 504}
+DISCORD_API_MAX_ATTEMPTS = 3
+
+
+async def _discord_api_json(session: ClientSession, method: str, url: str, **kwargs):
+    """Appel Discord REST/OAuth borné, avec respect de Retry-After.
+
+    discord.py gère déjà les rate limits du bot ; ce helper couvre les appels HTTP
+    directs du dashboard (OAuth /users/@me /guilds), qui n'en bénéficient pas.
+    """
+    last_status = 0
+    last_payload = None
+    for attempt in range(1, DISCORD_API_MAX_ATTEMPTS + 1):
+        try:
+            async with session.request(method, url, **kwargs) as response:
+                last_status = response.status
+                try:
+                    payload = await response.json(content_type=None)
+                except Exception:
+                    payload = {"message": (await response.text())[:300]}
+                last_payload = payload
+
+                if response.status not in DISCORD_API_RETRY_STATUSES:
+                    return response.status, payload
+
+                if attempt >= DISCORD_API_MAX_ATTEMPTS:
+                    break
+
+                retry_after = 0.0
+                if response.status == 429 and isinstance(payload, dict):
+                    try:
+                        retry_after = float(payload.get("retry_after") or 0)
+                    except (TypeError, ValueError):
+                        retry_after = 0.0
+                if retry_after <= 0:
+                    header = response.headers.get("Retry-After")
+                    try:
+                        retry_after = float(header) if header else 0.0
+                    except (TypeError, ValueError):
+                        retry_after = 0.0
+                delay = min(max(retry_after, 0.5 * attempt), 5.0)
+                logger.warning(
+                    "Discord API temporairement indisponible status=%s tentative=%s/%s retry=%.2fs",
+                    response.status, attempt, DISCORD_API_MAX_ATTEMPTS, delay,
+                )
+                await asyncio.sleep(delay)
+        except asyncio.TimeoutError:
+            if attempt >= DISCORD_API_MAX_ATTEMPTS:
+                raise
+            await asyncio.sleep(min(0.5 * attempt, 2.0))
+
+    return last_status, last_payload
+
+
 BOT_INSTALL_URL = "https://discord.com/oauth2/authorize?client_id=1532010415951839252"
 SESSION_COOKIE = "sentrix_session"
 OAUTH_STATE_COOKIE = "sentrix_oauth_state"
@@ -544,30 +598,39 @@ async def handle_callback(request: web.Request):
     bot = request.app["bot"]
     redirect_uri = f"{_public_url(request)}/oauth/callback"
     try:
-        async with ClientSession() as client:
-            async with client.post(
+        timeout = __import__("aiohttp").ClientTimeout(total=12)
+        async with ClientSession(timeout=timeout) as client:
+            token_status, token_data = await _discord_api_json(
+                client,
+                "POST",
                 f"{DISCORD_API}/oauth2/token",
                 data={"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri},
                 auth=BasicAuth(_client_id(bot), config.DISCORD_CLIENT_SECRET),
-            ) as token_response:
-                if token_response.status != 200:
-                    logger.warning("Échange OAuth Discord refusé (%s).", token_response.status)
-                    raise web.HTTPFound("/?auth=failed")
-                token_data = await token_response.json()
+            )
+            if token_status != 200 or not isinstance(token_data, dict) or not token_data.get("access_token"):
+                logger.warning("Échange OAuth Discord refusé (%s).", token_status)
+                raise web.HTTPFound("/?auth=failed")
 
             headers = {"Authorization": f"Bearer {token_data['access_token']}"}
-            async with client.get(f"{DISCORD_API}/users/@me", headers=headers) as user_response:
-                user_response.raise_for_status()
-                user = await user_response.json()
+            user_status, user = await _discord_api_json(
+                client, "GET", f"{DISCORD_API}/users/@me", headers=headers
+            )
+            if user_status != 200 or not isinstance(user, dict):
+                logger.warning("Lecture identité OAuth Discord refusée (%s).", user_status)
+                raise web.HTTPFound("/?auth=failed")
 
             # Le flux de vérification est volontairement minimal : l'appartenance au
             # serveur est contrôlée ensuite avec le bot lui-même, donc aucune lecture de
             # la liste des serveurs Discord de l'utilisateur n'est nécessaire.
             oauth_guilds = []
             if pending_verify is None:
-                async with client.get(f"{DISCORD_API}/users/@me/guilds", headers=headers) as guild_response:
-                    guild_response.raise_for_status()
-                    oauth_guilds = await guild_response.json()
+                guild_status, guild_payload = await _discord_api_json(
+                    client, "GET", f"{DISCORD_API}/users/@me/guilds", headers=headers
+                )
+                if guild_status != 200 or not isinstance(guild_payload, list):
+                    logger.warning("Lecture des serveurs OAuth Discord refusée (%s).", guild_status)
+                    raise web.HTTPFound("/?auth=failed")
+                oauth_guilds = guild_payload
     except web.HTTPException:
         raise
     except Exception:
