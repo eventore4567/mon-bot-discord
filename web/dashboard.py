@@ -1694,6 +1694,21 @@ INDEX_HTML = r"""<!doctype html>
     #bootLoader .boot-mark{width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,var(--brand),#4736b4);box-shadow:0 0 40px #7c6cff55;display:grid;place-items:center;font-weight:800;font-size:20px;animation:sxBootPulse 1.4s ease-in-out infinite}
     @keyframes sxBootPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(.92);opacity:.75}}
     @media(prefers-reduced-motion:reduce){#bootLoader .boot-mark{animation:none}}
+    .nav-section-label{margin:14px 0 6px;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+    .nav [data-advanced].hidden{display:none}
+    .advanced-toggle{width:100%;margin-top:8px;justify-content:center}
+    .setup-path{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 18px}
+    .setup-step{min-height:72px;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--card);text-align:left;cursor:pointer;transition:.16s ease}
+    .setup-step:hover{transform:translateY(-2px);border-color:var(--brand)}
+    .setup-step b{display:block;font-size:13px;margin-bottom:4px}
+    .setup-step span{display:block;font-size:12px;color:var(--muted);line-height:1.35}
+    .fields{align-items:stretch}
+    .field-section{grid-column:1/-1;border:1px solid var(--border);border-radius:16px;padding:16px;background:color-mix(in srgb,var(--card) 92%,transparent)}
+    .field-section h3{margin:0 0 14px;font-size:13px}
+    .field-section-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch}
+    .field-section-grid>.field,.field-section-grid>.switch{min-height:100%;margin:0}
+    .field-section-grid>.full{grid-column:1/-1}
+    @media(max-width:900px){.setup-path{grid-template-columns:repeat(2,minmax(0,1fr))}.field-section-grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -1744,17 +1759,20 @@ INDEX_HTML = r"""<!doctype html>
       <div class="user"><div class="brand-logo avatar" id="userAvatar">U</div><div style="min-width:0"><b id="userName">Utilisateur</b><span>Connecté avec Discord</span></div></div>
       <div class="nav-label">Configuration</div>
       <nav class="nav" id="navigation">
+        <div class="nav-section-label">Essentiel</div>
         <button data-tab="general" class="active">Général</button>
         <button data-tab="security">Sécurité</button>
-        <button data-tab="sanctions">Sanctions</button>
         <button data-tab="logs">Logs</button>
-        <button data-tab="welcome">Accueil</button>
-        <button data-tab="levels">Niveaux</button>
         <button data-tab="tickets">Tickets</button>
-        <button data-tab="ai">Intelligence artificielle</button>
-        <button data-tab="notifications">Notifications</button>
-        <button data-tab="roles">Rôles et salons</button>
+        <button data-tab="welcome">Bienvenue & Départ</button>
+        <div class="nav-section-label">Plus de réglages</div>
+        <button data-tab="sanctions" data-advanced class="hidden">Sanctions</button>
+        <button data-tab="levels" data-advanced class="hidden">Niveaux</button>
+        <button data-tab="roles" data-advanced class="hidden">Rôles & Salons</button>
+        <button data-tab="ai" data-advanced class="hidden">Intelligence artificielle</button>
+        <button data-tab="notifications" data-advanced class="hidden">Notifications</button>
       </nav>
+      <button class="btn ghost advanced-toggle" id="advancedToggle" type="button">Afficher les réglages avancés</button>
       <div class="side-bottom">
         <a class="btn primary" id="appInvite" target="_blank" rel="noopener">Ajouter SentriX</a>
         <button class="btn ghost" id="logoutButton">Se déconnecter</button>
@@ -1772,6 +1790,12 @@ INDEX_HTML = r"""<!doctype html>
           <div class="metric"><small>Tickets ouverts</small><strong id="metricTickets">—</strong></div>
           <div class="metric"><small>Avertissements</small><strong id="metricWarnings">—</strong></div>
         </div>
+        <div class="setup-path" id="setupPath">
+          <button class="setup-step" type="button" data-jump="security"><b>1. Sécurité</b><span>Choisir les protections voulues.</span></button>
+          <button class="setup-step" type="button" data-jump="logs"><b>2. Logs</b><span>Choisir où envoyer chaque journal.</span></button>
+          <button class="setup-step" type="button" data-jump="tickets"><b>3. Tickets</b><span>Relier les tickets aux éléments existants.</span></button>
+          <button class="setup-step" type="button" data-jump="welcome"><b>4. Bienvenue & Départ</b><span>Choisir les salons et messages.</span></button>
+        </div>
         <section class="panel">
           <header class="panel-head"><div><h2 id="tabTitle">Configuration générale</h2><p id="tabDescription">Réglages essentiels du serveur.</p></div></header>
           <form id="settingsForm"><div class="fields" id="fields"></div><div class="savebar" id="saveBar"><span class="save-status" id="saveStatus">Aucune modification</span><button class="btn primary" id="saveButton" type="submit">Enregistrer</button></div></form>
@@ -1783,32 +1807,32 @@ INDEX_HTML = r"""<!doctype html>
 
   <div id="toast" class="toast hidden"></div>
   <script>
-    const state={publicData:null,user:null,csrf:null,guilds:[],guildData:null,guildId:null,guildAbort:null,guildRetryTimer:null,tab:"general",dirty:false,sanctions:[],sanctionNext:null,sanctionLoading:false};
+    const state={publicData:null,user:null,csrf:null,guilds:[],guildData:null,guildId:null,guildAbort:null,guildRetryTimer:null,tab:"general",dirty:false,advanced:false,sanctions:[],sanctionNext:null,sanctionLoading:false};
     const EMPTY_STATE_DEFAULT="Sélectionnez un serveur pour commencer. Les serveurs sans SentriX proposent directement le bouton d'invitation.";
     const tabs={
-      general:{title:"Configuration générale",description:"Préfixe, niveau de sécurité et sanctions automatiques.",fields:[
+      general:{title:"Configuration générale",description:"Les quelques réglages de base. Rien n'est configuré ou créé automatiquement.",fields:[
         {key:"prefix",label:"Préfixe des commandes",type:"text",hint:"Entre 1 et 5 caractères. Le préfixe par défaut est +."},
         {key:"security_level",label:"Niveau de sécurité",type:"choice",options:[["faible","Faible"],["moyen","Moyen"],["eleve","Élevé"]]},
         {key:"warn_ban_threshold",label:"Bannissement après avertissements",type:"number",min:1,max:20,hint:"Nombre d'avertissements avant la sanction automatique."}
       ]},
-      security:{title:"Sécurité et AutoMod",description:"Filtres appliqués automatiquement aux nouveaux messages et événements.",automod:true,fields:[
+      security:{title:"Sécurité",description:"Active uniquement les protections que tu veux. SentriX ne choisit rien à ta place.",automod:true,fields:[
         ["antispam","Anti-spam","Limite les messages envoyés trop rapidement.","Messages et contenu"],["antilink","Bloquer les liens","Interdit les liens web non autorisés.","Messages et contenu"],["antiinvite","Bloquer les invitations","Interdit les invitations Discord.","Messages et contenu"],["antimention","Anti-mentions","Bloque les mentions massives.","Messages et contenu"],["anticaps","Anti-majuscules","Limite les messages presque entièrement en majuscules.","Messages et contenu"],["antiemoji","Anti-spam emojis","Limite les messages remplis d'emojis.","Messages et contenu"],
         ["antiraid","Anti-raid","Réagit aux arrivées massives de comptes.","Arrivées et comptes"],["antibot","Anti-bot","Contrôle l'arrivée de nouveaux bots.","Arrivées et comptes"],["antiaccount","Comptes récents","Surveille les comptes trop récents.","Arrivées et comptes"],
         ["antiscam","Anti-arnaque","Détecte les liens et messages suspects.","Protection avancée"],["antinuke","Anti-nuke","Protège les rôles, salons et bannissements massifs.","Protection avancée"],["security_vanity","Vanity URL","Détecte et restaure les changements suspects de lien vanity.","Protection avancée"],["security_prune","Member prune","Détecte les prunes massifs dans le journal d'audit.","Protection avancée"],["security_permissions","Permissions dangereuses","Bloque les élévations de rôles et permissions critiques.","Protection avancée"],["join_gate","Join Gate avancé","Combine âge du compte, avatar et vitesse d'arrivée.","Protection avancée"],["risk_engine","Risk score","Combine plusieurs signaux avec décroissance temporelle.","Protection avancée"],["escalation","Sanctions progressives","Augmente la sanction lors des récidives.","Protection avancée"]
       ].map(x=>({key:x[0],label:x[1],hint:x[2],type:"switch",group:x[3]}))},
       sanctions:{title:"Sanctions",description:"Historique des bannissements, mutes et avertissements appliqués par SentriX sur ce serveur.",sanctions:true,fields:[]},
-      logs:{title:"Système de logs",description:"Choisissez un salon différent pour chaque type d'événement.",fields:[
+      logs:{title:"Logs",description:"Choisis manuellement les salons existants pour chaque type de log.",fields:[
         ["log_messages","Messages","Par catégorie"],["log_members","Membres","Par catégorie"],["log_voice","Salons vocaux","Par catégorie"],["log_roles","Rôles","Par catégorie"],["log_server","Serveur","Par catégorie"],["log_automod","AutoMod","Par catégorie"],["log_moderation","Modération","Par catégorie"],
         ["log_channel","Salon de logs général","Repli"]
       ].map(x=>({key:x[0],label:x[1],type:"channel",group:x[2]}))},
-      welcome:{title:"Accueil des membres",description:"Messages d'arrivée, de départ et rôle automatique.",fields:[
+      welcome:{title:"Bienvenue & Départ",description:"Configure séparément les arrivées et les départs, dans une seule page cohérente.",fields:[
         {key:"welcome_channel",label:"Salon de bienvenue",type:"channel",group:"Arrivée"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables : {member}, {username}, {server} et {member_count}.",group:"Arrivée"},{key:"welcome_image_url",label:"Fond de bienvenue",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Arrivée"},{key:"autorole",label:"Rôle automatique",type:"role",group:"Arrivée"},
         {key:"goodbye_channel",label:"Salon de départ",type:"channel",group:"Départ"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}.",group:"Départ"},{key:"goodbye_image_url",label:"Fond de départ",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Départ"}
       ]},
       levels:{title:"Niveaux et expérience",description:"Configurez la progression et les annonces de niveau.",fields:[
         {key:"xp_multiplier",label:"Multiplicateur d'XP",type:"number",min:.1,max:5,step:.1},{key:"level_channel",label:"Salon des niveaux",type:"channel"},{key:"level_message",label:"Message de passage de niveau",type:"textarea",hint:"Le membre est mentionné automatiquement lors du passage de niveau."}
       ]},
-      tickets:{title:"Tickets de support",description:"Réglages généraux appliqués aux tickets configurés.",fields:[
+      tickets:{title:"Tickets",description:"Relie les tickets aux catégories et salons que tu choisis. Aucun salon n'est créé automatiquement.",fields:[
         {key:"ticket_category",label:"Catégorie des tickets",type:"category"},{key:"ticket_log_channel",label:"Salon des logs tickets",type:"channel"},{key:"ticket_delete_delay",label:"Délai avant suppression (secondes)",type:"number",min:0,max:3600},{key:"ticket_transcript_dm",label:"Envoyer le transcript en message privé",type:"switch",hint:"Envoie une copie au membre lors de la fermeture."},{key:"ticket_rating_enabled",label:"Activer l'évaluation",type:"switch",hint:"Propose au membre de noter le support."}
       ]},
       ai:{title:"Intelligence artificielle",description:"Modèle, limites, mémoire et journalisation des réponses de SentriX.",ai:true,fields:[
@@ -1892,11 +1916,36 @@ INDEX_HTML = r"""<!doctype html>
     async function loadSanctions(reset=true){if(!state.guildId||state.tab!=="sanctions"||state.sanctionLoading)return;const guildId=state.guildId,search=$("sanctionSearch")?.value.trim()||"",filter=$("sanctionFilter")?.value||"all";if(reset){state.sanctions=[];state.sanctionNext=0;$("sanctionList").innerHTML='<div class="notification-empty">Chargement…</div>';}if(state.sanctionNext===null)return;state.sanctionLoading=true;try{const params=new URLSearchParams({limit:"50",offset:String(state.sanctionNext||0),filter});if(search)params.set("user_id",search);const data=await json(`/api/guilds/${guildId}/sanctions?${params}`);if(state.guildId!==guildId||state.tab!=="sanctions")return;state.sanctions=reset?data.sanctions:state.sanctions.concat(data.sanctions);state.sanctionNext=data.next_offset;renderSanctionRows(data.total);}catch(e){toast(e.message,true);if($("sanctionList"))$("sanctionList").innerHTML=`<div class="notification-empty">${esc(e.message)}</div>`;}finally{state.sanctionLoading=false;}}
     async function sanctionAction(userId,action){const labels={unban:"débannir cet utilisateur",unmute:"retirer le mute de ce membre","clear-warnings":"effacer tous les avertissements actifs de ce membre"};if(!confirm(`Confirmer : ${labels[action]||"effectuer cette action"} ?`))return;try{const result=await json(`/api/guilds/${state.guildId}/sanctions/${userId}/${action}`,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:"{}"});toast(result.message);await loadSanctions(true);}catch(e){toast(e.message,true);}}
     function renderNotifications(){const rows=state.guildData.social_notifications||[];const textChannels=state.guildData.channels.filter(c=>["text","news"].includes(c.type));const channelOptions='<option value="">Choisissez un salon</option>'+textChannels.map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");const roleOptions='<option value="">Choisissez un rôle</option>'+state.guildData.roles.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");const list=rows.length?rows.map(n=>`<div class="notification-item"><div><b>${esc(n.platform)} · ${esc(state.guildData.roles.find(r=>String(r.id)===String(n.role_id))?.name||"Rôle supprimé")}</b><span>${esc(n.source_url)} · #${esc(state.guildData.channels.find(c=>String(c.id)===String(n.discord_channel_id))?.name||"salon supprimé")}</span></div><button class="btn danger" type="button" data-delete-notification="${esc(n.id)}">Supprimer</button></div>`).join(""):'<div class="notification-empty">Aucune notification configurée. Ajoutez votre première chaîne ci-dessus.</div>';$("fields").innerHTML=`<div class="notification-builder"><div class="field full"><label>Lien de la chaîne ou du profil</label><input data-key="source_url" type="url" placeholder="https://youtube.com/@votrechaine"><div class="hint">YouTube, TikTok, Twitch, Instagram, X, Facebook, Dailymotion, Vimeo et Kick.</div></div><div class="field"><label>Salon de publication</label><select class="select" data-key="discord_channel_id">${channelOptions}</select></div><div class="field"><label>Rôle à notifier</label><select class="select" data-key="role_id">${roleOptions}</select></div><div class="field full"><label>Texte personnalisé (facultatif)</label><textarea data-key="custom_text" placeholder="Une nouvelle publication vient de sortir !"></textarea></div><div class="field full"><label>Image ou GIF (facultatif)</label><input data-key="image_url" type="url" placeholder="https://exemple.com/image.png"><div class="hint">Utilisez une URL HTTPS directe. Sans image, SentriX utilise la miniature de la publication.</div></div></div><div class="notification-list"><h3>Notifications actives</h3>${list}</div>`;$("fields").querySelectorAll("[data-delete-notification]").forEach(button=>button.addEventListener("click",()=>removeNotification(button.dataset.deleteNotification)));}
-    function fieldsHTML(fields){let lastGroup,out="";for(const field of fields){if(field.group&&field.group!==lastGroup){out+=`<h3 class="field-group-title">${esc(field.group)}</h3>`;lastGroup=field.group;}out+=fieldHTML(field);}return out;}
+    function fieldsHTML(fields){
+      const groups=new Map();
+      for(const field of fields){
+        const group=field.group||"Réglages";
+        if(!groups.has(group))groups.set(group,[]);
+        groups.get(group).push(field);
+      }
+      return [...groups.entries()].map(([group,items])=>`<section class="field-section"><h3>${esc(group)}</h3><div class="field-section-grid">${items.map(fieldHTML).join("")}</div></section>`).join("");
+    }
     function renderTab(){if(!state.guildData)return;if(!tabs[state.tab])state.tab="general";const tab=tabs[state.tab];$("tabTitle").textContent=tab.title;$("tabDescription").textContent=tab.description;if(tab.sanctions)renderSanctions();else if(tab.notifications)renderNotifications();else $("fields").innerHTML=fieldsHTML(tab.fields);$("saveBar").classList.toggle("hidden",Boolean(tab.sanctions));$("saveButton").textContent=tab.notifications?"Ajouter la notification":"Enregistrer";$("saveStatus").textContent=tab.notifications?"Surveillance toutes les 5 minutes":"Aucune modification";state.dirty=false;$("fields").querySelectorAll("input,select,textarea").forEach(el=>el.addEventListener("input",()=>{if(tab.sanctions)return;state.dirty=true;$("saveStatus").textContent="Modifications non enregistrées";}));}
     async function save(event){event.preventDefault();if(!state.guildId||!state.guildData)return;const tab=tabs[state.tab];if(tab.sanctions){await loadSanctions(true);return;}const values={};$("fields").querySelectorAll("[data-key]").forEach(el=>{let value=el.type==="checkbox"?el.checked:el.value;if(el.type==="number"&&value!=="")value=Number(value);values[el.dataset.key]=value;});const endpoint=tab.notifications?`/api/guilds/${state.guildId}/notifications`:`/api/guilds/${state.guildId}/settings`;const body=tab.notifications?values:tab.automod?{automod:values}:tab.ai?{ai:values}:{settings:values};$("settingsForm").classList.add("loading");try{const result=await json(endpoint,{method:tab.notifications?"POST":"PUT",headers:{"Content-Type":"application/json","X-CSRF-Token":state.csrf},body:JSON.stringify(body)});toast(result.message);state.dirty=false;$("saveStatus").textContent="Configuration enregistrée";await selectGuild(state.guildId);}catch(e){toast(e.message,true);$("saveStatus").textContent="Enregistrement impossible";}finally{$("settingsForm").classList.remove("loading");}}
     async function removeNotification(id){if(!state.guildId||!id)return;if(!confirm("Supprimer cette notification automatique ?"))return;try{const result=await json(`/api/guilds/${state.guildId}/notifications/${id}`,{method:"DELETE",headers:{"X-CSRF-Token":state.csrf}});toast(result.message);await selectGuild(state.guildId);}catch(e){toast(e.message,true);}}
-    $("serverSelect").addEventListener("change",e=>selectGuild(e.target.value));$("settingsForm").addEventListener("submit",save);$("navigation").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(!button)return;state.tab=button.dataset.tab;$("navigation").querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===button));renderTab();});$("logoutButton").addEventListener("click",async()=>{try{await json("/logout",{method:"POST",headers:{"X-CSRF-Token":state.csrf}});}finally{location.href="/";}});window.addEventListener("beforeunload",e=>{if(state.dirty){e.preventDefault();e.returnValue="";}});
+    function openTab(tab){
+      if(!tabs[tab])return;
+      state.tab=tab;
+      $("navigation").querySelectorAll("button[data-tab]").forEach(x=>x.classList.toggle("active",x.dataset.tab===tab));
+      renderTab();
+    }
+    $("serverSelect").addEventListener("change",e=>selectGuild(e.target.value));
+    $("settingsForm").addEventListener("submit",save);
+    $("navigation").addEventListener("click",e=>{const button=e.target.closest("button[data-tab]");if(button)openTab(button.dataset.tab);});
+    $("setupPath").addEventListener("click",e=>{const button=e.target.closest("[data-jump]");if(button)openTab(button.dataset.jump);});
+    $("advancedToggle").addEventListener("click",()=>{
+      state.advanced=!state.advanced;
+      $("navigation").querySelectorAll("[data-advanced]").forEach(x=>x.classList.toggle("hidden",!state.advanced));
+      $("advancedToggle").textContent=state.advanced?"Masquer les réglages avancés":"Afficher les réglages avancés";
+      if(!state.advanced&&["sanctions","levels","roles","ai","notifications"].includes(state.tab))openTab("general");
+    });
+    $("logoutButton").addEventListener("click",async()=>{try{await json("/logout",{method:"POST",headers:{"X-CSRF-Token":state.csrf}});}finally{location.href="/";}});
+    window.addEventListener("beforeunload",e=>{if(state.dirty){e.preventDefault();e.returnValue="";}});
     (function reportAuthFailure(){
       // handle_login redirige ici avec ?auth=missing quand DISCORD_CLIENT_SECRET
       // n'est pas configure sur Railway : #authMessage existait dans le HTML mais
