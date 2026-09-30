@@ -324,7 +324,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
     async def on_ready(self) -> None:
         """Réapplique le mode lecture seule sans créer de salon."""
         rows = await self.bot.db.fetchall(
-            "SELECT guild_id,category_id,verify_channel_id,trap_channel_id,unverified_role_id "
+            "SELECT guild_id,category_id,verify_channel_id,trap_channel_id,unverified_role_id,verified_role_id "
             "FROM honeypot_verification WHERE enabled=1"
         )
         for row in rows:
@@ -358,6 +358,32 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
                         guild.id,
                     )
                 await asyncio.sleep(0.02)
+
+            # Répare aussi les anciens membres qui ont fini avec les deux rôles.
+            verified = guild.get_role(int(row["verified_role_id"] or 0))
+            if verified is not None:
+                for member in list(unverified.members):
+                    if verified not in member.roles:
+                        continue
+                    pending = await self._pending(guild.id, member.id)
+                    try:
+                        if pending:
+                            await member.remove_roles(
+                                verified,
+                                reason="SentriX : membre encore en attente de vérification",
+                            )
+                        else:
+                            await member.remove_roles(
+                                unverified,
+                                reason="SentriX : vérification déjà terminée",
+                            )
+                    except (discord.Forbidden, discord.HTTPException):
+                        logger.warning(
+                            "Impossible de corriger les rôles de vérification user=%s guild=%s.",
+                            member.id,
+                            guild.id,
+                        )
+                    await asyncio.sleep(0.02)
 
     async def _pending(self, guild_id: int, user_id: int):
         return await self.bot.db.fetchone(
