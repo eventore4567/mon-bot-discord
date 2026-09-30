@@ -1046,8 +1046,10 @@ class AutoMod(commands.Cog, name="Automod"):
         )
 
     async def _sync_native_harmful_rule(self, guild: discord.Guild) -> bool:
-        conf = await self.bot.db.get_automod(guild.id)
-        enabled = bool(conf and conf["antiinsult"])
+        # Le preset natif Discord mélange grossièretés, contenu sexuel et insultes.
+        # Il peut donc bloquer des phrases neutres avant même que SentriX puisse
+        # appliquer sa détection contextuelle. On le garde désactivé et on utilise
+        # exclusivement le matcher multilingue local, plus précis et token-aware.
         presets = discord.AutoModPresets(
             profanity=True,
             sexual_content=True,
@@ -1057,7 +1059,7 @@ class AutoMod(commands.Cog, name="Automod"):
         return await self._upsert_native_rule(
             guild,
             name=NATIVE_HARMFUL_RULE_NAME,
-            enabled=enabled,
+            enabled=False,
             trigger=trigger,
             custom_message=NATIVE_HARMFUL_CUSTOM_MESSAGE,
         )
