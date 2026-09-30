@@ -354,11 +354,26 @@ async def handle_index(request: web.Request):
 
 async def handle_health(request: web.Request):
     bot = request.app["bot"]
+    extension_health = getattr(bot, "_sentrix_extension_health", None)
+    critical_failed = []
+    if isinstance(extension_health, dict):
+        value = extension_health.get("critical_failed", [])
+        if isinstance(value, list):
+            critical_failed = [str(item) for item in value]
+
+    ready = bool(bot.is_ready() and not bot.is_closed())
+    ok = bool(ready and not critical_failed)
     return web.json_response({
-        "ok": True,
-        "discord_ready": bot.is_ready(),
-        "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
-    })
+        "ok": ok,
+        "discord_ready": ready,
+        "latency_ms": round(bot.latency * 1000) if ready else None,
+        "extensions": extension_health or {
+            "expected": None,
+            "loaded": None,
+            "failed": [],
+            "critical_failed": [],
+        },
+    }, status=200 if ok else 503)
 
 
 # /api/public est appelé en boucle par la page d'accueil tant que le bot n'est pas
