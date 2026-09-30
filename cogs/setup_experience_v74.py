@@ -295,6 +295,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         ]
         options.append(
             discord.SelectOption(
+                label="Règlement & accès",
+                value="rules_access",
+                emoji="📜",
+                description="Salon du règlement, rôle Vérifié, CAPTCHA et publication du panneau.",
+            )
+        )
+        options.append(
+            discord.SelectOption(
                 label="Automatisations",
                 value="automation",
                 emoji="⚙️",
@@ -406,6 +414,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.add_item(container)
 
     async def _build_page(self, page: str) -> None:
+        if page == "rules_access":
+            return await self._build_rules_access()
         if page == "automation":
             return await self._build_automation()
         if page == "security":
@@ -417,6 +427,89 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         if page == "music":
             return await self._build_music()
         return await super()._build_page(page)
+
+    async def _build_rules_access(self) -> None:
+        from . import verify_setup_interactive_v78 as rules_setup
+
+        await self.bot.db.execute(rules_setup._SCHEMA)
+        conf = await self.bot.db.get_guild_config(self.guild.id)
+        row = await self.bot.db.fetchone(
+            "SELECT rules_text,image_url,message_id FROM dashboard_verification_panels WHERE guild_id=?",
+            (self.guild.id,),
+        )
+        row = dict(row) if row else {}
+
+        def conf_value(key: str, default=None):
+            try:
+                value = conf[key] if conf is not None else default
+            except (KeyError, IndexError, TypeError):
+                return default
+            return default if value is None else value
+
+        channel_id = conf_value("verification_channel")
+        role_id = conf_value("verify_role", conf_value("verification_role"))
+        channel = self.guild.get_channel(int(channel_id)) if channel_id else None
+        role = self.guild.get_role(int(role_id)) if role_id else None
+        rules_text = str(row.get("rules_text") or "").strip()
+        published = bool(row.get("message_id"))
+
+        language = await language_runtime.get_language(self.bot, self.guild.id)
+        english = language == language_runtime.LANG_EN
+
+        title = "Rules & access" if english else "Règlement & accès"
+        intro = (
+            "Configure the rules channel, Verified role, rules text, optional image and simple CAPTCHA from one place."
+            if english
+            else "Configurez le salon du règlement, le rôle Vérifié, le texte, l’image facultative et le CAPTCHA simple au même endroit."
+        )
+        status_lines = (
+            f"**Channel:** {channel.mention if channel else 'Not configured'}\n"
+            f"**Verified role:** {role.mention if role else 'Not configured'}\n"
+            f"**Rules text:** {'Configured' if rules_text else 'Not configured'}\n"
+            f"**Public panel:** {'Published' if published else 'Not published'}"
+            if english
+            else
+            f"**Salon :** {channel.mention if channel else 'Non configuré'}\n"
+            f"**Rôle Vérifié :** {role.mention if role else 'Non configuré'}\n"
+            f"**Règlement :** {'Configuré' if rules_text else 'Non configuré'}\n"
+            f"**Panneau public :** {'Publié' if published else 'Non publié'}"
+        )
+
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(f"# 📜 {title}\n{intro}\n\n{status_lines}"),
+                accessory=v73._thumbnail(self.bot),
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        configure = discord.ui.Button(
+            label="Configure rules" if english else "Configurer le règlement",
+            style=discord.ButtonStyle.primary,
+        )
+
+        async def open_configurator(interaction: discord.Interaction):
+            view = await rules_setup.build_setup_view(
+                self.bot,
+                self.guild,
+                interaction.user.id,
+            )
+            await panels.envoyer(
+                interaction.response,
+                view.panel(),
+                ephemere=True,
+            )
+            try:
+                view.message = await interaction.original_response()
+            except (discord.NotFound, discord.HTTPException):
+                view.message = None
+
+        configure.callback = open_configurator
+        container.add_item(discord.ui.ActionRow(configure))
+        self._add_navigation(container)
+        self.add_item(container)
 
     async def _build_automation(self) -> None:
         from . import setup_v2_ui as automation_ui
