@@ -146,6 +146,12 @@ def test_success_dm_matches_requested_green_verification_style():
 def test_adaptive_v5_is_web_gated_and_can_refresh_existing_panels():
     assert "async def refresh_existing_panels" in AUTO_V5_SOURCE
     assert "await _web_panel(self.bot, guild)" in AUTO_V5_SOURCE
+    assert "automatic_verification_panel_messages_v5" in AUTO_V5_SOURCE
+    refresh_start = AUTO_V5_SOURCE.index("async def refresh_existing_panels")
+    refresh_end = AUTO_V5_SOURCE.index("async def create_or_refresh_system", refresh_start)
+    refresh = AUTO_V5_SOURCE[refresh_start:refresh_end]
+    assert "_purge_bot_messages" not in refresh
+    assert "panels.editer(existing, panel)" in AUTO_V5_SOURCE
     assert '"web_ready"' in AUTO_V5_SOURCE
     evaluate_start = AUTO_V5_SOURCE.index("async def evaluate_member")
     evaluate_end = AUTO_V5_SOURCE.index("def schedule_evaluation", evaluate_start)

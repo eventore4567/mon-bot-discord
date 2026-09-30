@@ -132,3 +132,40 @@ def test_welcome_departure_backgrounds_and_level_card_are_simple():
     assert "ImageOps.fit(source, _SIZE" in cards
     assert 'Bravo {display_name}, tu es passé niveau' in visual
     assert "if: github.event_name != 'push'" in workflow
+
+
+
+def test_module_activation_requires_real_resources():
+    core = (ROOT / "cogs" / "setup_v2_core.py").read_text()
+    control = (ROOT / "cogs" / "control_center_v3.py").read_text()
+    setup_v74 = (ROOT / "cogs" / "setup_experience_v74.py").read_text()
+
+    assert "class ModuleSetupRequired(ValueError)" in core
+    assert "async def module_activation_issue(" in core
+    assert "Choisis d’abord le salon de bienvenue." in core
+    assert "Choisis d’abord le salon de départ." in core
+    assert "Choisis d’abord le salon des montées de niveau." in core
+    assert '"welcome_message": "welcome"' not in core
+    assert '"welcome_image_url": "welcome"' not in core
+    assert '"goodbye_message": "goodbye"' not in core
+    assert "except setup_v2_core.ModuleSetupRequired" in control
+    assert "except core.ModuleSetupRequired" in setup_v74
+
+
+def test_level_system_requires_or_reuses_a_level_channel_and_stays_synced():
+    source = (ROOT / "cogs" / "feature_systems.py").read_text()
+    assert "salon: discord.TextChannel = None" in source
+    assert 'set_guild_config(ctx.guild.id, "level_channel", salon.id)' in source
+    assert "module_state(self.bot, ctx.guild.id, module)" in source
+    assert "setup_v2_core.set_module_enabled(" in source
+    assert "choisis le salon des montées de niveau" in source
+
+
+def test_test_events_command_previews_all_three_without_mutating_member_data():
+    source = (ROOT / "cogs" / "levels.py").read_text()
+    assert 'name="test-events"' in source
+    assert "setup_v2_completion._send_welcome(" in source
+    assert "setup_v2_completion._send_goodbye(" in source
+    assert "level_up=fake_level" in source
+    assert "allowed_mentions=discord.AllowedMentions.none()" in source
+    assert "Aucune XP, aucun rôle et aucune donnée membre n’ont été modifiés." in source

@@ -37,6 +37,11 @@ MODULE_STATE_ENABLED = "enabled"
 MODULE_STATE_DISABLED = "disabled"
 MODULE_STATE_NOT_CONFIGURED = "not_configured"
 
+
+class ModuleSetupRequired(ValueError):
+    """Activation refusée tant que les ressources obligatoires ne sont pas configurées."""
+
+
 MODERATION_COMMANDS = frozenset({
     "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
     "warnings", "clearwarnings", "case", "modhistory", "quarantine", "unquarantine",
@@ -278,11 +283,7 @@ async def reset_module(bot: commands.Bot, guild_id: int, module: str) -> None:
 # module explicitement DÉSACTIVÉ (ligne enabled=0) n'est jamais rallumé par ce chemin.
 GUILD_CONFIG_FIELD_MODULE: dict[str, str] = {
     "welcome_channel": "welcome",
-    "welcome_message": "welcome",
-    "welcome_image_url": "welcome",
     "goodbye_channel": "goodbye",
-    "goodbye_message": "goodbye",
-    "goodbye_image_url": "goodbye",
     "autorole": "roles",
     "level_channel": "levels",
     "ticket_category": "tickets",
@@ -429,6 +430,105 @@ async def migrate_module_defaults(bot: commands.Bot) -> dict[str, int]:
     return created
 
 
+async def module_activation_issue(
+    bot: commands.Bot,
+    guild_id: int,
+    module: str,
+) -> str | None:
+    """Retourne la ressource manquante qui empêcherait une activation propre."""
+    if module not in CONFIGURABLE_MODULES:
+        return None
+    guild = bot.get_guild(int(guild_id))
+    if guild is None:
+        return "Le serveur n’est pas disponible dans le cache SentriX."
+
+    conf = await bot.db.get_guild_config(int(guild_id))
+
+    def configured_channel(field: str) -> bool:
+        try:
+            channel_id = conf[field] if conf else None
+        except (KeyError, IndexError, TypeError):
+            channel_id = None
+        if not channel_id:
+            return False
+        return isinstance(guild.get_channel(int(channel_id)), (discord.TextChannel, discord.Thread))
+
+    if module == "welcome" and not configured_channel("welcome_channel"):
+        return "Choisis d’abord le salon de bienvenue."
+    if module == "goodbye" and not configured_channel("goodbye_channel"):
+        return "Choisis d’abord le salon de départ."
+    if module == "levels" and not configured_channel("level_channel"):
+        return "Choisis d’abord le salon des montées de niveau."
+
+    if module == "logs":
+        if configured_channel("log_channel"):
+            return None
+        for log_type in log_service.CATEGORIES:
+            try:
+                setting = await log_service.get_log_setting(bot, guild.id, log_type)
+            except Exception:
+                continue
+            channel_id = setting.get("channel_id")
+            if channel_id and isinstance(guild.get_channel(int(channel_id)), discord.TextChannel):
+                return None
+        return "Choisis d’abord au moins un salon de logs."
+
+    if module == "tickets":
+        try:
+            category_id = conf["ticket_category"] if conf else None
+        except (KeyError, IndexError, TypeError):
+            category_id = None
+        if category_id and isinstance(guild.get_channel(int(category_id)), discord.CategoryChannel):
+            return None
+        try:
+            panel = await bot.db.fetchone(
+                "SELECT channel_id FROM ticket_panels_v2 WHERE guild_id=? AND enabled=1 ORDER BY id LIMIT 1",
+                (guild.id,),
+            )
+        except Exception:
+            panel = None
+        if panel and isinstance(guild.get_channel(int(panel["channel_id"])), discord.TextChannel):
+            return None
+        return "Configure d’abord une catégorie ou un panneau de tickets."
+
+    if module == "notifications":
+        try:
+            rows = await bot.db.fetchall(
+                "SELECT discord_channel_id FROM social_notifications WHERE guild_id=? AND enabled=1",
+                (guild.id,),
+            )
+        except Exception:
+            rows = []
+        if any(
+            row["discord_channel_id"]
+            and isinstance(guild.get_channel(int(row["discord_channel_id"])), discord.TextChannel)
+            for row in rows
+        ):
+            return None
+        return "Configure d’abord au moins une notification avec son salon."
+
+    if module == "roles":
+        for field in ("autorole", "verify_role", "verification_role", "member_role", "booster_role"):
+            try:
+                role_id = conf[field] if conf else None
+            except (KeyError, IndexError, TypeError):
+                role_id = None
+            if role_id and guild.get_role(int(role_id)) is not None:
+                return None
+        try:
+            panel = await bot.db.fetchone(
+                "SELECT channel_id FROM self_role_panels WHERE guild_id=? ORDER BY message_id LIMIT 1",
+                (guild.id,),
+            )
+        except Exception:
+            panel = None
+        if panel and isinstance(guild.get_channel(int(panel["channel_id"])), discord.TextChannel):
+            return None
+        return "Configure d’abord au moins un rôle automatique ou un panneau de rôles."
+
+    return None
+
+
 async def set_module_enabled(
     bot: commands.Bot,
     guild_id: int,
@@ -440,6 +540,12 @@ async def set_module_enabled(
     if module not in MODULES:
         raise ValueError(f"module inconnu: {module}")
     await ensure_schema(bot)
+    if enabled:
+        issue = await module_activation_issue(bot, guild_id, module)
+        if issue:
+            raise ModuleSetupRequired(
+                f"{issue} Le module n’a pas été activé. Configure-le dans +setup ou le dashboard puis réessaie."
+            )
     now_ts = int(time.time())
     await bot.db.execute(
         "INSERT INTO module_settings (guild_id,module,enabled,updated_by,updated_at) VALUES (?,?,?,?,?) "
@@ -1197,7 +1303,7 @@ def install(bot: commands.Bot) -> None:
 
 __all__ = [
     "MODULES", "MODERATION_COMMANDS", "ECONOMY_COMMANDS", "LEVEL_COMMANDS",
-    "AI_COMMANDS", "ensure_schema", "module_enabled", "set_module_enabled",
+    "AI_COMMANDS", "ensure_schema", "module_enabled", "module_activation_issue", "ModuleSetupRequired", "set_module_enabled",
     "economy_settings", "set_currency", "get_role_command_decision",
     "set_role_command_decision", "is_trusted", "add_trusted", "remove_trusted",
     "permission_scope_for_command", "commands_for_scope", "install",

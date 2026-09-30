@@ -1653,6 +1653,93 @@ class Levels(commands.Cog, name="Levels"):
             lines.append(f"<t:{r['created_at']}:R> **{sign}{r['amount']}** par {giver_name}{reason}")
         await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral(f'📜 Historique de réputation de {membre.display_name}', '\n'.join(lines))))
 
+    @commands.hybrid_command(
+        name="test-events",
+        aliases=["test-evenements", "preview-events"],
+        description="[Admin] Tester une arrivée, un départ et une montée de niveau sans modifier de données.",
+    )
+    @app_commands.describe(niveau="Niveau fictif affiché dans le test")
+    @checks.is_owner_or_admin_for("configuration")
+    async def test_events(self, ctx: commands.Context, niveau: int = 1):
+        if ctx.guild is None or not isinstance(ctx.author, discord.Member):
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Cette commande doit être utilisée sur un serveur.")))
+
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+        missing = []
+        configured = {}
+        for field, label in (
+            ("welcome_channel", "salon de bienvenue"),
+            ("goodbye_channel", "salon de départ"),
+            ("level_channel", "salon des niveaux"),
+        ):
+            try:
+                channel_id = conf[field] if conf else None
+            except (KeyError, IndexError, TypeError):
+                channel_id = None
+            channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                missing.append(label)
+            else:
+                configured[field] = channel
+
+        if missing:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.warning(
+                        "Configure d’abord : " + ", ".join(missing) + ". "
+                        "Le test ne crée aucun salon automatiquement."
+                    )
+                ),
+            )
+
+        from cogs import setup_v2_completion
+
+        ok_welcome, welcome_message = await setup_v2_completion._send_welcome(
+            self.bot, ctx.author, test=True
+        )
+        goodbye_channel = await setup_v2_completion._send_goodbye(
+            self.bot, ctx.author, test=True
+        )
+        if not ok_welcome or goodbye_channel is None:
+            detail = welcome_message if not ok_welcome else "Le test de départ n’a pas pu être envoyé."
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(detail)))
+
+        fake_level = max(1, min(int(niveau), 1_000_000))
+        stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
+        design_settings = await self.bot.db.get_design_settings(ctx.guild.id)
+        buffer = await visual_v5.render_member_card(
+            ctx.author,
+            ctx.guild,
+            stats,
+            design_settings,
+            level_up=fake_level,
+        )
+        file = discord.File(buffer, filename="sentrix-level-up-test.png")
+        level_embed = discord.Embed(colour=discord.Colour(0x2B2D31))
+        level_embed.set_image(url="attachment://sentrix-level-up-test.png")
+        try:
+            await configured["level_channel"].send(
+                embed=level_embed,
+                file=file,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except discord.HTTPException as exc:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error(f"Le test de niveau a été refusé par Discord : {exc}")),
+            )
+
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.success(
+                    "Tests envoyés : fausse arrivée, faux départ et fausse montée de niveau. "
+                    "Aucune XP, aucun rôle et aucune donnée membre n’ont été modifiés."
+                )
+            ),
+        )
+
     @commands.hybrid_command(name="voice-time", description="Afficher le temps passé en vocal par un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def voice_time(self, ctx: commands.Context, membre: discord.Member = None):

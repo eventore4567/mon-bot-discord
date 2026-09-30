@@ -87,20 +87,67 @@ class SystemFeatureCommands(commands.Cog, name="SystemFeatures"):
                 )
         return True
 
-    async def _show_or_set(self, ctx: commands.Context, feature: str, etat: str | None):
+    async def _show_or_set(
+        self,
+        ctx: commands.Context,
+        feature: str,
+        etat: str | None,
+        *,
+        salon: discord.TextChannel | None = None,
+    ):
         if ctx.guild is None:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
 
         current = await get_system_features(self.bot.db, ctx.guild.id, fresh=True)
         key = "economy_enabled" if feature == "economy" else "levels_enabled"
         requested = _state_from_text(etat)
+        from cogs import setup_v2_core
         if etat is not None and requested is None:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Utilisez `on` ou `off`.')))
 
         if requested is None:
             label = "argent + boutiques" if feature == "economy" else "niveaux + XP"
-            state = "activé" if current[key] else "désactivé"
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'Le système **{label}** est actuellement **{state}**.')))
+            module = "economy" if feature == "economy" else "levels"
+            module_state = await setup_v2_core.module_state(self.bot, ctx.guild.id, module)
+            state = {
+                "enabled": "activé",
+                "disabled": "désactivé",
+                "not_configured": "non configuré",
+            }.get(module_state, "désactivé")
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.info(f'Le système **{label}** est actuellement **{state}**.')),
+            )
+
+        if feature == "levels" and requested:
+            if salon is not None:
+                await self.bot.db.set_guild_config(ctx.guild.id, "level_channel", salon.id)
+            conf = await self.bot.db.get_guild_config(ctx.guild.id)
+            channel_id = conf["level_channel"] if conf else None
+            channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                return await panels.envoyer(
+                    ctx,
+                    panels.depuis_embed(
+                        embeds.warning(
+                            "Avant d’activer les niveaux, choisis le salon des montées de niveau. "
+                            "Avec /level-system on, sélectionne l’option salon ; "
+                            "avec +level-system on, ajoute #salon à la fin."
+                        )
+                    ),
+                )
+
+        module = "economy" if feature == "economy" else "levels"
+        try:
+            await setup_v2_core.set_module_enabled(
+                self.bot,
+                ctx.guild.id,
+                module,
+                requested,
+                actor_id=ctx.author.id,
+            )
+        except setup_v2_core.ModuleSetupRequired as exc:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(str(exc))))
 
         values = await set_system_feature(self.bot.db, ctx.guild.id, feature, requested)
         active = values[key]
@@ -133,10 +180,18 @@ class SystemFeatureCommands(commands.Cog, name="SystemFeatures"):
         aliases=["levels-system", "niveau-system", "niveaux-system"],
         description="Activer ou désactiver tout le système de niveaux et d'XP.",
     )
-    @app_commands.describe(etat="on/off — laissez vide pour afficher l'état")
+    @app_commands.describe(
+        etat="on/off — laissez vide pour afficher l'état",
+        salon="Salon à utiliser pour les annonces de niveau",
+    )
     @checks.is_owner_or_admin()
-    async def level_system(self, ctx: commands.Context, etat: str = None):
-        await self._show_or_set(ctx, "levels", etat)
+    async def level_system(
+        self,
+        ctx: commands.Context,
+        etat: str = None,
+        salon: discord.TextChannel = None,
+    ):
+        await self._show_or_set(ctx, "levels", etat, salon=salon)
 
 
 def _patch_database(bot: commands.Bot) -> None:

@@ -209,7 +209,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             )
 
             async def basculer(interaction: discord.Interaction, module=key):
-                nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
+                try:
+                    nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
+                except core.ModuleSetupRequired as exc:
+                    return await panels.envoyer(
+                        interaction.response,
+                        panels.depuis_embed(embeds.warning(str(exc))),
+                        ephemere=True,
+                    )
                 try:
                     await self.backend.audit(interaction.user.id, f"module:{module}", "on" if nouveau else "off")
                 except Exception:

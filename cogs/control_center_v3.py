@@ -350,9 +350,16 @@ class ModuleToggle(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         enabled = await setup_v2_core.module_enabled(self.owner.bot, self.owner.guild.id, self.module)
-        await setup_v2_core.set_module_enabled(
-            self.owner.bot, self.owner.guild.id, self.module, not enabled, actor_id=interaction.user.id
-        )
+        try:
+            await setup_v2_core.set_module_enabled(
+                self.owner.bot, self.owner.guild.id, self.module, not enabled, actor_id=interaction.user.id
+            )
+        except setup_v2_core.ModuleSetupRequired as exc:
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embeds.warning(str(exc))),
+                ephemere=True,
+            )
         await self.owner.refresh(interaction)
 
 

@@ -172,7 +172,7 @@ HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
     # sans connaître le nom exact de la commande. Ce ne sont pas des commandes
     # publiques — la vérification de permission reste entière — seulement des
     # commandes qu'on doit pouvoir retrouver dans +help.
-    "level-system", "economy-system",
+    "level-system", "economy-system", "test-events",
 
     # Deuxième lot d'orphelines, 2026-09-26. Le lot du 2026-09-09 en avait
     # rattrapé trente-quatre ; il en restait 108 chargées, masquées et classées
