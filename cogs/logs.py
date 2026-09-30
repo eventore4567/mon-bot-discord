@@ -169,6 +169,8 @@ class Logs(commands.Cog, name="Logs"):
         guild: discord.Guild,
         author_id: int,
         channel_id: int,
+        *,
+        message_id: int | None = None,
     ) -> tuple[discord.abc.User | None, discord.AuditLogEntry | None]:
         """Essaie d'identifier qui a supprimé le message.
 
@@ -177,6 +179,19 @@ class Logs(commands.Cog, name="Logs"):
         suppression faite par l'auteur lui-même ne produit pas d'entrée d'audit :
         dans ce cas on laisse explicitement l'exécuteur inconnu au lieu d'inventer.
         """
+        # Les suppressions effectuées directement par SentriX sont marquées par
+        # les moteurs internes avant l'appel Discord : attribution exacte, même
+        # sans permission Voir le journal d'audit.
+        if message_id is not None:
+            local = getattr(self.bot, "_sentrix_local_message_deleters", None)
+            if isinstance(local, dict):
+                marker = local.pop(int(message_id), None)
+                if marker and time.monotonic() - float(marker[0]) <= 8:
+                    actor_id = int(marker[1] or 0)
+                    actor = guild.get_member(actor_id) or self.bot.get_user(actor_id)
+                    if actor is not None:
+                        return actor, None
+
         if guild.me is None or not guild.me.guild_permissions.view_audit_log:
             return None, None
 
@@ -287,6 +302,7 @@ class Logs(commands.Cog, name="Logs"):
             guild,
             author_id,
             channel_id,
+            message_id=message_id,
         ) if channel_id else (None, None)
         fields = [
             ("Auteur", _user_ref(author_id), True),
@@ -354,6 +370,7 @@ class Logs(commands.Cog, name="Logs"):
             message.guild,
             message.author.id,
             message.channel.id,
+            message_id=message.id,
         )
         fields = [
             ("Auteur", _user_ref(message.author.id), True),
