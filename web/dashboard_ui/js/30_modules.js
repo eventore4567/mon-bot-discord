@@ -87,12 +87,15 @@ function bindModeSwitch(root = content()) {
 
 /* Sécurité : protections / vérification / sanctions */
 const securityOverview = (force = false) => cached('security-overview', () => gget('/security/overview'), { force, ttl: 15000 });
+const forbiddenWordsData = (force = false) => cached('forbidden-words', () => gget('/forbidden-words'), { force, ttl: 5000 });
 
 async function renderSecurity() {
   if (state.sub === 'verification') return renderVerification();
   if (state.sub === 'sanctions') return renderSanctions();
 
   const a = state.guild?.automod || {}, s = settings();
+  let forbidden = { words: [] }; try { forbidden = await forbiddenWordsData(); } catch (_) {}
+  const forbiddenWords = Array.isArray(forbidden?.words) ? forbidden.words : [];
   let d = null; try { d = await diagnostics(); } catch (_) {}
   let sec = null; try { sec = await securityOverview(); } catch (_) {}
   const missing = (sec?.permissions || d?.permissions || []).filter(p => !p.granted);
@@ -162,11 +165,57 @@ async function renderSecurity() {
     ${missing.length ? `<div class="notice warn full">SentriX n’a pas toutes les permissions nécessaires : ${esc(missing.map(p => p.name).join(', '))}. Certaines protections peuvent détecter un risque sans pouvoir agir.</div>` : ''}
 
     ${card('Protections', 'Activez uniquement les protections adaptées à votre serveur.', AUTOMOD.map(([k, l, c]) => switchRow(l, k, Boolean(a[k]), c)).join(''), 'full')}
+    <section class="card full">
+      <div class="card-head">
+        <div><h2>Mots interdits</h2><p>Ajoutez les mots ou expressions que SentriX doit censurer immédiatement.</p></div>
+        <span class="badge">\${forbiddenWords.length} configuré(s)</span>
+      </div>
+      <div class="fields" style="margin-top:12px">
+        <div class="field full">
+          <label for="forbiddenWordInput">Nouveau mot ou expression</label>
+          <input id="forbiddenWordInput" maxlength="80" placeholder="Ex. mot à censurer">
+        </div>
+      </div>
+      <div class="toolbar">
+        <button class="btn primary" type="button" id="forbiddenWordAdd">Ajouter aux mots interdits</button>
+      </div>
+      <div class="list" style="margin-top:14px">
+        \${forbiddenWords.length ? forbiddenWords.map(word => \`<div class="row"><div class="row-main"><b>\${esc(word)}</b><small>Le message sera censuré et l’auteur averti.</small></div><button class="btn sm danger" type="button" data-forbidden-remove="\${esc(word)}">Retirer</button></div>\`).join('') : emptyState('Aucun mot interdit', 'Ajoutez un mot ci-dessus.')}
+      </div>
+    </section>
+
     ${advanced(card('Politique de sécurité', '', `<div class="fields">${field('Niveau de sécurité', 'security_level', '', { select: ['faible', 'moyen', 'eleve'].map(v => `<option value="${v}" ${s.security_level === v ? 'selected' : ''}>${v === 'eleve' ? 'Élevé' : v[0].toUpperCase() + v.slice(1)}</option>`).join('') })}${field('Avertissements avant ban automatique', 'warn_ban_threshold', s.warn_ban_threshold ?? 0, { type: 'number', min: 0, max: 20, hint: '0 = jamais de ban automatique.' })}</div>` + switchRow('Escalade AutoMod', 'escalation', Boolean(a.escalation), 'Augmente progressivement les sanctions.')))}
   </div>`;
 
   bindEditable();
   bindModuleButtons();
+
+  if ($('forbiddenWordAdd')) $('forbiddenWordAdd').onclick = async () => {
+    const input = $('forbiddenWordInput');
+    const word = input?.value.trim();
+    if (!word) return toast('Entrez un mot ou une expression.', true);
+    try {
+      const result = await gpost('/forbidden-words', { action: 'add', word });
+      toast(result.message || 'Mot interdit ajouté.');
+      invalidate('forbidden-words');
+      await renderSecurity();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  content().querySelectorAll('[data-forbidden-remove]').forEach(button => {
+    button.onclick = async () => {
+      const word = button.dataset.forbiddenRemove;
+      try {
+        const result = await gpost('/forbidden-words', { action: 'remove', word });
+        toast(result.message || 'Mot interdit retiré.');
+        invalidate('forbidden-words');
+        await renderSecurity();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
 
   if ($('securityRefresh')) $('securityRefresh').onclick = async () => {
     invalidate('security-overview', 'diagnostics');
