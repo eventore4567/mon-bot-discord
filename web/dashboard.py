@@ -1456,6 +1456,9 @@ def build_app(bot) -> web.Application:
     # Vérification publique : OAuth Discord + CAPTCHA web + attribution du rôle.
     from web.public_verification_v120 import register as register_public_verification
     register_public_verification(app, sys.modules[__name__])
+    # Règles de contenu par salon : messages interdits / images uniquement.
+    from web.dashboard_api_channel_rules import register as register_channel_rule_routes
+    register_channel_rule_routes(app, sys.modules[__name__])
     return app
 
 

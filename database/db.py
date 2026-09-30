@@ -37,6 +37,8 @@ _CONFIG_PERSISTENCE_MARKERS = (
     "notification_sources",
     "automatic_verification_v4",
     "honeypot_verification",
+    "sentrix_dashboard_auto_reaction",
+    "sentrix_channel_message_rules",
     "starboard",
     "sticky",
     "scheduled_messages",

@@ -13,6 +13,7 @@ from . import setup_v2_core as core
 from . import setup_v2_ui as ui
 from . import setup_v2_completion as completion
 from . import setup_v2_resource_events as resource_events
+from . import channel_message_rules
 
 logger = logging.getLogger("bot.setup-v2-runtime")
 
@@ -134,6 +135,14 @@ def install(bot) -> None:
     _patch_ai_features(bot)
     _replace_resource_listeners(bot)
     resource_events.install(bot)
+    # Le setup peut créer des réactions automatiques même si la page dashboard
+    # n'a pas encore été ouverte : installe le listener Growth existant au boot.
+    try:
+        from web import dashboard_growth_control_v12 as growth_v12
+        growth_v12._install_listener(bot)
+    except Exception:
+        logger.exception("Installation du moteur de réactions automatiques impossible.")
+    channel_message_rules.install(bot)
     _finalize_log_runtime(bot)
     completion.install(bot)
     bot._sentrix_setup_v2_runtime = True

@@ -5,6 +5,8 @@ manquants sans créer un deuxième setup concurrent.
 """
 from __future__ import annotations
 
+import json
+import re
 import time
 
 import discord
@@ -14,6 +16,7 @@ from utils import sentrix_panels as panels
 from . import permission_guard
 from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
+from . import channel_message_rules
 
 MODULE_BY_CATEGORY = {
     "moderation": "moderation",
@@ -519,6 +522,327 @@ def _patch_can_setup() -> None:
     setup_ui._can_setup = can_setup_v2
 
 
+
+async def ensure_automation_schema(bot) -> None:
+    """Même table de réactions que le dashboard + règles de salons partagées."""
+    await bot.db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sentrix_dashboard_auto_reaction (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id BIGINT NOT NULL,
+            channel_id BIGINT NOT NULL,
+            emojis_json TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            mode TEXT NOT NULL DEFAULT 'all',
+            keyword TEXT NOT NULL DEFAULT '',
+            ignore_bots INTEGER NOT NULL DEFAULT 1,
+            created_by BIGINT,
+            created_at BIGINT NOT NULL,
+            updated_at BIGINT NOT NULL
+        )
+        """
+    )
+    await channel_message_rules.ensure_schema(bot)
+
+
+def _automation_emoji_valid(token: str) -> bool:
+    value = str(token or "").strip()
+    if not value or len(value) > 100:
+        return False
+    if re.fullmatch(r"<a?:[A-Za-z0-9_]{2,32}:\d{5,25}>", value):
+        return True
+    return not value.startswith("<") and not value.endswith(">")
+
+
+async def _automation_reaction_rows(bot, guild_id: int):
+    await ensure_automation_schema(bot)
+    return await bot.db.fetchall(
+        "SELECT id,channel_id,emojis_json,enabled,mode,keyword,ignore_bots "
+        "FROM sentrix_dashboard_auto_reaction WHERE guild_id=? "
+        "ORDER BY updated_at DESC,id DESC LIMIT 25",
+        (guild_id,),
+    )
+
+
+class AutoReactionModal(discord.ui.Modal, title="Réaction automatique"):
+    emojis = discord.ui.TextInput(
+        label="Emojis",
+        placeholder="👍 👎 ou emojis du serveur",
+        max_length=400,
+    )
+    keyword = discord.ui.TextInput(
+        label="Mot-clé (seulement si mode mot-clé)",
+        placeholder="gg",
+        required=False,
+        max_length=80,
+    )
+
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+
+    async def on_submit(self, interaction):
+        if not self.owner.channel_id:
+            return await interaction.response.send_message("Choisissez d’abord un salon.", ephemeral=True)
+        raw = str(self.emojis.value or "").replace(",", " ").split()
+        emojis = []
+        for value in raw:
+            token = value.strip()
+            if token and token not in emojis:
+                if not _automation_emoji_valid(token):
+                    return await interaction.response.send_message(f"Emoji invalide : {token[:30]}", ephemeral=True)
+                emojis.append(token)
+            if len(emojis) >= 8:
+                break
+        if not emojis:
+            return await interaction.response.send_message("Ajoutez au moins un emoji.", ephemeral=True)
+        keyword = str(self.keyword.value or "").strip()
+        if self.owner.mode == "keyword" and not keyword:
+            return await interaction.response.send_message("Ajoutez le mot-clé à détecter.", ephemeral=True)
+        await ensure_automation_schema(self.owner.bot)
+        now = int(time.time())
+        await self.owner.bot.db.execute(
+            "INSERT INTO sentrix_dashboard_auto_reaction "
+            "(guild_id,channel_id,emojis_json,enabled,mode,keyword,ignore_bots,created_by,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                self.owner.guild.id,
+                self.owner.channel_id,
+                json.dumps(emojis, ensure_ascii=False),
+                1,
+                self.owner.mode,
+                keyword[:80],
+                1,
+                interaction.user.id,
+                now,
+                now,
+            ),
+        )
+        await panels.envoyer(
+            interaction.response,
+            panels.depuis_embed(embeds.success("Réaction automatique enregistrée.")),
+            ephemere=True,
+        )
+
+
+class AutoReactionSetupView(discord.ui.View):
+    def __init__(self, setup_view, author_id: int, rows):
+        super().__init__(timeout=180)
+        self.setup_view = setup_view
+        self.bot = setup_view.bot
+        self.guild = setup_view.guild
+        self.author_id = int(author_id)
+        self.channel_id = None
+        self.mode = "all"
+        self.selected_rule_id = None
+
+        channel = discord.ui.ChannelSelect(
+            placeholder="Salon des réactions automatiques",
+            min_values=1,
+            max_values=1,
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            row=0,
+        )
+        async def channel_cb(interaction):
+            self.channel_id = channel.values[0].id
+            await interaction.response.send_message("Salon sélectionné.", ephemeral=True)
+        channel.callback = channel_cb
+        self.add_item(channel)
+
+        mode = discord.ui.Select(
+            placeholder="Quand réagir ?",
+            options=[
+                discord.SelectOption(label="Tous les messages", value="all"),
+                discord.SelectOption(label="Si le message contient un mot-clé", value="keyword"),
+            ],
+            row=1,
+        )
+        async def mode_cb(interaction):
+            self.mode = mode.values[0]
+            await interaction.response.send_message("Mode sélectionné.", ephemeral=True)
+        mode.callback = mode_cb
+        self.add_item(mode)
+
+        if rows:
+            options = []
+            for row in rows[:25]:
+                channel_obj = self.guild.get_channel(int(row["channel_id"]))
+                try:
+                    emojis = " ".join(json.loads(row["emojis_json"] or "[]")[:4])
+                except Exception:
+                    emojis = ""
+                options.append(discord.SelectOption(
+                    label=f"#{getattr(channel_obj, 'name', row['channel_id'])}"[:100],
+                    value=str(row["id"]),
+                    description=(f"{'Mot-clé' if row['mode'] == 'keyword' else 'Tous'} · {emojis}")[:100],
+                ))
+            existing = discord.ui.Select(
+                placeholder="Règle existante à gérer",
+                options=options,
+                row=2,
+            )
+            async def existing_cb(interaction):
+                self.selected_rule_id = int(existing.values[0])
+                await interaction.response.send_message("Règle sélectionnée.", ephemeral=True)
+            existing.callback = existing_cb
+            self.add_item(existing)
+
+        add = discord.ui.Button(label="Ajouter la réaction", style=discord.ButtonStyle.success, row=3)
+        toggle = discord.ui.Button(label="Activer / Désactiver", style=discord.ButtonStyle.secondary, row=3)
+        delete = discord.ui.Button(label="Supprimer", style=discord.ButtonStyle.danger, row=3)
+
+        async def add_cb(interaction):
+            if not self.channel_id:
+                return await interaction.response.send_message("Choisissez d’abord un salon.", ephemeral=True)
+            await interaction.response.send_modal(AutoReactionModal(self))
+
+        async def toggle_cb(interaction):
+            if not self.selected_rule_id:
+                return await interaction.response.send_message("Choisissez une règle existante.", ephemeral=True)
+            row = await self.bot.db.fetchone(
+                "SELECT enabled FROM sentrix_dashboard_auto_reaction WHERE guild_id=? AND id=?",
+                (self.guild.id, self.selected_rule_id),
+            )
+            if not row:
+                return await interaction.response.send_message("Règle introuvable.", ephemeral=True)
+            enabled = 0 if bool(row["enabled"]) else 1
+            await self.bot.db.execute(
+                "UPDATE sentrix_dashboard_auto_reaction SET enabled=?,updated_at=? WHERE guild_id=? AND id=?",
+                (enabled, int(time.time()), self.guild.id, self.selected_rule_id),
+            )
+            await interaction.response.send_message(
+                f"Réaction automatique {'activée' if enabled else 'désactivée'}.",
+                ephemeral=True,
+            )
+
+        async def delete_cb(interaction):
+            if not self.selected_rule_id:
+                return await interaction.response.send_message("Choisissez une règle existante.", ephemeral=True)
+            await self.bot.db.execute(
+                "DELETE FROM sentrix_dashboard_auto_reaction WHERE guild_id=? AND id=?",
+                (self.guild.id, self.selected_rule_id),
+            )
+            await interaction.response.send_message("Réaction automatique supprimée.", ephemeral=True)
+
+        add.callback = add_cb
+        toggle.callback = toggle_cb
+        delete.callback = delete_cb
+        self.add_item(add)
+        self.add_item(toggle)
+        self.add_item(delete)
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Ce menu ne vous appartient pas.", ephemeral=True)
+            return False
+        return True
+
+
+class ChannelRuleSetupView(discord.ui.View):
+    def __init__(self, setup_view, author_id: int, rows):
+        super().__init__(timeout=180)
+        self.setup_view = setup_view
+        self.bot = setup_view.bot
+        self.guild = setup_view.guild
+        self.author_id = int(author_id)
+        self.channel_id = None
+        self.mode = "images_only"
+        self.selected_channel_id = None
+
+        channel = discord.ui.ChannelSelect(
+            placeholder="Salon à protéger",
+            min_values=1,
+            max_values=1,
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            row=0,
+        )
+        async def channel_cb(interaction):
+            self.channel_id = channel.values[0].id
+            await interaction.response.send_message("Salon sélectionné.", ephemeral=True)
+        channel.callback = channel_cb
+        self.add_item(channel)
+
+        mode = discord.ui.Select(
+            placeholder="Règle du salon",
+            options=[
+                discord.SelectOption(
+                    label="Images uniquement",
+                    value="images_only",
+                    description="Image obligatoire et aucun texte.",
+                ),
+                discord.SelectOption(
+                    label="Messages interdits",
+                    value="blocked",
+                    description="Les messages des membres sont supprimés.",
+                ),
+            ],
+            row=1,
+        )
+        async def mode_cb(interaction):
+            self.mode = mode.values[0]
+            await interaction.response.send_message("Règle sélectionnée.", ephemeral=True)
+        mode.callback = mode_cb
+        self.add_item(mode)
+
+        if rows:
+            options = []
+            for row in rows[:25]:
+                options.append(discord.SelectOption(
+                    label=f"#{row.get('channel_name') or row.get('channel_id')}"[:100],
+                    value=str(row.get("channel_id")),
+                    description=("Images uniquement" if row.get("mode") == "images_only" else "Messages interdits"),
+                ))
+            existing = discord.ui.Select(
+                placeholder="Règle existante à supprimer",
+                options=options,
+                row=2,
+            )
+            async def existing_cb(interaction):
+                self.selected_channel_id = int(existing.values[0])
+                await interaction.response.send_message("Règle sélectionnée.", ephemeral=True)
+            existing.callback = existing_cb
+            self.add_item(existing)
+
+        save = discord.ui.Button(label="Enregistrer la règle", style=discord.ButtonStyle.success, row=3)
+        delete = discord.ui.Button(label="Supprimer la règle", style=discord.ButtonStyle.danger, row=3)
+
+        async def save_cb(interaction):
+            if not self.channel_id:
+                return await interaction.response.send_message("Choisissez d’abord un salon.", ephemeral=True)
+            try:
+                await channel_message_rules.save_rule(
+                    self.bot,
+                    self.guild,
+                    self.channel_id,
+                    self.mode,
+                    actor_id=interaction.user.id,
+                )
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
+            await interaction.response.send_message("Règle de salon enregistrée.", ephemeral=True)
+
+        async def delete_cb(interaction):
+            if not self.selected_channel_id:
+                return await interaction.response.send_message("Choisissez une règle existante.", ephemeral=True)
+            await channel_message_rules.delete_rule(
+                self.bot,
+                self.guild.id,
+                self.selected_channel_id,
+            )
+            await interaction.response.send_message("Règle de salon supprimée.", ephemeral=True)
+
+        save.callback = save_cb
+        delete.callback = delete_cb
+        self.add_item(save)
+        self.add_item(delete)
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Ce menu ne vous appartient pas.", ephemeral=True)
+            return False
+        return True
+
+
 def _patch_statuses() -> None:
     current = setup_ui.module_statuses
     if getattr(current, "_sentrix_v2", False):
@@ -536,6 +860,29 @@ def _patch_statuses() -> None:
             setup_ui.ConfigState.ACTIVE,
             f"{int(count['n'] if count else 0)} règle(s) personnalisée(s) • mêmes droits pour + et /.",
             (),
+        )
+        await ensure_automation_schema(bot)
+        reactions = await bot.db.fetchall(
+            "SELECT channel_id,enabled FROM sentrix_dashboard_auto_reaction WHERE guild_id=?",
+            (guild.id,),
+        )
+        channel_rules = await channel_message_rules.list_rules(bot, guild)
+        problems = []
+        for row in reactions:
+            if guild.get_channel(int(row["channel_id"])) is None:
+                problems.append("Une réaction automatique pointe vers un salon supprimé.")
+        for row in channel_rules:
+            if guild.get_channel(int(row["channel_id"])) is None:
+                problems.append("Une règle de salon pointe vers un salon supprimé.")
+        active = sum(bool(row["enabled"]) for row in reactions) + sum(bool(row["enabled"]) for row in channel_rules)
+        configured = len(reactions) + len(channel_rules)
+        result["automation"] = (
+            setup_ui.ConfigState.ERROR if problems else
+            setup_ui.ConfigState.ACTIVE if active else
+            setup_ui.ConfigState.INACTIVE if configured else
+            setup_ui.ConfigState.UNCONFIGURED,
+            f"{len(reactions)} réaction(s) automatique(s) • {len(channel_rules)} règle(s) de salon.",
+            tuple(problems),
         )
         return result
     statuses_v2._sentrix_v2 = True
@@ -592,6 +939,48 @@ def _patch_render() -> None:
             self.add_item(PermissionRoleSelect(self))
             self.add_item(PermissionScopeSelect(self))
             self.add_item(PermissionCommandSelect(self))
+
+        elif category == "automation":
+            reactions = discord.ui.Button(label="Réactions automatiques", style=discord.ButtonStyle.secondary, row=1)
+            channel_rules_button = discord.ui.Button(label="Règles de salons", style=discord.ButtonStyle.secondary, row=1)
+
+            async def reactions_cb(interaction):
+                rows = await _automation_reaction_rows(self.bot, self.guild.id)
+                panel = embeds.info(
+                    "Choisissez un salon, puis si SentriX doit réagir à tous les messages ou seulement à un mot-clé. "
+                    "Les bots sont ignorés pour éviter les boucles.",
+                    title="Réactions automatiques",
+                )
+                await panels.envoyer(
+                    interaction.response,
+                    panels.avec_composants(
+                        panels.depuis_embed(panel),
+                        AutoReactionSetupView(self, interaction.user.id, rows),
+                    ),
+                    ephemere=True,
+                )
+
+            async def channel_rules_cb(interaction):
+                rows = await channel_message_rules.list_rules(self.bot, self.guild)
+                panel = embeds.info(
+                    "**Images uniquement** : au moins une image jointe, aucun texte et aucun autre fichier.\n"
+                    "**Messages interdits** : les messages des membres sont supprimés.\n\n"
+                    "Bots et staff avec Gérer les messages/Gérer le serveur/Admin ne sont pas bloqués.",
+                    title="Règles de salons",
+                )
+                await panels.envoyer(
+                    interaction.response,
+                    panels.avec_composants(
+                        panels.depuis_embed(panel),
+                        ChannelRuleSetupView(self, interaction.user.id, rows),
+                    ),
+                    ephemere=True,
+                )
+
+            reactions.callback = reactions_cb
+            channel_rules_button.callback = channel_rules_cb
+            self.add_item(reactions)
+            self.add_item(channel_rules_button)
 
         elif category == "security":
             self.add_item(WhitelistUserSelect(self))
@@ -695,6 +1084,29 @@ def _patch_build_embed() -> None:
             panel.add_field(
                 name="État du module",
                 value=("ACTIF" if enabled else "INACTIF — configuration conservée"),
+                inline=False,
+            )
+
+        if self.category == "automation":
+            reactions = await self.bot.db.fetchall(
+                "SELECT enabled FROM sentrix_dashboard_auto_reaction WHERE guild_id=?",
+                (self.guild.id,),
+            )
+            rules = await channel_message_rules.list_rules(self.bot, self.guild)
+            panel.add_field(
+                name="Automatisations configurées",
+                value=(
+                    f"**Réactions automatiques :** {sum(bool(row['enabled']) for row in reactions)}/{len(reactions)} actives\n"
+                    f"**Règles de salons :** {sum(bool(row['enabled']) for row in rules)}/{len(rules)} actives"
+                ),
+                inline=False,
+            )
+            panel.add_field(
+                name="Règles de contenu",
+                value=(
+                    "**Images uniquement** bloque le texte et les fichiers non-images.\n"
+                    "**Messages interdits** supprime les messages membres. Aucun salon n'est créé automatiquement."
+                ),
                 inline=False,
             )
 
@@ -808,10 +1220,19 @@ def install(bot) -> None:
         "Permissions",
         "Accès des membres, modérateurs, administrateurs et rôles personnalisés aux commandes + et /.",
     )
+    setup_ui.CATEGORIES["automation"] = (
+        "Automatisations",
+        "Réactions automatiques et règles de contenu par salon.",
+    )
+    setup_ui.BOT_PERMS["automation"] = ("view_channel", "manage_messages", "add_reactions")
+    setup_ui.PERM_LABELS["add_reactions"] = "Ajouter des réactions"
     order = list(setup_ui.CATEGORY_ORDER)
     if "permissions" not in order:
         index = order.index("moderation") + 1 if "moderation" in order else 0
         order.insert(index, "permissions")
+    if "automation" not in order:
+        index = order.index("security") + 1 if "security" in order else len(order)
+        order.insert(index, "automation")
     setup_ui.CATEGORY_ORDER = tuple(order)
     setup_ui.BOT_PERMS["permissions"] = tuple()
     _patch_can_setup()
