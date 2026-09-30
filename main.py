@@ -46,6 +46,7 @@ logger = logging.getLogger("bot")
 EXTENSIONS = [
     "cogs.moderation",
     "cogs.automod",
+    "cogs.forbidden_words_ui",
     # Ces quatre modules n'avaient qu'un install(), déclenché par l'enveloppe de
     # chargement de cogs/__init__ — enveloppe posée sur une classe que la
     # production n'instancie plus depuis la substitution de commands.Bot par
