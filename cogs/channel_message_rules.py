@@ -255,15 +255,30 @@ def install(bot: commands.Bot) -> None:
             return
         if not isinstance(message.author, discord.Member):
             return
-        if member_bypasses(message.author):
-            return
+
         rule = await _rule_for(bot, message.guild.id, message.channel.id)
         if not rule or not bool(rule.get("enabled")):
             return
         mode = str(rule.get("mode") or "")
-        if mode == "images_only" and message_is_images_only(message):
-            return
         if mode not in MODES:
+            return
+
+        # SentriX lui-même respecte la règle. Ainsi une réponse IA, un message
+        # d'aide ou un vieux callback ne peut pas polluer un salon media-only.
+        is_sentrix = bot.user is not None and int(message.author.id) == int(bot.user.id)
+        if is_sentrix:
+            if mode == "images_only" and message_is_images_only(message):
+                return
+            try:
+                await message.delete()
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+            return
+
+        # Les autres bots/webhooks et le staff restent hors du filtrage.
+        if member_bypasses(message.author):
+            return
+        if mode == "images_only" and message_is_images_only(message):
             return
         try:
             await message.delete()
