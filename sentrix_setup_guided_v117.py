@@ -19,17 +19,19 @@ logger = logging.getLogger("bot.setup-v117")
 _INSTALLED = False
 
 HOME_MODULE_KEYS: tuple[str, ...] = (
+    # Parcours essentiel — même ordre que le dashboard.
     "security",
+    "logs",
+    "tickets",
+    "members",
+    # Réglages complémentaires.
     "moderation",
     "automation",
-    "music",
-    "members",
-    "logs",
     "levels",
     "economy",
-    "tickets",
-    "notifications",
     "ai",
+    "notifications",
+    "music",
     "suggestions",
 )
 ROLE_FIELDS = {"autorole", "verify_role", "warn_role"}
