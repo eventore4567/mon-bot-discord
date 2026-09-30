@@ -76,7 +76,7 @@ def test_goodbye_text_mode_sends_plain_content():
     result = asyncio.run(setup_v2_completion._send_goodbye(bot, _member(guild)))
     assert result is channel
     kwargs = channel.send.call_args.kwargs
-    assert kwargs["content"] == "jayden a quitté Le Repaire."
+    assert kwargs["content"] == "<@111>\njayden a quitté Le Repaire."
     assert "embed" not in kwargs
 
 

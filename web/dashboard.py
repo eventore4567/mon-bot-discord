@@ -70,7 +70,9 @@ TEXT_FIELDS = {
     "level_message": (0, 1000),
 }
 
-URL_FIELDS = {"welcome_image_url", "goodbye_image_url"}
+URL_FIELDS = set()
+EVENT_BACKGROUND_FIELDS = {"welcome_image_url", "goodbye_image_url"}
+EVENT_BACKGROUND_PRESETS = {"preset:dark", "preset:gray", "preset:light"}
 SUPPORTED_SOCIAL_DOMAINS = (
     "youtube.com", "youtu.be", "tiktok.com", "twitch.tv", "instagram.com",
     "x.com", "twitter.com", "facebook.com", "fb.watch", "dailymotion.com",
@@ -803,6 +805,11 @@ def _validate_settings(guild: discord.Guild, values: dict) -> tuple[dict, str | 
             if not minimum <= len(text) <= maximum:
                 return {}, f"Le champ {field} doit contenir entre {minimum} et {maximum} caractères."
             clean[field] = text or None
+        elif field in EVENT_BACKGROUND_FIELDS:
+            preset = str(value or "preset:gray").strip()
+            if preset not in EVENT_BACKGROUND_PRESETS:
+                return {}, f"Le réglage {field} doit utiliser un fond SentriX prédéfini."
+            clean[field] = preset
         elif field in URL_FIELDS:
             text = str(value or "").strip()
             if text and not _valid_https_url(text):
@@ -1645,8 +1652,8 @@ INDEX_HTML = r"""<!doctype html>
         ["log_channel","Salon de logs général","Repli"]
       ].map(x=>({key:x[0],label:x[1],type:"channel",group:x[2]}))},
       welcome:{title:"Accueil des membres",description:"Messages d'arrivée, de départ et rôle automatique.",fields:[
-        {key:"welcome_channel",label:"Salon de bienvenue",type:"channel",group:"Arrivée"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables : {member}, {username}, {server} et {member_count}.",group:"Arrivée"},{key:"welcome_image_url",label:"Background de bienvenue (facultatif)",type:"url",hint:"L’image remplit automatiquement le fond de la carte.",group:"Arrivée"},{key:"autorole",label:"Rôle automatique",type:"role",group:"Arrivée"},
-        {key:"goodbye_channel",label:"Salon de départ",type:"channel",group:"Départ"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}.",group:"Départ"},{key:"goodbye_image_url",label:"Background de départ (facultatif)",type:"url",hint:"L’image remplit automatiquement le fond de la carte.",group:"Départ"}
+        {key:"welcome_channel",label:"Salon de bienvenue",type:"channel",group:"Arrivée"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables : {member}, {username}, {server} et {member_count}.",group:"Arrivée"},{key:"welcome_image_url",label:"Fond de bienvenue",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Arrivée"},{key:"autorole",label:"Rôle automatique",type:"role",group:"Arrivée"},
+        {key:"goodbye_channel",label:"Salon de départ",type:"channel",group:"Départ"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}.",group:"Départ"},{key:"goodbye_image_url",label:"Fond de départ",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Départ"}
       ]},
       levels:{title:"Niveaux et expérience",description:"Configurez la progression et les annonces de niveau.",fields:[
         {key:"xp_multiplier",label:"Multiplicateur d'XP",type:"number",min:.1,max:5,step:.1},{key:"level_channel",label:"Salon des niveaux",type:"channel"},{key:"level_message",label:"Message de passage de niveau",type:"textarea",hint:"Le membre est mentionné automatiquement lors du passage de niveau."}

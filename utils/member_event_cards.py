@@ -19,6 +19,12 @@ _BG = (43, 45, 49)
 _BG_DARK = (35, 36, 40)
 _BORDER = (74, 76, 82)
 
+EVENT_BACKGROUND_PRESETS = {
+    "preset:dark": ((28, 29, 33), (39, 40, 45)),
+    "preset:gray": ((43, 45, 49), (52, 54, 60)),
+    "preset:light": ((66, 68, 75), (78, 80, 88)),
+}
+
 
 def _font(size: int, *, bold: bool = False):
     names = (
@@ -108,9 +114,18 @@ async def read_member_avatar(member: discord.Member) -> bytes | None:
         return None
 
 
-def _neutral_background(custom_bytes: bytes | None = None) -> Image.Image:
-    """Fond plat, neutre, sans dégradé ni couleur vive."""
+def _preset_palette(preset: str | None):
+    return EVENT_BACKGROUND_PRESETS.get(str(preset or ""), EVENT_BACKGROUND_PRESETS["preset:gray"])
+
+
+def _neutral_background(
+    custom_bytes: bytes | None = None,
+    preset: str | None = None,
+) -> Image.Image:
+    """Fond plat SentriX. Les utilisateurs choisissent uniquement parmi 3 presets."""
     if custom_bytes:
+        # Conservé uniquement pour compatibilité interne ; le dashboard et +setup
+        # n'acceptent plus d'URL ou d'image personnalisée.
         try:
             source = Image.open(io.BytesIO(custom_bytes)).convert("RGB")
             image = ImageOps.fit(source, _SIZE, method=Image.Resampling.LANCZOS).convert("RGBA")
@@ -118,7 +133,8 @@ def _neutral_background(custom_bytes: bytes | None = None) -> Image.Image:
             return Image.alpha_composite(image, shade)
         except Exception:
             pass
-    return Image.new("RGBA", _SIZE, (*_BG, 255))
+    canvas, _panel = _preset_palette(preset)
+    return Image.new("RGBA", _SIZE, (*canvas, 255))
 
 
 def _fit_text(draw: ImageDraw.ImageDraw, text: str, max_width: int, start_size: int, min_size: int = 26):
@@ -177,13 +193,15 @@ def build_member_event_card(
     *,
     kind: str,
     background_bytes: bytes | None = None,
+    background_preset: str | None = None,
     avatar_bytes: bytes | None = None,
     level: int | None = None,
 ) -> discord.File:
     """Carte sobre façon Discord : avatar rond, gros titre, zéro couleur néon."""
     kind = str(kind or "welcome").casefold()
-    image = _neutral_background(background_bytes)
+    image = _neutral_background(background_bytes, background_preset)
     draw = ImageDraw.Draw(image, "RGBA")
+    _canvas, panel_color = _preset_palette(background_preset)
 
     name = str(
         getattr(member, "display_name", None)
@@ -197,7 +215,7 @@ def build_member_event_card(
     draw.rounded_rectangle(
         (34, 38, 1166, 382),
         radius=24,
-        fill=(*_BG, 255) if background_bytes is None else (15, 16, 18, 145),
+        fill=(*panel_color, 255) if background_bytes is None else (15, 16, 18, 145),
         outline=(*_BORDER, 255),
         width=2,
     )
@@ -238,6 +256,7 @@ def build_member_event_card(
 
 __all__ = [
     "build_member_event_card",
+    "EVENT_BACKGROUND_PRESETS",
     "fetch_background_image",
     "read_member_avatar",
 ]

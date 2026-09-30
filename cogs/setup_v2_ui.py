@@ -282,9 +282,6 @@ class WelcomeTextModal(discord.ui.Modal, title="Messages de bienvenue et départ
         max_length=1000,
         style=discord.TextStyle.paragraph,
     )
-    image = discord.ui.TextInput(label="URL image de bienvenue (facultatif)", required=False, max_length=400)
-    goodbye_image = discord.ui.TextInput(label="URL image de départ (facultatif)", required=False, max_length=400)
-
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
@@ -293,16 +290,17 @@ class WelcomeTextModal(discord.ui.Modal, title="Messages de bienvenue et départ
         gid = self.owner.guild.id
         welcome = str(self.welcome.value).strip() or None
         goodbye = str(self.goodbye.value).strip() or None
-        image = str(self.image.value).strip() or None
-        goodbye_image = str(self.goodbye_image.value).strip() or None
-        for candidate in (image, goodbye_image):
-            if candidate and not candidate.startswith(("https://", "http://")):
-                return await interaction.response.send_message("L’image doit utiliser une URL http/https.", ephemeral=True)
         await self.owner.bot.db.set_guild_config(gid, "welcome_message", welcome)
         await self.owner.bot.db.set_guild_config(gid, "goodbye_message", goodbye)
-        await self.owner.bot.db.set_guild_config(gid, "welcome_image_url", image)
-        await self.owner.bot.db.set_guild_config(gid, "goodbye_image_url", goodbye_image)
-        await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Messages enregistrés. Un modèle propre reste utilisé quand un champ est vide.')), ephemere=True)
+        await panels.envoyer(
+            interaction.response,
+            panels.depuis_embed(
+                embeds.success(
+                    "Messages enregistrés. Les fonds se choisissent dans le dashboard parmi les 3 modèles SentriX."
+                )
+            ),
+            ephemere=True,
+        )
 
 
 class AiFeatureView(discord.ui.View):

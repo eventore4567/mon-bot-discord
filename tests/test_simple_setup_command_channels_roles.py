@@ -126,10 +126,10 @@ def test_welcome_departure_backgrounds_and_level_card_are_simple():
 
     assert "goodbye_image_url TEXT" in schema
     assert '"goodbye_image_url"' in dashboard
-    assert "fetch_background_image(image_url)" in welcome
+    assert "fetch_background_image(image_url)" not in welcome
     assert "_without_duplicate_member_mention" in welcome
-    assert "background_bytes=background_bytes" in welcome
-    assert "ImageOps.fit(source, _SIZE" in cards
+    assert "background_preset=background_preset" in welcome
+    assert "EVENT_BACKGROUND_PRESETS" in cards
     assert "Carte sobre façon Discord : avatar rond, gros titre, zéro couleur néon." in cards
     assert 'kind == "level"' in cards
     assert 'title = "Félicitations !"' in cards
@@ -209,3 +209,23 @@ def test_feature_system_commands_do_not_double_write_through_db_only_facade():
     assert "set_system_feature(" not in source
     assert "setup_v2_core.set_module_enabled(" in source
     assert "get_system_features(self.bot.db, ctx.guild.id, fresh=True)" in source
+
+
+
+def test_event_backgrounds_are_limited_to_three_presets_and_pings_are_forced():
+    dashboard = (ROOT / "web" / "dashboard.py").read_text()
+    frontend = (ROOT / "web" / "dashboard_ui" / "js" / "30_modules.js").read_text()
+    setup = (ROOT / "cogs" / "setup_v2_completion.py").read_text()
+    legacy_setup = (ROOT / "cogs" / "setup_v2_ui.py").read_text()
+
+    for preset in ("preset:dark", "preset:gray", "preset:light"):
+        assert preset in dashboard
+        assert preset in frontend
+    assert "URL bannière / image" not in setup
+    assert "URL image de bienvenue" not in legacy_setup
+    assert "URL image de départ" not in legacy_setup
+    assert "Aucune image personnalisée" in frontend
+    assert 'content=(None if test else member.mention)' in setup
+    assert 'content = goodbye_body if test else f"{member.mention}\\n{goodbye_body}"' in setup
+    assert '"ping": True' in setup
+    assert '"goodbye_ping": True' in setup
