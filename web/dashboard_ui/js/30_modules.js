@@ -168,7 +168,7 @@ async function renderSecurity() {
     <section class="card full">
       <div class="card-head">
         <div><h2>Mots interdits</h2><p>Ajoutez les mots ou expressions que SentriX doit censurer immédiatement.</p></div>
-        <span class="badge">\${forbiddenWords.length} configuré(s)</span>
+        <span class="badge">${forbiddenWords.length} configuré(s)</span>
       </div>
       <div class="fields" style="margin-top:12px">
         <div class="field full">
@@ -180,7 +180,7 @@ async function renderSecurity() {
         <button class="btn primary" type="button" id="forbiddenWordAdd">Ajouter aux mots interdits</button>
       </div>
       <div class="list" style="margin-top:14px">
-        \${forbiddenWords.length ? forbiddenWords.map(word => \`<div class="row"><div class="row-main"><b>\${esc(word)}</b><small>Le message sera censuré et l’auteur averti.</small></div><button class="btn sm danger" type="button" data-forbidden-remove="\${esc(word)}">Retirer</button></div>\`).join('') : emptyState('Aucun mot interdit', 'Ajoutez un mot ci-dessus.')}
+        ${forbiddenWords.length ? forbiddenWords.map(word => `<div class="row"><div class="row-main"><b>${esc(word)}</b><small>Le message sera censuré et l’auteur averti.</small></div><button class="btn sm danger" type="button" data-forbidden-remove="${esc(word)}">Retirer</button></div>`).join('') : emptyState('Aucun mot interdit', 'Ajoutez un mot ci-dessus.')}
       </div>
     </section>
 
