@@ -4,6 +4,7 @@ Le nouveau +setup et /setup utilisent le même contrôleur, modifient toujours l
 message et lisent les configurations historiques au lieu de les recréer.
 """
 from __future__ import annotations
+import json
 import logging
 
 import re
@@ -13,6 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils import ai_service
 from utils import checks, embeds, log_service, sentrix_panels as panels
 
 logger = logging.getLogger("bot.setup-control-center")
@@ -1031,6 +1033,31 @@ class SetupView(discord.ui.LayoutView):
             toggle.callback, limits.callback = toggle_ai, edit_ai
             self.ajouter(toggle); self.ajouter(limits)
 
+            ai_channels = discord.ui.ChannelSelect(
+                placeholder="Salons où SentriX AI peut répondre (vide = tous)",
+                min_values=0,
+                max_values=25,
+                channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            )
+
+            async def choose_ai_channels(interaction: discord.Interaction):
+                ids = [int(channel.id) for channel in ai_channels.values]
+                await ai_service.update_setting(
+                    self.bot,
+                    self.guild.id,
+                    "allowed_channel_ids",
+                    json.dumps(ids),
+                )
+                await self.audit(
+                    interaction.user.id,
+                    "ai:allowed_channels",
+                    ",".join(map(str, ids)) if ids else "all",
+                )
+                await self.refresh(interaction)
+
+            ai_channels.callback = choose_ai_channels
+            self.ajouter(ai_channels)
+
     async def prepare(self):
         if self.category is None:
             states = await module_switch_states(self.bot, self.guild.id)
@@ -1421,6 +1448,17 @@ class SetupView(discord.ui.LayoutView):
                     [
                         panels.Ligne("Conversation", "active" if _get(row, "enabled", 1) else "désactivée"),
                         panels.Ligne("Mémoire", "active" if _get(row, "memory_enabled", 1) else "désactivée"),
+                        panels.Ligne(
+                            "Salons autorisés",
+                            (
+                                ", ".join(
+                                    channel.mention
+                                    for channel_id in json.loads(_get(row, "allowed_channel_ids", "[]") or "[]")[:5]
+                                    if (channel := self.guild.get_channel(int(channel_id))) is not None
+                                )
+                                or "Tous les salons"
+                            ),
+                        ),
                     ],
                 ),
                 panels.Section(
