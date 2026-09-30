@@ -13,6 +13,7 @@ Objectifs :
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 import discord
@@ -408,6 +409,96 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         if page == "music":
             return await self._build_music()
         return await super()._build_page(page)
+
+    async def _build_automation(self) -> None:
+        from . import setup_v2_ui as automation_ui
+
+        language = await language_runtime.get_language(self.bot, self.guild.id)
+        reactions = await automation_ui._automation_reaction_rows(self.bot, self.guild.id)
+        rules = await automation_ui.channel_message_rules.list_rules(self.bot, self.guild)
+        active_reactions = sum(bool(row["enabled"]) for row in reactions)
+        active_rules = sum(bool(row.get("enabled")) for row in rules)
+
+        title = "Automations" if language == language_runtime.LANG_EN else "Automatisations"
+        description = (
+            "Configure automatic reactions and per-channel content rules."
+            if language == language_runtime.LANG_EN
+            else "Configurez les réactions automatiques et les règles de contenu par salon."
+        )
+
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    f"# ⚙️ {title}\n{description}\n\n"
+                    + (
+                        f"**Active reactions:** {active_reactions}\n**Active rules:** {active_rules}"
+                        if language == language_runtime.LANG_EN
+                        else f"**Réactions actives :** {active_reactions}\n**Règles actives :** {active_rules}"
+                    )
+                ),
+                accessory=v73._thumbnail(self.bot),
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        reactions_button = discord.ui.Button(
+            label="Automatic reactions" if language == language_runtime.LANG_EN else "Réactions automatiques",
+            style=discord.ButtonStyle.primary,
+        )
+        rules_button = discord.ui.Button(
+            label="Channel rules" if language == language_runtime.LANG_EN else "Règles des salons",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def open_reactions(interaction: discord.Interaction):
+            rows = await automation_ui._automation_reaction_rows(self.bot, self.guild.id)
+            panel = embeds.info(
+                (
+                    "Choose a channel, all messages or a keyword, then up to 8 emojis."
+                    if language == language_runtime.LANG_EN
+                    else "Choisissez un salon, tous les messages ou un mot-clé, puis jusqu’à 8 emojis."
+                ),
+                title="Automatic reactions" if language == language_runtime.LANG_EN else "Réactions automatiques",
+            )
+            source = SimpleNamespace(bot=self.bot, guild=self.guild)
+            await panels.envoyer(
+                interaction.response,
+                panels.avec_composants(
+                    panels.depuis_embed(panel),
+                    automation_ui.AutoReactionSetupView(source, interaction.user.id, rows),
+                ),
+                ephemere=True,
+            )
+
+        async def open_rules(interaction: discord.Interaction):
+            rows = await automation_ui.channel_message_rules.list_rules(self.bot, self.guild)
+            panel = embeds.info(
+                (
+                    "**Images only** blocks text and other file types.\n"
+                    "**Messages blocked** removes member messages from the channel."
+                    if language == language_runtime.LANG_EN
+                    else "**Images uniquement** bloque le texte et les autres fichiers.\n"
+                    "**Messages interdits** supprime les messages des membres dans le salon."
+                ),
+                title="Channel rules" if language == language_runtime.LANG_EN else "Règles des salons",
+            )
+            source = SimpleNamespace(bot=self.bot, guild=self.guild)
+            await panels.envoyer(
+                interaction.response,
+                panels.avec_composants(
+                    panels.depuis_embed(panel),
+                    automation_ui.ChannelRuleSetupView(source, interaction.user.id, rows),
+                ),
+                ephemere=True,
+            )
+
+        reactions_button.callback = open_reactions
+        rules_button.callback = open_rules
+        container.add_item(discord.ui.ActionRow(reactions_button, rules_button))
+        self._add_navigation(container)
+        self.add_item(container)
 
     async def _build_music(self) -> None:
         music = self.bot.get_cog("Music")
