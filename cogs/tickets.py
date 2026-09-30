@@ -32,6 +32,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cogs import language_runtime
 from cogs.ticket_constants import (
     BUTTON_STYLE_NAMES,
     BUTTON_STYLES,
@@ -485,7 +486,7 @@ class TicketRenameModal(discord.ui.Modal, title="✏️ Renommer le ticket"):
 # =============================================================================
 
 class TicketOpenSelect(discord.ui.Select):
-    def __init__(self, panel_id: int, types: list):
+    def __init__(self, panel_id: int, types: list, language: str = language_runtime.LANG_FR):
         options = [
             discord.SelectOption(
                 label=(t["name"] or "Ticket")[:100], value=str(t["id"]),
@@ -494,7 +495,11 @@ class TicketOpenSelect(discord.ui.Select):
             for t in types[:25]
         ]
         super().__init__(
-            placeholder="🎫 Choisissez une catégorie pour ouvrir un ticket...",
+            placeholder=(
+                "🎫 Choose a category to open a ticket..."
+                if language == language_runtime.LANG_EN
+                else "🎫 Choisissez une catégorie pour ouvrir un ticket..."
+            ),
             options=options, custom_id=f"ticket_open_select:{panel_id}", min_values=1, max_values=1,
         )
 
@@ -520,7 +525,7 @@ class TicketPanelView(discord.ui.View):
     base de données à chaque envoi ET après chaque redémarrage (Tickets.restore_panel_views),
     donc toujours à jour avec les types de tickets réellement configurés."""
 
-    def __init__(self, panel, types: list):
+    def __init__(self, panel, types: list, language: str = language_runtime.LANG_FR):
         super().__init__(timeout=None)
         if not types:
             return
@@ -528,7 +533,7 @@ class TicketPanelView(discord.ui.View):
             for t in types[:25]:
                 self.add_item(TicketOpenButton(t))
         else:
-            self.add_item(TicketOpenSelect(panel["id"], types))
+            self.add_item(TicketOpenSelect(panel["id"], types, language))
 
 
 class TicketControlButton(discord.ui.Button):
@@ -963,7 +968,8 @@ class Tickets(commands.Cog):
             if not types:
                 continue
             try:
-                self.bot.add_view(TicketPanelView(panel, types), message_id=panel["message_id"])
+                language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
+                self.bot.add_view(TicketPanelView(panel, types, language), message_id=panel["message_id"])
                 restored += 1
             except discord.HTTPException:
                 pass
@@ -1032,35 +1038,123 @@ class Tickets(commands.Cog):
 
     # ---------------------------------------------------------------- OUVERTURE
 
-    def build_panel_embed(self, panel) -> discord.Embed:
-        e = embeds.brand(panel["title"] or "🎫 Support", panel["description"] or "")
+    async def build_public_panel(self, panel, types):
+        language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
+        title = str(panel["title"] or "🎫 Support")
+        description = str(panel["description"] or "")
+        if not description or description == "Choisissez une option ci-dessous pour ouvrir un ticket.":
+            description = (
+                "Choose the category that matches your request. Staff will reply in a private channel."
+                if language == language_runtime.LANG_EN
+                else "Choisissez la catégorie qui correspond à votre demande. Le staff vous répondra dans un salon privé."
+            )
+
+        lines = []
+        for ticket_type in list(types)[:12]:
+            emoji = str(ticket_type["emoji"] or "🎫")
+            name = str(ticket_type["name"] or "Ticket")
+            detail = str(ticket_type["description"] or "").strip()
+            lines.append(f"{emoji} **{name}**" + (f" — {detail}" if detail else ""))
+
+        section_title = "Available categories" if language == language_runtime.LANG_EN else "Catégories disponibles"
+        how_title = "How it works" if language == language_runtime.LANG_EN else "Comment ça marche"
+        how_text = (
+            "Select a category below. A private channel will be created for you and the relevant staff."
+            if language == language_runtime.LANG_EN
+            else "Sélectionnez une catégorie ci-dessous. Un salon privé sera créé pour vous et le staff concerné."
+        )
+        public = sx_panels.Panneau(
+            titre=title,
+            sous_titre=description,
+            sections=[
+                sx_panels.Section(how_title, texte=how_text),
+                sx_panels.Section(section_title, texte="\n".join(lines)),
+            ],
+            kind="tickets",
+            vignette=panel["thumbnail_url"] or None,
+            image=panel["image_url"] or None,
+            pied=panel["footer_text"] or "SentriX",
+        )
         if panel["color"]:
-            e.color = panel["color"]
-        if panel["image_url"]:
-            e.set_image(url=panel["image_url"])
-        if panel["thumbnail_url"]:
-            e.set_thumbnail(url=panel["thumbnail_url"])
-        if panel["footer_text"]:
-            e.set_footer(text=panel["footer_text"])
-        return e
+            try:
+                container = next(x for x in public.children if isinstance(x, discord.ui.Container))
+                container.accent_colour = discord.Colour(int(panel["color"]))
+            except Exception:
+                pass
+        return sx_panels.avec_composants(public, TicketPanelView(panel, types, language))
+
+    async def refresh_public_panels(self, guild_id: int) -> int:
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return 0
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM ticket_panels_v2 WHERE guild_id=? AND enabled=1 AND channel_id IS NOT NULL AND message_id IS NOT NULL",
+            (int(guild_id),),
+        )
+        changed = 0
+        for panel in rows:
+            channel = guild.get_channel(int(panel["channel_id"]))
+            if channel is None:
+                continue
+            types = await self.get_panel_types(panel["id"])
+            if not types:
+                continue
+            try:
+                old = await channel.fetch_message(int(panel["message_id"]))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                continue
+            public = await self.build_public_panel(panel, types)
+            try:
+                if old.embeds:
+                    msg = await sx_panels.envoyer(channel, public)
+                    await old.delete()
+                else:
+                    await sx_panels.editer(old, public)
+                    msg = old
+                await self.bot.db.execute(
+                    "UPDATE ticket_panels_v2 SET message_id=? WHERE id=?",
+                    (msg.id, panel["id"]),
+                )
+                changed += 1
+            except (discord.Forbidden, discord.HTTPException):
+                logger.exception("Rafraîchissement du panel ticket #%s impossible.", panel["id"])
+        return changed
 
     async def send_panel_preview(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
+        language = await language_runtime.get_language(self.bot, interaction.guild_id)
         if not types:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`.")), ephemere=True)
-        await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemere=True)
+            text = (
+                "This panel has no ticket type yet."
+                if language == language_runtime.LANG_EN
+                else "Ce panel n’a encore aucun type de ticket."
+            )
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(embeds.warning(text)),
+                ephemere=True,
+            )
+        await sx_panels.envoyer(
+            interaction.response,
+            await self.build_public_panel(panel, types),
+            ephemere=True,
+        )
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
+        language = await language_runtime.get_language(self.bot, interaction.guild_id)
         if not panel["channel_id"]:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Choisissez d'abord un salon de destination (menu déroulant du dessus).")), ephemere=True)
+            text = "Choose the destination channel first." if language == language_runtime.LANG_EN else "Choisissez d’abord le salon de destination."
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(text)), ephemere=True)
         if not types:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup` avant de l’envoyer.")), ephemere=True)
+            text = "Add at least one ticket type before publishing." if language == language_runtime.LANG_EN else "Ajoutez au moins un type de ticket avant de publier."
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(text)), ephemere=True)
         channel = interaction.guild.get_channel(panel["channel_id"])
         if not channel:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Le salon configuré n'existe plus.")), ephemere=True)
+            text = "The configured channel no longer exists." if language == language_runtime.LANG_EN else "Le salon configuré n’existe plus."
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(text)), ephemere=True)
 
         await interaction.response.defer(ephemeral=True)
         old_message_id = panel["message_id"]
@@ -1068,11 +1162,19 @@ class Tickets(commands.Cog):
             try:
                 old = await channel.fetch_message(old_message_id)
                 await old.delete()
-            except discord.HTTPException:
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
-        msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
-        await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (msg.id, channel.id, panel_id))
-        await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')), ephemere=True)
+        msg = await sx_panels.envoyer(channel, await self.build_public_panel(panel, types))
+        await self.bot.db.execute(
+            "UPDATE ticket_panels_v2 SET message_id=?, channel_id=? WHERE id=?",
+            (msg.id, channel.id, panel_id),
+        )
+        confirmation = (
+            f"Ticket panel published in {channel.mention}."
+            if language == language_runtime.LANG_EN
+            else f"Panel ticket publié dans {channel.mention}."
+        )
+        await sx_panels.texte_court(interaction, confirmation, ephemere=True)
 
     async def start_ticket_flow(self, interaction: discord.Interaction, type_id: int):
         started = time.monotonic()
