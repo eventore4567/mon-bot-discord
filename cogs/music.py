@@ -49,9 +49,21 @@ CREATE TABLE IF NOT EXISTS sentrix_music_settings (
 )
 """
 
+MUSIC_MEMBER_PANEL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_music_member_panels (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
+
 
 async def ensure_music_settings_schema(bot) -> None:
     await bot.db.execute(MUSIC_SETTINGS_SCHEMA)
+    await bot.db.execute(MUSIC_MEMBER_PANEL_SCHEMA)
 
 
 async def get_music_settings(bot, guild_id: int) -> dict:
@@ -127,6 +139,7 @@ class GuildMusicQueue:
         self.elapsed_offset: float = 0.0  # secondes déjà écoutées avant le dernier seek
         self.started_at: float = 0.0  # time.monotonic() au dernier (re)démarrage de lecture
         self.disconnect_task: asyncio.Task | None = None
+        self.keep_connected: bool = False
 
     def position_seconds(self) -> float:
         if not self.started_at:
@@ -350,12 +363,46 @@ class Music(commands.Cog, name="Music"):
             voice_channel_id=channel.id if channel else None,
             actor_id=actor_id,
         )
-        if not enabled:
+
+        persistent = getattr(self, "_sentrix_persistent_voice", None)
+        if enabled and channel is not None:
+            try:
+                try:
+                    target = self.bot.get_partial_messageable(
+                        channel.id,
+                        guild_id=guild.id,
+                        type=discord.ChannelType.voice,
+                    )
+                except TypeError:
+                    target = self.bot.get_partial_messageable(channel.id)
+
+                queue = await self._connect_configured_voice(
+                    guild,
+                    channel,
+                    text_channel=target,
+                )
+                queue.keep_connected = True
+                if persistent is not None:
+                    await persistent.remember(guild.id, channel.id, channel.id)
+            except (PermissionError, RuntimeError, discord.Forbidden, discord.HTTPException, discord.ClientException) as exc:
+                await save_music_settings(
+                    self.bot,
+                    guild.id,
+                    enabled=False,
+                    voice_channel_id=channel.id,
+                    actor_id=actor_id,
+                )
+                raise ValueError(str(exc) or "SentriX n’a pas pu rejoindre le vocal musique.") from exc
+        else:
+            if persistent is not None:
+                await persistent.forget(guild.id)
             await self.shutdown_guild_music(guild.id)
+
         return settings
 
     async def shutdown_guild_music(self, guild_id: int) -> None:
         queue = self.get_queue(guild_id)
+        queue.keep_connected = False
         self._cancel_disconnect(queue)
         voice = queue.voice_client
         queue.tracks.clear()
@@ -395,6 +442,7 @@ class Music(commands.Cog, name="Music"):
         else:
             voice = await channel.connect()
         queue.voice_client = voice
+        queue.keep_connected = True
         if text_channel is not None:
             queue.text_channel = text_channel
         self._cancel_disconnect(queue)
@@ -538,6 +586,8 @@ class Music(commands.Cog, name="Music"):
 
     def _schedule_disconnect(self, queue: GuildMusicQueue) -> None:
         self._cancel_disconnect(queue)
+        if queue.keep_connected:
+            return
 
         async def _wait_then_leave():
             try:
@@ -655,6 +705,51 @@ class Music(commands.Cog, name="Music"):
         # d'embed "Lecture en cours", ce qui supprimait le doublon visible.
         await self._advance(queue)
 
+    async def _voice_chat_target(self, guild_id: int, channel_id: int):
+        try:
+            return self.bot.get_partial_messageable(
+                int(channel_id),
+                guild_id=int(guild_id),
+                type=discord.ChannelType.voice,
+            )
+        except TypeError:
+            return self.bot.get_partial_messageable(int(channel_id))
+
+    async def _delete_saved_member_panel(self, guild_id: int, member_id: int) -> None:
+        await ensure_music_settings_schema(self.bot)
+        row = await self.bot.db.fetchone(
+            "SELECT channel_id,message_id FROM sentrix_music_member_panels "
+            "WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(member_id)),
+        )
+        if row is not None:
+            try:
+                target = await self._voice_chat_target(guild_id, int(row["channel_id"]))
+                partial = target.get_partial_message(int(row["message_id"]))
+                await partial.delete()
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
+                pass
+        await self.bot.db.execute(
+            "DELETE FROM sentrix_music_member_panels WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(member_id)),
+        )
+
+    async def _save_member_panel(self, guild_id: int, member_id: int, channel_id: int, message_id: int) -> None:
+        await ensure_music_settings_schema(self.bot)
+        await self.bot.db.execute(
+            "INSERT INTO sentrix_music_member_panels "
+            "(guild_id,user_id,channel_id,message_id,updated_at) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(guild_id,user_id) DO UPDATE SET "
+            "channel_id=excluded.channel_id,message_id=excluded.message_id,updated_at=excluded.updated_at",
+            (
+                int(guild_id),
+                int(member_id),
+                int(channel_id),
+                int(message_id),
+                int(time.time()),
+            ),
+        )
+
     async def _delete_member_music_panel_after_leave(
         self,
         guild_id: int,
@@ -678,6 +773,7 @@ class Music(commands.Cog, name="Music"):
                     await message.delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
+            await self._delete_saved_member_panel(guild_id, member_id)
         except asyncio.CancelledError:
             return
         finally:
@@ -738,6 +834,10 @@ class Music(commands.Cog, name="Music"):
         if key in self._join_panel_messages:
             return
 
+        # Après un redémarrage/failover, le dict mémoire est vide mais l'ancien
+        # message peut encore exister. On le retire avant d'en créer un nouveau.
+        await self._delete_saved_member_panel(member.guild.id, member.id)
+
         me = member.guild.me
         if me is None:
             return
@@ -751,14 +851,7 @@ class Music(commands.Cog, name="Music"):
             return
 
         try:
-            try:
-                target = self.bot.get_partial_messageable(
-                    after.channel.id,
-                    guild_id=member.guild.id,
-                    type=discord.ChannelType.voice,
-                )
-            except TypeError:
-                target = self.bot.get_partial_messageable(after.channel.id)
+            target = await self._voice_chat_target(member.guild.id, after.channel.id)
 
             message = await target.send(
                 content=(
@@ -774,6 +867,12 @@ class Music(commands.Cog, name="Music"):
                 ),
             )
             self._join_panel_messages[key] = message
+            await self._save_member_panel(
+                member.guild.id,
+                member.id,
+                after.channel.id,
+                message.id,
+            )
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             logger.exception(
                 "Impossible d'envoyer le panneau musique dans le chat vocal guild=%s channel=%s",
@@ -791,6 +890,19 @@ class Music(commands.Cog, name="Music"):
             vc = queue.voice_client
             if not vc or not vc.is_connected():
                 continue
+
+            settings = await self.get_system_settings(queue.guild_id)
+            configured_id = settings.get("voice_channel_id")
+            if (
+                settings.get("enabled")
+                and configured_id
+                and int(configured_id) == int(vc.channel.id)
+            ):
+                queue.keep_connected = True
+                self._cancel_disconnect(queue)
+                continue
+
+            queue.keep_connected = False
             humans = [m for m in vc.channel.members if not m.bot]
             if not humans and not queue.disconnect_task:
                 self._schedule_disconnect(queue)
