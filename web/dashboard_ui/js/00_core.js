@@ -220,6 +220,7 @@ async function guardDirty() {
 
 /* ---------- options Discord ---------- */
 function roles() { return state.guild?.roles || []; }
+function guildEmojis() { return state.guild?.emojis || []; }
 function channels(type = 'text') {
   const all = state.guild?.channels || [];
   return all.filter(c => {
@@ -239,6 +240,40 @@ function channelOptions(value = '', type = 'text', placeholder = 'Aucun salon') 
 }
 function channelName(id) { const c = (state.guild?.channels || []).find(x => String(x.id) === String(id)); return c ? `#${c.name}` : ''; }
 function roleName(id) { const r = roles().find(x => String(x.id) === String(id)); return r ? `@${r.name}` : ''; }
+function emojiControl(id, value = '', placeholder = 'Emoji Unicode ou du serveur') {
+  const total = guildEmojis().length;
+  return `<div class="toolbar emoji-control"><input class="search-input" id="${esc(id)}" maxlength="100" value="${esc(value || '')}" placeholder="${esc(placeholder)}"><button class="btn" type="button" data-server-emoji-target="${esc(id)}" ${total ? '' : 'disabled'}>${total ? 'Emojis du serveur' : 'Aucun emoji serveur'}</button></div>`;
+}
+async function pickServerEmoji() {
+  const items = guildEmojis().map(emoji => ({
+    value: emoji.value,
+    label: `:${emoji.name}:`,
+    emoji,
+  }));
+  if (!items.length) {
+    toast('Ce serveur n’a aucun emoji personnalisé disponible.', true);
+    return null;
+  }
+  const picked = await pickDialog({
+    title: 'Choisir un emoji du serveur',
+    items,
+    render: item => `<span class="emoji-option"><img src="${esc(item.emoji.url)}" alt="" loading="lazy"><span><b>${esc(item.label)}</b>${item.emoji.animated ? '<small>Animé</small>' : ''}</span></span>`,
+  });
+  return picked?.value || null;
+}
+function bindEmojiPickers(root = document) {
+  root.querySelectorAll('[data-server-emoji-target]').forEach(button => {
+    button.onclick = async () => {
+      const value = await pickServerEmoji();
+      if (!value) return;
+      const input = $(button.dataset.serverEmojiTarget);
+      if (!input) return;
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+  });
+}
 function resourceIssue(field) {
   const d = state.cache.get(`${state.guildId}:diagnostics`)?.value;
   return (d?.invalid_resources || []).find(x => x.field === field) || null;

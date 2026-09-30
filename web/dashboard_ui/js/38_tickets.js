@@ -95,7 +95,7 @@ async function appendTicketButtonSettings() {
       title: `Configurer « ${cfg.label || TICKET_BUTTON_LABELS[key] || key} »`,
       body: `<div class="fields">
         <div class="field"><label for="ticketActionLabel">Nom du bouton</label><input id="ticketActionLabel" maxlength="80" value="${esc(cfg.label || TICKET_BUTTON_LABELS[key] || key)}"></div>
-        <div class="field"><label for="ticketActionEmoji">Emoji</label><input id="ticketActionEmoji" maxlength="100" value="${esc(cfg.emoji || '')}"></div>
+        <div class="field full"><label for="ticketActionEmoji">Emoji</label>${emojiControl('ticketActionEmoji', cfg.emoji || '')}</div>
         <div class="field"><label for="ticketActionStyle">Couleur</label><select id="ticketActionStyle">${[['bleu','Bleu'],['gris','Gris'],['vert','Vert'],['rouge','Rouge']].map(([v,l]) => `<option value="${v}" ${(cfg.style || 'bleu') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="field"><label for="ticketActionRole">Rôle requis</label><select id="ticketActionRole">${roleOptions(cfg.role_id || '', 'Tout le staff')}</select></div>
       </div>`,
@@ -117,6 +117,7 @@ async function appendTicketButtonSettings() {
           } catch (e) { toast(e.message, true); }
         } },
       ],
+      onOpen: () => bindEmojiPickers($('modalBody')),
     });
   };
 

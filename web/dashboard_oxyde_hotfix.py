@@ -227,6 +227,18 @@ def patch_dashboard_runtime(dashboard=None) -> None:
                 for channel in guild.channels
                 if isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.CategoryChannel))
             ]
+        emojis = [
+            {
+                "id": str(emoji.id),
+                "name": emoji.name,
+                "animated": bool(emoji.animated),
+                "available": bool(emoji.available),
+                "value": str(emoji),
+                "url": str(emoji.url),
+            }
+            for emoji in sorted(guild.emojis, key=lambda item: item.name.casefold())
+            if emoji.available
+        ]
 
         return {
             "guild": {
@@ -243,6 +255,7 @@ def patch_dashboard_runtime(dashboard=None) -> None:
             "social_notifications": social_notifications,
             "roles": roles,
             "channels": channels,
+            "emojis": emojis,
             "metrics": metrics,
         }
 

@@ -77,6 +77,25 @@ def test_dashboard_navigation_does_not_shift_layout():
     assert "translateY" not in transition
     assert "scale(" not in transition
 
+
+def test_dashboard_exposes_and_reuses_server_emojis():
+    dashboard = (ROOT / "web" / "dashboard.py").read_text()
+    hotfix = (ROOT / "web" / "dashboard_oxyde_hotfix.py").read_text()
+    core = (ROOT / "web" / "dashboard_ui" / "js" / "00_core.js").read_text()
+    roles = (ROOT / "web" / "dashboard_ui" / "js" / "35_community.js").read_text()
+    modules = (ROOT / "web" / "dashboard_ui" / "js" / "30_modules.js").read_text()
+    ticket_actions = (ROOT / "web" / "dashboard_ui" / "js" / "38_tickets.js").read_text()
+
+    assert '"emojis": emojis' in dashboard
+    assert '"emojis": emojis' in hotfix
+    assert "function guildEmojis()" in core
+    assert "function pickServerEmoji()" in core
+    assert "function bindEmojiPickers" in core
+    assert "emojiControl('rrEmoji')" in roles
+    assert "emojiControl('ttEmoji'" in modules
+    assert "reactEmojiServer" in modules
+    assert "emojiControl('ticketActionEmoji'" in ticket_actions
+
 def test_roles_offer_simple_no_emoji_and_reaction_modes():
     backend = (ROOT / "web" / "setup_dashboard.py").read_text()
     frontend = (ROOT / "web" / "dashboard_ui" / "js" / "35_community.js").read_text()

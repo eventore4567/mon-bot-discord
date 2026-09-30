@@ -675,6 +675,18 @@ async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
         if not role.is_default() and not role.managed
     ]
     channels = _channel_items(guild)
+    emojis = [
+        {
+            "id": str(emoji.id),
+            "name": emoji.name,
+            "animated": bool(emoji.animated),
+            "available": bool(emoji.available),
+            "value": str(emoji),
+            "url": str(emoji.url),
+        }
+        for emoji in sorted(guild.emojis, key=lambda item: item.name.casefold())
+        if emoji.available
+    ]
     return {
         "guild": {
             "id": str(guild.id),
@@ -690,6 +702,7 @@ async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
         "social_notifications": social_notifications,
         "roles": roles,
         "channels": channels,
+        "emojis": emojis,
         "metrics": metrics,
     }
 

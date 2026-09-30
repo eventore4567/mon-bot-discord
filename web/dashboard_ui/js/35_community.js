@@ -155,7 +155,7 @@ async function renderRoles() {
     bindModuleButtons();
     const addReaction = (messageId, channelId) => openModal({
       title: 'Ajouter un rôle par réaction',
-      body: `<div class="fields">${channelId ? '' : `<div class="field full"><label for="rrChannel">Salon du message</label><select id="rrChannel">${channelOptions('', 'text', 'Choisir un salon')}</select></div>`}<div class="field full"><span class="label">Message</span><div class="toolbar"><button class="btn" type="button" id="rrPick" ${channelId || messageId ? '' : 'disabled'}>${messageId ? 'Message choisi' : 'Choisir le message…'}</button><small id="rrPicked">${messageId ? 'Le panneau sélectionné.' : 'Choisissez d’abord un salon.'}</small></div></div><div class="field"><label for="rrEmoji">Emoji</label><input id="rrEmoji" placeholder="Emoji Unicode ou du serveur"></div><div class="field"><label for="rrRole">Rôle donné</label><select id="rrRole">${roleOptions('', 'Choisir un rôle')}</select></div><div class="field full"><label for="rrLabel">Texte affiché (optionnel)</label><input id="rrLabel" maxlength="100" placeholder="Ex : Annonces importantes"></div></div>`,
+      body: `<div class="fields">${channelId ? '' : `<div class="field full"><label for="rrChannel">Salon du message</label><select id="rrChannel">${channelOptions('', 'text', 'Choisir un salon')}</select></div>`}<div class="field full"><span class="label">Message</span><div class="toolbar"><button class="btn" type="button" id="rrPick" ${channelId || messageId ? '' : 'disabled'}>${messageId ? 'Message choisi' : 'Choisir le message…'}</button><small id="rrPicked">${messageId ? 'Le panneau sélectionné.' : 'Choisissez d’abord un salon.'}</small></div></div><div class="field full"><label for="rrEmoji">Emoji</label>${emojiControl('rrEmoji')}</div><div class="field"><label for="rrRole">Rôle donné</label><select id="rrRole">${roleOptions('', 'Choisir un rôle')}</select></div><div class="field full"><label for="rrLabel">Texte affiché (optionnel)</label><input id="rrLabel" maxlength="100" placeholder="Ex : Annonces importantes"></div></div>`,
       actions: [{ label: 'Annuler' }, { label: 'Ajouter', kind: 'primary', keep: true, onClick: async () => {
         const mid = $('modalBody').dataset.messageId || messageId; const ch = channelId || $('rrChannel')?.value;
         if (!ch || !mid) return toast('Choisissez le salon et le message.', true);
@@ -163,6 +163,7 @@ async function renderRoles() {
       } }],
       onOpen: () => {
         $('modalBody').dataset.messageId = messageId || '';
+        bindEmojiPickers($('modalBody'));
         const chSel = $('rrChannel'); if (chSel) chSel.onchange = () => { $('rrPick').disabled = !chSel.value; $('rrPicked').textContent = chSel.value ? 'Choisissez le message.' : 'Choisissez d’abord un salon.'; };
         $('rrPick').onclick = async () => { const ch = channelId || $('rrChannel')?.value; if (!ch) return; const picked = await pickMessage(ch); if (!picked) { return; } /* pickDialog a fermé la modale : on la rouvre avec le message choisi */ addReaction(picked.value, ch); };
       },
