@@ -31,6 +31,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
+from cogs import language_runtime
 from utils import embeds, helpers, checks, design_system
 from utils import sentrix_panels as panels
 from database.db import FAKE_INVITE_ACCOUNT_AGE_DAYS
@@ -171,24 +172,36 @@ class Invites(commands.Cog, name="Invites"):
         """
         guild = member.guild
         try:
+            language = await language_runtime.get_language(self.bot, guild.id)
+            english = language == language_runtime.LANG_EN
             if inviter_id:
                 detail = await self.bot.db.get_invite_breakdown(guild.id, inviter_id)
                 invitant = f"<@{inviter_id}>\n`ID: {inviter_id}`"
-                total = f"**{detail['credited']}** invitation(s) créditée(s)"
+                total = (
+                    f"**{detail['credited']}** credited invite(s)"
+                    if english
+                    else f"**{detail['credited']}** invitation(s) créditée(s)"
+                )
             else:
-                invitant = "Inconnu"
-                total = "Non attribué : SentriX n'a pas pu déterminer l'invitation utilisée."
+                invitant = "Unknown" if english else "Inconnu"
+                total = (
+                    "Unattributed: SentriX could not determine which invite was used."
+                    if english
+                    else "Non attribué : SentriX n'a pas pu déterminer l'invitation utilisée."
+                )
 
             extra = {
-                "🔗 Invité par": invitant,
-                "📊 Total de l'invitant": total,
-                "🎟️ Invitation utilisée": f"`{code}`" if code else "Inconnue",
+                ("🔗 Invited by" if english else "🔗 Invité par"): invitant,
+                ("📊 Inviter total" if english else "📊 Total de l'invitant"): total,
+                ("🎟️ Invite used" if english else "🎟️ Invitation utilisée"): (
+                    f"`{code}`" if code else ("Unknown" if english else "Inconnue")
+                ),
             }
             entree = embeds.log_entry(
-                "📬 Nouvelle arrivée",
+                "📬 New member joined" if english else "📬 Nouvelle arrivée",
                 config.COLOR_SUCCESS,
                 cible=member,
-                cible_label="👤 Membre",
+                cible_label="👤 Member" if english else "👤 Membre",
                 extra=extra,
             )
             # La clé d'événement empêche un double log si deux couches relaient l'arrivée.
