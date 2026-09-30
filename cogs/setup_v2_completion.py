@@ -16,7 +16,7 @@ from discord.ext import commands
 from utils import checks, embeds, log_service
 from utils import sentrix_panels as panels
 from utils import join_dedup
-from utils.member_event_cards import build_member_event_card, fetch_background_image
+from utils.member_event_cards import build_member_event_card, fetch_background_image, read_member_avatar
 from . import bot_tracker
 from . import control_center_v3
 from . import setup_control_center as setup_ui
@@ -222,23 +222,26 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     # vraiment la personne. C'est exactement ce que Jayden a signalé — « un vrai
     # @ ». La duplication apparente n'en est pas une : celle du haut notifie,
     # celle du corps salue.
-    panel = embeds.brand(
-        _without_duplicate_member_mention(_format_welcome(presentation["title"], member), member),
-        body,
+    title = _without_duplicate_member_mention(
+        _format_welcome(presentation["title"], member),
+        member,
     )
-    if presentation["show_avatar"]:
-        panel.set_thumbnail(url=member.display_avatar.url)
-    if presentation["show_member_count"]:
-        count = int(member.guild.member_count or 0)
-        panel.add_field(name="Membres", value=f"{count} membre{'s' if count > 1 else ''}", inline=True)
+    panel = discord.Embed(
+        title=f"👋 {title}",
+        description=body,
+        colour=discord.Colour(0x6C5CE7),
+    )
+    panel.set_footer(text="SentriX")
     image_url = _conf_value(conf, "welcome_image_url")
     card_file = None
     try:
         background_bytes = await fetch_background_image(image_url) if image_url else None
+        avatar_bytes = await read_member_avatar(member) if presentation["show_avatar"] else None
         card_file = build_member_event_card(
             member,
             kind="welcome",
             background_bytes=background_bytes,
+            avatar_bytes=avatar_bytes,
         )
         panel.set_image(url="attachment://sentrix_welcome.png")
     except Exception:
@@ -287,28 +290,37 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
         except discord.HTTPException:
             return None
         return channel
-    panel = embeds.neutral("Départ d’un membre", _format_welcome(template, member))
-    if presentation["show_avatar"]:
-        panel.set_thumbnail(url=member.display_avatar.url)
+    goodbye_body = _without_duplicate_member_mention(
+        _format_welcome(template, member),
+        member,
+    )
+    panel = discord.Embed(
+        title=f"👋 Au revoir {member.display_name}",
+        description=goodbye_body,
+        colour=discord.Colour(0x6C5CE7),
+    )
+    panel.set_footer(text="SentriX")
     card_file = None
     try:
         image_url = _conf_value(conf, "goodbye_image_url")
         background_bytes = await fetch_background_image(image_url) if image_url else None
+        avatar_bytes = await read_member_avatar(member) if presentation["show_avatar"] else None
         card_file = build_member_event_card(
             member,
             kind="goodbye",
             background_bytes=background_bytes,
+            avatar_bytes=avatar_bytes,
         )
         panel.set_image(url="attachment://sentrix_goodbye.png")
     except Exception:
         logger.exception("Carte de départ automatique impossible guild=%s user=%s", member.guild.id, member.id)
         card_file = None
     try:
-        await panels.envoyer(
-            channel,
-            panels.depuis_embed(panel),
+        await channel.send(
+            content=(member.mention if presentation.get("goodbye_ping", False) and not test else None),
+            embed=panel,
             file=card_file,
-            allowed_mentions=discord.AllowedMentions.none(),
+            allowed_mentions=mentions_depart,
         )
     except discord.HTTPException:
         return None

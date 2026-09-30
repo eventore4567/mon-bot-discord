@@ -63,9 +63,9 @@ def test_default_and_legacy_rows_stay_in_embed_mode():
     ok, _ = asyncio.run(setup_v2_completion._send_welcome(bot, _member(guild), test=False))
     assert ok
     embed = channel.send.call_args.kwargs["embed"]
-    assert embed.title == "Titre"
-    members_field = next(f for f in embed.fields if f.name == "Membres")
-    assert members_field.value == "1 membre"
+    assert embed.title == "👋 Titre"
+    assert not embed.fields
+    assert embed.image.url == "attachment://sentrix_welcome.png"
 
 
 def test_goodbye_text_mode_sends_plain_content():
@@ -78,3 +78,31 @@ def test_goodbye_text_mode_sends_plain_content():
     kwargs = channel.send.call_args.kwargs
     assert kwargs["content"] == "jayden a quitté Le Repaire."
     assert "embed" not in kwargs
+
+
+
+def test_goodbye_embed_uses_same_visual_shell_as_welcome():
+    channel = _fake_channel()
+    guild = _guild(channel, members=12)
+    bot = _FakeBot(
+        {
+            "goodbye_channel": 42,
+            "goodbye_message": "{username} a quitté {server}.",
+            "goodbye_image_url": None,
+        },
+        {
+            "title": "x",
+            "show_avatar": 1,
+            "show_member_count": 1,
+            "mode": "embed",
+            "goodbye_mode": "embed",
+        },
+    )
+    result = asyncio.run(setup_v2_completion._send_goodbye(bot, _member(guild), test=True))
+    assert result is channel
+    kwargs = channel.send.call_args.kwargs
+    assert kwargs["embed"].title == "👋 Au revoir Jayden"
+    assert kwargs["embed"].image.url == "attachment://sentrix_goodbye.png"
+    assert kwargs["embed"].colour.value == 0x6C5CE7
+    assert kwargs["content"] is None
+    assert kwargs["file"] is not None

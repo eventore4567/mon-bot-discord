@@ -130,7 +130,9 @@ def test_welcome_departure_backgrounds_and_level_card_are_simple():
     assert "_without_duplicate_member_mention" in welcome
     assert "background_bytes=background_bytes" in welcome
     assert "ImageOps.fit(source, _SIZE" in cards
-    assert 'Bravo {display_name}, tu es passé niveau' in visual
+    assert "Même composition visuelle pour arrivée, départ et montée de niveau." in cards
+    assert 'kind == "level"' in cards
+    assert 'badge = f"NIVEAU {current_level}"' in cards
     assert "if: github.event_name != 'push'" in workflow
 
 
@@ -166,6 +168,21 @@ def test_test_events_command_previews_all_three_without_mutating_member_data():
     assert 'name="test-events"' in source
     assert "setup_v2_completion._send_welcome(" in source
     assert "setup_v2_completion._send_goodbye(" in source
-    assert "level_up=fake_level" in source
-    assert "allowed_mentions=discord.AllowedMentions.none()" in source
+    assert "self._send_level_announcement(" in source
+    assert "ping=True" in source
+    assert 'title="🏆 Niveau supérieur"' in source
+    assert "content=member.mention if ping else None" in source
     assert "Aucune XP, aucun rôle et aucune donnée membre n’ont été modifiés." in source
+
+
+
+def test_welcome_and_goodbye_share_the_same_direct_embed_renderer():
+    source = (ROOT / "cogs" / "setup_v2_completion.py").read_text()
+    cards = (ROOT / "utils" / "member_event_cards.py").read_text()
+    assert 'colour=discord.Colour(0x6C5CE7)' in source
+    assert 'kind="welcome"' in source
+    assert 'kind="goodbye"' in source
+    goodbye = source[source.index("async def _send_goodbye"):source.index("def _replace_welcome_listeners")]
+    assert "await channel.send(" in goodbye
+    assert "panels.depuis_embed(panel)" not in goodbye
+    assert "_paste_avatar(image, avatar_bytes, name)" in cards

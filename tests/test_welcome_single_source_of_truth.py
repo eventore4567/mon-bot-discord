@@ -198,17 +198,18 @@ def test_preview_and_real_send_produce_the_identical_embed():
     ok_test, ok_real, embed_test, embed_real, content_test, content_real = asyncio.run(_run_send_welcome_pair())
 
     assert ok_test and ok_real
-    # Meme titre, meme description, meme couleur, meme banniere, meme miniature : c'est
+    # Meme titre, meme description, meme couleur et meme carte : c'est
     # exactement l'exigence "l'apercu = le message reel envoye sur Discord". embeds.brand()
     # prefixe une barre decorative a la description (mise en forme commune a tout SentriX,
     # sans rapport avec la bienvenue) : on verifie donc le contenu utile avec un "endswith"
     # plutot qu'une egalite exacte a une chaine tapee a la main.
-    assert embed_test.title == embed_real.title == "Salut Jayden !"
+    assert embed_test.title == embed_real.title == "👋 Salut Jayden !"
     assert embed_test.description == embed_real.description
     assert embed_real.description.endswith("Bienvenue Jayden sur **Le Repaire** !")
     assert embed_test.colour == embed_real.colour
     assert embed_test.image.url == embed_real.image.url == "attachment://sentrix_welcome.png"
-    assert embed_test.thumbnail.url == embed_real.thumbnail.url
+    assert not embed_test.thumbnail.url
+    assert not embed_real.thumbnail.url
     # Variable francaise remplacee, jamais laissee telle quelle dans le message envoye.
     assert "{membre}" not in embed_real.description
     assert "{serveur}" not in embed_real.description

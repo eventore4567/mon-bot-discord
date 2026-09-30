@@ -19,7 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from services import levels as levels_service
-from utils import embeds, checks, helpers, stats_service, design_system, visual_v5, temporary_boosts
+from utils import embeds, checks, helpers, stats_service, design_system, visual_v5, temporary_boosts, member_event_cards
 from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
 
@@ -702,6 +702,62 @@ class Levels(commands.Cog, name="Levels"):
             import logging
             logging.getLogger("bot").exception("Impossible de restaurer les sessions vocales au démarrage")
 
+    async def _send_level_announcement(
+        self,
+        channel: discord.abc.Messageable,
+        member: discord.Member,
+        level: int,
+        *,
+        ping: bool = True,
+    ) -> bool:
+        """Rendu unique des montées de niveau, utilisé en réel et par +test-events."""
+        allowed_mentions = (
+            discord.AllowedMentions(users=[member], roles=False, everyone=False, replied_user=False)
+            if ping else discord.AllowedMentions.none()
+        )
+        try:
+            avatar_bytes = await member_event_cards.read_member_avatar(member)
+            file = member_event_cards.build_member_event_card(
+                member,
+                kind="level",
+                avatar_bytes=avatar_bytes,
+                level=level,
+            )
+            embed = discord.Embed(
+                title="🏆 Niveau supérieur",
+                description=f"Bravo **{member.display_name}**, tu es passé niveau **{level}**.",
+                colour=discord.Colour(0x6C5CE7),
+            )
+            embed.set_image(url="attachment://sentrix_level_up.png")
+            embed.set_footer(text="SentriX")
+            await channel.send(
+                content=member.mention if ping else None,
+                embed=embed,
+                file=file,
+                allowed_mentions=allowed_mentions,
+            )
+            return True
+        except Exception:
+            logger.exception(
+                "Annonce de niveau riche impossible guild=%s user=%s level=%s",
+                getattr(member.guild, "id", 0),
+                member.id,
+                level,
+            )
+            try:
+                await channel.send(
+                    content=member.mention if ping else None,
+                    embed=discord.Embed(
+                        title="🏆 Niveau supérieur",
+                        description=f"Bravo **{member.display_name}**, tu es passé niveau **{level}**.",
+                        colour=discord.Colour(0x6C5CE7),
+                    ),
+                    allowed_mentions=allowed_mentions,
+                )
+                return True
+            except discord.HTTPException:
+                return False
+
     # -------------------------------------------------------------- XP
 
     @commands.Cog.listener()
@@ -771,46 +827,12 @@ class Levels(commands.Cog, name="Levels"):
                 if settings.get("level_announce_enabled", True):
                     channel = message.guild.get_channel(conf["level_channel"]) if conf and conf["level_channel"] else message.channel
                     if channel:
-                        allowed_mentions = discord.AllowedMentions(
-                            users=[message.author],
-                            roles=False,
-                            everyone=False,
-                            replied_user=False,
+                        await self._send_level_announcement(
+                            channel,
+                            message.author,
+                            level,
+                            ping=True,
                         )
-                        try:
-                            card_stats = await stats_service.get_member_statistics(
-                                self.bot, message.guild, message.author
-                            )
-                            design_settings = await self.bot.db.get_design_settings(message.guild.id)
-                            buffer = await visual_v5.render_member_card(
-                                message.author,
-                                message.guild,
-                                card_stats,
-                                design_settings,
-                                level_up=level,
-                            )
-                            file = discord.File(buffer, filename="sentrix-level-up.png")
-                            level_embed = discord.Embed(
-                                colour=discord.Colour(0x2B2D31),
-                            )
-                            level_embed.set_image(url="attachment://sentrix-level-up.png")
-                            await channel.send(
-                                content=message.author.mention,
-                                embed=level_embed,
-                                file=file,
-                                allowed_mentions=allowed_mentions,
-                            )
-                        except Exception:
-                            try:
-                                await channel.send(
-                                    content=message.author.mention,
-                                    embed=embeds.success(
-                                        f"**{message.author.display_name}** passe au niveau **{level}** !"
-                                    ),
-                                    allowed_mentions=allowed_mentions,
-                                )
-                            except discord.HTTPException:
-                                pass
                 await self._assign_level_role(message.guild, message.author, level, settings)
         except Exception:
             import logging
@@ -1706,28 +1728,15 @@ class Levels(commands.Cog, name="Levels"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(detail)))
 
         fake_level = max(1, min(int(niveau), 1_000_000))
-        stats = await stats_service.get_member_statistics(self.bot, ctx.guild, ctx.author)
-        design_settings = await self.bot.db.get_design_settings(ctx.guild.id)
-        buffer = await visual_v5.render_member_card(
+        if not await self._send_level_announcement(
+            configured["level_channel"],
             ctx.author,
-            ctx.guild,
-            stats,
-            design_settings,
-            level_up=fake_level,
-        )
-        file = discord.File(buffer, filename="sentrix-level-up-test.png")
-        level_embed = discord.Embed(colour=discord.Colour(0x2B2D31))
-        level_embed.set_image(url="attachment://sentrix-level-up-test.png")
-        try:
-            await configured["level_channel"].send(
-                embed=level_embed,
-                file=file,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
-        except discord.HTTPException as exc:
+            fake_level,
+            ping=True,
+        ):
             return await panels.envoyer(
                 ctx,
-                panels.depuis_embed(embeds.error(f"Le test de niveau a été refusé par Discord : {exc}")),
+                panels.depuis_embed(embeds.error("Le test de niveau a été refusé par Discord.")),
             )
 
         await panels.envoyer(
