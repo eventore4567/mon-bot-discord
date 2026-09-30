@@ -723,12 +723,29 @@ class Music(commands.Cog, name="Music"):
             (int(guild_id), int(member_id)),
         )
         if row is not None:
+            channel_id = int(row["channel_id"])
+            message_id = int(row["message_id"])
+            deleted = False
             try:
-                target = await self._voice_chat_target(guild_id, int(row["channel_id"]))
-                partial = target.get_partial_message(int(row["message_id"]))
+                target = await self._voice_chat_target(guild_id, channel_id)
+                partial = target.get_partial_message(message_id)
                 await partial.delete()
+                deleted = True
             except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
                 pass
+            if not deleted:
+                try:
+                    await self.bot.http.delete_message(channel_id, message_id)
+                    deleted = True
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+            logger.info(
+                "music member panel cleanup -> guild=%s user=%s message=%s deleted=%s",
+                guild_id,
+                member_id,
+                message_id,
+                deleted,
+            )
         await self.bot.db.execute(
             "DELETE FROM sentrix_music_member_panels WHERE guild_id=? AND user_id=?",
             (int(guild_id), int(member_id)),
@@ -750,6 +767,96 @@ class Music(commands.Cog, name="Music"):
             ),
         )
 
+    async def _ensure_member_music_panel(
+        self,
+        member: discord.Member,
+        channel: discord.VoiceChannel,
+    ) -> None:
+        key = (member.guild.id, member.id)
+
+        pending = self._join_panel_delete_tasks.pop(key, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
+        if key in self._join_panel_messages:
+            return
+
+        # Nettoie un ancien message laissé par un redémarrage/failover avant d'en
+        # publier un nouveau.
+        await self._delete_saved_member_panel(member.guild.id, member.id)
+
+        me = member.guild.me
+        if me is None:
+            return
+        perms = channel.permissions_for(me)
+        if not perms.view_channel or not getattr(perms, "send_messages", False):
+            logger.warning(
+                "music voice panel skipped: missing chat permission guild=%s channel=%s",
+                member.guild.id,
+                channel.id,
+            )
+            return
+
+        try:
+            target = await self._voice_chat_target(member.guild.id, channel.id)
+            embed = await self._embed(
+                member.guild.id,
+                title="Lecteur musique",
+                description=(
+                    "Bienvenue dans le vocal musique.\n"
+                    "Choisis un titre avec le lecteur ci-dessous."
+                ),
+                kind="primary",
+            )
+            message = await target.send(
+                content=member.mention,
+                embed=embed,
+                view=MusicVoicePanel(self.bot, member.guild.id, channel.id),
+                allowed_mentions=discord.AllowedMentions(
+                    users=[member],
+                    roles=False,
+                    everyone=False,
+                    replied_user=False,
+                ),
+            )
+            self._join_panel_messages[key] = message
+            await self._save_member_panel(
+                member.guild.id,
+                member.id,
+                channel.id,
+                message.id,
+            )
+            logger.info(
+                "music member panel shown -> guild=%s user=%s channel=%s message=%s",
+                member.guild.id,
+                member.id,
+                channel.id,
+                message.id,
+            )
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            logger.exception(
+                "Impossible d'envoyer le panneau musique dans le chat vocal guild=%s channel=%s",
+                member.guild.id,
+                channel.id,
+            )
+
+    async def ensure_panels_for_current_members(
+        self,
+        guild: discord.Guild,
+        channel: discord.VoiceChannel,
+    ) -> None:
+        for member in list(channel.members):
+            if member.bot:
+                continue
+            try:
+                await self._ensure_member_music_panel(member, channel)
+            except Exception:
+                logger.exception(
+                    "music panel reconcile failed -> guild=%s user=%s channel=%s",
+                    guild.id,
+                    member.id,
+                    channel.id,
+                )
+
     async def _delete_member_music_panel_after_leave(
         self,
         guild_id: int,
@@ -760,11 +867,14 @@ class Music(commands.Cog, name="Music"):
         try:
             await asyncio.sleep(2)
             guild = self.bot.get_guild(int(guild_id))
-            member = guild.get_member(int(member_id)) if guild is not None else None
-            current = getattr(getattr(member, "voice", None), "channel", None)
+            channel = guild.get_channel(int(configured_channel_id)) if guild is not None else None
+            still_inside = bool(
+                channel is not None
+                and any(int(m.id) == int(member_id) for m in getattr(channel, "members", ()))
+            )
 
             # Retour dans les 2 secondes : on conserve le panneau existant.
-            if current is not None and current.id == int(configured_channel_id):
+            if still_inside:
                 return
 
             message = self._join_panel_messages.pop(key, None)
@@ -799,7 +909,7 @@ class Music(commands.Cog, name="Music"):
 
         settings = await self.get_system_settings(member.guild.id)
         configured_id = settings["voice_channel_id"]
-        if not settings["enabled"] or not configured_id:
+        if not configured_id:
             return
 
         configured_id = int(configured_id)
@@ -823,62 +933,10 @@ class Music(commands.Cog, name="Music"):
             )
             return
 
-        if not joined_configured:
+        if not joined_configured or not settings["enabled"]:
             return
 
-        # Si le membre revient avant les 2 secondes, on annule la suppression
-        # et on garde exactement le même message/panneau.
-        pending = self._join_panel_delete_tasks.pop(key, None)
-        if pending is not None and not pending.done():
-            pending.cancel()
-        if key in self._join_panel_messages:
-            return
-
-        # Après un redémarrage/failover, le dict mémoire est vide mais l'ancien
-        # message peut encore exister. On le retire avant d'en créer un nouveau.
-        await self._delete_saved_member_panel(member.guild.id, member.id)
-
-        me = member.guild.me
-        if me is None:
-            return
-        perms = after.channel.permissions_for(me)
-        if not perms.view_channel or not getattr(perms, "send_messages", False):
-            logger.warning(
-                "music voice panel skipped: missing chat permission guild=%s channel=%s",
-                member.guild.id,
-                after.channel.id,
-            )
-            return
-
-        try:
-            target = await self._voice_chat_target(member.guild.id, after.channel.id)
-
-            message = await target.send(
-                content=(
-                    f"{member.mention} bienvenue dans le vocal musique. "
-                    "Choisis un titre avec le petit lecteur ci-dessous."
-                ),
-                view=MusicVoicePanel(self.bot, member.guild.id, after.channel.id),
-                allowed_mentions=discord.AllowedMentions(
-                    users=[member],
-                    roles=False,
-                    everyone=False,
-                    replied_user=False,
-                ),
-            )
-            self._join_panel_messages[key] = message
-            await self._save_member_panel(
-                member.guild.id,
-                member.id,
-                after.channel.id,
-                message.id,
-            )
-        except (discord.Forbidden, discord.HTTPException, AttributeError):
-            logger.exception(
-                "Impossible d'envoyer le panneau musique dans le chat vocal guild=%s channel=%s",
-                member.guild.id,
-                after.channel.id,
-            )
+        await self._ensure_member_music_panel(member, after.channel)
 
     @tasks.loop(minutes=1)
     async def _inactivity_checker(self):
