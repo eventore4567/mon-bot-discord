@@ -2260,6 +2260,10 @@ class Ai(commands.Cog, name="Ai"):
         if content.startswith(prefix):
             return
 
+        settings = await ai_service.get_settings(self.bot, message.guild.id)
+        if not settings["enabled"] or not ai_service.is_channel_allowed(settings, message.channel.id):
+            return
+
         question = content
         if mentioned:
             question = re.sub(r"<@!?\d+>", "", question, count=1).strip()
