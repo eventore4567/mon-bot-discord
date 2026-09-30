@@ -63,7 +63,7 @@ def test_default_and_legacy_rows_stay_in_embed_mode():
     ok, _ = asyncio.run(setup_v2_completion._send_welcome(bot, _member(guild), test=False))
     assert ok
     embed = channel.send.call_args.kwargs["embed"]
-    assert embed.title == "👋 Titre"
+    assert embed.title == "Titre"
     assert not embed.fields
     assert embed.image.url == "attachment://sentrix_welcome.png"
 
@@ -101,7 +101,7 @@ def test_goodbye_embed_uses_same_visual_shell_as_welcome():
     result = asyncio.run(setup_v2_completion._send_goodbye(bot, _member(guild), test=True))
     assert result is channel
     kwargs = channel.send.call_args.kwargs
-    assert kwargs["embed"].title == "👋 Au revoir Jayden"
+    assert kwargs["embed"].title == "Un membre vient de partir"
     assert kwargs["embed"].image.url == "attachment://sentrix_goodbye.png"
     assert kwargs["embed"].colour.value == 0x6C5CE7
     assert kwargs["content"] is None

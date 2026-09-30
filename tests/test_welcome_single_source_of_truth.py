@@ -203,7 +203,7 @@ def test_preview_and_real_send_produce_the_identical_embed():
     # prefixe une barre decorative a la description (mise en forme commune a tout SentriX,
     # sans rapport avec la bienvenue) : on verifie donc le contenu utile avec un "endswith"
     # plutot qu'une egalite exacte a une chaine tapee a la main.
-    assert embed_test.title == embed_real.title == "👋 Salut Jayden !"
+    assert embed_test.title == embed_real.title == "Salut Jayden !"
     assert embed_test.description == embed_real.description
     assert embed_real.description.endswith("Bienvenue Jayden sur **Le Repaire** !")
     assert embed_test.colour == embed_real.colour

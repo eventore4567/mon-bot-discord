@@ -130,7 +130,7 @@ def test_welcome_departure_backgrounds_and_level_card_are_simple():
     assert "_without_duplicate_member_mention" in welcome
     assert "background_bytes=background_bytes" in welcome
     assert "ImageOps.fit(source, _SIZE" in cards
-    assert "Même composition visuelle pour arrivée, départ et montée de niveau." in cards
+    assert "Carte sobre façon Discord : avatar rond, gros titre, zéro couleur néon." in cards
     assert 'kind == "level"' in cards
     assert 'title = "Félicitations !"' in cards
     assert 'line2 = "vous avez atteint"' in cards
@@ -194,7 +194,7 @@ def test_test_events_command_previews_all_three_without_mutating_member_data():
 def test_welcome_and_goodbye_share_the_same_direct_embed_renderer():
     source = (ROOT / "cogs" / "setup_v2_completion.py").read_text()
     cards = (ROOT / "utils" / "member_event_cards.py").read_text()
-    assert 'colour=discord.Colour(0x6C5CE7)' in source
+    assert 'colour=discord.Colour(0x4E5058)' in source
     assert 'kind="welcome"' in source
     assert 'kind="goodbye"' in source
     goodbye = source[source.index("async def _send_goodbye"):source.index("def _replace_welcome_listeners")]
