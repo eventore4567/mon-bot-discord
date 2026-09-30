@@ -320,6 +320,45 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             query += " AND enabled = 1"
         return await self.bot.db.fetchone(query, (guild_id,))
 
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Réapplique le mode lecture seule sans créer de salon."""
+        rows = await self.bot.db.fetchall(
+            "SELECT guild_id,category_id,verify_channel_id,trap_channel_id,unverified_role_id "
+            "FROM honeypot_verification WHERE enabled=1"
+        )
+        for row in rows:
+            guild = self.bot.get_guild(int(row["guild_id"]))
+            if guild is None:
+                continue
+            unverified = guild.get_role(int(row["unverified_role_id"] or 0))
+            if unverified is None:
+                continue
+            excluded = {
+                int(row["category_id"] or 0),
+                int(row["verify_channel_id"] or 0),
+                int(row["trap_channel_id"] or 0),
+            }
+            rules_channel_id = await rules_flow.rules_channel_id(self.bot, guild.id)
+            if rules_channel_id:
+                excluded.add(int(rules_channel_id))
+            for channel in list(guild.channels):
+                if channel.id in excluded:
+                    continue
+                try:
+                    await channel.set_permissions(
+                        unverified,
+                        overwrite=self._unverified_overwrite(),
+                        reason="SentriX : Non vérifié = lecture seule",
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    logger.warning(
+                        "Impossible d'appliquer lecture seule au salon %s sur %s.",
+                        channel.id,
+                        guild.id,
+                    )
+                await asyncio.sleep(0.02)
+
     async def _pending(self, guild_id: int, user_id: int):
         return await self.bot.db.fetchone(
             "SELECT * FROM honeypot_pending_members WHERE guild_id = ? AND user_id = ?",
@@ -392,12 +431,16 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
 
     @staticmethod
     def _unverified_overwrite() -> discord.PermissionOverwrite:
+        # Non vérifié reste visible dans les salons mais ne peut pas écrire
+        # tant que la vérification n'est pas terminée.
         return discord.PermissionOverwrite(
-            view_channel=False,
+            view_channel=True,
+            read_message_history=True,
             send_messages=False,
             add_reactions=False,
             create_public_threads=False,
             create_private_threads=False,
+            send_messages_in_threads=False,
             connect=False,
             speak=False,
         )
@@ -431,11 +474,9 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             return None, "Permissions manquantes : " + ", ".join(missing)
 
         old = await self.config(guild.id, enabled_only=False)
-        unverified = await self._find_or_create_role(guild, "Non vérifié")
 
-        # Une seule source de vérité pour le rôle final : si /setup ou le règlement a déjà
-        # choisi verify_role, la vérification renforcée réutilise exactement ce rôle au lieu
-        # de créer un deuxième rôle "Vérifié".
+        # Le rôle final doit être choisi explicitement dans +setup. SentriX ne
+        # crée plus de rôle générique Vérifié tout seul.
         verified = None
         try:
             guild_conf = await self.bot.db.get_guild_config(guild.id)
@@ -443,19 +484,22 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             if configured_role_id:
                 candidate = guild.get_role(int(configured_role_id))
                 if candidate is not None and not candidate.managed and not candidate.is_default():
-                    verified = candidate
+                    explicit_panel = await self.bot.db.fetchone(
+                        "SELECT 1 FROM dashboard_verification_panels WHERE guild_id=? LIMIT 1",
+                        (guild.id,),
+                    )
+                    if explicit_panel or candidate.name != "Vérifié":
+                        verified = candidate
         except Exception:
             logger.debug("Lecture du rôle Vérifié configuré impossible guild=%s", guild.id, exc_info=True)
+
         if verified is None:
-            old_verified_id = old["verified_role_id"] if old and old["verified_role_id"] else None
-            verified = guild.get_role(int(old_verified_id)) if old_verified_id else None
-        if verified is None or verified.managed or verified.is_default():
-            verified = await self._find_or_create_role(guild, "Vérifié")
-        try:
-            await self.bot.db.set_guild_config(guild.id, "verify_role", verified.id)
-            await self.bot.db.set_guild_config(guild.id, "verification_role", verified.id)
-        except Exception:
-            logger.debug("Synchronisation du rôle Vérifié impossible guild=%s", guild.id, exc_info=True)
+            return None, (
+                "Choisissez d'abord le rôle final dans +setup → Règlement & accès. "
+                "SentriX ne crée plus automatiquement de rôle Vérifié."
+            )
+
+        unverified = await self._find_or_create_role(guild, "Non vérifié")
 
         me = guild.me
         if me is None:
@@ -1040,7 +1084,13 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         # Chaque nouvelle entrée exige une nouvelle vérification, même si le membre avait
         # déjà été vérifié lors d'un précédent passage sur le serveur.
         await self._mark_pending(member.guild.id, member.id, int(time.time()))
+        verified = member.guild.get_role(int(conf["verified_role_id"] or 0))
         try:
+            if verified is not None and verified in member.roles:
+                await member.remove_roles(
+                    verified,
+                    reason="SentriX : nouvelle vérification requise à l'arrivée",
+                )
             await member.add_roles(
                 unverified,
                 reason="SentriX : vérification complète obligatoire à l'arrivée",
