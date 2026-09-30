@@ -153,6 +153,7 @@ async def _publish_verification(bot, guild: discord.Guild, *, channel: discord.T
 
 async def _ticket_panel_send(bot, guild: discord.Guild, panel_id: int):
     from cogs.tickets import TicketPanelView
+    from utils import sentrix_panels as sx_panels
 
     cog = bot.get_cog("Tickets")
     if cog is None:
@@ -167,17 +168,30 @@ async def _ticket_panel_send(bot, guild: discord.Guild, panel_id: int):
     ticket_types = await cog.get_panel_types(panel_id)
     if not ticket_types:
         raise ValueError("Ajoutez au moins un type de ticket avant de publier le panel.")
-    embed = cog.build_panel_embed(panel)
-    view = TicketPanelView(panel, ticket_types)
+
+    panel_view = sx_panels.avec_composants(
+        sx_panels.depuis_embed(cog.build_panel_embed(panel), kind="tickets"),
+        TicketPanelView(panel, ticket_types),
+    )
     message_id = panel["message_id"]
     if message_id:
         try:
             message = await channel.fetch_message(int(message_id))
-            await message.edit(embed=embed, view=view)
-            return message.id, "mis à jour"
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            if bool(getattr(getattr(message, "flags", None), "components_v2", False)):
+                await sx_panels.editer(message, panel_view)
+                return message.id, "mis à jour"
+            # Un ancien embed Discord ne peut pas devenir Components V2 par édition.
+            # On le remplace une seule fois pour obtenir la bannière SentriX en tête.
+            await message.delete()
+            message = await sx_panels.envoyer(channel, panel_view)
+            await bot.db.execute(
+                "UPDATE ticket_panels_v2 SET message_id = ? WHERE id = ?",
+                (message.id, panel_id),
+            )
+            return message.id, "modernisé avec la bannière SentriX"
+        except discord.NotFound:
             pass
-    message = await channel.send(embed=embed, view=view)
+    message = await sx_panels.envoyer(channel, panel_view)
     await bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ? WHERE id = ?", (message.id, panel_id))
     return message.id, "publié"
 

@@ -181,12 +181,30 @@ async def _sync_panel_message(bot, guild: discord.Guild, panel_id: int) -> str:
     except discord.HTTPException:
         return "unavailable"
     types = await cog.get_panel_types(panel_id)
+    if not types:
+        return "not_sent"
     try:
         from cogs.tickets import TicketPanelView
-        view = TicketPanelView(panel, types) if types else None
-        await message.edit(embed=cog.build_panel_embed(panel), view=view)
+        from utils import sentrix_panels as sx_panels
+
+        panel_view = sx_panels.avec_composants(
+            sx_panels.depuis_embed(cog.build_panel_embed(panel), kind="tickets"),
+            TicketPanelView(panel, types),
+        )
+        if bool(getattr(getattr(message, "flags", None), "components_v2", False)):
+            await sx_panels.editer(message, panel_view)
+            return "updated"
+
+        # Les anciens panels en embed ne peuvent pas être convertis en Components V2
+        # par Discord. On les remplace une seule fois afin d'ajouter la bannière SentriX.
+        await message.delete()
+        message = await sx_panels.envoyer(channel, panel_view)
+        await bot.db.execute(
+            "UPDATE ticket_panels_v2 SET message_id=? WHERE id=?",
+            (message.id, panel_id),
+        )
         return "updated"
-    except discord.HTTPException:
+    except (discord.Forbidden, discord.HTTPException):
         logger.exception("Impossible de synchroniser le panel #%s.", panel_id)
         return "unavailable"
 

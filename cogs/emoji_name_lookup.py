@@ -203,10 +203,14 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
         return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Emoji deja present', description=f'{existing} existe deja sous le nom `:{existing.name}:`.', kind='warning')))
 
     extension = "gif" if animated else "png"
+    # IMPORTANT : toujours prendre l'asset ORIGINAL Discord en premier.
+    # Les variantes ?size=128 peuvent être recompressées/transcodées par le CDN.
+    # Sur certains GIF, cela modifie le timing ou produit des frames partielles.
     candidates = [
+        f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}",
+        f"https://media.discordapp.net/emojis/{emoji_id}.{extension}",
         f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}?size=128&quality=lossless",
         f"https://media.discordapp.net/emojis/{emoji_id}.{extension}?size=128&quality=lossless",
-        f"https://cdn.discordapp.com/emojis/{emoji_id}.{extension}",
     ]
 
     data = None
@@ -236,6 +240,42 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
     if data is None:
         detail = f" (HTTP {last_status})" if last_status else ""
         return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Emoji inaccessible', description=f"SentriX n'a pas pu recuperer cet emoji depuis Discord{detail}.", kind='danger')))
+
+    # Vérifie que Discord a bien renvoyé le format attendu. Pour un emoji animé,
+    # ne jamais accepter silencieusement une miniature PNG/WebP du CDN.
+    from cogs import utility as utility_cog
+    image_kind = utility_cog._image_kind(data)
+    if animated and image_kind != "gif":
+        return await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                await cog_self._embed(
+                    ctx.guild.id,
+                    title='Emoji animé invalide',
+                    description="Discord n'a pas renvoyé le GIF original. L'emoji n'a pas été ajouté pour éviter une copie cassée.",
+                    kind='danger',
+                )
+            ),
+        )
+
+    # Si l'asset original dépasse la limite Discord actuelle, on utilise le pipeline
+    # animé corrigé : frames complètes + durée totale conservée. Les assets déjà
+    # compatibles sont envoyés octet pour octet sans réencodage.
+    if animated and len(data) > utility_cog.MAX_EMOJI_BYTES:
+        try:
+            data = await asyncio.to_thread(utility_cog._encode_animated_emoji, data)
+        except ValueError as exc:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    await cog_self._embed(
+                        ctx.guild.id,
+                        title='Emoji animé trop lourd',
+                        description=str(exc),
+                        kind='danger',
+                    )
+                ),
+            )
 
     try:
         created = await ctx.guild.create_custom_emoji(
