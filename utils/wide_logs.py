@@ -837,7 +837,7 @@ class WideLogView(discord.ui.LayoutView):
                 if not source:
                     continue
 
-                if content_type.startswith(("image/", "video/")):
+                if content_type.startswith("image/"):
                     try:
                         gallery.add_item(media=source)
                         gallery_count += 1
@@ -858,7 +858,10 @@ class WideLogView(discord.ui.LayoutView):
 
             file_cls = getattr(discord.ui, "File", None)
             for source, filename in fallback_files[:5]:
-                if file_cls is not None:
+                # Le composant File Discord accepte les pièces jointes du message.
+                # Pour une ancienne URL CDN non réuploadée, on garde un lien Markdown
+                # plutôt que de risquer de faire échouer tout le log.
+                if file_cls is not None and source.startswith("attachment://"):
                     try:
                         container.add_item(file_cls(media=source))
                         continue
@@ -867,9 +870,14 @@ class WideLogView(discord.ui.LayoutView):
                             "SENTRIX V2 file component failed filename=%s",
                             filename,
                         )
-                container.add_item(
-                    discord.ui.TextDisplay(f"📎 **{filename}**")
-                )
+                if source.startswith(("https://", "http://")):
+                    container.add_item(
+                        discord.ui.TextDisplay(f"📎 [{filename}]({source})")
+                    )
+                else:
+                    container.add_item(
+                        discord.ui.TextDisplay(f"📎 **{filename}**")
+                    )
 
         # Les boutons restent DANS le Container, en ActionRow, tous en secondary.
         rows = build_rows(old_view)
