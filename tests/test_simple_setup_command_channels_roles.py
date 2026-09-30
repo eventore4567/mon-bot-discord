@@ -132,7 +132,12 @@ def test_welcome_departure_backgrounds_and_level_card_are_simple():
     assert "ImageOps.fit(source, _SIZE" in cards
     assert "Même composition visuelle pour arrivée, départ et montée de niveau." in cards
     assert 'kind == "level"' in cards
-    assert 'badge = f"NIVEAU {current_level}"' in cards
+    assert 'title = "Félicitations !"' in cards
+    assert 'line2 = "vous avez atteint"' in cards
+    assert 'line3 = f"le niveau {current_level}"' in cards
+    assert 'title = "Bienvenue"' in cards
+    assert 'title = "À bientôt"' in cards
+    assert "_ACCENT" not in cards
     assert "if: github.event_name != 'push'" in workflow
 
 
@@ -179,7 +184,7 @@ def test_test_events_command_previews_all_three_without_mutating_member_data():
     assert "setup_v2_completion._send_goodbye(" in source
     assert "self._send_level_announcement(" in source
     assert "ping=True" in source
-    assert 'title="🏆 Niveau supérieur"' in source
+    assert 'colour=discord.Colour(0x4E5058)' in source
     assert "content=member.mention if ping else None" in source
     assert "Aucune XP, aucun rôle et aucune donnée membre n’ont été modifiés." in source
     assert "Aucun salon n'est créé" in source

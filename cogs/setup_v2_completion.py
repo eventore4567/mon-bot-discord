@@ -227,9 +227,9 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         member,
     )
     panel = discord.Embed(
-        title=f"👋 {title}",
+        title=title,
         description=body,
-        colour=discord.Colour(0x6C5CE7),
+        colour=discord.Colour(0x4E5058),
     )
     panel.set_footer(text="SentriX")
     image_url = _conf_value(conf, "welcome_image_url")
@@ -295,9 +295,9 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
         member,
     )
     panel = discord.Embed(
-        title=f"👋 Au revoir {member.display_name}",
+        title="Un membre vient de partir",
         description=goodbye_body,
-        colour=discord.Colour(0x6C5CE7),
+        colour=discord.Colour(0x4E5058),
     )
     panel.set_footer(text="SentriX")
     card_file = None

@@ -724,9 +724,8 @@ class Levels(commands.Cog, name="Levels"):
                 level=level,
             )
             embed = discord.Embed(
-                title="🏆 Niveau supérieur",
-                description=f"Bravo **{member.display_name}**, tu es passé niveau **{level}**.",
-                colour=discord.Colour(0x6C5CE7),
+                description=f"**{member.display_name}**, vous venez de passer au niveau **{level}** !",
+                colour=discord.Colour(0x4E5058),
             )
             embed.set_image(url="attachment://sentrix_level_up.png")
             embed.set_footer(text="SentriX")
@@ -748,9 +747,8 @@ class Levels(commands.Cog, name="Levels"):
                 await channel.send(
                     content=member.mention if ping else None,
                     embed=discord.Embed(
-                        title="🏆 Niveau supérieur",
-                        description=f"Bravo **{member.display_name}**, tu es passé niveau **{level}**.",
-                        colour=discord.Colour(0x6C5CE7),
+                        description=f"**{member.display_name}**, vous venez de passer au niveau **{level}** !",
+                        colour=discord.Colour(0x4E5058),
                     ),
                     allowed_mentions=allowed_mentions,
                 )

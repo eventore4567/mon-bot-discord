@@ -13,9 +13,11 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 _SIZE = (1200, 420)
 _MAX_BACKGROUND_BYTES = 8 * 1024 * 1024
-_ACCENT = (108, 92, 231)
-_TEXT = (246, 247, 249)
-_MUTED = (181, 185, 194)
+_TEXT = (250, 250, 252)
+_MUTED = (210, 212, 217)
+_BG = (43, 45, 49)
+_BG_DARK = (35, 36, 40)
+_BORDER = (74, 76, 82)
 
 
 def _font(size: int, *, bold: bool = False):
@@ -107,25 +109,16 @@ async def read_member_avatar(member: discord.Member) -> bytes | None:
 
 
 def _neutral_background(custom_bytes: bytes | None = None) -> Image.Image:
-    """Fond sobre SentriX ; une image configurée remplit réellement toute la carte."""
+    """Fond plat, neutre, sans dégradé ni couleur vive."""
     if custom_bytes:
         try:
             source = Image.open(io.BytesIO(custom_bytes)).convert("RGB")
             image = ImageOps.fit(source, _SIZE, method=Image.Resampling.LANCZOS).convert("RGBA")
-            shade = Image.new("RGBA", _SIZE, (0, 0, 0, 105))
+            shade = Image.new("RGBA", _SIZE, (0, 0, 0, 95))
             return Image.alpha_composite(image, shade)
         except Exception:
             pass
-
-    small = Image.new("RGB", (64, 24))
-    pixels = small.load()
-    left = (20, 21, 25)
-    right = (31, 32, 38)
-    for y in range(24):
-        for x in range(64):
-            t = (x / 63) * 0.72 + ((23 - y) / 23) * 0.28
-            pixels[x, y] = tuple(round(a + (b - a) * t) for a, b in zip(left, right))
-    return small.resize(_SIZE, Image.Resampling.BICUBIC).convert("RGBA")
+    return Image.new("RGBA", _SIZE, (*_BG, 255))
 
 
 def _fit_text(draw: ImageDraw.ImageDraw, text: str, max_width: int, start_size: int, min_size: int = 26):
@@ -150,8 +143,8 @@ def _paste_avatar(canvas: Image.Image, avatar_bytes: bytes | None, name: str) ->
     ImageDraw.Draw(ring).ellipse(
         (2, 2, size + 15, size + 15),
         fill=(19, 20, 24, 245),
-        outline=(*_ACCENT, 255),
-        width=6,
+        outline=(108, 110, 116, 255),
+        width=5,
     )
     canvas.alpha_composite(ring, (x - 9, y - 9))
 
@@ -187,7 +180,7 @@ def build_member_event_card(
     avatar_bytes: bytes | None = None,
     level: int | None = None,
 ) -> discord.File:
-    """Même composition visuelle pour arrivée, départ et montée de niveau."""
+    """Carte sobre façon Discord : avatar rond, gros titre, zéro couleur néon."""
     kind = str(kind or "welcome").casefold()
     image = _neutral_background(background_bytes)
     draw = ImageDraw.Draw(image, "RGBA")
@@ -199,64 +192,43 @@ def build_member_event_card(
     ).strip()
     guild = getattr(member, "guild", None)
     server = str(getattr(guild, "name", None) or "le serveur").strip()
-    count = int(getattr(guild, "member_count", 0) or 0)
 
-    # Carte centrale : assez dense pour ne plus donner l'impression d'un grand vide.
+    # Cadre simple, plat, identique pour les trois cartes.
     draw.rounded_rectangle(
-        (42, 44, 1158, 376),
-        radius=30,
-        fill=(10, 11, 14, 178),
-        outline=(255, 255, 255, 34),
+        (34, 38, 1166, 382),
+        radius=24,
+        fill=(*_BG, 255) if background_bytes is None else (15, 16, 18, 145),
+        outline=(*_BORDER, 255),
         width=2,
     )
-    draw.rounded_rectangle((42, 44, 50, 376), radius=4, fill=(*_ACCENT, 255))
     _paste_avatar(image, avatar_bytes, name)
 
+    x = 365
     if kind == "level":
-        label = "NIVEAU SUPÉRIEUR"
-        title = name
         current_level = max(1, int(level or 1))
-        subtitle = f"Bravo, tu viens de passer au niveau {current_level}."
-        badge = f"NIVEAU {current_level}"
+        title = "Félicitations !"
+        line2 = "vous avez atteint"
+        line3 = f"le niveau {current_level}"
         filename = "sentrix_level_up.png"
     elif kind == "goodbye":
-        label = "DÉPART"
-        title = name
-        subtitle = f"a quitté {server}."
-        badge = f"{count} MEMBRE{'S' if count != 1 else ''}"
+        title = "À bientôt"
+        line2 = "sur le serveur Discord"
+        line3 = server
         filename = "sentrix_goodbye.png"
     else:
-        label = "BIENVENUE"
-        title = name
-        subtitle = f"vient de rejoindre {server}."
-        badge = f"{count} MEMBRE{'S' if count != 1 else ''}"
+        title = "Bienvenue"
+        line2 = "sur le serveur Discord"
+        line3 = server
         filename = "sentrix_welcome.png"
 
-    draw.text((350, 92), label, font=_font(21, bold=True), fill=(*_ACCENT, 255))
-    title_text, title_font = _fit_text(draw, title, 720, 54, 32)
-    draw.text((350, 128), title_text, font=title_font, fill=_TEXT)
+    title_text, title_font = _fit_text(draw, title, 760, 68, 42)
+    draw.text((x, 90), title_text, font=title_font, fill=_TEXT)
 
-    subtitle_font = _font(27)
-    subtitle_text = subtitle
-    if draw.textbbox((0, 0), subtitle_text, font=subtitle_font)[2] > 720:
-        subtitle_text, subtitle_font = _fit_text(draw, subtitle_text, 720, 27, 22)
-    draw.text((350, 205), subtitle_text, font=subtitle_font, fill=(218, 220, 226))
+    line2_text, line2_font = _fit_text(draw, line2, 760, 34, 26)
+    draw.text((x, 194), line2_text, font=line2_font, fill=_MUTED)
 
-    badge_font = _font(19, bold=True)
-    badge_box = draw.textbbox((0, 0), badge, font=badge_font)
-    badge_w = badge_box[2] - badge_box[0] + 36
-    draw.rounded_rectangle(
-        (350, 263, 350 + badge_w, 310),
-        radius=18,
-        fill=(*_ACCENT, 46),
-        outline=(*_ACCENT, 150),
-        width=2,
-    )
-    draw.text((368, 274), badge, font=badge_font, fill=(232, 230, 255))
-
-    footer = f"SentriX  •  {server}"
-    footer_text, footer_font = _fit_text(draw, footer, 720, 19, 16)
-    draw.text((350, 332), footer_text, font=footer_font, fill=_MUTED)
+    line3_text, line3_font = _fit_text(draw, line3, 760, 48, 30)
+    draw.text((x, 244), line3_text, font=line3_font, fill=_TEXT)
 
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)
