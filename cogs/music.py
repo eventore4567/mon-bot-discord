@@ -287,11 +287,19 @@ class Music(commands.Cog, name="Music"):
         self.manager = ProviderManager()
         self.queues: dict[int, GuildMusicQueue] = {}
         self._panel_locks: dict[int, asyncio.Lock] = {}
-        self._join_panel_cooldowns: dict[tuple[int, int], float] = {}
+        # Un seul panneau musique par membre présent dans le vocal configuré.
+        # À la sortie on attend 2 s avant suppression : si le membre revient
+        # immédiatement, on garde le même panneau et on évite le spam.
+        self._join_panel_messages: dict[tuple[int, int], discord.Message] = {}
+        self._join_panel_delete_tasks: dict[tuple[int, int], asyncio.Task] = {}
         self._inactivity_checker.start()
 
     def cog_unload(self):
         self._inactivity_checker.cancel()
+        for task in list(self._join_panel_delete_tasks.values()):
+            if not task.done():
+                task.cancel()
+        self._join_panel_delete_tasks.clear()
 
     def get_queue(self, guild_id: int) -> GuildMusicQueue:
         if guild_id not in self.queues:
@@ -647,6 +655,36 @@ class Music(commands.Cog, name="Music"):
         # d'embed "Lecture en cours", ce qui supprimait le doublon visible.
         await self._advance(queue)
 
+    async def _delete_member_music_panel_after_leave(
+        self,
+        guild_id: int,
+        member_id: int,
+        configured_channel_id: int,
+    ) -> None:
+        key = (int(guild_id), int(member_id))
+        try:
+            await asyncio.sleep(2)
+            guild = self.bot.get_guild(int(guild_id))
+            member = guild.get_member(int(member_id)) if guild is not None else None
+            current = getattr(getattr(member, "voice", None), "channel", None)
+
+            # Retour dans les 2 secondes : on conserve le panneau existant.
+            if current is not None and current.id == int(configured_channel_id):
+                return
+
+            message = self._join_panel_messages.pop(key, None)
+            if message is not None:
+                try:
+                    await message.delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+        except asyncio.CancelledError:
+            return
+        finally:
+            task = self._join_panel_delete_tasks.get(key)
+            if task is asyncio.current_task():
+                self._join_panel_delete_tasks.pop(key, None)
+
     @commands.Cog.listener()
     async def on_voice_state_update(
         self,
@@ -654,21 +692,51 @@ class Music(commands.Cog, name="Music"):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ):
-        if member.bot or after.channel is None:
+        if member.bot:
             return
-        if before.channel is not None and before.channel.id == after.channel.id:
+        if (
+            before.channel is not None
+            and after.channel is not None
+            and before.channel.id == after.channel.id
+        ):
             return
 
         settings = await self.get_system_settings(member.guild.id)
         configured_id = settings["voice_channel_id"]
-        if not settings["enabled"] or configured_id != after.channel.id:
+        if not settings["enabled"] or not configured_id:
             return
 
+        configured_id = int(configured_id)
         key = (member.guild.id, member.id)
-        now = time.monotonic()
-        if now - self._join_panel_cooldowns.get(key, 0.0) < 90:
+        left_configured = before.channel is not None and before.channel.id == configured_id
+        joined_configured = after.channel is not None and after.channel.id == configured_id
+
+        # Sortie du vocal musique : suppression différée de 2 secondes.
+        # Cela absorbe les déconnexions/reconnexions rapides sans créer plusieurs panneaux.
+        if left_configured and not joined_configured:
+            previous = self._join_panel_delete_tasks.pop(key, None)
+            if previous is not None and not previous.done():
+                previous.cancel()
+            self._join_panel_delete_tasks[key] = asyncio.create_task(
+                self._delete_member_music_panel_after_leave(
+                    member.guild.id,
+                    member.id,
+                    configured_id,
+                ),
+                name=f"sentrix-music-panel-leave-{member.guild.id}-{member.id}",
+            )
             return
-        self._join_panel_cooldowns[key] = now
+
+        if not joined_configured:
+            return
+
+        # Si le membre revient avant les 2 secondes, on annule la suppression
+        # et on garde exactement le même message/panneau.
+        pending = self._join_panel_delete_tasks.pop(key, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
+        if key in self._join_panel_messages:
+            return
 
         me = member.guild.me
         if me is None:
@@ -692,7 +760,7 @@ class Music(commands.Cog, name="Music"):
             except TypeError:
                 target = self.bot.get_partial_messageable(after.channel.id)
 
-            await target.send(
+            message = await target.send(
                 content=(
                     f"{member.mention} bienvenue dans le vocal musique. "
                     "Choisis un titre avec le petit lecteur ci-dessous."
@@ -704,8 +772,8 @@ class Music(commands.Cog, name="Music"):
                     everyone=False,
                     replied_user=False,
                 ),
-                delete_after=10 * 60,
             )
+            self._join_panel_messages[key] = message
         except (discord.Forbidden, discord.HTTPException, AttributeError):
             logger.exception(
                 "Impossible d'envoyer le panneau musique dans le chat vocal guild=%s channel=%s",
