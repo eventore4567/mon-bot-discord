@@ -217,25 +217,34 @@ class PersistentVoiceState:
                 if vc is not None:
                     try:
                         if vc.is_connected():
-                            queue.voice_client = vc
-                            # Si Discord ou un administrateur a déplacé SentriX, la
-                            # destination réelle devient la nouvelle cible persistante.
                             current_channel = getattr(vc, "channel", None)
                             if current_channel is not None and int(current_channel.id) != int(voice_channel.id):
-                                await self.remember(
-                                    guild_id,
-                                    int(current_channel.id),
-                                    int(queue.text_channel.id) if getattr(queue.text_channel, "id", None) is not None else None,
-                                )
+                                # Le vocal choisi dans +setup/dashboard est la source
+                                # de vérité. Même si SentriX a été déplacé manuellement,
+                                # le watchdog le remet dans le vocal configuré.
+                                await vc.move_to(voice_channel)
+                            queue.voice_client = vc
+                            queue.keep_connected = True
+                            if hasattr(self.cog, "ensure_panels_for_current_members"):
+                                await self.cog.ensure_panels_for_current_members(guild, voice_channel)
                             continue
                         # Un VoiceClient peut être en plein handshake/reconnect. On ne
                         # crée pas une seconde connexion concurrente ; le watchdog réessaie.
                         continue
-                    except Exception:
+                    except Exception as exc:
+                        logger.warning(
+                            "repositionnement vocal différé -> guild=%s channel=%s error=%s",
+                            guild_id,
+                            voice_channel.id,
+                            str(exc)[:180],
+                        )
                         continue
 
                 try:
                     queue.voice_client = await voice_channel.connect(timeout=30, reconnect=True)
+                    queue.keep_connected = True
+                    if hasattr(self.cog, "ensure_panels_for_current_members"):
+                        await self.cog.ensure_panels_for_current_members(guild, voice_channel)
                     abnormal_at = self._last_abnormal_disconnect_at.pop(guild_id, None)
                     if abnormal_at is not None:
                         logger.warning(
