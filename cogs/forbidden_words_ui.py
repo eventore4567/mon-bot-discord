@@ -5,7 +5,10 @@ l'interface publique. Les anciens noms restent cachés pour compatibilité inter
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from types import MethodType
 
 import discord
 from discord import app_commands
@@ -41,6 +44,126 @@ class ForbiddenWordsUI(commands.Cog):
             return original(filter_name, reason)
 
         automod._public_automod_message = public_message
+        original_delete_and_warn = automod._delete_and_warn
+
+        async def delete_and_warn(
+            runtime,
+            message: discord.Message,
+            reason: str,
+            filter_name: str = "automod",
+            *,
+            censored_content: str | None = None,
+        ):
+            if filter_name != "blacklist_word":
+                return await original_delete_and_warn(
+                    message,
+                    reason,
+                    filter_name,
+                    censored_content=censored_content,
+                )
+
+            from cogs import automod as automod_module
+
+            runtime._mark_xp_skip(message.id)
+            deleted = False
+            try:
+                await message.delete()
+                deleted = True
+            except discord.HTTPException:
+                pass
+
+            if deleted and censored_content:
+                await runtime._repost_censored(message, censored_content)
+
+            key = (message.guild.id, message.author.id)
+            now_ts = time.monotonic()
+            incident = runtime.incidents.get(key)
+            if incident is not None and now_ts - incident.started < automod_module.INCIDENT_WINDOW_SECONDS:
+                incident.deleted += 1
+                return
+
+            incident = automod_module._Incident(
+                started=now_ts,
+                filter_name=filter_name,
+                reason=reason,
+                channel_id=message.channel.id,
+            )
+            runtime.incidents[key] = incident
+            if len(runtime.incidents) > 5000:
+                cutoff = now_ts - automod_module.INCIDENT_WINDOW_SECONDS
+                for candidate, item in list(runtime.incidents.items()):
+                    if item.started < cutoff:
+                        runtime.incidents.pop(candidate, None)
+
+            await runtime.bot.db.log_automod_action(
+                message.guild.id,
+                message.author.id,
+                filter_name,
+                "suppression",
+                reason,
+            )
+            await runtime.add_risk_signal(
+                message.guild,
+                message.author.id,
+                filter_name,
+                automod_module.RISK_SIGNAL_POINTS.get(filter_name, 10),
+                reason=reason,
+                target=message.author,
+            )
+            action, infraction_count = await runtime._maybe_escalate(
+                message.guild,
+                message.author,
+                reason,
+            )
+            incident.action = action
+            incident.infractions = infraction_count
+            if action:
+                await runtime.bot.db.log_automod_action(
+                    message.guild.id,
+                    message.author.id,
+                    filter_name,
+                    action,
+                    reason,
+                )
+
+            description = (
+                "❌ Votre message a été censuré, car il contenait un "
+                "**mot interdit sur le serveur**."
+            )
+            if action == "mute":
+                description += (
+                    " Exclusion temporaire de "
+                    + automod_module.helpers.format_duration(automod_module.SPAM_TIMEOUT_SECONDS)
+                    + "."
+                )
+            try:
+                note = await message.channel.send(
+                    content=message.author.mention,
+                    embed=discord.Embed(
+                        description=description,
+                        colour=discord.Colour.red(),
+                    ),
+                    allowed_mentions=discord.AllowedMentions(
+                        users=True,
+                        roles=False,
+                        everyone=False,
+                        replied_user=False,
+                    ),
+                )
+                await note.delete(delay=8)
+            except discord.HTTPException:
+                pass
+
+            asyncio.create_task(
+                runtime._flush_incident_log(
+                    message.guild,
+                    message.author,
+                    key,
+                    incident,
+                )
+            )
+
+        automod._delete_and_warn = MethodType(delete_and_warn, automod)
 
         try:
             from cogs import automod as automod_module
