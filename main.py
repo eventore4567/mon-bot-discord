@@ -388,13 +388,38 @@ def cooldown_text(seconds: float) -> str:
 
 
 INTENTS = discord.Intents.default()
+# Accès privilégiés réellement nécessaires à SentriX :
+# - members : arrivée/départ, modération, vérification et protections anti-raid ;
+# - message_content : commandes + et filtres anti-spam/anti-lien/anti-scam.
+# La présence n'est pas nécessaire au produit et reste explicitement désactivée afin de
+# minimiser l'accès aux données Discord, conformément aux exigences développeur 2026.
 INTENTS.members = True
 INTENTS.message_content = True
+INTENTS.presences = False
 INTENTS.voice_states = True
 # Nécessaire pour que SentriX reçoive les créations/modifications et exécutions
 # de règles Discord AutoMod qu'il synchronise (anti-liens natif notamment).
 INTENTS.auto_moderation_configuration = True
 INTENTS.auto_moderation_execution = True
+
+
+def _log_discord_data_access_readiness() -> None:
+    """Journalise les accès Discord sensibles utilisés par la production.
+
+    Discord exige depuis 2026 une revue à partir de 10 000 utilisateurs pour
+    Message Content / Guild Members / Presence, puis une revue annuelle. Ce
+    diagnostic évite qu'une future modification d'intents passe inaperçue.
+    """
+    logger.info(
+        "Discord data-access readiness — message_content=%s, members=%s, presences=%s, "
+        "automod_config=%s, automod_execution=%s. Slash commands restent disponibles ; "
+        "les commandes + et les protections de contenu nécessitent Message Content.",
+        INTENTS.message_content,
+        INTENTS.members,
+        INTENTS.presences,
+        INTENTS.auto_moderation_configuration,
+        INTENTS.auto_moderation_execution,
+    )
 
 
 class SentriXContext(commands.Context):
@@ -471,6 +496,7 @@ class BotAllInOne(commands.Bot):
         return removed_names
 
     async def setup_hook(self):
+        _log_discord_data_access_readiness()
         await self.db.connect()
         logger.info("Base de données connectée.")
 
