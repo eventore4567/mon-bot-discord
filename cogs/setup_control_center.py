@@ -35,6 +35,7 @@ CATEGORIES = {
     "roles": ("Rôles", "Autorôles, vérification, rôles membres et récompenses."),
     "levels": ("Niveaux & économie", "XP, activité, argent, banque, récompenses et boutique."),
     "notifications": ("Notifications", "YouTube, Twitch et TikTok, salons et rôles mentionnés."),
+    "music": ("Musique", "Activer le lecteur, choisir le vocal musique et gérer le panneau du chat vocal."),
     "ai": ("IA", "Assistant SentriX, limites, permissions et génération d’images."),
 }
 CATEGORY_ORDER = tuple(CATEGORIES)
@@ -59,6 +60,7 @@ BOT_PERMS = {
     "roles": ("manage_roles",),
     "levels": ("view_channel", "send_messages", "embed_links"),
     "notifications": ("view_channel", "send_messages", "embed_links", "mention_everyone"),
+    "music": ("view_channel", "send_messages", "connect", "speak"),
     "ai": ("view_channel", "send_messages", "embed_links", "attach_files"),
 }
 PERM_LABELS = {
@@ -69,6 +71,8 @@ PERM_LABELS = {
     "kick_members": "Expulser des membres", "ban_members": "Bannir des membres",
     "manage_roles": "Gérer les rôles", "manage_channels": "Gérer les salons",
     "view_audit_log": "Voir les logs d’audit",
+    "connect": "Se connecter aux salons vocaux",
+    "speak": "Parler dans les salons vocaux",
     "mention_everyone": "Mentionner @everyone/@here et les rôles",
 }
 
@@ -302,6 +306,32 @@ async def module_statuses(bot, guild, conf):
         f"{active_notifs}/{len(notifications)} source(s) active(s).",
         tuple(notif_errors),
     )
+
+    music = bot.get_cog("Music")
+    if music is None:
+        result["music"] = (
+            ConfigState.ERROR,
+            "Le moteur musique n’est pas chargé.",
+            ("Module Music indisponible.",),
+        )
+    else:
+        settings = await music.get_system_settings(guild.id)
+        channel_id = settings.get("voice_channel_id")
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
+        music_errors = []
+        if channel_id and channel is None:
+            music_errors.append("Le vocal musique configuré a été supprimé.")
+        result["music"] = (
+            ConfigState.ERROR if music_errors else
+            ConfigState.ACTIVE if settings.get("enabled") else
+            ConfigState.INACTIVE if channel_id else
+            ConfigState.UNCONFIGURED,
+            (
+                f"Système {'activé' if settings.get('enabled') else 'désactivé'}"
+                + (f" • vocal : {channel.mention}" if channel else " • aucun vocal configuré")
+            ),
+            tuple(music_errors),
+        )
 
     ai = await bot.db.fetchone("SELECT * FROM ai_settings WHERE guild_id = ?", (guild.id,))
     result["ai"] = (
@@ -687,6 +717,39 @@ class AiModal(discord.ui.Modal, title="Limites IA"):
         )
 
 
+class MusicVoiceSelect(discord.ui.ChannelSelect):
+    def __init__(self, owner):
+        self.owner = owner
+        super().__init__(
+            placeholder="Choisir le vocal musique",
+            min_values=1,
+            max_values=1,
+            channel_types=[discord.ChannelType.voice],
+            row=2,
+        )
+
+    async def callback(self, interaction):
+        channel = self.values[0]
+        music = self.owner.bot.get_cog("Music")
+        if music is None:
+            return await interaction.response.send_message(
+                "Le module musique n’est pas chargé.",
+                ephemeral=True,
+            )
+        current = await music.get_system_settings(self.owner.guild.id)
+        try:
+            await music.configure_system(
+                self.owner.guild,
+                enabled=bool(current.get("enabled")),
+                voice_channel_id=channel.id,
+                actor_id=interaction.user.id,
+            )
+        except ValueError as exc:
+            return await interaction.response.send_message(str(exc), ephemeral=True)
+        await self.owner.audit(interaction.user.id, "music:voice_channel", channel.id)
+        await self.owner.refresh(interaction)
+
+
 class SetupView(discord.ui.LayoutView):
     """Centre de controle SentriX, compose.
 
@@ -895,6 +958,58 @@ class SetupView(discord.ui.LayoutView):
             self.ajouter(FieldRoleSelect(self, "member_role", "Rôle membre", 4))
         elif self.category == "levels":
             self.ajouter(FieldChannelSelect(self, "level_channel", "Salon des notifications de niveau", 2))
+        elif self.category == "music":
+            self.ajouter(MusicVoiceSelect(self))
+            activate = discord.ui.Button(label="Activer la musique", style=discord.ButtonStyle.success)
+            disable = discord.ui.Button(label="Désactiver la musique", style=discord.ButtonStyle.danger)
+
+            async def activate_music(interaction):
+                music = self.bot.get_cog("Music")
+                if music is None:
+                    return await interaction.response.send_message(
+                        "Le module musique n’est pas chargé.",
+                        ephemeral=True,
+                    )
+                settings = await music.get_system_settings(self.guild.id)
+                channel_id = settings.get("voice_channel_id")
+                if not channel_id:
+                    return await interaction.response.send_message(
+                        "Choisissez d’abord le vocal musique dans le menu ci-dessus.",
+                        ephemeral=True,
+                    )
+                try:
+                    await music.configure_system(
+                        self.guild,
+                        enabled=True,
+                        voice_channel_id=int(channel_id),
+                        actor_id=interaction.user.id,
+                    )
+                except ValueError as exc:
+                    return await interaction.response.send_message(str(exc), ephemeral=True)
+                await self.audit(interaction.user.id, "music", "on")
+                await self.refresh(interaction)
+
+            async def disable_music(interaction):
+                music = self.bot.get_cog("Music")
+                if music is None:
+                    return await interaction.response.send_message(
+                        "Le module musique n’est pas chargé.",
+                        ephemeral=True,
+                    )
+                settings = await music.get_system_settings(self.guild.id)
+                await music.configure_system(
+                    self.guild,
+                    enabled=False,
+                    voice_channel_id=settings.get("voice_channel_id"),
+                    actor_id=interaction.user.id,
+                )
+                await self.audit(interaction.user.id, "music", "off")
+                await self.refresh(interaction)
+
+            activate.callback = activate_music
+            disable.callback = disable_music
+            self.ajouter(activate)
+            self.ajouter(disable)
         elif self.category == "ai":
             toggle = discord.ui.Button(label="Activer / désactiver l’IA", style=discord.ButtonStyle.primary)
             limits = discord.ui.Button(label="Modifier les limites", style=discord.ButtonStyle.secondary)
@@ -1120,6 +1235,30 @@ class SetupView(discord.ui.LayoutView):
                     )
                 )
             return sections
+        if cle == "music":
+            music = self.bot.get_cog("Music")
+            if music is None:
+                return [
+                    panels.Section(
+                        "Lecteur musique",
+                        [panels.Ligne("État", "Moteur musique indisponible")],
+                    )
+                ]
+            settings = await music.get_system_settings(self.guild.id)
+            channel = self.guild.get_channel(settings.get("voice_channel_id")) if settings.get("voice_channel_id") else None
+            return [
+                panels.Section(
+                    "Lecteur musique",
+                    [
+                        panels.Ligne("Système", "**ACTIF**" if settings.get("enabled") else "INACTIF"),
+                        panels.Ligne("Vocal musique", channel.mention if channel else "Non configuré"),
+                        panels.Ligne(
+                            "Panneau vocal",
+                            "Quand un membre rejoint ce vocal, SentriX le mentionne dans son chat et affiche le lecteur."
+                        ),
+                    ],
+                )
+            ]
         if cle == "logs":
             actifs, inactifs = [], []
             for log_type, meta in log_service.LOG_TYPES.items():
