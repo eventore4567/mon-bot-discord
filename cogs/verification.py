@@ -492,6 +492,29 @@ class Verification(commands.Cog, name="Verification"):
             lines.append("Retiré : " + ", ".join(role.mention for role in removed))
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
+    async def _configured_verified_role(self, guild: discord.Guild) -> discord.Role | None:
+        """Rôle final choisi explicitement par l'admin.
+
+        Les anciennes versions pouvaient créer et enregistrer automatiquement un rôle
+        nommé exactement "Vérifié". Sans panneau règlement publié, ce rôle historique
+        n'est plus traité comme un choix explicite.
+        """
+        conf = await self.bot.db.get_guild_config(guild.id)
+        role_id = conf["verify_role"] if conf else None
+        if not role_id:
+            return None
+        role = guild.get_role(int(role_id))
+        if role is None or role.managed or role.is_default():
+            return None
+        if role.name == "Vérifié":
+            panel = await self.bot.db.fetchone(
+                "SELECT 1 FROM dashboard_verification_panels WHERE guild_id=? LIMIT 1",
+                (guild.id,),
+            )
+            if not panel:
+                return None
+        return role
+
     async def _grant_verified_role(self, interaction: discord.Interaction, role: discord.Role) -> None:
         """Point d'écriture UNIQUE du rôle vérifié — appelé aussi bien sans CAPTCHA
         (désactivé) qu'après un CAPTCHA réussi. Ne échoue jamais en silence : Discord
@@ -499,6 +522,31 @@ class Verification(commands.Cog, name="Verification"):
         member = interaction.user
         try:
             await member.add_roles(role, reason="Vérification via panneau SentriX")
+
+            # Le rôle Non vérifié et un ancien rôle final renforcé ne doivent jamais
+            # rester en même temps que le rôle final choisi dans +setup.
+            security_row = await self.bot.db.fetchone(
+                "SELECT unverified_role_id,verified_role_id FROM honeypot_verification WHERE guild_id=?",
+                (interaction.guild.id,),
+            )
+            roles_to_remove = []
+            if security_row:
+                unverified = interaction.guild.get_role(int(security_row["unverified_role_id"] or 0))
+                old_verified = interaction.guild.get_role(int(security_row["verified_role_id"] or 0))
+                if unverified is not None and unverified in member.roles and unverified.id != role.id:
+                    roles_to_remove.append(unverified)
+                if (
+                    old_verified is not None
+                    and old_verified in member.roles
+                    and old_verified.id != role.id
+                    and old_verified not in roles_to_remove
+                ):
+                    roles_to_remove.append(old_verified)
+            if roles_to_remove:
+                await member.remove_roles(
+                    *roles_to_remove,
+                    reason="SentriX : fin de vérification, nettoyage des anciens rôles",
+                )
         except discord.Forbidden:
             logger.error(
                 "Attribution du rôle de vérification refusée guild=%s user=%s role=%s : "
@@ -548,13 +596,15 @@ class Verification(commands.Cog, name="Verification"):
             )
 
         conf = await self.bot.db.get_guild_config(guild.id)
-        role_id = conf["verify_role"] if conf else None
-        if not role_id:
-            return await interaction.response.send_message("Aucun rôle de vérification n'est configuré sur ce serveur.", ephemeral=True)
-        role = guild.get_role(int(role_id))
+        role = await self._configured_verified_role(guild)
+        if role is None:
+            return await interaction.response.send_message(
+                "Aucun rôle final n'a été choisi dans +setup → Règlement & accès.",
+                ephemeral=True,
+            )
         problem = role_grant_problem(guild, role)
         if problem:
-            logger.warning("Vérification bloquée guild=%s role=%s : %s", guild.id, role_id, problem)
+            logger.warning("Vérification bloquée guild=%s role=%s : %s", guild.id, role.id, problem)
             return await interaction.response.send_message(f"Vérification impossible pour le moment : {problem}", ephemeral=True)
         # Cliquer sur le panneau de règlement valide la VERSION actuellement publiée.
         # Si la vérification renforcée est active, le règlement ne donne jamais directement
@@ -615,8 +665,7 @@ class Verification(commands.Cog, name="Verification"):
             return await interaction.response.send_message("Cette action doit se faire sur un serveur.", ephemeral=True)
 
         conf = await self.bot.db.get_guild_config(guild.id)
-        role_id = conf["verify_role"] if conf else None
-        role = guild.get_role(int(role_id)) if role_id else None
+        role = await self._configured_verified_role(guild)
         problem = role_grant_problem(guild, role)
         if problem:
             return await interaction.response.send_message(f"Vérification impossible pour le moment : {problem}", ephemeral=True)
