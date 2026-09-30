@@ -280,9 +280,15 @@ def install(bot: commands.Bot) -> None:
             return
         if mode == "images_only" and message_is_images_only(message):
             return
+        local_deleters = getattr(bot, "_sentrix_local_message_deleters", None)
+        if not isinstance(local_deleters, dict):
+            local_deleters = {}
+            bot._sentrix_local_message_deleters = local_deleters
+        local_deleters[int(message.id)] = (time.monotonic(), int(bot.user.id) if bot.user else 0)
         try:
             await message.delete()
         except (discord.NotFound, discord.Forbidden):
+            local_deleters.pop(int(message.id), None)
             return
         except discord.HTTPException:
             logger.debug(
