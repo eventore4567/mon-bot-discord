@@ -35,7 +35,7 @@ def install(bot: commands.Bot) -> None:
         self.bot = bot_obj
 
         fr = discord.ui.Button(
-            label="Francais",
+            label="Français",
             emoji="🇫🇷",
             style=discord.ButtonStyle.primary,
             custom_id="sentrix:language:fr",
@@ -59,8 +59,8 @@ def install(bot: commands.Bot) -> None:
                 )
             else:
                 embed = embeds.success(
-                    "Le francais est maintenant la langue du serveur. Les noms dans `+help` et l'interface de configuration sont affiches en francais.",
-                    title="🇫🇷 Langue selectionnee",
+                    "Le français est maintenant la langue du serveur. Les noms dans `+help` et l'interface de configuration sont affichées en français.",
+                    title="🇫🇷 Langue sélectionnée",
                 )
             await interaction.response.edit_message(embed=embed, view=None)
 
