@@ -21,7 +21,7 @@ from discord.ext import commands
 
 from utils import checks, embeds
 from utils import sentrix_panels as panels
-from utils.system_features import ensure_feature_table, get_system_features, is_system_enabled, set_system_feature
+from utils.system_features import ensure_feature_table, get_system_features, is_system_enabled
 
 logger = logging.getLogger("bot.feature-systems")
 
@@ -149,7 +149,7 @@ class SystemFeatureCommands(commands.Cog, name="SystemFeatures"):
         except setup_v2_core.ModuleSetupRequired as exc:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(str(exc))))
 
-        values = await set_system_feature(self.bot.db, ctx.guild.id, feature, requested)
+        values = await get_system_features(self.bot.db, ctx.guild.id, fresh=True)
         active = values[key]
         if feature == "economy":
             description = (

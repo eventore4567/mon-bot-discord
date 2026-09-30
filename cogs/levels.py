@@ -1675,12 +1675,11 @@ class Levels(commands.Cog, name="Levels"):
             lines.append(f"<t:{r['created_at']}:R> **{sign}{r['amount']}** par {giver_name}{reason}")
         await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral(f'📜 Historique de réputation de {membre.display_name}', '\n'.join(lines))))
 
-    @commands.hybrid_command(
+    @commands.command(
         name="test-events",
         aliases=["test-evenements", "preview-events"],
-        description="[Admin] Auto-configurer puis tester arrivée, départ et niveau sans modifier les données membre.",
+        help="[Admin] Auto-configurer puis tester arrivée, départ et niveau sans modifier les données membre.",
     )
-    @app_commands.describe(niveau="Niveau fictif affiché dans le test")
     @checks.is_owner_or_admin_for("configuration")
     async def test_events(self, ctx: commands.Context, niveau: int = 1):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member):
@@ -1729,7 +1728,6 @@ class Levels(commands.Cog, name="Levels"):
             )
 
         from cogs import setup_v2_completion, setup_v2_core
-        from utils.system_features import set_system_feature
 
         conf = await self.bot.db.get_guild_config(ctx.guild.id)
         configured = {}
@@ -1788,7 +1786,6 @@ class Levels(commands.Cog, name="Levels"):
                 True,
                 actor_id=ctx.author.id,
             )
-        await set_system_feature(self.bot.db, ctx.guild.id, "levels", True)
 
         # Si aucune présentation n'existe encore, crée une seule configuration neutre
         # et cohérente pour arrivée/départ. Ne touche jamais à une présentation existante.

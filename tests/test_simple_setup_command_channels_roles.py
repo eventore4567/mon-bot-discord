@@ -165,13 +165,15 @@ def test_level_system_requires_or_reuses_a_level_channel_and_stays_synced():
 
 def test_test_events_command_previews_all_three_without_mutating_member_data():
     source = (ROOT / "cogs" / "levels.py").read_text()
-    assert 'name="test-events"' in source
+    assert '@commands.command(' in source[source.index('name="test-events"') - 160:source.index('name="test-events"')]
+    assert '@commands.hybrid_command(' not in source[source.index('name="test-events"') - 160:source.index('name="test-events"')]
+    assert '@app_commands.describe(niveau=' not in source[source.index('name="test-events"') - 220:source.index('name="test-events"') + 220]
     assert 'await self.bot.db.set_guild_config(ctx.guild.id, field, fallback.id)' in source
     assert '"welcome_message"' in source
     assert '"goodbye_message"' in source
     assert 'for module in ("welcome", "goodbye", "levels")' in source
     assert "setup_v2_core.set_module_enabled(" in source
-    assert 'set_system_feature(self.bot.db, ctx.guild.id, "levels", True)' in source
+    assert 'set_system_feature(self.bot.db, ctx.guild.id, "levels", True)' not in source
     assert "presentation_row is None" in source
     assert "setup_v2_completion._send_welcome(" in source
     assert "setup_v2_completion._send_goodbye(" in source
@@ -194,3 +196,11 @@ def test_welcome_and_goodbye_share_the_same_direct_embed_renderer():
     assert "await channel.send(" in goodbye
     assert "panels.depuis_embed(panel)" not in goodbye
     assert "_paste_avatar(image, avatar_bytes, name)" in cards
+
+
+
+def test_feature_system_commands_do_not_double_write_through_db_only_facade():
+    source = (ROOT / "cogs" / "feature_systems.py").read_text()
+    assert "set_system_feature(" not in source
+    assert "setup_v2_core.set_module_enabled(" in source
+    assert "get_system_features(self.bot.db, ctx.guild.id, fresh=True)" in source
