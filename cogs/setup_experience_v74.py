@@ -18,6 +18,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from cogs import language_runtime
 from utils import embeds
 from utils import sentrix_panels as panels
 from . import security_verification_v71 as security_v71
@@ -283,6 +284,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             for key in CATEGORY_ORDER
             if key in CATEGORY_META
         ]
+        options.append(
+            discord.SelectOption(
+                label="Automatisations",
+                value="automation",
+                emoji="⚙️",
+                description="Réactions automatiques et règles de contenu par salon.",
+            )
+        )
         selecteur = discord.ui.Select(placeholder="Configurer un module en détail…", options=options[:25])
 
         async def ouvrir(interaction: discord.Interaction):
@@ -388,6 +397,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.add_item(container)
 
     async def _build_page(self, page: str) -> None:
+        if page == "automation":
+            return await self._build_automation()
         if page == "security":
             return await self._build_security()
         if page == "tickets":
