@@ -206,29 +206,38 @@ async def _rule_for(bot, guild_id: int, channel_id: int) -> dict | None:
     return value
 
 
+async def restricts_bot_text(bot, guild_id: int, channel_id: int) -> bool:
+    """True si ce salon est configuré pour rester sans réponses textuelles SentriX.
+
+    Utilisé notamment par SentriX AI pour ne pas polluer un salon media-only ou
+    un salon où les messages sont interdits.
+    """
+    rule = await _rule_for(bot, int(guild_id), int(channel_id))
+    if not rule or not bool(rule.get("enabled")):
+        return False
+    return str(rule.get("mode") or "") in MODES
+
+
 async def _warn_after_delete(bot, message: discord.Message, mode: str) -> None:
+    # Ne jamais polluer le salon protégé avec un message SentriX après avoir
+    # supprimé celui du membre. L'information part uniquement en DM, avec un
+    # cooldown large ; si les DMs sont fermés, la suppression reste silencieuse.
     cooldowns = getattr(bot, "_sentrix_channel_rule_warning_cooldowns", None)
     if not isinstance(cooldowns, dict):
         cooldowns = {}
         bot._sentrix_channel_rule_warning_cooldowns = cooldowns
     key = (message.guild.id, message.channel.id, message.author.id, mode)
     now = time.monotonic()
-    if now - float(cooldowns.get(key, 0.0)) < 8.0:
+    if now - float(cooldowns.get(key, 0.0)) < 30.0:
         return
     cooldowns[key] = now
     text = (
-        "ce salon accepte uniquement des images, sans texte."
+        f"Dans #{message.channel.name}, seuls les messages contenant une image sans texte sont autorisés."
         if mode == "images_only"
-        else "les messages des membres sont interdits dans ce salon."
+        else f"Les messages des membres sont désactivés dans #{message.channel.name}."
     )
     try:
-        await message.channel.send(
-            f"{message.author.mention}, {text}",
-            allowed_mentions=discord.AllowedMentions(
-                users=[message.author], roles=False, everyone=False, replied_user=False
-            ),
-            delete_after=5,
-        )
+        await message.author.send(text)
     except (discord.Forbidden, discord.HTTPException):
         pass
 
@@ -283,5 +292,6 @@ __all__ = [
     "toggle_rule",
     "message_is_images_only",
     "member_bypasses",
+    "restricts_bot_text",
     "install",
 ]
