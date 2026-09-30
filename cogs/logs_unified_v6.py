@@ -22,7 +22,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from utils import embeds, log_compact_final, log_service
+from utils import embeds, log_compact_final, log_service, wide_logs
 from utils import sentrix_panels as panels
 from . import generated_logs_sync
 from . import log_transport_v52
@@ -264,6 +264,73 @@ def _attachment_line(attachment: discord.Attachment) -> str:
     return f"{icon} **{attachment.filename}** • {size_text} • `{kind}`"
 
 
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"}
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv"}
+
+
+def _media_kind(filename: str, content_type: str | None = None) -> str:
+    kind = str(content_type or "").casefold()
+    if kind.startswith("image/"):
+        return "image"
+    if kind.startswith("video/"):
+        return "video"
+    suffix = "." + filename.rsplit(".", 1)[-1].casefold() if "." in filename else ""
+    if suffix in _IMAGE_EXTENSIONS:
+        return "image"
+    if suffix in _VIDEO_EXTENSIONS:
+        return "video"
+    return "file"
+
+
+def _link_actions_from_attachments(
+    attachments: list[discord.Attachment],
+) -> list[tuple[str, str]]:
+    actions: list[tuple[str, str]] = []
+    multiple = len(attachments) > 1
+    for index, attachment in enumerate(attachments[:10], start=1):
+        kind = _media_kind(
+            str(getattr(attachment, "filename", "") or ""),
+            str(getattr(attachment, "content_type", "") or ""),
+        )
+        suffix = f" {index}" if multiple else ""
+        label = (
+            f"Ouvrir l’image{suffix}"
+            if kind == "image"
+            else f"Télécharger la vidéo{suffix}"
+            if kind == "video"
+            else f"Télécharger le fichier{suffix}"
+        )
+        url = str(
+            getattr(attachment, "proxy_url", None)
+            or getattr(attachment, "url", None)
+            or ""
+        )
+        if url:
+            actions.append((label, url))
+    return actions
+
+
+def _link_actions_from_urls(urls: list[str]) -> list[tuple[str, str]]:
+    actions: list[tuple[str, str]] = []
+    multiple = len(urls) > 1
+    for index, raw_url in enumerate(urls[:10], start=1):
+        url = str(raw_url or "").strip()
+        if not url:
+            continue
+        filename = url.split("?", 1)[0].rsplit("/", 1)[-1]
+        kind = _media_kind(filename)
+        suffix = f" {index}" if multiple else ""
+        label = (
+            f"Ouvrir l’image{suffix}"
+            if kind == "image"
+            else f"Télécharger la vidéo{suffix}"
+            if kind == "video"
+            else f"Télécharger le fichier{suffix}"
+        )
+        actions.append((label, url))
+    return actions
+
+
 async def _best_effort_files(attachments: list[discord.Attachment]) -> list[discord.File]:
     files: list[discord.File] = []
     for attachment in attachments[:10]:
@@ -280,20 +347,25 @@ async def _send_files_log(
     panel: discord.Embed,
     *,
     files: list[discord.File] | None = None,
+    media_items: list[tuple[str, str, str]] | None = None,
     view: discord.ui.View | None = None,
     event_key: str | None = None,
 ) -> bool:
-    """Même transport natif que V5.3, avec prise en charge de plusieurs fichiers."""
-    files = list(files or [])[:10]
+    """Logs-dossiers au même format large que les autres logs.
+
+    Ordre visuel : bannière SentriX large en haut -> identité/événement -> médias
+    supprimés en bas -> boutons Ouvrir/Télécharger + copie des IDs.
+    """
+    files = list(files or [])[:9]  # +1 slot réservé à la bannière du WideLog
     try:
         setting, _recovered = await log_transport_v52._resolve_setting(
-            bot, guild, "files", needs_file=bool(files)
+            bot, guild, "files", needs_file=True
         )
         if setting is None:
             return False
         channel_id = int(setting.get("channel_id") or 0)
         valid, _reason = log_service.validate_channel(
-            guild, channel_id, needs_file=bool(files)
+            guild, channel_id, needs_file=True
         )
         if not valid:
             return False
@@ -306,28 +378,14 @@ async def _send_files_log(
         if log_service._is_duplicate(event_key) or log_service._is_duplicate(semantic_key):
             return False
 
-        if files:
-            first_image = next(
-                (
-                    attachment
-                    for attachment, file in zip([], files)
-                    if False
-                ),
-                None,
-            )
-            del first_image
-
-        kwargs: dict[str, Any] = {
-            "embed": rendered,
-            "allowed_mentions": log_service.LOG_ALLOWED_MENTIONS,
-        }
-        if view is not None:
-            kwargs["view"] = view
-        if files:
-            kwargs["files"] = files
-        native_send = log_transport_v52._unwrap_messageable_send()
-        await native_send(channel, **kwargs)
-        return True
+        return await wide_logs.send_wide_log(
+            channel,
+            rendered,
+            log_type="files",
+            old_view=view,
+            extra_files=files,
+            media_items=media_items,
+        )
     except Exception:
         logger.exception("V6 : envoi logs-dossiers impossible guild=%s", guild.id)
         return False
@@ -600,15 +658,31 @@ def _patch_raw_file_recovery(bot: commands.Bot) -> None:
                 ),
             )
             panel.colour = discord.Colour(embeds.COLOR_DANGER)
+            media_items: list[tuple[str, str, str]] = []
+            for url in urls[:10]:
+                clean_url = str(url or "").strip()
+                if not clean_url:
+                    continue
+                filename = clean_url.split("?", 1)[0].rsplit("/", 1)[-1] or "fichier"
+                kind = _media_kind(filename)
+                content_type = (
+                    "image/unknown" if kind == "image"
+                    else "video/unknown" if kind == "video"
+                    else "application/octet-stream"
+                )
+                media_items.append((clean_url, filename, content_type))
+
             await _send_files_log(
                 bot,
                 guild,
                 panel,
+                media_items=media_items,
                 view=log_service.log_actions(
                     ids=[
                         ("Copier l'ID de l'auteur", author_id),
                         ("Copier l'ID du message", message_id),
-                    ]
+                    ],
+                    links=_link_actions_from_urls(urls),
                 ),
                 event_key=log_service.make_event_key(
                     guild.id,
@@ -671,27 +745,39 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
         # Une suppression est un événement destructif : l'ancien classifieur voyait
         # le mot « supprimé » comme un succès et affichait le log en vert.
         panel.colour = discord.Colour(embeds.COLOR_DANGER)
-        if files:
-            image_file = next(
-                (
-                    file
-                    for attachment, file in zip(message.attachments, files)
-                    if str(getattr(attachment, "content_type", "") or "").startswith("image/")
-                ),
-                None,
-            )
-            if image_file is not None:
-                panel.set_image(url=f"attachment://{image_file.filename}")
+
+        file_names = {
+            str(getattr(file, "filename", "") or ""): file
+            for file in files
+        }
+        media_items: list[tuple[str, str, str]] = []
+        for attachment in list(message.attachments)[:10]:
+            filename = str(getattr(attachment, "filename", "") or "fichier")
+            content_type = str(getattr(attachment, "content_type", "") or "")
+            preserved = file_names.get(filename)
+            if preserved is not None:
+                source = f"attachment://{filename}"
+            else:
+                source = str(
+                    getattr(attachment, "proxy_url", None)
+                    or getattr(attachment, "url", None)
+                    or ""
+                )
+            if source:
+                media_items.append((source, filename, content_type))
+
         await _send_files_log(
             self.bot,
             message.guild,
             panel,
             files=files,
+            media_items=media_items,
             view=log_service.log_actions(
                 ids=[
                     ("Copier l'ID de l'auteur", message.author.id),
                     ("Copier l'ID du message", message.id),
-                ]
+                ],
+                links=_link_actions_from_attachments(list(message.attachments)),
             ),
             event_key=log_service.make_event_key(
                 message.guild.id,
