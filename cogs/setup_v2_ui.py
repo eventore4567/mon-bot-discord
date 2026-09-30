@@ -738,6 +738,92 @@ class AutoReactionSetupView(discord.ui.View):
         return True
 
 
+class MusicSystemSetupView(discord.ui.View):
+    def __init__(self, setup_view, author_id: int, settings: dict):
+        super().__init__(timeout=180)
+        self.setup_view = setup_view
+        self.bot = setup_view.bot
+        self.guild = setup_view.guild
+        self.author_id = int(author_id)
+        self.channel_id = settings.get("voice_channel_id")
+
+        channel = discord.ui.ChannelSelect(
+            placeholder="Choisir le vocal musique",
+            min_values=1,
+            max_values=1,
+            channel_types=[discord.ChannelType.voice],
+            row=0,
+        )
+
+        async def channel_cb(interaction):
+            self.channel_id = channel.values[0].id
+            await interaction.response.send_message(
+                f"Vocal sélectionné : {channel.values[0].mention}.",
+                ephemeral=True,
+            )
+
+        channel.callback = channel_cb
+        self.add_item(channel)
+
+        activate = discord.ui.Button(label="Activer", style=discord.ButtonStyle.success, row=1)
+        disable = discord.ui.Button(label="Désactiver", style=discord.ButtonStyle.danger, row=1)
+
+        async def activate_cb(interaction):
+            if not self.channel_id:
+                return await interaction.response.send_message(
+                    "Choisissez d’abord le vocal musique.",
+                    ephemeral=True,
+                )
+            music = self.bot.get_cog("Music")
+            if music is None:
+                return await interaction.response.send_message(
+                    "Le module musique n’est pas chargé.",
+                    ephemeral=True,
+                )
+            try:
+                await music.configure_system(
+                    self.guild,
+                    enabled=True,
+                    voice_channel_id=self.channel_id,
+                    actor_id=interaction.user.id,
+                )
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
+            await interaction.response.send_message(
+                "Système musique activé. Quand un membre rejoint ce vocal, SentriX affiche le lecteur dans le chat du vocal.",
+                ephemeral=True,
+            )
+
+        async def disable_cb(interaction):
+            music = self.bot.get_cog("Music")
+            if music is None:
+                return await interaction.response.send_message(
+                    "Le module musique n’est pas chargé.",
+                    ephemeral=True,
+                )
+            await music.configure_system(
+                self.guild,
+                enabled=False,
+                voice_channel_id=self.channel_id,
+                actor_id=interaction.user.id,
+            )
+            await interaction.response.send_message(
+                "Système musique désactivé. SentriX quitte aussi le vocal et arrête la session en cours.",
+                ephemeral=True,
+            )
+
+        activate.callback = activate_cb
+        disable.callback = disable_cb
+        self.add_item(activate)
+        self.add_item(disable)
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("Ce menu ne vous appartient pas.", ephemeral=True)
+            return False
+        return True
+
+
 class ChannelRuleSetupView(discord.ui.View):
     def __init__(self, setup_view, author_id: int, rows):
         super().__init__(timeout=180)
@@ -884,6 +970,35 @@ def _patch_statuses() -> None:
             f"{len(reactions)} réaction(s) automatique(s) • {len(channel_rules)} règle(s) de salon.",
             tuple(problems),
         )
+
+        music = bot.get_cog("Music")
+        if music is None:
+            result["music"] = (
+                setup_ui.ConfigState.ERROR,
+                "Le moteur musique n’est pas chargé.",
+                ("Module Music indisponible.",),
+            )
+        else:
+            settings = await music.get_system_settings(guild.id)
+            channel_id = settings.get("voice_channel_id")
+            channel = guild.get_channel(int(channel_id)) if channel_id else None
+            music_problems = []
+            if channel_id and channel is None:
+                music_problems.append("Le vocal musique configuré a été supprimé.")
+            state = (
+                setup_ui.ConfigState.ERROR if music_problems else
+                setup_ui.ConfigState.ACTIVE if settings.get("enabled") else
+                setup_ui.ConfigState.INACTIVE if channel_id else
+                setup_ui.ConfigState.UNCONFIGURED
+            )
+            result["music"] = (
+                state,
+                (
+                    f"Système {'activé' if settings.get('enabled') else 'désactivé'}"
+                    + (f" • vocal : {channel.mention}" if channel else " • aucun vocal configuré")
+                ),
+                tuple(music_problems),
+            )
         return result
     statuses_v2._sentrix_v2 = True
     setup_ui.module_statuses = statuses_v2
@@ -939,6 +1054,43 @@ def _patch_render() -> None:
             self.add_item(PermissionRoleSelect(self))
             self.add_item(PermissionScopeSelect(self))
             self.add_item(PermissionCommandSelect(self))
+
+        elif category == "music":
+            configure_music = discord.ui.Button(
+                label="Configurer la musique",
+                style=discord.ButtonStyle.primary,
+                row=1,
+            )
+
+            async def configure_music_cb(interaction):
+                music = self.bot.get_cog("Music")
+                if music is None:
+                    return await interaction.response.send_message(
+                        "Le module musique n’est pas chargé.",
+                        ephemeral=True,
+                    )
+                settings = await music.get_system_settings(self.guild.id)
+                channel = self.guild.get_channel(settings.get("voice_channel_id")) if settings.get("voice_channel_id") else None
+                panel = embeds.info(
+                    (
+                        f"**État :** {'ACTIF' if settings.get('enabled') else 'INACTIF'}\n"
+                        f"**Vocal musique :** {channel.mention if channel else 'Non configuré'}\n\n"
+                        "Choisissez un vocal puis activez le système. Quand un membre rejoint ce vocal, "
+                        "SentriX le mentionne dans le chat du vocal et affiche un petit lecteur pour choisir une musique."
+                    ),
+                    title="Musique SentriX",
+                )
+                await panels.envoyer(
+                    interaction.response,
+                    panels.avec_composants(
+                        panels.depuis_embed(panel),
+                        MusicSystemSetupView(self, interaction.user.id, settings),
+                    ),
+                    ephemere=True,
+                )
+
+            configure_music.callback = configure_music_cb
+            self.add_item(configure_music)
 
         elif category == "automation":
             reactions = discord.ui.Button(label="Réactions automatiques", style=discord.ButtonStyle.secondary, row=1)
@@ -1087,6 +1239,27 @@ def _patch_build_embed() -> None:
                 inline=False,
             )
 
+        if self.category == "music":
+            music = self.bot.get_cog("Music")
+            if music is None:
+                panel.add_field(
+                    name="Système musique",
+                    value="Le moteur musique n’est pas chargé.",
+                    inline=False,
+                )
+            else:
+                settings = await music.get_system_settings(self.guild.id)
+                channel = self.guild.get_channel(settings.get("voice_channel_id")) if settings.get("voice_channel_id") else None
+                panel.add_field(
+                    name="Système musique",
+                    value=(
+                        f"**État :** {'ACTIF' if settings.get('enabled') else 'INACTIF'}\n"
+                        f"**Vocal :** {channel.mention if channel else 'Non configuré'}\n"
+                        "Quand le système est actif, le chat du vocal affiche le lecteur aux membres qui le rejoignent."
+                    ),
+                    inline=False,
+                )
+
         if self.category == "automation":
             reactions = await self.bot.db.fetchall(
                 "SELECT enabled FROM sentrix_dashboard_auto_reaction WHERE guild_id=?",
@@ -1224,7 +1397,12 @@ def install(bot) -> None:
         "Automatisations",
         "Réactions automatiques et règles de contenu par salon.",
     )
+    setup_ui.CATEGORIES["music"] = (
+        "Musique",
+        "Activer le système musique, choisir son vocal et afficher le lecteur dans le chat vocal.",
+    )
     setup_ui.BOT_PERMS["automation"] = ("view_channel", "manage_messages", "add_reactions")
+    setup_ui.BOT_PERMS["music"] = ("view_channel", "connect", "speak", "send_messages")
     setup_ui.PERM_LABELS["add_reactions"] = "Ajouter des réactions"
     order = list(setup_ui.CATEGORY_ORDER)
     if "permissions" not in order:
@@ -1233,6 +1411,9 @@ def install(bot) -> None:
     if "automation" not in order:
         index = order.index("security") + 1 if "security" in order else len(order)
         order.insert(index, "automation")
+    if "music" not in order:
+        index = order.index("automation") + 1 if "automation" in order else len(order)
+        order.insert(index, "music")
     setup_ui.CATEGORY_ORDER = tuple(order)
     setup_ui.BOT_PERMS["permissions"] = tuple()
     _patch_can_setup()

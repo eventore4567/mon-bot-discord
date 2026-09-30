@@ -21,6 +21,8 @@ _INSTALLED = False
 HOME_MODULE_KEYS: tuple[str, ...] = (
     "security",
     "moderation",
+    "automation",
+    "music",
     "members",
     "logs",
     "levels",
