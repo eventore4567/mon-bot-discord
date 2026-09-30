@@ -12,6 +12,7 @@ Objectifs :
 """
 from __future__ import annotations
 
+import json
 import logging
 from types import SimpleNamespace
 from typing import Any
@@ -20,7 +21,7 @@ import discord
 from discord.ext import commands
 
 from cogs import language_runtime
-from utils import embeds
+from utils import ai_service, embeds
 from utils import sentrix_panels as panels
 from . import security_verification_v71 as security_v71
 from . import setup_components_v73 as v73
@@ -426,7 +427,124 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             return await self._build_moderation()
         if page == "music":
             return await self._build_music()
+        if page == "ai":
+            return await self._build_ai()
         return await super()._build_page(page)
+
+    async def _build_ai(self) -> None:
+        settings = await ai_service.get_settings(self.bot, self.guild.id)
+        allowed_ids = [int(value) for value in settings.get("allowed_channel_ids", [])]
+        allowed_channels = [
+            self.guild.get_channel(channel_id)
+            for channel_id in allowed_ids
+            if self.guild.get_channel(channel_id) is not None
+        ]
+
+        language = await language_runtime.get_language(self.bot, self.guild.id)
+        english = language == language_runtime.LANG_EN
+        if allowed_channels:
+            channel_text = ", ".join(channel.mention for channel in allowed_channels[:12])
+            if len(allowed_channels) > 12:
+                channel_text += f" +{len(allowed_channels) - 12}"
+        else:
+            channel_text = "All channels" if english else "Tous les salons"
+
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    (
+                        "# 🤖 AI\nChoose exactly where SentriX may answer. "
+                        "Natural replies and AI commands use the same channel list."
+                        if english
+                        else "# 🤖 IA\nChoisissez exactement où SentriX peut répondre. "
+                        "Les réponses naturelles et les commandes IA utilisent la même liste de salons."
+                    )
+                    + "\n\n"
+                    + (
+                        f"**State:** {'Enabled' if settings['enabled'] else 'Disabled'}\n"
+                        f"**Allowed channels:** {channel_text}\n"
+                        f"**Limits:** {settings['cooldown_seconds']} s · "
+                        f"{settings['per_minute_limit']}/min · {settings['daily_limit']}/day"
+                        if english
+                        else f"**État :** {'Activée' if settings['enabled'] else 'Désactivée'}\n"
+                        f"**Salons autorisés :** {channel_text}\n"
+                        f"**Limites :** {settings['cooldown_seconds']} s · "
+                        f"{settings['per_minute_limit']}/min · {settings['daily_limit']}/jour"
+                    )
+                ),
+                accessory=v73._thumbnail(self.bot),
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        channels = discord.ui.ChannelSelect(
+            placeholder=(
+                "Select one or more AI channels (empty = all)"
+                if english
+                else "Choisir un ou plusieurs salons IA (vide = tous)"
+            ),
+            min_values=0,
+            max_values=25,
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+        )
+
+        async def choose_channels(interaction: discord.Interaction):
+            ids = [int(channel.id) for channel in channels.values]
+            await ai_service.update_setting(
+                self.bot,
+                self.guild.id,
+                "allowed_channel_ids",
+                json.dumps(ids),
+            )
+            try:
+                await self.backend.audit(
+                    interaction.user.id,
+                    "ai:allowed_channels",
+                    ",".join(map(str, ids)) if ids else "all",
+                )
+            except Exception:
+                logger.debug("Audit salons IA indisponible", exc_info=True)
+            await self.refresh(interaction)
+
+        channels.callback = choose_channels
+        container.add_item(discord.ui.ActionRow(channels))
+
+        toggle = discord.ui.Button(
+            label=(
+                "Disable AI" if settings["enabled"] else "Enable AI"
+                if english
+                else "Désactiver l’IA" if settings["enabled"] else "Activer l’IA"
+            ),
+            style=discord.ButtonStyle.danger if settings["enabled"] else discord.ButtonStyle.success,
+        )
+        limits = discord.ui.Button(
+            label="Edit limits" if english else "Modifier les limites",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def toggle_ai(interaction: discord.Interaction):
+            await ai_service.update_setting(
+                self.bot,
+                self.guild.id,
+                "enabled",
+                0 if settings["enabled"] else 1,
+            )
+            await self.refresh(interaction)
+
+        async def edit_limits(interaction: discord.Interaction):
+            row = await self.bot.db.fetchone(
+                "SELECT cooldown_seconds,per_minute_limit,daily_limit FROM ai_settings WHERE guild_id=?",
+                (self.guild.id,),
+            )
+            await interaction.response.send_modal(v73.V73AiLimitsModal(self, row))
+
+        toggle.callback = toggle_ai
+        limits.callback = edit_limits
+        container.add_item(discord.ui.ActionRow(toggle, limits))
+        self._add_navigation(container)
+        self.add_item(container)
 
     async def _build_rules_access(self) -> None:
         from . import verify_setup_interactive_v78 as rules_setup
