@@ -176,7 +176,12 @@ class MusicSearchModal(discord.ui.Modal, title="Choisir une musique"):
             str(self.recherche.value or "").strip(),
             text_channel=interaction.channel,
         )
-        await interaction.followup.send(message, ephemeral=True)
+        await panels.texte_court(
+            interaction,
+            message,
+            ephemere=True,
+            supprimer_apres=6,
+        )
 
 
 class MusicVoicePanel(discord.ui.View):
@@ -636,24 +641,11 @@ class Music(commands.Cog, name="Music"):
         return None
 
     async def _on_track_finished(self, queue: GuildMusicQueue) -> None:
-        finished = queue.current
+        # Une seule source de notification publique :
+        # sentrix_music_playlists_v108 envoie le message texte final avec la mention.
+        # On ne renvoie donc plus ici d'embed "File d'attente terminée" ni
+        # d'embed "Lecture en cours", ce qui supprimait le doublon visible.
         await self._advance(queue)
-        if queue.current is None and queue.text_channel is not None and finished is not None:
-            try:
-                embed = await self._embed(
-                    queue.guild_id, title="File d'attente terminée",
-                    description="Plus rien à jouer — utilisez `/music play` pour ajouter des titres.",
-                    kind="primary",
-                )
-                await queue.text_channel.send(embed=embed)
-            except discord.HTTPException:
-                pass
-        elif queue.current is not None and queue.text_channel is not None and finished is not queue.current:
-            try:
-                embed = await self._embed(queue.guild_id, title="Lecture en cours", description=f"▶️ **{queue.current.display_title()}**", kind="success")
-                await queue.text_channel.send(embed=embed)
-            except discord.HTTPException:
-                pass
 
     @commands.Cog.listener()
     async def on_voice_state_update(
