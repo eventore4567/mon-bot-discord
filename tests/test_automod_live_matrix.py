@@ -291,3 +291,34 @@ async def test_native_permission_failure_keeps_local_filter_available():
     await cog.on_message(message)
 
     cog._delete_and_warn.assert_awaited_once()
+
+
+
+def test_invite_censor_keeps_link_shape_but_never_the_real_code():
+    value = automod_module._censor_invites("https://discord.gg/SecretInvite")
+    assert value == (
+        "https://discord.gg/æ@#/%E2%82%AC%C3%9F!%& "
+        "(invitation censurée)"
+    )
+    assert "SecretInvite" not in value
+
+
+def test_invite_censor_supports_discord_com_invite_links():
+    value = automod_module._censor_invites(
+        "regarde https://discord.com/invite/abcDEF123 maintenant"
+    )
+    assert (
+        "https://discord.com/invite/æ@#/%E2%82%AC%C3%9F!%& "
+        "(invitation censurée)"
+    ) in value
+    assert "abcDEF123" not in value
+
+
+def test_composed_invite_censor_uses_safe_visible_placeholder():
+    value = automod_module._compose_censored_content(
+        "https://discord.gg/real-code",
+        invites=True,
+    )
+    assert value.startswith("https://discord.gg/æ@#/")
+    assert value.endswith("(invitation censurée)")
+    assert "real-code" not in value

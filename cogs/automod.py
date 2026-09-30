@@ -448,8 +448,27 @@ def _censor_links(content: str) -> str | None:
     return redacted if count else None
 
 
+_CENSORED_INVITE_CODE = "æ@#/%E2%82%AC%C3%9F!%&"
+
+
 def _censor_invites(content: str) -> str | None:
-    redacted, count = INVITE_RE.subn("████ (invitation censurée)", str(content or ""))
+    """Conserve la forme du lien mais détruit définitivement le code d\'invitation.
+
+    Exemple :
+      https://discord.gg/vraicode
+      -> https://discord.gg/æ@#/%E2%82%AC%C3%9F!%& (invitation censurée)
+
+    Le schéma https:// n\'est pas inclus dans INVITE_RE : il reste donc naturellement
+    devant le domaine, exactement comme dans le rendu demandé. Le vrai code ne doit
+    jamais être recopié dans le message webhook.
+    """
+    def replacement(match: re.Match) -> str:
+        raw = str(match.group(0) or "")
+        slash = raw.rfind("/")
+        base = raw[: slash + 1] if slash >= 0 else raw + "/"
+        return f"{base}{_CENSORED_INVITE_CODE} (invitation censurée)"
+
+    redacted, count = INVITE_RE.subn(replacement, str(content or ""))
     return redacted if count else None
 
 
