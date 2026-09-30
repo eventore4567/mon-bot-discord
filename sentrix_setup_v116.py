@@ -67,6 +67,10 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("staff", "Rôle staff", "Choisir le rôle principal utilisé par les outils de modération.", "config:mod_role"),
         _s("history", "Historique", "Consulter les dernières modifications et actions setup.", "history"),
     )),
+    ModuleSpec("automation", "Automatisations", "Réactions automatiques et règles de contenu par salon.", (
+        _s("reactions", "Réactions automatiques", "Choisir un salon et faire réagir SentriX à tous les messages ou à un mot-clé.", "automation:reactions"),
+        _s("channel_rules", "Règles de salons", "Limiter un salon aux images uniquement ou y interdire les messages des membres.", "automation:channel-rules"),
+    )),
     ModuleSpec("members", "Membres", "Bienvenue, départ, vérification, autorôles et règlement.", (
         _s("welcome", "Bienvenue", "Salon et paramètres d'accueil des nouveaux membres.", "config:welcome_channel"),
         _s("goodbye", "Départ", "Salon et comportement lors du départ d'un membre.", "config:goodbye_channel"),
@@ -195,6 +199,20 @@ async def _module_status(view, module_key: str) -> str:
         return f"{active}/{len(v4._CONFIG_MODULE.AUTOMOD_TOGGLE_LABELS)} protections actives"
     if module_key == "moderation":
         return f"Staff : {_mention(guild, conf, 'mod_role', role=True)}"
+    if module_key == "automation":
+        try:
+            from cogs import setup_v2_ui as setup_v2
+            reactions = await setup_v2._automation_reaction_rows(view.bot, view.guild_id)
+            rules = await setup_v2.channel_message_rules.list_rules(view.bot, guild)
+            active_reactions = sum(bool(row["enabled"]) for row in reactions)
+            active_rules = sum(bool(row.get("enabled")) for row in rules)
+            return (
+                f"Réactions : {active_reactions}/{len(reactions)} actives · "
+                f"Règles de salons : {active_rules}/{len(rules)} actives"
+            )
+        except Exception:
+            logger.exception("V116 : lecture des automatisations impossible guild=%s", view.guild_id)
+            return "Automatisations disponibles"
     if module_key == "members":
         return f"Bienvenue : {_mention(guild, conf, 'welcome_channel')} · Autorôle : {_mention(guild, conf, 'autorole', role=True)}"
     if module_key == "logs":
@@ -323,6 +341,43 @@ def _route_to_config(view, field: str) -> None:
     view.picker_selected = field
 
 
+async def _open_automation(view, interaction: discord.Interaction, kind: str) -> None:
+    from types import SimpleNamespace
+    from cogs import setup_v2_ui as setup_v2
+
+    guild = view._guild()
+    if guild is None:
+        return await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
+
+    adapter = SimpleNamespace(bot=view.bot, guild=guild)
+
+    if kind == "reactions":
+        rows = await setup_v2._automation_reaction_rows(view.bot, view.guild_id)
+        embed = embeds.info(
+            "Choisis un salon, puis si SentriX doit réagir à tous les messages ou seulement à un mot-clé. "
+            "Tu peux ajouter jusqu’à 8 emojis et gérer les règles déjà enregistrées.",
+            title="Réactions automatiques",
+        )
+        subview = setup_v2.AutoReactionSetupView(adapter, interaction.user.id, rows)
+    elif kind == "channel-rules":
+        rows = await setup_v2.channel_message_rules.list_rules(view.bot, guild)
+        embed = embeds.info(
+            "**Images uniquement** : une vraie image doit être jointe, sans texte ni autre fichier.\n"
+            "**Messages interdits** : les messages des membres sont supprimés.\n\n"
+            "SentriX ne crée aucun salon et le staff disposant des permissions de gestion n’est pas bloqué.",
+            title="Règles de salons",
+        )
+        subview = setup_v2.ChannelRuleSetupView(adapter, interaction.user.id, rows)
+    else:
+        return await interaction.response.send_message("Automatisation inconnue.", ephemeral=True)
+
+    await panels.envoyer(
+        interaction.response,
+        panels.avec_composants(panels.depuis_embed(embed), subview),
+        ephemere=True,
+    )
+
+
 async def _run_action(view, interaction: discord.Interaction) -> None:
     _ensure_state(view)
     module = MODULE_BY_KEY[view._v116_module]
@@ -337,6 +392,8 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
         view.page = v4.PAGE_SUMMARY
     elif action == "levels-config":
         return await _open_levels_config(view, interaction)
+    elif action.startswith("automation:"):
+        return await _open_automation(view, interaction, action.split(":", 1)[1])
     elif action == "verification":
         _route_to_config(view, "verify_role")
     elif action == "history":
