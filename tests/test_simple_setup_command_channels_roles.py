@@ -91,6 +91,8 @@ def test_dashboard_exposes_and_reuses_server_emojis():
     assert "function guildEmojis()" in core
     assert "function pickServerEmoji()" in core
     assert "function bindEmojiPickers" in core
+    css = (ROOT / "web" / "dashboard_ui" / "app.css").read_text()
+    assert ".emoji-option img{width:32px;height:32px" in css
     assert "emojiControl('rrEmoji')" in roles
     assert "emojiControl('ttEmoji'" in modules
     assert "reactEmojiServer" in modules
