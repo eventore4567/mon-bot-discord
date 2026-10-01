@@ -62,9 +62,24 @@ class ModuleRuntimeController:
         self._validate(name)
         async with self._lock:
             was_loaded = name in self.bot.extensions
+            state_before = self.kernel.snapshot().get("modules", {}).get(name, {})
+            circuit_was_open = bool(state_before.get("circuit_open"))
             if hasattr(self.kernel, "open_circuit"):
                 self.kernel.open_circuit(name, reason="maintenance")
-            await self._wait_for_drain(name)
+
+            remaining = await self._wait_for_drain(name)
+            if remaining:
+                if not circuit_was_open and hasattr(self.kernel, "close_circuit"):
+                    self.kernel.close_circuit(name, reason="drain_timeout")
+                self._last_operation = {
+                    "operation": "reload",
+                    "module": name,
+                    "ok": False,
+                    "error": "ModuleBusy",
+                }
+                self.refresh()
+                raise RuntimeError(f"Module occupé pendant le reload: {name}")
+
             self.kernel.begin(name, operation="reload")
             try:
                 if was_loaded:
@@ -74,7 +89,7 @@ class ModuleRuntimeController:
             except Exception as exc:
                 if was_loaded and name in self.bot.extensions:
                     self.kernel.recovered(name, exc)
-                    if hasattr(self.kernel, "close_circuit"):
+                    if not circuit_was_open and hasattr(self.kernel, "close_circuit"):
                         self.kernel.close_circuit(name, reason="rollback")
                 else:
                     self.kernel.failed(name, exc)
