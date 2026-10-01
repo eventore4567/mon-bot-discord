@@ -241,3 +241,15 @@ def test_circuit_transitions_are_recorded_in_journal():
     event_names = [event["event"] for event in kernel.snapshot()["recent_events"]]
     assert "circuit_open" in event_names
     assert "circuit_closed" in event_names
+
+
+def test_in_flight_counter_never_goes_negative():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.enter_runtime("cogs.music")
+    kernel.enter_runtime("cogs.music")
+    assert kernel.in_flight("cogs.music") == 2
+
+    kernel.exit_runtime("cogs.music")
+    kernel.exit_runtime("cogs.music")
+    kernel.exit_runtime("cogs.music")
+    assert kernel.in_flight("cogs.music") == 0
