@@ -23,6 +23,11 @@ class ModuleState:
     reloads: int = 0
     last_operation: str = "startup"
     blocked_by: tuple[str, ...] = ()
+    runtime_errors: int = 0
+    consecutive_runtime_errors: int = 0
+    runtime_degraded: bool = False
+    last_runtime_error: str | None = None
+    last_runtime_error_at: float | None = None
     _started_at: float | None = field(default=None, repr=False)
 
     def begin(self, *, operation: str = "load") -> None:
@@ -119,6 +124,23 @@ class ModuleKernel:
     def contains(self, name: str) -> bool:
         return name in self._states
 
+    def record_runtime_error(self, name: str, error: BaseException | str, *, threshold: int = 3) -> None:
+        if name not in self._states:
+            return
+        state = self._states[name]
+        state.runtime_errors += 1
+        state.consecutive_runtime_errors += 1
+        state.last_runtime_error = error if isinstance(error, str) else type(error).__name__
+        state.last_runtime_error_at = time.time()
+        state.runtime_degraded = state.consecutive_runtime_errors >= max(1, int(threshold))
+
+    def record_runtime_success(self, name: str) -> None:
+        if name not in self._states:
+            return
+        state = self._states[name]
+        state.consecutive_runtime_errors = 0
+        state.runtime_degraded = False
+
     def reconcile(self, loaded_modules: Iterable[str]) -> list[str]:
         """Aligne le registre sur la vérité runtime de discord.py.
 
@@ -162,6 +184,10 @@ class ModuleKernel:
             | {item["name"] for item in blocked if item["critical"]}
         )
         loaded = sum(row.status == "loaded" for row in rows)
+        runtime_degraded = sorted(
+            row.name for row in rows
+            if row.status == "loaded" and row.runtime_degraded
+        )
         return {
             "expected": len(rows),
             "loaded": loaded,
@@ -169,6 +195,7 @@ class ModuleKernel:
             "blocked": blocked,
             "critical_failed": critical_failed,
             "ready": not critical_failed,
+            "runtime_degraded": runtime_degraded,
             "modules": {
                 row.name: {
                     "status": row.status,
@@ -180,6 +207,11 @@ class ModuleKernel:
                     "reloads": row.reloads,
                     "last_operation": row.last_operation,
                     "blocked_by": list(row.blocked_by),
+                    "runtime_errors": row.runtime_errors,
+                    "consecutive_runtime_errors": row.consecutive_runtime_errors,
+                    "runtime_degraded": row.runtime_degraded,
+                    "last_runtime_error": row.last_runtime_error,
+                    "last_runtime_error_at": row.last_runtime_error_at,
                 }
                 for row in rows
             },
