@@ -243,3 +243,29 @@ async def test_dependent_reload_failure_is_isolated_without_reloading_parent_aga
     assert snapshot["cogs.giveaway_center"]["runtime_degraded"] is True
     assert snapshot["cogs.giveaway_center"]["circuit_open"] is True
     assert snapshot["cogs.giveaway_center"]["circuit_reason"] == "dependency_reload_failed"
+
+
+@pytest.mark.asyncio
+async def test_stop_refuses_parent_with_active_dependents():
+    bot = FakeBot()
+    bot.extensions = {
+        "cogs.events": object(),
+        "cogs.giveaway_center": object(),
+    }
+    kernel = ModuleKernel(
+        ["cogs.events", "cogs.giveaway_center"],
+        dependencies={"cogs.giveaway_center": ("cogs.events",)},
+    )
+    for name in ("cogs.events", "cogs.giveaway_center"):
+        kernel.begin(name)
+        kernel.loaded(name)
+
+    runtime = ModuleRuntimeController(bot, kernel)
+
+    with pytest.raises(RuntimeError):
+        await runtime.stop("cogs.events")
+
+    assert bot.unload_calls == []
+    operation = runtime.snapshot()["last_operation"]
+    assert operation["error"] == "ActiveDependents"
+    assert operation["dependents"] == ["cogs.giveaway_center"]
