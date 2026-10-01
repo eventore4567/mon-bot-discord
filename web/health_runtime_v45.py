@@ -183,6 +183,12 @@ async def _snapshot(bot, dashboard) -> dict:
             and hasattr(request_supervisor, "snapshot")
             else None
         ),
+        "module_runtime": (
+            request_runtime.snapshot()
+            if (request_runtime := getattr(bot, "module_runtime", None)) is not None
+            and hasattr(request_runtime, "snapshot")
+            else None
+        ),
         "runtime_degraded_modules": (
             request_kernel.snapshot().get("runtime_degraded", [])
             if (request_kernel := getattr(bot, "module_kernel", None)) is not None
