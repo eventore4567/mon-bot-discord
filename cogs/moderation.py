@@ -1099,24 +1099,32 @@ class Moderation(commands.Cog):
         try:
             deleted = await self._purge_messages(ctx, candidates, purge_limit)
         except discord.Forbidden:
-            return await panels.texte_court(
-                ctx.channel if is_prefix else ctx,
-                "Il manque à SentriX la permission **Gérer les messages** ou **Voir l'historique** dans ce salon.",
-                ephemere=True,
-                supprimer_apres=8,
+            message = (
+                "Permission manquante : `Gérer les messages` "
+                "ou `Voir l'historique`."
             )
+            if is_prefix:
+                return await ctx.channel.send(message, delete_after=8)
+            if ctx.interaction.response.is_done():
+                return await ctx.interaction.followup.send(message, ephemeral=True)
+            return await ctx.interaction.response.send_message(message, ephemeral=True)
         messages = [
             message for message in deleted
             if invocation_id is None or int(message.id) != int(invocation_id)
         ]
 
-        texte = f"{len(messages)} message(s) supprimé(s)."
+        texte = f"`{len(messages)}` message(s) supprimé(s)."
         if is_prefix:
-            # Le message de commande vient d'être purgé : la confirmation est éphémère à
-            # sa manière (courte durée), sans référence à un message disparu.
-            await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
+            # Texte Discord brut : aucun embed/panel pour la confirmation de clear.
+            await ctx.channel.send(texte, delete_after=4)
         else:
-            await panels.texte_court(ctx, texte, ephemere=True)
+            if ctx.interaction.response.is_done():
+                try:
+                    await ctx.interaction.edit_original_response(content=texte)
+                except discord.HTTPException:
+                    await ctx.interaction.followup.send(texte, ephemeral=True)
+            else:
+                await ctx.interaction.response.send_message(texte, ephemeral=True)
 
         asyncio.create_task(self._log_clear_safely(ctx, messages, requested))
 
