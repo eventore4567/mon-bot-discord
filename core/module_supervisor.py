@@ -89,7 +89,8 @@ class ModuleSupervisor:
                 kernel = getattr(bot, "module_kernel", None)
                 if kernel is None:
                     continue
-                snapshot = kernel.snapshot()
+                refresh = getattr(bot, "_refresh_module_health", None)
+                snapshot = refresh() if callable(refresh) else kernel.snapshot()
                 now = time.monotonic()
                 for name, state in snapshot.get("modules", {}).items():
                     if name not in self.retryable:
