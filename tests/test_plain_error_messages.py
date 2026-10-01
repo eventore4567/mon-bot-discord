@@ -64,3 +64,26 @@ def test_clear_is_forced_to_raw_text_everywhere():
     assert "ctx.channel.send(" in block
     assert "edit_original_response(content=texte)" in block
     assert '"clear"' in policy.split("PLAIN_ROOTS", 1)[1].split("\n", 2)[0]
+
+
+def test_clear_range_error_guard_is_plain_text():
+    source = (ROOT / "cogs" / "plain_text_all_extension.py").read_text(encoding="utf-8")
+
+    assert 'getattr(commands, "RangeError", None)' in source
+    assert "Valeur invalide : `nombre` doit être compris entre `2` et `100`." in source
+    clear_start = source.index("async def clear_error_guard")
+    clear_end = source.index("\n\ndef _disable_legacy_help_mutators", clear_start)
+    block = source[clear_start:clear_end]
+    assert "panels.envoyer(" not in block
+    assert "embeds.warning(" not in block
+
+
+def test_final_error_v5_never_uses_panels_for_user_facing_errors():
+    source = (ROOT / "cogs" / "final_error_embed_v5.py").read_text(encoding="utf-8")
+    start = source.index("def install(bot: commands.Bot)")
+    block = source[start:]
+
+    assert "_panneau_erreur_simple(ctx, error, texte)" not in block
+    assert "await _raw_slash_send(interaction, panel)" not in block
+    assert "await _raw_slash_send(interaction, _component_error_panel(item))" not in block
+    assert block.count('"Une erreur est survenue. Merci de réessayer."') >= 3
