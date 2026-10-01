@@ -29,6 +29,7 @@ class ModuleState:
     runtime_degraded: bool = False
     circuit_open: bool = False
     circuit_opened_at: float | None = None
+    in_flight: int = 0
     last_runtime_error: str | None = None
     last_runtime_error_at: float | None = None
     _started_at: float | None = field(default=None, repr=False)
@@ -141,6 +142,22 @@ class ModuleKernel:
 
     def contains(self, name: str) -> bool:
         return name in self._states
+
+    def enter_runtime(self, name: str) -> None:
+        if name not in self._states:
+            return
+        self._states[name].in_flight += 1
+
+    def exit_runtime(self, name: str) -> None:
+        if name not in self._states:
+            return
+        state = self._states[name]
+        state.in_flight = max(0, state.in_flight - 1)
+
+    def in_flight(self, name: str) -> int:
+        if name not in self._states:
+            return 0
+        return int(self._states[name].in_flight)
 
     def record_runtime_error(
         self,
@@ -297,6 +314,7 @@ class ModuleKernel:
                     "runtime_degraded": row.runtime_degraded,
                     "circuit_open": row.circuit_open,
                     "circuit_opened_at": row.circuit_opened_at,
+                    "in_flight": row.in_flight,
                     "last_runtime_error": row.last_runtime_error,
                     "last_runtime_error_at": row.last_runtime_error_at,
                 }
