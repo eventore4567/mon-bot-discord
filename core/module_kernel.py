@@ -133,14 +133,29 @@ class ModuleKernel:
         *,
         threshold: int = 3,
         circuit_threshold: int = 5,
+        error_window_seconds: int = 300,
     ) -> None:
         if name not in self._states:
             return
         state = self._states[name]
+        now = time.time()
+
+        # Une erreur ancienne ne doit pas compter comme "consécutive" avec une
+        # nouvelle erreur beaucoup plus tard. Le circuit protège les rafales de
+        # panne, pas les incidents isolés répartis sur plusieurs heures.
+        if (
+            state.last_runtime_error_at is not None
+            and now - state.last_runtime_error_at > max(1, int(error_window_seconds))
+        ):
+            state.consecutive_runtime_errors = 0
+            state.runtime_degraded = False
+            if not state.circuit_open:
+                state.circuit_opened_at = None
+
         state.runtime_errors += 1
         state.consecutive_runtime_errors += 1
         state.last_runtime_error = error if isinstance(error, str) else type(error).__name__
-        state.last_runtime_error_at = time.time()
+        state.last_runtime_error_at = now
         state.runtime_degraded = state.consecutive_runtime_errors >= max(1, int(threshold))
 
         # Les modules critiques ne sont jamais ouverts automatiquement.
