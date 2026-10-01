@@ -34,6 +34,7 @@ from utils.checks import (
 from utils import access_matrix
 from utils import log_hygiene
 from core.module_kernel import ModuleKernel
+from core.module_supervisor import ModuleSupervisor
 from web.dashboard import start_dashboard
 import web.dashboard as dashboard_module
 from web.dashboard_api_forbidden_words import register as register_forbidden_words_routes
@@ -484,6 +485,10 @@ class BotAllInOne(commands.Bot):
         self.expected_extension_count = len(EXTENSIONS)
         self.module_kernel = ModuleKernel(EXTENSIONS, CRITICAL_EXTENSIONS)
         self._module_runtime_lock = asyncio.Lock()
+        self.module_supervisor = ModuleSupervisor(
+            set(EXTENSIONS) - set(RUNTIME_LOCKED_EXTENSIONS)
+        )
+        self._module_supervisor_task: asyncio.Task | None = None
         self.tree.on_error = self.on_app_command_error
         self._cooldown_bucket = commands.CooldownMapping.from_cooldown(
             config.GLOBAL_COOLDOWN_RATE, config.GLOBAL_COOLDOWN_PER, commands.BucketType.user
@@ -558,6 +563,16 @@ class BotAllInOne(commands.Bot):
         )
         return removed_names
 
+    async def close(self):
+        task = self._module_supervisor_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        await super().close()
+
     async def setup_hook(self):
         _log_discord_data_access_readiness()
         await self.db.connect()
@@ -626,6 +641,12 @@ class BotAllInOne(commands.Bot):
 
         self._prune_redundant_commands()
         self._audit_command_permissions()
+
+        if self._module_supervisor_task is None or self._module_supervisor_task.done():
+            self._module_supervisor_task = asyncio.create_task(
+                self.module_supervisor.run(self),
+                name="sentrix-module-supervisor",
+            )
 
         try:
             from cogs.tickets import TicketControlView
