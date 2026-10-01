@@ -16,6 +16,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Barrière de qualité micro-kernel : une release qui casse l'isolation,
+# la readiness, les circuits ou le reload ne doit jamais atteindre la prod.
+RUN python -m pytest -q \
+    tests/test_module_kernel.py \
+    tests/test_module_runtime.py \
+    tests/test_module_supervisor.py \
+    tests/test_module_gate.py \
+    tests/test_module_policy.py \
+    tests/test_health_runtime_module_readiness.py \
+    tests/test_runtime_observability_module_health.py
+
 # Port du dashboard web intégré (voir web/dashboard.py) — Railway fournit sa propre
 # variable PORT au runtime, cette ligne ne sert que de documentation pour Docker.
 EXPOSE 8080
