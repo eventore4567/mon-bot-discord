@@ -29,6 +29,7 @@ class ModuleState:
     runtime_degraded: bool = False
     circuit_open: bool = False
     circuit_opened_at: float | None = None
+    circuit_reason: str | None = None
     in_flight: int = 0
     in_flight_since: float | None = None
     last_runtime_error: str | None = None
@@ -206,17 +207,32 @@ class ModuleKernel:
             if not state.circuit_open:
                 state.circuit_open = True
                 state.circuit_opened_at = time.time()
-                self._event(name, "circuit_open", consecutive_errors=state.consecutive_runtime_errors)
+                state.circuit_reason = "runtime_errors"
+                self._event(
+                    name,
+                    "circuit_open",
+                    reason="runtime_errors",
+                    consecutive_errors=state.consecutive_runtime_errors,
+                )
 
     def record_runtime_success(self, name: str) -> None:
         if name not in self._states:
             return
         state = self._states[name]
+
+        # Un succès de commande ne doit jamais annuler un circuit structurel
+        # (maintenance, boucle de fond morte, arrêt manuel). Seuls les circuits
+        # ouverts par une rafale d'erreurs de commandes peuvent être refermés
+        # par une exécution réussie.
+        if state.circuit_open and state.circuit_reason not in {None, "runtime_errors"}:
+            return
+
         state.consecutive_runtime_errors = 0
         state.runtime_degraded = False
         was_open = state.circuit_open
         state.circuit_open = False
         state.circuit_opened_at = None
+        state.circuit_reason = None
         if was_open:
             self._event(name, "circuit_closed", reason="runtime_success")
 
@@ -229,6 +245,7 @@ class ModuleKernel:
         if not state.circuit_open:
             state.circuit_open = True
             state.circuit_opened_at = time.time()
+            state.circuit_reason = reason
             self._event(name, "circuit_open", reason=reason)
 
     def close_circuit(self, name: str, *, reason: str = "reload") -> None:
@@ -238,6 +255,7 @@ class ModuleKernel:
         was_open = state.circuit_open
         state.circuit_open = False
         state.circuit_opened_at = None
+        state.circuit_reason = None
         state.consecutive_runtime_errors = 0
         state.runtime_degraded = False
         if was_open:
@@ -325,6 +343,7 @@ class ModuleKernel:
                     "runtime_degraded": row.runtime_degraded,
                     "circuit_open": row.circuit_open,
                     "circuit_opened_at": row.circuit_opened_at,
+                    "circuit_reason": row.circuit_reason,
                     "in_flight": row.in_flight,
                     "in_flight_since": row.in_flight_since,
                     "in_flight_age_seconds": (
