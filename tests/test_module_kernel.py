@@ -253,3 +253,16 @@ def test_in_flight_counter_never_goes_negative():
     kernel.exit_runtime("cogs.music")
     kernel.exit_runtime("cogs.music")
     assert kernel.in_flight("cogs.music") == 0
+
+
+def test_degraded_critical_module_fails_kernel_readiness_without_opening_circuit():
+    kernel = ModuleKernel(["cogs.moderation"], critical={"cogs.moderation"})
+    kernel.begin("cogs.moderation")
+    kernel.loaded("cogs.moderation")
+    for _ in range(3):
+        kernel.record_runtime_error("cogs.moderation", RuntimeError("boom"))
+
+    snapshot = kernel.snapshot()
+    assert snapshot["ready"] is False
+    assert snapshot["critical_runtime_degraded"] == ["cogs.moderation"]
+    assert snapshot["open_circuits"] == []
