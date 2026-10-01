@@ -70,8 +70,12 @@ async def _database_probe(bot) -> tuple[bool, float | None]:
 
 def _extension_state(bot) -> tuple[int, int, bool, list[str], list[dict]]:
     """Retourne la santé des extensions depuis le micro-kernel si disponible."""
-    kernel = getattr(bot, "module_kernel", None)
-    runtime = kernel.snapshot() if kernel is not None and hasattr(kernel, "snapshot") else getattr(bot, "_sentrix_extension_health", None)
+    refresh = getattr(bot, "_refresh_module_health", None)
+    if callable(refresh):
+        runtime = refresh()
+    else:
+        kernel = getattr(bot, "module_kernel", None)
+        runtime = kernel.snapshot() if kernel is not None and hasattr(kernel, "snapshot") else getattr(bot, "_sentrix_extension_health", None)
     if isinstance(runtime, dict):
         loaded = int(runtime.get("loaded") or 0)
         expected = int(runtime.get("expected") or loaded)
