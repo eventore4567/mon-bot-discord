@@ -163,20 +163,8 @@ def _texte_erreur_prefix(ctx: commands.Context, error: commands.CommandError) ->
     usage = _usage(ctx)
 
     if isinstance(base, commands.CommandNotFound):
-        typed = str(getattr(ctx, "invoked_with", "") or "").strip()
-        suggestions: list[str] = []
-        try:
-            from . import command_response_guard as guard
+        return None
 
-            suggestions = guard._command_suggestions(getattr(ctx, "bot", None), ctx, typed)
-        except Exception:
-            logger.debug("Suggestions de commandes indisponibles.", exc_info=True)
-        texte = f"Commande introuvable : `{prefix}{typed}`."
-        if suggestions:
-            texte += " Vouliez-vous dire " + " ou ".join(f"`{prefix}{nom}`" for nom in suggestions[:2]) + " ?"
-        else:
-            texte += f" Voir `{prefix}help`."
-        return texte
     # Textes partagés avec le transport slash (utils/error_texts.py) : permission exacte,
     # message d'un BotPermissionError conservé, argument fautif nommé.
     from utils import error_texts
@@ -610,6 +598,10 @@ def install(bot: commands.Bot) -> None:
                 return await _matchmake_tictactoe(ctx)
             except Exception:
                 logger.exception("V5 : matchmaking +tictactoe indisponible, repli sur le panneau d'erreur standard.")
+
+        if isinstance(base, commands.CommandNotFound):
+            # Une commande inconnue peut viser un autre bot : SentriX reste silencieux.
+            return
 
         texte = _texte_erreur_prefix(ctx, error)
         if texte == _CHECK_FALLBACK and isinstance(base, commands.CheckFailure):
