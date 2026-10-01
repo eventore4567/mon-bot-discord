@@ -61,6 +61,9 @@ async def prefix_gate(ctx: commands.Context) -> bool:
     module = prefix_command_module(ctx)
     if circuit_open(ctx.bot, module):
         raise ModuleTemporarilyUnavailable(module or "inconnu")
+    kernel = getattr(ctx.bot, "module_kernel", None)
+    if module and kernel is not None and hasattr(kernel, "enter_runtime"):
+        kernel.enter_runtime(module)
     return True
 
 
@@ -69,6 +72,9 @@ def app_gate_for(command):
         module = app_command_module(command)
         if circuit_open(interaction.client, module):
             raise AppModuleTemporarilyUnavailable(module or "inconnu")
+        kernel = getattr(interaction.client, "module_kernel", None)
+        if module and kernel is not None and hasattr(kernel, "enter_runtime"):
+            kernel.enter_runtime(module)
         return True
     check.__name__ = f"sentrix_module_gate_{str(getattr(command, 'name', 'command')).replace('-', '_')}"
     return check
