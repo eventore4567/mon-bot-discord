@@ -19,6 +19,7 @@ RUNTIME_LOCKED_EXTENSIONS = CRITICAL_EXTENSIONS | frozenset({
 })
 
 MODULE_LOAD_TIMEOUT_SECONDS = 20.0
+MODULE_BOOT_BUDGET_SECONDS = 120.0
 
 MODULE_DEPENDENCIES = {
     "cogs.security_runtime_hardening": ("cogs.automod",),
