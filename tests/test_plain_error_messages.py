@@ -87,3 +87,32 @@ def test_final_error_v5_never_uses_panels_for_user_facing_errors():
     assert "await _raw_slash_send(interaction, panel)" not in block
     assert "await _raw_slash_send(interaction, _component_error_panel(item))" not in block
     assert block.count('"Une erreur est survenue. Merci de réessayer."') >= 3
+
+
+def test_global_panel_layer_flattens_simple_command_errors():
+    source = (ROOT / "utils" / "sentrix_panels.py").read_text(encoding="utf-8")
+
+    assert "def _panneau_est_erreur_simple" in source
+    assert 'getattr(panneau, "kind", "") not in {"danger", "warning"}' in source
+    assert 'if getattr(panneau, "boutons_source", ()):' in source
+    assert "return await _envoyer_texte_brut_depuis_panneau(" in source
+
+
+def test_global_transport_flattens_direct_error_embeds_and_text():
+    source = (ROOT / "cogs" / "final_interaction_policy.py").read_text(encoding="utf-8")
+
+    assert "def _embed_is_simple_error" in source
+    assert "def _plain_text_from_error_embed" in source
+    assert "if _embed_is_simple_error(single_error):" in source
+    assert "if _text_is_simple_error(content):" in source
+    assert "force_embed = False" in source
+
+
+def test_interactive_error_panels_are_not_flattened_blindly():
+    source = (ROOT / "utils" / "sentrix_panels.py").read_text(encoding="utf-8")
+    start = source.index("def _panneau_est_erreur_simple")
+    end = source.index("\n\ndef _texte_erreur_depuis_panneau", start)
+    block = source[start:end]
+
+    assert 'if getattr(panneau, "boutons_source", ()):' in block
+    assert "return False" in block
