@@ -7,6 +7,7 @@ observable sans rendre tout le bot indisponible.
 from __future__ import annotations
 
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping
 
@@ -75,15 +76,27 @@ class ModuleKernel:
             name: tuple(dep for dep in raw_dependencies.get(name, ()) if dep in self._states)
             for name in module_names
         }
+        self._events = deque(maxlen=120)
+
+    def _event(self, name: str, event: str, **detail) -> None:
+        self._events.append({
+            "at": int(time.time()),
+            "module": name,
+            "event": event,
+            **detail,
+        })
 
     def begin(self, name: str, *, operation: str = "load") -> None:
         self._states[name].begin(operation=operation)
+        self._event(name, "begin", operation=operation)
 
     def loaded(self, name: str) -> None:
         self._states[name].finish()
+        self._event(name, "loaded")
 
     def failed(self, name: str, error: BaseException) -> None:
         self._states[name].finish(error=error)
+        self._event(name, "failed", error=type(error).__name__)
 
     def blockers(self, name: str) -> tuple[str, ...]:
         return tuple(
@@ -99,6 +112,7 @@ class ModuleKernel:
         state.blocked_by = tuple(sorted(set(dependencies)))
         state.last_operation = "dependency-wait"
         state._started_at = None
+        self._event(name, "blocked", blocked_by=list(state.blocked_by))
 
     def recovered(self, name: str, error: BaseException) -> None:
         """Une opération a échoué mais l'ancienne extension reste disponible."""
@@ -110,6 +124,7 @@ class ModuleKernel:
         state.error = None
         state.blocked_by = ()
         state.last_error = type(error).__name__
+        self._event(name, "recovered", error=type(error).__name__)
 
     def unloaded(self, name: str) -> None:
         state = self._states[name]
@@ -119,6 +134,7 @@ class ModuleKernel:
         state.load_ms = None
         state._started_at = None
         state.last_operation = "unload"
+        self._event(name, "unloaded")
 
     def is_critical(self, name: str) -> bool:
         return self._states[name].critical
@@ -164,8 +180,10 @@ class ModuleKernel:
             and state.status == "loaded"
             and state.consecutive_runtime_errors >= max(1, int(circuit_threshold))
         ):
-            state.circuit_open = True
-            state.circuit_opened_at = state.circuit_opened_at or time.time()
+            if not state.circuit_open:
+                state.circuit_open = True
+                state.circuit_opened_at = time.time()
+                self._event(name, "circuit_open", consecutive_errors=state.consecutive_runtime_errors)
 
     def record_runtime_success(self, name: str) -> None:
         if name not in self._states:
@@ -173,17 +191,23 @@ class ModuleKernel:
         state = self._states[name]
         state.consecutive_runtime_errors = 0
         state.runtime_degraded = False
+        was_open = state.circuit_open
         state.circuit_open = False
         state.circuit_opened_at = None
+        if was_open:
+            self._event(name, "circuit_closed", reason="runtime_success")
 
     def close_circuit(self, name: str) -> None:
         if name not in self._states:
             return
         state = self._states[name]
+        was_open = state.circuit_open
         state.circuit_open = False
         state.circuit_opened_at = None
         state.consecutive_runtime_errors = 0
         state.runtime_degraded = False
+        if was_open:
+            self._event(name, "circuit_closed", reason="reload")
 
     def reconcile(self, loaded_modules: Iterable[str]) -> list[str]:
         """Aligne le registre sur la vérité runtime de discord.py.
@@ -245,6 +269,7 @@ class ModuleKernel:
             "ready": not critical_failed,
             "runtime_degraded": runtime_degraded,
             "open_circuits": open_circuits,
+            "recent_events": list(self._events)[-20:],
             "modules": {
                 row.name: {
                     "status": row.status,
