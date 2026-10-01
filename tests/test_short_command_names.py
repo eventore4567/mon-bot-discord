@@ -3,6 +3,11 @@ un alias court est ajouté et affiché. Permissions, catalogue et récompenses r
 donc strictement identiques (« sûr pour tout le monde »)."""
 from __future__ import annotations
 
+import os
+
+# Le test vérifie uniquement les aliases ; aucun vrai token Discord n'est nécessaire.
+os.environ.setdefault("DISCORD_TOKEN", "test-token")
+
 from discord.ext import commands
 
 from cogs import common_command_names as short
