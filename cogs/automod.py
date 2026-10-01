@@ -2536,47 +2536,97 @@ class AutoMod(commands.Cog, name="Automod"):
                 if item.started < cutoff:
                     self.incidents.pop(candidate, None)
 
-        await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, "suppression", reason)
-        risk_points = RISK_SIGNAL_POINTS.get(filter_name, 10)
-        await self.add_risk_signal(
-            message.guild,
-            message.author.id,
-            filter_name,
-            risk_points,
-            reason=reason,
-            target=message.author,
-        )
-        spam_duration = None
-        spam_public_text = None
-        if filter_name in SPAM_FILTERS:
-            action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
-                message.guild,
-                message.author,
-                reason,
-            )
-            infraction_count = 0
-            incident.spam_stage = spam_stage
-            if action == "warning_ping":
-                incident.action_label = "⚠️ Rappel anti-spam"
-            elif action == "warn":
-                incident.action_label = "⚠️ Avertissement enregistré"
-            elif action == "mute":
-                incident.action_label = f"🔇 Mute {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)}"
-            elif action == "mute_failed":
-                incident.action_label = f"⚠️ Mute prévu {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)} — non appliqué"
-        else:
-            action, infraction_count = await self._maybe_escalate(message.guild, message.author, reason)
-
-        incident.action = action
-        incident.infractions = infraction_count
-        if action and action != "warning_ping":
+        try:
             await self.bot.db.log_automod_action(
                 message.guild.id,
                 message.author.id,
                 filter_name,
-                action,
+                "suppression",
                 reason,
             )
+        except Exception:
+            logger.exception(
+                "Historique AutoMod indisponible après suppression guild=%s user=%s filtre=%s.",
+                message.guild.id,
+                message.author.id,
+                filter_name,
+            )
+
+        risk_points = RISK_SIGNAL_POINTS.get(filter_name, 10)
+        try:
+            await self.add_risk_signal(
+                message.guild,
+                message.author.id,
+                filter_name,
+                risk_points,
+                reason=reason,
+                target=message.author,
+            )
+        except Exception:
+            logger.exception(
+                "Score de risque AutoMod indisponible guild=%s user=%s filtre=%s.",
+                message.guild.id,
+                message.author.id,
+                filter_name,
+            )
+
+        action = None
+        infraction_count = 0
+        spam_stage = 0
+        spam_duration = None
+        spam_public_text = None
+
+        try:
+            if filter_name in SPAM_FILTERS:
+                action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
+                    message.guild,
+                    message.author,
+                    reason,
+                )
+                incident.spam_stage = spam_stage
+                if action == "warning_ping":
+                    incident.action_label = "⚠️ Rappel anti-spam"
+                elif action == "warn":
+                    incident.action_label = "⚠️ Avertissement enregistré"
+                elif action == "mute":
+                    incident.action_label = f"🔇 Mute {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)}"
+                elif action == "mute_failed":
+                    incident.action_label = f"⚠️ Mute prévu {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)} — non appliqué"
+            else:
+                action, infraction_count = await self._maybe_escalate(
+                    message.guild,
+                    message.author,
+                    reason,
+                )
+        except Exception:
+            # L'escalade est secondaire par rapport à la suppression déjà faite :
+            # on garde l'avertissement public et le log d'incident au lieu de perdre
+            # tout le traitement du message.
+            logger.exception(
+                "Escalade AutoMod indisponible guild=%s user=%s filtre=%s.",
+                message.guild.id,
+                message.author.id,
+                filter_name,
+            )
+
+        incident.action = action
+        incident.infractions = infraction_count
+        if action and action != "warning_ping":
+            try:
+                await self.bot.db.log_automod_action(
+                    message.guild.id,
+                    message.author.id,
+                    filter_name,
+                    action,
+                    reason,
+                )
+            except Exception:
+                logger.exception(
+                    "Historique de sanction AutoMod indisponible guild=%s user=%s action=%s.",
+                    message.guild.id,
+                    message.author.id,
+                    action,
+                )
 
         public_text = (
             spam_public_text
