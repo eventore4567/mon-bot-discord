@@ -156,6 +156,15 @@ RUNTIME_LOCKED_EXTENSIONS = CRITICAL_EXTENSIONS | frozenset({
     "cogs.visual_experience_v5",
 })
 
+# Dépendances confirmées par les modules existants. On garde cette carte volontairement
+# petite : mieux vaut aucune dépendance déclarée qu'une dépendance inventée.
+MODULE_DEPENDENCIES = {
+    "cogs.security_runtime_hardening": ("cogs.automod",),
+    "cogs.ticket_claim_security": ("cogs.tickets",),
+    "cogs.ai_disable_guard": ("cogs.ai",),
+    "cogs.giveaway_center": ("cogs.events",),
+}
+
 # Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
 # implémentés dans leurs cogs afin que les boutons et les données historiques continuent
 # de fonctionner, mais ne sont plus enregistrés comme commandes publiques.
@@ -483,7 +492,11 @@ class BotAllInOne(commands.Bot):
         )
         self.db = Database(config.DATABASE_PATH)
         self.expected_extension_count = len(EXTENSIONS)
-        self.module_kernel = ModuleKernel(EXTENSIONS, CRITICAL_EXTENSIONS)
+        self.module_kernel = ModuleKernel(
+            EXTENSIONS,
+            CRITICAL_EXTENSIONS,
+            dependencies=MODULE_DEPENDENCIES,
+        )
         self._module_runtime_lock = asyncio.Lock()
         self.module_supervisor = ModuleSupervisor(
             set(EXTENSIONS) - set(RUNTIME_LOCKED_EXTENSIONS)
@@ -603,6 +616,16 @@ class BotAllInOne(commands.Bot):
         loaded_extensions: list[str] = []
         failed_extensions: list[dict[str, str]] = []
         for ext in EXTENSIONS:
+            blockers = self.module_kernel.blockers(ext)
+            if blockers:
+                self.module_kernel.blocked(ext, blockers)
+                logger.warning(
+                    "Module différé : %s attend %s",
+                    ext,
+                    ", ".join(blockers),
+                )
+                continue
+
             self.module_kernel.begin(ext)
             try:
                 await self.load_extension(ext)
