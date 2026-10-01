@@ -16,6 +16,7 @@ V102 avant tout code applicatif — voir son propre docstring pour le détail ex
 
 import asyncio
 import logging
+import sys
 import traceback
 
 import discord
@@ -42,6 +43,8 @@ from core.module_policy import (
     RUNTIME_LOCKED_EXTENSIONS,
     validate_policy,
 )
+from core.module_health import is_technical_failure
+from core.runtime_attribution import module_from_traceback
 from core.module_gate import (
     AppModuleTemporarilyUnavailable,
     ModuleTemporarilyUnavailable,
@@ -924,6 +927,34 @@ class BotAllInOne(commands.Bot):
                 if real_command:
                     ctx.command = real_command
         return ctx
+
+    async def on_error(self, event_method: str, *args, **kwargs):
+        exc_type, exc, tb = sys.exc_info()
+        module_name = module_from_traceback(
+            tb,
+            known=self.module_kernel.contains,
+        )
+        if (
+            module_name
+            and exc is not None
+            and is_technical_failure(exc)
+        ):
+            self.module_kernel.record_runtime_error(module_name, exc)
+            self._refresh_module_health()
+            logger.error(
+                "Erreur listener attribuée au module %s (event=%s, type=%s).",
+                module_name,
+                event_method,
+                type(exc).__name__,
+                exc_info=(exc_type, exc, tb),
+            )
+            return
+
+        logger.error(
+            "Erreur listener Discord non attribuée ou attendue (event=%s).",
+            event_method,
+            exc_info=(exc_type, exc, tb) if exc is not None else None,
+        )
 
     async def on_ready(self):
         logger.info(f"Connecté en tant que {self.user} (ID: {self.user.id})")
