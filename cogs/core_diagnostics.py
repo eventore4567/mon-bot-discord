@@ -166,13 +166,22 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
             problems.append(f"{len(loops_stopped)} boucle(s) de cog arrêtée(s)")
         snapshot = metrics.snapshot()
         recent_failures = sum(int(getattr(s, "recent_failures", 0) or 0) for s in snapshot.values())
+        supervisor = getattr(self.bot, "module_supervisor", None)
+        supervisor_snapshot = supervisor.snapshot() if supervisor is not None and hasattr(supervisor, "snapshot") else {}
+        failed_background_loops = list(supervisor_snapshot.get("failed_background_loops") or [])
+        if failed_background_loops:
+            problems.append(f"{len(failed_background_loops)} boucle(s) de fond en échec confirmé")
+
         background_section = [
             panels.Ligne("Tâches asyncio actives", str(len(all_tasks))),
             panels.Ligne("Boucles de cogs", f"{loops_running} active(s) · {len(loops_stopped)} arrêtée(s)"),
+            panels.Ligne("Boucles en échec", str(len(failed_background_loops))),
             panels.Ligne("Échecs de commandes récents", str(recent_failures)),
         ]
         if loops_stopped:
             background_section.append(panels.Ligne("Arrêtées", ", ".join(loops_stopped[:6])))
+        if failed_background_loops:
+            background_section.append(panels.Ligne("Échecs confirmés", ", ".join(failed_background_loops[:4])))
 
         # ÉTAT
         degraded = bool(problems)
