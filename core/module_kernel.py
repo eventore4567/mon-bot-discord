@@ -236,7 +236,13 @@ class ModuleKernel:
         if was_open:
             self._event(name, "circuit_closed", reason="runtime_success")
 
-    def open_circuit(self, name: str, *, reason: str = "manual") -> None:
+    def open_circuit(
+        self,
+        name: str,
+        *,
+        reason: str = "manual",
+        replace_reason: bool = False,
+    ) -> None:
         if name not in self._states:
             return
         state = self._states[name]
@@ -247,6 +253,9 @@ class ModuleKernel:
             state.circuit_opened_at = time.time()
             state.circuit_reason = reason
             self._event(name, "circuit_open", reason=reason)
+        elif replace_reason and state.circuit_reason != reason:
+            state.circuit_reason = reason
+            self._event(name, "circuit_reason", reason=reason)
 
     def close_circuit(self, name: str, *, reason: str = "reload") -> None:
         if name not in self._states:
