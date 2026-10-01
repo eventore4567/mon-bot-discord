@@ -151,6 +151,10 @@ CRITICAL_EXTENSIONS = frozenset({
     "cogs.utility",
 })
 
+RUNTIME_LOCKED_EXTENSIONS = CRITICAL_EXTENSIONS | frozenset({
+    "cogs.visual_experience_v5",
+})
+
 # Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
 # implémentés dans leurs cogs afin que les boutons et les données historiques continuent
 # de fonctionner, mais ne sont plus enregistrés comme commandes publiques.
@@ -486,6 +490,39 @@ class BotAllInOne(commands.Bot):
         self.prefix_cache: dict[int, str] = {}
         self.blacklist_cache: dict[int, str] = {}
 
+    def _refresh_module_health(self) -> dict:
+        snapshot = self.module_kernel.snapshot()
+        self._sentrix_extension_health = snapshot
+        return snapshot
+
+    async def reload_runtime_module(self, name: str) -> dict:
+        if not self.module_kernel.contains(name):
+            raise ValueError(f"Extension inconnue: {name}")
+        if name in RUNTIME_LOCKED_EXTENSIONS:
+            raise RuntimeError(f"Extension protégée: {name}")
+        self.module_kernel.begin(name, operation="reload")
+        try:
+            if name in self.extensions:
+                await self.reload_extension(name)
+            else:
+                await self.load_extension(name)
+        except Exception as exc:
+            self.module_kernel.failed(name, exc)
+            self._refresh_module_health()
+            raise
+        self.module_kernel.loaded(name)
+        return self._refresh_module_health()
+
+    async def stop_runtime_module(self, name: str) -> dict:
+        if not self.module_kernel.contains(name):
+            raise ValueError(f"Extension inconnue: {name}")
+        if name in RUNTIME_LOCKED_EXTENSIONS:
+            raise RuntimeError(f"Extension protégée: {name}")
+        if name in self.extensions:
+            await self.unload_extension(name)
+        self.module_kernel.unloaded(name)
+        return self._refresh_module_health()
+
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
         for requested_name in sorted(PRUNED_COMMANDS):
@@ -555,7 +592,7 @@ class BotAllInOne(commands.Bot):
                 })
                 logger.error("Échec du chargement du module %s :\n%s", ext, traceback.format_exc())
 
-        self._sentrix_extension_health = self.module_kernel.snapshot()
+        self._sentrix_extension_health = self._refresh_module_health()
         critical_failed = list(self._sentrix_extension_health["critical_failed"])
         if critical_failed:
             logger.critical(
