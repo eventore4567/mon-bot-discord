@@ -182,3 +182,70 @@ def test_automatic_alias_does_not_change_slash_or_internal_name():
     assert command.qualified_name == "notification-settings"
     assert command.name == "notification-settings"
     assert "notif-set" in command.aliases
+
+
+def test_long_name_and_short_alias_both_keep_working():
+    bot = _bot()
+
+    @bot.command(name="serverconfiguration")
+    async def serverconfiguration(ctx):
+        pass
+
+    command = bot.get_command("serverconfiguration")
+    short._apply_short_names(bot, command)
+
+    assert bot.get_command("serverconfiguration") is command
+    assert bot.get_command("srvconfig") is command
+
+
+def test_long_subcommand_and_short_alias_both_keep_working():
+    bot = _bot()
+
+    @bot.group(name="administration")
+    async def administration(ctx):
+        pass
+
+    @administration.command(name="notification-settings")
+    async def notification_settings(ctx):
+        pass
+
+    short._apply_short_names(bot, bot.get_command("administration"))
+
+    original = bot.get_command("administration notification-settings")
+    assert original is not None
+    assert bot.get_command("administration notif-set") is original
+
+
+def test_generic_long_command_gets_fallback_alias():
+    bot = _bot()
+
+    @bot.command(name="supercalifragilistic")
+    async def supercalifragilistic(ctx):
+        pass
+
+    command = bot.get_command("supercalifragilistic")
+    short._apply_short_names(bot, command)
+
+    aliases = [alias for alias in command.aliases if len(alias) <= 12]
+    assert aliases
+    assert bot.get_command("supercalifragilistic") is command
+    assert any(bot.get_command(alias) is command for alias in aliases)
+
+
+def test_auto_alias_collision_gets_safe_numbered_variant():
+    bot = _bot()
+
+    @bot.command(name="srvconfig")
+    async def existing(ctx):
+        pass
+
+    @bot.command(name="serverconfiguration")
+    async def serverconfiguration(ctx):
+        pass
+
+    command = bot.get_command("serverconfiguration")
+    short._apply_short_names(bot, command)
+
+    assert bot.get_command("srvconfig") is not command
+    assert bot.get_command("srvconfig2") is command
+    assert bot.get_command("serverconfiguration") is command
