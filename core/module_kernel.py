@@ -136,6 +136,11 @@ class ModuleKernel:
     def record_runtime_success(self, name: str) -> None:
         self._resilience.record_success(name)
 
+    def decay_runtime_health(self, *, quiet_window_seconds: int = 300) -> list[str]:
+        return self._resilience.decay(
+            quiet_window_seconds=quiet_window_seconds,
+        )
+
     def open_circuit(
         self,
         name: str,
