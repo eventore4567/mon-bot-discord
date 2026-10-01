@@ -43,6 +43,7 @@ from core.module_policy import (
 from core.module_gate import (
     AppModuleTemporarilyUnavailable,
     ModuleTemporarilyUnavailable,
+    app_command_module,
     install_app_gates,
     prefix_gate,
 )
@@ -1091,6 +1092,10 @@ class BotAllInOne(commands.Bot):
         error: discord.app_commands.AppCommandError,
     ):
         original = getattr(error, "original", error)
+        kernel = getattr(self, "module_kernel", None)
+        module_name = app_command_module(getattr(interaction, "command", None))
+        if module_name and kernel is not None and hasattr(kernel, "exit_runtime"):
+            kernel.exit_runtime(module_name)
 
         if isinstance(original, BotPermissionError):
             embed = embeds.error(original.message)
