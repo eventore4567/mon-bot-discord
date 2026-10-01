@@ -37,6 +37,7 @@ from core.module_kernel import ModuleKernel
 from core.module_policy import (
     CRITICAL_EXTENSIONS,
     MODULE_DEPENDENCIES,
+    MODULE_LOAD_TIMEOUT_SECONDS,
     RUNTIME_LOCKED_EXTENSIONS,
     validate_policy,
 )
@@ -593,7 +594,10 @@ class BotAllInOne(commands.Bot):
 
             self.module_kernel.begin(ext)
             try:
-                await self.load_extension(ext)
+                await asyncio.wait_for(
+                    self.load_extension(ext),
+                    timeout=MODULE_LOAD_TIMEOUT_SECONDS,
+                )
                 self.module_kernel.loaded(ext)
                 loaded_extensions.append(ext)
                 logger.info("Module chargé : %s", ext)
