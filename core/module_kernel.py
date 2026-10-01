@@ -26,6 +26,8 @@ class ModuleState:
     runtime_errors: int = 0
     consecutive_runtime_errors: int = 0
     runtime_degraded: bool = False
+    circuit_open: bool = False
+    circuit_opened_at: float | None = None
     last_runtime_error: str | None = None
     last_runtime_error_at: float | None = None
     _started_at: float | None = field(default=None, repr=False)
@@ -124,7 +126,14 @@ class ModuleKernel:
     def contains(self, name: str) -> bool:
         return name in self._states
 
-    def record_runtime_error(self, name: str, error: BaseException | str, *, threshold: int = 3) -> None:
+    def record_runtime_error(
+        self,
+        name: str,
+        error: BaseException | str,
+        *,
+        threshold: int = 3,
+        circuit_threshold: int = 5,
+    ) -> None:
         if name not in self._states:
             return
         state = self._states[name]
@@ -134,10 +143,30 @@ class ModuleKernel:
         state.last_runtime_error_at = time.time()
         state.runtime_degraded = state.consecutive_runtime_errors >= max(1, int(threshold))
 
+        # Les modules critiques ne sont jamais ouverts automatiquement.
+        if (
+            not state.critical
+            and state.status == "loaded"
+            and state.consecutive_runtime_errors >= max(1, int(circuit_threshold))
+        ):
+            state.circuit_open = True
+            state.circuit_opened_at = state.circuit_opened_at or time.time()
+
     def record_runtime_success(self, name: str) -> None:
         if name not in self._states:
             return
         state = self._states[name]
+        state.consecutive_runtime_errors = 0
+        state.runtime_degraded = False
+        state.circuit_open = False
+        state.circuit_opened_at = None
+
+    def close_circuit(self, name: str) -> None:
+        if name not in self._states:
+            return
+        state = self._states[name]
+        state.circuit_open = False
+        state.circuit_opened_at = None
         state.consecutive_runtime_errors = 0
         state.runtime_degraded = False
 
@@ -188,6 +217,10 @@ class ModuleKernel:
             row.name for row in rows
             if row.status == "loaded" and row.runtime_degraded
         )
+        open_circuits = sorted(
+            row.name for row in rows
+            if row.status == "loaded" and row.circuit_open
+        )
         return {
             "expected": len(rows),
             "loaded": loaded,
@@ -196,6 +229,7 @@ class ModuleKernel:
             "critical_failed": critical_failed,
             "ready": not critical_failed,
             "runtime_degraded": runtime_degraded,
+            "open_circuits": open_circuits,
             "modules": {
                 row.name: {
                     "status": row.status,
@@ -210,6 +244,8 @@ class ModuleKernel:
                     "runtime_errors": row.runtime_errors,
                     "consecutive_runtime_errors": row.consecutive_runtime_errors,
                     "runtime_degraded": row.runtime_degraded,
+                    "circuit_open": row.circuit_open,
+                    "circuit_opened_at": row.circuit_opened_at,
                     "last_runtime_error": row.last_runtime_error,
                     "last_runtime_error_at": row.last_runtime_error_at,
                 }
