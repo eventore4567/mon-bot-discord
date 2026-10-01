@@ -81,7 +81,8 @@ def _extension_state(bot) -> tuple[int, int, bool, list[str], list[dict]]:
         expected = int(runtime.get("expected") or loaded)
         critical_failed = [str(name) for name in (runtime.get("critical_failed") or [])]
         failed = [dict(item) for item in (runtime.get("failed") or []) if isinstance(item, dict)]
-        return loaded, expected, not critical_failed, critical_failed, failed
+        ready = bool(runtime.get("ready", not critical_failed))
+        return loaded, expected, ready, critical_failed, failed
 
     loaded = len(getattr(bot, "extensions", {}) or {})
     expected = int(getattr(bot, "expected_extension_count", loaded) or loaded)
@@ -170,6 +171,12 @@ async def _snapshot(bot, dashboard) -> dict:
         "extensions_loaded": loaded_extensions,
         "extensions_expected": expected_extensions,
         "critical_extensions_failed": critical_extensions_failed,
+        "critical_runtime_degraded": (
+            request_kernel.snapshot().get("critical_runtime_degraded", [])
+            if (request_kernel := getattr(bot, "module_kernel", None)) is not None
+            and hasattr(request_kernel, "snapshot")
+            else []
+        ),
         "failed_extensions": failed_extensions[:12],
         "module_kernel": (
             request_kernel.snapshot()
