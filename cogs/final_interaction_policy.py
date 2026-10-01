@@ -143,6 +143,52 @@ def _clean_embed(
     return result
 
 
+_SIMPLE_ERROR_RE = re.compile(
+    r"(?:erreur|invalide|introuvable|permission|cooldown|manque|manquant|"
+    r"requis|impossible|interdit|refus|indisponible|échou|echou|"
+    r"doit être|doit etre|maximum|minim(?:um|ale)|déjà|deja)",
+    re.IGNORECASE,
+)
+
+
+def _command_is_active() -> bool:
+    return bool(_COMMAND_ROOT.get() or _COMMAND_CONTEXT.get() is not None)
+
+
+def _text_is_simple_error(value: Any) -> bool:
+    if not _command_is_active():
+        return False
+    text = str(value or "").strip()
+    return bool(text and len(text) <= 1900 and _SIMPLE_ERROR_RE.search(text))
+
+
+def _embed_is_simple_error(embed: discord.Embed | None) -> bool:
+    if not _command_is_active() or not isinstance(embed, discord.Embed):
+        return False
+    kind = panels.intention_de(embed)
+    if kind not in {"danger", "warning"}:
+        return False
+    title = str(getattr(embed, "title", "") or "")
+    description = str(getattr(embed, "description", "") or "")
+    fields = " ".join(
+        f"{field.name} {field.value}"
+        for field in list(getattr(embed, "fields", ()) or ())[:4]
+    )
+    return bool(_SIMPLE_ERROR_RE.search(" ".join((title, description, fields))))
+
+
+def _plain_text_from_error_embed(embed: discord.Embed) -> str:
+    description = _strip_drawn_dividers(getattr(embed, "description", ""))
+    title = _strip_drawn_dividers(getattr(embed, "title", ""))
+    if description:
+        return description[:1900]
+    for field in list(getattr(embed, "fields", ()) or ()):
+        value = _strip_drawn_dividers(getattr(field, "value", ""))
+        if value:
+            return value[:1900]
+    return title[:1900] or "Une erreur est survenue. Merci de réessayer."
+
+
 def _title_for_text(text: str) -> str:
     lowered = text.casefold()
     if any(word in lowered for word in (
@@ -349,6 +395,27 @@ def _normalize_existing(
     bot: Any,
 ) -> tuple[tuple, dict]:
     new_kwargs = dict(kwargs)
+
+    # Toute erreur simple émise directement sous forme d'embed par une vieille
+    # commande est ramenée au même contrat texte que les handlers centraux.
+    # Hors commande (logs, notifications automatiques), les embeds restent intacts.
+    if new_kwargs.get("view") is None:
+        single_error = new_kwargs.get("embed")
+        if _embed_is_simple_error(single_error):
+            text = _plain_text_from_error_embed(single_error)
+            new_kwargs.pop("embed", None)
+            new_kwargs.pop("embeds", None)
+            new_kwargs["content"] = text
+        else:
+            embedded = [
+                item for item in list(new_kwargs.get("embeds") or [])
+                if isinstance(item, discord.Embed)
+            ]
+            if len(embedded) == 1 and _embed_is_simple_error(embedded[0]):
+                text = _plain_text_from_error_embed(embedded[0])
+                new_kwargs.pop("embed", None)
+                new_kwargs.pop("embeds", None)
+                new_kwargs["content"] = text
     if isinstance(new_kwargs.get("embed"), discord.Embed):
         new_kwargs["embed"] = _clean_embed(new_kwargs["embed"], root=root, bot=bot)
     if new_kwargs.get("embeds"):
@@ -394,6 +461,8 @@ def _payload_pages(
         args, kwargs, editing=editing, root=root, bot=bot
     )
     content, positional = _content_from(base_args, base_kwargs)
+    if _text_is_simple_error(content):
+        force_embed = False
     if not force_embed or content is None or not str(content).strip():
         return [(base_args, base_kwargs)]
 
