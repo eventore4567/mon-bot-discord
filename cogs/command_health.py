@@ -41,6 +41,7 @@ _USER_ERRORS = frozenset({
     "MemberNotFound", "UserNotFound", "RoleNotFound", "ChannelNotFound",
     "CommandOnCooldown", "MissingPermissions", "BotMissingPermissions",
     "NoPrivateMessage", "CheckFailure", "Forbidden", "NotFound",
+    "ModuleTemporarilyUnavailable", "AppModuleTemporarilyUnavailable",
 })
 
 
