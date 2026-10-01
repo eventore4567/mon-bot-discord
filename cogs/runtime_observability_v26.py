@@ -140,7 +140,23 @@ def _slash_module_name(command: Any) -> str | None:
     return _module_name_from_object(binding) or _module_name_from_object(getattr(command, "callback", None))
 
 
+def _is_technical_module_failure(error: BaseException) -> bool:
+    if isinstance(error, (
+        commands.UserInputError,
+        commands.CheckFailure,
+        commands.CommandOnCooldown,
+        commands.DisabledCommand,
+        commands.MaxConcurrencyReached,
+        discord.Forbidden,
+        discord.NotFound,
+    )):
+        return False
+    return True
+
+
 def _record_module_runtime_error(bot: commands.Bot, module_name: str | None, error: BaseException) -> None:
+    if not _is_technical_module_failure(error):
+        return
     kernel = getattr(bot, "module_kernel", None)
     if module_name and kernel is not None and hasattr(kernel, "record_runtime_error"):
         kernel.record_runtime_error(module_name, error)
