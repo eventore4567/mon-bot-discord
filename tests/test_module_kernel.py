@@ -318,3 +318,25 @@ def test_dependency_with_open_circuit_blocks_dependent():
     assert kernel.blockers("cogs.giveaway_center") == ()
     kernel.open_circuit("cogs.events", reason="runtime_failure")
     assert kernel.blockers("cogs.giveaway_center") == ("cogs.events",)
+
+
+def test_kernel_invariants_are_clean_for_normal_loaded_module():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    assert kernel.validate_invariants() == []
+    assert kernel.snapshot()["ready"] is True
+
+
+def test_kernel_invariant_error_fails_readiness():
+    kernel = ModuleKernel(["cogs.moderation"], critical={"cogs.moderation"})
+    kernel.begin("cogs.moderation")
+    kernel.loaded("cogs.moderation")
+
+    # Simule une corruption interne impossible via l'API normale.
+    kernel._states["cogs.moderation"].circuit_open = True
+    kernel._states["cogs.moderation"].circuit_reason = "corrupt"
+
+    snapshot = kernel.snapshot()
+    assert snapshot["ready"] is False
+    assert any("circuit ouvert" in problem for problem in snapshot["invariant_errors"])
