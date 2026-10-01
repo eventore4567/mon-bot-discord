@@ -124,3 +124,25 @@ def test_stuck_call_degrades_module_without_opening_circuit():
     assert state["runtime_degraded"] is True
     assert state["circuit_open"] is False
     assert supervisor.snapshot()["stuck_modules"] == ["cogs.music"]
+
+
+def test_transition_tracker_is_idempotent_for_same_snapshot():
+    supervisor = ModuleSupervisor(["cogs.music"])
+    snapshot = {
+        "modules": {
+            "cogs.music": {
+                "status": "loaded",
+                "runtime_degraded": False,
+                "circuit_open": False,
+                "blocked_by": [],
+            }
+        }
+    }
+
+    supervisor._log_state_transitions(snapshot)
+    first = dict(supervisor._last_module_states)
+    supervisor._log_state_transitions(snapshot)
+    second = dict(supervisor._last_module_states)
+
+    assert first == second
+    assert second["cogs.music"] == ("loaded", False, False, ())
