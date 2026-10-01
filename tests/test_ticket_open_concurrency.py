@@ -25,3 +25,19 @@ def test_ticket_creation_rolls_back_channel_when_database_insert_fails():
     assert "rollback d'un ticket non persisté" in source
     assert "await channel.delete(" in source
     assert "Aucun ticket incomplet n'a été conservé." in source
+
+
+def test_ticket_initialization_rolls_back_when_control_message_fails():
+    source = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
+
+    assert "rollback d'un ticket sans message de contrôle" in source
+    assert "DELETE FROM ticket_answers WHERE ticket_id = ?" in source
+    assert "DELETE FROM tickets WHERE id = ?" in source
+    assert "La création a été annulée proprement." in source
+
+
+def test_ticket_open_journal_failure_does_not_invalidate_ticket():
+    source = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
+
+    assert "Journal d'ouverture ticket indisponible" in source
+    assert "une panne du journal ne doit pas faire croire que l'ouverture a échoué" in source
