@@ -18,6 +18,8 @@ RUNTIME_LOCKED_EXTENSIONS = CRITICAL_EXTENSIONS | frozenset({
     "cogs.visual_experience_v5",
 })
 
+MODULE_LOAD_TIMEOUT_SECONDS = 20.0
+
 MODULE_DEPENDENCIES = {
     "cogs.security_runtime_hardening": ("cogs.automod",),
     "cogs.ticket_claim_security": ("cogs.tickets",),
