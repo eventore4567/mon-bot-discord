@@ -1027,101 +1027,67 @@ class BotAllInOne(commands.Bot):
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         error = getattr(error, "original", error)
         from cogs.command_channel_gate import CommandChannelBlocked
-        if isinstance(error, CommandChannelBlocked):
-            return
 
-        if isinstance(error, commands.CommandNotFound):
+        if isinstance(error, (CommandChannelBlocked, commands.CommandNotFound)):
             return
 
         if isinstance(error, BotPermissionError):
-            return await ctx.send(embed=embeds.error(error.message))
+            return await ctx.send(f"Permission manquante : \`{error.message}\`.")
 
         if isinstance(error, BotBlacklistedError):
-            return await ctx.send(embed=embeds.error(f"Vous n'êtes pas autorisé à utiliser ce bot.\nRaison : {error.reason}"))
+            return await ctx.send("Tu ne peux pas utiliser SentriX actuellement.")
 
         if isinstance(error, ModuleTemporarilyUnavailable):
-            return await ctx.send(
-                embed=embeds.warning(
-                    "Cette fonction est temporairement indisponible pendant une récupération automatique. "
-                    "Les autres fonctions de SentriX continuent de fonctionner."
-                )
-            )
+            return await ctx.send("Cette fonction est temporairement indisponible. Merci de réessayer.")
 
         if isinstance(error, commands.CommandOnCooldown):
             return await ctx.send(
-                embed=embeds.warning(
-                    f"Cette commande est temporairement en recharge. Vous pourrez la réutiliser dans "
-                    f"**{cooldown_text(error.retry_after)}**."
-                )
+                f"Réessaie dans \`{cooldown_text(error.retry_after)}\`."
             )
 
         if isinstance(error, commands.MissingPermissions):
             perms = format_permissions(error.missing_permissions)
-            return await ctx.send(embed=embeds.error(
-                f"Votre rôle ne possède pas les autorisations nécessaires pour cette action.\n"
-                f"Permission(s) requise(s) : **{perms}**."
-            ))
+            return await ctx.send(f"Permission(s) manquante(s) : \`{perms}\`.")
 
         if isinstance(error, commands.BotMissingPermissions):
             perms = format_permissions(error.missing_permissions)
-            return await ctx.send(embed=embeds.error(
-                f"Le bot ne peut pas terminer cette action car il lui manque : **{perms}**.\n"
-                "Un administrateur doit corriger les permissions du rôle SentriX et vérifier qu’il est placé assez haut."
-            ))
+            return await ctx.send(f"SentriX n'a pas la permission : \`{perms}\`.")
 
         if isinstance(error, commands.UserNotFound):
-            if ctx.command and ctx.command.qualified_name in {"bl", "blinfo", "unbl", "editbl"}:
-                return await ctx.send(embed=embeds.error(
-                    f"`{error.argument}` n'est pas un membre valide (mention `@membre` ou ID attendu).\n\n"
-                    "**`/bl`** bloque un **utilisateur** sur tout le bot (aucune commande nulle part).\n"
-                    "Pour interdire un **mot** (ex: une insulte) dans les messages de ce serveur, utilisez "
-                    "**`/blacklist-add <mot>`** à la place — c'est une fonction différente."
-                ))
-            return await ctx.send(embed=embeds.error("Utilisateur introuvable. Vérifiez la mention ou l'ID."))
+            return await ctx.send(f"Utilisateur introuvable : \`{error.argument}\`.")
 
         if isinstance(error, commands.MemberNotFound):
-            return await ctx.send(embed=embeds.error("Membre introuvable. Vérifiez le nom ou la mention."))
+            return await ctx.send(f"Membre introuvable : \`{error.argument}\`.")
 
         if isinstance(error, commands.ChannelNotFound):
-            return await ctx.send(embed=embeds.error("Salon introuvable."))
+            return await ctx.send(f"Salon introuvable : \`{error.argument}\`.")
 
         if isinstance(error, commands.RoleNotFound):
-            return await ctx.send(embed=embeds.error("Rôle introuvable."))
+            return await ctx.send(f"Rôle introuvable : \`{error.argument}\`.")
 
         if isinstance(error, commands.MissingRequiredArgument):
             usage = command_usage(ctx)
-            detail = f"\nSyntaxe correcte : `{usage}`" if usage else ""
-            return await ctx.send(embed=embeds.error(
-                f"L’argument **{error.param.name}** est obligatoire.{detail}\n"
-                f"Consultez `{ctx.clean_prefix}help {ctx.command.qualified_name}` pour le détail des paramètres."
-            ))
+            text = f"Il manque \`{error.param.name}\`."
+            if usage:
+                text += f" Utilise \`{usage}\`."
+            return await ctx.send(text)
 
         if isinstance(error, commands.BadArgument):
             usage = command_usage(ctx)
-            detail = f"\nSyntaxe correcte : `{usage}`" if usage else ""
-            return await ctx.send(embed=embeds.error(
-                "Une valeur fournie n’est pas reconnue. Vérifiez les mentions, nombres et noms indiqués."
-                + detail
-            ))
+            if usage:
+                return await ctx.send(f"Valeur invalide. Utilise \`{usage}\`.")
+            return await ctx.send("Valeur invalide. Vérifie puis réessaie.")
 
         if isinstance(error, discord.Forbidden):
-            return await ctx.send(embed=embeds.error(
-                "Discord a refusé cette action. Vérifiez les permissions du bot et placez le rôle SentriX "
-                "au-dessus du membre ou du rôle concerné."
-            ))
+            return await ctx.send("SentriX n'a pas la permission nécessaire pour faire ça.")
 
         if isinstance(error, commands.CheckFailure):
-            return await ctx.send(embed=embeds.error(
-                "Vous n’avez pas accès à cette commande. Elle est réservée au staff ou nécessite une permission "
-                "qui n’est pas présente sur votre rôle."
-            ))
+            return await ctx.send("Tu n'as pas la permission d'utiliser cette commande.")
 
-        # Contexte exploitable dans Railway : module, commande, serveur, membre, type —
-        # avec la vraie trace de l'exception reçue (traceback.format_exc() ne voyait
-        # rien ici : l'erreur est passée en argument, pas en cours de levée).
         logger.error(
             "Erreur non gérée | cog=%s commande=%s guild=%s user=%s | %s: %s",
-            getattr(getattr(ctx, "cog", None), "qualified_name", None) or getattr(getattr(ctx.command, "callback", None), "__module__", "?"),
+            getattr(getattr(ctx, "cog", None), "qualified_name", None)
+            or getattr(getattr(ctx.command, "callback", None), "__module__", "?"),
             getattr(ctx.command, "qualified_name", ctx.command),
             getattr(ctx.guild, "id", None),
             getattr(ctx.author, "id", None),
@@ -1129,18 +1095,13 @@ class BotAllInOne(commands.Bot):
             str(error)[:300],
             exc_info=(type(error), error, error.__traceback__),
         )
-        if ctx.author.id == PRIMARY_CREATOR_ID:
-            detail = str(error).strip() or "aucun détail"
-            return await ctx.send(
-                embed=embeds.error(
-                    f"Erreur technique : {type(error).__name__}\n{detail[:700]}"
-                )
+        try:
+            await ctx.send("Une erreur est survenue. Merci de réessayer.")
+        except discord.HTTPException:
+            logger.warning(
+                "Impossible d'envoyer la réponse d'erreur pour la commande %s.",
+                getattr(ctx.command, "qualified_name", ctx.command),
             )
-        reference = str(getattr(getattr(ctx, "message", None), "id", "indisponible"))
-        await ctx.send(embed=embeds.error(
-            "Une erreur technique inattendue a interrompu la commande. Aucun changement supplémentaire "
-            f"n’a été appliqué. Référence : `{reference}`."
-        ))
 
     async def on_app_command_error(
         self,
@@ -1154,71 +1115,66 @@ class BotAllInOne(commands.Bot):
             kernel.exit_runtime(module_name)
 
         if isinstance(original, BotPermissionError):
-            embed = embeds.error(original.message)
+            message = f"Permission manquante : \`{original.message}\`."
         elif isinstance(original, BotBlacklistedError):
-            embed = embeds.error(f"Vous n’êtes pas autorisé à utiliser ce bot.\nRaison : {original.reason}")
-        elif isinstance(original, AppModuleTemporarilyUnavailable) or isinstance(error, AppModuleTemporarilyUnavailable):
-            embed = embeds.warning(
-                "Cette fonction est temporairement indisponible pendant une récupération automatique. "
-                "Les autres fonctions de SentriX continuent de fonctionner."
-            )
+            message = "Tu ne peux pas utiliser SentriX actuellement."
+        elif isinstance(original, AppModuleTemporarilyUnavailable) or isinstance(
+            error, AppModuleTemporarilyUnavailable
+        ):
+            message = "Cette fonction est temporairement indisponible. Merci de réessayer."
         elif isinstance(error, discord.app_commands.CommandOnCooldown):
-            embed = embeds.warning(
-                f"Cette commande est temporairement en recharge. Vous pourrez la réutiliser dans "
-                f"**{cooldown_text(error.retry_after)}**."
-            )
+            message = f"Réessaie dans \`{cooldown_text(error.retry_after)}\`."
         elif isinstance(error, discord.app_commands.MissingPermissions):
-            embed = embeds.error(
-                "Votre rôle ne possède pas les autorisations nécessaires.\n"
-                f"Permission(s) requise(s) : **{format_permissions(error.missing_permissions)}**."
-            )
+            perms = format_permissions(error.missing_permissions)
+            message = f"Permission(s) manquante(s) : \`{perms}\`."
         elif isinstance(error, discord.app_commands.BotMissingPermissions):
-            embed = embeds.error(
-                "Le bot ne peut pas terminer cette action. Permission(s) manquante(s) : "
-                f"**{format_permissions(error.missing_permissions)}**."
-            )
-        elif isinstance(error, (discord.app_commands.TransformerError, discord.app_commands.CommandSignatureMismatch)):
-            embed = embeds.error(
-                "Une valeur fournie n’est pas valide pour cette commande. Vérifiez les membres, rôles, salons "
-                "et nombres sélectionnés, puis réessayez."
-            )
+            perms = format_permissions(error.missing_permissions)
+            message = f"SentriX n'a pas la permission : \`{perms}\`."
+        elif isinstance(
+            error,
+            (
+                discord.app_commands.TransformerError,
+                discord.app_commands.CommandSignatureMismatch,
+            ),
+        ):
+            message = "Valeur invalide. Vérifie puis réessaie."
         elif isinstance(original, discord.Forbidden):
-            embed = embeds.error(
-                "Discord a refusé cette action. Vérifiez les permissions et la position du rôle SentriX."
-            )
+            message = "SentriX n'a pas la permission nécessaire pour faire ça."
         elif isinstance(error, discord.app_commands.CheckFailure):
-            embed = embeds.error(
-                "Vous n’avez pas accès à cette commande. Elle est réservée au staff ou nécessite une permission "
-                "supplémentaire."
-            )
+            message = "Tu n'as pas la permission d'utiliser cette commande."
         else:
-            command_name = interaction.command.qualified_name if interaction.command else "inconnue"
+            command_name = (
+                interaction.command.qualified_name
+                if interaction.command
+                else "inconnue"
+            )
             logger.error(
                 "Erreur non gérée | slash=%s module=%s guild=%s user=%s | %s: %s",
                 command_name,
-                getattr(getattr(interaction.command, "callback", None), "__module__", "?"),
+                getattr(
+                    getattr(interaction.command, "callback", None),
+                    "__module__",
+                    "?",
+                ),
                 getattr(interaction.guild, "id", None),
                 getattr(interaction.user, "id", None),
                 type(original).__name__,
                 str(original)[:300],
                 exc_info=(type(original), original, original.__traceback__),
             )
-            if interaction.user.id == PRIMARY_CREATOR_ID:
-                detail = str(original).strip() or "aucun détail"
-                embed = embeds.error(f"Erreur technique : {type(original).__name__}\n{detail[:700]}")
-            else:
-                embed = embeds.error(
-                    "Une erreur technique inattendue a interrompu la commande. Aucun changement supplémentaire "
-                    f"n’a été appliqué. Référence : `{interaction.id}`."
-                )
+            message = "Une erreur est survenue. Merci de réessayer."
 
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                await interaction.followup.send(message, ephemeral=True)
             else:
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.response.send_message(message, ephemeral=True)
         except discord.HTTPException:
-            logger.warning("Impossible d’envoyer la réponse d’erreur de l’interaction %s.", interaction.id)
+            logger.warning(
+                "Impossible d'envoyer la réponse d'erreur de l'interaction %s.",
+                interaction.id,
+            )
+
 
 
 async def main():
