@@ -195,3 +195,24 @@ def test_success_closes_open_circuit():
     state = kernel.snapshot()["modules"]["cogs.music"]
     assert state["circuit_open"] is False
     assert state["runtime_degraded"] is False
+
+
+def test_old_runtime_errors_do_not_accumulate_into_new_circuit(monkeypatch):
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+
+    times = iter([1000, 1001, 1002, 1400])
+    monkeypatch.setattr("core.module_kernel.time.time", lambda: next(times))
+
+    kernel.record_runtime_error("cogs.music", RuntimeError("one"))
+    kernel.record_runtime_error("cogs.music", RuntimeError("two"))
+    kernel.record_runtime_error("cogs.music", RuntimeError("three"))
+    assert kernel.snapshot()["modules"]["cogs.music"]["runtime_degraded"] is True
+
+    # 398 secondes plus tard : la série précédente ne doit plus compter.
+    kernel.record_runtime_error("cogs.music", RuntimeError("later"))
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["consecutive_runtime_errors"] == 1
+    assert state["runtime_degraded"] is False
+    assert state["circuit_open"] is False
