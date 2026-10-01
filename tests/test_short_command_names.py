@@ -162,11 +162,14 @@ def test_automatic_alias_never_steals_existing_command():
     async def serverconfiguration(ctx):
         pass
 
-    short._apply_short_names(bot, bot.get_command("serverconfiguration"))
+    original_short = bot.get_command("srvconfig")
+    long_command = bot.get_command("serverconfiguration")
+    short._apply_short_names(bot, long_command)
 
-    assert bot.get_command("srvconfig") is bot.get_command("srvconfig")
-    assert bot.get_command("serverconfiguration") is not bot.get_command("srvconfig")
-    assert short.display_name(bot.get_command("serverconfiguration")) == "serverconfiguration"
+    assert bot.get_command("srvconfig") is original_short
+    assert bot.get_command("serverconfiguration") is long_command
+    assert bot.get_command("srvconfig2") is long_command
+    assert short.display_name(long_command) == "srvconfig2"
 
 
 def test_automatic_alias_does_not_change_slash_or_internal_name():
