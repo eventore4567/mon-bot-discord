@@ -108,6 +108,13 @@ class ModuleKernel:
             if self._states[dep].status != "loaded"
         )
 
+    def dependents(self, name: str) -> tuple[str, ...]:
+        return tuple(
+            module
+            for module, dependencies in self._dependencies.items()
+            if name in dependencies
+        )
+
     def blocked(self, name: str, dependencies: Iterable[str]) -> None:
         state = self._states[name]
         state.status = "blocked"
