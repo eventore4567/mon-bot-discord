@@ -133,16 +133,20 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
         kernel_snapshot = kernel.snapshot() if kernel is not None and hasattr(kernel, "snapshot") else None
         optional_failed = []
         runtime_degraded = []
+        open_circuits = []
         if isinstance(kernel_snapshot, dict):
             optional_failed = [
                 item["name"] for item in kernel_snapshot.get("failed", [])
                 if not item.get("critical")
             ]
             runtime_degraded = list(kernel_snapshot.get("runtime_degraded") or [])
+            open_circuits = list(kernel_snapshot.get("open_circuits") or [])
             if optional_failed:
                 problems.append(f"{len(optional_failed)} module(s) optionnel(s) isolé(s) en échec")
             if runtime_degraded:
                 problems.append(f"{len(runtime_degraded)} module(s) actif(s) mais dégradé(s)")
+            if open_circuits:
+                problems.append(f"{len(open_circuits)} circuit(s) de module ouvert(s)")
 
         discord_section = [
             panels.Ligne("Connecté", "Oui" if ready else "Non"),
@@ -158,6 +162,8 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
             discord_section.append(panels.Ligne("Optionnels isolés", ", ".join(optional_failed[:5])))
         if runtime_degraded:
             discord_section.append(panels.Ligne("Actifs mais dégradés", ", ".join(runtime_degraded[:5])))
+        if open_circuits:
+            discord_section.append(panels.Ligne("Circuits ouverts", ", ".join(open_circuits[:5])))
 
         # TÂCHES DE FOND
         loops_running, loops_stopped = _cog_loops(self.bot)
