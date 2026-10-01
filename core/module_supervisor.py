@@ -33,6 +33,8 @@ class ModuleSupervisor:
         self._last_recovered: str | None = None
         self._running = False
         self._failed_loops: set[str] = set()
+        self._internal_errors = 0
+        self._last_internal_error: str | None = None
 
     def snapshot(self) -> dict:
         now = time.monotonic()
@@ -42,6 +44,8 @@ class ModuleSupervisor:
             "recovered": self._recovered,
             "last_recovered": self._last_recovered,
             "failed_background_loops": sorted(self._failed_loops),
+            "internal_errors": self._internal_errors,
+            "last_internal_error": self._last_internal_error,
             "pending": {
                 name: {
                     "failures": count,
@@ -125,43 +129,47 @@ class ModuleSupervisor:
         try:
             while not bot.is_closed():
                 await asyncio.sleep(self.scan_interval)
-                kernel = getattr(bot, "module_kernel", None)
-                if kernel is None:
-                    continue
-                refresh = getattr(bot, "_refresh_module_health", None)
-                snapshot = refresh() if callable(refresh) else kernel.snapshot()
-                self._scan_failed_loops(bot, kernel)
-                snapshot = refresh() if callable(refresh) else kernel.snapshot()
-                now = time.monotonic()
-                for name, state in snapshot.get("modules", {}).items():
-                    if name not in self.retryable:
+                try:
+                    kernel = getattr(bot, "module_kernel", None)
+                    if kernel is None:
                         continue
-                    status = state.get("status")
+                    refresh = getattr(bot, "_refresh_module_health", None)
+                    snapshot = refresh() if callable(refresh) else kernel.snapshot()
+                    self._scan_failed_loops(bot, kernel)
+                    snapshot = refresh() if callable(refresh) else kernel.snapshot()
+                    now = time.monotonic()
+                    for name, state in snapshot.get("modules", {}).items():
+                        if name not in self.retryable:
+                            continue
+                        status = state.get("status")
 
-                    # "unloaded" signifie arrêt volontaire : aucun auto-redémarrage.
-                    if status == "unloaded":
-                        self._clear(name)
-                        continue
+                        if status == "unloaded":
+                            self._clear(name)
+                            continue
 
-                    # Un module bloqué par une dépendance repart dès que son blocker
-                    # est de nouveau chargé. Cela évite les cascades au démarrage.
-                    if status == "blocked":
-                        if kernel.blockers(name):
+                        if status == "blocked":
+                            if kernel.blockers(name):
+                                continue
+                            await self._retry_one(bot, name)
+                            continue
+
+                        if status != "failed":
+                            self._clear(name)
+                            continue
+
+                        failures = self._failures.get(name, 0)
+                        if failures >= len(self.retry_delays):
+                            continue
+                        if now < self._next_retry.get(name, 0):
                             continue
                         await self._retry_one(bot, name)
-                        continue
-
-                    if status != "failed":
-                        self._clear(name)
-                        continue
-
-                    failures = self._failures.get(name, 0)
-                    if failures >= len(self.retry_delays):
-                        continue
-                    if now < self._next_retry.get(name, 0):
-                        continue
-                    await self._retry_one(bot, name)
-        except asyncio.CancelledError:
-            raise
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._internal_errors += 1
+                    self._last_internal_error = type(exc).__name__
+                    logger.exception(
+                        "Micro-kernel : erreur interne du superviseur, surveillance conservée."
+                    )
         finally:
             self._running = False
