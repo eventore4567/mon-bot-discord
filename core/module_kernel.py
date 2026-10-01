@@ -19,10 +19,15 @@ class ModuleState:
     load_ms: float | None = None
     error: str | None = None
     attempts: int = 0
+    reloads: int = 0
+    last_operation: str = "startup"
     _started_at: float | None = field(default=None, repr=False)
 
-    def begin(self) -> None:
+    def begin(self, *, operation: str = "load") -> None:
         self.attempts += 1
+        if operation == "reload":
+            self.reloads += 1
+        self.last_operation = operation
         self.status = "loading"
         self.error = None
         self._started_at = time.perf_counter()
@@ -49,14 +54,28 @@ class ModuleKernel:
             for name in modules
         }
 
-    def begin(self, name: str) -> None:
-        self._states[name].begin()
+    def begin(self, name: str, *, operation: str = "load") -> None:
+        self._states[name].begin(operation=operation)
 
     def loaded(self, name: str) -> None:
         self._states[name].finish()
 
     def failed(self, name: str, error: BaseException) -> None:
         self._states[name].finish(error=error)
+
+    def unloaded(self, name: str) -> None:
+        state = self._states[name]
+        state.status = "unloaded"
+        state.error = None
+        state.load_ms = None
+        state._started_at = None
+        state.last_operation = "unload"
+
+    def is_critical(self, name: str) -> bool:
+        return self._states[name].critical
+
+    def contains(self, name: str) -> bool:
+        return name in self._states
 
     def snapshot(self) -> dict:
         rows = list(self._states.values())
@@ -80,6 +99,8 @@ class ModuleKernel:
                     "load_ms": row.load_ms,
                     "error": row.error,
                     "attempts": row.attempts,
+                    "reloads": row.reloads,
+                    "last_operation": row.last_operation,
                 }
                 for row in rows
             },
