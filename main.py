@@ -34,6 +34,7 @@ from utils.checks import (
 from utils import access_matrix
 from utils import log_hygiene
 from core.module_kernel import ModuleKernel
+from core.module_runtime import ModuleRuntimeController
 from core.module_supervisor import ModuleSupervisor
 from web.dashboard import start_dashboard
 import web.dashboard as dashboard_module
@@ -497,7 +498,11 @@ class BotAllInOne(commands.Bot):
             CRITICAL_EXTENSIONS,
             dependencies=MODULE_DEPENDENCIES,
         )
-        self._module_runtime_lock = asyncio.Lock()
+        self.module_runtime = ModuleRuntimeController(
+            self,
+            self.module_kernel,
+            locked=RUNTIME_LOCKED_EXTENSIONS,
+        )
         self.module_supervisor = ModuleSupervisor(
             set(EXTENSIONS) - set(RUNTIME_LOCKED_EXTENSIONS)
         )
@@ -510,52 +515,13 @@ class BotAllInOne(commands.Bot):
         self.blacklist_cache: dict[int, str] = {}
 
     def _refresh_module_health(self) -> dict:
-        changed = self.module_kernel.reconcile(self.extensions.keys())
-        if changed:
-            logger.warning(
-                "Micro-kernel : état runtime réconcilié pour %s",
-                ", ".join(changed),
-            )
-        snapshot = self.module_kernel.snapshot()
-        self._sentrix_extension_health = snapshot
-        return snapshot
+        return self.module_runtime.refresh()
 
     async def reload_runtime_module(self, name: str) -> dict:
-        if not self.module_kernel.contains(name):
-            raise ValueError(f"Extension inconnue: {name}")
-        if name in RUNTIME_LOCKED_EXTENSIONS:
-            raise RuntimeError(f"Extension protégée: {name}")
-        async with self._module_runtime_lock:
-            was_loaded = name in self.extensions
-            self.module_kernel.begin(name, operation="reload")
-            try:
-                if was_loaded:
-                    await self.reload_extension(name)
-                else:
-                    await self.load_extension(name)
-            except Exception as exc:
-                # discord.py restaure l'ancienne extension lorsqu'un reload échoue.
-                # Si elle est encore présente, SentriX reste disponible et conserve
-                # seulement l'erreur comme diagnostic de la tentative.
-                if was_loaded and name in self.extensions:
-                    self.module_kernel.recovered(name, exc)
-                else:
-                    self.module_kernel.failed(name, exc)
-                self._refresh_module_health()
-                raise
-            self.module_kernel.loaded(name)
-            return self._refresh_module_health()
+        return await self.module_runtime.reload(name)
 
     async def stop_runtime_module(self, name: str) -> dict:
-        if not self.module_kernel.contains(name):
-            raise ValueError(f"Extension inconnue: {name}")
-        if name in RUNTIME_LOCKED_EXTENSIONS:
-            raise RuntimeError(f"Extension protégée: {name}")
-        async with self._module_runtime_lock:
-            if name in self.extensions:
-                await self.unload_extension(name)
-            self.module_kernel.unloaded(name)
-            return self._refresh_module_health()
+        return await self.module_runtime.stop(name)
 
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
