@@ -33,6 +33,7 @@ from utils.checks import (
 )
 from utils import access_matrix
 from utils import log_hygiene
+from core.module_kernel import ModuleKernel
 from web.dashboard import start_dashboard
 import web.dashboard as dashboard_module
 from web.dashboard_api_forbidden_words import register as register_forbidden_words_routes
@@ -477,6 +478,7 @@ class BotAllInOne(commands.Bot):
         )
         self.db = Database(config.DATABASE_PATH)
         self.expected_extension_count = len(EXTENSIONS)
+        self.module_kernel = ModuleKernel(EXTENSIONS, CRITICAL_EXTENSIONS)
         self.tree.on_error = self.on_app_command_error
         self._cooldown_bucket = commands.CooldownMapping.from_cooldown(
             config.GLOBAL_COOLDOWN_RATE, config.GLOBAL_COOLDOWN_PER, commands.BucketType.user
@@ -539,26 +541,22 @@ class BotAllInOne(commands.Bot):
         loaded_extensions: list[str] = []
         failed_extensions: list[dict[str, str]] = []
         for ext in EXTENSIONS:
+            self.module_kernel.begin(ext)
             try:
                 await self.load_extension(ext)
+                self.module_kernel.loaded(ext)
                 loaded_extensions.append(ext)
                 logger.info("Module chargé : %s", ext)
             except Exception as exc:
+                self.module_kernel.failed(ext, exc)
                 failed_extensions.append({
                     "name": ext,
                     "error": type(exc).__name__,
                 })
                 logger.error("Échec du chargement du module %s :\n%s", ext, traceback.format_exc())
 
-        critical_failed = sorted(
-            item["name"] for item in failed_extensions if item["name"] in CRITICAL_EXTENSIONS
-        )
-        self._sentrix_extension_health = {
-            "expected": len(EXTENSIONS),
-            "loaded": len(loaded_extensions),
-            "failed": failed_extensions,
-            "critical_failed": critical_failed,
-        }
+        self._sentrix_extension_health = self.module_kernel.snapshot()
+        critical_failed = list(self._sentrix_extension_health["critical_failed"])
         if critical_failed:
             logger.critical(
                 "Démarrage dégradé : %s extension(s) critique(s) absente(s) — %s. "
