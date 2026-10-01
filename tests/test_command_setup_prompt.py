@@ -74,3 +74,46 @@ def test_all_prefix_error_layers_offer_setup_before_usage_fallback():
 
     for source in (final, runtime, main):
         assert "offer_setup_for_missing_argument" in source
+
+
+def test_every_command_with_two_required_values_gets_setup_panel():
+    bot = _bot()
+
+    @bot.command(name="giverole")
+    async def giverole(ctx, member: discord.Member, role: discord.Role):
+        pass
+
+    assert should_offer_setup(bot.get_command("giverole")) is True
+
+
+def test_single_required_value_does_not_open_setup_panel():
+    bot = _bot()
+
+    @bot.command(name="nickname")
+    async def nickname(ctx, member: discord.Member):
+        pass
+
+    assert should_offer_setup(bot.get_command("nickname")) is False
+
+
+def test_setup_opening_is_a_real_compact_sentrix_panel():
+    source = (ROOT / "utils" / "command_setup_prompt.py").read_text(encoding="utf-8")
+
+    assert "panels.Panneau(" in source
+    assert 'sections=[' in source
+    assert 'panels.Section(' in source
+    assert 'banniere=False' in source
+    assert 'panels.avec_composants(' in source
+    assert 'label="Configurer"' in source
+
+
+def test_setup_rule_is_based_only_on_required_argument_count():
+    source = (ROOT / "utils" / "command_setup_prompt.py").read_text(encoding="utf-8")
+
+    start = source.index("def should_offer_setup")
+    end = source.index("\n\ndef _field_label", start)
+    block = source[start:end]
+
+    assert "return len(params) >= 2" in block
+    assert "_FAST_COMMANDS" not in block
+    assert "_SETUP_HINTS" not in block
