@@ -107,3 +107,27 @@ def test_dependency_unblocks_after_dependency_recovers():
     kernel.begin("cogs.events", operation="reload")
     kernel.loaded("cogs.events")
     assert kernel.blockers("cogs.giveaway_center") == ()
+
+
+def test_reconcile_detects_missing_runtime_module():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+
+    changed = kernel.reconcile([])
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert changed == ["cogs.music"]
+    assert state["status"] == "failed"
+    assert state["error"] == "RuntimeMissing"
+
+
+def test_reconcile_recovers_stale_failed_state_when_runtime_has_module():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.failed("cogs.music", RuntimeError("boom"))
+
+    changed = kernel.reconcile(["cogs.music"])
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert changed == ["cogs.music"]
+    assert state["status"] == "loaded"
+    assert state["error"] is None
