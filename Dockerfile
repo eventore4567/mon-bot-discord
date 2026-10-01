@@ -16,8 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Barrière de qualité micro-kernel : une release qui casse l'isolation,
-# la readiness, les circuits ou le reload ne doit jamais atteindre la prod.
+# Barrière de qualité micro-kernel exécutée à chaque build primaire : une release
+# qui casse l'isolation, la readiness, les circuits ou le reload reste hors prod.
 RUN python -m pytest -q \
     tests/test_module_kernel.py \
     tests/test_module_runtime.py \
