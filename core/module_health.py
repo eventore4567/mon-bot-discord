@@ -61,3 +61,11 @@ def extension_state_from_runtime(
         [],
         [],
     )
+
+
+def supervisor_ready(snapshot: dict[str, Any] | None) -> bool:
+    return bool(
+        isinstance(snapshot, dict)
+        and snapshot.get("running")
+        and not snapshot.get("last_internal_error")
+    )
