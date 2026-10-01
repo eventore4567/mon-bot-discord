@@ -1377,9 +1377,21 @@ class Tickets(commands.Cog):
                 ephemere=True,
             )
         for label, value in answers:
-            if value:
+            if not value:
+                continue
+            try:
                 await self.bot.db.execute(
-                    "INSERT INTO ticket_answers (ticket_id, question_label, answer) VALUES (?, ?, ?)", (ticket_id, label, value[:1000])
+                    "INSERT INTO ticket_answers (ticket_id, question_label, answer) VALUES (?, ?, ?)",
+                    (ticket_id, label, value[:1000]),
+                )
+            except Exception:
+                # La réponse du formulaire est secondaire par rapport au ticket déjà
+                # créé. Une seule réponse défectueuse ne doit jamais transformer un
+                # ticket valide en échec complet.
+                logger.exception(
+                    "Réponse de formulaire ticket non persistée ticket=%s label=%r.",
+                    ticket_id,
+                    label,
                 )
 
         # Fiche d'ouverture de ticket (Phase 3, design premium/sombre) — n'affecte QUE ce
@@ -1399,14 +1411,70 @@ class Tickets(commands.Cog):
         for label, value in answers:
             if value:
                 e.add_field(name=label[:256], value=helpers.truncate(value, 1024), inline=False)
-        button_settings = await get_button_settings(self.bot, guild.id)
+        try:
+            button_settings = await get_button_settings(self.bot, guild.id)
+        except Exception:
+            logger.exception(
+                "Configuration des boutons ticket indisponible guild=%s ; valeurs par défaut utilisées.",
+                guild.id,
+            )
+            button_settings = default_button_settings()
+
         content = user.mention
         if ticket_type["mention_staff"] and staff_role:
             content += f" {staff_role.mention}"
         # Ce message DOIT pinguer le membre et le role support : Discord refuse un
         # `content` sur un message Components V2, donc il reste un embed. Le ping
         # prime sur la banniere — c'est une exception assumee, pas un oubli.
-        await channel.send(content=content, embed=e, view=TicketControlView(button_settings))
+        try:
+            await channel.send(
+                content=content,
+                embed=e,
+                view=TicketControlView(button_settings),
+            )
+        except discord.HTTPException:
+            # Sans message de contrôle, le ticket est inutilisable. On revient à un
+            # état propre au lieu de conserver salon + DB partiellement initialisés.
+            logger.exception(
+                "Message de contrôle ticket impossible guild=%s channel=%s ticket=%s ; rollback.",
+                guild.id,
+                channel.id,
+                ticket_id,
+            )
+            try:
+                await self.bot.db.execute(
+                    "DELETE FROM ticket_answers WHERE ticket_id = ?",
+                    (ticket_id,),
+                )
+                await self.bot.db.execute(
+                    "DELETE FROM tickets WHERE id = ?",
+                    (ticket_id,),
+                )
+            except Exception:
+                logger.exception(
+                    "Rollback DB du ticket #%s incomplet.",
+                    ticket_id,
+                )
+            try:
+                await channel.delete(
+                    reason="SentriX : rollback d'un ticket sans message de contrôle"
+                )
+            except discord.HTTPException:
+                logger.exception(
+                    "Rollback du salon ticket #%s impossible channel=%s.",
+                    ticket_id,
+                    channel.id,
+                )
+            return await sx_panels.envoyer(
+                interaction,
+                sx_panels.depuis_embed(
+                    embeds.error(
+                        "Le ticket n'a pas pu être initialisé correctement. "
+                        "La création a été annulée proprement."
+                    )
+                ),
+                ephemere=True,
+            )
 
         await sx_panels.envoyer(
             interaction,
@@ -1459,15 +1527,27 @@ class Tickets(commands.Cog):
         # « 📌 Salon » et « 🆔 Ticket » sont retirés d'ici : la primitive les
         # pose elle-même, à l'identique pour les quatorze événements. Les laisser
         # les aurait dupliqués dans l'embed.
-        await tickets_service.journaliser_evenement(
-            self.bot, guild, "ticket_open",
-            ticket_id=ticket_id, channel=channel,
-            # Pas de `cible` : sur une ouverture, l'auteur EST le membre
-            # concerné, et le renseigner deux fois afficherait la même personne
-            # sur deux champs côte à côte.
-            acteur=user,
-            extra=ticket_extra,
-        )
+        try:
+            await tickets_service.journaliser_evenement(
+                self.bot,
+                guild,
+                "ticket_open",
+                ticket_id=ticket_id,
+                channel=channel,
+                # Pas de `cible` : sur une ouverture, l'auteur EST le membre
+                # concerné, et le renseigner deux fois afficherait la même personne
+                # sur deux champs côte à côte.
+                acteur=user,
+                extra=ticket_extra,
+            )
+        except Exception:
+            # Le ticket et son message de contrôle existent déjà : une panne du
+            # journal ne doit pas faire croire que l'ouverture a échoué.
+            logger.exception(
+                "Journal d'ouverture ticket indisponible guild=%s ticket=%s.",
+                guild.id,
+                ticket_id,
+            )
 
     # ---------------------------------------------------------------- BOUTONS STAFF
 
