@@ -44,12 +44,27 @@ class ModuleRuntimeController:
         if name in self.locked:
             raise RuntimeError(f"Extension protégée: {name}")
 
+    async def _wait_for_drain(self, name: str, *, timeout: float = 5.0) -> int:
+        deadline = asyncio.get_running_loop().time() + max(0.1, float(timeout))
+        while self.kernel.in_flight(name) > 0:
+            if asyncio.get_running_loop().time() >= deadline:
+                remaining = self.kernel.in_flight(name)
+                logger.warning(
+                    "Micro-kernel : drain incomplet pour %s, %s commande(s) encore active(s).",
+                    name,
+                    remaining,
+                )
+                return remaining
+            await asyncio.sleep(0.05)
+        return 0
+
     async def reload(self, name: str) -> dict:
         self._validate(name)
         async with self._lock:
             was_loaded = name in self.bot.extensions
             if hasattr(self.kernel, "open_circuit"):
                 self.kernel.open_circuit(name, reason="maintenance")
+            await self._wait_for_drain(name)
             self.kernel.begin(name, operation="reload")
             try:
                 if was_loaded:
