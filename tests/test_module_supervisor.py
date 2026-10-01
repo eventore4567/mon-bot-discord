@@ -147,3 +147,31 @@ def test_transition_tracker_is_idempotent_for_same_snapshot():
 
     assert first == second
     assert second["cogs.music"] == ("loaded", False, False, ())
+
+
+def test_recovery_cooldown_marks_flapping_module_and_extends_retry():
+    supervisor = ModuleSupervisor(
+        ["cogs.music"],
+        retry_delays=(10, 20, 30),
+        recovery_cooldown_seconds=300,
+    )
+    supervisor._last_recovery_at["cogs.music"] = 100.0
+
+    now = 150.0
+    last_recovery = supervisor._last_recovery_at["cogs.music"]
+    delay = supervisor.retry_delays[0]
+    if now - last_recovery < supervisor.recovery_cooldown_seconds:
+        delay = max(delay, supervisor.recovery_cooldown_seconds)
+        supervisor._flapping.add("cogs.music")
+    supervisor._next_retry["cogs.music"] = now + delay
+
+    snapshot = supervisor.snapshot()
+    assert snapshot["flapping_modules"] == ["cogs.music"]
+    assert supervisor._next_retry["cogs.music"] == 450.0
+
+
+def test_successful_recovery_clears_flapping_marker():
+    supervisor = ModuleSupervisor(["cogs.music"])
+    supervisor._flapping.add("cogs.music")
+    supervisor._flapping.discard("cogs.music")
+    assert supervisor.snapshot()["flapping_modules"] == []
