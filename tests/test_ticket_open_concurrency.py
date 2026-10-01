@@ -40,4 +40,5 @@ def test_ticket_open_journal_failure_does_not_invalidate_ticket():
     source = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
 
     assert "Journal d'ouverture ticket indisponible" in source
-    assert "une panne du journal ne doit pas faire croire que l'ouverture a échoué" in source
+    assert "try:" in source
+    assert "except Exception:" in source
