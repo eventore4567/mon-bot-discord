@@ -175,19 +175,25 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
         supervisor = getattr(self.bot, "module_supervisor", None)
         supervisor_snapshot = supervisor.snapshot() if supervisor is not None and hasattr(supervisor, "snapshot") else {}
         failed_background_loops = list(supervisor_snapshot.get("failed_background_loops") or [])
+        stuck_modules = list(supervisor_snapshot.get("stuck_modules") or [])
         if failed_background_loops:
             problems.append(f"{len(failed_background_loops)} boucle(s) de fond en échec confirmé")
+        if stuck_modules:
+            problems.append(f"{len(stuck_modules)} module(s) avec appel bloqué")
 
         background_section = [
             panels.Ligne("Tâches asyncio actives", str(len(all_tasks))),
             panels.Ligne("Boucles de cogs", f"{loops_running} active(s) · {len(loops_stopped)} arrêtée(s)"),
             panels.Ligne("Boucles en échec", str(len(failed_background_loops))),
+            panels.Ligne("Modules bloqués", str(len(stuck_modules))),
             panels.Ligne("Échecs de commandes récents", str(recent_failures)),
         ]
         if loops_stopped:
             background_section.append(panels.Ligne("Arrêtées", ", ".join(loops_stopped[:6])))
         if failed_background_loops:
             background_section.append(panels.Ligne("Échecs confirmés", ", ".join(failed_background_loops[:4])))
+        if stuck_modules:
+            background_section.append(panels.Ligne("Appels bloqués", ", ".join(stuck_modules[:4])))
 
         # ÉTAT
         degraded = bool(problems)
