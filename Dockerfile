@@ -31,7 +31,8 @@ RUN python -m pytest -q \
     tests/test_health_runtime_module_readiness.py \
     tests/test_runtime_observability_module_health.py \
     tests/test_runtime_attribution.py \
-    tests/test_tickets_autoclose_resilience.py
+    tests/test_tickets_autoclose_resilience.py \
+    tests/test_ticket_open_concurrency.py
 
 # Port du dashboard web intégré (voir web/dashboard.py) — Railway fournit sa propre
 # variable PORT au runtime, cette ligne ne sert que de documentation pour Docker.
