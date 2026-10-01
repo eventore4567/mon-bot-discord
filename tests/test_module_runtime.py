@@ -317,3 +317,35 @@ async def test_runtime_unload_times_out_without_marking_module_unloaded():
         await runtime.stop("cogs.music")
 
     assert kernel.snapshot()["modules"]["cogs.music"]["status"] == "loaded"
+
+
+@pytest.mark.asyncio
+async def test_recover_missing_can_load_absent_critical_module_without_reload():
+    bot = FakeBot()
+    bot.extensions = {}
+    kernel = ModuleKernel(["cogs.moderation"], critical={"cogs.moderation"})
+    kernel.begin("cogs.moderation")
+    kernel.failed("cogs.moderation", RuntimeError("boot failed"))
+
+    runtime = ModuleRuntimeController(bot, kernel)
+    await runtime.recover_missing("cogs.moderation")
+
+    assert bot.load_calls == ["cogs.moderation"]
+    assert bot.reload_calls == []
+    assert kernel.snapshot()["modules"]["cogs.moderation"]["status"] == "loaded"
+
+
+@pytest.mark.asyncio
+async def test_recover_missing_never_reloads_already_active_critical_module():
+    bot = FakeBot()
+    bot.extensions = {"cogs.moderation": object()}
+    kernel = ModuleKernel(["cogs.moderation"], critical={"cogs.moderation"})
+    kernel.begin("cogs.moderation")
+    kernel.loaded("cogs.moderation")
+
+    runtime = ModuleRuntimeController(bot, kernel)
+    await runtime.recover_missing("cogs.moderation")
+
+    assert bot.load_calls == []
+    assert bot.reload_calls == []
+    assert kernel.snapshot()["modules"]["cogs.moderation"]["status"] == "loaded"
