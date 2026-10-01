@@ -13,10 +13,18 @@ logger = logging.getLogger("bot.module-runtime")
 
 
 class ModuleRuntimeController:
-    def __init__(self, bot, kernel, *, locked: Iterable[str] = ()) -> None:
+    def __init__(
+        self,
+        bot,
+        kernel,
+        *,
+        locked: Iterable[str] = (),
+        operation_timeout_seconds: float = 20.0,
+    ) -> None:
         self.bot = bot
         self.kernel = kernel
         self.locked = frozenset(locked)
+        self.operation_timeout_seconds = max(1.0, float(operation_timeout_seconds))
         self._lock = asyncio.Lock()
         self._last_operation: dict | None = None
 
@@ -24,6 +32,7 @@ class ModuleRuntimeController:
         return {
             "locked": sorted(self.locked),
             "busy": self._lock.locked(),
+            "operation_timeout_seconds": self.operation_timeout_seconds,
             "last_operation": dict(self._last_operation) if self._last_operation else None,
         }
 
@@ -43,6 +52,12 @@ class ModuleRuntimeController:
             raise ValueError(f"Extension inconnue: {name}")
         if name in self.locked:
             raise RuntimeError(f"Extension protégée: {name}")
+
+    async def _bounded(self, awaitable):
+        return await asyncio.wait_for(
+            awaitable,
+            timeout=self.operation_timeout_seconds,
+        )
 
     async def _wait_for_drain(self, name: str, *, timeout: float = 5.0) -> int:
         deadline = asyncio.get_running_loop().time() + max(0.1, float(timeout))
@@ -140,9 +155,9 @@ class ModuleRuntimeController:
             self.kernel.begin(name, operation="reload")
             try:
                 if primary_was_loaded:
-                    await self.bot.reload_extension(name)
+                    await self._bounded(self.bot.reload_extension(name))
                 else:
-                    await self.bot.load_extension(name)
+                    await self._bounded(self.bot.load_extension(name))
             except Exception as exc:
                 if primary_was_loaded and name in self.bot.extensions:
                     self.kernel.recovered(name, exc)
@@ -180,7 +195,7 @@ class ModuleRuntimeController:
             for dep in dependents:
                 self.kernel.begin(dep, operation="reload")
                 try:
-                    await self.bot.reload_extension(dep)
+                    await self._bounded(self.bot.reload_extension(dep))
                 except Exception as exc:
                     if dep in self.bot.extensions:
                         self.kernel.recovered(dep, exc)
@@ -253,7 +268,7 @@ class ModuleRuntimeController:
 
             try:
                 if name in self.bot.extensions:
-                    await self.bot.unload_extension(name)
+                    await self._bounded(self.bot.unload_extension(name))
             except Exception as exc:
                 self._last_operation = {
                     "operation": "stop",
