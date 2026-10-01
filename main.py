@@ -34,6 +34,12 @@ from utils.checks import (
 from utils import access_matrix
 from utils import log_hygiene
 from core.module_kernel import ModuleKernel
+from core.module_policy import (
+    CRITICAL_EXTENSIONS,
+    MODULE_DEPENDENCIES,
+    RUNTIME_LOCKED_EXTENSIONS,
+    validate_policy,
+)
 from core.module_runtime import ModuleRuntimeController
 from core.module_supervisor import ModuleSupervisor
 from web.dashboard import start_dashboard
@@ -138,33 +144,6 @@ EXTENSIONS = [
     # style.
     "cogs.visual_experience_v5",
 ]
-
-# Extensions dont l'absence rendrait SentriX partiellement fonctionnel tout en donnant
-# l'impression qu'il est sain. Les projets Discord matures séparent la vivacité du
-# processus de la disponibilité réelle des fonctions critiques ; on applique ici ce
-# principe sans rendre tous les modules optionnels bloquants.
-CRITICAL_EXTENSIONS = frozenset({
-    "cogs.moderation",
-    "cogs.automod",
-    "cogs.security_runtime_hardening",
-    "cogs.tickets",
-    "cogs.configuration",
-    "cogs.logs",
-    "cogs.utility",
-})
-
-RUNTIME_LOCKED_EXTENSIONS = CRITICAL_EXTENSIONS | frozenset({
-    "cogs.visual_experience_v5",
-})
-
-# Dépendances confirmées par les modules existants. On garde cette carte volontairement
-# petite : mieux vaut aucune dépendance déclarée qu'une dépendance inventée.
-MODULE_DEPENDENCIES = {
-    "cogs.security_runtime_hardening": ("cogs.automod",),
-    "cogs.ticket_claim_security": ("cogs.tickets",),
-    "cogs.ai_disable_guard": ("cogs.ai",),
-    "cogs.giveaway_center": ("cogs.events",),
-}
 
 # Les réglages ci-dessous existent déjà dans les panneaux interactifs. Ils restent
 # implémentés dans leurs cogs afin que les boutons et les données historiques continuent
@@ -584,6 +563,13 @@ class BotAllInOne(commands.Bot):
         from cogs.slash_command_budget import install as _install_slash_command_budget
 
         _install_slash_command_budget(self)
+
+        policy_problems = validate_policy(EXTENSIONS)
+        if policy_problems:
+            logger.error(
+                "Politique modules incohérente : %s",
+                " | ".join(policy_problems),
+            )
 
         loaded_extensions: list[str] = []
         failed_extensions: list[dict[str, str]] = []
