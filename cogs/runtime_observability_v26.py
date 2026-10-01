@@ -16,6 +16,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from core.module_health import is_technical_failure
+
 logger = logging.getLogger("bot.runtime-observability")
 
 _SLOW_COMMAND_SECONDS = 2.0
@@ -141,17 +143,7 @@ def _slash_module_name(command: Any) -> str | None:
 
 
 def _is_technical_module_failure(error: BaseException) -> bool:
-    if isinstance(error, (
-        commands.UserInputError,
-        commands.CheckFailure,
-        commands.CommandOnCooldown,
-        commands.DisabledCommand,
-        commands.MaxConcurrencyReached,
-        discord.Forbidden,
-        discord.NotFound,
-    )):
-        return False
-    return True
+    return is_technical_failure(error)
 
 
 def _record_module_runtime_error(bot: commands.Bot, module_name: str | None, error: BaseException) -> None:
