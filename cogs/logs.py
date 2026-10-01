@@ -449,20 +449,35 @@ class Logs(commands.Cog, name="Logs"):
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
         if payload.guild_id is None:
             return
-        if payload.message_ids and all(log_service.is_purged(value) for value in payload.message_ids):
-            return
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
+
         for message_id in payload.message_ids:
-            row = await self._cached_message_row(payload.guild_id, message_id)
-            if row is not None:
+            # Un lot peut mélanger des messages supprimés par +clear et d'autres
+            # suppressions. Tester seulement "all(...)" reloggait les messages du
+            # clear dès qu'un seul message du lot venait d'une autre source.
+            if log_service.is_purged(message_id):
+                continue
+
+            try:
+                row = await self._cached_message_row(payload.guild_id, message_id)
+                if row is None:
+                    continue
                 await self._log_deleted_from_row(
                     guild,
                     row,
                     fallback_channel_id=payload.channel_id,
                 )
                 await self._forget_cached_message(message_id)
+            except Exception:
+                # Une entrée de cache invalide ou un échec de log ne doit jamais
+                # empêcher les autres messages du même lot d'être traités.
+                logger.exception(
+                    "Journal bulk delete impossible guild=%s message=%s ; poursuite du lot.",
+                    payload.guild_id,
+                    message_id,
+                )
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
