@@ -128,3 +128,52 @@ def test_short_slash_names_are_gated_and_short(monkeypatch):
         seen.add((root, bucket, leaf))
     for source, public in surface.SHORT_DIRECT.items():
         assert len(public) < len(source), (source, public)
+
+
+def test_long_prefix_command_gets_safe_automatic_alias():
+    bot = _bot()
+
+    @bot.command(name="serverconfiguration")
+    async def serverconfiguration(ctx):
+        pass
+
+    short._apply_short_names(bot, bot.get_command("serverconfiguration"))
+
+    command = bot.get_command("serverconfiguration")
+    assert command is not None
+    assert bot.get_command("srvconfig") is command
+    assert command.qualified_name == "serverconfiguration"
+    assert short.display_name(command) == "srvconfig"
+
+
+def test_automatic_alias_never_steals_existing_command():
+    bot = _bot()
+
+    @bot.command(name="srvconfig")
+    async def existing(ctx):
+        pass
+
+    @bot.command(name="serverconfiguration")
+    async def serverconfiguration(ctx):
+        pass
+
+    short._apply_short_names(bot, bot.get_command("serverconfiguration"))
+
+    assert bot.get_command("srvconfig") is bot.get_command("srvconfig")
+    assert bot.get_command("serverconfiguration") is not bot.get_command("srvconfig")
+    assert short.display_name(bot.get_command("serverconfiguration")) == "serverconfiguration"
+
+
+def test_automatic_alias_does_not_change_slash_or_internal_name():
+    bot = _bot()
+
+    @bot.hybrid_command(name="notification-settings")
+    async def notification_settings(ctx):
+        pass
+
+    command = bot.get_command("notification-settings")
+    short._apply_short_names(bot, command)
+
+    assert command.qualified_name == "notification-settings"
+    assert command.name == "notification-settings"
+    assert "notif-set" in command.aliases
