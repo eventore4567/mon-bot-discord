@@ -10,7 +10,9 @@ def test_ticket_autoclose_loop_is_fault_isolated_and_restartable():
     assert "WHERE id = ? AND status = 'ouvert'" in source
     assert "@check_autoclose.error" in source
     assert "self.check_autoclose.restart()" in source
-    assert "les autres tickets continuent d'être traités" in source
+    assert "for row in rows:" in source
+    assert "await self._process_autoclose_row(row)" in source
+    assert "except Exception:" in source
 
 
 def test_ticket_autoclose_has_safe_fallbacks():
