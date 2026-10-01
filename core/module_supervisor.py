@@ -172,8 +172,10 @@ class ModuleSupervisor:
                         module_name,
                         "BackgroundLoopFailed",
                         threshold=1,
-                        circuit_threshold=1,
+                        circuit_threshold=999999,
                     )
+                    if hasattr(kernel, "open_circuit"):
+                        kernel.open_circuit(module_name, reason="background_loop")
                     logger.error(
                         "Micro-kernel : boucle de fond en échec détectée : %s",
                         key,
