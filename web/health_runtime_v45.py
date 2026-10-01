@@ -12,7 +12,7 @@ import time
 
 from aiohttp import web
 
-from core.module_health import extension_state_from_runtime
+from core.module_health import extension_state_from_runtime, supervisor_ready
 
 logger = logging.getLogger("bot.dashboard.health-runtime-v45")
 _INSTALLED = False
@@ -142,11 +142,7 @@ async def _snapshot(bot, dashboard) -> dict:
         if supervisor is not None and hasattr(supervisor, "snapshot")
         else None
     )
-    supervisor_ok = bool(
-        supervisor_snapshot
-        and supervisor_snapshot.get("running")
-        and not supervisor_snapshot.get("last_internal_error")
-    )
+    supervisor_ok = supervisor_ready(supervisor_snapshot)
 
     latency_ms = None
     if discord_ready:
