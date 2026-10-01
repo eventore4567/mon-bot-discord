@@ -11,6 +11,8 @@ import logging
 import time
 from typing import Iterable
 
+from discord.ext import tasks
+
 logger = logging.getLogger("bot.module-supervisor")
 
 
@@ -30,6 +32,7 @@ class ModuleSupervisor:
         self._recovered = 0
         self._last_recovered: str | None = None
         self._running = False
+        self._failed_loops: set[str] = set()
 
     def snapshot(self) -> dict:
         now = time.monotonic()
@@ -38,6 +41,7 @@ class ModuleSupervisor:
             "retryable_count": len(self.retryable),
             "recovered": self._recovered,
             "last_recovered": self._last_recovered,
+            "failed_background_loops": sorted(self._failed_loops),
             "pending": {
                 name: {
                     "failures": count,
@@ -60,6 +64,41 @@ class ModuleSupervisor:
     def _clear(self, name: str) -> None:
         self._failures.pop(name, None)
         self._next_retry.pop(name, None)
+
+    def _scan_failed_loops(self, bot, kernel) -> None:
+        current_failed: set[str] = set()
+        for cog in getattr(bot, "cogs", {}).values():
+            module_name = str(getattr(type(cog), "__module__", "") or "")
+            if not module_name.startswith("cogs.") or not kernel.contains(module_name):
+                continue
+            for attr in dir(cog):
+                if attr.startswith("__"):
+                    continue
+                try:
+                    value = getattr(cog, attr)
+                except Exception:
+                    continue
+                if not isinstance(value, tasks.Loop):
+                    continue
+                try:
+                    failed = bool(value.failed())
+                except Exception:
+                    failed = False
+                if not failed:
+                    continue
+                key = f"{module_name}:{type(cog).__name__}.{attr}"
+                current_failed.add(key)
+                if key not in self._failed_loops:
+                    kernel.record_runtime_error(
+                        module_name,
+                        "BackgroundLoopFailed",
+                        threshold=1,
+                    )
+                    logger.error(
+                        "Micro-kernel : boucle de fond en échec détectée : %s",
+                        key,
+                    )
+        self._failed_loops = current_failed
 
     async def _retry_one(self, bot, name: str) -> None:
         try:
@@ -90,6 +129,8 @@ class ModuleSupervisor:
                 if kernel is None:
                     continue
                 refresh = getattr(bot, "_refresh_module_health", None)
+                snapshot = refresh() if callable(refresh) else kernel.snapshot()
+                self._scan_failed_loops(bot, kernel)
                 snapshot = refresh() if callable(refresh) else kernel.snapshot()
                 now = time.monotonic()
                 for name, state in snapshot.get("modules", {}).items():
