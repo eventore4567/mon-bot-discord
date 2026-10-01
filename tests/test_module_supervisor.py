@@ -175,3 +175,35 @@ def test_successful_recovery_clears_flapping_marker():
     supervisor._flapping.add("cogs.music")
     supervisor._flapping.discard("cogs.music")
     assert supervisor.snapshot()["flapping_modules"] == []
+
+
+@pytest.mark.asyncio
+async def test_supervisor_recovers_missing_critical_without_runtime_reload():
+    class CriticalBot:
+        def __init__(self):
+            self.module_kernel = ModuleKernel(
+                ["cogs.moderation"],
+                critical={"cogs.moderation"},
+            )
+            self.module_kernel.begin("cogs.moderation")
+            self.module_kernel.failed("cogs.moderation", RuntimeError("boot failed"))
+            self.extensions = {}
+            self.recover_calls = []
+            self.reload_calls = []
+
+        async def recover_missing_module(self, name):
+            self.recover_calls.append(name)
+            self.extensions[name] = object()
+            self.module_kernel.begin(name, operation="recovery-load")
+            self.module_kernel.loaded(name)
+
+        async def reload_runtime_module(self, name):
+            self.reload_calls.append(name)
+
+    bot = CriticalBot()
+    supervisor = ModuleSupervisor([])
+    await supervisor._recover_missing_one(bot, "cogs.moderation")
+
+    assert bot.recover_calls == ["cogs.moderation"]
+    assert bot.reload_calls == []
+    assert bot.module_kernel.snapshot()["modules"]["cogs.moderation"]["status"] == "loaded"
