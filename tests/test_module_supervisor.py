@@ -98,6 +98,7 @@ def test_failed_background_loop_degrades_owning_module(monkeypatch):
     snapshot = bot.module_kernel.snapshot()
     assert snapshot["runtime_degraded"] == ["cogs.music"]
     assert snapshot["open_circuits"] == ["cogs.music"]
+    assert snapshot["modules"]["cogs.music"]["circuit_reason"] == "background_loop"
     assert supervisor.snapshot()["failed_background_loops"]
 
 
