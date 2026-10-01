@@ -38,3 +38,18 @@ def test_guided_setup_matches_dashboard_essential_order():
         source.index('"members"'),
     ]
     assert positions == sorted(positions)
+
+
+def test_guided_setup_hides_advanced_by_default_and_has_no_smart_setup():
+    source = (ROOT / "sentrix_setup_guided_v117.py").read_text(encoding="utf-8")
+    assert 'ESSENTIAL_MODULE_KEYS' in source
+    assert 'ADVANCED_MODULE_KEYS' in source
+    assert '"security",\n    "logs",\n    "tickets",\n    "members",' in source
+    assert 'label="Afficher les réglages avancés"' in source
+    assert 'label="Smart Setup"' not in source
+    assert 'Setup manuel guidé' in source
+
+
+def test_guided_setup_states_no_automatic_configuration():
+    source = (ROOT / "sentrix_setup_guided_v117.py").read_text(encoding="utf-8")
+    assert "Aucun salon, rôle ou réglage n’est choisi ou créé automatiquement." in source
