@@ -48,6 +48,8 @@ class ModuleRuntimeController:
         self._validate(name)
         async with self._lock:
             was_loaded = name in self.bot.extensions
+            if hasattr(self.kernel, "open_circuit"):
+                self.kernel.open_circuit(name, reason="maintenance")
             self.kernel.begin(name, operation="reload")
             try:
                 if was_loaded:
@@ -57,6 +59,8 @@ class ModuleRuntimeController:
             except Exception as exc:
                 if was_loaded and name in self.bot.extensions:
                     self.kernel.recovered(name, exc)
+                    if hasattr(self.kernel, "close_circuit"):
+                        self.kernel.close_circuit(name, reason="rollback")
                 else:
                     self.kernel.failed(name, exc)
                 self._last_operation = {
@@ -70,7 +74,7 @@ class ModuleRuntimeController:
 
             self.kernel.loaded(name)
             if hasattr(self.kernel, "close_circuit"):
-                self.kernel.close_circuit(name)
+                self.kernel.close_circuit(name, reason="reload_success")
             self._last_operation = {
                 "operation": "reload",
                 "module": name,
