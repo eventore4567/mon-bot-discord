@@ -318,6 +318,11 @@ class Panneau(discord.ui.LayoutView):
     ) -> None:
         super().__init__(timeout=None)
         self.kind = kind if kind in INTENTIONS else "info"
+        self.titre = str(titre or "")
+        self.sous_titre = str(sous_titre or "") if sous_titre else ""
+        self.sections_source = tuple(sections)
+        self.boutons_source = tuple(boutons)
+        self.pied_source = str(pied or "") if pied else ""
         # Réponse en texte libre (IA, traduction) : pas de bandeau au-dessus du texte.
         self.avec_banniere = banniere and not commande_en_texte_libre()
         banniere = self.avec_banniere
@@ -460,6 +465,99 @@ def _message_envoye(resultat: Any):
     return resultat
 
 
+_ERREUR_SIMPLE_RE = _re.compile(
+    r"(?:erreur|invalide|introuvable|permission|cooldown|manque|manquant|"
+    r"requis|impossible|interdit|refus|indisponible|échou|echou|"
+    r"doit être|doit etre|maximum|minim(?:um|ale)|déjà|deja)",
+    _re.IGNORECASE,
+)
+
+
+def _panneau_est_erreur_simple(panneau: Any) -> bool:
+    if not isinstance(panneau, Panneau):
+        return False
+    if getattr(panneau, "boutons_source", ()):
+        return False
+    if getattr(panneau, "kind", "") not in {"danger", "warning"}:
+        return False
+    nom, _ = _commande_en_cours()
+    if not nom:
+        return False
+    texte = " ".join(
+        part
+        for part in (
+            getattr(panneau, "titre", ""),
+            getattr(panneau, "sous_titre", ""),
+            texte_complet(panneau),
+        )
+        if part
+    )
+    return bool(_ERREUR_SIMPLE_RE.search(texte))
+
+
+def _texte_erreur_depuis_panneau(panneau: Panneau) -> str:
+    titre = str(getattr(panneau, "titre", "") or "").strip()
+    sous_titre = str(getattr(panneau, "sous_titre", "") or "").strip()
+
+    # Le sous-titre porte presque toujours le vrai message ("La valeur nombre…").
+    # On évite les gros titres décoratifs et les sections "Commande / Vous avez tapé".
+    texte = sous_titre or titre or "Une erreur est survenue. Merci de réessayer."
+    texte = _sans_barre(texte)
+    texte = _re.sub(r"\s{2,}", " ", texte).strip()
+    return texte[:1900] or "Une erreur est survenue. Merci de réessayer."
+
+
+async def _envoyer_texte_brut_depuis_panneau(
+    destination: Any,
+    texte: str,
+    *,
+    ephemere: bool,
+    extra: dict[str, Any],
+):
+    kwargs = dict(extra)
+    kwargs.pop("file", None)
+    kwargs.pop("files", None)
+    kwargs.pop("view", None)
+    kwargs.pop("embed", None)
+    kwargs.pop("embeds", None)
+    kwargs["content"] = texte[:1900]
+
+    if isinstance(destination, discord.InteractionResponse):
+        if ephemere:
+            kwargs["ephemeral"] = True
+        if not destination.is_done():
+            return _message_envoye(await destination.send_message(**kwargs))
+        parent = getattr(destination, "_parent", None)
+        if parent is not None:
+            return await parent.followup.send(**kwargs)
+
+    interaction = getattr(destination, "interaction", None) or (
+        destination if isinstance(destination, discord.Interaction) else None
+    )
+    if interaction is not None:
+        if ephemere:
+            kwargs["ephemeral"] = True
+        if not interaction.response.is_done():
+            return _message_envoye(await interaction.response.send_message(**kwargs))
+        if reponse_differee_a_finaliser(interaction):
+            try:
+                result = await interaction.edit_original_response(
+                    content=texte[:1900],
+                    embeds=[],
+                    view=None,
+                    attachments=[],
+                )
+                marquer_reponse_differee_finalisee(interaction)
+                return result
+            except (discord.NotFound, discord.HTTPException):
+                logger.debug("Edition texte d'erreur différée impossible.", exc_info=True)
+        return await interaction.followup.send(**kwargs)
+
+    if ephemere and isinstance(destination, discord.Webhook):
+        kwargs["ephemeral"] = True
+    return await destination.send(**kwargs)
+
+
 async def envoyer(
     destination: Any,
     panneau: Panneau,
@@ -481,6 +579,14 @@ async def envoyer(
     reste fermé sur @everyone et sur les rôles : consulter une fiche ne doit jamais
     pouvoir alerter le serveur entier.
     """
+    if _panneau_est_erreur_simple(panneau):
+        return await _envoyer_texte_brut_depuis_panneau(
+            destination,
+            _texte_erreur_depuis_panneau(panneau),
+            ephemere=ephemere,
+            extra=extra,
+        )
+
     # Toute vue exposant fichiers() est acceptee, pas seulement Panneau : les
     # panneaux interactifs (aide, setup) sont des LayoutView batis sur mesure.
     fabrique = getattr(panneau, "fichiers", None)
