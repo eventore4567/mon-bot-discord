@@ -38,7 +38,8 @@ RUN python -m pytest -q \
     tests/test_automod_enforcement_resilience.py \
     tests/test_plain_error_messages.py \
     tests/test_short_command_names.py \
-    tests/test_command_setup_prompt.py
+    tests/test_command_setup_prompt.py \
+    tests/test_help_short_names.py
 
 # Port du dashboard web intégré (voir web/dashboard.py) — Railway fournit sa propre
 # variable PORT au runtime, cette ligne ne sert que de documentation pour Docker.
