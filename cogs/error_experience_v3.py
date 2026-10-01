@@ -131,6 +131,17 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
         return
 
     if isinstance(base, commands.MissingRequiredArgument):
+        try:
+            from utils.command_setup_prompt import offer_setup_for_missing_argument
+
+            if await offer_setup_for_missing_argument(ctx, base):
+                return True
+        except Exception:
+            logger.exception(
+                "Mini-setup d'arguments indisponible pour +%s.",
+                getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
+            )
+
         label = _param_label(getattr(base, "param", None))
         await _send_plain(ctx, f"Il manque `{label}`. Utilise `{_safe_usage(ctx)}`.")
         return True
