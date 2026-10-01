@@ -187,6 +187,34 @@ class ModuleSupervisor:
                     )
         self._failed_loops = current_failed
 
+    async def _recover_missing_one(self, bot, name: str) -> None:
+        try:
+            await bot.recover_missing_module(name)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._schedule_failure(name)
+            logger.exception(
+                "Micro-kernel : récupération du module critique absent %s impossible "
+                "(tentative %s/%s).",
+                name,
+                self._failures.get(name, 0),
+                len(self.retry_delays),
+            )
+            return
+
+        snapshot = getattr(bot, "module_kernel").snapshot()
+        status = snapshot.get("modules", {}).get(name, {}).get("status")
+        if status == "loaded":
+            self._clear(name)
+            self._recovered += 1
+            self._last_recovered = name
+            self._last_recovery_at[name] = time.monotonic()
+            logger.warning(
+                "Micro-kernel : module critique absent récupéré automatiquement : %s",
+                name,
+            )
+
     async def _retry_one(self, bot, name: str) -> None:
         try:
             await bot.reload_runtime_module(name)
@@ -228,10 +256,32 @@ class ModuleSupervisor:
                     self._log_state_transitions(snapshot)
                     now = time.monotonic()
                     for name, state in snapshot.get("modules", {}).items():
-                        if name not in self.retryable:
-                            continue
                         status = state.get("status")
                         circuit_open = bool(state.get("circuit_open"))
+                        is_critical = bool(state.get("critical"))
+
+                        # Un critique déjà actif n'est jamais reloadé automatiquement.
+                        # En revanche, un critique absent après un échec de boot peut
+                        # être chargé proprement quand ses dépendances sont prêtes.
+                        if is_critical and status in {"failed", "blocked"}:
+                            if name in getattr(bot, "extensions", {}):
+                                continue
+                            blockers = kernel.blockers(name)
+                            if blockers:
+                                continue
+                            failures = self._failures.get(name, 0)
+                            if failures >= len(self.retry_delays):
+                                continue
+                            if name not in self._next_retry:
+                                self._next_retry[name] = now + self.retry_delays[min(failures, len(self.retry_delays) - 1)]
+                                continue
+                            if now < self._next_retry.get(name, 0):
+                                continue
+                            await self._recover_missing_one(bot, name)
+                            continue
+
+                        if name not in self.retryable:
+                            continue
 
                         if status == "unloaded":
                             self._clear(name)
