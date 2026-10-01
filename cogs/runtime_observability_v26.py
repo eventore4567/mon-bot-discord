@@ -290,8 +290,10 @@ def install(bot: commands.Bot) -> None:
         if started is None:
             return
         name = getattr(command, "qualified_name", getattr(command, "name", "inconnue"))
+        module_name = _slash_module_name(command)
         _record_command_duration(bot, str(name), time.perf_counter() - started, failed=False)
-        _record_module_runtime_success(bot, _slash_module_name(command))
+        _record_module_runtime_success(bot, module_name)
+        _exit_module_runtime(bot, module_name)
 
     bot.add_listener(prefix_start, "on_command")
     bot.add_listener(prefix_complete, "on_command_completion")
