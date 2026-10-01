@@ -64,12 +64,23 @@ class ModuleRuntimeController:
             was_loaded = name in self.bot.extensions
             state_before = self.kernel.snapshot().get("modules", {}).get(name, {})
             circuit_was_open = bool(state_before.get("circuit_open"))
+            circuit_reason_before = state_before.get("circuit_reason")
             if hasattr(self.kernel, "open_circuit"):
-                self.kernel.open_circuit(name, reason="maintenance")
+                self.kernel.open_circuit(
+                    name,
+                    reason="maintenance",
+                    replace_reason=True,
+                )
 
             remaining = await self._wait_for_drain(name)
             if remaining:
-                if not circuit_was_open and hasattr(self.kernel, "close_circuit"):
+                if circuit_was_open and hasattr(self.kernel, "open_circuit"):
+                    self.kernel.open_circuit(
+                        name,
+                        reason=str(circuit_reason_before or "runtime_errors"),
+                        replace_reason=True,
+                    )
+                elif hasattr(self.kernel, "close_circuit"):
                     self.kernel.close_circuit(name, reason="drain_timeout")
                 self._last_operation = {
                     "operation": "reload",
@@ -89,7 +100,13 @@ class ModuleRuntimeController:
             except Exception as exc:
                 if was_loaded and name in self.bot.extensions:
                     self.kernel.recovered(name, exc)
-                    if not circuit_was_open and hasattr(self.kernel, "close_circuit"):
+                    if circuit_was_open and hasattr(self.kernel, "open_circuit"):
+                        self.kernel.open_circuit(
+                            name,
+                            reason=str(circuit_reason_before or "runtime_errors"),
+                            replace_reason=True,
+                        )
+                    elif hasattr(self.kernel, "close_circuit"):
                         self.kernel.close_circuit(name, reason="rollback")
                 else:
                     self.kernel.failed(name, exc)
