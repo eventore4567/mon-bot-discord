@@ -25,16 +25,19 @@ class ModuleSupervisor:
         *,
         retry_delays: tuple[int, ...] = (60, 300, 900),
         scan_interval: int = 30,
+        stuck_call_seconds: int = 120,
     ) -> None:
         self.retryable = frozenset(retryable)
         self.retry_delays = tuple(max(1, int(v)) for v in retry_delays)
         self.scan_interval = max(5, int(scan_interval))
+        self.stuck_call_seconds = max(30, int(stuck_call_seconds))
         self._failures: dict[str, int] = {}
         self._next_retry: dict[str, float] = {}
         self._recovered = 0
         self._last_recovered: str | None = None
         self._running = False
         self._failed_loops: set[str] = set()
+        self._stuck_modules: set[str] = set()
         self._internal_errors = 0
         self._last_internal_error: str | None = None
 
@@ -46,6 +49,7 @@ class ModuleSupervisor:
             "recovered": self._recovered,
             "last_recovered": self._last_recovered,
             "failed_background_loops": sorted(self._failed_loops),
+            "stuck_modules": sorted(self._stuck_modules),
             "internal_errors": self._internal_errors,
             "last_internal_error": self._last_internal_error,
             "pending": {
@@ -70,6 +74,31 @@ class ModuleSupervisor:
     def _clear(self, name: str) -> None:
         self._failures.pop(name, None)
         self._next_retry.pop(name, None)
+
+    def _scan_stuck_calls(self, kernel, snapshot: dict) -> None:
+        current: set[str] = set()
+        for name, state in snapshot.get("modules", {}).items():
+            if state.get("status") != "loaded":
+                continue
+            if int(state.get("in_flight") or 0) <= 0:
+                continue
+            age = float(state.get("in_flight_age_seconds") or 0)
+            if age < self.stuck_call_seconds:
+                continue
+            current.add(name)
+            if name not in self._stuck_modules:
+                kernel.record_runtime_error(
+                    name,
+                    "StuckCommand",
+                    threshold=1,
+                    circuit_threshold=999999,
+                )
+                logger.error(
+                    "Micro-kernel : appel bloqué détecté dans %s depuis %.1fs.",
+                    name,
+                    age,
+                )
+        self._stuck_modules = current
 
     def _scan_failed_loops(self, bot, kernel) -> None:
         current_failed: set[str] = set()
@@ -140,6 +169,8 @@ class ModuleSupervisor:
                     snapshot = refresh() if callable(refresh) else kernel.snapshot()
                     install_app_gates(bot)
                     self._scan_failed_loops(bot, kernel)
+                    snapshot = refresh() if callable(refresh) else kernel.snapshot()
+                    self._scan_stuck_calls(kernel, snapshot)
                     snapshot = refresh() if callable(refresh) else kernel.snapshot()
                     now = time.monotonic()
                     for name, state in snapshot.get("modules", {}).items():
