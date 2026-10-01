@@ -30,6 +30,7 @@ class ModuleState:
     circuit_open: bool = False
     circuit_opened_at: float | None = None
     in_flight: int = 0
+    in_flight_since: float | None = None
     last_runtime_error: str | None = None
     last_runtime_error_at: float | None = None
     _started_at: float | None = field(default=None, repr=False)
@@ -146,13 +147,18 @@ class ModuleKernel:
     def enter_runtime(self, name: str) -> None:
         if name not in self._states:
             return
-        self._states[name].in_flight += 1
+        state = self._states[name]
+        if state.in_flight == 0:
+            state.in_flight_since = time.time()
+        state.in_flight += 1
 
     def exit_runtime(self, name: str) -> None:
         if name not in self._states:
             return
         state = self._states[name]
         state.in_flight = max(0, state.in_flight - 1)
+        if state.in_flight == 0:
+            state.in_flight_since = None
 
     def in_flight(self, name: str) -> int:
         if name not in self._states:
@@ -320,6 +326,12 @@ class ModuleKernel:
                     "circuit_open": row.circuit_open,
                     "circuit_opened_at": row.circuit_opened_at,
                     "in_flight": row.in_flight,
+                    "in_flight_since": row.in_flight_since,
+                    "in_flight_age_seconds": (
+                        max(0, round(time.time() - row.in_flight_since, 2))
+                        if row.in_flight and row.in_flight_since is not None
+                        else 0
+                    ),
                     "last_runtime_error": row.last_runtime_error,
                     "last_runtime_error_at": row.last_runtime_error_at,
                 }
