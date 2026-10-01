@@ -69,6 +69,8 @@ class ModuleRuntimeController:
                 raise
 
             self.kernel.loaded(name)
+            if hasattr(self.kernel, "close_circuit"):
+                self.kernel.close_circuit(name)
             self._last_operation = {
                 "operation": "reload",
                 "module": name,
