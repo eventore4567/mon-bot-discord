@@ -209,6 +209,69 @@ PREFERRED_SUBCOMMAND_NAMES: dict[str, str] = {
 
 # Alias secondaires : ils ne remplacent PAS le nom affiché dans +help. Ils permettent
 # simplement de taper des commandes évidentes en français sans apprendre le nom anglais.
+# Raccourcissement de secours pour les commandes + encore trop longues.
+# Il ne renomme jamais la commande interne et ne touche pas aux slash.
+_AUTO_SHORT_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("leaderboard", "top"),
+    ("configuration", "config"),
+    ("notifications", "notifs"),
+    ("notification", "notif"),
+    ("permissions", "perms"),
+    ("permission", "perm"),
+    ("reactionrole", "rr"),
+    ("giveaway", "gw"),
+    ("tournament", "tour"),
+    ("blacklist", "bl"),
+    ("whitelist", "wl"),
+    ("verification", "verify"),
+    ("economy", "eco"),
+    ("history", "hist"),
+    ("channel", "chan"),
+    ("command", "cmd"),
+    ("server", "srv"),
+    ("reminder", "rem"),
+    ("statistics", "stats"),
+    ("profile", "prof"),
+    ("settings", "set"),
+    ("transcript", "trans"),
+)
+
+_AUTO_SHORT_MIN_LENGTH = 13
+_AUTO_SHORT_MAX_LENGTH = 12
+
+
+def _automatic_short_alias(name: str) -> str | None:
+    """Produit un alias + court et lisible quand aucun alias explicite n'existe."""
+    original = str(name or "").casefold().strip()
+    if (
+        not original
+        or len(original) < _AUTO_SHORT_MIN_LENGTH
+        or original in PROTECTED_NAMES
+        or original in PREFERRED_COMMAND_NAMES
+    ):
+        return None
+
+    candidate = original.replace("_", "-")
+    for source, target in _AUTO_SHORT_REPLACEMENTS:
+        candidate = candidate.replace(source, target)
+
+    candidate = re.sub(r"-+", "-", candidate).strip("-")
+    if not candidate or candidate == original or len(candidate) >= len(original):
+        return None
+
+    # Les aliases automatiques doivent rester réellement confortables à taper.
+    if len(candidate) > _AUTO_SHORT_MAX_LENGTH:
+        parts = [part for part in candidate.split("-") if part]
+        if len(parts) >= 2:
+            compact = "".join(part[:4] for part in parts)
+            if compact and len(compact) <= _AUTO_SHORT_MAX_LENGTH:
+                candidate = compact
+        if len(candidate) > _AUTO_SHORT_MAX_LENGTH:
+            return None
+
+    return candidate
+
+
 FRENCH_COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
     "help": ("aide",),
     "avatar": ("pp",),
@@ -464,6 +527,10 @@ def _apply_short_names(bot: commands.Bot, command: commands.Command) -> tuple[in
         preferred = PREFERRED_COMMAND_NAMES.get(str(node.name))
         if preferred and _register_alias(bot, node, preferred):
             added += 1
+        elif not preferred:
+            automatic = _automatic_short_alias(str(node.name))
+            if automatic and _register_alias(bot, node, automatic):
+                added += 1
         for alias in FRENCH_COMMAND_ALIASES.get(str(node.name), ()) + LEGACY_PREFERRED_ALIASES.get(str(node.name), ()):
             if _register_secondary_alias(bot, node, alias):
                 french_added += 1
