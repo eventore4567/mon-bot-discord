@@ -6,10 +6,11 @@ indisponibilité temporaire propre pour les commandes Discord.
 from __future__ import annotations
 
 from typing import Any
+from weakref import WeakSet
 
 from discord import app_commands
 
-_GATED_COMMAND_IDS: set[int] = set()
+_GATED_COMMANDS: WeakSet = WeakSet()
 from discord.ext import commands
 
 
@@ -121,10 +122,9 @@ def install_app_gates(bot) -> int:
         add_check = getattr(command, "add_check", None)
         if not callable(add_check):
             continue
-        marker = id(command)
-        if marker in _GATED_COMMAND_IDS:
+        if command in _GATED_COMMANDS:
             continue
         add_check(app_gate_for(command))
-        _GATED_COMMAND_IDS.add(marker)
+        _GATED_COMMANDS.add(command)
         installed += 1
     return installed
