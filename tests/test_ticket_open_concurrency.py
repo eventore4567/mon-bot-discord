@@ -17,3 +17,11 @@ def test_ticket_open_lock_registry_is_bounded():
 
     assert "if len(self._ticket_open_locks) > 5000:" in source
     assert "not candidate_lock.locked()" in source
+
+
+def test_ticket_creation_rolls_back_channel_when_database_insert_fails():
+    source = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
+
+    assert "rollback d'un ticket non persisté" in source
+    assert "await channel.delete(" in source
+    assert "Aucun ticket incomplet n'a été conservé." in source
