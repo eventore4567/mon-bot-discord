@@ -1,7 +1,8 @@
 """Mini-setup interactif pour les commandes + complexes.
 
-Quand une commande de configuration reçoit des arguments manquants, SentriX ne
-répond plus avec une longue ligne "Usage". Il propose un bouton Configurer,
+Quand une commande préfixée demande au moins deux valeurs obligatoires et qu'une
+valeur manque, SentriX ne répond plus avec une longue ligne "Usage". Il ouvre un
+petit panneau de configuration avec un bouton Configurer,
 collecte les paramètres obligatoires dans un ou plusieurs modals, convertit les
 valeurs avec les convertisseurs discord.py de la vraie commande puis invoque
 cette même commande.
@@ -23,48 +24,6 @@ from discord.ext.commands.converter import run_converters
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.command-setup-prompt")
-
-_SETUP_HINTS = (
-    "setup",
-    "config",
-    "panel",
-    "reactionrole",
-    "ticket",
-    "log",
-    "automod",
-    "whitelist",
-    "blacklist",
-    "notification",
-    "welcome",
-    "goodbye",
-    "giveaway",
-    "security",
-    "proof",
-    "invite",
-    "emoji",
-    "role",
-)
-
-_FAST_COMMANDS = frozenset({
-    "ban",
-    "unban",
-    "kick",
-    "mute",
-    "unmute",
-    "warn",
-    "clear",
-    "slowmode",
-    "nickname",
-    "resetnick",
-    "giverole",
-    "removerole",
-    "pay",
-    "deposit",
-    "withdraw",
-    "rob",
-    "play",
-    "roll",
-})
 
 _FIELD_LABELS = {
     "message_id": "ID du message",
@@ -129,22 +88,14 @@ def _unsupported_param(param: Any) -> bool:
 
 
 def should_offer_setup(command: commands.Command | None) -> bool:
-    """Vrai pour les commandes + complexes/configurables avec arguments requis."""
+    """Toute commande + avec au moins deux valeurs obligatoires ouvre un panel."""
     if command is None:
         return False
 
     params = _required_params(command)
-    if not params or any(_unsupported_param(param) for param in params):
+    if any(_unsupported_param(param) for param in params):
         return False
-
-    root = str(command.qualified_name or command.name).split(" ", 1)[0].casefold()
-    if root in _FAST_COMMANDS:
-        return False
-
-    name = str(command.qualified_name or command.name).casefold()
-    if len(params) >= 2:
-        return True
-    return any(hint in name for hint in _SETUP_HINTS)
+    return len(params) >= 2
 
 
 def _field_label(param: Any) -> str:
@@ -176,24 +127,44 @@ async def _send_setup_message(
     ctx: commands.Context,
     session: "CommandSetupSession",
 ) -> bool:
-    token = panels.TEXTE_BRUT.set(True)
-    try:
-        message = await ctx.send(
-            f"Configure {_command_label(ctx)} avec le bouton ci-dessous.",
-            view=CommandSetupOpenView(session),
-            delete_after=_SETUP_TIMEOUT,
+    fields = [
+        panels.Ligne(
+            _field_label(param),
+            f"`{str(getattr(param, 'name', 'valeur'))}`",
         )
-        session.prompt_message = message if isinstance(message, discord.Message) else None
-        return True
-    finally:
-        panels.TEXTE_BRUT.reset(token)
+        for param in session.params
+    ]
+    panneau = panels.Panneau(
+        titre=f"Configurer {_command_label(ctx)}",
+        sous_titre="Cette commande demande plusieurs informations.",
+        sections=[
+            panels.Section(
+                "À renseigner",
+                fields,
+            )
+        ],
+        kind="info",
+        pied="SentriX • Configuration manuelle",
+        banniere=False,
+    )
+    panneau = panels.avec_composants(
+        panneau,
+        CommandSetupOpenView(session),
+    )
+    message = await panels.envoyer(
+        ctx,
+        panneau,
+        delete_after=_SETUP_TIMEOUT,
+    )
+    session.prompt_message = message if isinstance(message, discord.Message) else None
+    return True
 
 
 async def offer_setup_for_missing_argument(
     ctx: commands.Context,
     error: commands.MissingRequiredArgument,
 ) -> bool:
-    """Affiche le mini-setup si la commande s'y prête.
+    """Affiche le panel dès que la commande demande au moins deux valeurs.
 
     Retourne True si l'erreur a été prise en charge.
     """
