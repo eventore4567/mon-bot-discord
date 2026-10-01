@@ -40,6 +40,7 @@ class ModuleSupervisor:
         self._stuck_modules: set[str] = set()
         self._internal_errors = 0
         self._last_internal_error: str | None = None
+        self._last_module_states: dict[str, tuple] = {}
 
     def snapshot(self) -> dict:
         now = time.monotonic()
@@ -74,6 +75,49 @@ class ModuleSupervisor:
     def _clear(self, name: str) -> None:
         self._failures.pop(name, None)
         self._next_retry.pop(name, None)
+
+    def _log_state_transitions(self, snapshot: dict) -> None:
+        current: dict[str, tuple] = {}
+        for name, state in snapshot.get("modules", {}).items():
+            marker = (
+                state.get("status"),
+                bool(state.get("runtime_degraded")),
+                bool(state.get("circuit_open")),
+                tuple(state.get("blocked_by") or ()),
+            )
+            current[name] = marker
+            previous = self._last_module_states.get(name)
+            if previous is None or previous == marker:
+                continue
+
+            status, degraded, circuit, blocked_by = marker
+            old_status, old_degraded, old_circuit, old_blocked_by = previous
+
+            if not old_degraded and degraded:
+                logger.warning("Micro-kernel : module dégradé : %s", name)
+            elif old_degraded and not degraded:
+                logger.info("Micro-kernel : module revenu sain : %s", name)
+
+            if not old_circuit and circuit:
+                logger.warning("Micro-kernel : circuit ouvert : %s", name)
+            elif old_circuit and not circuit:
+                logger.info("Micro-kernel : circuit refermé : %s", name)
+
+            if old_status != status:
+                logger.info(
+                    "Micro-kernel : état %s -> %s pour %s",
+                    old_status,
+                    status,
+                    name,
+                )
+            if old_blocked_by != blocked_by and blocked_by:
+                logger.warning(
+                    "Micro-kernel : %s bloqué par dépendance(s) : %s",
+                    name,
+                    ", ".join(blocked_by),
+                )
+
+        self._last_module_states = current
 
     def _scan_stuck_calls(self, kernel, snapshot: dict) -> None:
         current: set[str] = set()
@@ -172,6 +216,7 @@ class ModuleSupervisor:
                     snapshot = refresh() if callable(refresh) else kernel.snapshot()
                     self._scan_stuck_calls(kernel, snapshot)
                     snapshot = refresh() if callable(refresh) else kernel.snapshot()
+                    self._log_state_transitions(snapshot)
                     now = time.monotonic()
                     for name, state in snapshot.get("modules", {}).items():
                         if name not in self.retryable:
