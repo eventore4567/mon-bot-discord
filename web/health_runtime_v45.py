@@ -136,6 +136,18 @@ async def _snapshot(bot, dashboard) -> dict:
     command_policy_ok, unknown_commands, dangerous_public_commands = _command_policy_state(bot)
     discord_ready = bool(bot.is_ready())
 
+    supervisor = getattr(bot, "module_supervisor", None)
+    supervisor_snapshot = (
+        supervisor.snapshot()
+        if supervisor is not None and hasattr(supervisor, "snapshot")
+        else None
+    )
+    supervisor_ok = bool(
+        supervisor_snapshot
+        and supervisor_snapshot.get("running")
+        and not supervisor_snapshot.get("last_internal_error")
+    )
+
     latency_ms = None
     if discord_ready:
         try:
@@ -143,7 +155,13 @@ async def _snapshot(bot, dashboard) -> dict:
         except (TypeError, ValueError):
             latency_ms = None
 
-    healthy = bool(discord_ready and database_ok and extensions_ok and command_policy_ok)
+    healthy = bool(
+        discord_ready
+        and database_ok
+        and extensions_ok
+        and command_policy_ok
+        and supervisor_ok
+    )
     if healthy:
         status = "operational"
     elif not database_ok:
@@ -152,6 +170,8 @@ async def _snapshot(bot, dashboard) -> dict:
         status = "extensions_degraded"
     elif not command_policy_ok:
         status = "security_degraded"
+    elif not supervisor_ok:
+        status = "module_supervisor_unavailable"
     elif not discord_ready:
         status = "discord_not_ready"
     else:
@@ -217,6 +237,7 @@ async def _snapshot(bot, dashboard) -> dict:
             and hasattr(request_kernel, "snapshot")
             else []
         ),
+        "module_supervisor_ok": supervisor_ok,
         "command_policy_ok": command_policy_ok,
         "unknown_command_policy_count": unknown_commands,
         "dangerous_public_command_count": dangerous_public_commands,
