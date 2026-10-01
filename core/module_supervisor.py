@@ -26,11 +26,13 @@ class ModuleSupervisor:
         retry_delays: tuple[int, ...] = (60, 300, 900),
         scan_interval: int = 30,
         stuck_call_seconds: int = 120,
+        recovery_cooldown_seconds: int = 300,
     ) -> None:
         self.retryable = frozenset(retryable)
         self.retry_delays = tuple(max(1, int(v)) for v in retry_delays)
         self.scan_interval = max(5, int(scan_interval))
         self.stuck_call_seconds = max(30, int(stuck_call_seconds))
+        self.recovery_cooldown_seconds = max(60, int(recovery_cooldown_seconds))
         self._failures: dict[str, int] = {}
         self._next_retry: dict[str, float] = {}
         self._recovered = 0
@@ -41,6 +43,8 @@ class ModuleSupervisor:
         self._internal_errors = 0
         self._last_internal_error: str | None = None
         self._last_module_states: dict[str, tuple] = {}
+        self._last_recovery_at: dict[str, float] = {}
+        self._flapping: set[str] = set()
 
     def snapshot(self) -> dict:
         now = time.monotonic()
@@ -53,6 +57,7 @@ class ModuleSupervisor:
             "stuck_modules": sorted(self._stuck_modules),
             "internal_errors": self._internal_errors,
             "last_internal_error": self._last_internal_error,
+            "flapping_modules": sorted(self._flapping),
             "pending": {
                 name: {
                     "failures": count,
@@ -200,6 +205,8 @@ class ModuleSupervisor:
         self._clear(name)
         self._recovered += 1
         self._last_recovered = name
+        self._last_recovery_at[name] = time.monotonic()
+        self._flapping.discard(name)
         logger.warning("Micro-kernel : module optionnel récupéré automatiquement : %s", name)
 
     async def run(self, bot) -> None:
@@ -233,7 +240,21 @@ class ModuleSupervisor:
                         if circuit_open and status == "loaded":
                             failures = self._failures.get(name, 0)
                             if failures == 0 and name not in self._next_retry:
-                                self._next_retry[name] = now + self.retry_delays[0]
+                                delay = self.retry_delays[0]
+                                last_recovery = self._last_recovery_at.get(name)
+                                if (
+                                    last_recovery is not None
+                                    and now - last_recovery < self.recovery_cooldown_seconds
+                                ):
+                                    delay = max(delay, self.recovery_cooldown_seconds)
+                                    self._flapping.add(name)
+                                    logger.warning(
+                                        "Micro-kernel : %s retombe pendant le cooldown ; "
+                                        "récupération ralentie à %ss.",
+                                        name,
+                                        delay,
+                                    )
+                                self._next_retry[name] = now + delay
                                 logger.warning(
                                     "Micro-kernel : circuit ouvert pour %s, récupération planifiée.",
                                     name,
@@ -254,6 +275,13 @@ class ModuleSupervisor:
 
                         if status != "failed":
                             self._clear(name)
+                            if not circuit_open:
+                                last_recovery = self._last_recovery_at.get(name)
+                                if (
+                                    last_recovery is not None
+                                    and now - last_recovery >= self.recovery_cooldown_seconds
+                                ):
+                                    self._flapping.discard(name)
                             continue
 
                         failures = self._failures.get(name, 0)
