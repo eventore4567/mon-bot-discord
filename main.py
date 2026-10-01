@@ -510,6 +510,12 @@ class BotAllInOne(commands.Bot):
         self.blacklist_cache: dict[int, str] = {}
 
     def _refresh_module_health(self) -> dict:
+        changed = self.module_kernel.reconcile(self.extensions.keys())
+        if changed:
+            logger.warning(
+                "Micro-kernel : état runtime réconcilié pour %s",
+                ", ".join(changed),
+            )
         snapshot = self.module_kernel.snapshot()
         self._sentrix_extension_health = snapshot
         return snapshot
