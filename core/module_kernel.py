@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Iterable, Mapping
 
 
 @dataclass(slots=True)
@@ -22,6 +22,7 @@ class ModuleState:
     attempts: int = 0
     reloads: int = 0
     last_operation: str = "startup"
+    blocked_by: tuple[str, ...] = ()
     _started_at: float | None = field(default=None, repr=False)
 
     def begin(self, *, operation: str = "load") -> None:
@@ -31,6 +32,7 @@ class ModuleState:
         self.last_operation = operation
         self.status = "loading"
         self.error = None
+        self.blocked_by = ()
         self._started_at = time.perf_counter()
 
     def finish(self, *, error: BaseException | None = None) -> None:
@@ -49,11 +51,22 @@ class ModuleState:
 class ModuleKernel:
     """Petit registre d'état, indépendant des cogs et de Discord."""
 
-    def __init__(self, modules: Iterable[str], critical: Iterable[str] = ()) -> None:
+    def __init__(
+        self,
+        modules: Iterable[str],
+        critical: Iterable[str] = (),
+        dependencies: Mapping[str, Iterable[str]] | None = None,
+    ) -> None:
+        module_names = tuple(modules)
         critical_set = set(critical)
         self._states = {
             name: ModuleState(name=name, critical=name in critical_set)
-            for name in modules
+            for name in module_names
+        }
+        raw_dependencies = dependencies or {}
+        self._dependencies = {
+            name: tuple(dep for dep in raw_dependencies.get(name, ()) if dep in self._states)
+            for name in module_names
         }
 
     def begin(self, name: str, *, operation: str = "load") -> None:
@@ -65,6 +78,21 @@ class ModuleKernel:
     def failed(self, name: str, error: BaseException) -> None:
         self._states[name].finish(error=error)
 
+    def blockers(self, name: str) -> tuple[str, ...]:
+        return tuple(
+            dep
+            for dep in self._dependencies.get(name, ())
+            if self._states[dep].status != "loaded"
+        )
+
+    def blocked(self, name: str, dependencies: Iterable[str]) -> None:
+        state = self._states[name]
+        state.status = "blocked"
+        state.error = None
+        state.blocked_by = tuple(sorted(set(dependencies)))
+        state.last_operation = "dependency-wait"
+        state._started_at = None
+
     def recovered(self, name: str, error: BaseException) -> None:
         """Une opération a échoué mais l'ancienne extension reste disponible."""
         state = self._states[name]
@@ -73,12 +101,14 @@ class ModuleKernel:
         state._started_at = None
         state.status = "loaded"
         state.error = None
+        state.blocked_by = ()
         state.last_error = type(error).__name__
 
     def unloaded(self, name: str) -> None:
         state = self._states[name]
         state.status = "unloaded"
         state.error = None
+        state.blocked_by = ()
         state.load_ms = None
         state._started_at = None
         state.last_operation = "unload"
@@ -96,12 +126,21 @@ class ModuleKernel:
             for row in rows
             if row.status == "failed"
         ]
-        critical_failed = sorted(item["name"] for item in failed if item["critical"])
+        blocked = [
+            {"name": row.name, "blocked_by": list(row.blocked_by), "critical": row.critical}
+            for row in rows
+            if row.status == "blocked"
+        ]
+        critical_failed = sorted(
+            {item["name"] for item in failed if item["critical"]}
+            | {item["name"] for item in blocked if item["critical"]}
+        )
         loaded = sum(row.status == "loaded" for row in rows)
         return {
             "expected": len(rows),
             "loaded": loaded,
             "failed": failed,
+            "blocked": blocked,
             "critical_failed": critical_failed,
             "ready": not critical_failed,
             "modules": {
@@ -114,6 +153,7 @@ class ModuleKernel:
                     "attempts": row.attempts,
                     "reloads": row.reloads,
                     "last_operation": row.last_operation,
+                    "blocked_by": list(row.blocked_by),
                 }
                 for row in rows
             },
