@@ -22,3 +22,12 @@ def test_log_sanction_returns_even_when_audit_steps_fail():
 
     assert block.count("except Exception:") >= 3
     assert "return e" in block
+
+
+def test_tempban_expiry_consumes_after_discord_success_even_if_audit_fails():
+    source = (ROOT / "cogs" / "moderation.py").read_text(encoding="utf-8")
+
+    assert "Dossier d'unban automatique non persisté" in source
+    assert "Log d'unban automatique non envoyé" in source
+    assert "Discord a confirmé le débannissement" in source
+    assert "return True" in source
