@@ -142,9 +142,26 @@ class ModuleSupervisor:
                         if name not in self.retryable:
                             continue
                         status = state.get("status")
+                        circuit_open = bool(state.get("circuit_open"))
 
                         if status == "unloaded":
                             self._clear(name)
+                            continue
+
+                        if circuit_open and status == "loaded":
+                            failures = self._failures.get(name, 0)
+                            if failures == 0 and name not in self._next_retry:
+                                self._next_retry[name] = now + self.retry_delays[0]
+                                logger.warning(
+                                    "Micro-kernel : circuit ouvert pour %s, récupération planifiée.",
+                                    name,
+                                )
+                                continue
+                            if failures >= len(self.retry_delays):
+                                continue
+                            if now < self._next_retry.get(name, 0):
+                                continue
+                            await self._retry_one(bot, name)
                             continue
 
                         if status == "blocked":
