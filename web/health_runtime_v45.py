@@ -12,6 +12,8 @@ import time
 
 from aiohttp import web
 
+from core.module_health import extension_state_from_runtime
+
 logger = logging.getLogger("bot.dashboard.health-runtime-v45")
 _INSTALLED = False
 _DB_TIMEOUT_SECONDS = 2.5
@@ -76,18 +78,13 @@ def _extension_state(bot) -> tuple[int, int, bool, list[str], list[dict]]:
     else:
         kernel = getattr(bot, "module_kernel", None)
         runtime = kernel.snapshot() if kernel is not None and hasattr(kernel, "snapshot") else getattr(bot, "_sentrix_extension_health", None)
-    if isinstance(runtime, dict):
-        loaded = int(runtime.get("loaded") or 0)
-        expected = int(runtime.get("expected") or loaded)
-        critical_failed = [str(name) for name in (runtime.get("critical_failed") or [])]
-        failed = [dict(item) for item in (runtime.get("failed") or []) if isinstance(item, dict)]
-        ready = bool(runtime.get("ready", not critical_failed))
-        return loaded, expected, ready, critical_failed, failed
-
     loaded = len(getattr(bot, "extensions", {}) or {})
     expected = int(getattr(bot, "expected_extension_count", loaded) or loaded)
-    # Fallback historique avant que setup_hook ait publié l'état détaillé.
-    return loaded, expected, loaded >= expected, [], []
+    return extension_state_from_runtime(
+        runtime if isinstance(runtime, dict) else None,
+        fallback_loaded=loaded,
+        fallback_expected=expected,
+    )
 
 
 def _command_policy_state(bot) -> tuple[bool, int, int]:
