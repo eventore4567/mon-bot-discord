@@ -195,7 +195,7 @@ class ModuleSupervisor:
         except Exception:
             self._schedule_failure(name)
             logger.exception(
-                "Micro-kernel : récupération du module critique absent %s impossible "
+                "Micro-kernel : récupération du module absent %s impossible "
                 "(tentative %s/%s).",
                 name,
                 self._failures.get(name, 0),
@@ -211,7 +211,7 @@ class ModuleSupervisor:
             self._last_recovered = name
             self._last_recovery_at[name] = time.monotonic()
             logger.warning(
-                "Micro-kernel : module critique absent récupéré automatiquement : %s",
+                "Micro-kernel : module absent récupéré automatiquement : %s",
                 name,
             )
 
@@ -260,12 +260,13 @@ class ModuleSupervisor:
                         circuit_open = bool(state.get("circuit_open"))
                         is_critical = bool(state.get("critical"))
 
-                        # Un critique déjà actif n'est jamais reloadé automatiquement.
-                        # En revanche, un critique absent après un échec de boot peut
-                        # être chargé proprement quand ses dépendances sont prêtes.
-                        if is_critical and status in {"failed", "blocked"}:
-                            if name in getattr(bot, "extensions", {}):
-                                continue
+                        # Toute extension absente peut être chargée sans risque de
+                        # remplacement à chaud, y compris une extension verrouillée.
+                        # Les modules critiques déjà actifs restent intouchables.
+                        if (
+                            status in {"failed", "blocked"}
+                            and name not in getattr(bot, "extensions", {})
+                        ):
                             blockers = kernel.blockers(name)
                             if blockers:
                                 continue
@@ -273,14 +274,19 @@ class ModuleSupervisor:
                             if failures >= len(self.retry_delays):
                                 continue
                             if name not in self._next_retry:
-                                self._next_retry[name] = now + self.retry_delays[min(failures, len(self.retry_delays) - 1)]
+                                self._next_retry[name] = (
+                                    now
+                                    + self.retry_delays[
+                                        min(failures, len(self.retry_delays) - 1)
+                                    ]
+                                )
                                 continue
                             if now < self._next_retry.get(name, 0):
                                 continue
                             await self._recover_missing_one(bot, name)
                             continue
 
-                        if name not in self.retryable:
+                        if is_critical or name not in self.retryable:
                             continue
 
                         if status == "unloaded":
