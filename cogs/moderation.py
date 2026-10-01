@@ -234,9 +234,26 @@ class Moderation(commands.Cog):
         unban tant qu'ils ne sont pas migrés) déclenche encore la persistance directe,
         non protégée, ici."""
         if case_number is _CASE_NUMBER_UNSET:
-            case_number = await self.bot.db.record_sanction(
-                ctx.guild.id, target.id, ctx.author.id, action, reason, duration_seconds
-            )
+            try:
+                case_number = await self.bot.db.record_sanction(
+                    ctx.guild.id,
+                    target.id,
+                    ctx.author.id,
+                    action,
+                    reason,
+                    duration_seconds,
+                )
+            except Exception:
+                # La sanction Discord peut déjà être réellement appliquée. Une panne
+                # de persistance du dossier ne doit jamais transformer ce succès en
+                # "commande échouée" côté modérateur.
+                case_number = None
+                logger.exception(
+                    "Dossier de sanction non persisté guild=%s target=%s action=%s.",
+                    ctx.guild.id,
+                    target.id,
+                    action,
+                )
         kind = self.SANCTION_KIND.get(action, "danger")
         colour = {"success": config.COLOR_SUCCESS, "warning": config.COLOR_WARNING, "danger": config.COLOR_ERROR}[kind]
         label = self.SANCTION_LABELS.get(action, action)
@@ -252,14 +269,44 @@ class Moderation(commands.Cog):
         )
         e.add_field(name="👤 Membre", value=f"{getattr(target, 'mention', target)}\n`ID: {target.id}`", inline=True)
         e.add_field(name="🛡️ Modérateur", value=f"{ctx.author.mention}\n`ID: {ctx.author.id}`", inline=True)
-        total = await self.bot.db.get_sanction_count(ctx.guild.id, target.id)
-        e.add_field(name="📁 Historique", value=f"{total} sanction(s) au total pour ce membre", inline=True)
+        try:
+            total = await self.bot.db.get_sanction_count(ctx.guild.id, target.id)
+        except Exception:
+            total = None
+            logger.exception(
+                "Comptage de l'historique indisponible guild=%s target=%s.",
+                ctx.guild.id,
+                target.id,
+            )
+        e.add_field(
+            name="📁 Historique",
+            value=(
+                f"{total} sanction(s) au total pour ce membre"
+                if total is not None
+                else "Indisponible temporairement"
+            ),
+            inline=True,
+        )
         if duration_seconds:
             e.add_field(name="⏱️ Durée", value=helpers.format_duration(duration_seconds), inline=True)
         e.add_field(name="📝 Raison", value=reason or "Aucune raison fournie", inline=False)
         for name, value in (extra_fields or {}).items():
             e.add_field(name=name, value=value, inline=False)
-        await self.log_action(ctx.guild, e, self.SANCTION_EVENT_TYPES.get(action, "moderation"))
+        try:
+            await self.log_action(
+                ctx.guild,
+                e,
+                self.SANCTION_EVENT_TYPES.get(action, "moderation"),
+            )
+        except Exception:
+            # Le log est important pour l'audit, mais il reste secondaire par
+            # rapport à la vérité Discord : l'action a déjà été exécutée.
+            logger.exception(
+                "Journal de sanction non envoyé guild=%s target=%s action=%s.",
+                ctx.guild.id,
+                target.id,
+                action,
+            )
         return e
 
     # Deux appels identiques (même serveur, même action, même cible) en moins de
