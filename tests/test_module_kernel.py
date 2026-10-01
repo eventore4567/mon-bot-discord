@@ -266,3 +266,31 @@ def test_degraded_critical_module_fails_kernel_readiness_without_opening_circuit
     assert snapshot["ready"] is False
     assert snapshot["critical_runtime_degraded"] == ["cogs.moderation"]
     assert snapshot["open_circuits"] == []
+
+
+def test_runtime_success_does_not_close_maintenance_circuit():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    kernel.open_circuit("cogs.music", reason="maintenance")
+
+    kernel.record_runtime_success("cogs.music")
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["circuit_open"] is True
+    assert state["circuit_reason"] == "maintenance"
+
+
+def test_runtime_error_circuit_has_reason_and_success_can_close_it():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    for _ in range(5):
+        kernel.record_runtime_error("cogs.music", RuntimeError("boom"))
+
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["circuit_reason"] == "runtime_errors"
+
+    kernel.record_runtime_success("cogs.music")
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["circuit_open"] is False
+    assert state["circuit_reason"] is None
