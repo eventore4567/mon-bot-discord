@@ -173,6 +173,12 @@ async def _snapshot(bot, dashboard) -> dict:
             and hasattr(request_kernel, "snapshot")
             else None
         ),
+        "module_supervisor": (
+            request_supervisor.snapshot()
+            if (request_supervisor := getattr(bot, "module_supervisor", None)) is not None
+            and hasattr(request_supervisor, "snapshot")
+            else None
+        ),
         "command_policy_ok": command_policy_ok,
         "unknown_command_policy_count": unknown_commands,
         "dangerous_public_command_count": dangerous_public_commands,
