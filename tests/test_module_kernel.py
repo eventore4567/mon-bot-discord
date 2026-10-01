@@ -294,3 +294,13 @@ def test_runtime_error_circuit_has_reason_and_success_can_close_it():
     state = kernel.snapshot()["modules"]["cogs.music"]
     assert state["circuit_open"] is False
     assert state["circuit_reason"] is None
+
+
+def test_kernel_exposes_reverse_dependencies():
+    kernel = ModuleKernel(
+        ["cogs.ai", "cogs.ai_disable_guard", "cogs.other"],
+        dependencies={"cogs.ai_disable_guard": ("cogs.ai",)},
+    )
+
+    assert kernel.dependents("cogs.ai") == ("cogs.ai_disable_guard",)
+    assert kernel.dependents("cogs.other") == ()
