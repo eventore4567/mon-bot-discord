@@ -162,34 +162,67 @@ def _without_duplicate_member_mention(value: str, member: discord.Member) -> str
     return text
 
 
-async def _welcome_destination(bot, guild: discord.Guild):
+async def _event_destination(
+    bot,
+    guild: discord.Guild,
+    *,
+    field: str,
+    label: str,
+    require_embed: bool = False,
+):
     conf = await bot.db.get_guild_config(guild.id)
-    channel_id = _conf_value(conf, "welcome_channel")
-    # Pas de repli sur le salon système : la bienvenue n'existe que si un salon est configuré.
+    channel_id = _conf_value(conf, field)
     channel = guild.get_channel(int(channel_id)) if channel_id else None
     if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-        return None, "Aucun salon de bienvenue n’est configuré (ou il a été supprimé)."
+        return None, f"Aucun salon de {label} n’est configuré (ou il a été supprimé)."
     me = guild.me
     if me is None:
         return None, "SentriX n’est pas disponible dans le cache du serveur."
     perms = channel.permissions_for(me)
     missing = []
-    if not perms.view_channel: missing.append("Voir le salon")
-    if not perms.send_messages: missing.append("Envoyer des messages")
-    if not perms.embed_links: missing.append("Intégrer des liens")
+    if not perms.view_channel:
+        missing.append("Voir le salon")
+    if not perms.send_messages:
+        missing.append("Envoyer des messages")
+    if require_embed and not perms.embed_links:
+        missing.append("Intégrer des liens")
     if missing:
         return None, f"Permissions manquantes dans {channel.mention} : **{', '.join(missing)}**."
     return channel, None
 
 
+async def _welcome_destination(bot, guild: discord.Guild, *, require_embed: bool = False):
+    return await _event_destination(
+        bot,
+        guild,
+        field="welcome_channel",
+        label="bienvenue",
+        require_embed=require_embed,
+    )
+
+
+async def _goodbye_destination(bot, guild: discord.Guild, *, require_embed: bool = False):
+    return await _event_destination(
+        bot,
+        guild,
+        field="goodbye_channel",
+        label="départ",
+        require_embed=require_embed,
+    )
+
+
 async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> tuple[bool, str]:
     if not test and not await core.module_enabled(bot, member.guild.id, "welcome"):
         return False, "Le module Bienvenue est désactivé."
-    channel, error = await _welcome_destination(bot, member.guild)
-    if channel is None:
-        return False, error or "Salon de bienvenue indisponible."
     conf = await bot.db.get_guild_config(member.guild.id)
     presentation = await _welcome_presentation(bot, member.guild.id)
+    channel, error = await _welcome_destination(
+        bot,
+        member.guild,
+        require_embed=presentation.get("mode") != "text",
+    )
+    if channel is None:
+        return False, error or "Salon de bienvenue indisponible."
     body = _without_duplicate_member_mention(
         _format_welcome(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT), member),
         member,
@@ -239,13 +272,15 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     card_file = None
     try:
         avatar_bytes = await read_member_avatar(member) if presentation["show_avatar"] else None
-        card_file = build_member_event_card(
-            member,
-            kind="welcome",
-            background_preset=background_preset,
-            avatar_bytes=avatar_bytes,
-        )
-        panel.set_image(url="attachment://sentrix_welcome.png")
+        perms = channel.permissions_for(member.guild.me) if member.guild.me else None
+        if perms is not None and perms.attach_files:
+            card_file = build_member_event_card(
+                member,
+                kind="welcome",
+                background_preset=background_preset,
+                avatar_bytes=avatar_bytes,
+            )
+            panel.set_image(url="attachment://sentrix_welcome.png")
     except Exception:
         logger.exception("Carte de bienvenue automatique impossible guild=%s user=%s", member.guild.id, member.id)
         card_file = None
@@ -273,14 +308,15 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
     if not test and not await core.module_enabled(bot, member.guild.id, "goodbye"):
         return None
     conf = await bot.db.get_guild_config(member.guild.id)
-    channel_id = _conf_value(conf, "goodbye_channel")
-    if not channel_id:
-        return None
-    channel = member.guild.get_channel(int(channel_id))
-    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+    presentation = await _welcome_presentation(bot, member.guild.id)
+    channel, _error = await _goodbye_destination(
+        bot,
+        member.guild,
+        require_embed=presentation.get("goodbye_mode") != "text",
+    )
+    if channel is None:
         return None
     template = _conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT)
-    presentation = await _welcome_presentation(bot, member.guild.id)
     mentions_depart = (
         discord.AllowedMentions.none()
         if test
@@ -309,13 +345,15 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
         if background_preset not in EVENT_BACKGROUND_PRESETS:
             background_preset = "preset:gray"
         avatar_bytes = await read_member_avatar(member) if presentation["show_avatar"] else None
-        card_file = build_member_event_card(
-            member,
-            kind="goodbye",
-            background_preset=background_preset,
-            avatar_bytes=avatar_bytes,
-        )
-        panel.set_image(url="attachment://sentrix_goodbye.png")
+        perms = channel.permissions_for(member.guild.me) if member.guild.me else None
+        if perms is not None and perms.attach_files:
+            card_file = build_member_event_card(
+                member,
+                kind="goodbye",
+                background_preset=background_preset,
+                avatar_bytes=avatar_bytes,
+            )
+            panel.set_image(url="attachment://sentrix_goodbye.png")
     except Exception:
         logger.exception("Carte de départ automatique impossible guild=%s user=%s", member.guild.id, member.id)
         card_file = None
@@ -358,12 +396,11 @@ def _replace_welcome_listeners(bot) -> None:
             if role and not role.managed and me and me.guild_permissions.manage_roles and role < me.top_role:
                 try: await member.add_roles(role, reason="Autorole SentriX")
                 except discord.HTTPException: pass
-        # Verrou partage : sentrix_ultimate (smart_welcome) et engagement_suite
-        # (onboarding) peuvent aussi vouloir annoncer cette arrivee. Le premier
-        # a reclamer l'evenement gagne, les autres se taisent — voir
-        # utils/join_dedup.py pour la raison complete (dont la course pendant
-        # une bascule HA, que la garde primary/standby ci-dessus ne couvre pas
-        # a elle seule des que PLUSIEURS fonctionnalites sont actives).
+        # Ne réserve l'événement que si le module Bienvenue est réellement actif.
+        # Sinon un autre module d'onboarding pourrait être bloqué alors que SentriX
+        # n'enverra finalement aucun message.
+        if not await core.module_enabled(bot, member.guild.id, "welcome"):
+            return
         if not await join_dedup.reclamer(bot, member.guild.id, member.id, "welcome"):
             return
         ok, _message = await _send_welcome(bot, member)
@@ -379,6 +416,10 @@ def _replace_welcome_listeners(bot) -> None:
 
     async def on_member_remove(member: discord.Member):
         if not control_center_v3._is_primary_sentrix_service():
+            return
+        if not await core.module_enabled(bot, member.guild.id, "goodbye"):
+            return
+        if not await join_dedup.reclamer(bot, member.guild.id, member.id, "goodbye"):
             return
         channel = await _send_goodbye(bot, member)
         if channel is not None:
