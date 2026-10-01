@@ -105,7 +105,10 @@ class ModuleKernel:
         return tuple(
             dep
             for dep in self._dependencies.get(name, ())
-            if self._states[dep].status != "loaded"
+            if (
+                self._states[dep].status != "loaded"
+                or self._states[dep].circuit_open
+            )
         )
 
     def dependents(self, name: str) -> tuple[str, ...]:
