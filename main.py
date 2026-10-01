@@ -1066,6 +1066,17 @@ class BotAllInOne(commands.Bot):
             return await ctx.send(f"Rôle introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.MissingRequiredArgument):
+            try:
+                from utils.command_setup_prompt import offer_setup_for_missing_argument
+
+                if await offer_setup_for_missing_argument(ctx, error):
+                    return
+            except Exception:
+                logger.exception(
+                    "Mini-setup d'arguments indisponible pour +%s.",
+                    getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
+                )
+
             usage = command_usage(ctx)
             text = f"Il manque `{error.param.name}`."
             if usage:
