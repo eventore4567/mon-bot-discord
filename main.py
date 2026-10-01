@@ -508,6 +508,9 @@ class BotAllInOne(commands.Bot):
     async def reload_runtime_module(self, name: str) -> dict:
         return await self.module_runtime.reload(name)
 
+    async def recover_missing_module(self, name: str) -> dict:
+        return await self.module_runtime.recover_missing(name)
+
     async def stop_runtime_module(self, name: str) -> dict:
         return await self.module_runtime.stop(name)
 
