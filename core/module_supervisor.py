@@ -94,10 +94,25 @@ class ModuleSupervisor:
                 for name, state in snapshot.get("modules", {}).items():
                     if name not in self.retryable:
                         continue
+                    status = state.get("status")
+
                     # "unloaded" signifie arrêt volontaire : aucun auto-redémarrage.
-                    if state.get("status") != "failed":
+                    if status == "unloaded":
                         self._clear(name)
                         continue
+
+                    # Un module bloqué par une dépendance repart dès que son blocker
+                    # est de nouveau chargé. Cela évite les cascades au démarrage.
+                    if status == "blocked":
+                        if kernel.blockers(name):
+                            continue
+                        await self._retry_one(bot, name)
+                        continue
+
+                    if status != "failed":
+                        self._clear(name)
+                        continue
+
                     failures = self._failures.get(name, 0)
                     if failures >= len(self.retry_delays):
                         continue
