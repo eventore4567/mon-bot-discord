@@ -69,13 +69,9 @@ async def _database_probe(bot) -> tuple[bool, float | None]:
 
 
 def _extension_state(bot) -> tuple[int, int, bool, list[str], list[dict]]:
-    """Retourne la santé des extensions avec priorité aux modules critiques.
-
-    Les extensions optionnelles peuvent échouer sans rendre l'instance indisponible.
-    Les modules critiques (modération, AutoMod, tickets, logs, configuration, utilitaires)
-    doivent tous être chargés pour que la readiness passe.
-    """
-    runtime = getattr(bot, "_sentrix_extension_health", None)
+    """Retourne la santé des extensions depuis le micro-kernel si disponible."""
+    kernel = getattr(bot, "module_kernel", None)
+    runtime = kernel.snapshot() if kernel is not None and hasattr(kernel, "snapshot") else getattr(bot, "_sentrix_extension_health", None)
     if isinstance(runtime, dict):
         loaded = int(runtime.get("loaded") or 0)
         expected = int(runtime.get("expected") or loaded)
@@ -171,6 +167,12 @@ async def _snapshot(bot, dashboard) -> dict:
         "extensions_expected": expected_extensions,
         "critical_extensions_failed": critical_extensions_failed,
         "failed_extensions": failed_extensions[:12],
+        "module_kernel": (
+            request_kernel.snapshot()
+            if (request_kernel := getattr(bot, "module_kernel", None)) is not None
+            and hasattr(request_kernel, "snapshot")
+            else None
+        ),
         "command_policy_ok": command_policy_ok,
         "unknown_command_policy_count": unknown_commands,
         "dangerous_public_command_count": dangerous_public_commands,
