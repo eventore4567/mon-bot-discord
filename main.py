@@ -40,6 +40,12 @@ from core.module_policy import (
     RUNTIME_LOCKED_EXTENSIONS,
     validate_policy,
 )
+from core.module_gate import (
+    AppModuleTemporarilyUnavailable,
+    ModuleTemporarilyUnavailable,
+    install_app_gates,
+    prefix_gate,
+)
 from core.module_runtime import ModuleRuntimeController
 from core.module_supervisor import ModuleSupervisor
 from web.dashboard import start_dashboard
@@ -691,6 +697,7 @@ class BotAllInOne(commands.Bot):
 
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
+        self.add_check(prefix_gate)
         # cogs/permission_guard.py::install() s'enregistre désormais lui-même dès
         # qu'il réaffecte self.global_permission_check (docs/core-v2-audit-
         # technical-debt.md, §6) — ne l'ajouter ici qu'en repli, si cette extension
@@ -787,6 +794,19 @@ class BotAllInOne(commands.Bot):
         except Exception:
             logger.warning(
                 "Alignement final de l'affichage slash impossible :\n" + traceback.format_exc()
+            )
+
+        try:
+            gated_slash = install_app_gates(self)
+            if gated_slash:
+                logger.info(
+                    "Micro-kernel : garde de disponibilité installée sur %s commande(s) slash.",
+                    gated_slash,
+                )
+        except Exception:
+            logger.warning(
+                "Installation des gardes de disponibilité slash impossible :\n"
+                + traceback.format_exc()
             )
 
         try:
@@ -962,6 +982,14 @@ class BotAllInOne(commands.Bot):
         if isinstance(error, BotBlacklistedError):
             return await ctx.send(embed=embeds.error(f"Vous n'êtes pas autorisé à utiliser ce bot.\nRaison : {error.reason}"))
 
+        if isinstance(error, ModuleTemporarilyUnavailable):
+            return await ctx.send(
+                embed=embeds.warning(
+                    "Cette fonction est temporairement indisponible pendant une récupération automatique. "
+                    "Les autres fonctions de SentriX continuent de fonctionner."
+                )
+            )
+
         if isinstance(error, commands.CommandOnCooldown):
             return await ctx.send(
                 embed=embeds.warning(
@@ -1068,6 +1096,11 @@ class BotAllInOne(commands.Bot):
             embed = embeds.error(original.message)
         elif isinstance(original, BotBlacklistedError):
             embed = embeds.error(f"Vous n’êtes pas autorisé à utiliser ce bot.\nRaison : {original.reason}")
+        elif isinstance(original, AppModuleTemporarilyUnavailable) or isinstance(error, AppModuleTemporarilyUnavailable):
+            embed = embeds.warning(
+                "Cette fonction est temporairement indisponible pendant une récupération automatique. "
+                "Les autres fonctions de SentriX continuent de fonctionner."
+            )
         elif isinstance(error, discord.app_commands.CommandOnCooldown):
             embed = embeds.warning(
                 f"Cette commande est temporairement en recharge. Vous pourrez la réutiliser dans "
