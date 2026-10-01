@@ -119,16 +119,35 @@ def _description(command: commands.Command) -> str:
     return raw.split("\n", 1)[0][:220]
 
 
+def _display_name(command: commands.Command) -> str:
+    try:
+        from . import common_command_names
+
+        return common_command_names.display_name(command)
+    except Exception:
+        return str(command.qualified_name)
+
+
+def _example(command: commands.Command, prefix: str) -> str:
+    example = command_example(command, prefix)
+    long_call = f"{prefix}{command.qualified_name}"
+    short_call = f"{prefix}{_display_name(command)}"
+    if example.startswith(long_call):
+        return short_call + example[len(long_call):]
+    return example
+
+
 def _usage(command: commands.Command, prefix: str) -> str:
+    name = _display_name(command)
     if command.usage:
-        return f"{prefix}{command.qualified_name} {command.usage}".strip()
+        return f"{prefix}{name} {command.usage}".strip()
     signature = getattr(command, "signature", "") or ""
-    return f"{prefix}{command.qualified_name} {signature}".strip()
+    return f"{prefix}{name} {signature}".strip()
 
 
 def _command_label(bot: commands.Bot, command: commands.Command, prefix: str) -> str:
     slash = _slash_map(bot).get(command.qualified_name.casefold())
-    label = f"{prefix}{command.qualified_name}"
+    label = f"{prefix}{_display_name(command)}"
     if slash:
         label += f"   /{slash}"
     return label[:256]
@@ -170,17 +189,26 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
 def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discord.Embed:
     slash = _slash_map(bot).get(command.qualified_name.casefold())
     requirement = command_requirement(command)
-    panel = embeds.help_embed(f"SentriX — {command.qualified_name}", _description(command))
+    panel = embeds.help_embed(f"SentriX — {_display_name(command)}", _description(command))
     panel.add_field(name="Commande", value=f"`{_usage(command, prefix)}`", inline=False)
     if slash:
         panel.add_field(name="Slash", value=f"`/{slash}`", inline=True)
     panel.add_field(name="Permission nécessaire", value=requirement, inline=True)
     panel.add_field(name="Catégorie", value=_category(command), inline=True)
-    panel.add_field(name="Exemple", value=f"`{command_example(command, prefix)}`", inline=False)
-    if command.aliases:
+    panel.add_field(name="Exemple", value=f"`{_example(command, prefix)}`", inline=False)
+    alternate_names = []
+    short_name = _display_name(command)
+    if short_name != command.qualified_name:
+        alternate_names.append(command.qualified_name)
+    alternate_names.extend(
+        alias
+        for alias in (command.aliases or [])
+        if alias not in alternate_names and alias != short_name
+    )
+    if alternate_names:
         panel.add_field(
-            name="Alias",
-            value=", ".join(f"`{alias}`" for alias in command.aliases[:10]),
+            name="Autres noms",
+            value=", ".join(f"`{prefix}{alias}`" for alias in alternate_names[:10]),
             inline=False,
         )
     panel.set_footer(text="SentriX • Aide commande")
@@ -440,7 +468,7 @@ def _sections_detail(bot: commands.Bot, command: commands.Command, prefix: str) 
     appel = [panels.Ligne("Préfixe", f"`{_usage(command, prefix)}`")]
     if slash:
         appel.append(panels.Ligne("Slash", f"`/{slash}`"))
-    appel.append(panels.Ligne("Exemple", f"`{command_example(command, prefix)}`"))
+    appel.append(panels.Ligne("Exemple", f"`{_example(command, prefix)}`"))
 
     sections = [
         panels.Section("Comment l'utiliser", appel),
@@ -452,7 +480,15 @@ def _sections_detail(bot: commands.Bot, command: commands.Command, prefix: str) 
             ],
         ),
     ]
-    alias = [a for a in getattr(command, "aliases", ()) if a]
+    alias = []
+    short_name = _display_name(command)
+    if short_name != command.qualified_name:
+        alias.append(command.qualified_name)
+    alias.extend(
+        a
+        for a in (getattr(command, "aliases", ()) or ())
+        if a and a not in alias and a != short_name
+    )
     if alias:
         sections.append(
             panels.Section(
@@ -706,7 +742,7 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
             if exact:
                 vue = VueAide(
                     self.bot, prefix, member.id,
-                    titre=f"SentriX — {exact.qualified_name}",
+                    titre=f"SentriX — {_display_name(exact)}",
                     resume=_description(exact),
                     sections=_sections_detail(self.bot, exact, prefix),
                     member=member,
