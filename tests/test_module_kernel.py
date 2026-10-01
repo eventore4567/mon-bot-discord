@@ -131,3 +131,27 @@ def test_reconcile_recovers_stale_failed_state_when_runtime_has_module():
     assert changed == ["cogs.music"]
     assert state["status"] == "loaded"
     assert state["error"] is None
+
+
+def test_runtime_errors_degrade_module_after_threshold_and_success_recovers():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+
+    kernel.record_runtime_error("cogs.music", RuntimeError("one"))
+    kernel.record_runtime_error("cogs.music", RuntimeError("two"))
+    assert kernel.snapshot()["runtime_degraded"] == []
+
+    kernel.record_runtime_error("cogs.music", RuntimeError("three"))
+    snapshot = kernel.snapshot()
+    state = snapshot["modules"]["cogs.music"]
+    assert snapshot["runtime_degraded"] == ["cogs.music"]
+    assert state["runtime_errors"] == 3
+    assert state["consecutive_runtime_errors"] == 3
+    assert state["runtime_degraded"] is True
+
+    kernel.record_runtime_success("cogs.music")
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["runtime_degraded"] is False
+    assert state["consecutive_runtime_errors"] == 0
+    assert state["runtime_errors"] == 3
