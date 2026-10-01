@@ -241,7 +241,7 @@ _AUTO_SHORT_MAX_LENGTH = 12
 
 
 def _automatic_short_alias(name: str) -> str | None:
-    """Produit un alias + court et lisible quand aucun alias explicite n'existe."""
+    """Produit un alias + court et déterministe pour tout nom réellement long."""
     original = str(name or "").casefold().strip()
     if (
         not original
@@ -256,20 +256,70 @@ def _automatic_short_alias(name: str) -> str | None:
         candidate = candidate.replace(source, target)
 
     candidate = re.sub(r"-+", "-", candidate).strip("-")
+    parts = [part for part in candidate.split("-") if part]
+
+    if len(candidate) > _AUTO_SHORT_MAX_LENGTH and len(parts) >= 2:
+        compact = "".join(part[:4] for part in parts)
+        if compact:
+            candidate = compact
+
+    if len(candidate) > _AUTO_SHORT_MAX_LENGTH or candidate == original:
+        # Fallback universel pour les longs noms en un seul bloc :
+        # on garde le début lisible puis on retire les voyelles du reste.
+        flat = re.sub(r"[^a-z0-9]", "", candidate or original)
+        if len(flat) >= _AUTO_SHORT_MIN_LENGTH:
+            head = flat[:4]
+            tail = re.sub(r"[aeiouy]", "", flat[4:])
+            candidate = (head + tail)[:_AUTO_SHORT_MAX_LENGTH]
+
     if not candidate or candidate == original or len(candidate) >= len(original):
+        flat = re.sub(r"[^a-z0-9]", "", original)
+        candidate = flat[:_AUTO_SHORT_MAX_LENGTH]
+
+    if (
+        not candidate
+        or candidate == original
+        or len(candidate) >= len(original)
+        or len(candidate) > _AUTO_SHORT_MAX_LENGTH
+    ):
         return None
-
-    # Les aliases automatiques doivent rester réellement confortables à taper.
-    if len(candidate) > _AUTO_SHORT_MAX_LENGTH:
-        parts = [part for part in candidate.split("-") if part]
-        if len(parts) >= 2:
-            compact = "".join(part[:4] for part in parts)
-            if compact and len(compact) <= _AUTO_SHORT_MAX_LENGTH:
-                candidate = compact
-        if len(candidate) > _AUTO_SHORT_MAX_LENGTH:
-            return None
-
     return candidate
+
+
+def _available_root_alias(
+    bot: commands.Bot,
+    command: commands.Command,
+    base: str,
+) -> str | None:
+    """Trouve un alias court libre sans jamais voler une commande existante."""
+    existing = bot.all_commands.get(base)
+    if existing is None or existing is command:
+        return base
+
+    for serial in range(2, 10):
+        suffix = str(serial)
+        candidate = f"{base[: _AUTO_SHORT_MAX_LENGTH - len(suffix)]}{suffix}"
+        existing = bot.all_commands.get(candidate)
+        if existing is None or existing is command:
+            return candidate
+    return None
+
+
+def _available_sub_alias(command: commands.Command, base: str) -> str | None:
+    parent = command.parent
+    if parent is None:
+        return None
+    existing = parent.all_commands.get(base)
+    if existing is None or existing is command:
+        return base
+
+    for serial in range(2, 10):
+        suffix = str(serial)
+        candidate = f"{base[: _AUTO_SHORT_MAX_LENGTH - len(suffix)]}{suffix}"
+        existing = parent.all_commands.get(candidate)
+        if existing is None or existing is command:
+            return candidate
+    return None
 
 
 FRENCH_COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
@@ -336,8 +386,23 @@ def preferred_name(command: commands.Command) -> str:
     # renommé se propage à ses enfants (music playlist add -> music pl add).
     parts = qualified.split(" ")
     leaves = []
+    current = command
+    dynamic_by_depth: dict[int, str] = {}
+    while getattr(current, "parent", None) is not None:
+        depth = len(str(current.qualified_name).split(" ")) - 1
+        saved_leaf = (getattr(current, "extras", {}) or {}).get("sentrix_preferred_leaf")
+        if saved_leaf:
+            dynamic_by_depth[depth] = str(saved_leaf)
+        current = current.parent
+
     for depth in range(1, len(parts)):
-        leaves.append(PREFERRED_SUBCOMMAND_NAMES.get(" ".join(parts[: depth + 1]), parts[depth]))
+        leaves.append(
+            dynamic_by_depth.get(depth)
+            or PREFERRED_SUBCOMMAND_NAMES.get(
+                " ".join(parts[: depth + 1]),
+                parts[depth],
+            )
+        )
     return " ".join([root, *leaves])
 
 
@@ -523,12 +588,22 @@ def _apply_short_names(bot: commands.Bot, command: commands.Command) -> tuple[in
             leaf = PREFERRED_SUBCOMMAND_NAMES.get(str(node.qualified_name))
             if leaf and _register_sub_alias(node, leaf):
                 sub_added += 1
+            elif not leaf:
+                automatic = _automatic_short_alias(str(node.name))
+                if automatic:
+                    automatic = _available_sub_alias(node, automatic)
+                if automatic and _register_sub_alias(node, automatic):
+                    node.extras["sentrix_preferred_leaf"] = automatic
+                    sub_added += 1
             continue
+
         preferred = PREFERRED_COMMAND_NAMES.get(str(node.name))
         if preferred and _register_alias(bot, node, preferred):
             added += 1
         elif not preferred:
             automatic = _automatic_short_alias(str(node.name))
+            if automatic:
+                automatic = _available_root_alias(bot, node, automatic)
             if automatic and _register_alias(bot, node, automatic):
                 added += 1
         for alias in FRENCH_COMMAND_ALIASES.get(str(node.name), ()) + LEGACY_PREFERRED_ALIASES.get(str(node.name), ()):
@@ -546,6 +621,13 @@ def _apply_sub_short_names(command: commands.Command) -> int:
             continue
         leaf = PREFERRED_SUBCOMMAND_NAMES.get(str(node.qualified_name))
         if leaf and _register_sub_alias(node, leaf):
+            added += 1
+            continue
+        automatic = _automatic_short_alias(str(node.name))
+        if automatic:
+            automatic = _available_sub_alias(node, automatic)
+        if automatic and _register_sub_alias(node, automatic):
+            node.extras["sentrix_preferred_leaf"] = automatic
             added += 1
     return added
 
