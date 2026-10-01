@@ -57,9 +57,24 @@ def circuit_open(bot, module: str | None) -> bool:
     return bool(state.get("circuit_open"))
 
 
+def dependency_blockers(bot, module: str | None) -> tuple[str, ...]:
+    if not module:
+        return ()
+    kernel = getattr(bot, "module_kernel", None)
+    if kernel is None or not hasattr(kernel, "blockers"):
+        return ()
+    if hasattr(kernel, "contains") and not kernel.contains(module):
+        return ()
+    return tuple(kernel.blockers(module))
+
+
+def module_unavailable(bot, module: str | None) -> bool:
+    return circuit_open(bot, module) or bool(dependency_blockers(bot, module))
+
+
 async def prefix_gate(ctx: commands.Context) -> bool:
     module = prefix_command_module(ctx)
-    if circuit_open(ctx.bot, module):
+    if module_unavailable(ctx.bot, module):
         raise ModuleTemporarilyUnavailable(module or "inconnu")
     kernel = getattr(ctx.bot, "module_kernel", None)
     if module and kernel is not None and hasattr(kernel, "enter_runtime"):
@@ -70,7 +85,7 @@ async def prefix_gate(ctx: commands.Context) -> bool:
 def app_gate_for(command):
     async def check(interaction) -> bool:
         module = app_command_module(command)
-        if circuit_open(interaction.client, module):
+        if module_unavailable(interaction.client, module):
             raise AppModuleTemporarilyUnavailable(module or "inconnu")
         kernel = getattr(interaction.client, "module_kernel", None)
         if module and kernel is not None and hasattr(kernel, "enter_runtime"):
