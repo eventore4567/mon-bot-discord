@@ -483,6 +483,7 @@ class BotAllInOne(commands.Bot):
         self.db = Database(config.DATABASE_PATH)
         self.expected_extension_count = len(EXTENSIONS)
         self.module_kernel = ModuleKernel(EXTENSIONS, CRITICAL_EXTENSIONS)
+        self._module_runtime_lock = asyncio.Lock()
         self.tree.on_error = self.on_app_command_error
         self._cooldown_bucket = commands.CooldownMapping.from_cooldown(
             config.GLOBAL_COOLDOWN_RATE, config.GLOBAL_COOLDOWN_PER, commands.BucketType.user
@@ -500,28 +501,37 @@ class BotAllInOne(commands.Bot):
             raise ValueError(f"Extension inconnue: {name}")
         if name in RUNTIME_LOCKED_EXTENSIONS:
             raise RuntimeError(f"Extension protégée: {name}")
-        self.module_kernel.begin(name, operation="reload")
-        try:
-            if name in self.extensions:
-                await self.reload_extension(name)
-            else:
-                await self.load_extension(name)
-        except Exception as exc:
-            self.module_kernel.failed(name, exc)
-            self._refresh_module_health()
-            raise
-        self.module_kernel.loaded(name)
-        return self._refresh_module_health()
+        async with self._module_runtime_lock:
+            was_loaded = name in self.extensions
+            self.module_kernel.begin(name, operation="reload")
+            try:
+                if was_loaded:
+                    await self.reload_extension(name)
+                else:
+                    await self.load_extension(name)
+            except Exception as exc:
+                # discord.py restaure l'ancienne extension lorsqu'un reload échoue.
+                # Si elle est encore présente, SentriX reste disponible et conserve
+                # seulement l'erreur comme diagnostic de la tentative.
+                if was_loaded and name in self.extensions:
+                    self.module_kernel.recovered(name, exc)
+                else:
+                    self.module_kernel.failed(name, exc)
+                self._refresh_module_health()
+                raise
+            self.module_kernel.loaded(name)
+            return self._refresh_module_health()
 
     async def stop_runtime_module(self, name: str) -> dict:
         if not self.module_kernel.contains(name):
             raise ValueError(f"Extension inconnue: {name}")
         if name in RUNTIME_LOCKED_EXTENSIONS:
             raise RuntimeError(f"Extension protégée: {name}")
-        if name in self.extensions:
-            await self.unload_extension(name)
-        self.module_kernel.unloaded(name)
-        return self._refresh_module_health()
+        async with self._module_runtime_lock:
+            if name in self.extensions:
+                await self.unload_extension(name)
+            self.module_kernel.unloaded(name)
+            return self._refresh_module_health()
 
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
