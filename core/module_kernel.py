@@ -10,6 +10,7 @@ import time
 from typing import Iterable, Mapping
 
 from core.module_journal import ModuleJournal
+from core.module_resilience import ModuleResilience
 from core.module_snapshot import build_snapshot, validate_invariants
 from core.module_state import ModuleState
 
@@ -35,6 +36,7 @@ class ModuleKernel:
             for name in module_names
         }
         self._journal = ModuleJournal(capacity=120)
+        self._resilience = ModuleResilience(self._states, self._event)
 
     def _event(self, name: str, event: str, **detail) -> None:
         self._journal.add(name, event, **detail)
@@ -106,25 +108,13 @@ class ModuleKernel:
         return name in self._states
 
     def enter_runtime(self, name: str) -> None:
-        if name not in self._states:
-            return
-        state = self._states[name]
-        if state.in_flight == 0:
-            state.in_flight_since = time.time()
-        state.in_flight += 1
+        self._resilience.enter(name)
 
     def exit_runtime(self, name: str) -> None:
-        if name not in self._states:
-            return
-        state = self._states[name]
-        state.in_flight = max(0, state.in_flight - 1)
-        if state.in_flight == 0:
-            state.in_flight_since = None
+        self._resilience.exit(name)
 
     def in_flight(self, name: str) -> int:
-        if name not in self._states:
-            return 0
-        return int(self._states[name].in_flight)
+        return self._resilience.in_flight(name)
 
     def record_runtime_error(
         self,
@@ -135,66 +125,16 @@ class ModuleKernel:
         circuit_threshold: int = 5,
         error_window_seconds: int = 300,
     ) -> None:
-        if name not in self._states:
-            return
-        state = self._states[name]
-        now = time.time()
-
-        # Une erreur ancienne ne doit pas compter comme "consécutive" avec une
-        # nouvelle erreur beaucoup plus tard. Le circuit protège les rafales de
-        # panne, pas les incidents isolés répartis sur plusieurs heures.
-        if (
-            state.last_runtime_error_at is not None
-            and now - state.last_runtime_error_at > max(1, int(error_window_seconds))
-        ):
-            state.consecutive_runtime_errors = 0
-            state.runtime_degraded = False
-            if not state.circuit_open:
-                state.circuit_opened_at = None
-
-        state.runtime_errors += 1
-        state.consecutive_runtime_errors += 1
-        state.last_runtime_error = error if isinstance(error, str) else type(error).__name__
-        state.last_runtime_error_at = now
-        state.runtime_degraded = state.consecutive_runtime_errors >= max(1, int(threshold))
-
-        # Les modules critiques ne sont jamais ouverts automatiquement.
-        if (
-            not state.critical
-            and state.status == "loaded"
-            and state.consecutive_runtime_errors >= max(1, int(circuit_threshold))
-        ):
-            if not state.circuit_open:
-                state.circuit_open = True
-                state.circuit_opened_at = time.time()
-                state.circuit_reason = "runtime_errors"
-                self._event(
-                    name,
-                    "circuit_open",
-                    reason="runtime_errors",
-                    consecutive_errors=state.consecutive_runtime_errors,
-                )
+        self._resilience.record_error(
+            name,
+            error,
+            threshold=threshold,
+            circuit_threshold=circuit_threshold,
+            error_window_seconds=error_window_seconds,
+        )
 
     def record_runtime_success(self, name: str) -> None:
-        if name not in self._states:
-            return
-        state = self._states[name]
-
-        # Un succès de commande ne doit jamais annuler un circuit structurel
-        # (maintenance, boucle de fond morte, arrêt manuel). Seuls les circuits
-        # ouverts par une rafale d'erreurs de commandes peuvent être refermés
-        # par une exécution réussie.
-        if state.circuit_open and state.circuit_reason not in {None, "runtime_errors"}:
-            return
-
-        state.consecutive_runtime_errors = 0
-        state.runtime_degraded = False
-        was_open = state.circuit_open
-        state.circuit_open = False
-        state.circuit_opened_at = None
-        state.circuit_reason = None
-        if was_open:
-            self._event(name, "circuit_closed", reason="runtime_success")
+        self._resilience.record_success(name)
 
     def open_circuit(
         self,
@@ -203,32 +143,15 @@ class ModuleKernel:
         reason: str = "manual",
         replace_reason: bool = False,
     ) -> None:
-        if name not in self._states:
-            return
-        state = self._states[name]
-        if state.critical:
-            return
-        if not state.circuit_open:
-            state.circuit_open = True
-            state.circuit_opened_at = time.time()
-            state.circuit_reason = reason
-            self._event(name, "circuit_open", reason=reason)
-        elif replace_reason and state.circuit_reason != reason:
-            state.circuit_reason = reason
-            self._event(name, "circuit_reason", reason=reason)
+        self._resilience.open_circuit(
+            name,
+            reason=reason,
+            replace_reason=replace_reason,
+        )
 
     def close_circuit(self, name: str, *, reason: str = "reload") -> None:
-        if name not in self._states:
-            return
-        state = self._states[name]
-        was_open = state.circuit_open
-        state.circuit_open = False
-        state.circuit_opened_at = None
-        state.circuit_reason = None
-        state.consecutive_runtime_errors = 0
-        state.runtime_degraded = False
-        if was_open:
-            self._event(name, "circuit_closed", reason=reason)
+        self._resilience.close_circuit(name, reason=reason)
+
 
     def reconcile(self, loaded_modules: Iterable[str]) -> list[str]:
         """Aligne le registre sur la vérité runtime de discord.py.
