@@ -101,6 +101,8 @@ def install_app_gates(bot) -> int:
     """Ajoute une garde aux commandes slash actuellement enregistrées."""
     installed = 0
     for command in _walk_app_commands(bot.tree):
+        if not isinstance(command, app_commands.Command):
+            continue
         add_check = getattr(command, "add_check", None)
         if not callable(add_check):
             continue
