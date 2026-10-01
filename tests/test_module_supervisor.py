@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+from discord.ext import tasks
 
 from core.module_kernel import ModuleKernel
 from core.module_supervisor import ModuleSupervisor
@@ -74,3 +75,26 @@ async def test_supervisor_can_restart_module_once_dependency_is_back():
 
     await supervisor._retry_one(bot, "cogs.giveaway_center")
     assert bot.module_kernel.snapshot()["modules"]["cogs.giveaway_center"]["status"] == "loaded"
+
+
+def test_failed_background_loop_degrades_owning_module(monkeypatch):
+    class DummyCog:
+        __module__ = "cogs.music"
+
+        @tasks.loop(seconds=60)
+        async def worker(self):
+            pass
+
+    bot = type("Bot", (), {})()
+    bot.cogs = {"DummyCog": DummyCog()}
+    bot.module_kernel = ModuleKernel(["cogs.music"])
+    bot.module_kernel.begin("cogs.music")
+    bot.module_kernel.loaded("cogs.music")
+
+    monkeypatch.setattr(tasks.Loop, "failed", lambda self: True)
+    supervisor = ModuleSupervisor(["cogs.music"])
+    supervisor._scan_failed_loops(bot, bot.module_kernel)
+
+    snapshot = bot.module_kernel.snapshot()
+    assert snapshot["runtime_degraded"] == ["cogs.music"]
+    assert supervisor.snapshot()["failed_background_loops"]
