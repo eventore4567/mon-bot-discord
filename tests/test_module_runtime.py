@@ -269,3 +269,51 @@ async def test_stop_refuses_parent_with_active_dependents():
     operation = runtime.snapshot()["last_operation"]
     assert operation["error"] == "ActiveDependents"
     assert operation["dependents"] == ["cogs.giveaway_center"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_reload_times_out_instead_of_hanging_forever():
+    bot = FakeBot()
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+
+    async def hanging_reload(name):
+        await asyncio.sleep(1)
+
+    bot.reload_extension = hanging_reload
+    runtime = ModuleRuntimeController(
+        bot,
+        kernel,
+        operation_timeout_seconds=0.01,
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await runtime.reload("cogs.music")
+
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["status"] == "loaded"
+    assert state["last_error"] == "TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_runtime_unload_times_out_without_marking_module_unloaded():
+    bot = FakeBot()
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+
+    async def hanging_unload(name):
+        await asyncio.sleep(1)
+
+    bot.unload_extension = hanging_unload
+    runtime = ModuleRuntimeController(
+        bot,
+        kernel,
+        operation_timeout_seconds=0.01,
+    )
+
+    with pytest.raises(asyncio.TimeoutError):
+        await runtime.stop("cogs.music")
+
+    assert kernel.snapshot()["modules"]["cogs.music"]["status"] == "loaded"
