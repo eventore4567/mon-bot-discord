@@ -132,3 +132,46 @@ async def test_runtime_controller_waits_for_active_calls_before_reload():
     await finisher
 
     assert observed["in_flight_at_reload"] == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_recovery_reload_keeps_preexisting_circuit_open():
+    bot = FakeBot()
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    kernel.open_circuit("cogs.music", reason="runtime_failure")
+
+    async def failing_reload(name):
+        raise RuntimeError("still broken")
+
+    bot.reload_extension = failing_reload
+    runtime = ModuleRuntimeController(bot, kernel)
+
+    with pytest.raises(RuntimeError):
+        await runtime.reload("cogs.music")
+
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["status"] == "loaded"
+    assert state["circuit_open"] is True
+
+
+@pytest.mark.asyncio
+async def test_reload_refuses_to_replace_module_when_drain_times_out():
+    bot = FakeBot()
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    runtime = ModuleRuntimeController(bot, kernel)
+
+    async def fake_drain(name, timeout=5.0):
+        return 1
+
+    runtime._wait_for_drain = fake_drain
+
+    with pytest.raises(RuntimeError):
+        await runtime.reload("cogs.music")
+
+    assert bot.reload_calls == []
+    assert kernel.snapshot()["modules"]["cogs.music"]["circuit_open"] is False
+    assert runtime.snapshot()["last_operation"]["error"] == "ModuleBusy"
