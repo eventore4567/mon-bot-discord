@@ -126,17 +126,9 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
         return True
 
     if isinstance(base, commands.CommandNotFound):
-        if not _can_reply_unknown(bot, ctx):
-            return True
-        typed = str(getattr(ctx, "invoked_with", "") or "").casefold().strip()
-        suggestions = _command_suggestions(bot, ctx, typed)
-        if suggestions:
-            rendered = " ou ".join(f"`{prefix}{name}`" for name in suggestions[:2])
-            text = f"Commande introuvable. Essayez {rendered}."
-        else:
-            text = "Commande introuvable. Utilisez `/help` pour voir les commandes disponibles."
-        await _send_plain(ctx, text, delete_after=5)
-        return True
+        # Une commande inconnue peut viser un autre bot du serveur.
+        # SentriX reste silencieux au lieu de polluer le salon.
+        return
 
     if isinstance(base, commands.MissingRequiredArgument):
         label = _param_label(getattr(base, "param", None))
