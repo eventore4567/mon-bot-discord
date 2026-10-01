@@ -306,6 +306,26 @@ class ModuleKernel:
                 changed.append(name)
         return changed
 
+    def validate_invariants(self) -> list[str]:
+        problems: list[str] = []
+        valid_statuses = {"pending", "loading", "loaded", "failed", "blocked", "unloaded"}
+
+        for name, state in self._states.items():
+            if state.status not in valid_statuses:
+                problems.append(f"{name}: statut inconnu {state.status}")
+            if state.in_flight < 0:
+                problems.append(f"{name}: compteur in-flight négatif")
+            if state.critical and state.circuit_open:
+                problems.append(f"{name}: circuit ouvert sur module critique")
+            if state.status == "loaded" and state.blocked_by:
+                problems.append(f"{name}: chargé mais encore bloqué par dépendance")
+            if state.in_flight == 0 and state.in_flight_since is not None:
+                problems.append(f"{name}: horodatage in-flight sans appel actif")
+            if state.in_flight > 0 and state.in_flight_since is None:
+                problems.append(f"{name}: appel actif sans horodatage")
+
+        return problems
+
     def snapshot(self) -> dict:
         rows = list(self._states.values())
         failed = [
@@ -335,6 +355,7 @@ class ModuleKernel:
             row.name for row in rows
             if row.status == "loaded" and row.circuit_open
         )
+        invariant_errors = self.validate_invariants()
         return {
             "expected": len(rows),
             "loaded": loaded,
@@ -342,7 +363,8 @@ class ModuleKernel:
             "blocked": blocked,
             "critical_failed": critical_failed,
             "critical_runtime_degraded": critical_runtime_degraded,
-            "ready": not critical_failed and not critical_runtime_degraded,
+            "ready": not critical_failed and not critical_runtime_degraded and not invariant_errors,
+            "invariant_errors": invariant_errors,
             "runtime_degraded": runtime_degraded,
             "open_circuits": open_circuits,
             "recent_events": list(self._events)[-20:],
