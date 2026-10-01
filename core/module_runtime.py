@@ -246,6 +246,48 @@ class ModuleRuntimeController:
             }
             return self.refresh()
 
+    async def recover_missing(self, name: str) -> dict:
+        """Récupère uniquement une extension absente, y compris critique.
+
+        Cette voie ne reload/unload jamais un module déjà actif. Elle permet de
+        réparer un échec de boot critique sans prendre de risque sur une fonction
+        critique qui fonctionne déjà.
+        """
+        if not self.kernel.contains(name):
+            raise ValueError(f"Extension inconnue: {name}")
+
+        async with self._lock:
+            if name in self.bot.extensions:
+                return self.refresh()
+
+            blockers = self.kernel.blockers(name)
+            if blockers:
+                self.kernel.blocked(name, blockers)
+                return self.refresh()
+
+            self.kernel.begin(name, operation="recovery-load")
+            try:
+                await self._bounded(self.bot.load_extension(name))
+            except Exception as exc:
+                self.kernel.failed(name, exc)
+                self._last_operation = {
+                    "operation": "recovery-load",
+                    "module": name,
+                    "ok": False,
+                    "error": type(exc).__name__,
+                }
+                self.refresh()
+                raise
+
+            self.kernel.loaded(name)
+            self._last_operation = {
+                "operation": "recovery-load",
+                "module": name,
+                "ok": True,
+                "error": None,
+            }
+            return self.refresh()
+
     async def stop(self, name: str) -> dict:
         self._validate(name)
         async with self._lock:
