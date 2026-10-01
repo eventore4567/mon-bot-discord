@@ -63,3 +63,45 @@ async def test_runtime_controller_stop_marks_unloaded():
 
     assert bot.unload_calls == ["cogs.music"]
     assert kernel.snapshot()["modules"]["cogs.music"]["status"] == "unloaded"
+
+
+@pytest.mark.asyncio
+async def test_runtime_controller_opens_maintenance_circuit_during_reload():
+    bot = FakeBot()
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    observed = {"open": False}
+
+    async def reload_extension(name):
+        observed["open"] = kernel.snapshot()["modules"][name]["circuit_open"]
+
+    bot.reload_extension = reload_extension
+    runtime = ModuleRuntimeController(bot, kernel)
+
+    await runtime.reload("cogs.music")
+
+    assert observed["open"] is True
+    assert kernel.snapshot()["modules"]["cogs.music"]["circuit_open"] is False
+
+
+@pytest.mark.asyncio
+async def test_failed_reload_with_runtime_rollback_reopens_module():
+    bot = FakeBot()
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+
+    async def failing_reload(name):
+        raise RuntimeError("new version broken")
+
+    bot.reload_extension = failing_reload
+    runtime = ModuleRuntimeController(bot, kernel)
+
+    with pytest.raises(RuntimeError):
+        await runtime.reload("cogs.music")
+
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["status"] == "loaded"
+    assert state["circuit_open"] is False
+    assert state["last_error"] == "RuntimeError"
