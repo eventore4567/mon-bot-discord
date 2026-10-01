@@ -152,6 +152,12 @@ def _record_module_runtime_success(bot: commands.Bot, module_name: str | None) -
         kernel.record_runtime_success(module_name)
 
 
+def _exit_module_runtime(bot: commands.Bot, module_name: str | None) -> None:
+    kernel = getattr(bot, "module_kernel", None)
+    if module_name and kernel is not None and hasattr(kernel, "exit_runtime"):
+        kernel.exit_runtime(module_name)
+
+
 def _command_key(ctx: commands.Context) -> int | None:
     message = getattr(ctx, "message", None)
     message_id = getattr(message, "id", None)
