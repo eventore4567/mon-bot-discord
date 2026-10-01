@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from core.module_kernel import ModuleKernel
@@ -105,3 +107,28 @@ async def test_failed_reload_with_runtime_rollback_reopens_module():
     assert state["status"] == "loaded"
     assert state["circuit_open"] is False
     assert state["last_error"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_runtime_controller_waits_for_active_calls_before_reload():
+    bot = FakeBot()
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    kernel.enter_runtime("cogs.music")
+    observed = {"in_flight_at_reload": None}
+
+    async def reload_extension(name):
+        observed["in_flight_at_reload"] = kernel.in_flight(name)
+
+    async def finish_call():
+        await asyncio.sleep(0.02)
+        kernel.exit_runtime("cogs.music")
+
+    bot.reload_extension = reload_extension
+    runtime = ModuleRuntimeController(bot, kernel)
+    finisher = asyncio.create_task(finish_call())
+    await runtime.reload("cogs.music")
+    await finisher
+
+    assert observed["in_flight_at_reload"] == 0
