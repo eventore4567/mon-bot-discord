@@ -599,6 +599,18 @@ def install(bot: commands.Bot) -> None:
             except Exception:
                 logger.exception("V5 : matchmaking +tictactoe indisponible, repli sur le panneau d'erreur standard.")
 
+        if isinstance(base, commands.MissingRequiredArgument):
+            try:
+                from utils.command_setup_prompt import offer_setup_for_missing_argument
+
+                if await offer_setup_for_missing_argument(ctx, base):
+                    return
+            except Exception:
+                logger.exception(
+                    "V5 : mini-setup d'arguments indisponible pour +%s.",
+                    getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
+                )
+
         if isinstance(base, commands.CommandNotFound):
             # Une commande inconnue peut viser un autre bot : SentriX reste silencieux.
             return
