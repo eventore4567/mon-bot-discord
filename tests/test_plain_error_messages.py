@@ -116,3 +116,16 @@ def test_interactive_error_panels_are_not_flattened_blindly():
 
     assert 'if getattr(panneau, "boutons_source", ()):' in block
     assert "return False" in block
+
+
+def test_unknown_prefix_commands_are_silent_for_other_bots():
+    main = (ROOT / "main.py").read_text(encoding="utf-8")
+    runtime = (ROOT / "cogs" / "error_experience_v3.py").read_text(encoding="utf-8")
+    final = (ROOT / "cogs" / "final_error_embed_v5.py").read_text(encoding="utf-8")
+
+    assert "commands.CommandNotFound" in main
+    assert "return" in runtime[runtime.index("if isinstance(base, commands.CommandNotFound):"):][:220]
+    block = final[final.index("if isinstance(base, commands.CommandNotFound):"):][:220]
+    assert "return None" in block
+    assert "Vouliez-vous dire" not in block
+    assert "Voir `" not in block
