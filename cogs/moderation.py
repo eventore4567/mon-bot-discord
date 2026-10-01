@@ -138,17 +138,55 @@ class Moderation(commands.Cog):
             )
             return False
 
-        case_number = await self.bot.db.record_sanction(
-            guild.id, row["user_id"], self.bot.user.id, "unban", "Fin du bannissement temporaire (automatique)"
+        try:
+            case_number = await self.bot.db.record_sanction(
+                guild.id,
+                row["user_id"],
+                self.bot.user.id,
+                "unban",
+                "Fin du bannissement temporaire (automatique)",
+            )
+        except Exception:
+            case_number = None
+            logger.exception(
+                "Dossier d'unban automatique non persisté guild=%s user=%s.",
+                guild.id,
+                row["user_id"],
+            )
+
+        title = (
+            f"⏰ Dossier #{case_number} — Fin de sanction temporaire"
+            if case_number is not None
+            else "⏰ Fin de sanction temporaire — dossier non enregistré"
         )
         e = design_system.create_embed(
-            title=f"⏰ Dossier #{case_number} — Fin de sanction temporaire",
+            title=title,
             colour=config.COLOR_INFO,
             footer="SentriX",
         )
-        e.add_field(name="👤 Utilisateur", value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`", inline=False)
-        e.add_field(name="📄 Détail", value="Débanni automatiquement (fin du tempban)", inline=False)
-        await self.log_action(guild, e)
+        e.add_field(
+            name="👤 Utilisateur",
+            value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`",
+            inline=False,
+        )
+        e.add_field(
+            name="📄 Détail",
+            value="Débanni automatiquement (fin du tempban)",
+            inline=False,
+        )
+        try:
+            await self.log_action(guild, e)
+        except Exception:
+            logger.exception(
+                "Log d'unban automatique non envoyé guild=%s user=%s.",
+                guild.id,
+                row["user_id"],
+            )
+
+        # Discord a confirmé le débannissement : la ligne est consommable même si
+        # l'audit DB/log secondaire a échoué. La conserver ne recréerait pas le log
+        # au prochain cycle (Discord répondrait NotFound), mais laisserait une ligne
+        # temporaire obsolète inutilement.
         return True
 
     @check_tempactions.before_loop
