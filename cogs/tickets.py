@@ -933,6 +933,7 @@ class TicketSetupHubView(discord.ui.View):
 class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._ticket_open_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
         self.check_autoclose.start()
 
     def cog_unload(self):
@@ -1244,7 +1245,64 @@ class Tickets(commands.Cog):
             level = logger.warning if elapsed > 2.0 else logger.info
             level("Ouverture ticket type #%s traitée en %.2fs (guild=%s, user=%s).", type_id, elapsed, guild_id, user_id)
 
+    def _ticket_open_lock(
+        self,
+        guild_id: int,
+        user_id: int,
+        type_id: int,
+    ) -> asyncio.Lock:
+        key = (int(guild_id), int(user_id), int(type_id))
+        lock = self._ticket_open_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._ticket_open_locks[key] = lock
+
+        # Garde mémoire bornée : les clés anciennes et libres sont éliminées
+        # uniquement quand le registre devient gros. On ne retire jamais un lock
+        # actif, ce qui préserverait mal la sérialisation des interactions en attente.
+        if len(self._ticket_open_locks) > 5000:
+            for candidate, candidate_lock in list(self._ticket_open_locks.items()):
+                if candidate != key and not candidate_lock.locked():
+                    self._ticket_open_locks.pop(candidate, None)
+                    if len(self._ticket_open_locks) <= 4000:
+                        break
+        return lock
+
     async def create_ticket(self, interaction: discord.Interaction, ticket_type, answers: list):
+        guild = interaction.guild
+        user = interaction.user
+        if guild is None or user is None:
+            return
+
+        type_id = int(ticket_type["id"])
+        lock = self._ticket_open_lock(guild.id, user.id, type_id)
+
+        async with lock:
+            # Recontrôle SOUS verrou. Le contrôle précédent dans start_ticket_flow
+            # améliore l'UX, celui-ci garantit réellement la limite en cas de double
+            # clic, formulaire soumis deux fois ou deux interactions concurrentes.
+            limit = int(ticket_type["max_per_member"] or 1)
+            open_count = await count_genuinely_open_tickets(
+                self.bot,
+                guild,
+                user.id,
+                type_id,
+            )
+            if open_count >= limit:
+                return await sx_panels.envoyer(
+                    interaction,
+                    sx_panels.depuis_embed(
+                        embeds.warning(
+                            f"Vous avez déjà **{open_count}** ticket(s) "
+                            f"« {ticket_type['name']} » ouvert(s) (maximum : {limit})."
+                        )
+                    ),
+                    ephemere=True,
+                )
+
+            return await self._create_ticket_locked(interaction, ticket_type, answers)
+
+    async def _create_ticket_locked(self, interaction: discord.Interaction, ticket_type, answers: list):
         guild = interaction.guild
         user = interaction.user
 
