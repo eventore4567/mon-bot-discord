@@ -248,6 +248,15 @@ class ModuleSupervisor:
                         continue
                     refresh = getattr(bot, "_refresh_module_health", None)
                     snapshot = refresh() if callable(refresh) else kernel.snapshot()
+                    if hasattr(kernel, "decay_runtime_health"):
+                        recovered_by_decay = kernel.decay_runtime_health()
+                        for module_name in recovered_by_decay:
+                            logger.info(
+                                "Micro-kernel : dégradation runtime expirée après période calme : %s",
+                                module_name,
+                            )
+                        if recovered_by_decay:
+                            snapshot = refresh() if callable(refresh) else kernel.snapshot()
                     install_app_gates(bot)
                     self._scan_failed_loops(bot, kernel)
                     snapshot = refresh() if callable(refresh) else kernel.snapshot()
