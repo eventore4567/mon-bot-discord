@@ -87,6 +87,26 @@ class ModuleResilience:
                 consecutive_errors=state.consecutive_runtime_errors,
             )
 
+    def decay(self, *, quiet_window_seconds: int = 300) -> list[str]:
+        """Rétablit les modules dégradés après une vraie période calme."""
+        now = time.time()
+        recovered: list[str] = []
+        window = max(1, int(quiet_window_seconds))
+        for name, state in self._states.items():
+            if not state.runtime_degraded:
+                continue
+            if state.circuit_open:
+                continue
+            if state.last_runtime_error_at is None:
+                continue
+            if now - state.last_runtime_error_at < window:
+                continue
+            state.consecutive_runtime_errors = 0
+            state.runtime_degraded = False
+            recovered.append(name)
+            self._event(name, "runtime_decay_recovered")
+        return recovered
+
     def record_success(self, name: str) -> None:
         state = self._states.get(name)
         if state is None:
