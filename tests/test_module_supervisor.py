@@ -107,3 +107,20 @@ def test_supervisor_snapshot_exposes_internal_health():
     assert snapshot["internal_errors"] == 0
     assert snapshot["last_internal_error"] is None
     assert snapshot["running"] is False
+
+
+def test_stuck_call_degrades_module_without_opening_circuit():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    supervisor = ModuleSupervisor(["cogs.music"], stuck_call_seconds=30)
+
+    snapshot = kernel.snapshot()
+    snapshot["modules"]["cogs.music"]["in_flight"] = 1
+    snapshot["modules"]["cogs.music"]["in_flight_age_seconds"] = 45
+    supervisor._scan_stuck_calls(kernel, snapshot)
+
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["runtime_degraded"] is True
+    assert state["circuit_open"] is False
+    assert supervisor.snapshot()["stuck_modules"] == ["cogs.music"]
