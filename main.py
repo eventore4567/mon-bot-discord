@@ -36,6 +36,7 @@ from utils import log_hygiene
 from core.module_kernel import ModuleKernel
 from core.module_policy import (
     CRITICAL_EXTENSIONS,
+    MODULE_BOOT_BUDGET_SECONDS,
     MODULE_DEPENDENCIES,
     MODULE_LOAD_TIMEOUT_SECONDS,
     RUNTIME_LOCKED_EXTENSIONS,
@@ -585,7 +586,23 @@ class BotAllInOne(commands.Bot):
 
         loaded_extensions: list[str] = []
         failed_extensions: list[dict[str, str]] = []
+        extension_boot_started = asyncio.get_running_loop().time()
         for ext in EXTENSIONS:
+            boot_elapsed = asyncio.get_running_loop().time() - extension_boot_started
+            if boot_elapsed >= MODULE_BOOT_BUDGET_SECONDS:
+                exc = TimeoutError("BootBudgetExceeded")
+                self.module_kernel.begin(ext, operation="boot-budget")
+                self.module_kernel.failed(ext, exc)
+                failed_extensions.append({
+                    "name": ext,
+                    "error": "BootBudgetExceeded",
+                })
+                logger.error(
+                    "Module différé : budget global de boot %.0fs dépassé — %s sera récupéré après démarrage.",
+                    MODULE_BOOT_BUDGET_SECONDS,
+                    ext,
+                )
+                continue
             blockers = self.module_kernel.blockers(ext)
             if blockers:
                 self.module_kernel.blocked(ext, blockers)
