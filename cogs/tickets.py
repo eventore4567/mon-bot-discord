@@ -1692,44 +1692,129 @@ class Tickets(commands.Cog):
 
     @tasks.loop(minutes=15)
     async def check_autoclose(self):
-        rows = await self.bot.db.fetchall(
-            "SELECT t.*, tt.autoclose_hours, tt.log_channel_id FROM tickets t "
-            "JOIN ticket_types tt ON tt.id = t.type_id "
-            "WHERE t.status = 'ouvert' AND tt.autoclose_hours > 0"
-        )
+        try:
+            rows = await self.bot.db.fetchall(
+                "SELECT t.*, tt.autoclose_hours, tt.log_channel_id FROM tickets t "
+                "JOIN ticket_types tt ON tt.id = t.type_id "
+                "WHERE t.status = 'ouvert' AND tt.autoclose_hours > 0"
+            )
+        except Exception:
+            logger.exception(
+                "Lecture des tickets à fermer automatiquement impossible ; "
+                "nouvel essai au prochain cycle."
+            )
+            return
+
         for row in rows:
-            if row["last_activity_at"] is None:
-                continue
-            elapsed = now() - row["last_activity_at"]
-            if elapsed < row["autoclose_hours"] * 3600:
-                continue
-            guild = self.bot.get_guild(row["guild_id"])
-            channel = guild.get_channel(row["channel_id"]) if guild else None
-            if not guild or not channel:
-                await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (row["id"],))
-                continue
-            await self.bot.db.execute("UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 WHERE id = ?", (now(), row["id"]))
+            try:
+                await self._process_autoclose_row(row)
+            except Exception:
+                logger.exception(
+                    "Auto-fermeture du ticket #%s impossible ; les autres tickets "
+                    "continuent d'être traités.",
+                    row["id"],
+                )
+
+    async def _process_autoclose_row(self, row) -> None:
+        if row["last_activity_at"] is None:
+            return
+
+        elapsed = now() - row["last_activity_at"]
+        if elapsed < row["autoclose_hours"] * 3600:
+            return
+
+        guild = self.bot.get_guild(row["guild_id"])
+        channel = guild.get_channel(row["channel_id"]) if guild else None
+        if not guild or not channel:
+            await self.bot.db.execute(
+                "UPDATE tickets SET status = 'supprime' WHERE id = ?",
+                (row["id"],),
+            )
+            return
+
+        # Compare-and-set : deux cycles/reprises ne ferment jamais deux fois le même ticket.
+        cursor = await self.bot.db.execute(
+            "UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 "
+            "WHERE id = ? AND status = 'ouvert'",
+            (now(), row["id"]),
+        )
+        if getattr(cursor, "rowcount", 0) != 1:
+            return
+
+        try:
             transcript = await self.generate_transcript(channel)
-            await sx_panels.envoyer(channel, sx_panels.depuis_embed(embeds.warning('🔒 Ticket fermé automatiquement pour inactivité.')), file=transcript)
-            # Événement PROPRE : ticket_autoclose, pas ticket_close. Ces deux
-            # lignes passaient par log_action, dont le classement était
-            # « "ferm" in title » — une fermeture automatique par inactivité
-            # arrivait donc dans le journal indistinguable d'une fermeture
-            # décidée par un humain, sans acteur et sans durée d'inactivité.
+        except Exception:
+            logger.exception(
+                "Transcription auto-close indisponible pour le ticket #%s.",
+                row["id"],
+            )
+            transcript = None
+
+        try:
+            kwargs = {}
+            if transcript is not None:
+                kwargs["file"] = transcript
+            await sx_panels.envoyer(
+                channel,
+                sx_panels.depuis_embed(
+                    embeds.warning("🔒 Ticket fermé automatiquement pour inactivité.")
+                ),
+                **kwargs,
+            )
+        except discord.HTTPException:
+            logger.warning(
+                "Message d'auto-fermeture non envoyé pour le ticket #%s.",
+                row["id"],
+                exc_info=True,
+            )
+
+        try:
             await tickets_service.journaliser_evenement(
-                self.bot, guild, "ticket_autoclose",
-                ticket_id=row["id"], channel=channel,
+                self.bot,
+                guild,
+                "ticket_autoclose",
+                ticket_id=row["id"],
+                channel=channel,
                 cible=guild.get_member(int(row["user_id"])) if row["user_id"] else None,
                 raison=f"Aucune activité depuis {helpers.format_duration(int(elapsed))}.",
-                extra={"⏳ Seuil configuré": helpers.format_duration(int(row["autoclose_hours"]) * 3600)},
+                extra={
+                    "⏳ Seuil configuré": helpers.format_duration(
+                        int(row["autoclose_hours"]) * 3600
+                    )
+                },
             )
+        except Exception:
+            # Le ticket est réellement fermé même si le journal est momentanément
+            # indisponible. Ne jamais rouvrir/réexécuter la fermeture à cause du log.
+            logger.exception(
+                "Journal auto-close indisponible pour le ticket #%s.",
+                row["id"],
+            )
+
+        try:
             conf = await self.bot.db.get_guild_config(guild.id)
             delay = (conf["ticket_delete_delay"] if conf else 30) or 30
-            asyncio.create_task(self._auto_delete(channel, row["id"], delay))
+        except Exception:
+            logger.exception(
+                "Configuration du délai de suppression indisponible pour le ticket #%s ; "
+                "délai de secours 30s.",
+                row["id"],
+            )
+            delay = 30
+
+        asyncio.create_task(self._auto_delete(channel, row["id"], delay))
 
     @check_autoclose.before_loop
     async def before_check_autoclose(self):
         await self.bot.wait_until_ready()
+
+    @check_autoclose.error
+    async def check_autoclose_error(self, error: BaseException) -> None:
+        logger.error(
+            "Boucle check_autoclose interrompue (%r) ; relance automatique.",
+            error,
+        )
+        self.check_autoclose.restart()
 
     @commands.hybrid_command(name="ticket-reopen", description="Rouvrir un ticket fermé (avant sa suppression automatique).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
