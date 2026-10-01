@@ -7,56 +7,10 @@ observable sans rendre tout le bot indisponible.
 from __future__ import annotations
 
 import time
-from collections import deque
-from dataclasses import dataclass, field
 from typing import Iterable, Mapping
 
-
-@dataclass(slots=True)
-class ModuleState:
-    name: str
-    critical: bool = False
-    status: str = "pending"
-    load_ms: float | None = None
-    error: str | None = None
-    last_error: str | None = None
-    attempts: int = 0
-    reloads: int = 0
-    last_operation: str = "startup"
-    blocked_by: tuple[str, ...] = ()
-    runtime_errors: int = 0
-    consecutive_runtime_errors: int = 0
-    runtime_degraded: bool = False
-    circuit_open: bool = False
-    circuit_opened_at: float | None = None
-    circuit_reason: str | None = None
-    in_flight: int = 0
-    in_flight_since: float | None = None
-    last_runtime_error: str | None = None
-    last_runtime_error_at: float | None = None
-    _started_at: float | None = field(default=None, repr=False)
-
-    def begin(self, *, operation: str = "load") -> None:
-        self.attempts += 1
-        if operation == "reload":
-            self.reloads += 1
-        self.last_operation = operation
-        self.status = "loading"
-        self.error = None
-        self.blocked_by = ()
-        self._started_at = time.perf_counter()
-
-    def finish(self, *, error: BaseException | None = None) -> None:
-        if self._started_at is not None:
-            self.load_ms = round((time.perf_counter() - self._started_at) * 1000, 2)
-        self._started_at = None
-        if error is None:
-            self.status = "loaded"
-            self.error = None
-        else:
-            self.status = "failed"
-            self.error = type(error).__name__
-            self.last_error = self.error
+from core.module_journal import ModuleJournal
+from core.module_state import ModuleState
 
 
 class ModuleKernel:
@@ -79,15 +33,10 @@ class ModuleKernel:
             name: tuple(dep for dep in raw_dependencies.get(name, ()) if dep in self._states)
             for name in module_names
         }
-        self._events = deque(maxlen=120)
+        self._journal = ModuleJournal(capacity=120)
 
     def _event(self, name: str, event: str, **detail) -> None:
-        self._events.append({
-            "at": int(time.time()),
-            "module": name,
-            "event": event,
-            **detail,
-        })
+        self._journal.add(name, event, **detail)
 
     def begin(self, name: str, *, operation: str = "load") -> None:
         self._states[name].begin(operation=operation)
@@ -367,7 +316,7 @@ class ModuleKernel:
             "invariant_errors": invariant_errors,
             "runtime_degraded": runtime_degraded,
             "open_circuits": open_circuits,
-            "recent_events": list(self._events)[-20:],
+            "recent_events": self._journal.recent(20),
             "modules": {
                 row.name: {
                     "status": row.status,
