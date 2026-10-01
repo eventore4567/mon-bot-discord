@@ -109,3 +109,28 @@ def test_slash_gate_installation_is_idempotent():
 
     assert first == 1
     assert second == 0
+
+
+@pytest.mark.asyncio
+async def test_prefix_gate_blocks_command_when_dependency_parent_is_unavailable():
+    kernel = ModuleKernel(
+        ["cogs.events", "cogs.giveaway_center"],
+        dependencies={"cogs.giveaway_center": ("cogs.events",)},
+    )
+    for name in ("cogs.events", "cogs.giveaway_center"):
+        kernel.begin(name)
+        kernel.loaded(name)
+    kernel.open_circuit("cogs.events", reason="runtime_failure")
+
+    async def callback():
+        pass
+
+    callback.__module__ = "cogs.giveaway_center"
+    ctx = SimpleNamespace(
+        bot=SimpleNamespace(module_kernel=kernel),
+        command=SimpleNamespace(cog=None, callback=callback),
+    )
+
+    with pytest.raises(ModuleTemporarilyUnavailable):
+        await prefix_gate(ctx)
+    assert kernel.in_flight("cogs.giveaway_center") == 0
