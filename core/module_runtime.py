@@ -234,6 +234,23 @@ class ModuleRuntimeController:
     async def stop(self, name: str) -> dict:
         self._validate(name)
         async with self._lock:
+            active_dependents = [
+                dep
+                for dep in getattr(self.kernel, "dependents", lambda _name: ()) (name)
+                if dep in self.bot.extensions
+            ]
+            if active_dependents:
+                self._last_operation = {
+                    "operation": "stop",
+                    "module": name,
+                    "ok": False,
+                    "error": "ActiveDependents",
+                    "dependents": list(active_dependents),
+                }
+                raise RuntimeError(
+                    f"Arrêt refusé : {name} est requis par {', '.join(active_dependents)}"
+                )
+
             try:
                 if name in self.bot.extensions:
                     await self.bot.unload_extension(name)
