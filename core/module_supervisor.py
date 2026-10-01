@@ -13,6 +13,8 @@ from typing import Iterable
 
 from discord.ext import tasks
 
+from core.module_gate import install_app_gates
+
 logger = logging.getLogger("bot.module-supervisor")
 
 
@@ -135,6 +137,7 @@ class ModuleSupervisor:
                         continue
                     refresh = getattr(bot, "_refresh_module_health", None)
                     snapshot = refresh() if callable(refresh) else kernel.snapshot()
+                    install_app_gates(bot)
                     self._scan_failed_loops(bot, kernel)
                     snapshot = refresh() if callable(refresh) else kernel.snapshot()
                     now = time.monotonic()
