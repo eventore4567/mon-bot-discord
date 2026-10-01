@@ -284,6 +284,10 @@ class ModuleKernel:
             row.name for row in rows
             if row.status == "loaded" and row.runtime_degraded
         )
+        critical_runtime_degraded = sorted(
+            row.name for row in rows
+            if row.status == "loaded" and row.runtime_degraded and row.critical
+        )
         open_circuits = sorted(
             row.name for row in rows
             if row.status == "loaded" and row.circuit_open
@@ -294,7 +298,8 @@ class ModuleKernel:
             "failed": failed,
             "blocked": blocked,
             "critical_failed": critical_failed,
-            "ready": not critical_failed,
+            "critical_runtime_degraded": critical_runtime_degraded,
+            "ready": not critical_failed and not critical_runtime_degraded,
             "runtime_degraded": runtime_degraded,
             "open_circuits": open_circuits,
             "recent_events": list(self._events)[-20:],
