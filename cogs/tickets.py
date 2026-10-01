@@ -1331,12 +1331,51 @@ class Tickets(commands.Cog):
         except discord.HTTPException:
             return await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.error('Impossible de créer le salon (permissions du bot ou catégorie pleine).')), ephemere=True)
 
-        cur = await self.bot.db.execute(
-            "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, type_id, priority, created_at, last_activity_at) "
-            "VALUES (?, ?, ?, 'ouvert', ?, ?, 'normale', ?, ?)",
-            (guild.id, channel.id, user.id, ticket_type["name"], ticket_type["id"], now(), now()),
-        )
-        ticket_id = cur.lastrowid
+        try:
+            cur = await self.bot.db.execute(
+                "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, type_id, priority, created_at, last_activity_at) "
+                "VALUES (?, ?, ?, 'ouvert', ?, ?, 'normale', ?, ?)",
+                (
+                    guild.id,
+                    channel.id,
+                    user.id,
+                    ticket_type["name"],
+                    ticket_type["id"],
+                    now(),
+                    now(),
+                ),
+            )
+            ticket_id = cur.lastrowid
+        except Exception:
+            # Le salon Discord existe déjà : si la persistance échoue, le garder
+            # créerait un ticket orphelin que SentriX ne peut plus retrouver ni fermer.
+            logger.exception(
+                "Persistance du ticket impossible après création du salon guild=%s channel=%s user=%s type=%s.",
+                guild.id,
+                channel.id,
+                user.id,
+                ticket_type["id"],
+            )
+            try:
+                await channel.delete(
+                    reason="SentriX : rollback d'un ticket non persisté"
+                )
+            except discord.HTTPException:
+                logger.exception(
+                    "Rollback du salon ticket orphelin impossible guild=%s channel=%s.",
+                    guild.id,
+                    channel.id,
+                )
+            return await sx_panels.envoyer(
+                interaction,
+                sx_panels.depuis_embed(
+                    embeds.error(
+                        "Le ticket n'a pas pu être enregistré. "
+                        "Aucun ticket incomplet n'a été conservé."
+                    )
+                ),
+                ephemere=True,
+            )
         for label, value in answers:
             if value:
                 await self.bot.db.execute(
