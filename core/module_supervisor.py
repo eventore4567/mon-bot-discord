@@ -99,6 +99,7 @@ class ModuleSupervisor:
                         module_name,
                         "BackgroundLoopFailed",
                         threshold=1,
+                        circuit_threshold=1,
                     )
                     logger.error(
                         "Micro-kernel : boucle de fond en échec détectée : %s",
