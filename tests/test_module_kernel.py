@@ -304,3 +304,17 @@ def test_kernel_exposes_reverse_dependencies():
 
     assert kernel.dependents("cogs.ai") == ("cogs.ai_disable_guard",)
     assert kernel.dependents("cogs.other") == ()
+
+
+def test_dependency_with_open_circuit_blocks_dependent():
+    kernel = ModuleKernel(
+        ["cogs.events", "cogs.giveaway_center"],
+        dependencies={"cogs.giveaway_center": ("cogs.events",)},
+    )
+    for name in ("cogs.events", "cogs.giveaway_center"):
+        kernel.begin(name)
+        kernel.loaded(name)
+
+    assert kernel.blockers("cogs.giveaway_center") == ()
+    kernel.open_circuit("cogs.events", reason="runtime_failure")
+    assert kernel.blockers("cogs.giveaway_center") == ("cogs.events",)
