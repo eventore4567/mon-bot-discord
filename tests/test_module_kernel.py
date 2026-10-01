@@ -216,3 +216,28 @@ def test_old_runtime_errors_do_not_accumulate_into_new_circuit(monkeypatch):
     assert state["consecutive_runtime_errors"] == 1
     assert state["runtime_degraded"] is False
     assert state["circuit_open"] is False
+
+
+def test_kernel_keeps_bounded_lifecycle_journal():
+    kernel = ModuleKernel(["cogs.music"])
+    for _ in range(150):
+        kernel.begin("cogs.music", operation="reload")
+        kernel.loaded("cogs.music")
+
+    events = kernel.snapshot()["recent_events"]
+    assert len(events) <= 20
+    assert events[-1]["module"] == "cogs.music"
+    assert events[-1]["event"] == "loaded"
+
+
+def test_circuit_transitions_are_recorded_in_journal():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    for _ in range(5):
+        kernel.record_runtime_error("cogs.music", RuntimeError("boom"))
+    kernel.close_circuit("cogs.music")
+
+    event_names = [event["event"] for event in kernel.snapshot()["recent_events"]]
+    assert "circuit_open" in event_names
+    assert "circuit_closed" in event_names
