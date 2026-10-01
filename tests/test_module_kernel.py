@@ -340,3 +340,41 @@ def test_kernel_invariant_error_fails_readiness():
     snapshot = kernel.snapshot()
     assert snapshot["ready"] is False
     assert any("circuit ouvert" in problem for problem in snapshot["invariant_errors"])
+
+
+def test_runtime_degradation_decays_after_quiet_window(monkeypatch):
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    for _ in range(3):
+        kernel.record_runtime_error("cogs.music", RuntimeError("boom"))
+
+    kernel._states["cogs.music"].last_runtime_error_at = 100.0
+    monkeypatch.setattr("core.module_resilience.time.time", lambda: 500.0)
+
+    recovered = kernel.decay_runtime_health(quiet_window_seconds=300)
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert recovered == ["cogs.music"]
+    assert state["runtime_degraded"] is False
+    assert state["consecutive_runtime_errors"] == 0
+
+
+def test_structural_open_circuit_does_not_decay_away(monkeypatch):
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    kernel.record_runtime_error(
+        "cogs.music",
+        RuntimeError("boom"),
+        threshold=1,
+        circuit_threshold=999999,
+    )
+    kernel.open_circuit("cogs.music", reason="background_loop")
+    kernel._states["cogs.music"].last_runtime_error_at = 100.0
+    monkeypatch.setattr("core.module_resilience.time.time", lambda: 1000.0)
+
+    recovered = kernel.decay_runtime_health(quiet_window_seconds=300)
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert recovered == []
+    assert state["runtime_degraded"] is True
+    assert state["circuit_open"] is True
