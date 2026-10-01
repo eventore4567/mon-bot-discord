@@ -187,6 +187,12 @@ async def _snapshot(bot, dashboard) -> dict:
             and hasattr(request_supervisor, "snapshot")
             else None
         ),
+        "flapping_modules": (
+            request_supervisor.snapshot().get("flapping_modules", [])
+            if (request_supervisor := getattr(bot, "module_supervisor", None)) is not None
+            and hasattr(request_supervisor, "snapshot")
+            else []
+        ),
         "module_runtime": (
             request_runtime.snapshot()
             if (request_runtime := getattr(bot, "module_runtime", None)) is not None
