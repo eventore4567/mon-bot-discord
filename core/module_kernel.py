@@ -119,6 +119,32 @@ class ModuleKernel:
     def contains(self, name: str) -> bool:
         return name in self._states
 
+    def reconcile(self, loaded_modules: Iterable[str]) -> list[str]:
+        """Aligne le registre sur la vérité runtime de discord.py.
+
+        Un module marqué chargé mais absent du registre d'extensions devient failed.
+        À l'inverse, un module présent dans discord.py mais encore marqué failed/blocked
+        redevient loaded. Les modules volontairement unloaded ne sont jamais réactivés
+        par cette simple observation.
+        """
+        actual = set(loaded_modules)
+        changed: list[str] = []
+        for name, state in self._states.items():
+            if state.status == "loaded" and name not in actual:
+                state.status = "failed"
+                state.error = "RuntimeMissing"
+                state.last_error = "RuntimeMissing"
+                state.last_operation = "runtime-reconcile"
+                state.blocked_by = ()
+                changed.append(name)
+            elif state.status in {"failed", "blocked"} and name in actual:
+                state.status = "loaded"
+                state.error = None
+                state.blocked_by = ()
+                state.last_operation = "runtime-reconcile"
+                changed.append(name)
+        return changed
+
     def snapshot(self) -> dict:
         rows = list(self._states.values())
         failed = [
