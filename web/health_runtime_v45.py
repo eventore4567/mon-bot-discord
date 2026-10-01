@@ -195,6 +195,12 @@ async def _snapshot(bot, dashboard) -> dict:
             and hasattr(request_kernel, "snapshot")
             else []
         ),
+        "open_module_circuits": (
+            request_kernel.snapshot().get("open_circuits", [])
+            if (request_kernel := getattr(bot, "module_kernel", None)) is not None
+            and hasattr(request_kernel, "snapshot")
+            else []
+        ),
         "command_policy_ok": command_policy_ok,
         "unknown_command_policy_count": unknown_commands,
         "dangerous_public_command_count": dangerous_public_commands,
