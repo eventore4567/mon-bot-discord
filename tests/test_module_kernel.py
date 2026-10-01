@@ -155,3 +155,43 @@ def test_runtime_errors_degrade_module_after_threshold_and_success_recovers():
     assert state["runtime_degraded"] is False
     assert state["consecutive_runtime_errors"] == 0
     assert state["runtime_errors"] == 3
+
+
+def test_optional_module_opens_circuit_after_five_consecutive_errors():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+
+    for _ in range(5):
+        kernel.record_runtime_error("cogs.music", RuntimeError("boom"))
+
+    snapshot = kernel.snapshot()
+    state = snapshot["modules"]["cogs.music"]
+    assert state["circuit_open"] is True
+    assert snapshot["open_circuits"] == ["cogs.music"]
+
+
+def test_critical_module_never_auto_opens_circuit():
+    kernel = ModuleKernel(["cogs.moderation"], critical={"cogs.moderation"})
+    kernel.begin("cogs.moderation")
+    kernel.loaded("cogs.moderation")
+
+    for _ in range(10):
+        kernel.record_runtime_error("cogs.moderation", RuntimeError("boom"))
+
+    state = kernel.snapshot()["modules"]["cogs.moderation"]
+    assert state["runtime_degraded"] is True
+    assert state["circuit_open"] is False
+
+
+def test_success_closes_open_circuit():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    for _ in range(5):
+        kernel.record_runtime_error("cogs.music", RuntimeError("boom"))
+
+    kernel.record_runtime_success("cogs.music")
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["circuit_open"] is False
+    assert state["runtime_degraded"] is False
