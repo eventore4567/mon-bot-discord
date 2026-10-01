@@ -42,3 +42,17 @@ def test_kernel_tracks_loading_attempts_and_duration():
     assert state["status"] == "loaded"
     assert state["load_ms"] is not None
     assert state["load_ms"] >= 0
+
+
+def test_kernel_tracks_unload_and_reload_metadata():
+    kernel = ModuleKernel(["cogs.music"])
+    kernel.begin("cogs.music")
+    kernel.loaded("cogs.music")
+    kernel.begin("cogs.music", operation="reload")
+    kernel.loaded("cogs.music")
+    kernel.unloaded("cogs.music")
+
+    state = kernel.snapshot()["modules"]["cogs.music"]
+    assert state["status"] == "unloaded"
+    assert state["reloads"] == 1
+    assert state["last_operation"] == "unload"
