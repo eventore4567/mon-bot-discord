@@ -58,3 +58,19 @@ def test_supervisor_retry_budget_is_bounded():
 
     assert supervisor.snapshot()["pending"]["cogs.music"]["failures"] == 4
     assert len(supervisor.retry_delays) == 3
+
+
+@pytest.mark.asyncio
+async def test_supervisor_can_restart_module_once_dependency_is_back():
+    bot = FakeBot(status="loaded")
+    bot.module_kernel = ModuleKernel(
+        ["cogs.events", "cogs.giveaway_center"],
+        dependencies={"cogs.giveaway_center": ("cogs.events",)},
+    )
+    bot.module_kernel.begin("cogs.events")
+    bot.module_kernel.loaded("cogs.events")
+    bot.module_kernel.blocked("cogs.giveaway_center", ())
+    supervisor = ModuleSupervisor(["cogs.giveaway_center"], retry_delays=(1,), scan_interval=5)
+
+    await supervisor._retry_one(bot, "cogs.giveaway_center")
+    assert bot.module_kernel.snapshot()["modules"]["cogs.giveaway_center"]["status"] == "loaded"
