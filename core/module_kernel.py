@@ -197,7 +197,18 @@ class ModuleKernel:
         if was_open:
             self._event(name, "circuit_closed", reason="runtime_success")
 
-    def close_circuit(self, name: str) -> None:
+    def open_circuit(self, name: str, *, reason: str = "manual") -> None:
+        if name not in self._states:
+            return
+        state = self._states[name]
+        if state.critical:
+            return
+        if not state.circuit_open:
+            state.circuit_open = True
+            state.circuit_opened_at = time.time()
+            self._event(name, "circuit_open", reason=reason)
+
+    def close_circuit(self, name: str, *, reason: str = "reload") -> None:
         if name not in self._states:
             return
         state = self._states[name]
@@ -207,7 +218,7 @@ class ModuleKernel:
         state.consecutive_runtime_errors = 0
         state.runtime_degraded = False
         if was_open:
-            self._event(name, "circuit_closed", reason="reload")
+            self._event(name, "circuit_closed", reason=reason)
 
     def reconcile(self, loaded_modules: Iterable[str]) -> list[str]:
         """Aligne le registre sur la vérité runtime de discord.py.
