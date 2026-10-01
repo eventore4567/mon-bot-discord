@@ -349,3 +349,25 @@ async def test_recover_missing_never_reloads_already_active_critical_module():
     assert bot.load_calls == []
     assert bot.reload_calls == []
     assert kernel.snapshot()["modules"]["cogs.moderation"]["status"] == "loaded"
+
+
+@pytest.mark.asyncio
+async def test_recover_missing_can_load_locked_optional_module_but_reload_stays_forbidden():
+    bot = FakeBot()
+    bot.extensions = {}
+    kernel = ModuleKernel(["cogs.visual_experience_v5"])
+    kernel.begin("cogs.visual_experience_v5")
+    kernel.failed("cogs.visual_experience_v5", RuntimeError("boot skipped"))
+
+    runtime = ModuleRuntimeController(
+        bot,
+        kernel,
+        locked={"cogs.visual_experience_v5"},
+    )
+
+    await runtime.recover_missing("cogs.visual_experience_v5")
+    assert bot.load_calls == ["cogs.visual_experience_v5"]
+    assert kernel.snapshot()["modules"]["cogs.visual_experience_v5"]["status"] == "loaded"
+
+    with pytest.raises(RuntimeError):
+        await runtime.reload("cogs.visual_experience_v5")
