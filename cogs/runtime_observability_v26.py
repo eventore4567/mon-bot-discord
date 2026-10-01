@@ -118,6 +118,40 @@ def _wrap_db_method(bot: commands.Bot, method_name: str) -> None:
     setattr(db, method_name, measured)
 
 
+def _module_name_from_object(value: Any) -> str | None:
+    if value is None:
+        return None
+    module = str(getattr(value, "__module__", "") or "")
+    if module.startswith("cogs."):
+        return module
+    cls = getattr(value, "__class__", None)
+    module = str(getattr(cls, "__module__", "") or "")
+    return module if module.startswith("cogs.") else None
+
+
+def _prefix_module_name(ctx: commands.Context) -> str | None:
+    command = getattr(ctx, "command", None)
+    cog = getattr(command, "cog", None)
+    return _module_name_from_object(cog) or _module_name_from_object(getattr(command, "callback", None))
+
+
+def _slash_module_name(command: Any) -> str | None:
+    binding = getattr(command, "binding", None)
+    return _module_name_from_object(binding) or _module_name_from_object(getattr(command, "callback", None))
+
+
+def _record_module_runtime_error(bot: commands.Bot, module_name: str | None, error: BaseException) -> None:
+    kernel = getattr(bot, "module_kernel", None)
+    if module_name and kernel is not None and hasattr(kernel, "record_runtime_error"):
+        kernel.record_runtime_error(module_name, error)
+
+
+def _record_module_runtime_success(bot: commands.Bot, module_name: str | None) -> None:
+    kernel = getattr(bot, "module_kernel", None)
+    if module_name and kernel is not None and hasattr(kernel, "record_runtime_success"):
+        kernel.record_runtime_success(module_name)
+
+
 def _command_key(ctx: commands.Context) -> int | None:
     message = getattr(ctx, "message", None)
     message_id = getattr(message, "id", None)
@@ -209,8 +243,10 @@ def install(bot: commands.Bot) -> None:
         started = state["prefix_starts"].pop(key, None)
         if started is None:
             return
-        name = getattr(getattr(ctx, "command", None), "qualified_name", "inconnue")
+        command = getattr(ctx, "command", None)
+        name = getattr(command, "qualified_name", "inconnue")
         _record_command_duration(bot, str(name), time.perf_counter() - started, failed=False)
+        _record_module_runtime_success(bot, _prefix_module_name(ctx))
 
     async def prefix_error(ctx: commands.Context, error: commands.CommandError):
         key = _command_key(ctx)
@@ -220,6 +256,7 @@ def install(bot: commands.Bot) -> None:
         original = getattr(error, "original", error)
         if started is not None:
             _record_command_duration(bot, str(name), time.perf_counter() - started, failed=True)
+        _record_module_runtime_error(bot, _prefix_module_name(ctx), original)
         record_error(
             bot,
             command=str(name),
@@ -244,6 +281,7 @@ def install(bot: commands.Bot) -> None:
             return
         name = getattr(command, "qualified_name", getattr(command, "name", "inconnue"))
         _record_command_duration(bot, str(name), time.perf_counter() - started, failed=False)
+        _record_module_runtime_success(bot, _slash_module_name(command))
 
     bot.add_listener(prefix_start, "on_command")
     bot.add_listener(prefix_complete, "on_command_completion")
