@@ -175,3 +175,71 @@ async def test_reload_refuses_to_replace_module_when_drain_times_out():
     assert bot.reload_calls == []
     assert kernel.snapshot()["modules"]["cogs.music"]["circuit_open"] is False
     assert runtime.snapshot()["last_operation"]["error"] == "ModuleBusy"
+
+
+@pytest.mark.asyncio
+async def test_parent_reload_also_reloads_loaded_dependents():
+    bot = FakeBot()
+    bot.extensions = {
+        "cogs.ai": object(),
+        "cogs.ai_disable_guard": object(),
+    }
+    kernel = ModuleKernel(
+        ["cogs.ai", "cogs.ai_disable_guard"],
+        dependencies={"cogs.ai_disable_guard": ("cogs.ai",)},
+    )
+    for name in ("cogs.ai", "cogs.ai_disable_guard"):
+        kernel.begin(name)
+        kernel.loaded(name)
+
+    runtime = ModuleRuntimeController(bot, kernel)
+    await runtime.reload("cogs.ai")
+
+    assert bot.reload_calls == ["cogs.ai", "cogs.ai_disable_guard"]
+    state = runtime.snapshot()["last_operation"]
+    assert state["dependents"] == ["cogs.ai_disable_guard"]
+    assert state["dependent_failures"] == []
+    snapshot = kernel.snapshot()["modules"]
+    assert snapshot["cogs.ai"]["circuit_open"] is False
+    assert snapshot["cogs.ai_disable_guard"]["circuit_open"] is False
+
+
+@pytest.mark.asyncio
+async def test_dependent_reload_failure_is_isolated_without_reloading_parent_again():
+    bot = FakeBot()
+    bot.extensions = {
+        "cogs.events": object(),
+        "cogs.giveaway_center": object(),
+    }
+    kernel = ModuleKernel(
+        ["cogs.events", "cogs.giveaway_center"],
+        dependencies={"cogs.giveaway_center": ("cogs.events",)},
+    )
+    for name in ("cogs.events", "cogs.giveaway_center"):
+        kernel.begin(name)
+        kernel.loaded(name)
+
+    async def reload_extension(name):
+        bot.reload_calls.append(name)
+        if name == "cogs.giveaway_center":
+            raise RuntimeError("dependent broken")
+
+    bot.reload_extension = reload_extension
+    runtime = ModuleRuntimeController(bot, kernel)
+
+    await runtime.reload("cogs.events")
+
+    assert bot.reload_calls == ["cogs.events", "cogs.giveaway_center"]
+    operation = runtime.snapshot()["last_operation"]
+    assert operation["ok"] is True
+    assert operation["dependent_failures"] == [
+        {"module": "cogs.giveaway_center", "error": "RuntimeError"}
+    ]
+
+    snapshot = kernel.snapshot()["modules"]
+    assert snapshot["cogs.events"]["status"] == "loaded"
+    assert snapshot["cogs.events"]["circuit_open"] is False
+    assert snapshot["cogs.giveaway_center"]["status"] == "loaded"
+    assert snapshot["cogs.giveaway_center"]["runtime_degraded"] is True
+    assert snapshot["cogs.giveaway_center"]["circuit_open"] is True
+    assert snapshot["cogs.giveaway_center"]["circuit_reason"] == "dependency_reload_failed"
