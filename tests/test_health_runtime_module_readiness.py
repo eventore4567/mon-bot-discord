@@ -1,23 +1,35 @@
-from core.module_kernel import ModuleKernel
-from web.health_runtime_v45 import _extension_state
-
-
-class FakeBot:
-    pass
+from core.module_health import extension_state_from_runtime
 
 
 def test_health_extension_state_respects_kernel_ready_flag():
-    bot = FakeBot()
-    bot.extensions = {}
-    bot.module_kernel = ModuleKernel(["cogs.moderation"], critical={"cogs.moderation"})
-    bot.module_kernel.begin("cogs.moderation")
-    bot.module_kernel.loaded("cogs.moderation")
-    for _ in range(3):
-        bot.module_kernel.record_runtime_error("cogs.moderation", RuntimeError("boom"))
+    runtime = {
+        "loaded": 1,
+        "expected": 1,
+        "ready": False,
+        "critical_failed": [],
+        "failed": [],
+    }
 
-    loaded, expected, ok, critical_failed, failed = _extension_state(bot)
+    loaded, expected, ok, critical_failed, failed = extension_state_from_runtime(
+        runtime,
+        fallback_loaded=0,
+        fallback_expected=0,
+    )
     assert loaded == 1
     assert expected == 1
+    assert ok is False
+    assert critical_failed == []
+    assert failed == []
+
+
+def test_health_extension_state_falls_back_without_runtime_snapshot():
+    loaded, expected, ok, critical_failed, failed = extension_state_from_runtime(
+        None,
+        fallback_loaded=3,
+        fallback_expected=4,
+    )
+    assert loaded == 3
+    assert expected == 4
     assert ok is False
     assert critical_failed == []
     assert failed == []
