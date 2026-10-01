@@ -18,13 +18,14 @@ import sentrix_setup_v116 as v116
 logger = logging.getLogger("bot.setup-v117")
 _INSTALLED = False
 
-HOME_MODULE_KEYS: tuple[str, ...] = (
-    # Parcours essentiel — même ordre que le dashboard.
+ESSENTIAL_MODULE_KEYS: tuple[str, ...] = (
     "security",
     "logs",
     "tickets",
     "members",
-    # Réglages complémentaires.
+)
+
+ADVANCED_MODULE_KEYS: tuple[str, ...] = (
     "moderation",
     "automation",
     "levels",
@@ -34,6 +35,8 @@ HOME_MODULE_KEYS: tuple[str, ...] = (
     "music",
     "suggestions",
 )
+
+HOME_MODULE_KEYS: tuple[str, ...] = ESSENTIAL_MODULE_KEYS + ADVANCED_MODULE_KEYS
 ROLE_FIELDS = {"autorole", "verify_role", "warn_role"}
 
 
@@ -73,8 +76,13 @@ GUIDED_SECTIONS: dict[str, tuple[v116.SectionSpec, ...]] = {
 }
 
 
-def _home_modules():
-    return tuple(v116.MODULE_BY_KEY[key] for key in HOME_MODULE_KEYS if key in v116.MODULE_BY_KEY)
+def _home_modules(keys=HOME_MODULE_KEYS):
+    return tuple(v116.MODULE_BY_KEY[key] for key in keys if key in v116.MODULE_BY_KEY)
+
+
+def _ensure_home_state(view) -> None:
+    if not hasattr(view, "_v117_show_advanced"):
+        view._v117_show_advanced = False
 
 
 def _sections_for(module) -> tuple[v116.SectionSpec, ...]:
@@ -178,12 +186,27 @@ async def _current_value(view, module, section) -> str | None:
 
 
 async def _home_embed(view) -> discord.Embed:
+    _ensure_home_state(view)
+    advanced = "affichés" if view._v117_show_advanced else "masqués"
     embed = discord.Embed(
         title="Configurer SentriX",
-        description="Choisis ce que tu veux configurer. SentriX te guide ensuite **une étape à la fois**.",
+        description=(
+            "**Parcours essentiel**\n"
+            "1. Sécurité\n"
+            "2. Logs\n"
+            "3. Tickets\n"
+            "4. Bienvenue & Départ\n\n"
+            "Choisis uniquement ce que tu veux modifier. "
+            "**Aucun salon, rôle ou réglage n’est choisi ou créé automatiquement.**"
+        ),
         colour=v4._CONFIG_MODULE.SETUP_COLOR_MAIN,
     )
-    embed.set_footer(text="SentriX • Setup guidé")
+    embed.add_field(
+        name="Réglages avancés",
+        value=f"Ils sont actuellement **{advanced}**. Utilise le bouton en dessous pour les afficher ou les masquer.",
+        inline=False,
+    )
+    embed.set_footer(text="SentriX • Setup manuel guidé")
     return embed
 
 
@@ -192,9 +215,9 @@ async def _summary_embed(view, module, sections) -> discord.Embed:
     for section in sections:
         value = await _current_value(view, module, section)
         lines.append(f"• **{section.label}**" + (f" — {value}" if value else ""))
-    lines.extend(["", "Tu peux revenir en arrière ou terminer."])
+    lines.extend(["", "Tu peux revenir en arrière, passer à l’étape suivante ou retourner à l’accueil."])
     embed = discord.Embed(title=f"{module.label} — Terminé", description="\n".join(lines), colour=v4._CONFIG_MODULE.SETUP_COLOR_SUCCESS)
-    embed.set_footer(text="Précédent • Terminer • Accueil")
+    embed.set_footer(text="SentriX • Setup manuel • Précédent • Accueil")
     return embed
 
 
@@ -207,7 +230,7 @@ async def _step_embed(view) -> discord.Embed:
     if current:
         lines.extend(["", f"Actuel : {current}"])
     embed = discord.Embed(title=module.label, description="\n".join(lines), colour=v4._CONFIG_MODULE.SETUP_COLOR_MAIN)
-    embed.set_footer(text="Précédent • Suivant • Accueil")
+    embed.set_footer(text="SentriX • Setup manuel • Précédent • Suivant • Accueil")
     return embed
 
 
@@ -446,17 +469,63 @@ def _add_native_picker(view, section) -> bool:
 
 
 def _render_home(view) -> None:
+    _ensure_home_state(view)
     view.clear_items()
-    select = discord.ui.Select(
-        placeholder="Que veux-tu configurer ?",
-        options=[discord.SelectOption(label=module.label, value=module.key, description=module.description[:100]) for module in _home_modules()],
+
+    essential = discord.ui.Select(
+        placeholder="Essentiel — choisir une section",
+        options=[
+            discord.SelectOption(
+                label=module.label,
+                value=module.key,
+                description=module.description[:100],
+            )
+            for module in _home_modules(ESSENTIAL_MODULE_KEYS)
+        ],
         row=0,
     )
-    select.callback = _module_select_callback(view, select)
-    view.add_item(select)
+    essential.callback = _module_select_callback(view, essential)
+    view.add_item(essential)
+
+    toggle = discord.ui.Button(
+        label="Masquer les réglages avancés" if view._v117_show_advanced else "Afficher les réglages avancés",
+        style=discord.ButtonStyle.secondary,
+        row=1,
+    )
+    async def toggle_callback(interaction: discord.Interaction):
+        view._v117_show_advanced = not view._v117_show_advanced
+        view.render_page()
+        await view.persist_session()
+        await view._refresh_message(interaction)
+    toggle.callback = toggle_callback
+    view.add_item(toggle)
+
+    if view._v117_show_advanced:
+        advanced = discord.ui.Select(
+            placeholder="Avancé — choisir une section",
+            options=[
+                discord.SelectOption(
+                    label=module.label,
+                    value=module.key,
+                    description=module.description[:100],
+                )
+                for module in _home_modules(ADVANCED_MODULE_KEYS)
+            ],
+            row=2,
+        )
+        advanced.callback = _module_select_callback(view, advanced)
+        view.add_item(advanced)
+
     button = v4._CONFIG_MODULE.SetupNavButton
-    view.add_item(button("restart", view.message_id, label="Smart Setup", style=discord.ButtonStyle.success, row=1))
-    view.add_item(button("summary", view.message_id, label="Diagnostic", style=discord.ButtonStyle.secondary, row=1))
+    view.add_item(
+        button(
+            "summary",
+            view.message_id,
+            label="Diagnostic",
+            style=discord.ButtonStyle.secondary,
+            row=3,
+        )
+    )
 
 
 def _render_step(view) -> None:
@@ -546,4 +615,4 @@ def install_for_bot(bot) -> None:
     logger.info("SentriX Setup V117 actif : configuration guidée intégrée, sans redirection vers des commandes externes.")
 
 
-__all__ = ["HOME_MODULE_KEYS", "GUIDED_SECTIONS", "install_for_bot"]
+__all__ = ["ESSENTIAL_MODULE_KEYS", "ADVANCED_MODULE_KEYS", "HOME_MODULE_KEYS", "GUIDED_SECTIONS", "install_for_bot"]
