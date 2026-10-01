@@ -1032,7 +1032,7 @@ class BotAllInOne(commands.Bot):
             return
 
         if isinstance(error, BotPermissionError):
-            return await ctx.send(f"Permission manquante : \`{error.message}\`.")
+            return await ctx.send(f"Permission manquante : `{error.message}`.")
 
         if isinstance(error, BotBlacklistedError):
             return await ctx.send("Tu ne peux pas utiliser SentriX actuellement.")
@@ -1042,40 +1042,40 @@ class BotAllInOne(commands.Bot):
 
         if isinstance(error, commands.CommandOnCooldown):
             return await ctx.send(
-                f"Réessaie dans \`{cooldown_text(error.retry_after)}\`."
+                f"Réessaie dans `{cooldown_text(error.retry_after)}`."
             )
 
         if isinstance(error, commands.MissingPermissions):
             perms = format_permissions(error.missing_permissions)
-            return await ctx.send(f"Permission(s) manquante(s) : \`{perms}\`.")
+            return await ctx.send(f"Permission(s) manquante(s) : `{perms}`.")
 
         if isinstance(error, commands.BotMissingPermissions):
             perms = format_permissions(error.missing_permissions)
-            return await ctx.send(f"SentriX n'a pas la permission : \`{perms}\`.")
+            return await ctx.send(f"SentriX n'a pas la permission : `{perms}`.")
 
         if isinstance(error, commands.UserNotFound):
-            return await ctx.send(f"Utilisateur introuvable : \`{error.argument}\`.")
+            return await ctx.send(f"Utilisateur introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.MemberNotFound):
-            return await ctx.send(f"Membre introuvable : \`{error.argument}\`.")
+            return await ctx.send(f"Membre introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.ChannelNotFound):
-            return await ctx.send(f"Salon introuvable : \`{error.argument}\`.")
+            return await ctx.send(f"Salon introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.RoleNotFound):
-            return await ctx.send(f"Rôle introuvable : \`{error.argument}\`.")
+            return await ctx.send(f"Rôle introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.MissingRequiredArgument):
             usage = command_usage(ctx)
-            text = f"Il manque \`{error.param.name}\`."
+            text = f"Il manque `{error.param.name}`."
             if usage:
-                text += f" Utilise \`{usage}\`."
+                text += f" Utilise `{usage}`."
             return await ctx.send(text)
 
         if isinstance(error, commands.BadArgument):
             usage = command_usage(ctx)
             if usage:
-                return await ctx.send(f"Valeur invalide. Utilise \`{usage}\`.")
+                return await ctx.send(f"Valeur invalide. Utilise `{usage}`.")
             return await ctx.send("Valeur invalide. Vérifie puis réessaie.")
 
         if isinstance(error, discord.Forbidden):
@@ -1115,7 +1115,7 @@ class BotAllInOne(commands.Bot):
             kernel.exit_runtime(module_name)
 
         if isinstance(original, BotPermissionError):
-            message = f"Permission manquante : \`{original.message}\`."
+            message = f"Permission manquante : `{original.message}`."
         elif isinstance(original, BotBlacklistedError):
             message = "Tu ne peux pas utiliser SentriX actuellement."
         elif isinstance(original, AppModuleTemporarilyUnavailable) or isinstance(
@@ -1123,13 +1123,13 @@ class BotAllInOne(commands.Bot):
         ):
             message = "Cette fonction est temporairement indisponible. Merci de réessayer."
         elif isinstance(error, discord.app_commands.CommandOnCooldown):
-            message = f"Réessaie dans \`{cooldown_text(error.retry_after)}\`."
+            message = f"Réessaie dans `{cooldown_text(error.retry_after)}`."
         elif isinstance(error, discord.app_commands.MissingPermissions):
             perms = format_permissions(error.missing_permissions)
-            message = f"Permission(s) manquante(s) : \`{perms}\`."
+            message = f"Permission(s) manquante(s) : `{perms}`."
         elif isinstance(error, discord.app_commands.BotMissingPermissions):
             perms = format_permissions(error.missing_permissions)
-            message = f"SentriX n'a pas la permission : \`{perms}\`."
+            message = f"SentriX n'a pas la permission : `{perms}`."
         elif isinstance(
             error,
             (
