@@ -251,8 +251,10 @@ def install(bot: commands.Bot) -> None:
             return
         command = getattr(ctx, "command", None)
         name = getattr(command, "qualified_name", "inconnue")
+        module_name = _prefix_module_name(ctx)
         _record_command_duration(bot, str(name), time.perf_counter() - started, failed=False)
-        _record_module_runtime_success(bot, _prefix_module_name(ctx))
+        _record_module_runtime_success(bot, module_name)
+        _exit_module_runtime(bot, module_name)
 
     async def prefix_error(ctx: commands.Context, error: commands.CommandError):
         key = _command_key(ctx)
@@ -260,9 +262,11 @@ def install(bot: commands.Bot) -> None:
         started = state["prefix_starts"].pop(key, None) if key is not None else None
         name = getattr(getattr(ctx, "command", None), "qualified_name", "inconnue")
         original = getattr(error, "original", error)
+        module_name = _prefix_module_name(ctx)
         if started is not None:
             _record_command_duration(bot, str(name), time.perf_counter() - started, failed=True)
-        _record_module_runtime_error(bot, _prefix_module_name(ctx), original)
+        _record_module_runtime_error(bot, module_name, original)
+        _exit_module_runtime(bot, module_name)
         record_error(
             bot,
             command=str(name),
