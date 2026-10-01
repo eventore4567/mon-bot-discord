@@ -489,6 +489,7 @@ class BotAllInOne(commands.Bot):
             self,
             self.module_kernel,
             locked=RUNTIME_LOCKED_EXTENSIONS,
+            operation_timeout_seconds=MODULE_LOAD_TIMEOUT_SECONDS,
         )
         self.module_supervisor = ModuleSupervisor(
             set(EXTENSIONS) - set(RUNTIME_LOCKED_EXTENSIONS)
