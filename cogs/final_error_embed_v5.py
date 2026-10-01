@@ -623,24 +623,26 @@ def install(bot: commands.Bot) -> None:
                 logger.debug("Explication du refus impossible.", exc_info=True)
         try:
             if texte is not None:
-                duree = _DUREE_COMMANDE_INTROUVABLE if isinstance(base, commands.CommandNotFound) else _DUREE_AFFICHAGE
-                if getattr(ctx, "_sentrix_response_sent", False):
-                    # Une réponse est déjà partie : on la remplace par le texte
-                    # plutôt que d'empiler un second message dans le salon.
-                    await _texte_prefix_send(ctx, texte, supprimer_apres=duree)
-                    return
-                await _raw_prefix_send(
-                    ctx, _panneau_erreur_simple(ctx, error, texte), supprimer_apres=duree
+                duree = (
+                    _DUREE_COMMANDE_INTROUVABLE
+                    if isinstance(base, commands.CommandNotFound)
+                    else _DUREE_AFFICHAGE
                 )
+                await _texte_prefix_send(ctx, texte, supprimer_apres=duree)
                 return
-            panel = _prefix_error_panel(ctx, error)
+
             if getattr(ctx, "_sentrix_response_sent", False):
                 logger.warning(
                     "Erreur après réponse pour +%s : réponse déjà envoyée conservée.",
                     getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
                 )
                 return
-            await _raw_prefix_send(ctx, panel)
+
+            await _texte_prefix_send(
+                ctx,
+                "Une erreur est survenue. Merci de réessayer.",
+                supprimer_apres=_DUREE_AFFICHAGE,
+            )
         except Exception:
             logger.exception("V5 : impossible d’envoyer l’erreur préfixée en embed natif.")
 
@@ -663,13 +665,10 @@ def install(bot: commands.Bot) -> None:
             if texte is not None:
                 await _texte_slash_send(interaction, texte)
                 return
-            panel = _slash_error_panel(
-                error,
-                command=getattr(command, "qualified_name", None),
-                guild_id=interaction.guild_id,
-                user_id=getattr(interaction.user, "id", None),
+            await _texte_slash_send(
+                interaction,
+                "Une erreur est survenue. Merci de réessayer.",
             )
-            await _raw_slash_send(interaction, panel)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):
             logger.exception("V5 : impossible d’envoyer l’erreur slash en embed natif.")
 
@@ -684,9 +683,16 @@ def install(bot: commands.Bot) -> None:
         async def component_error(self, interaction, error, item=None):
             logger.exception("V5 : erreur dans un composant.", exc_info=error)
             try:
-                await _raw_slash_send(interaction, _component_error_panel(item))
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException,
-                    discord.ClientException):
+                await _texte_slash_send(
+                    interaction,
+                    "Une erreur est survenue. Merci de réessayer.",
+                )
+            except (
+                discord.NotFound,
+                discord.Forbidden,
+                discord.HTTPException,
+                discord.ClientException,
+            ):
                 logger.exception("V5 : impossible d'afficher l'erreur de composant.")
 
         async def view_error(self, interaction, error, item):
