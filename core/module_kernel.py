@@ -18,6 +18,7 @@ class ModuleState:
     status: str = "pending"
     load_ms: float | None = None
     error: str | None = None
+    last_error: str | None = None
     attempts: int = 0
     reloads: int = 0
     last_operation: str = "startup"
@@ -42,6 +43,7 @@ class ModuleState:
         else:
             self.status = "failed"
             self.error = type(error).__name__
+            self.last_error = self.error
 
 
 class ModuleKernel:
@@ -62,6 +64,16 @@ class ModuleKernel:
 
     def failed(self, name: str, error: BaseException) -> None:
         self._states[name].finish(error=error)
+
+    def recovered(self, name: str, error: BaseException) -> None:
+        """Une opération a échoué mais l'ancienne extension reste disponible."""
+        state = self._states[name]
+        if state._started_at is not None:
+            state.load_ms = round((time.perf_counter() - state._started_at) * 1000, 2)
+        state._started_at = None
+        state.status = "loaded"
+        state.error = None
+        state.last_error = type(error).__name__
 
     def unloaded(self, name: str) -> None:
         state = self._states[name]
@@ -98,6 +110,7 @@ class ModuleKernel:
                     "critical": row.critical,
                     "load_ms": row.load_ms,
                     "error": row.error,
+                    "last_error": row.last_error,
                     "attempts": row.attempts,
                     "reloads": row.reloads,
                     "last_operation": row.last_operation,
