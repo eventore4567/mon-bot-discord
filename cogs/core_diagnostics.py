@@ -129,12 +129,29 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
             slash_roots = len(self.bot.tree.get_commands())
         except Exception:
             slash_roots = 0
+        kernel = getattr(self.bot, "module_kernel", None)
+        kernel_snapshot = kernel.snapshot() if kernel is not None and hasattr(kernel, "snapshot") else None
+        optional_failed = []
+        if isinstance(kernel_snapshot, dict):
+            optional_failed = [
+                item["name"] for item in kernel_snapshot.get("failed", [])
+                if not item.get("critical")
+            ]
+            if optional_failed:
+                problems.append(f"{len(optional_failed)} module(s) optionnel(s) isolé(s) en échec")
+
         discord_section = [
             panels.Ligne("Connecté", "Oui" if ready else "Non"),
             panels.Ligne("Serveurs", str(len(self.bot.guilds))),
             panels.Ligne("Extensions", f"{loaded} chargées" + (f" · {len(manquantes)} manquante(s)" if manquantes else "")),
+            panels.Ligne("Noyau modules", (
+                f"{kernel_snapshot.get('loaded', 0)}/{kernel_snapshot.get('expected', 0)} chargés"
+                if kernel_snapshot else "indisponible"
+            )),
             panels.Ligne("Commandes", f"{len(list(self.bot.walk_commands()))} texte · {slash_roots} racines slash"),
         ]
+        if optional_failed:
+            discord_section.append(panels.Ligne("Optionnels isolés", ", ".join(optional_failed[:5])))
 
         # TÂCHES DE FOND
         loops_running, loops_stopped = _cog_loops(self.bot)
