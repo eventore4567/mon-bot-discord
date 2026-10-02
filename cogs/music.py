@@ -626,7 +626,7 @@ class Music(commands.Cog, name="Music"):
         track = queue.current
         if track is None:
             return panels.Panneau(
-                titre="SentriX Music",
+                titre="Musique",
                 sous_titre="Aucune musique n'est en lecture.",
                 kind="musique",
                 sections=[
