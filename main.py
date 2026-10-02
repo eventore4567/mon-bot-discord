@@ -841,6 +841,42 @@ class BotAllInOne(commands.Bot):
         try:
             synced = await self.tree.sync()
             logger.info(f"{len(synced)} commandes slash synchronisées globalement.")
+
+            # Phase 12 : ne pas confondre le tree local avec ce que Discord vient
+            # réellement d'accepter. tree.sync() renvoie les AppCommand distantes ;
+            # on compare donc les deux surfaces et on conserve le rapport pour le
+            # diagnostic runtime/dashboard.
+            from utils.discord_command_publish_audit import audit_published_commands
+
+            publish_audit = audit_published_commands(self.tree, synced)
+            self._sentrix_discord_publish_audit = publish_audit
+            logger.info(
+                "Audit slash Discord post-sync : local=%s distant=%s manquantes=%s inattendues=%s.",
+                len(publish_audit.local_paths),
+                len(publish_audit.remote_paths),
+                len(publish_audit.missing_paths),
+                len(publish_audit.unexpected_paths),
+            )
+            if publish_audit.musique_paths:
+                logger.info(
+                    "Discord slash /musique publié : %s",
+                    ", ".join(f"/{path}" for path in publish_audit.musique_paths),
+                )
+            else:
+                logger.error(
+                    "Audit slash Discord : /musique absent de la surface renvoyée par sync()."
+                )
+            if publish_audit.legacy_music_paths:
+                logger.error(
+                    "Audit slash Discord : ancienne surface /music encore publiée : %s",
+                    ", ".join(f"/{path}" for path in publish_audit.legacy_music_paths),
+                )
+            if publish_audit.missing_paths or publish_audit.unexpected_paths:
+                logger.warning(
+                    "Écart tree local/distant après sync : manquantes=%s | inattendues=%s",
+                    ", ".join(publish_audit.missing_paths[:20]) or "aucune",
+                    ", ".join(publish_audit.unexpected_paths[:20]) or "aucune",
+                )
         except Exception:
             logger.error(f"Échec de la synchronisation des commandes slash :\n{traceback.format_exc()}")
 
