@@ -64,7 +64,8 @@ def test_clear_is_forced_to_raw_text_everywhere():
     # / éphémère sans réintroduire d'embed ni dupliquer le code Discord.
     assert "panels.texte_court(ctx.channel, texte, supprimer_apres=4)" in block
     assert "panels.texte_court(ctx, texte, ephemere=True)" in block
-    assert "ctx.channel.send(" not in block
+    assert "ctx.channel.send(texte" not in block
+    assert "edit_original_response(content=texte)" not in block
     assert "embeds." not in block
     assert '"clear"' in policy.split("PLAIN_ROOTS", 1)[1].split("\n", 2)[0]
 
