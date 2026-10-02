@@ -139,6 +139,69 @@ def format_number(value) -> str:
     return f"{value:,}".replace(",", " ")
 
 
+#: Corps de la barre. Ni « █░ », qui donne un damier pixelisé, ni des traits
+#: si fins qu'on ne voit plus le remplissage.
+PLEIN, VIDE = "▰", "▱"
+
+
+def barre_progression(
+    courant: float,
+    maximum: float,
+    *,
+    longueur: int = 10,
+    en_cours: bool = True,
+) -> str:
+    """Barre de progression SentriX, avec un curseur animé à la frontière.
+
+    L'animation vient d'une icône animée posée À l'endroit où le remplissage
+    s'arrête — pas d'une réédition du message. Rééditer toutes les secondes
+    pour faire bouger une barre coûte une requête Discord par seconde et par
+    panneau ; un curseur animé bouge tout seul, côté client, indéfiniment.
+
+    Trois états, parce qu'ils ne disent pas la même chose :
+
+    - rien de fait : aucun curseur, la barre est vide et c'est l'information ;
+    - en cours : le curseur anime la frontière, on voit que ça avance ;
+    - terminé : une coche remplace le curseur, et il n'y a plus rien à animer.
+
+    ``en_cours=False`` sert aux barres qui MESURENT au lieu de suivre — un
+    score de configuration, une jauge de niveau. Animer une valeur figée
+    laisserait croire qu'elle bouge.
+
+    Sans les icônes SentriX, la barre reste exactement celle d'aujourd'hui.
+    """
+    from utils.sentrix_emojis import emoji as _icone
+
+    def icone_de_barre(nom: str) -> str:
+        """L'icône, ou rien — jamais le repli TEXTE.
+
+        ``emoji()`` rend « … » quand « loading » n'est pas disponible, ce qui
+        est juste dans une phrase et faux dans une barre : le curseur
+        afficherait des points de suspension au milieu des blocs. Ici, seule
+        une vraie icône convient ; sinon on garde le bloc plein.
+        """
+        rendu = _icone(nom)
+        return rendu if rendu.startswith("<") else ""
+
+    longueur = max(4, min(30, int(longueur)))
+    if maximum <= 0:
+        return f"{VIDE * longueur}  0 %"
+    ratio = max(0.0, min(float(courant) / float(maximum), 1.0))
+    pleins = round(ratio * longueur)
+    pourcent = round(ratio * 100)
+
+    if pleins >= longueur:
+        fin = icone_de_barre("success") or PLEIN
+        return f"{PLEIN * (longueur - 1)}{fin}  {pourcent} %"
+    if pleins <= 0:
+        return f"{VIDE * longueur}  {pourcent} %"
+
+    # Le curseur occupe la case de frontière : la barre garde donc sa longueur
+    # visuelle, elle ne s'allonge pas d'un cran dès qu'elle démarre.
+    curseur = (icone_de_barre("loading") if en_cours else "") or PLEIN
+    return f"{PLEIN * (pleins - 1)}{curseur}{VIDE * (longueur - pleins)}  {pourcent} %"
+
+
 def progress_bar(current: float, maximum: float, length: int = 10, filled: str = "▰", empty: str = "▱") -> str:
     """Barre moderne lisible même lorsque la politique sans emoji est active."""
     def decorative(value: str) -> bool:
@@ -149,8 +212,16 @@ def progress_bar(current: float, maximum: float, length: int = 10, filled: str =
             for char in value
         )
 
-    filled = filled if filled and not decorative(filled) else "▰"
-    empty = empty if empty and not decorative(empty) else "▱"
+    filled = filled if filled and not decorative(filled) else PLEIN
+    empty = empty if empty and not decorative(empty) else VIDE
+
+    # Glyphes par défaut : on passe par la barre premium, donc tous les
+    # appelants historiques gagnent le curseur animé sans rien changer.
+    # Glyphes personnalisés : l'appelant a une raison de les vouloir, on les
+    # respecte et on ne pose pas de curseur qui jurerait avec.
+    if filled == PLEIN and empty == VIDE:
+        return barre_progression(current, maximum, longueur=length)
+
     if maximum <= 0:
         return f"{empty * length}  0 %"
     ratio = max(0.0, min(current / maximum, 1.0))
