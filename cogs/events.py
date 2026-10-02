@@ -267,7 +267,9 @@ class Events(commands.Cog, name="Events"):
         design = await self.bot.db.get_design_settings(ctx.guild.id)
         style = design_system.CATEGORY_STYLES["giveaways"]
         e = design_system.create_embed(
-            title=f"{style['emoji']} GIVEAWAY",
+            # Pas de capitales : tous les autres titres SentriX sont en casse
+            # normale, et un seul écran qui crie casse la cohérence.
+            title=f"{style['emoji']} Giveaway",
             description=f"**Prix :** {prix}\n\nCliquez sur le bouton ci-dessous pour participer !",
             colour=design.get("primary_color", style["colour"]),
             footer=design.get("footer"),
