@@ -1,4 +1,4 @@
-"""SentriX V73 — Control Center Components V2.
+"""SentriX V73 — interface Setup Components V2.
 
 Cette couche remplace uniquement le rendu de +setup et /setup. Les réglages, callbacks,
 permissions, migrations et moteurs métier restent ceux du Setup final déjà installé
@@ -20,7 +20,7 @@ from . import setup_ticket_autoconfig_v72 as v72
 
 logger = logging.getLogger("bot.setup-components-v73")
 
-RUNTIME_MARKER = "Control Center Components V2 V73"
+RUNTIME_MARKER = "SentriX Setup Components V2 V73"
 # Liseré des conteneurs de +setup et +help, et de dix-neuf autres écrans.
 #
 # Il valait 0x6D5DFB — le violet. Jayden : « enlève le style bleu violet, je
@@ -53,7 +53,7 @@ CATEGORY_META: dict[str, tuple[str, str, str]] = {
     "welcome": (
         "👋",
         "Bienvenue",
-        "Message d’arrivée, salon et rôle automatique.",
+        "Message d’arrivée, salon et rôle d’arrivée choisi.",
     ),
     "goodbye": (
         "🚪",
@@ -97,7 +97,7 @@ CATEGORY_META: dict[str, tuple[str, str, str]] = {
     ),
 }
 
-# Ordre pensé comme le panneau de référence : protection -> communauté -> services.
+# Ordre SentriX : protection -> communauté -> services.
 CATEGORY_ORDER = (
     "moderation",
     "security",
@@ -383,7 +383,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# Configuration de SentriX\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX\n"
                     f"**Bienvenue dans le panneau de configuration de SentriX !** "
                     f"Sélectionnez une catégorie pour configurer les fonctionnalités du bot sur **{self.guild.name}**.\n"
                     f"{active}/{len(CATEGORY_ORDER)} modules actifs"
@@ -449,7 +449,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    f"# {emoji} {label}\n{description}\nConfiguration sur **{self.guild.name}**."
+                    f"-# SENTRIX CORE · Configuration · setup\n# {emoji} {label}\n{description}\nConfiguration sur **{self.guild.name}**."
                 ),
                 accessory=_thumbnail(self.bot),
             )
@@ -476,7 +476,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
 
         if movable:
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay("### Réglages"))
+            container.add_item(discord.ui.TextDisplay("### 01 · Réglages"))
             self._append_controls(container, movable)
         else:
             container.add_item(discord.ui.Separator())
@@ -575,7 +575,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         self.stop()
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
-        logger.error("Erreur Control Center V73", exc_info=(type(error), error, error.__traceback__))
+        logger.error("Erreur SentriX Setup V73", exc_info=(type(error), error, error.__traceback__))
         try:
             panel = embeds.error("Une erreur est survenue dans le panneau de configuration SentriX.")
             if interaction.response.is_done():
