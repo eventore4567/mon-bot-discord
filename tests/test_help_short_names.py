@@ -161,3 +161,14 @@ def test_final_rebuild_removes_legacy_help_but_keeps_aide():
     assert '"aide"' in direct_line
     assert '"aide"' in preserved_line
     assert '"help"' not in preserved_line
+
+
+
+def test_legacy_help_is_removed_after_all_prepare_layers_before_audit():
+    source = (ROOT / "sentrix_v95_runtime.py").read_text(encoding="utf-8")
+    prepare = source.index("await prepare_bot(client)")
+    cleanup = source.index("_remove_legacy_public_roots(self)", prepare)
+    audit = source.index("issues = assert_registry_clean(client)", cleanup)
+    sync = source.index("return await _ORIGINAL_SYNC(self, *args, **kwargs)", audit)
+
+    assert prepare < cleanup < audit < sync
