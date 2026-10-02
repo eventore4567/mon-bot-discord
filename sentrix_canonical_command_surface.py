@@ -145,6 +145,7 @@ BUCKETS = {
     ("moderation", "emoji"): "emojis", ("moderation", "general"): "outils",
     ("security", "lists"): "listes", ("security", "backup"): "sauvegarde",
     ("security", "general"): "outils", ("config", "commands"): "commandes",
+    ("config", "general"): "reglages", ("utility", "general"): "pratiques",
     ("config", "channels"): "salons", ("config", "levels"): "niveaux",
     ("economy", "wallet"): "portefeuille", ("economy", "rewards"): "recompenses",
     ("economy", "shop"): "boutique", ("economy", "ranking"): "classement",
