@@ -61,14 +61,7 @@ def _gamble_amount_contract_ok(command: commands.Command) -> bool:
         return False
 
     callback = getattr(command, "callback", None)
-    code = getattr(callback, "__code__", None)
-    names = set(getattr(code, "co_names", ()) or ())
-    constants = " ".join(
-        str(value)
-        for value in (getattr(code, "co_consts", ()) or ())
-        if isinstance(value, str)
-    ).casefold()
-    return "_parse_amount" in names and "all" in constants
+    return bool(getattr(callback, "_sentrix_all_amount_parser", False))
 
 
 def _install_negative_creator_cache(bot: commands.Bot) -> None:
