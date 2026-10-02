@@ -175,6 +175,83 @@ EVENT_EMOJI: dict[str, str] = {
 }
 DEFAULT_EVENT_EMOJI = "📋"
 
+# ---------------------------------------------------------------------------
+# Icônes SentriX des cartes Trace
+#
+# Les emojis Unicode ci-dessus restent le REPLI : ils s'affichent tant qu'une
+# icône n'est pas téléversée, et pour les 40 et quelques événements que le
+# pack ne couvre pas encore. Le remplacement est donc progressif, sans trou.
+# ---------------------------------------------------------------------------
+
+#: Événements dont le nom ne correspond pas directement à une icône.
+#: « member_ban » doit trouver « sentrix_ban », pas « sentrix_member_ban ».
+ICONES_EVENEMENTS: dict[str, str] = {
+    "member_kick": "kick",
+    "member_ban": "ban",
+    "member_unban": "unban",
+    "member_timeout": "timeout",
+    "member_untimeout": "unmute",
+    "member_warn": "warn",
+    "member_mute": "mute",
+    "member_unmute": "unmute",
+    "member_remove": "member_leave",
+    "message_bulk": "trash",
+    "ticket_release": "ticket_release",
+    "ticket_delete": "trash",
+    "ticket_transcript": "transcript",
+    # Donner ou retirer un rôle est classé dans « members » : sans ces deux
+    # lignes, la famille rendait l'icône « utilisateur » alors que l'action
+    # porte sur un rôle.
+    "role_add": "role",
+    "role_remove": "role",
+    "member_roles": "role",
+}
+
+#: Repli par famille, quand l'événement lui-même n'a pas d'icône. Les
+#: catégories sont au pluriel, les icônes au singulier : une correspondance
+#: automatique échouerait silencieusement sur presque toutes.
+ICONES_CATEGORIES: dict[str, str] = {
+    "automod": "security",
+    "channels": "channel",
+    "files": "file",
+    "members": "user",
+    "messages": "message",
+    "moderation": "mod",
+    "raid": "anti_raid",
+    "resources": "settings",
+    "roles": "role",
+    "server": "settings",
+    "soundboard": "voice",
+    "spam": "antispam",
+    "tickets": "ticket",
+    "voice": "voice",
+}
+
+
+def marqueur_evenement(evenement: str, *, defaut: str = "") -> str:
+    """Icône SentriX de cet événement, ou son emoji Unicode de repli.
+
+    Quatre niveaux, du plus précis au plus général :
+
+    1. ``sentrix_<evenement>`` — « message_delete » trouve son icône seul ;
+    2. ``ICONES_EVENEMENTS`` — pour « member_ban » → « ban » ;
+    3. ``ICONES_CATEGORIES`` — toute la famille partage une icône ;
+    4. l'emoji Unicode existant, inchangé.
+
+    Rend toujours quelque chose d'affichable : tant que la synchronisation
+    n'a pas eu lieu, c'est le niveau 4, et la carte reste identique à avant.
+    """
+    from utils.sentrix_emojis import emoji as _icone
+
+    evenement = str(evenement or "")
+    for candidat in (evenement, ICONES_EVENEMENTS.get(evenement, "")):
+        if candidat and (rendu := _icone(candidat)):
+            return rendu
+    famille = ICONES_CATEGORIES.get(category_for(evenement), "")
+    if famille and (rendu := _icone(famille)):
+        return rendu
+    return defaut or EVENT_EMOJI.get(evenement, DEFAULT_EVENT_EMOJI)
+
 LOGS = LOG_REGISTRY
 
 
@@ -257,7 +334,8 @@ def legacy_to_category(value: str) -> str | None:
 
 __all__ = [
     "CATEGORIES", "CATEGORY_META", "CATEGORY_ORDER", "DEFAULT_CATEGORY",
-    "DEFAULT_EVENT_EMOJI", "EVENT_EMOJI", "LEGACY_CATEGORY_KEYS", "LEGACY_EVENT_ALIASES",
+    "DEFAULT_EVENT_EMOJI", "EVENT_EMOJI", "ICONES_CATEGORIES",
+    "ICONES_EVENEMENTS", "marqueur_evenement", "LEGACY_CATEGORY_KEYS", "LEGACY_EVENT_ALIASES",
     "LOG_REGISTRY", "LOGS",
     "canonical_event_type", "category_for", "legacy_to_category", "resolve",
 ]

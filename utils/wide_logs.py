@@ -23,6 +23,7 @@ from utils.log_banners import COLORS, get_banner
 from utils.log_categories import (
     CATEGORIES,
     DEFAULT_EVENT_EMOJI,
+    marqueur_evenement,
     EVENT_EMOJI,
     canonical_event_type,
     category_for,
@@ -894,7 +895,10 @@ def _trace_meta(event_type: str, *, emoji: str = "") -> str:
     event = canonical_event_type(event_type)
     category = category_for(event)
     category_label = CATEGORIES.get(category, category.replace("_", " ").title())
-    marker = (emoji or EVENT_EMOJI.get(event, DEFAULT_EVENT_EMOJI)).strip()
+    # L'icône SentriX d'abord, l'emoji Unicode en repli : tant que la
+    # synchronisation n'a pas eu lieu, la carte reste exactement celle
+    # d'aujourd'hui.
+    marker = (emoji or marqueur_evenement(event)).strip()
     prefix = f"{marker} " if marker else ""
     return f"-# SENTRIX TRACE · {prefix}{category_label} · {_trace_code(event)}"
 
