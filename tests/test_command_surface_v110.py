@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import sentrix_command_surface_v110 as surface
 
 
@@ -70,3 +72,28 @@ def test_collision_suffix_is_readable() -> None:
 def test_me_and_profile_are_not_public_direct_slash_commands() -> None:
     assert "profile" not in surface.STANDARD_DIRECT_SLASH
     assert "me" not in surface.STANDARD_DIRECT_SLASH.values()
+
+
+
+def test_grouped_command_is_not_hidden_only_because_simple_name_is_merged(monkeypatch) -> None:
+    monkeypatch.setattr(surface, "_ORIGINAL_SHOULD_EXPOSE", lambda _command: True)
+
+    music_queue = SimpleNamespace(
+        qualified_name="music queue",
+        name="queue",
+        root_parent=object(),
+    )
+    music_resume = SimpleNamespace(
+        qualified_name="music resume",
+        name="resume",
+        root_parent=object(),
+    )
+    music_clear = SimpleNamespace(
+        qualified_name="music clear",
+        name="clear",
+        root_parent=object(),
+    )
+
+    assert surface._compact_should_expose(music_queue) is True
+    assert surface._compact_should_expose(music_resume) is True
+    assert surface._compact_should_expose(music_clear) is True
