@@ -1224,6 +1224,7 @@ class Economy(commands.Cog, name="Economy"):
 # Le wrapper prévoit déjà sa propre sortie : il ne remplace rien si le callback est
 # marqué atomique. On pose le marqueur plutôt que de supprimer son code.
 Economy.gamble.callback._sentrix_atomic = True
+Economy.gamble.callback._sentrix_all_amount_parser = True
 
 
 async def setup(bot: commands.Bot):
