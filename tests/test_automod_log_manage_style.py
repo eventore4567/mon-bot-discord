@@ -42,7 +42,7 @@ def test_all_automod_logs_use_manage_title_and_main_fields():
         "Salon",
         "Message",
     ]
-    assert dict(fields)["Protection"] == "Anti-liens"
+    assert dict(fields)["Protection"] == "Liens externes"
     assert dict(fields)["Sanction"] == "Suppression du message"
     assert "https://example.com/test" in dict(fields)["Message"]
 
