@@ -22,21 +22,18 @@ def test_final_renderer_uses_short_unknown_command_lifetime():
     assert "_texte_prefix_send(ctx, texte, supprimer_apres=duree)" in source
 
 
-def test_official_unknown_reply_expires():
-    """Ce qui compte est la DURÉE, pas le transport.
+def test_official_legacy_unknown_layer_delegates_without_replying():
+    """Les couches historiques ne doivent plus répondre à CommandNotFound.
 
-    Ce test épinglait l'appel exact ``await _send_plain(ctx, text,
-    delete_after=5)``. Il interdisait donc de changer l'apparence du message
-    sans le casser — et c'est ce qui a changé le 29/09/2026 : une commande
-    introuvable rend maintenant un panneau avec sa bannière, comme la branche
-    « argument manquant » juste à côté, au lieu d'une ligne de texte nu. La
-    durée, elle, n'a pas bougé, et c'est elle que ce fichier protège.
+    sentrix_product_update est installé en dernier et possède la réponse réelle ;
+    garder une réponse ici recréerait le vieux doublon +hyelp.
     """
     source = _read("cogs/error_experience_v3.py")
     debut = source.index("isinstance(base, commands.CommandNotFound)")
     fin = source.index("isinstance(base, commands.MissingRequiredArgument)")
     branche = source[debut:fin]
-    assert "delete_after=5" in branche
+    assert "return" in branche
+    assert "delete_after=5" not in branche
     assert '"delete_after": float(delete_after)' in source
 
 

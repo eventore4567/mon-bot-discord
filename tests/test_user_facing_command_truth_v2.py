@@ -116,10 +116,13 @@ def test_setup_visible_text_prefers_current_centers():
 
 def test_ticket_hub_does_not_send_users_to_pruned_manual_commands():
     source = _read("cogs/tickets.py")
+    update = _read("sentrix_product_update.py")
     assert "Panel **{name_input.value}** créé" in source
     assert "PanelEditView(self.cog, panel_id, inter.user.id)" in source
-    assert "Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`" in source
-    assert "Les anciennes commandes séparées ne sont plus proposées" not in source or "+ticketpanel" not in source[source.find("async def ticketsetup"):source.find("# ---------------------------------------------------------------- COMMANDES : PANELS")]
+    assert 'label="Ajouter un type de ticket"' in source
+    assert "PanelAddTypeModal(self.cog, self.panel_id, interaction.guild.id)" in source
+    assert "Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`" not in source
+    assert '"ticket_setup_dashboard_only": True' in update
     assert "Ajouter une question" in source
     assert "FormQuestionModal(self.cog, self.type_id)" in source
 

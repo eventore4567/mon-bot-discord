@@ -62,13 +62,18 @@ async def run() -> int:
             checked_commands += 1
             title = official_help._category(command)
             summary = official_help._description(command)
+            display = official_help._display_name(command)
             syntax = official_help._usage(command, "+")
             if not title or len(title) > 100:
                 errors.append(f"catégorie illisible pour {command.qualified_name}: {title!r}")
             if not summary:
                 errors.append(f"résumé vide pour {command.qualified_name}")
-            if command.qualified_name not in syntax or not syntax.startswith("+"):
-                errors.append(f"syntaxe invalide pour {command.qualified_name}: {syntax!r}")
+            expected = f"+{display}".casefold()
+            if not syntax.casefold().startswith(expected):
+                errors.append(
+                    f"syntaxe invalide pour {command.qualified_name}: {syntax!r} "
+                    f"(nom public attendu: {display!r})"
+                )
 
         # Le setup doit réellement ressembler à un centre de configuration : menu de
         # modules, boutons de navigation utiles, aucune rangée marketing Inviter/Sécurité.

@@ -117,3 +117,59 @@ def test_ai_search_wrappers_accept_force_web_search():
     src34 = inspect.getsource(community_v34._install_fast_ai)
     assert "force_web_search: bool = False" in src32 and "force_web_search=force_web_search" in src32
     assert "force_web_search: bool = False" in src34 and "force_web_search or ai_service.needs_web_search" in src34
+
+
+
+def test_permission_audit_shards_are_exclusive_and_complete():
+    from tools.permission_audit_sweep import belongs_to_shard
+
+    commands_to_check = [
+        ("prefix", "ban"),
+        ("prefix", "music play"),
+        ("prefix", "ticket close"),
+        ("slash", "moderation ban"),
+        ("slash", "musique jouer"),
+        ("slash", "tickets fermer"),
+        ("slash", "aide"),
+    ]
+
+    for transport, name in commands_to_check:
+        owners = [
+            shard
+            for shard in range(8)
+            if belongs_to_shard(transport, name, shard, 8)
+        ]
+        assert owners == [owners[0]]
+        assert len(owners) == 1
+
+    # La partition couvre tout : chaque commande tombe dans exactement un shard.
+    assert sum(
+        belongs_to_shard("prefix", "warn", shard, 8)
+        for shard in range(8)
+    ) == 1
+
+
+def test_permission_audit_single_shard_mode_keeps_every_command():
+    from tools.permission_audit_sweep import belongs_to_shard
+
+    assert belongs_to_shard("prefix", "ban", 0, 1) is True
+    assert belongs_to_shard("slash", "musique jouer", 0, 1) is True
+
+
+
+def test_aide_is_a_native_permission_audit_transport():
+    from tools.permission_audit_sweep import NATIVE_TRANSPORT
+
+    assert "aide" in NATIVE_TRANSPORT
+
+
+def test_e2e_world_configures_levels_before_enabling_modules():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "tools" / "sentrix_e2e_harness.py"
+    ).read_text(encoding="utf-8")
+    config = source.index('set_guild_config(GID, "level_channel", CID)')
+    enable = source.index("for module in sorted(setup_v2_core.CONFIGURABLE_MODULES")
+
+    assert config < enable

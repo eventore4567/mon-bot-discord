@@ -68,6 +68,9 @@ async def run() -> int:
         }
         try:
             mapping = await v95.prepare_bot(bot)
+            # Même dernière passe que le wrapper CommandTree.sync de production :
+            # /aide reste, l'ancienne racine /help est supprimée avant publication.
+            v95._remove_legacy_public_roots(bot.tree)
         except Exception as exc:
             import traceback
             traceback.print_exc()
@@ -97,19 +100,45 @@ async def run() -> int:
         if len(roots) > 100:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
 
-        # V110 : les commandes les plus familières doivent être directes, comme sur les
-        # principaux bots Discord. On garde les groupes pour les fonctions avancées.
+        # Surface publique actuelle : l'aide est /aide et la musique vit sous
+        # /musique. Les anciennes racines /help, /play, /pause et /queue ne doivent
+        # plus être exigées par ce gate historique.
         required_roots = (
-            "help", "setup", "ping", "sentrix",
+            "aide", "setup", "ping", "sentrix",
             "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
             "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
             "clearwarnings", "clear", "lock", "unlock", "slowmode",
             "userinfo", "serverinfo", "avatar", "level", "leaderboard",
-            "balance", "play", "pause", "queue", "role",
+            "balance", "role",
         )
         for required in required_roots:
             if required not in root_names:
                 errors.append(f"racine slash essentielle absente: /{required}")
+
+        # Ce harness V95 ne charge pas toute la pile canonique de production, donc
+        # il ne peut pas exiger que /musique existe ici. En revanche, on verrouille
+        # la politique publique actuelle directement sur les deux autorités de noms.
+        try:
+            import sentrix_canonical_command_surface as canonical_surface
+            import sentrix_command_surface_v110 as surface_v110
+
+            if canonical_surface.ROOTS.get("music") != "musique":
+                errors.append("la surface canonique ne mappe plus music vers /musique")
+            forbidden_direct_music = {"play", "pause", "queue"}
+            leaked = sorted(
+                public
+                for source, public in surface_v110.STANDARD_DIRECT_SLASH.items()
+                if source in forbidden_direct_music or public in forbidden_direct_music
+            )
+            if leaked:
+                errors.append(
+                    "anciennes racines musique directes encore configurees: "
+                    + ", ".join(leaked)
+                )
+        except Exception as exc:
+            errors.append(
+                f"audit politique musique canonique: {type(exc).__name__}: {exc}"
+            )
 
         # Discord limite un groupe et un sous-groupe à 25 options/sous-commandes.
         for root in roots:
@@ -223,7 +252,7 @@ async def run() -> int:
         )
         print(
             f"V110: slash_familiers={len(direct_mapping)} "
-            f"exemples=/ban,/userinfo,/leaderboard,/play,/role give"
+            f"exemples=/ban,/userinfo,/leaderboard,/musique jouer,/role give"
         )
         print(f"V95: inventaire_attendu={len(expected)} manquantes={len(missing)} extras={len(extra)}")
         print(

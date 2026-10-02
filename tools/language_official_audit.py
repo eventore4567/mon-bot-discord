@@ -14,7 +14,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-EXPECTED_SETUP_CATEGORIES = 12  # + Départs (séparé de Bienvenue)
+REQUIRED_SETUP_CATEGORIES = frozenset({
+    "moderation", "security", "logs", "tickets", "welcome", "goodbye",
+    "roles", "levels", "notifications", "music", "ai", "permissions", "invitations",
+})
 
 
 async def run() -> int:
@@ -76,15 +79,14 @@ async def run() -> int:
         elif getattr(setup_command, "cog", None) is not setup_cog:
             errors.append("+setup n'est pas rattache au Cog SentriXSetup")
 
-        if len(setup_control_center.CATEGORIES) != EXPECTED_SETUP_CATEGORIES:
+        categories = set(setup_control_center.CATEGORIES)
+        missing_categories = sorted(REQUIRED_SETUP_CATEGORIES - categories)
+        if missing_categories:
             errors.append(
-                f"le setup officiel doit garder {EXPECTED_SETUP_CATEGORIES} categories: "
-                f"{len(setup_control_center.CATEGORIES)}"
+                "categories officielles manquantes: " + ", ".join(missing_categories)
             )
-        if "permissions" not in setup_control_center.CATEGORIES:
-            errors.append("la categorie Permissions / Acces aux commandes manque")
-        if "invitations" not in setup_control_center.CATEGORIES:
-            errors.append("la categorie Invitations manque dans le setup officiel")
+        if set(setup_control_center.CATEGORIES) != set(setup_control_center.CATEGORY_ORDER):
+            errors.append("CATEGORY_ORDER ne contient plus les memes categories officielles")
 
         view_cls = setup_control_center.SetupView
         # Les marqueurs V3/langue restent le contrat backend. V70 est le propriétaire
@@ -197,8 +199,8 @@ async def run() -> int:
         print(f"ECHEC: {len(errors)} probleme(s)")
         return 1
     print(
-        "OK: FR/EN persistant, 12 categories dont Invitations, navigation V70/V72, "
-        "Tickets V72, help officiel et aucun doublon"
+        f"OK: FR/EN persistant, {len(setup_control_center.CATEGORIES)} categories officielles, "
+        "navigation V70/V72, Tickets V72, help officiel et aucun doublon"
     )
     return 0
 

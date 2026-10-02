@@ -17,7 +17,7 @@ from discord.ext import commands
 
 logger = logging.getLogger("bot.sentrix-product-update")
 
-UNKNOWN_COMMAND_TEXT = "Commande introuvable. Merci de consulter les commandes avec /help."
+UNKNOWN_COMMAND_TEXT = "Commande introuvable. Consultez /aide pour voir les commandes."
 TICKET_CONFIG_COMMANDS = frozenset({
     "ticketsetup",
     "ticketpanel",
@@ -463,6 +463,28 @@ def _unwrap_error_handler(handler):
     return current
 
 
+def _unknown_command_text(bot: commands.Bot, ctx: commands.Context) -> str:
+    """Réponse finale d'une faute de frappe, avec suggestions sûres.
+
+    command_response_guard possède déjà la recherche et le filtre de permissions :
+    on la réutilise ici au lieu d'avoir une seconde logique qui pourrait révéler
+    une commande staff/owner à un membre qui n'y a pas accès.
+    """
+    from cogs import command_response_guard
+
+    typed = command_response_guard._typed_command_path(bot, ctx)
+    if not typed:
+        typed = str(getattr(ctx, "invoked_with", "") or "").strip()
+
+    suggestions = command_response_guard._command_suggestions(bot, ctx, typed)
+    if not suggestions:
+        return UNKNOWN_COMMAND_TEXT
+
+    prefix = str(getattr(ctx, "clean_prefix", None) or "+")
+    rendered = ", ".join(f"`{prefix}{name}`" for name in suggestions)
+    return f"{UNKNOWN_COMMAND_TEXT}\nVouliez-vous dire {rendered} ?"
+
+
 async def _plain_send(ctx: commands.Context, text: str):
     """Le message d'une commande inconnue, dans un panneau SentriX.
 
@@ -512,7 +534,7 @@ def _install_unknown_command(bot: commands.Bot) -> bool:
     async def exact_error(self, ctx: commands.Context, error: commands.CommandError):
         root = getattr(error, "original", error)
         if isinstance(root, commands.CommandNotFound):
-            await _plain_send(ctx, UNKNOWN_COMMAND_TEXT)
+            await _plain_send(ctx, _unknown_command_text(self, ctx))
             return
         result = base(ctx, error)
         if inspect.isawaitable(result):
