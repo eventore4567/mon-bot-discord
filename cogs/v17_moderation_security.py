@@ -519,7 +519,14 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             await self.bot.db.execute(f"UPDATE v17_sanction_policy SET {field}=?,updated_at=? WHERE guild_id=?", (seconds, now(), ctx.guild.id))
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Palier **{action}** réglé sur **{warns} warn(s)**.')))
 
-    @commands.hybrid_group(name="serversnapshot", description="Snapshots de sécurité du serveur.")
+    # « serversnapshot » ne dit pas ce qu'il fait à qui ne connaît pas le mot.
+    # L'alias français le dit ; le nom d'origine continue de fonctionner, donc
+    # aucune habitude ni aucun tutoriel ne casse.
+    @commands.hybrid_group(
+        name="serversnapshot",
+        aliases=["sauvegarde-serveur", "instantane-serveur"],
+        description="Sauvegardes de sécurité du serveur : créer, lister, restaurer.",
+    )
     @checks.is_owner_or_admin_for("securite")
     async def serversnapshot(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT id,label,created_at FROM v17_snapshots WHERE guild_id=? ORDER BY created_at DESC LIMIT 10", (ctx.guild.id,))
@@ -654,7 +661,11 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             await self.bot.db.execute("DELETE FROM v17_lockdown_state WHERE guild_id=?", (ctx.guild.id,))
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Smart lockdown {('activé' if enable else 'désactivé')} — **{changed} salon(s)** modifié(s).")))
 
-    @commands.hybrid_group(name="nukewhitelist", description="Whitelist anti-nuke par utilisateur, rôle et action.")
+    @commands.hybrid_group(
+        name="nukewhitelist",
+        aliases=["antinuke-autorisations", "liste-confiance-antinuke"],
+        description="Membres et rôles autorisés à agir malgré l'anti-nuke.",
+    )
     @checks.is_owner_or_admin_for("securite")
     async def nukewhitelist(self, ctx: commands.Context):
         rows = await self.bot.db.fetchall("SELECT * FROM v17_antinuke_whitelist WHERE guild_id=? ORDER BY subject_type,subject_id", (ctx.guild.id,))
@@ -697,6 +708,16 @@ class V17ModerationSecurity(commands.Cog, name="V17ModerationSecurity"):
             "DELETE FROM v17_antinuke_whitelist WHERE guild_id=? AND subject_id=? AND action=?",
             (ctx.guild.id, subject_id, action.casefold()),
         )
+        # Symétrique du correctif côté automod : `_antinuke_allowed` accorde si
+        # l'une OU l'autre table correspond, donc une règle retirée ici devait
+        # aussi l'être dans la table historique. Seulement pour « all » : une
+        # règle limitée à UNE action ne doit pas révoquer une confiance posée
+        # pour toutes les autres.
+        if action.casefold() == "all":
+            await self.bot.db.execute(
+                "DELETE FROM antinuke_whitelist WHERE guild_id=? AND user_id=?",
+                (ctx.guild.id, subject_id),
+            )
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Règle supprimée.')))
 
     @commands.hybrid_command(name="suspiciouslist", description="Afficher les comptes récents à surveiller.", with_app_command=False)

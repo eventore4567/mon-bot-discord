@@ -1812,8 +1812,21 @@ class AutoMod(commands.Cog, name="Automod"):
     @app_commands.describe(membre="Le membre à retirer")
     @checks.is_owner_or_admin_for("securite")
     async def antinuke_whitelist_remove(self, ctx: commands.Context, membre: discord.Member):
+        # Les DEUX tables. `_antinuke_allowed` accorde l'accès si l'une OU
+        # l'autre correspond : ne vider que `antinuke_whitelist` affichait
+        # « a été retiré de la liste blanche » alors que la personne restait
+        # autorisée par `v17_antinuke_whitelist`, posée par +nukewhitelist.
+        # Une révocation qui annonce un succès sans révoquer est pire que pas
+        # de révocation du tout : l'administrateur croit la trappe fermée.
+        #
+        # Retirer est le sens SÛR — ça resserre, jamais ça n'ouvre — donc
+        # nettoyer les deux ne peut pas créer d'accès.
         await self.bot.db.execute(
             "DELETE FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
+        )
+        await self.bot.db.execute(
+            "DELETE FROM v17_antinuke_whitelist WHERE guild_id = ? AND subject_type = 'user' AND subject_id = ?",
+            (ctx.guild.id, membre.id),
         )
         from cogs.setup_v2_core import invalidate_trusted_cache
         invalidate_trusted_cache(ctx.guild.id, membre.id)

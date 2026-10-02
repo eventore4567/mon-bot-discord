@@ -340,6 +340,11 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         # Anciennement fail-closed par oubli
         "security", "antigif", "antinuke-config", "backup-now", "incidents",
         "nukewhitelist", "serversnapshot",
+        # Leurs alias français, au MÊME niveau. Un alias non classé tombe en
+        # fail-closed alors que le nom principal passe : c'est ce qui a rendu
+        # « aide » inaccessible et masqué « test-events ».
+        "sauvegarde-serveur", "instantane-serveur",
+        "antinuke-autorisations", "liste-confiance-antinuke",
         # Interrupteurs des protections ajoutées avec le lot sécurité : chacune
         # porte déjà @checks.is_owner_or_admin_for("securite") dans
         # cogs/automod.py. On classe donc au niveau que l'auteur a choisi.
