@@ -54,6 +54,10 @@ INTENTIONS: dict[str, tuple[int, str]] = {
     "ia": (0xA855F7, "ai"),
     "configuration": (0xC084FC, "config"),
     "bienvenue": (0x34D399, "welcome"),
+    # Giveaways, concours, évènements. Même indigo que leur bannière : le liseré
+    # du conteneur et le trait de la bannière doivent être la même couleur, sinon
+    # la carte a deux teintes qui se disputent.
+    "evenements": (0x818CF8, "events"),
     "depart": (0xFF6A3D, "goodbye"),
 }
 
@@ -73,6 +77,7 @@ _FAMILY_LABELS = {
     "warning": "Attention",
     "info": "Information",
     "special": "SentriX",
+    "events": "Évènements",
     "moderation": "Modération",
     "security": "Sécurité",
     "tickets": "Tickets",

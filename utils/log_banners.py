@@ -87,6 +87,12 @@ COLORS: dict[str, tuple[int, int, int]] = {
     "config": (192, 132, 252),      # violet clair
     "welcome": (52, 211, 153),      # vert turquoise
     "goodbye": (255, 106, 61),      # orange rouge
+    # Giveaways, concours et évènements. Ils partageaient la famille « special »
+    # avec le design et la marque, dont l'étiquette était « SentriX » — donc une
+    # signature « SENTRIX CORE · SentriX », le produit nommé deux fois. Les
+    # évènements ont assez de commandes pour mériter leur domaine, et « design »
+    # reste sur special.
+    "events": (129, 140, 248),      # indigo clair
 }
 
 STYLES = tuple(COLORS)
@@ -270,14 +276,14 @@ COG_FAMILIES: dict[str, str] = {
     "security": "security", "securitytools": "security", "verification": "security",
     "configuration": "config", "serverbuilder": "config", "notifications": "config",
     "guildarrival": "welcome", "welcome": "welcome",
-    "events": "special", "design": "special", "embedbuilder": "config",
+    "events": "events", "design": "special", "embedbuilder": "config",
 }
 COMMAND_FAMILIES: dict[str, str] = {
     # Racines sans module : leur famille est declaree ici plutot que devinee.
     "play": "music", "music": "music", "nowplaying": "music", "queue": "music",
     "skip": "music", "stop": "music", "pause": "music", "resume": "music",
     "volume": "music", "seek": "music", "shuffle": "music", "join": "music", "leave": "music",
-    "giveaway": "special", "concours": "special",
+    "giveaway": "events", "concours": "events",
     "setup": "config", "help": "info", "ping": "info", "sentrix": "info",
 }
 

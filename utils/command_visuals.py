@@ -14,7 +14,7 @@ from discord.ext import commands
 
 import config
 from . import embeds
-from .log_banners import BANNER_DIR, BANNER_VERSION, ensure_banners, family_for_command, nom_fichier
+from .log_banners import BANNER_DIR, BANNER_VERSION, STYLES, ensure_banners, family_for_command, nom_fichier
 
 logger = logging.getLogger("bot.command-visuals")
 
@@ -23,13 +23,13 @@ logger = logging.getLogger("bot.command-visuals")
 # sans dépendre de fichiers GitHub raw qui peuvent rester en cache plusieurs heures.
 _BANNER_RUNTIME_BASE = f"{config.DASHBOARD_PUBLIC_URL.rstrip('/')}/assets/sentrix-banner"
 
+# Dérivé de log_banners.STYLES, et non recopié : cette liste était tenue à la
+# main en double, et ajouter une famille d'un seul côté levait un KeyError sur
+# l'autre. Un test existait déjà pour rattraper la divergence — autant la
+# rendre impossible.
 _BANNER_URLS = {
     famille: f"{_BANNER_RUNTIME_BASE}/{famille}.webp?v={BANNER_VERSION}"
-    for famille in (
-        "success", "error", "warning", "info", "special",
-        "moderation", "security", "tickets", "economy", "levels",
-        "music", "games", "ai", "config", "welcome", "goodbye",
-    )
+    for famille in STYLES
 }
 # Couleur du liseré du conteneur : exactement celle du trait et du logo de la
 # bannière (utils/log_banners.COLORS), pour que l'embed et la bannière s'accordent.
