@@ -30,9 +30,29 @@ def test_reinforced_verification_requires_current_rules_version_twice():
 
 
 def test_reinforced_verification_reuses_setup_verified_role():
-    assert 'configured_role_id = guild_conf["verify_role"]' in HONEYPOT
-    assert 'set_guild_config(guild.id, "verify_role", verified.id)' in HONEYPOT
-    assert 'set_guild_config(guild.id, "verification_role", verified.id)' in HONEYPOT
+    """Le rôle final vient de +setup, et de nulle part ailleurs.
+
+    Ce test exigeait que le module RÉÉCRIVE le rôle en base
+    (`set_guild_config(..., "verify_role", verified.id)`) après l'avoir lu au
+    même endroit — une écriture redondante, héritée de l'époque où SentriX
+    créait un rôle « Vérifié » tout seul quand il n'en trouvait pas.
+
+    La règle a changé, et dans le sens strict : le module ne crée plus aucun
+    rôle. Il lit celui que l'administrateur a choisi, et REFUSE de continuer
+    s'il n'y en a pas, plutôt que d'en inventer un. Un rôle créé
+    automatiquement donne des accès que personne n'a décidés.
+
+    C'est donc cette garantie-là qu'on vérifie, pas l'écriture disparue.
+    """
+    assert 'configured_role_id = guild_conf["verify_role"]' in HONEYPOT, (
+        "le rôle final ne vient plus de la configuration de +setup"
+    )
+    assert "_find_or_create_role(guild, \"Vérifié\")" not in HONEYPOT, (
+        "SentriX recrée un rôle Vérifié au lieu d'utiliser celui de +setup"
+    )
+    assert "SentriX ne crée plus automatiquement de rôle Vérifié." in HONEYPOT, (
+        "le refus explicite a disparu : sans rôle configuré, que se passe-t-il ?"
+    )
 
 
 def test_rules_channel_stays_visible_to_unverified_members():
