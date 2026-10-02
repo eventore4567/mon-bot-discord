@@ -398,6 +398,7 @@ class _Incident:
     filter_name: str
     reason: str
     channel_id: int
+    message_preview: str = ""
     deleted: int = 1
     action: str | None = None
     action_label: str | None = None
@@ -600,6 +601,170 @@ AUTOMOD_TOGGLE_LABELS = {
     "join_gate": "Join Gate avancé",
     "risk_engine": "Score Risk comportemental",
 }
+
+_AUTOMOD_LOG_EVENT_LABELS = {
+    "automod_link": "Anti-liens",
+    "automod_invite": "Anti-invitations Discord",
+    "automod_scam": "Anti-arnaques",
+    "automod_word": "Mots / contenu interdits",
+    "automod_mention": "Anti-mentions massives",
+    "automod_spam": "Anti-spam",
+    "spam": "Anti-spam",
+    "antiraid": "Anti-raid",
+    "raid": "Anti-raid",
+}
+
+_AUTOMOD_LOG_TITLE_LABELS = (
+    ("anti-nuke", "Anti-nuke"),
+    ("antinuke", "Anti-nuke"),
+    ("antibot", "Anti-bots non autorisés"),
+    ("anti-bot", "Anti-bots non autorisés"),
+    ("antiaccount", "Anti-comptes très récents"),
+    ("anti-account", "Anti-comptes très récents"),
+    ("anti-spam", "Anti-spam"),
+    ("spam", "Anti-spam"),
+    ("anti-lien", "Anti-liens"),
+    ("antiinvite", "Anti-invitations Discord"),
+    ("anti-invite", "Anti-invitations Discord"),
+    ("anti-arnaque", "Anti-arnaques"),
+    ("scam", "Anti-arnaques"),
+    ("multilingue", "Anti-insultes / contenu offensant"),
+    ("mention", "Anti-mentions massives"),
+    ("raid", "Anti-raid"),
+    ("risk score", "Score Risk comportemental"),
+    ("vanity", "Protection vanity URL"),
+    ("prune", "Détection des prunes membres"),
+    ("permissions dangereuses", "Garde permissions dangereuses"),
+    ("garde permissions", "Garde permissions dangereuses"),
+    ("immunité", "Immunité AutoMod"),
+)
+
+
+def _automod_message_preview(message_or_text, *, limit: int = 900) -> str:
+    """Bloc Message lisible pour les logs AutoMod, sans jamais dépasser Discord."""
+    if hasattr(message_or_text, "content"):
+        content = str(getattr(message_or_text, "content", "") or "").strip()
+        attachments = []
+        for attachment in list(getattr(message_or_text, "attachments", ()) or ())[:3]:
+            url = str(getattr(attachment, "url", "") or "").strip()
+            if url:
+                attachments.append(url)
+        if attachments:
+            content = "\n".join(part for part in (content, *attachments) if part)
+    else:
+        content = str(message_or_text or "").strip()
+
+    if not content:
+        return ""
+    content = content.replace("\r\n", "\n").replace("\r", "\n")
+    if len(content) > limit:
+        content = content[: max(1, limit - 1)].rstrip() + "…"
+    # Citation Discord : garde les URLs cliquables et rend même un long texte lisible.
+    return "> " + content.replace("\n", "\n> ")
+
+
+def _automod_protection_label(log_type: str, title: str) -> str:
+    key = str(log_type or "").strip().casefold().replace("-", "_")
+    if key in _AUTOMOD_LOG_EVENT_LABELS:
+        return _AUTOMOD_LOG_EVENT_LABELS[key]
+    sample = str(title or "").casefold()
+    for token, label in _AUTOMOD_LOG_TITLE_LABELS:
+        if token in sample:
+            return label
+    return "Protection AutoMod"
+
+
+def _automod_default_sanction(log_type: str, title: str, protection: str) -> str:
+    key = str(log_type or "").strip().casefold().replace("-", "_")
+    sample = f"{title} {protection}".casefold()
+    if key in {"automod_link", "automod_invite", "automod_scam", "automod_word", "automod_mention", "automod_spam", "spam"}:
+        return "Suppression du message"
+    if "antibot" in sample or "anti-bot" in sample or "antiaccount" in sample or "anti-compte" in sample:
+        return "Expulsion"
+    if "risk" in sample:
+        return "Surveillance renforcée"
+    if "raid" in sample or "nuke" in sample or "permissions" in sample or "vanity" in sample or "prune" in sample:
+        return "Protection automatique"
+    return "Action AutoMod"
+
+
+def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
+    """Uniformise TOUS les logs AutoMod en une carte AutoMod Manage structurée."""
+    title = str(embed.title or "")
+    fields = [
+        (str(field.name or ""), str(field.value or ""), bool(field.inline))
+        for field in embed.fields
+        if str(field.value or "").strip()
+    ]
+
+    def take(*tokens: str):
+        for index, (name, value, inline) in enumerate(fields):
+            low = name.casefold()
+            if any(token in low for token in tokens):
+                return index, name, value, inline
+        return None
+
+    used: set[int] = set()
+
+    identity = take("membre", "bot expuls", "membre expuls", "auteur suspect", "auteur", "acteur", "cible", "utilisateur")
+    protection = take("protection")
+    sanction = take("sanction", "action prise", "action")
+    reason = take("raison", "reason")
+    channel = take("salon", "channel")
+    message = take("message", "contenu", "content")
+
+    ordered: list[tuple[str, str, bool]] = []
+
+    if identity:
+        used.add(identity[0])
+        ordered.append(("Membre", identity[2][:1024], False))
+
+    protection_value = protection[2] if protection else _automod_protection_label(log_type, title)
+    if protection:
+        used.add(protection[0])
+    ordered.append(("Protection", protection_value[:1024], True))
+
+    sanction_value = sanction[2] if sanction else _automod_default_sanction(log_type, title, protection_value)
+    if sanction:
+        used.add(sanction[0])
+    ordered.append(("Sanction", sanction_value[:1024], True))
+
+    if reason:
+        used.add(reason[0])
+        ordered.append(("Raison", reason[2][:1024], False))
+
+    if channel:
+        used.add(channel[0])
+        ordered.append(("Salon", channel[2][:1024], False))
+
+    if message:
+        used.add(message[0])
+        ordered.append(("Message", message[2][:1024], False))
+
+    # Garde tous les détails spécifiques (score, nombre de messages, niveau,
+    # rôle, permissions, etc.) APRÈS le bloc principal au lieu de les perdre.
+    for index, (name, value, inline) in enumerate(fields):
+        if index in used:
+            continue
+        if name.casefold().strip(" :") in {"protection", "sanction", "raison", "salon", "message"}:
+            continue
+        ordered.append((name[:256] or "Détail", value[:1024], inline))
+        if len(ordered) >= 20:
+            break
+
+    styled = embeds.canonical_log_embed(
+        "AutoMod Manage",
+        description=str(embed.description or "")[:3500],
+        fields=ordered,
+    )
+    image_url = str(getattr(getattr(embed, "image", None), "url", "") or "")
+    if image_url:
+        styled.set_image(url=image_url)
+    thumbnail_url = str(getattr(getattr(embed, "thumbnail", None), "url", "") or "")
+    if thumbnail_url:
+        styled.set_thumbnail(url=thumbnail_url)
+    return styled
+
 
 # Préréglages du niveau de sécurité global (/security-level et page "Sécurité" de /setup).
 SECURITY_PRESETS = {
@@ -1176,8 +1341,11 @@ class AutoMod(commands.Cog, name="Automod"):
         embed: discord.Embed,
         log_type: str = "automod",
     ):
-        # Le type d'événement pilote aussi la bannière.
-        await helpers.send_log(self.bot, guild, log_type, embed)
+        # Point unique : TOUS les événements AutoMod utilisent le même rendu
+        # AutoMod Manage. helpers.send_log -> log_service -> send_wide_log ajoute
+        # ensuite systématiquement la bannière de sécurité au-dessus de la carte.
+        styled = _style_automod_log(embed, log_type)
+        await helpers.send_log(self.bot, guild, log_type, styled)
 
     # ---------------------------------------------------------------- CACHES
 
@@ -2528,7 +2696,13 @@ class AutoMod(commands.Cog, name="Automod"):
         if incident is not None and now_ts - incident.started < incident_window:
             incident.deleted += 1
             return
-        incident = _Incident(started=now_ts, filter_name=filter_name, reason=reason, channel_id=message.channel.id)
+        incident = _Incident(
+            started=now_ts,
+            filter_name=filter_name,
+            reason=reason,
+            channel_id=message.channel.id,
+            message_preview=_automod_message_preview(message),
+        )
         self.incidents[key] = incident
         if len(self.incidents) > 5000:
             cutoff = now_ts - INCIDENT_WINDOW_SECONDS
@@ -2677,7 +2851,12 @@ class AutoMod(commands.Cog, name="Automod"):
             await asyncio.sleep(INCIDENT_LOG_DELAY_SECONDS)
             title = "🛡️ Action AutoMod"
             color = config.COLOR_WARNING
-            extra = {"📍 Salon": f"<#{incident.channel_id}>", "🗑️ Messages": str(incident.deleted)}
+            extra = {
+                "Salon": f"<#{incident.channel_id}>",
+                "Messages supprimés": str(incident.deleted),
+            }
+            if incident.message_preview:
+                extra["Message"] = incident.message_preview
             if incident.action:
                 title = (
                     "🚨 Action AutoMod — sanction appliquée"
@@ -2685,14 +2864,14 @@ class AutoMod(commands.Cog, name="Automod"):
                     else "🛡️ Action AutoMod — rappel anti-spam"
                 )
                 color = config.COLOR_ERROR if incident.action in ("kick", "ban") else config.COLOR_WARNING
-                extra["⚔️ Action"] = (
+                extra["Sanction"] = (
                     incident.action_label
                     or ESCALATION_LABELS.get(incident.action, incident.action)
                 )
             if incident.spam_stage:
-                extra["📈 Niveau anti-spam"] = str(incident.spam_stage)
+                extra["Niveau anti-spam"] = str(incident.spam_stage)
             if incident.infractions:
-                extra["🔢 Infractions (1h)"] = str(incident.infractions)
+                extra["Infractions (1h)"] = str(incident.infractions)
             e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
             event_type = {
                 "antiscam": "automod_scam",
@@ -2700,6 +2879,12 @@ class AutoMod(commands.Cog, name="Automod"):
                 "antilink": "automod_link",
                 "blacklist_link": "automod_link",
                 "blacklist_word_link": "automod_link",
+                "blacklist_word": "automod_word",
+                "antiinsult": "automod_word",
+                "antimention": "automod_mention",
+                "antispam": "automod_spam",
+                "antispam_duplicate": "automod_spam",
+                "antiemoji": "automod_spam",
             }.get(incident.filter_name, "automod")
             await self.log_action(guild, e, event_type)
         except Exception:
@@ -2776,11 +2961,12 @@ class AutoMod(commands.Cog, name="Automod"):
             raison=reason,
             extra={
                 "Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`",
+                "Message": _automod_message_preview(message),
                 "Type de détection": detection_kind.replace("_", " "),
                 "Sanction": timeout_status,
             },
         )
-        await self.log_action(message.guild, e)
+        await self.log_action(message.guild, e, "automod_word")
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
