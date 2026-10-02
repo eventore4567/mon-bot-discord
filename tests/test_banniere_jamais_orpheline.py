@@ -1,0 +1,167 @@
+"""Une galerie de bannière ne part JAMAIS sans sa pièce jointe.
+
+**Le bug de production, le 29/09/2026.** `/setup` répondait :
+
+    Invalid Form Body
+    In data.components.0.components.0.items.0.media.url:
+    The referenced attachment ("attachment://banner_config.webp") was not found.
+
+Ce n'est pas une image manquante : Discord **refuse le message entier**. La
+commande ne répond plus du tout.
+
+**La cause.** ``cogs/setup_invitations.final_send_setup`` est le dernier
+expéditeur installé — c'est lui qui répond à ``/setup``. Il envoyait la vue
+sans joindre la bannière que le conteneur référence. Trois autres expéditeurs
+avaient été corrigés, pas celui-là, et rien ne pouvait le signaler : la galerie
+est posée à la construction, la pièce jointe à l'envoi, à deux endroits
+différents.
+
+**Ce qui l'empêche de revenir.** Une condition unique,
+``banniere_disponible()``, que la pose ET l'envoi consultent tous les deux.
+Quand le fichier manque, ni la galerie ni la pièce jointe n'existent — l'écran
+perd son bandeau mais reste affichable. Et aucun module ne construit sa
+galerie à la main.
+"""
+from __future__ import annotations
+
+import ast
+import os
+import pathlib
+
+os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
+
+import pytest
+
+RACINE = pathlib.Path(__file__).resolve().parents[1]
+
+#: Les modules qui posent une bannière sur un conteneur construit à la main.
+MODULES_A_BANNIERE = (
+    "cogs/setup_components_v73.py",
+    "cogs/setup_experience_v74.py",
+    "cogs/help_complete_v79.py",
+    "cogs/setup_invitations.py",
+)
+
+
+def _source(chemin: str) -> str:
+    return (RACINE / chemin).read_text(encoding="utf-8")
+
+
+# =============================================================================
+# La condition est unique
+# =============================================================================
+
+def test_la_pose_et_lenvoi_consultent_la_meme_condition():
+    """C'est tout le correctif : deux décisions séparées peuvent diverger, une
+    condition partagée ne le peut pas."""
+    from cogs import setup_components_v73 as v73
+    import inspect
+
+    assert "banniere_disponible()" in inspect.getsource(v73.entete_banniere)
+    assert "banniere_disponible()" in inspect.getsource(v73.joindre_banniere)
+
+
+def test_sans_fichier_ni_galerie_ni_piece_jointe(monkeypatch):
+    """Le cas qui faisait refuser le message. Les deux doivent disparaître
+    ENSEMBLE."""
+    import pathlib as _p
+
+    from cogs import setup_components_v73 as v73
+    from utils import log_banners
+
+    monkeypatch.setattr(log_banners, "BANNER_DIR", _p.Path("/tmp/sentrix-inexistant"))
+
+    assert v73.banniere_disponible() is False
+    assert v73.entete_banniere() is None
+    assert "file" not in v73.joindre_banniere({"view": object()})
+
+    class _Conteneur:
+        def __init__(self):
+            self.items = []
+
+        def add_item(self, item):
+            self.items.append(item)
+
+    conteneur = _Conteneur()
+    v73.poser_banniere(conteneur)
+    assert conteneur.items == [], "une galerie orpheline a été posée"
+
+
+def test_avec_fichier_les_deux_sont_la():
+    from cogs import setup_components_v73 as v73
+
+    assert v73.banniere_disponible() is True
+    assert v73.entete_banniere() is not None
+    assert "file" in v73.joindre_banniere({"view": object()})
+
+
+def test_le_nom_joint_est_celui_que_la_galerie_reference():
+    """Une divergence de nom produit la même erreur Discord qu'une absence."""
+    from cogs.setup_components_v73 import BANNIERE, joindre_banniere
+    from utils.log_banners import nom_fichier
+
+    fichier = joindre_banniere({"view": object()})["file"]
+    assert fichier.filename == nom_fichier(BANNIERE)
+
+
+def test_chaque_appel_rend_un_fichier_neuf():
+    """Un discord.File consommé par un envoi arrive VIDE au suivant — donc une
+    pièce jointe absente, donc le même refus."""
+    from cogs.setup_components_v73 import joindre_banniere
+
+    premier = joindre_banniere({"view": object()})["file"]
+    second = joindre_banniere({"view": object()})["file"]
+    assert premier is not second
+
+
+# =============================================================================
+# Aucun expéditeur ne peut oublier
+# =============================================================================
+
+@pytest.mark.parametrize("chemin", MODULES_A_BANNIERE)
+def test_tout_module_qui_pose_une_banniere_la_joint_aussi(chemin):
+    """L'invariant qui ferme le bug : poser sans joindre fait refuser le
+    message par Discord. ``setup_invitations`` posait la vue de V74 — donc une
+    galerie — sans jamais joindre quoi que ce soit."""
+    source = _source(chemin)
+    pose = "poser_banniere(" in source
+    joint = "joindre_banniere(" in source
+    assert pose == joint or (joint and not pose), (
+        f"{chemin} pose une bannière sans la joindre"
+    )
+
+
+def test_aucun_module_ne_construit_sa_galerie_a_la_main():
+    """Une galerie construite ailleurs échapperait à la condition partagée."""
+    coupables = []
+    for fichier in (RACINE / "cogs").glob("*.py"):
+        source = fichier.read_text(encoding="utf-8")
+        if "attachment://banner" not in source:
+            continue
+        # Seul le point d'entrée a le droit de composer cette URL.
+        if fichier.name != "setup_components_v73.py":
+            coupables.append(fichier.name)
+    assert coupables == [], (
+        f"ces modules référencent une bannière hors du point d'entrée : {coupables}"
+    )
+
+
+@pytest.mark.parametrize("chemin", MODULES_A_BANNIERE)
+def test_aucun_envoi_de_vue_sans_passer_par_le_point_dentree(chemin):
+    """Détecte un expéditeur oublié : ``send(view=...)`` sur une de ces vues
+    doit passer par ``joindre_banniere``. C'est exactement ce qui manquait à
+    setup_invitations."""
+    arbre = ast.parse(_source(chemin))
+    oublis = []
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.Call):
+            continue
+        nom = ast.unparse(noeud.func) if hasattr(ast, "unparse") else ""
+        if not nom.endswith((".send", ".send_message")):
+            continue
+        rendu = ast.unparse(noeud)
+        if "view=view" not in rendu and "view=vue" not in rendu:
+            continue
+        if "joindre_banniere" not in rendu:
+            oublis.append(rendu[:70])
+    assert oublis == [], f"{chemin} : envoi sans bannière jointe — {oublis}"

@@ -427,7 +427,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         # Le fichier est refabriqué à chaque édition : celui de l'envoi
         # précédent est consommé, et le réutiliser donnerait une pièce jointe
         # vide — donc une bannière cassée, sans erreur pour le dire.
-        fichier = setup_v73.fichier_banniere()
+        fichier = setup_v73.fichier_banniere() if setup_v73.banniere_disponible() else None
         await interaction.edit_original_response(
             content=None, embed=None,
             attachments=[fichier] if fichier else [],
@@ -464,7 +464,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         page_keys = keys[start:start + HOME_PAGE_SIZE]
 
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
-        container.add_item(setup_v73.entete_banniere())
+        setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -550,7 +550,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         self.index = min(max(self.index, 0), len(pages) - 1)
         chunk = pages[self.index]
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
-        container.add_item(setup_v73.entete_banniere())
+        setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -632,7 +632,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
             usage_lines.append(f"`{prefix_usage}`")
 
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
-        container.add_item(setup_v73.entete_banniere())
+        setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(f"# {_title(entry, self.prefix)}\n{_description(entry)}"),
@@ -703,18 +703,16 @@ async def _send_help_v79(self, target, query: str | None = None):
     await view.prepare()
 
     if isinstance(target, commands.Context):
-        fichier = setup_v73.fichier_banniere()
-        return await target.send(content=None, embed=None, view=view,
-                                 **({"file": fichier} if fichier else {}))
+        return await target.send(**setup_v73.joindre_banniere(
+            {"content": None, "embed": None, "view": view}))
     if target.response.is_done():
-        fichier = setup_v73.fichier_banniere()
-        return await target.followup.send(content=None, embed=None, view=view,
-                                          **({"file": fichier} if fichier else {}))
-    # Un fichier par branche : un discord.File consommé par un envoi ne peut
-    # pas servir au suivant.
-    fichier = setup_v73.fichier_banniere()
-    return await target.response.send_message(content=None, embed=None, view=view,
-                                              **({"file": fichier} if fichier else {}))
+        return await target.followup.send(**setup_v73.joindre_banniere(
+            {"content": None, "embed": None, "view": view}))
+    # joindre_banniere consulte la MÊME condition que la pose de la galerie :
+    # une galerie sans sa pièce jointe fait refuser le message entier par
+    # Discord, pas seulement disparaître l'image.
+    return await target.response.send_message(**setup_v73.joindre_banniere(
+        {"content": None, "embed": None, "view": view}))
 
 
 def install(bot: commands.Bot) -> None:

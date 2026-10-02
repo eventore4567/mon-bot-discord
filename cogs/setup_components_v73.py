@@ -165,13 +165,63 @@ def fichier_banniere() -> "discord.File | None":
         return None
 
 
-def entete_banniere() -> "discord.ui.MediaGallery":
-    """La galerie qui affiche la bannière en tête de conteneur."""
+def banniere_disponible() -> bool:
+    """Le fichier de bannière est-il réellement produisible ?
+
+    La galerie et la pièce jointe DOIVENT être décidées ensemble. Une galerie
+    qui référence ``attachment://banner_config.webp`` sans que le fichier soit
+    joint ne dégrade pas l'affichage : Discord refuse le message ENTIER avec
+
+        Invalid Form Body — The referenced attachment was not found.
+
+    C'est arrivé en production sur /setup. Cette fonction est la condition
+    unique que la construction et l'envoi consultent tous les deux.
+    """
+    from utils.log_banners import BANNER_DIR, nom_fichier
+
+    return (BANNER_DIR / nom_fichier(BANNIERE)).exists()
+
+
+def entete_banniere() -> "discord.ui.MediaGallery | None":
+    """La galerie de tête, ou None si le fichier ne peut pas suivre.
+
+    Rendre None plutôt qu'une galerie orpheline : un écran sans bannière reste
+    utilisable, un message refusé par Discord ne l'est pas.
+    """
+    if not banniere_disponible():
+        logger.warning(
+            "Bannière %s introuvable : écran rendu sans bandeau plutôt que refusé.",
+            BANNIERE,
+        )
+        return None
     from utils.log_banners import nom_fichier
 
     galerie = discord.ui.MediaGallery()
     galerie.add_item(media=f"attachment://{nom_fichier(BANNIERE)}")
     return galerie
+
+
+def poser_banniere(container) -> None:
+    """Ajoute l'en-tête au conteneur, ou ne fait rien. Point d'entrée unique."""
+    entete = entete_banniere()
+    if entete is not None:
+        container.add_item(entete)
+
+
+def joindre_banniere(kwargs: dict) -> dict:
+    """Ajoute ``file=`` aux arguments d'envoi, si et seulement si la galerie a
+    pu être posée. Même condition que ``poser_banniere`` — c'est ce qui rend
+    les deux indissociables.
+
+    Un fichier NEUF à chaque appel : un discord.File consommé par un envoi ne
+    peut pas servir au suivant.
+    """
+    if not banniere_disponible():
+        return kwargs
+    fichier = fichier_banniere()
+    if fichier is not None:
+        kwargs["file"] = fichier
+    return kwargs
 
 
 def _thumbnail(bot: commands.Bot) -> discord.ui.Thumbnail:
@@ -324,7 +374,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         # « attachment://banner_config.webp ». Sans le fichier joint, Discord
         # affiche une image cassée. Un fichier NEUF à chaque édition — celui de
         # l'envoi précédent est consommé.
-        fichier = fichier_banniere()
+        fichier = fichier_banniere() if banniere_disponible() else None
         await interaction.edit_original_response(
             content=None,
             embed=None,
@@ -358,7 +408,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         problems = sum("CORRIGER" in value for value in states.values())
 
         container = discord.ui.Container(accent_colour=ACCENT)
-        container.add_item(entete_banniere())
+        poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -424,7 +474,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
 
         container = discord.ui.Container(accent_colour=ACCENT)
-        container.add_item(entete_banniere())
+        poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -544,7 +594,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         # « attachment://banner_config.webp ». Sans le fichier joint, Discord
         # affiche une image cassée. Un fichier NEUF à chaque édition — celui de
         # l'envoi précédent est consommé.
-        fichier = fichier_banniere()
+        fichier = fichier_banniere() if banniere_disponible() else None
         await interaction.edit_original_response(
             content=None,
             embed=None,
@@ -577,13 +627,10 @@ async def _send_setup_v73(self, target):
     # Le fichier est refabriqué pour CHAQUE branche : un discord.File consommé
     # par un envoi ne peut pas servir au suivant.
     if isinstance(target, commands.Context):
-        fichier = fichier_banniere()
-        return await target.send(view=view, **({"file": fichier} if fichier else {}))
+        return await target.send(**joindre_banniere({"view": view}))
     if target.response.is_done():
-        fichier = fichier_banniere()
-        return await target.followup.send(view=view, **({"file": fichier} if fichier else {}))
-    fichier = fichier_banniere()
-    return await target.response.send_message(view=view, **({"file": fichier} if fichier else {}))
+        return await target.followup.send(**joindre_banniere({"view": view}))
+    return await target.response.send_message(**joindre_banniere({"view": view}))
 
 
 def install(bot: commands.Bot) -> None:
