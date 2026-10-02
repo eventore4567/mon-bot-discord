@@ -590,7 +590,7 @@ def _sections_accueil(bot: commands.Bot, member=None) -> list[panels.Section]:
 
 def _sections_detail(bot: commands.Bot, command: commands.Command, prefix: str) -> list[panels.Section]:
     """Fiche d'une commande : comment l'appeler, qui peut, un exemple."""
-    slash = _slash_map(bot).get(command.qualified_name.casefold())
+    slash = _slash_name(bot, command)
     appel = [panels.Ligne("Préfixe", f"`{_usage(command, prefix)}`")]
     if slash:
         appel.append(panels.Ligne("Slash", f"`/{slash}`"))
