@@ -85,6 +85,19 @@ def _weighted_unique(pool: list[tuple[int, int]], count: int) -> list[int]:
     return winners
 
 
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def _is_image_attachment(attachment: discord.Attachment) -> bool:
+    content_type = str(getattr(attachment, "content_type", "") or "").casefold()
+    filename = str(getattr(attachment, "filename", "") or "").casefold()
+    return content_type.startswith("image/") or filename.endswith(_IMAGE_EXTENSIONS)
+
+
+def _stable_attachment_url(attachment: discord.Attachment) -> str:
+    return str(attachment.url).split("?", 1)[0]
+
+
 @dataclass
 class BuilderState:
     author_id: int
@@ -100,7 +113,12 @@ class BuilderState:
     required_roles: list[int] = field(default_factory=list)
     excluded_roles: list[int] = field(default_factory=list)
     bonus_roles: list[int] = field(default_factory=list)
+    # Compatibilité dashboard/anciens appels : si aucun multiplicateur individuel
+    # n'est défini, cette valeur reste le défaut.
     bonus_multiplier: int = 2
+    # Nouveau modèle Discord : chaque rôle bonus possède son propre multiplicateur.
+    # La base stocke déjà un JSON role_id -> multiplicateur, aucune migration nécessaire.
+    bonus_multipliers: dict[int, int] = field(default_factory=dict)
     min_invites: int = 0
     min_account_age_days: int = 0
     min_server_age_days: int = 0
@@ -146,7 +164,6 @@ class ConditionsModal(discord.ui.Modal, title="Giveaway — conditions facultati
     min_invites = discord.ui.TextInput(label="Invitations minimum", default="0", max_length=6)
     account_age = discord.ui.TextInput(label="Âge minimum du compte (jours)", default="0", max_length=6)
     server_age = discord.ui.TextInput(label="Présence minimum serveur (jours)", default="0", max_length=6)
-    image = discord.ui.TextInput(label="URL image / GIF", required=False, max_length=500)
     custom = discord.ui.TextInput(label="Condition personnalisée (information)", required=False, max_length=500, style=discord.TextStyle.paragraph)
 
     def __init__(self, owner: "GiveawayBuilderView"):
@@ -155,8 +172,6 @@ class ConditionsModal(discord.ui.Modal, title="Giveaway — conditions facultati
         self.min_invites.default = str(owner.state.min_invites)
         self.account_age.default = str(owner.state.min_account_age_days)
         self.server_age.default = str(owner.state.min_server_age_days)
-        if owner.state.image_url:
-            self.image.default = owner.state.image_url
         if owner.state.custom_condition:
             self.custom.default = owner.state.custom_condition
 
@@ -167,22 +182,86 @@ class ConditionsModal(discord.ui.Modal, title="Giveaway — conditions facultati
             return await interaction.response.send_message("Les trois valeurs numériques doivent être des nombres entiers.", ephemeral=True)
         if any(value < 0 for value in values):
             return await interaction.response.send_message("Une condition minimum ne peut pas être négative.", ephemeral=True)
-        image = str(self.image.value).strip() or None
-        if image and not image.startswith(("https://", "http://")):
-            return await interaction.response.send_message("L’image doit utiliser une URL `http://` ou `https://`.", ephemeral=True)
         self.owner.state.min_invites, self.owner.state.min_account_age_days, self.owner.state.min_server_age_days = values
-        self.owner.state.image_url = image
         self.owner.state.custom_condition = str(self.custom.value).strip() or None
         await self.owner.refresh(interaction)
 
 
-class BonusModal(discord.ui.Modal, title="Giveaway — multiplicateur bonus"):
-    multiplier = discord.ui.TextInput(label="Multiplicateur des rôles bonus", placeholder="2", default="2", max_length=3)
+class MediaModal(discord.ui.Modal, title="Giveaway — média"):
+    """Upload natif Discord : plus aucune URL image/GIF à copier."""
 
-    def __init__(self, role_view: "RoleSetupView"):
+    def __init__(self, owner: "GiveawayBuilderView"):
         super().__init__()
-        self.role_view = role_view
-        self.multiplier.default = str(role_view.owner.state.bonus_multiplier)
+        self.owner = owner
+        self.upload = discord.ui.FileUpload(
+            custom_id="sentrix:giveaway:v2:media",
+            required=False,
+            min_values=0,
+            max_values=1,
+        )
+        self.remove = discord.ui.TextInput(
+            default="non",
+            required=False,
+            max_length=8,
+            placeholder="non / oui",
+        )
+        self.add_item(
+            discord.ui.Label(
+                text="Image / GIF",
+                description="Choisissez directement un fichier depuis votre appareil.",
+                component=self.upload,
+            )
+        )
+        self.add_item(
+            discord.ui.Label(
+                text="Retirer le média actuel ?",
+                description="Écrivez oui uniquement si vous voulez supprimer l'image déjà choisie.",
+                component=self.remove,
+            )
+        )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        values = list(getattr(self.upload, "values", None) or [])
+        attachment = values[0] if values else None
+        remove = str(self.remove.value or "").strip().casefold() in {"oui", "yes", "o", "y"}
+
+        if attachment is not None and not _is_image_attachment(attachment):
+            return await interaction.response.send_message(
+                "Le fichier doit être une image PNG, JPG, WEBP ou GIF.",
+                ephemeral=True,
+            )
+
+        if remove:
+            self.owner.state.image_url = None
+        elif attachment is not None:
+            self.owner.state.image_url = _stable_attachment_url(attachment)
+
+        await self.owner.refresh(interaction)
+
+
+class BonusModal(discord.ui.Modal, title="Giveaway — multiplicateur du rôle"):
+    def __init__(
+        self,
+        selector_view: "BonusMultiplierView",
+        role_setup: "RoleSetupView",
+        role_id: int,
+    ):
+        super().__init__()
+        self.selector_view = selector_view
+        self.role_setup = role_setup
+        self.role_id = int(role_id)
+        current = role_setup.owner.state.bonus_multipliers.get(
+            self.role_id,
+            role_setup.owner.state.bonus_multiplier,
+        )
+        role = role_setup.owner.ctx.guild.get_role(self.role_id)
+        self.multiplier = discord.ui.TextInput(
+            label=f"Multiplicateur — {(role.name if role else 'rôle')[:70]}",
+            placeholder="2",
+            default=str(current),
+            max_length=3,
+        )
+        self.add_item(self.multiplier)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -191,8 +270,76 @@ class BonusModal(discord.ui.Modal, title="Giveaway — multiplicateur bonus"):
             return await interaction.response.send_message("Le multiplicateur doit être un entier.", ephemeral=True)
         if not 1 <= value <= 100:
             return await interaction.response.send_message("Choisissez un multiplicateur entre x1 et x100.", ephemeral=True)
-        self.role_view.owner.state.bonus_multiplier = value
-        await interaction.response.send_message(f"Multiplicateur enregistré : **x{value}**.", ephemeral=True)
+
+        state = self.role_setup.owner.state
+        state.bonus_multipliers[self.role_id] = value
+        await interaction.response.edit_message(
+            embed=self.selector_view.summary_embed(),
+            view=self.selector_view,
+        )
+        await self.role_setup.owner.sync_main_message()
+
+
+class BonusMultiplierSelect(discord.ui.Select):
+    def __init__(self, owner: "BonusMultiplierView"):
+        self.owner = owner
+        options = []
+        state = owner.role_setup.owner.state
+        guild = owner.role_setup.owner.ctx.guild
+        for role_id in state.bonus_roles[:25]:
+            role = guild.get_role(role_id)
+            current = state.bonus_multipliers.get(role_id, state.bonus_multiplier)
+            options.append(
+                discord.SelectOption(
+                    label=(role.name if role else f"Rôle {role_id}")[:100],
+                    value=str(role_id),
+                    description=f"Multiplicateur actuel : x{current}",
+                )
+            )
+        super().__init__(
+            placeholder="Choisir le rôle bonus à régler",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        role_id = int(self.values[0])
+        await interaction.response.send_modal(
+            BonusModal(self.owner, self.owner.role_setup, role_id)
+        )
+
+
+class BonusMultiplierView(discord.ui.View):
+    def __init__(self, role_setup: "RoleSetupView"):
+        super().__init__(timeout=180)
+        self.role_setup = role_setup
+        self.add_item(BonusMultiplierSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.role_setup.owner.state.author_id:
+            await interaction.response.send_message("Ce menu ne vous appartient pas.", ephemeral=True)
+            return False
+        return True
+
+    def summary_embed(self) -> discord.Embed:
+        state = self.role_setup.owner.state
+        guild = self.role_setup.owner.ctx.guild
+        lines = []
+        for role_id in state.bonus_roles:
+            role = guild.get_role(role_id)
+            mention = role.mention if role else f"`{role_id}`"
+            value = state.bonus_multipliers.get(role_id, state.bonus_multiplier)
+            lines.append(f"{mention} — **x{value}**")
+        return discord.Embed(
+            title="Giveaway — multiplicateurs par rôle",
+            description=(
+                "\n".join(lines)
+                if lines
+                else "Aucun rôle bonus sélectionné."
+            ),
+            colour=discord.Colour.blurple(),
+        )
 
 
 class RequiredRoleSelect(discord.ui.RoleSelect):
@@ -201,8 +348,15 @@ class RequiredRoleSelect(discord.ui.RoleSelect):
         super().__init__(placeholder="Rôles obligatoires (facultatif)", min_values=0, max_values=10, row=0)
 
     async def callback(self, interaction: discord.Interaction):
-        self.owner.owner.state.required_roles = [role.id for role in self.values]
-        await interaction.response.send_message("Rôles obligatoires mis à jour.", ephemeral=True)
+        selected = [role.id for role in self.values]
+        overlap = set(selected) & set(self.owner.owner.state.excluded_roles)
+        if overlap:
+            return await interaction.response.send_message(
+                "Un rôle ne peut pas être obligatoire et interdit en même temps.",
+                ephemeral=True,
+            )
+        self.owner.owner.state.required_roles = selected
+        await self.owner.refresh(interaction)
 
 
 class ExcludedRoleSelect(discord.ui.RoleSelect):
@@ -211,8 +365,15 @@ class ExcludedRoleSelect(discord.ui.RoleSelect):
         super().__init__(placeholder="Rôles interdits (facultatif)", min_values=0, max_values=10, row=1)
 
     async def callback(self, interaction: discord.Interaction):
-        self.owner.owner.state.excluded_roles = [role.id for role in self.values]
-        await interaction.response.send_message("Rôles interdits mis à jour.", ephemeral=True)
+        selected = [role.id for role in self.values]
+        overlap = set(selected) & set(self.owner.owner.state.required_roles)
+        if overlap:
+            return await interaction.response.send_message(
+                "Un rôle ne peut pas être obligatoire et interdit en même temps.",
+                ephemeral=True,
+            )
+        self.owner.owner.state.excluded_roles = selected
+        await self.owner.refresh(interaction)
 
 
 class BonusRoleSelect(discord.ui.RoleSelect):
@@ -221,8 +382,14 @@ class BonusRoleSelect(discord.ui.RoleSelect):
         super().__init__(placeholder="Rôles avec chances bonus (facultatif)", min_values=0, max_values=10, row=2)
 
     async def callback(self, interaction: discord.Interaction):
-        self.owner.owner.state.bonus_roles = [role.id for role in self.values]
-        await interaction.response.send_message("Rôles bonus mis à jour.", ephemeral=True)
+        selected = [role.id for role in self.values]
+        state = self.owner.owner.state
+        state.bonus_roles = selected
+        state.bonus_multipliers = {
+            role_id: state.bonus_multipliers.get(role_id, state.bonus_multiplier)
+            for role_id in selected
+        }
+        await self.owner.refresh(interaction)
 
 
 class PingRoleSelect(discord.ui.RoleSelect):
@@ -232,7 +399,7 @@ class PingRoleSelect(discord.ui.RoleSelect):
 
     async def callback(self, interaction: discord.Interaction):
         self.owner.owner.state.ping_role_id = self.values[0].id if self.values else None
-        await interaction.response.send_message("Rôle à ping mis à jour.", ephemeral=True)
+        await self.owner.refresh(interaction)
 
 
 class RoleSetupView(discord.ui.View):
@@ -250,9 +417,52 @@ class RoleSetupView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Multiplicateur bonus", style=discord.ButtonStyle.secondary, row=4)
+    def summary_embed(self) -> discord.Embed:
+        state = self.owner.state
+        guild = self.owner.ctx.guild
+
+        def mentions(ids):
+            return ", ".join(
+                (guild.get_role(role_id).mention if guild.get_role(role_id) else f"`{role_id}`")
+                for role_id in ids
+            ) or "Aucun"
+
+        bonus_lines = []
+        for role_id in state.bonus_roles:
+            role = guild.get_role(role_id)
+            mention = role.mention if role else f"`{role_id}`"
+            value = state.bonus_multipliers.get(role_id, state.bonus_multiplier)
+            bonus_lines.append(f"{mention} — **x{value}**")
+
+        ping = guild.get_role(state.ping_role_id) if state.ping_role_id else None
+        embed = discord.Embed(
+            title="Giveaway — rôles et bonus",
+            description="Sélectionnez les rôles directement ci-dessous. Les changements mettent à jour ce panneau sans créer de message supplémentaire.",
+            colour=discord.Colour.blurple(),
+        )
+        embed.add_field(name="Obligatoires", value=mentions(state.required_roles), inline=False)
+        embed.add_field(name="Interdits", value=mentions(state.excluded_roles), inline=False)
+        embed.add_field(name="Bonus", value="\n".join(bonus_lines) if bonus_lines else "Aucun", inline=False)
+        embed.add_field(name="Ping au lancement", value=ping.mention if ping else "Aucun", inline=False)
+        return embed
+
+    async def refresh(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(embed=self.summary_embed(), view=self)
+        await self.owner.sync_main_message()
+
+    @discord.ui.button(label="Multiplicateurs par rôle", style=discord.ButtonStyle.secondary, row=4)
     async def multiplier(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await interaction.response.send_modal(BonusModal(self))
+        if not self.owner.state.bonus_roles:
+            return await interaction.response.send_message(
+                "Sélectionnez d’abord au moins un rôle bonus.",
+                ephemeral=True,
+            )
+        view = BonusMultiplierView(self)
+        await interaction.response.send_message(
+            embed=view.summary_embed(),
+            view=view,
+            ephemeral=True,
+        )
 
 
 class DestinationSelect(discord.ui.ChannelSelect):
@@ -303,32 +513,66 @@ class GiveawayBuilderView(discord.ui.View):
         state = self.state
         guild = self.ctx.guild
         channel = guild.get_channel(state.channel_id) if state.channel_id else None
+
+        essentials = [
+            f"**Lot** — {state.prize or 'À configurer'}",
+            f"**Durée** — {state.duration_text or 'À configurer'}",
+            f"**Gagnants** — {state.winners if state.duration_seconds else 'À configurer'}",
+            f"**Salon** — {channel.mention if channel else 'À configurer'}",
+        ]
+
+        roles = []
+        if state.required_roles:
+            roles.append("**Obligatoires** — " + ", ".join(f"<@&{x}>" for x in state.required_roles))
+        if state.excluded_roles:
+            roles.append("**Interdits** — " + ", ".join(f"<@&{x}>" for x in state.excluded_roles))
+        if state.bonus_roles:
+            roles.append(
+                "**Bonus** — " + ", ".join(
+                    f"<@&{role_id}> x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}"
+                    for role_id in state.bonus_roles
+                )
+            )
+        if state.ping_role_id:
+            roles.append(f"**Ping** — <@&{state.ping_role_id}>")
+
+        conditions = []
+        if state.min_invites:
+            conditions.append(f"{state.min_invites}+ invitation(s)")
+        if state.min_account_age_days:
+            conditions.append(f"compte âgé de {state.min_account_age_days}+ jour(s)")
+        if state.min_server_age_days:
+            conditions.append(f"présence serveur de {state.min_server_age_days}+ jour(s)")
+        if state.custom_condition:
+            conditions.append(state.custom_condition)
+
         e = discord.Embed(
-            title="SentriX — Création d’un giveaway",
-            description="Les 4 éléments de base sont obligatoires. Tout le reste est facultatif.",
+            title="Giveaway — configuration",
+            description=(
+                "Configurez le concours depuis ce panneau. Les changements sont visibles ici immédiatement, "
+                "sans spammer de nouveaux messages."
+            ),
             colour=discord.Colour.blurple(),
         )
-        e.add_field(name="Lot", value=state.prize or "**À configurer**", inline=True)
-        e.add_field(name="Durée", value=state.duration_text or "**À configurer**", inline=True)
-        e.add_field(name="Gagnants", value=str(state.winners) if state.duration_seconds else "**À configurer**", inline=True)
-        e.add_field(name="Salon", value=channel.mention if channel else "**À configurer**", inline=True)
-        optional = []
-        if state.required_roles: optional.append(f"{len(state.required_roles)} rôle(s) obligatoire(s)")
-        if state.excluded_roles: optional.append(f"{len(state.excluded_roles)} rôle(s) interdit(s)")
-        if state.bonus_roles: optional.append(f"{len(state.bonus_roles)} rôle(s) bonus x{state.bonus_multiplier}")
-        if state.ping_role_id: optional.append("rôle à ping")
-        if state.min_invites: optional.append(f"{state.min_invites}+ invitation(s)")
-        if state.min_account_age_days: optional.append(f"compte {state.min_account_age_days}+ j")
-        if state.min_server_age_days: optional.append(f"présence {state.min_server_age_days}+ j")
-        if state.image_url: optional.append("image")
-        if state.custom_condition: optional.append("condition personnalisée")
-        e.add_field(name="Options", value=" • ".join(optional) if optional else "Aucune — c’est facultatif.", inline=False)
-        e.set_footer(text="SentriX • Giveaway interactif")
+        e.add_field(name="Essentiel", value="\n".join(essentials), inline=False)
+        e.add_field(name="Rôles et bonus", value="\n".join(roles) if roles else "Aucun rôle configuré.", inline=False)
+        e.add_field(name="Conditions", value="\n".join(conditions) if conditions else "Aucune condition supplémentaire.", inline=False)
+        e.add_field(name="Média", value="Image / GIF sélectionné depuis Discord." if state.image_url else "Aucun média.", inline=False)
+        e.set_footer(text="SentriX • Aperçu avant publication disponible")
         return e
 
     async def refresh(self, interaction: discord.Interaction):
         panneau = panels.avec_composants(panels.depuis_embed(self.setup_embed()), self)
         await panels.editer(interaction.response, panneau)
+
+    async def sync_main_message(self):
+        if self.message is None:
+            return
+        try:
+            panneau = panels.avec_composants(panels.depuis_embed(self.setup_embed()), self)
+            await panels.editer(self.message, panneau)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
 
     @discord.ui.button(label="1. Lot / durée / gagnants", style=discord.ButtonStyle.primary, row=0)
     async def base(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -340,15 +584,20 @@ class GiveawayBuilderView(discord.ui.View):
 
     @discord.ui.button(label="3. Rôles / ping / bonus", style=discord.ButtonStyle.secondary, row=0)
     async def roles(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        view = RoleSetupView(self)
         await interaction.response.send_message(
-            "Configurez uniquement les rôles dont vous avez besoin. Les rôles bonus utilisent le meilleur multiplicateur applicable, jamais un empilement.",
-            view=RoleSetupView(self),
+            embed=view.summary_embed(),
+            view=view,
             ephemeral=True,
         )
 
     @discord.ui.button(label="4. Conditions", style=discord.ButtonStyle.secondary, row=1)
     async def conditions(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(ConditionsModal(self))
+
+    @discord.ui.button(label="5. Média", style=discord.ButtonStyle.secondary, row=1)
+    async def media(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(MediaModal(self))
 
     @discord.ui.button(label="Aperçu", style=discord.ButtonStyle.secondary, row=1)
     async def preview(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -448,33 +697,47 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
 
     def build_public_embed(self, guild: discord.Guild, state: BuilderState, end_at: int, author) -> discord.Embed:
         e = discord.Embed(
-            title="🎉 GIVEAWAY",
-            description=((state.description + "\n\n") if state.description else "") + f"**Lot : {state.prize}**\n\nCliquez sur **Participer** pour entrer dans le tirage.",
+            title=f"Giveaway — {state.prize}",
+            description=(
+                ((state.description + "\n\n") if state.description else "")
+                + "Cliquez sur **Participer** pour entrer dans le tirage. "
+                + "Les conditions sont vérifiées à l’entrée puis de nouveau au tirage."
+            ),
             colour=discord.Colour.blurple(),
         )
+        e.add_field(name="Récompense", value=f"**{state.prize}**", inline=False)
         e.add_field(name="Fin", value=f"<t:{end_at}:R>\n<t:{end_at}:F>", inline=True)
         e.add_field(name="Gagnants", value=str(state.winners), inline=True)
         e.add_field(name="Organisé par", value=getattr(author, "mention", str(author)), inline=True)
+
         conditions = []
         if state.required_roles:
-            conditions.append("Rôle(s) obligatoire(s) : " + ", ".join(f"<@&{x}>" for x in state.required_roles))
+            conditions.append("**Obligatoire** — " + ", ".join(f"<@&{x}>" for x in state.required_roles))
         if state.excluded_roles:
-            conditions.append("Rôle(s) interdit(s) : " + ", ".join(f"<@&{x}>" for x in state.excluded_roles))
+            conditions.append("**Interdit** — " + ", ".join(f"<@&{x}>" for x in state.excluded_roles))
         if state.min_invites:
-            conditions.append(f"Invitations créditées minimum : **{state.min_invites}**")
+            conditions.append(f"**Invitations** — {state.min_invites} minimum")
         if state.min_account_age_days:
-            conditions.append(f"Compte Discord âgé d’au moins **{state.min_account_age_days} jour(s)**")
+            conditions.append(f"**Âge du compte** — {state.min_account_age_days} jour(s) minimum")
         if state.min_server_age_days:
-            conditions.append(f"Présent sur le serveur depuis **{state.min_server_age_days} jour(s)**")
+            conditions.append(f"**Présence serveur** — {state.min_server_age_days} jour(s) minimum")
         if state.custom_condition:
-            conditions.append(f"Condition indiquée par l’organisateur : {state.custom_condition}")
-        if conditions:
-            e.add_field(name="Conditions", value="\n".join(conditions)[:1024], inline=False)
+            conditions.append(f"**Condition personnalisée** — {state.custom_condition}")
+        e.add_field(
+            name="Conditions",
+            value="\n".join(conditions)[:1024] if conditions else "Aucune condition supplémentaire.",
+            inline=False,
+        )
+
         if state.bonus_roles:
-            e.add_field(name="Chances bonus", value=", ".join(f"<@&{x}>" for x in state.bonus_roles) + f" → **x{state.bonus_multiplier}**", inline=False)
+            bonus_lines = [
+                f"<@&{role_id}> — **x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}**"
+                for role_id in state.bonus_roles
+            ]
+            e.add_field(name="Chances bonus", value="\n".join(bonus_lines)[:1024], inline=False)
         if state.image_url:
             e.set_image(url=state.image_url)
-        e.set_footer(text="SentriX • Les conditions automatiques sont revérifiées au tirage")
+        e.set_footer(text="SentriX • Giveaway")
         return e
 
     async def publish(self, guild: discord.Guild, state: BuilderState, author) -> discord.Message:
@@ -491,7 +754,10 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             view=AdvancedGiveawayView(0),
             allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False, replied_user=False),
         )
-        bonus_map = {str(role_id): state.bonus_multiplier for role_id in state.bonus_roles}
+        bonus_map = {
+            str(role_id): int(state.bonus_multipliers.get(role_id, state.bonus_multiplier))
+            for role_id in state.bonus_roles
+        }
         await self.bot.db.execute(
             "INSERT INTO giveaways_v2 (guild_id,channel_id,message_id,prize,winners_count,end_at,status,created_by,created_at,ping_role_id,image_url,description,custom_condition,min_invites,min_account_age_days,min_server_age_days,required_roles_json,excluded_roles_json,bonus_roles_json,winners_json) VALUES (?,?,?,?,?,?,'actif',?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
@@ -508,8 +774,14 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         excluded = _ids(row["excluded_roles_json"])
         bonus = _bonus(row["bonus_roles_json"])
         member_roles = {role.id for role in member.roles}
-        if excluded and member_roles.intersection(excluded):
-            return False, "Un de vos rôles est interdit pour ce giveaway.", 1
+        blocked_roles = sorted(member_roles.intersection(excluded))
+        if blocked_roles:
+            return (
+                False,
+                "Vous avez un rôle interdit pour ce giveaway : "
+                + ", ".join(f"<@&{role_id}>" for role_id in blocked_roles),
+                1,
+            )
         missing = [role_id for role_id in required if role_id not in member_roles]
         if missing:
             return False, "Il vous manque un rôle obligatoire : " + ", ".join(f"<@&{x}>" for x in missing), 1
