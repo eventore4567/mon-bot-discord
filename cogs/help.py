@@ -22,48 +22,58 @@ PAGE_SIZE = 7
 
 CATEGORY_NAMES = {
     "Moderation": "Modération",
-    "Automod": "Administration",
-    "Security": "Administration",
-    "SecurityTools": "Administration",
-    "Configuration": "Administration",
-    "Logs": "Administration",
-    "ServerBuilder": "Administration",
-    "Verification": "Administration",
-    "Owner": "Administration",
-    "EmbedBuilder": "Administration",
-    "Design": "Administration",
+    "Automod": "Sécurité",
+    "Security": "Sécurité",
+    "SecurityTools": "Sécurité",
+    "Configuration": "Configuration",
+    "Logs": "Configuration",
+    "ServerBuilder": "Configuration",
+    "Verification": "Sécurité",
+    "Owner": "Configuration",
+    "EmbedBuilder": "Configuration",
+    "Design": "Configuration",
+    "Notifications": "Configuration",
     "Utility": "Informations",
     "Stats": "Informations",
-    "Invites": "Informations",
+    "Invites": "Invitations",
     "Economy": "Économie",
-    "Levels": "Économie",
+    "Levels": "Niveaux",
     "GamesEconomy": "Jeux",
     "Minigames": "Jeux",
-    "Music": "Jeux",
-    "Events": "Jeux",
+    "Music": "Musique",
+    "Events": "Événements",
     "Tickets": "Tickets",
     "Ai": "IA",
-    "Notifications": "Administration",
 }
 
 CATEGORY_ORDER = (
     "Modération",
-    "Informations",
-    "Économie",
-    "Jeux",
+    "Sécurité",
     "Tickets",
+    "Musique",
+    "Économie",
+    "Niveaux",
+    "Jeux",
+    "Événements",
+    "Invitations",
+    "Informations",
     "IA",
-    "Administration",
+    "Configuration",
 )
 
 CATEGORY_DESCRIPTIONS = {
-    "Modération": "Ban, kick, mute, warn, clear et sanctions.",
-    "Informations": "Serveur, membre, rôle, statistiques et utilitaires.",
-    "Économie": "Balance, banque, boutique, niveaux et progression.",
-    "Jeux": "Mini-jeux, activités et commandes de divertissement.",
-    "Tickets": "Commandes liées aux tickets et au support.",
-    "IA": "Assistant SentriX et génération d’images.",
-    "Administration": "Configuration, sécurité, logs, rôles et gestion du serveur.",
+    "Modération": "Sanctions, avertissements et gestion des membres.",
+    "Sécurité": "AutoMod, anti-raid, vérification et protections.",
+    "Tickets": "Support, panneaux et gestion des tickets.",
+    "Musique": "Lecture, file, playlists et contrôles vocaux.",
+    "Économie": "Argent, banque, boutique et récompenses.",
+    "Niveaux": "XP, progression et classements.",
+    "Jeux": "Mini-jeux et activités interactives.",
+    "Événements": "Événements, concours et animations.",
+    "Invitations": "Invitations, statistiques et récompenses.",
+    "Informations": "Serveur, membres, rôles, statistiques et utilitaires.",
+    "IA": "Assistant SentriX et outils IA.",
+    "Configuration": "Réglages, logs, design et administration du serveur.",
 }
 
 INVITE_PERMISSION_NAMES = (
@@ -100,18 +110,60 @@ def _visible(bot: commands.Bot, _member=None) -> list[commands.Command]:
     return rows
 
 
-def _slash_map(bot: commands.Bot) -> dict[str, str]:
-    result: dict[str, str] = {}
+def _callback_key(callback) -> tuple[str, str] | None:
+    if callback is None:
+        return None
+    seen: set[int] = set()
+    current = callback
+    while getattr(current, "__wrapped__", None) is not None and id(current) not in seen:
+        seen.add(id(current))
+        current = current.__wrapped__
+    module = str(getattr(current, "__module__", "") or "")
+    qualname = str(getattr(current, "__qualname__", "") or "")
+    return (module, qualname) if module or qualname else None
+
+
+def _slash_indexes(bot: commands.Bot) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
+    by_name: dict[str, str] = {}
+    by_callback: dict[tuple[str, str], str] = {}
 
     def walk(node, parent: str = "") -> None:
         name = f"{parent} {node.name}".strip()
-        result[name.casefold()] = name
+        by_name[name.casefold()] = name
+        key = _callback_key(getattr(node, "callback", None))
+        if key is not None:
+            by_callback.setdefault(key, name)
         for child in getattr(node, "commands", []):
             walk(child, name)
 
     for node in bot.tree.get_commands(type=discord.AppCommandType.chat_input):
         walk(node)
-    return result
+    return by_name, by_callback
+
+
+def _slash_map(bot: commands.Bot) -> dict[str, str]:
+    return _slash_indexes(bot)[0]
+
+
+def _slash_name(bot: commands.Bot, command: commands.Command) -> str | None:
+    by_name, by_callback = _slash_indexes(bot)
+    direct = by_name.get(command.qualified_name.casefold())
+    if direct:
+        return direct
+
+    app_command = getattr(command, "app_command", None)
+    app_qualified = str(getattr(app_command, "qualified_name", "") or "")
+    if app_qualified:
+        published = by_name.get(app_qualified.casefold())
+        if published:
+            return published
+
+    key = _callback_key(getattr(command, "callback", None))
+    if key is not None:
+        published = by_callback.get(key)
+        if published:
+            return published
+    return None
 
 
 def _description(command: commands.Command) -> str:
@@ -146,7 +198,7 @@ def _usage(command: commands.Command, prefix: str) -> str:
 
 
 def _command_label(bot: commands.Bot, command: commands.Command, prefix: str) -> str:
-    slash = _slash_map(bot).get(command.qualified_name.casefold())
+    slash = _slash_name(bot, command)
     label = f"{prefix}{_display_name(command)}"
     if slash:
         label += f"   /{slash}"
@@ -252,7 +304,11 @@ def _ordered_categories(bot: commands.Bot, member=None) -> OrderedDict[str, int]
     return result
 
 
-def _search(command_rows: list[commands.Command], query: str) -> list[commands.Command]:
+def _search(
+    bot: commands.Bot,
+    command_rows: list[commands.Command],
+    query: str,
+) -> list[commands.Command]:
     needle = query.casefold().strip().lstrip("+/")
     if not needle:
         return []
@@ -260,16 +316,17 @@ def _search(command_rows: list[commands.Command], query: str) -> list[commands.C
     for command in command_rows:
         aliases = [alias.casefold() for alias in (command.aliases or [])]
         name = command.qualified_name.casefold()
+        slash = str(_slash_name(bot, command) or "").casefold()
         category = _category(command).casefold()
         description = _description(command).casefold()
-        haystack = " ".join([name, *aliases, category, description])
+        haystack = " ".join([name, slash, *aliases, category, description])
         if needle not in haystack:
             continue
-        if needle == name or needle == command.name.casefold() or needle in aliases:
+        if needle in {name, slash, command.name.casefold(), *aliases}:
             rank = 0
-        elif name.startswith(needle):
+        elif slash.startswith(needle) or name.startswith(needle):
             rank = 1
-        elif needle in name:
+        elif needle in slash or needle in name:
             rank = 2
         elif needle in category:
             rank = 3
@@ -377,7 +434,7 @@ class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
     async def on_submit(self, interaction: discord.Interaction):
         vue = self.help_view
         recherche = str(self.query.value)
-        rows = _search(_visible(vue.bot, interaction.user), recherche)
+        rows = _search(vue.bot, _visible(vue.bot, interaction.user), recherche)
         exact = _exact_match(rows, recherche)
         if exact:
             nouvelle = VueAide(
@@ -444,7 +501,7 @@ def _sections_accueil(bot: commands.Bot, member=None) -> list[panels.Section]:
         panels.Section(
             "Trouver une commande",
             [
-                panels.Ligne("Par son nom", "`+help ban`"),
+                panels.Ligne("Par son nom", "`/aide commande:ban` ou `+help ban`"),
                 panels.Ligne("Par catégorie", "Le menu déroulant ci-dessous"),
                 panels.Ligne("Par mot-clé", "Le bouton **Rechercher**"),
             ],
@@ -742,7 +799,7 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
             return
 
         if query:
-            rows = _search(_visible(self.bot, member), query)
+            rows = _search(self.bot, _visible(self.bot, member), query)
             exact = _exact_match(rows, query)
             if exact:
                 vue = VueAide(
