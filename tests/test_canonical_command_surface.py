@@ -1,4 +1,10 @@
-from sentrix_canonical_command_surface import LEAVES, MUSIC_LEAVES, PLAYLIST_LEAVES, ROOTS
+from sentrix_canonical_command_surface import (
+    LEAVES,
+    MUSIC_LEAVES,
+    PLAYLIST_LEAVES,
+    ROOTS,
+    SHORT_TARGETS,
+)
 
 
 def test_canonical_roots_are_human_readable():
@@ -32,3 +38,33 @@ def test_playlist_surface_has_explicit_semantics():
         "rename": "renommer",
         "delete": "supprimer",
     }
+
+
+
+def test_music_short_mode_keeps_the_same_canonical_vocabulary():
+    assert SHORT_TARGETS["music remove"] == ("musique", "file", "retirer")
+    assert SHORT_TARGETS["music autoplay"] == ("musique", "", "lecture-auto")
+    assert SHORT_TARGETS["music playlist create"] == (
+        "musique",
+        "playlist",
+        "sauvegarder",
+    )
+
+
+def test_music_direct_actions_have_expected_french_names():
+    expected = {
+        "play": "jouer",
+        "pause": "pause",
+        "resume": "reprendre",
+        "skip": "suivant",
+        "previous": "precedent",
+        "stop": "arreter",
+        "nowplaying": "en-cours",
+        "volume": "volume",
+        "loop": "boucle",
+        "shuffle": "melanger",
+        "seek": "position",
+        "autoplay": "lecture-auto",
+    }
+    for source, public in expected.items():
+        assert MUSIC_LEAVES[source] == public
