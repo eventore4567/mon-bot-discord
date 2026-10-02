@@ -486,43 +486,14 @@ def _unknown_command_text(bot: commands.Bot, ctx: commands.Context) -> str:
 
 
 async def _plain_send(ctx: commands.Context, text: str):
-    """Le message d'une commande inconnue, dans un panneau SentriX.
+    """Compatibilité historique : les commandes inconnues sont désormais silencieuses.
 
-    Il partait en TEXTE NU. Cette fonction est installée en DERNIER sur
-    ``bot.on_command_error`` — elle l'emporte donc sur les deux autres chemins
-    du dépôt qui traitent déjà ce cas en panneau (cogs/error_experience_v3 et
-    cogs/bot_v16_commands). Résultat mesuré sur le bot booté : `+rank` sortait
-    en ligne de texte sans conteneur ni bannière, alors que `+dice` rendait un
-    panneau complet. Deux apparences pour le même bot selon la commande tapée.
-
-    Le TEXTE ne change pas — il est figé par
-    tests/test_product_update_contract.py, et c'est volontaire : ce module
-    existe pour garantir un message exact. Seule son enveloppe change.
-
-    Repli sur l'envoi brut si le panneau échoue : un message même nu vaut mieux
-    que rien, et cette fonction ne doit jamais faire échouer la gestion
-    d'erreur qui l'appelle.
+    Un typo comme `+ticket` ne doit ni spammer le salon, ni déclencher plusieurs
+    responders concurrents, ni nourrir l'AutoMode avec des messages générés par le bot.
+    Les vraies commandes restent découvrables via /aide et +help.
     """
-    try:
-        from utils import embeds
-        from utils import sentrix_panels as panels
-
-        return await panels.envoyer(
-            ctx,
-            panels.depuis_embed(embeds.warning(text, title="Commande introuvable")),
-            # Une faute de frappe s'efface toute seule : elle n'a pas à
-            # encombrer le salon comme une vraie erreur.
-            delete_after=5,
-        )
-    except Exception:
-        logger.debug("Panneau « commande inconnue » indisponible, repli texte.", exc_info=True)
-
-    sender = discord.abc.Messageable.send
-    seen = set()
-    while hasattr(sender, "_sentrix_original") and id(sender) not in seen:
-        seen.add(id(sender))
-        sender = getattr(sender, "_sentrix_original")
-    return await sender(ctx.channel, text, allowed_mentions=discord.AllowedMentions.none())
+    del ctx, text
+    return None
 
 
 def _install_unknown_command(bot: commands.Bot) -> bool:
@@ -531,11 +502,19 @@ def _install_unknown_command(bot: commands.Bot) -> bool:
         return False
     base = _unwrap_error_handler(current)
 
+    # Nettoie les anciens listeners qui répondaient encore aux fautes de frappe.
+    listeners = list(getattr(bot, "extra_events", {}).get("on_command_error", ()) or ())
+    for listener in listeners:
+        name = str(getattr(listener, "__name__", "") or "")
+        if name in {"unknown_command_v16", "improve_prefix_command_error"}:
+            bot.remove_listener(listener, "on_command_error")
+
     async def exact_error(self, ctx: commands.Context, error: commands.CommandError):
         root = getattr(error, "original", error)
         if isinstance(root, commands.CommandNotFound):
-            await _plain_send(ctx, _unknown_command_text(self, ctx))
-            return
+            # Politique finale : aucune réponse Discord pour une commande inconnue.
+            # Cela évite le spam visible et les boucles avec les anciens responders.
+            return None
         result = base(ctx, error)
         if inspect.isawaitable(result):
             return await result
@@ -571,6 +550,6 @@ async def install_runtime(bot: commands.Bot) -> None:
         "rolepanel_custom_emojis": custom_emoji,
         "ticket_setup_dashboard_only": True,
         "removed_ticket_config_commands": removed,
-        "unknown_command_plain_text": unknown,
+        "unknown_command_silent": unknown,
     }
     logger.info("SentriX product update active: %s", bot.sentrix_product_update_state)
