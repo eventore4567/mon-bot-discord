@@ -56,7 +56,7 @@ CATEGORY_META["moderation"] = (
 CATEGORY_META["security"] = (
     "🔒",
     "Sécurité",
-    "Un seul interrupteur : SentriX applique automatiquement le profil recommandé.",
+    "Choisissez les protections adaptées à votre serveur dans la page Sécurité.",
 )
 CATEGORY_META["music"] = (
     "🎵",
@@ -219,7 +219,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# Configuration de SentriX\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX\n"
                     f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules activés\n"
                     "Un module désactivé ou jamais configuré ne fait rien. Activez-le ici, puis "
                     "ouvrez sa page pour choisir ses salons et rôles."
@@ -365,7 +365,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# Configuration de SentriX — paramètres avancés\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX — paramètres avancés\n"
                     f"**{active}/{len(CATEGORY_ORDER)} modules actifs**"
                     + (f" · **{problems} à corriger**" if problems else "")
                     + "\nLes permissions des commandes sont vérifiées directement avec Discord."
@@ -740,7 +740,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# 🎵 Musique\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# 🎵 Musique\n"
                     "Choisissez le **vocal musique** puis activez le système. "
                     "Quand un membre rejoint ce vocal, SentriX le mentionne dans le chat du vocal "
                     "et affiche le petit lecteur musique.\n\n"
@@ -903,7 +903,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# 🔒 Sécurité\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# 🔒 Sécurité\n"
                     "Ici il n’y a plus 15 menus : **un seul bouton**.\n"
                     "Quand la sécurité est activée, SentriX applique automatiquement son profil "
                     "anti-spam, anti-raid, anti-liens, anti-invitations, anti-bot, anti-scam, "
@@ -954,8 +954,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# 🎫 Tickets\n"
-                    "Vous pouvez partir du **réglage par défaut** en un clic ou tout personnaliser : "
+                    "-# SENTRIX CORE · Configuration · setup\n# 🎫 Tickets\n"
+                    "Activez le module puis choisissez vous-même chaque réglage : "
                     "titre, texte, couleur, image, miniature, salon, rôle support, catégorie, logs, "
                     "formulaire, message d’ouverture et boutons.\n\n"
                     "**Un type de ticket = un bouton** en mode boutons. Discord permet jusqu’à "
@@ -976,50 +976,16 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         container.add_item(discord.ui.Section(discord.ui.TextDisplay(summary), accessory=status))
 
-        quick = discord.ui.Button(
-            label="Configuration rapide / réparer",
-            style=discord.ButtonStyle.success,
-            emoji="⚡",
-        )
         full = discord.ui.Button(
             label="Tout personnaliser",
             style=discord.ButtonStyle.primary,
             emoji="🛠️",
         )
         toggle = discord.ui.Button(
-            label="Désactiver" if enabled else "Activer avec les réglages par défaut",
+            label="Désactiver" if enabled else "Activer",
             style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
         )
 
-        async def quick_config(interaction: discord.Interaction):
-            if not interaction.response.is_done():
-                await interaction.response.defer()
-            try:
-                result = await v72.ensure_ticket_configuration(
-                    self.bot,
-                    self.guild,
-                    actor_id=interaction.user.id,
-                )
-                role = result.get("role")
-                if (
-                    isinstance(interaction.user, discord.Member)
-                    and isinstance(role, discord.Role)
-                    and role not in interaction.user.roles
-                    and self.guild.me is not None
-                    and self.guild.me.guild_permissions.manage_roles
-                    and role < self.guild.me.top_role
-                ):
-                    try:
-                        await interaction.user.add_roles(
-                            role,
-                            reason="SentriX V74 : le configurateur devient Support par défaut",
-                        )
-                    except discord.HTTPException:
-                        logger.debug("Impossible d'attribuer le rôle Support au configurateur", exc_info=True)
-                await self.refresh(interaction)
-                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Tickets prêts. Le panel par défaut a été créé/réparé et publié. Vous pouvez maintenant le personnaliser sans repartir de zéro.')), ephemere=True)
-            except v72.TicketBootstrapError as exc:
-                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(str(exc))), ephemere=True)
 
         async def full_config(interaction: discord.Interaction):
             ticket_cog = self.bot.get_cog("Tickets")
@@ -1037,31 +1003,18 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         async def toggle_tickets(interaction: discord.Interaction):
             if not interaction.response.is_done():
                 await interaction.response.defer()
-            if enabled:
-                await core.set_module_enabled(
-                    self.bot,
-                    self.guild.id,
-                    "tickets",
-                    False,
-                    actor_id=interaction.user.id,
-                )
-                await self.refresh(interaction)
-            else:
-                try:
-                    await v72.ensure_ticket_configuration(
-                        self.bot,
-                        self.guild,
-                        actor_id=interaction.user.id,
-                    )
-                    await self.refresh(interaction)
-                except v72.TicketBootstrapError as exc:
-                    await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(str(exc))), ephemere=True)
+            await core.set_module_enabled(
+                self.bot,
+                self.guild.id,
+                "tickets",
+                not enabled,
+                actor_id=interaction.user.id,
+            )
+            await self.refresh(interaction)
 
-        quick.callback = quick_config
         full.callback = full_config
         toggle.callback = toggle_tickets
-        container.add_item(discord.ui.ActionRow(quick, full))
-        container.add_item(discord.ui.ActionRow(toggle))
+        container.add_item(discord.ui.ActionRow(full, toggle))
         self._add_navigation(container)
         self.add_item(container)
 
@@ -1081,7 +1034,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# 🛡️ Modération\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# 🛡️ Modération\n"
                     "Le vieux **« Rôle staff »** n’est plus demandé. SentriX décide l’accès avec "
                     "les permissions Discord réelles : timeout, kick, ban, gérer les messages, "
                     "les salons, les rôles, etc.\n\n"
@@ -1120,7 +1073,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         toggle.callback = toggle_moderation
         container.add_item(discord.ui.ActionRow(toggle))
         container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay("### Créer / préparer un vrai rôle de modération"))
+        container.add_item(discord.ui.TextDisplay("### Configurer un rôle de modération existant"))
 
         role_select = discord.ui.RoleSelect(
             placeholder="1. Rôle Discord à configurer",
