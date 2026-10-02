@@ -219,7 +219,11 @@ def _aligne(lignes: Iterable[Ligne]) -> str:
 
 @dataclass
 class Bouton:
-    """Un bouton de navigation du panneau."""
+    """Un bouton de navigation ou d'action du panneau.
+
+    Le callback permet aux panneaux Components V2 natifs d'être réellement
+    interactifs sans retomber sur un vieux discord.ui.View séparé.
+    """
 
     libelle: str
     custom_id: str | None = None
@@ -227,6 +231,7 @@ class Bouton:
     style: discord.ButtonStyle = discord.ButtonStyle.secondary
     emoji: str | None = None
     desactive: bool = False
+    callback: Any = None
 
 
 def _commande_en_cours() -> tuple[str, str]:
@@ -367,8 +372,9 @@ class Panneau(discord.ui.LayoutView):
         pied: str | None = None,
         banniere: bool = True,
         image: str | None = None,
+        timeout: float | None = None,
     ) -> None:
-        super().__init__(timeout=None)
+        super().__init__(timeout=timeout)
         self.kind = kind if kind in INTENTIONS else "info"
         self.titre = str(titre or "")
         self.sous_titre = str(sous_titre or "") if sous_titre else ""
@@ -480,15 +486,16 @@ def _rangee(boutons: Sequence[Bouton]) -> discord.ui.ActionRow | None:
                     )
                 )
             else:
-                rangee.add_item(
-                    discord.ui.Button(
-                        label=_texte(bouton.libelle, 80),
-                        custom_id=bouton.custom_id or f"sentrix:panel:{pose}",
-                        style=bouton.style,
-                        emoji=bouton.emoji,
-                        disabled=bouton.desactive,
-                    )
+                item = discord.ui.Button(
+                    label=_texte(bouton.libelle, 80),
+                    custom_id=bouton.custom_id or f"sentrix:panel:{pose}",
+                    style=bouton.style,
+                    emoji=bouton.emoji,
+                    disabled=bouton.desactive,
                 )
+                if callable(bouton.callback):
+                    item.callback = bouton.callback
+                rangee.add_item(item)
             pose += 1
         except Exception:
             logger.exception("Bouton de panneau refusé : %s", bouton.libelle)
