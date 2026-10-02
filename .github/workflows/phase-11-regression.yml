@@ -139,7 +139,7 @@ jobs:
               tests/test_dashboard_product_ui_v18_live_fix.py
               tests/test_dashboard_v60_diagnostics_live.py
               tests/test_dashboard_v60_rework.py
-              tests/test_dashboard_accessibility.py
+              tests/test_accessibility.py
               tests/test_dashboard_auth_visible.py
               tests/test_dashboard_install_link.py
 
