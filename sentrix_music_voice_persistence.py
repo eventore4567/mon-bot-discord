@@ -173,16 +173,11 @@ class PersistentVoiceState:
                     continue
                 await self.remember(guild_id, voice_channel_id, voice_channel_id)
 
-            # Une vieille épingle ne doit jamais maintenir SentriX dans un vocal
-            # si le système musique a été désactivé depuis le setup/dashboard.
-            pinned = await self.bot.db.fetchall(
-                "SELECT guild_id FROM music_voice_sessions ORDER BY guild_id"
-            )
-            for item in pinned:
-                guild_id = int(item["guild_id"])
-                if guild_id not in configured_ids:
-                    await self.forget(guild_id)
-
+            # Les réglages configurés peuvent créer/rafraîchir une épingle, mais leur
+            # absence ne doit jamais supprimer une session persistante existante.
+            # La désactivation explicite du système musique appelle déjà forget()
+            # dans configure_system(); un restart, failover ou migration de schéma
+            # ne doit donc pas être interprété comme un /music leave.
             rows = await self.bot.db.fetchall(
                 "SELECT guild_id, voice_channel_id, text_channel_id "
                 "FROM music_voice_sessions ORDER BY guild_id"
