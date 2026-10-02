@@ -160,7 +160,10 @@ def test_les_pages_de_v74_portent_la_banniere():
     from cogs import setup_experience_v74 as v74
 
     source = inspect.getsource(v74)
-    conteneurs = source.count("discord.ui.Container(accent_colour=v73.ACCENT)")
+    # Le liseré coloré a été retiré de tous les conteneurs : il dessinait un
+    # trait sur le flanc du message et répétait en couleur ce que la signature
+    # dit déjà. On compte donc les conteneurs, pas leur accent.
+    conteneurs = source.count("discord.ui.Container()")
     poses = source.count("v73.poser_banniere(")
     assert conteneurs >= 1
     assert poses >= conteneurs, (

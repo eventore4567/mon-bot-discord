@@ -39,7 +39,7 @@ def _build_home_v78(self: v77.SentriXHelpV77) -> None:
     start = page_index * HOME_PAGE_SIZE
     page_keys = visible_keys[start:start + HOME_PAGE_SIZE]
 
-    container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+    container = discord.ui.Container()
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(

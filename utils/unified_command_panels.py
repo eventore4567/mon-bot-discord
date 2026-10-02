@@ -193,7 +193,7 @@ class UnifiedCommandPanel(discord.ui.LayoutView):
         super().__init__(timeout=None)
 
         accent = int(getattr(getattr(embed, "colour", None), "value", 0) or visuals._ACCENTS.get(kind, 0x3B82F6))
-        container = discord.ui.Container(accent_colour=discord.Colour(accent))
+        container = discord.ui.Container()
 
         # Banner + body live in the SAME container. This is the key invariant: never
         # create a second Discord embed solely to display the SentriX banner.

@@ -305,7 +305,7 @@ def _patch_setup() -> None:
                 lines.append(f"… et **{len(types)-12}** autre(s).")
         else:
             lines.append("Aucun type créé. Utilisez **Créer un type**.")
-        box = discord.ui.Container(accent_colour=v74.v73.ACCENT)
+        box = discord.ui.Container()
         box.add_item(discord.ui.TextDisplay("\n".join(lines)))
         create = discord.ui.Button(label="Créer un type", style=discord.ButtonStyle.success, emoji="➕", disabled=cog is None)
         manage = discord.ui.Button(label="Gérer les types", style=discord.ButtonStyle.primary, emoji="🎫", disabled=cog is None or not types)

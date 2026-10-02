@@ -328,7 +328,7 @@ class SentriXHelpV77(discord.ui.LayoutView):
         total = sum(len(rows) for rows in grouped.values())
         slash_count = len(legacy._slash_map(self.bot))
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = discord.ui.Container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -398,7 +398,7 @@ class SentriXHelpV77(discord.ui.LayoutView):
         self.index = min(max(self.index, 0), len(pages) - 1)
         chunk = pages[self.index]
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = discord.ui.Container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -489,7 +489,7 @@ class SentriXHelpV77(discord.ui.LayoutView):
         if slash:
             command_lines.insert(0, f"`/{slash}`")
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = discord.ui.Container()
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -546,7 +546,6 @@ class SentriXHelpV77(discord.ui.LayoutView):
                 discord.ui.TextDisplay(
                     "# Aide fermée\nLe centre d'aide SentriX a été fermé. Relancez `+help` ou `/help` pour le rouvrir."
                 ),
-                accent_colour=setup_v73.ACCENT,
             )
         )
 

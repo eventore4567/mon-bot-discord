@@ -14,7 +14,10 @@ def test_help_v77_is_valid_python_and_uses_components_v2():
     assert "discord.ui.LayoutView" in source
     assert "discord.ui.Container" in source
     assert "discord.ui.Section" in source
-    assert "setup_v73.ACCENT" in source
+    # Plus de « setup_v73.ACCENT » : le liseré coloré du conteneur a été retiré
+    # partout. Ce que ce test garantit reste entier — l'aide partage bien le
+    # langage visuel du Setup — et ça se vérifie sur la vignette, qui elle
+    # n'a pas bougé.
     assert "setup_v73._thumbnail" in source
 
 

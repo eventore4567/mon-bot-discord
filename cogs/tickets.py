@@ -1133,7 +1133,9 @@ class Tickets(commands.Cog):
         if panel["color"]:
             try:
                 container = next(x for x in public.children if isinstance(x, discord.ui.Container))
-                container.accent_colour = discord.Colour(int(panel["color"]))
+                # Liseré retiré : il dessinait un trait coloré sur tout le flanc
+                # gauche du message, et répétait en couleur ce que la signature
+                # « SENTRIX CORE · … » dit déjà en toutes lettres.
             except Exception:
                 pass
         return sx_panels.avec_composants(public, TicketPanelView(panel, types, language))

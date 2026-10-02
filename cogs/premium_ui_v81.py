@@ -214,9 +214,7 @@ class PremiumEmbedView(discord.ui.LayoutView):
         # Intention deduite de l'embed d'origine : le panneau premium affichait
         # toujours le meme accent, quel que soit le contenu converti.
         self.kind = _intention_depuis(embed)
-        container = discord.ui.Container(
-            accent_colour=discord.Colour(sx_panels.INTENTIONS[self.kind][0])
-        )
+        container = discord.ui.Container()
 
         # Banniere pleine largeur en tete. Le panneau premium n'en avait aucune :
         # +profile, +serverinfo et +leaderboard passaient par lui et s'ouvraient

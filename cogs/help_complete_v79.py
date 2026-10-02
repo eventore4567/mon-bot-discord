@@ -453,7 +453,6 @@ class SentriXHelpV79(discord.ui.LayoutView):
             self.add_item(
                 discord.ui.Container(
                     discord.ui.TextDisplay("# Aide fermée\nRelancez `+help` ou `/help` pour rouvrir le centre d'aide."),
-                    accent_colour=setup_v73.ACCENT,
                 )
             )
         else:
@@ -472,7 +471,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         start = self.home_index * HOME_PAGE_SIZE
         page_keys = keys[start:start + HOME_PAGE_SIZE]
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = discord.ui.Container()
         setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -558,7 +557,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         pages = _chunks(self.rows)
         self.index = min(max(self.index, 0), len(pages) - 1)
         chunk = pages[self.index]
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = discord.ui.Container()
         setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -640,7 +639,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         if prefix_usage:
             usage_lines.append(f"`{prefix_usage}`")
 
-        container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
+        container = discord.ui.Container()
         setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(

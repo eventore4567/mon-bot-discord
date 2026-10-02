@@ -110,10 +110,18 @@ def test_sanction_permissions_are_reported_before_target_hierarchy():
     guild = SimpleNamespace(id=123, owner_id=999)
     bot = SimpleNamespace(sentrix_access_backend=Backend())
 
+    # Les libellés viennent de la TABLE, pas d'une copie écrite ici. Ce test
+    # codait « Modérer les membres » en dur alors que le produit affiche
+    # « Exclure temporairement des membres », le nom officiel de Discord en
+    # français. Une quatrième source d'étiquettes qui diverge des trois autres
+    # ne vérifie plus rien : elle signale seulement qu'elle est périmée.
     expected = {
-        "mute": ("moderate_members", "Modérer les membres"),
-        "ban": ("ban_members", "Bannir des membres"),
-        "kick": ("kick_members", "Expulser des membres"),
+        nom: (permission, access_matrix.PERMISSION_LABELS[permission])
+        for nom, permission in (
+            ("mute", "moderate_members"),
+            ("ban", "ban_members"),
+            ("kick", "kick_members"),
+        )
     }
 
     for command_name, (permission, label) in expected.items():

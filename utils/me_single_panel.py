@@ -110,7 +110,7 @@ class MeSinglePanel(discord.ui.LayoutView):
         self.clear_items()
 
         colour_value = int(getattr(getattr(embed, "colour", None), "value", 0) or 0x3B82F6)
-        container = discord.ui.Container(accent_colour=discord.Colour(colour_value))
+        container = discord.ui.Container()
 
         # The banner is part of the SAME container, so +me is no longer two embeds.
         gallery = discord.ui.MediaGallery()

@@ -85,6 +85,32 @@ CORE_NAME = "SENTRIX CORE"
 #: besoin d'un bandeau n'a que cette ligne à changer.
 BANDEAUX_ACTIFS = False
 
+#: Icône de chaque domaine. Toute commande appartient à une famille, donc
+#: toute réponse peut porter son icône — sans qu'on ait à écrire un emoji
+#: dans chaque titre, ni à modifier le moindre cog.
+#:
+#: C'est ce qui rend l'identité SentriX visible PARTOUT et pas seulement là
+#: où quelqu'un avait pensé à mettre un emoji.
+ICONES_FAMILLES: dict[str, str] = {
+    "moderation": "mod",
+    "security": "security",
+    "tickets": "ticket",
+    "economy": "wallet",
+    "levels": "level",
+    "music": "voice",
+    "games": "games",
+    "ai": "ai",
+    "config": "settings",
+    "welcome": "member_join",
+    "goodbye": "member_leave",
+    "events": "event",
+    "info": "info",
+    "success": "success",
+    "error": "error",
+    "warning": "warning",
+    "special": "home",
+}
+
 _FAMILY_LABELS = {
     "success": "Succès",
     "error": "Erreur",
@@ -586,7 +612,11 @@ class Panneau(discord.ui.LayoutView):
 
         # 2 — titre et sous-titre. La vignette, quand il y en a une, se place à
         #     droite du titre plutôt qu'en médaillon perdu dans un coin.
-        entete = f"## {_icones(_texte(self.titre, 200))}"
+        # L'icône du domaine en tête, SAUF si le titre en porte déjà une :
+        # « 🎫 Ticket #42 » devient une icône de ticket par traduction, en
+        # ajouter une seconde ferait doublon.
+        titre_rendu = _icones(_texte(self.titre, 200))
+        entete = f"## {_icone_de_famille(self.identite_famille, titre_rendu)}"
         if sous_titre:
             entete += f"\n{_texte(sous_titre, 400)}"
         pose = False
@@ -657,6 +687,26 @@ class Panneau(discord.ui.LayoutView):
         if not self.avec_banniere:
             return []
         return pieces_jointes_de_famille(self.famille)
+
+
+def _icone_de_famille(famille: str, titre: str) -> str:
+    """Pose l'icône du domaine devant le titre, s'il n'en a pas déjà une.
+
+    Deux icônes à la suite se liraient comme une erreur d'affichage, et le
+    titre traduit porte déjà la sienne quand l'auteur en avait mis une.
+    """
+    from utils.sentrix_emojis import emoji as _emoji
+
+    titre = str(titre or "")
+    if titre.startswith("<:") or titre.startswith("<a:"):
+        return titre
+    nom = ICONES_FAMILLES.get(str(famille or ""))
+    icone = _emoji(nom) if nom else ""
+    # Seulement une VRAIE icône : le repli texte (« ✓ », « … ») devant un
+    # titre de panneau serait du bruit, pas de l'identité.
+    if not icone.startswith("<"):
+        return titre
+    return f"{icone} {titre}".strip()
 
 
 def _icones(texte: str) -> str:

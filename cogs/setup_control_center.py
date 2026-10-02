@@ -865,7 +865,6 @@ class SetupView(discord.ui.LayoutView):
             sections = list(self._sections_base)
 
         conteneur = discord.ui.Container(
-            accent_colour=discord.Colour(panels.INTENTIONS[self.intention()][0])
         )
         # Famille figee ICI (voir fichiers()) : la re-resoudre a l'envoi peut
         # rendre une autre famille et faire REFUSER le message par Discord.

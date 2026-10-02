@@ -123,7 +123,7 @@ async def _build_invitation_page(view) -> None:
     log_channel = view.guild.get_channel(int(log_id)) if log_id else None
     logs_enabled = bool(logs.get("enabled") and log_channel)
 
-    container = discord.ui.Container(accent_colour=v73.ACCENT)
+    container = discord.ui.Container()
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(

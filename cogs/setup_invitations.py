@@ -272,7 +272,7 @@ async def _build_v74_invitations(view) -> None:
     channel = view.guild.get_channel(int(channel_id)) if channel_id else None
     enabled = bool(setting.get("enabled") and channel_id)
 
-    container = discord.ui.Container(accent_colour=v73.ACCENT)
+    container = discord.ui.Container()
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(

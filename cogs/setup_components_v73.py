@@ -480,7 +480,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         active = sum("ACTIF" in value and "INACTIF" not in value for value in states.values())
         problems = sum("CORRIGER" in value for value in states.values())
 
-        container = discord.ui.Container(accent_colour=ACCENT)
+        container = discord.ui.Container()
         poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -546,7 +546,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         status_label, status_style = _status_button_text(state)
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
 
-        container = discord.ui.Container(accent_colour=ACCENT)
+        container = discord.ui.Container()
         poser_banniere(container)
         container.add_item(
             discord.ui.Section(
@@ -660,7 +660,6 @@ class SentriXSetupV73(discord.ui.LayoutView):
             discord.ui.TextDisplay(
                 "# Configuration fermée\nLe panneau SentriX a été fermé. Relancez `+setup` ou `/setup` pour le rouvrir."
             ),
-            accent_colour=ACCENT,
         )
         self.add_item(closed)
         # pieces_jointes_banniere consulte la MÊME condition que poser_banniere.

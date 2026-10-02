@@ -134,7 +134,7 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
         disabled=True,
     )
 
-    container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
+    container = discord.ui.Container()
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(

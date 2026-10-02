@@ -693,9 +693,7 @@ class VueAide(discord.ui.LayoutView):
                 else "Toutes les commandes de SentriX, classées et cherchables."
             )
 
-        conteneur = discord.ui.Container(
-            accent_colour=discord.Colour(panels.INTENTIONS[self.kind][0])
-        )
+        conteneur = discord.ui.Container()
         # Famille figee ICI et reutilisee par fichiers() : nom_banniere et
         # fichier_banniere appellent tous deux accord_commande, qui re-decide
         # depuis le contexte de commande. Ce contexte retombe parfois avant
