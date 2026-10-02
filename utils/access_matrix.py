@@ -41,7 +41,17 @@ logger = logging.getLogger("bot.access-matrix")
 
 PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires
-    "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
+    #
+    # « aide » est la racine d'aide finale en slash (/aide), « help » son nom
+    # historique. Les DEUX doivent être ici : la production disait
+    #
+    #   Audit commandes V41 : 1 racine(s) non classée(s), donc fail-closed : aide
+    #
+    # autrement dit la commande d'aide était réservée aux administrateurs,
+    # alors qu'elle venait d'être publiée pour tout le monde. Renommer une
+    # racine sans la reclasser la fait tomber en fail-closed, et c'est
+    # exactement ce qui est arrivé à « test-events » dans le même lot.
+    "help", "aide", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
     "report-bug", "afk", "roll", "choose", "privacy-policy",
