@@ -544,6 +544,20 @@ def _remove_old_roots(tree: app_commands.CommandTree) -> None:
             tree.remove_command(name)
 
 
+def _remove_legacy_public_roots(tree: app_commands.CommandTree) -> None:
+    """Supprime les anciennes racines qui ne doivent plus être publiées.
+
+    Cette passe est volontairement minuscule et se lance après TOUTES les couches
+    de préparation. Certaines couches historiques peuvent recréer /help après le
+    premier nettoyage ; /aide est désormais l'unique entrée publique d'aide.
+    """
+    for name in ("help",):
+        try:
+            tree.remove_command(name, type=discord.AppCommandType.chat_input)
+        except TypeError:
+            tree.remove_command(name)
+
+
 def _install_permission_bridge(bot: commands.Bot) -> None:
     try:
         from cogs import permission_guard
@@ -804,6 +818,7 @@ def install_global() -> None:
         client = getattr(self, "client", None) or getattr(self, "_client", None)
         if isinstance(client, commands.Bot):
             await prepare_bot(client)
+            _remove_legacy_public_roots(self)
 
             # Phase 9 : prepare_bot() construit la surface canonique JUSTE avant
             # la synchronisation. L'audit doit donc vivre ici, après cette étape,
