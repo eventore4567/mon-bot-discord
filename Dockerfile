@@ -49,7 +49,8 @@ RUN python -m pytest -q \
     tests/test_games_runtime_core.py \
     tests/test_game_stakes.py \
     tests/test_services_economy.py \
-    tests/test_economy_race_conditions.py
+    tests/test_economy_race_conditions.py \
+    tests/test_v25_quality.py
 
 # Port du dashboard web intégré (voir web/dashboard.py) — Railway fournit sa propre
 # variable PORT au runtime, cette ligne ne sert que de documentation pour Docker.
