@@ -271,3 +271,46 @@ def test_final_sync_wrapper_gates_the_prepared_registry():
 
     assert prepare_index < audit_index < sync_index
     assert "V95 audit registre final" in source
+
+
+
+def test_generated_slash_wrapper_links_back_to_prefix_business_command():
+    async def prefix_action():
+        return None
+
+    async def slash_wrapper():
+        return None
+
+    slash_wrapper._sentrix_original_command = "music play"
+
+    bot = FakeBot(
+        roots=[slash("jouer", callback=slash_wrapper)],
+        prefix=[prefix("music play", prefix_action)],
+    )
+
+    issues = audit_command_registry(bot)
+
+    assert not any(
+        issue.code == "slash-without-prefix-business-command"
+        for issue in issues
+    )
+
+
+def test_native_aide_is_linked_to_prefix_help():
+    async def slash_help():
+        return None
+
+    async def prefix_help():
+        return None
+
+    bot = FakeBot(
+        roots=[slash("aide", callback=slash_help)],
+        prefix=[prefix("help", prefix_help)],
+    )
+
+    issues = audit_command_registry(bot)
+
+    assert not any(
+        issue.code == "slash-without-prefix-business-command"
+        for issue in issues
+    )
