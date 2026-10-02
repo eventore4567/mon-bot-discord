@@ -27,6 +27,7 @@ from discord.ext import commands
 logger = logging.getLogger("bot.music-persistence")
 
 _RETRY_SECONDS = 30
+_STALE_VOICE_CLIENT_SECONDS = 12
 _VOICE_ABNORMAL_CLOSE_CODE = 1006
 _TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS music_voice_sessions (
@@ -47,6 +48,10 @@ class PersistentVoiceState:
         self._closed = False
         self._watchdog_task: asyncio.Task | None = None
         self._last_abnormal_disconnect_at: dict[int, float] = {}
+        # discord.py peut conserver un VoiceClient présent mais déconnecté pendant
+        # un handshake mort. Sans horodatage, restore_all le considère "en cours de
+        # reconnexion" pour toujours et ne recrée jamais la connexion.
+        self._disconnected_since: dict[int, float] = {}
 
     async def ensure_schema(self) -> None:
         if self._schema_ready:
@@ -130,6 +135,8 @@ class PersistentVoiceState:
             "DELETE FROM music_voice_sessions WHERE guild_id = ?",
             (guild_id,),
         )
+        self._disconnected_since.pop(int(guild_id), None)
+        self._last_abnormal_disconnect_at.pop(int(guild_id), None)
         if existing is not None:
             logger.info("salon vocal désépinglé explicitement -> guild=%s", guild_id)
             await self._durable_checkpoint("music_voice_unpin")
@@ -212,6 +219,7 @@ class PersistentVoiceState:
                 if vc is not None:
                     try:
                         if vc.is_connected():
+                            self._disconnected_since.pop(guild_id, None)
                             current_channel = getattr(vc, "channel", None)
                             if current_channel is not None and int(current_channel.id) != int(voice_channel.id):
                                 # Le vocal choisi dans +setup/dashboard est la source
@@ -222,10 +230,37 @@ class PersistentVoiceState:
                             queue.keep_connected = True
                             if hasattr(self.cog, "ensure_panels_for_current_members"):
                                 await self.cog.ensure_panels_for_current_members(guild, voice_channel)
+                            resume = getattr(self.cog, "resume_after_voice_reconnect", None)
+                            if callable(resume):
+                                await resume(queue)
                             continue
-                        # Un VoiceClient peut être en plein handshake/reconnect. On ne
-                        # crée pas une seconde connexion concurrente ; le watchdog réessaie.
-                        continue
+
+                        now = time.monotonic()
+                        disconnected_at = self._disconnected_since.setdefault(guild_id, now)
+                        if now - disconnected_at < _STALE_VOICE_CLIENT_SECONDS:
+                            # Court handshake normal : on laisse discord.py terminer.
+                            continue
+
+                        # VoiceClient fantôme : après le délai de grâce on le force à
+                        # se fermer puis on recrée une connexion propre. C'est le cas
+                        # qui restait bloqué indéfiniment avant la phase 6.
+                        logger.warning(
+                            "voice client stale -> guild=%s channel=%s age=%.1fs ; reconnexion forcée",
+                            guild_id,
+                            voice_channel.id,
+                            now - disconnected_at,
+                        )
+                        try:
+                            await vc.disconnect(force=True)
+                        except TypeError:
+                            await vc.disconnect()
+                        except Exception:
+                            logger.debug(
+                                "nettoyage du VoiceClient fantôme ignoré -> guild=%s",
+                                guild_id,
+                                exc_info=True,
+                            )
+                        queue.voice_client = None
                     except Exception as exc:
                         logger.warning(
                             "repositionnement vocal différé -> guild=%s channel=%s error=%s",
@@ -238,8 +273,12 @@ class PersistentVoiceState:
                 try:
                     queue.voice_client = await voice_channel.connect(timeout=30, reconnect=True)
                     queue.keep_connected = True
+                    self._disconnected_since.pop(guild_id, None)
                     if hasattr(self.cog, "ensure_panels_for_current_members"):
                         await self.cog.ensure_panels_for_current_members(guild, voice_channel)
+                    resume = getattr(self.cog, "resume_after_voice_reconnect", None)
+                    if callable(resume):
+                        await resume(queue)
                     abnormal_at = self._last_abnormal_disconnect_at.pop(guild_id, None)
                     if abnormal_at is not None:
                         logger.warning(
@@ -329,6 +368,7 @@ class PersistentVoiceState:
         # watchdog rétablira la connexion. Seul /music leave appelle forget().
         channel = getattr(after, "channel", None)
         if channel is not None:
+            self._disconnected_since.pop(int(guild.id), None)
             queue = self.cog.get_queue(guild.id)
             queue.voice_client = getattr(guild, "voice_client", None) or queue.voice_client
             text_channel = getattr(queue, "text_channel", None)
