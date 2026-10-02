@@ -1003,8 +1003,11 @@ async def evaluate(bot, *, command_name: Any, author: Any, guild: Any) -> Access
         ):
             return AccessDecision(True, policy="staff-role")
         return _deny(
-            f"**Permission requise :** {permission_label(required)} "
-            "ou un rôle autorisé dans `Setup > Permissions`.",
+            # Le membre arrive ici seulement s'il n'a NI permission native, NI
+            # autorisation explicite Setup, NI rôle staff de repli. On affiche donc
+            # la cause immédiate, sans la mélanger avec la hiérarchie de la cible :
+            # celle-ci n'est évaluée qu'après une autorisation réussie.
+            f"**Permission manquante :** {permission_label(required)}.",
             f"discord:{required}",
         )
 
