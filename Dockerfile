@@ -36,6 +36,7 @@ RUN python -m pytest -q \
     tests/test_logs_bulk_delete_resilience.py \
     tests/test_moderation_logging_resilience.py \
     tests/test_automod_enforcement_resilience.py \
+    tests/test_automod_log_manage_style.py \
     tests/test_plain_error_messages.py \
     tests/test_short_command_names.py \
     tests/test_command_setup_prompt.py \
