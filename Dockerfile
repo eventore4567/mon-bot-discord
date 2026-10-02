@@ -39,6 +39,7 @@ RUN python -m pytest -q \
     tests/test_automod_log_manage_style.py \
     tests/test_sentrix_trace_style.py \
     tests/test_sentrix_core_style.py \
+    tests/test_sentrix_native_interactive_surfaces.py \
     tests/test_plain_error_messages.py \
     tests/test_short_command_names.py \
     tests/test_command_setup_prompt.py \
