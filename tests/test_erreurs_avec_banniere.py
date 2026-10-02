@@ -148,20 +148,38 @@ def test_le_texte_exact_du_contrat_est_conserve():
     )
 
 
-def test_les_deux_branches_voisines_rendent_la_meme_chose():
-    """Dans cogs/error_experience_v3, « commande introuvable » et « argument
-    manquant » sont deux branches voisines du même if/elif. L'une rendait un
-    panneau, l'autre du texte nu — deux apparences à quinze lignes d'écart."""
+def test_une_commande_inconnue_ne_repond_rien_du_tout():
+    """La décision a changé, et pour une bonne raison : sur un serveur qui
+    héberge plusieurs bots, ``+play`` destiné à un autre bot ne doit pas faire
+    répondre SentriX. Ce test demandait l'inverse — un panneau « commande
+    introuvable » — et il verrouillait donc une pollution du salon.
+
+    Ce qui reste vérifié, c'est que la branche est bien SILENCIEUSE et qu'elle
+    dit à l'appelant que l'erreur est traitée : un retour falsy le fait
+    retomber sur le handler historique, qui parle, et le silence ne tient
+    plus.
+    """
+    import ast
     import inspect
+    import textwrap
 
     from cogs import error_experience_v3
 
-    source = inspect.getsource(error_experience_v3._handle_user_error)
-    debut = source.index("CommandNotFound")
-    fin = source.index("MissingRequiredArgument")
-    branche_introuvable = source[debut:fin]
-    assert "panels.envoyer" in branche_introuvable, (
-        "la commande introuvable est repassée en texte nu"
+    arbre = ast.parse(
+        textwrap.dedent(inspect.getsource(error_experience_v3._handle_user_error))
+    )
+
+    branche = None
+    for noeud in ast.walk(arbre):
+        if isinstance(noeud, ast.If) and "CommandNotFound" in ast.unparse(noeud.test):
+            branche = noeud
+            break
+    assert branche is not None, "la branche CommandNotFound a disparu"
+
+    corps = ast.unparse(branche.body)
+    assert "send" not in corps, f"la commande inconnue répond encore : {corps[:120]}"
+    assert "return True" in corps, (
+        "retour falsy : l'appelant retombe sur le handler historique, qui parle"
     )
 
 
@@ -174,8 +192,13 @@ def test_une_faute_de_frappe_seface_toute_seule():
     from cogs import error_experience_v3, final_error_embed_v5
 
     assert final_error_embed_v5._DUREE_COMMANDE_INTROUVABLE < final_error_embed_v5._DUREE_AFFICHAGE
-    source = inspect.getsource(error_experience_v3._handle_user_error)
-    assert "delete_after=5" in source
+    # Les erreurs utilisateur passent désormais par _send_plain, qui porte
+    # lui-même la durée courte : chercher « delete_after=5 » dans ce
+    # gestionnaire verrouillait l'ancien chemin d'envoi.
+    source = inspect.getsource(error_experience_v3._send_plain)
+    assert "delete_after" in source, (
+        "une faute de frappe reste affichée comme une vraie erreur"
+    )
 
 
 def test_lenvoi_de_panneau_accepte_une_duree():

@@ -90,12 +90,27 @@ def _can_reply_unknown(bot: commands.Bot, ctx: commands.Context) -> bool:
     return True
 
 
-async def _send_plain(ctx: commands.Context, text: str, *, delete_after: float | None = None):
+#: Une erreur d'utilisateur est passagère : un argument oublié, une mention mal
+#: tapée. Assez de temps pour la lire, pas assez pour encombrer le salon. Les
+#: treize appels de ce module n'en passaient aucune et ces messages restaient
+#: donc affichés indéfiniment, alignés sous chaque tentative ratée.
+_DUREE_ERREUR_UTILISATEUR = 12.0
+
+
+async def _send_plain(
+    ctx: commands.Context,
+    text: str,
+    *,
+    delete_after: float | None = _DUREE_ERREUR_UTILISATEUR,
+):
     """Envoie du vrai texte Discord sans passer par la conversion globale en embed.
 
     La politique visuelle finale remplace Context.send et convertit normalement tout texte
     de commande en carte SentriX. Une commande inconnue n'a volontairement pas de carte :
     on appelle donc le transport Discord original conservé par le wrapper final.
+
+    ``delete_after=None`` garde le message : à réserver à ce qui doit rester
+    lisible après coup, comme la sortie brute de +logsdiag.
     """
     sender = getattr(commands.Context.send, "_sentrix_original", commands.Context.send)
     kwargs = {"delete_after": float(delete_after)} if delete_after is not None else {}
@@ -128,7 +143,12 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
     if isinstance(base, commands.CommandNotFound):
         # Une commande inconnue peut viser un autre bot du serveur.
         # SentriX reste silencieux au lieu de polluer le salon.
-        return
+        #
+        # « return True » et non « return » : la fonction est typée -> bool, et
+        # l'appelant (ligne ~207) retombe sur le handler HISTORIQUE quand le
+        # retour est falsy. Un « return » nu rend None, donc le silence voulu
+        # ici était annulé par la couche d'en dessous.
+        return True
 
     if isinstance(base, commands.MissingRequiredArgument):
         try:

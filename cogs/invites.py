@@ -159,6 +159,21 @@ class Invites(commands.Cog, name="Invites"):
             await helpers.send_log(self.bot, guild, "automod", e)
             self.recent_new_accounts[key] = []
 
+    async def _langue_du_serveur(self, guild_id: int) -> str:
+        """Langue du serveur, avec repli sur le défaut du produit.
+
+        Isolée pour que son échec soit sans conséquence : le journal part en
+        français plutôt que de ne pas partir du tout.
+        """
+        try:
+            return await language_runtime.get_language(self.bot, guild_id)
+        except Exception:
+            logger.debug(
+                "Langue du serveur %s indéterminée : repli sur %s.",
+                guild_id, language_runtime.DEFAULT_LANGUAGE, exc_info=True,
+            )
+            return language_runtime.DEFAULT_LANGUAGE
+
     async def _journaliser_arrivee(
         self, member: discord.Member, code: str | None, inviter_id: int | None
     ) -> None:
@@ -171,8 +186,13 @@ class Invites(commands.Cog, name="Invites"):
         l'arrivée à quelqu'un au hasard.
         """
         guild = member.guild
+        # Hors du try : une recherche de LANGUE qui échoue ne doit pas coûter
+        # le journal. Cet appel était à l'intérieur, sous un commentaire qui ne
+        # parle que de l'enregistrement de l'arrivée — une base indisponible
+        # une seconde faisait donc disparaître l'arrivée du journal, en
+        # silence. Le repli est le français, langue par défaut du produit.
+        language = await self._langue_du_serveur(guild.id)
         try:
-            language = await language_runtime.get_language(self.bot, guild.id)
             english = language == language_runtime.LANG_EN
             if inviter_id:
                 detail = await self.bot.db.get_invite_breakdown(guild.id, inviter_id)
