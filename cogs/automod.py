@@ -2679,7 +2679,7 @@ class AutoMod(commands.Cog, name="Automod"):
         except discord.HTTPException:
             pass
 
-        # Clone façon DraftBot : seulement APRÈS suppression réussie, et uniquement si
+        # Republication contrôlée SentriX : seulement APRÈS suppression réussie, et uniquement si
         # le texte a pu être censuré de manière sûre. Sans Gérer les webhooks, on garde
         # automatiquement le comportement suppression + avertissement.
         if deleted and censored_content:
