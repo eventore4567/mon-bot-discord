@@ -931,7 +931,35 @@ def _trace_identity_label(event_type: str) -> str:
     return "Élément"
 
 
+def _trace_body_parts(body: str) -> tuple[str, str]:
+    """Sépare le résumé immédiat des détails longs.
+
+    Les anciens logs empilaient « Détails », l'identité puis le même contexte dans
+    plusieurs blocs. Le premier paragraphe devient le résumé lisible en un coup d'œil ;
+    le reste reste disponible sans être perdu.
+    """
+    clean = str(body or "").strip()
+    if not clean:
+        return "", ""
+    parts = [part.strip() for part in clean.split("\n\n") if part.strip()]
+    if not parts:
+        return "", ""
+    return parts[0][:1200], "\n\n".join(parts[1:])[:2200]
+
+
+def _trace_time_text(embed: discord.Embed) -> str:
+    timestamp = getattr(embed, "timestamp", None)
+    if timestamp is None:
+        return ""
+    try:
+        return f"<t:{int(timestamp.timestamp())}:R>"
+    except Exception:
+        return ""
+
+
 class WideLogView(discord.ui.LayoutView):
+    """SentriX Trace V7 — une lecture en trois zones : identité, événement, actions."""
+
     def __init__(
         self,
         embed: discord.Embed,
@@ -950,88 +978,70 @@ class WideLogView(discord.ui.LayoutView):
             accent_colour=discord.Colour(accent) if accent is not None else None
         )
 
-        separators = 0
-
-        def add_separator() -> bool:
-            nonlocal separators
-            if separators >= 2:
-                return False
-            try:
-                container.add_item(_sep())
-            except Exception:
-                logger.exception("SENTRIX TRACE separator")
-                return False
-            separators += 1
-            return True
-
-        # SIGNATURE — bannière SentriX toujours en premier.
+        # 1 — bannière fine, toujours la première pièce visuelle.
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
-        add_separator()
 
         event_type = canonical_event_type(
             log_type,
             embed.title or "",
             embed.description or "",
         )
+        title = _trace_title(event_type, embed.title or "")
+        meta = _trace_meta(event_type, emoji=emoji)
+        identity_label = _trace_identity_label(event_type)
 
-        # BLOC 1 — l'événement est la première information lisible.
-        container.add_item(
-            discord.ui.TextDisplay(
-                _trace_meta(event_type, emoji=emoji)
-            )
-        )
-        container.add_item(
-            discord.ui.TextDisplay(
-                f"## {_trace_title(event_type, embed.title or '')}"
-            )
-        )
-
-        # BLOC 2 — identité concernée, compacte et secondaire.
+        # 2 — en-tête compact : type d'événement + cible réunis dans la même zone.
+        header_lines = [meta, f"## {title}"]
         if identity_name:
-            ident = f"**{safe_text(identity_name)[:80]}**"
-            identity_label = _trace_identity_label(event_type)
-            ident += f"\n-# {identity_label}"
-            if identity_id:
-                ident += f" · ID {identity_id}"
-            placed = False
-            if identity_icon:
-                try:
-                    container.add_item(
-                        discord.ui.Section(
-                            discord.ui.TextDisplay(ident),
-                            accessory=discord.ui.Thumbnail(str(identity_icon)),
-                        )
-                    )
-                    placed = True
-                except Exception:
-                    logger.exception("SENTRIX TRACE identity section")
-            if not placed:
-                container.add_item(discord.ui.TextDisplay(ident))
-            add_separator()
+            header_lines.append(
+                f"**{identity_label}** · {safe_text(identity_name)[:80]}"
+            )
+        if identity_id:
+            header_lines.append(f"-# ID · `{identity_id}`")
 
-        # BLOC 3 — contexte humain. Les détails longs restent gérés par
-        # narrative_body(), donc aucun champ historique n'est perdu.
+        header = "\n".join(header_lines)
+        placed_header = False
+        if identity_icon:
+            try:
+                container.add_item(
+                    discord.ui.Section(
+                        discord.ui.TextDisplay(header),
+                        accessory=discord.ui.Thumbnail(str(identity_icon)),
+                    )
+                )
+                placed_header = True
+            except Exception:
+                logger.exception("SENTRIX TRACE V7 header section")
+        if not placed_header:
+            container.add_item(discord.ui.TextDisplay(header))
+
+        try:
+            container.add_item(_sep())
+        except Exception:
+            logger.exception("SENTRIX TRACE V7 separator")
+
+        # 3 — résumé d'abord, détails secondaires ensuite. Plus de titre « Détails »
+        # vide ou répétitif lorsqu'une seule phrase suffit.
         body = narrative_body(
             embed,
             log_type=event_type,
             identity_name=identity_name,
             identity_id=identity_id,
         )
-        if body:
-            container.add_item(discord.ui.TextDisplay("### Détails"))
-            container.add_item(discord.ui.TextDisplay(body[:3000]))
-
-        footer = safe_text(getattr(embed.footer, "text", None))[:250]
-        container.add_item(
-            discord.ui.TextDisplay(
-                f"-# {_trace_footer(event_type, footer)}"
+        summary, details = _trace_body_parts(body)
+        if summary:
+            quoted = "\n".join(
+                f"> {line}" if line.strip() else ">"
+                for line in summary.splitlines()
             )
-        )
+            container.add_item(discord.ui.TextDisplay(quoted[:1600]))
+        if details:
+            container.add_item(discord.ui.TextDisplay("### Informations"))
+            container.add_item(discord.ui.TextDisplay(details[:2200]))
 
-        # Médias APRÈS le contexte. La bannière reste donc la seule image
-        # structurelle en haut ; les pièces jointes de l'événement restent en bas.
+        # Médias seulement après le contexte métier.
         if media_items:
             media_gallery = discord.ui.MediaGallery()
             gallery_count = 0
@@ -1051,7 +1061,7 @@ class WideLogView(discord.ui.LayoutView):
                         continue
                     except Exception:
                         logger.exception(
-                            "SENTRIX TRACE media gallery item failed filename=%s type=%s",
+                            "SENTRIX TRACE V7 media gallery item failed filename=%s type=%s",
                             filename,
                             content_type,
                         )
@@ -1061,7 +1071,7 @@ class WideLogView(discord.ui.LayoutView):
                 try:
                     container.add_item(media_gallery)
                 except Exception:
-                    logger.exception("SENTRIX TRACE media gallery failed")
+                    logger.exception("SENTRIX TRACE V7 media gallery failed")
 
             file_cls = getattr(discord.ui, "File", None)
             for source, filename in fallback_files[:5]:
@@ -1071,23 +1081,32 @@ class WideLogView(discord.ui.LayoutView):
                         continue
                     except Exception:
                         logger.exception(
-                            "SENTRIX TRACE file component failed filename=%s",
+                            "SENTRIX TRACE V7 file component failed filename=%s",
                             filename,
                         )
                 if source.startswith(("https://", "http://")):
                     container.add_item(
-                        discord.ui.TextDisplay(f"📎 [{filename}]({source})")
+                        discord.ui.TextDisplay(f"[Ouvrir {filename}]({source})")
                     )
                 else:
-                    container.add_item(
-                        discord.ui.TextDisplay(f"📎 **{filename}**")
-                    )
+                    container.add_item(discord.ui.TextDisplay(f"**{filename}**"))
 
         rows = build_rows(old_view)
         if rows:
-            add_separator()
+            try:
+                container.add_item(_sep())
+            except Exception:
+                logger.exception("SENTRIX TRACE V7 actions separator")
             for row in rows:
                 container.add_item(row)
+
+        # Footer compact : temps relatif + trace. Aucun doublon SentriX.
+        footer = safe_text(getattr(embed.footer, "text", None))[:160]
+        time_text = _trace_time_text(embed)
+        footer_text = _trace_footer(event_type, footer)
+        if time_text:
+            footer_text = f"{time_text} · {footer_text}"
+        container.add_item(discord.ui.TextDisplay(f"-# {footer_text}"))
 
         self.add_item(container)
 
