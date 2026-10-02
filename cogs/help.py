@@ -182,7 +182,7 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
         value="Toutes les commandes sont visibles. La fiche d’une commande indique clairement la permission nécessaire.",
         inline=False,
     )
-    panel.set_footer(text="SentriX • Centre d’aide")
+    panel.set_footer(text="SentriX Core · Centre d’aide")
     return _decorate(panel, bot)
 
 
@@ -211,7 +211,7 @@ def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discor
             value=", ".join(f"`{prefix}{alias}`" for alias in alternate_names[:10]),
             inline=False,
         )
-    panel.set_footer(text="SentriX • Aide commande")
+    panel.set_footer(text="SentriX Core · Aide commande")
     return _decorate(panel, bot)
 
 
@@ -232,7 +232,7 @@ def _pages(bot: commands.Bot, command_rows: list[commands.Command], prefix: str,
                     value=f"{_description(command)}\n**Permission :** {command_requirement(command)}",
                     inline=False,
                 )
-        panel.set_footer(text=f"SentriX • Page {page_index}/{len(chunks)}")
+        panel.set_footer(text=f"SentriX Core · Page {page_index}/{len(chunks)}")
         pages.append(_decorate(panel, bot))
     return pages
 
