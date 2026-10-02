@@ -79,3 +79,11 @@ def test_unknown_command_policy_is_silent():
     assert "return None" in block
     assert "await _plain_send" not in block
     assert "unknown_command_v16" in block
+
+
+
+def test_ticket_member_entrypoint_is_repaired_after_cleanup():
+    source = (ROOT / "sentrix_product_update.py").read_text(encoding="utf-8")
+    assert "def _ensure_ticket_prefix_command(" in source
+    assert 'bot.get_command("ticket")' in source
+    assert '"ticket_prefix_available": ticket_prefix' in source
