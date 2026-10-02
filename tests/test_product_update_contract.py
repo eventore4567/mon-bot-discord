@@ -65,3 +65,17 @@ def test_regression_shim_applies_product_update_last():
     assert "await _regression_setup(bot)" in source
     assert "await install_runtime(bot)" in source
     assert source.index("await _regression_setup(bot)") < source.index("await install_runtime(bot)")
+
+
+
+def test_unknown_command_policy_is_silent():
+    source = (ROOT / "sentrix_product_update.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("def _install_unknown_command("):
+        source.index("async def install_runtime(", source.index("def _install_unknown_command("))
+    ]
+
+    assert "if isinstance(root, commands.CommandNotFound):" in block
+    assert "return None" in block
+    assert "await _plain_send" not in block
+    assert "unknown_command_v16" in block
