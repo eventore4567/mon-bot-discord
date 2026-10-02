@@ -159,7 +159,22 @@ def _text_is_simple_error(value: Any) -> bool:
     if not _command_is_active():
         return False
     text = str(value or "").strip()
-    return bool(text and len(text) <= 1900 and _SIMPLE_ERROR_RE.search(text))
+    if not text or len(text) > 1900:
+        return False
+    lowered = text.casefold()
+
+    # Un nom d'objet peut contenir un mot négatif sans que la réponse soit une
+    # erreur : « Rôles interdits mis à jour. » est une confirmation, pas un refus.
+    # Les verbes d'accomplissement explicites ont donc priorité sur les noms
+    # « interdit / permission / requis » présents dans la donnée manipulée.
+    if any(phrase in lowered for phrase in (
+        "mis à jour", "mise à jour", "mises à jour",
+        "enregistré", "enregistree", "enregistrée",
+        "sauvegardé", "sauvegardee", "sauvegardée",
+        "configuré", "configuree", "configurée",
+    )):
+        return False
+    return bool(_SIMPLE_ERROR_RE.search(text))
 
 
 def _embed_is_simple_error(embed: discord.Embed | None) -> bool:
@@ -191,6 +206,16 @@ def _plain_text_from_error_embed(embed: discord.Embed) -> str:
 
 def _title_for_text(text: str) -> str:
     lowered = text.casefold()
+
+    # Confirmation explicite avant les mots métier ambigus. Exemple réel :
+    # « Rôles interdits mis à jour. » ne doit jamais produire une carte « Erreur ».
+    if any(phrase in lowered for phrase in (
+        "mis à jour", "mise à jour", "mises à jour",
+        "réussi", "reussi", "effectué", "effectue", "créé", "cree",
+        "ajouté", "ajoute", "retiré", "retire", "enregistré", "enregistre",
+        "activé", "active", "terminé", "termine", "sauvegardé", "configuré",
+    )):
+        return "Action effectuée"
     if any(word in lowered for word in (
         "erreur", "introuvable", "impossible", "refus", "interdit",
         "permission", "échoué", "echoue",
@@ -200,12 +225,6 @@ def _title_for_text(text: str) -> str:
         "attention", "attendre", "cooldown", "recharge", "déjà", "deja",
     )):
         return "Vérification nécessaire"
-    if any(word in lowered for word in (
-        "réussi", "reussi", "effectué", "effectue", "créé", "cree",
-        "ajouté", "ajoute", "retiré", "retire", "enregistré", "enregistre",
-        "activé", "active", "terminé", "termine",
-    )):
-        return "Action effectuée"
     return "Information"
 
 
