@@ -11,6 +11,7 @@ import logging
 import os
 import time
 
+import discord
 from aiohttp import web
 
 logger = logging.getLogger("bot.dashboard-feedback")
@@ -133,7 +134,49 @@ def register(app: web.Application, dashboard) -> None:
             }
         )
 
+    async def list_reports(request: web.Request) -> web.Response:
+        try:
+            guild_id = int(request.match_info["guild_id"])
+        except (TypeError, ValueError):
+            return dashboard._json_error("Serveur invalide.", 400)
+
+        session, guild, error = await dashboard._manageable_guild(request, guild_id)
+        if error:
+            return error
+
+        bot = request.app["bot"]
+        is_owner = bool(
+            await bot.is_owner(
+                discord.Object(id=int(session["user"]["id"]))
+            )
+        )
+        if not is_owner:
+            return dashboard._json_error("Accès réservé au propriétaire du bot.", 403)
+
+        await _ensure_schema(bot)
+        rows = await bot.db.fetchall(
+            """
+            SELECT id, guild_id, user_id, kind, page, tab, message,
+                   technical, release, status, created_at
+            FROM dashboard_feedback_reports
+            WHERE guild_id = ?
+            ORDER BY id DESC
+            LIMIT 50
+            """,
+            (guild_id,),
+        )
+        return web.json_response(
+            {
+                "ok": True,
+                "reports": [dict(row) for row in rows],
+            }
+        )
+
     app.router.add_post(
         "/api/guilds/{guild_id}/feedback",
         create_report,
+    )
+    app.router.add_get(
+        "/api/guilds/{guild_id}/feedback",
+        list_reports,
     )
