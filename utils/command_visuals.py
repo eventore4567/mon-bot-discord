@@ -14,7 +14,7 @@ from discord.ext import commands
 
 import config
 from . import embeds
-from .log_banners import BANNER_DIR, BANNER_VERSION, ensure_banners, nom_fichier
+from .log_banners import BANNER_DIR, BANNER_VERSION, ensure_banners, family_for_command, nom_fichier
 
 logger = logging.getLogger("bot.command-visuals")
 
@@ -115,24 +115,65 @@ def _core_command_name(ctx: commands.Context) -> str:
         return str(getattr(command, "qualified_name", "") or _human_command_name(ctx))
 
 
-def _core_signature(ctx: commands.Context, family: str) -> str:
+def _domain_family(ctx: commands.Context) -> str | None:
+    command = getattr(ctx, "command", None)
+    if command is None:
+        return None
+    try:
+        family = family_for_command(
+            str(getattr(command, "qualified_name", "") or ""),
+            str(getattr(command, "cog_name", "") or ""),
+        )
+    except Exception:
+        return None
+    return family if family in _CORE_FAMILY_LABELS else None
+
+
+def _identity_family(ctx: commands.Context, kind: str, visual_family: str) -> str:
+    if kind in {"success", "error", "warning"}:
+        return _domain_family(ctx) or visual_family
+    return visual_family
+
+
+def _core_signature(
+    ctx: commands.Context,
+    family: str,
+    state_kind: str | None = None,
+) -> str:
     family_label = _CORE_FAMILY_LABELS.get(
         str(family or "").casefold(),
         str(family or "SentriX").replace("_", " ").title(),
     )
     command = _core_command_name(ctx)
     parts = ["SENTRIX CORE", family_label]
+    state_label = {
+        "success": "Succès",
+        "error": "Erreur",
+        "warning": "Attention",
+    }.get(str(state_kind or "").casefold())
+    if state_label and state_label != family_label:
+        parts.append(state_label)
     if command:
         parts.append(command)
     return " · ".join(parts)
 
 
-def _core_footer(ctx: commands.Context, family: str, footer: str = "") -> str:
+def _core_footer(
+    ctx: commands.Context,
+    family: str,
+    footer: str = "",
+    state_kind: str | None = None,
+) -> str:
     raw = str(footer or "").strip()
-    raw = re.sub(r"^SentriX(?:\s*Core)?\s*[•·]\s*", "", raw, flags=re.IGNORECASE).strip()
+    raw = re.sub(
+        r"^SentriX(?:\s*Core)?(?:\s*[•·:—–-]\s*)+",
+        "",
+        raw,
+        flags=re.IGNORECASE,
+    ).strip()
     if raw.casefold() in {"sentrix", "sentrix core"}:
         raw = ""
-    base = _core_signature(ctx, family)
+    base = _core_signature(ctx, family, state_kind)
     return f"{base} · {raw}" if raw else base
 
 
@@ -246,6 +287,12 @@ def _is_command_banner(url: object) -> bool:
 def _decorate_embed(embed: discord.Embed, kind: str) -> discord.Embed:
     """Add the command banner without replacing a semantic image."""
     result = embed.copy()
+    try:
+        from .sentrix_panels import titre_core
+        if getattr(result, "title", None):
+            result.title = titre_core(result.title)
+    except Exception:
+        pass
     current_image = getattr(getattr(result, "image", None), "url", None)
     if banniere_desactivee():
         if current_image and _is_command_banner(current_image):
@@ -318,12 +365,22 @@ class CommandPanelView(discord.ui.LayoutView):
         gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
 
-        family = _resolved_family(kind)
+        visual_family = _resolved_family(kind)
+        identity_family = _identity_family(ctx, kind, visual_family)
+        state_kind = kind if kind in {"success", "error", "warning"} else None
         container.add_item(
-            discord.ui.TextDisplay(f"-# {_core_signature(ctx, family)}")
+            discord.ui.TextDisplay(
+                f"-# {_core_signature(ctx, identity_family, state_kind)}"
+            )
         )
 
         title = _clean_text(getattr(embed, "title", None) if embed else None, limit=220)
+        if title:
+            try:
+                from .sentrix_panels import titre_core
+                title = titre_core(title)
+            except Exception:
+                pass
         if not title:
             title = _human_command_name(ctx)
 
@@ -363,7 +420,9 @@ class CommandPanelView(discord.ui.LayoutView):
 
         footer = _clean_text(getattr(getattr(embed, "footer", None), "text", None), limit=300) if embed else ""
         container.add_item(
-            discord.ui.TextDisplay(f"-# {_core_footer(ctx, family, footer)}")
+            discord.ui.TextDisplay(
+                f"-# {_core_footer(ctx, identity_family, footer, state_kind)}"
+            )
         )
 
         self.add_item(container)
