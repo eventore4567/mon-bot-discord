@@ -276,7 +276,15 @@ COG_FAMILIES: dict[str, str] = {
     "security": "security", "securitytools": "security", "verification": "security",
     "configuration": "config", "serverbuilder": "config", "notifications": "config",
     "guildarrival": "welcome", "welcome": "welcome",
-    "events": "events", "design": "special", "embedbuilder": "config",
+    # « design » part sur config : régler l'apparence EST de la configuration,
+    # et la famille « special » n'a plus d'étiquette depuis qu'elle a cessé de
+    # s'appeler « SentriX » (le produit nommé deux fois dans la signature).
+    # Elle ne sert donc plus qu'à l'intention « brand », où l'absence de
+    # domaine est le bon rendu : « SENTRIX CORE », rien de plus.
+    # Les clés sont des noms de commande EXACTS (ou une racine de groupe) : la
+    # recherche ne coupe pas les préfixes, donc « design » ne couvrait pas
+    # « designsetup » et l'écran retombait sur Information.
+    "events": "events", "design": "config", "embedbuilder": "config",
 }
 COMMAND_FAMILIES: dict[str, str] = {
     # Racines sans module : leur famille est declaree ici plutot que devinee.
