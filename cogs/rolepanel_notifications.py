@@ -69,7 +69,7 @@ def _panel_embed(guild: discord.Guild, role_ids: list[int]) -> discord.Embed:
         value='Vos choix sont privés et le panneau reste identique pour les autres membres.',
         inline=False,
     )
-    e.set_footer(text="SentriX • Rôles de notifications")
+    e.set_footer(text="SentriX Core · Rôles de notifications")
     return e
 
 
@@ -124,7 +124,7 @@ def _reponse(titre: str, description: str = "", *, kind: str = "configuration"):
     # ont vraiment de la matiere sont composes a la main, la ou ils sont ecrits.
     resume = " ".join(l.strip() for l in str(description or "").split("\n") if l.strip())
     return panels.Panneau(
-        titre=titre if titre.startswith("SentriX") else f"SentriX — {titre}",
+        titre=titre.removeprefix("SentriX — ").strip(),
         sous_titre=resume,
         kind=kind if kind in panels.INTENTIONS else "configuration",
         pied="SentriX",
