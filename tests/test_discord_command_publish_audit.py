@@ -62,6 +62,8 @@ def test_post_sync_audit_matches_real_musique_tree():
     assert "musique playlist sauvegarder" in audit.remote_paths
     assert "musique playlist importer" in audit.remote_paths
     assert audit.legacy_music_paths == ()
+    assert audit.aide_paths == ("aide",)
+    assert audit.legacy_help_paths == ()
 
 
 def test_post_sync_audit_detects_legacy_music_and_remote_drift():
@@ -93,3 +95,17 @@ def test_root_only_discord_response_compares_roots_without_fake_subcommand_gaps(
     assert audit.matches is True
     assert audit.missing_paths == ()
     assert audit.unexpected_paths == ()
+
+
+
+def test_post_sync_audit_detects_legacy_help_instead_of_aide():
+    tree = FakeTree([local("aide")])
+    synced = [remote("help")]
+
+    audit = audit_published_commands(tree, synced)
+
+    assert audit.matches is False
+    assert audit.aide_paths == ()
+    assert audit.legacy_help_paths == ("help",)
+    assert audit.missing_paths == ("aide",)
+    assert audit.unexpected_paths == ("help",)
