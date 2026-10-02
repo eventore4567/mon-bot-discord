@@ -48,8 +48,10 @@ def test_every_wide_log_uses_the_trace_renderer():
     assert "_trace_meta(event_type" in source
     assert "_trace_title(event_type" in source
     assert "_trace_identity_label(event_type)" in source
-    assert 'discord.ui.TextDisplay("### Détails")' in source
-    assert "### Contexte" not in source
+    assert "_trace_body_parts(body)" in source
+    assert 'discord.ui.TextDisplay("### Informations")' in source
+    assert "### Détails" not in source
+    assert "_trace_time_text(embed)" in source
     assert "_trace_footer(event_type, footer)" in source
     assert "view = WideLogView(" in source
 
@@ -71,3 +73,26 @@ def test_old_external_style_names_are_not_user_facing_in_automod():
     source = (ROOT / "cogs" / "automod.py").read_text(encoding="utf-8")
     assert '"AutoMod Manage"' not in source
     assert '"Protection SentriX"' in source
+
+
+
+def test_trace_v7_splits_summary_from_long_details():
+    summary, details = wide_logs._trace_body_parts(
+        "Un message a été supprimé.\n\n**Contenu**\n```hello```"
+    )
+    assert summary == "Un message a été supprimé."
+    assert "**Contenu**" in details
+
+
+def test_trace_v7_layout_is_compact_and_media_stays_below_context():
+    source = (ROOT / "utils" / "wide_logs.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("class WideLogView"):
+        source.index("def _database_path", source.index("class WideLogView"))
+    ]
+
+    assert "SentriX Trace V7" in block
+    assert "header_lines = [meta, f\"## {title}\"]" in block
+    assert "summary, details = _trace_body_parts(body)" in block
+    assert block.index("summary, details = _trace_body_parts(body)") < block.index("if media_items:")
+    assert "📎" not in block
