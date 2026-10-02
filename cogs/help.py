@@ -573,15 +573,20 @@ class VueAide(discord.ui.LayoutView):
         galerie = discord.ui.MediaGallery()
         galerie.add_item(media=f"attachment://{panels.nom_banniere(self.kind)}")
         conteneur.add_item(galerie)
+        conteneur.add_item(
+            discord.ui.TextDisplay(f"-# {panels.signature_core('special')}")
+        )
         conteneur.add_item(discord.ui.TextDisplay(f"## {titre}\n{resume}"))
 
-        for section in sections:
-            rendu = section.rendu()
+        for section_index, section in enumerate(sections, start=1):
+            rendu = section.rendu(section_index)
             if rendu:
                 conteneur.add_item(discord.ui.Separator())
                 conteneur.add_item(discord.ui.TextDisplay(rendu[:3800]))
 
-        conteneur.add_item(discord.ui.TextDisplay("-# SentriX • Centre d'aide"))
+        conteneur.add_item(
+            discord.ui.TextDisplay(f"-# {panels.pied_core('special', 'Centre d’aide')}")
+        )
         conteneur.add_item(discord.ui.Separator())
         conteneur.add_item(discord.ui.ActionRow(CategorySelect(self)))
         conteneur.add_item(discord.ui.ActionRow(*self._navigation()))
