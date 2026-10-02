@@ -76,12 +76,14 @@ async def get_music_settings(bot, guild_id: int) -> dict:
     if row is None:
         return {
             "enabled": False,
+            "configured": False,
             "voice_channel_id": None,
             "updated_by": None,
             "updated_at": 0,
         }
     return {
         "enabled": bool(row["enabled"]),
+        "configured": True,
         "voice_channel_id": int(row["voice_channel_id"]) if row["voice_channel_id"] else None,
         "updated_by": int(row["updated_by"]) if row["updated_by"] else None,
         "updated_at": int(row["updated_at"] or 0),
@@ -518,19 +520,42 @@ class Music(commands.Cog, name="Music"):
 
     async def _ensure_voice(self, ctx: commands.Context) -> GuildMusicQueue | None:
         settings = await self.get_system_settings(ctx.guild.id)
+
+        # Compatibilité simple : tant qu'un serveur n'a JAMAIS configuré le
+        # système musique, +play / /music play rejoignent le vocal du membre.
+        # Dès qu'un réglage existe, le vocal choisi dans setup/dashboard devient
+        # la source de vérité et une désactivation explicite est respectée.
+        if not settings.get("configured", True):
+            member_voice = getattr(ctx.author, "voice", None)
+            channel = getattr(member_voice, "channel", None)
+            if channel is None or not hasattr(channel, "connect"):
+                await panels.texte_court(
+                    ctx,
+                    "Rejoins un salon vocal avant d'utiliser la musique.",
+                    ephemere=bool(ctx.interaction),
+                )
+                return None
+
+            queue = self.get_queue(ctx.guild.id)
+            voice = queue.voice_client or getattr(ctx.guild, "voice_client", None)
+            if voice and voice.is_connected():
+                if getattr(getattr(voice, "channel", None), "id", None) != getattr(channel, "id", None):
+                    await voice.move_to(channel)
+            else:
+                voice = await channel.connect()
+            queue.voice_client = voice
+            queue.text_channel = ctx.channel
+            self._cancel_disconnect(queue)
+            return queue
+
         if not settings["enabled"]:
-            await panels.envoyer(
+            await panels.texte_court(
                 ctx,
-                panels.depuis_embed(
-                    await self._embed(
-                        ctx.guild.id,
-                        title="Musique désactivée",
-                        description="Activez d'abord le système musique dans `+setup` ou le dashboard.",
-                        kind="danger",
-                    )
-                ),
+                "Le système musique est désactivé.",
+                ephemere=bool(ctx.interaction),
             )
             return None
+
         channel_id = settings["voice_channel_id"]
         channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
         if not isinstance(channel, discord.VoiceChannel):
