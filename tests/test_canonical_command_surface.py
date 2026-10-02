@@ -91,3 +91,15 @@ def test_music_leaf_rebuild_prevents_cross_bucket_suffixes(monkeypatch):
     assert leaf("musique", "playlist", Target("music playlist clear", "vider-2")) == "vider"
 
     surface.v98.semantic_leaf = original
+
+
+
+def test_generic_general_buckets_are_renamed_in_public_surface():
+    import sentrix_canonical_command_surface as surface
+
+    assert surface.BUCKETS[("config", "general")] == "reglages"
+    assert surface.BUCKETS[("utility", "general")] == "pratiques"
+    assert "general" not in {
+        surface.BUCKETS[("config", "general")],
+        surface.BUCKETS[("utility", "general")],
+    }
