@@ -183,6 +183,43 @@ def _track_recovery_key(track: Track) -> str:
     ).casefold()
 
 
+_PROVIDER_LABELS = {
+    "youtube": "YouTube",
+    "youtube_music": "YouTube Music",
+    "soundcloud": "SoundCloud",
+    "spotify": "Spotify",
+    "deezer": "Deezer",
+    "direct": "Audio direct",
+    "unknown": "Source inconnue",
+}
+
+
+def _provider_label(value: str | None) -> str:
+    key = str(value or "unknown").casefold().strip()
+    return _PROVIDER_LABELS.get(key, key.replace("_", " ").title() or "Source inconnue")
+
+
+def _music_source_label(track: Track) -> str:
+    metadata = _provider_label(track.provider)
+    playback = _provider_label(track.playback_provider or track.provider)
+    return metadata if metadata == playback else f"{metadata} → {playback}"
+
+
+def _music_progress_text(queue: GuildMusicQueue, track: Track) -> str:
+    position = max(0, int(queue.position_seconds()))
+    if not track.duration:
+        return premium_style.format_duration(position)
+    duration = max(1, int(track.duration))
+    position = min(position, duration)
+    ratio = max(0.0, min(1.0, position / duration))
+    filled = max(0, min(12, round(ratio * 12)))
+    bar = "▰" * filled + "▱" * (12 - filled)
+    return (
+        f"{premium_style.format_duration(position)} / "
+        f"{premium_style.format_duration(duration)} · {bar}"
+    )
+
+
 def _classify_engine_error(exc: MusicEngineError) -> tuple[str, str]:
     """(titre, description) à afficher — jamais un message générique quand on sait
     précisément ce qui s'est passé (demande explicite : pas de "vérifie ton lien"
