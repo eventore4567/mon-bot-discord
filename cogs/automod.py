@@ -577,41 +577,43 @@ TOGGLE_FIELDS = [
     "antispam", "antilink", "antilink_strict", "antiinvite", "antimention", "anticaps",
     "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "antiinsult",
     "security_vanity", "security_prune", "security_permissions", "join_gate", "risk_engine",
+    "escalation",
 ]
 
 # Libellés lisibles des filtres AutoMod — réutilisés par /automod-status ET par la page
 # "Sécurité" de /setup, pour ne jamais avoir deux endroits à maintenir séparément.
 AUTOMOD_TOGGLE_LABELS = {
-    "antispam": "Anti-spam (messages répétés)",
-    "antilink": "Anti-liens (tous les formats)",
-    "antilink_strict": "Anti-liens strict (tous les liens, partout)",
-    "antiinvite": "Anti-invitations Discord",
-    "antimention": "Anti-mentions massives",
-    "anticaps": "Anti-majuscules (SPAM CAPS)",
-    "antiemoji": "Anti-spam d'émojis",
-    "antiraid": "Anti-raid (afflux de comptes)",
-    "antibot": "Anti-bots non autorisés",
-    "antiaccount": "Anti-comptes très récents",
-    "antiscam": "Anti-arnaques",
-    "antinuke": "Anti-nuke (compte compromis)",
-    "antiinsult": "Anti-insultes (filtre multilingue)",
-    "security_vanity": "Protection vanity URL",
-    "security_prune": "Détection des prunes membres",
-    "security_permissions": "Garde permissions dangereuses",
-    "join_gate": "Join Gate avancé",
-    "risk_engine": "Score Risk comportemental",
+    "antispam": "Flood & messages répétés",
+    "antilink": "Liens externes",
+    "antilink_strict": "Blocage total des liens",
+    "antiinvite": "Invitations Discord",
+    "antimention": "Mentions abusives",
+    "anticaps": "Majuscules excessives",
+    "antiemoji": "Flood d'émojis",
+    "antiraid": "Protection anti-raid",
+    "antibot": "Bots non autorisés",
+    "antiaccount": "Comptes trop récents",
+    "antiscam": "Arnaques & phishing",
+    "antinuke": "Protection anti-destruction",
+    "antiinsult": "Langage toxique",
+    "security_vanity": "Lien personnalisé du serveur",
+    "security_prune": "Suppressions massives de membres",
+    "security_permissions": "Permissions à risque",
+    "join_gate": "Filtre des nouvelles arrivées",
+    "risk_engine": "Analyse comportementale",
+    "escalation": "Sanctions progressives",
 }
 
 _AUTOMOD_LOG_EVENT_LABELS = {
-    "automod_link": "Anti-liens",
-    "automod_invite": "Anti-invitations Discord",
-    "automod_scam": "Anti-arnaques",
-    "automod_word": "Mots / contenu interdits",
-    "automod_mention": "Anti-mentions massives",
-    "automod_spam": "Anti-spam",
-    "spam": "Anti-spam",
-    "antiraid": "Anti-raid",
-    "raid": "Anti-raid",
+    "automod_link": "Liens externes",
+    "automod_invite": "Invitations Discord",
+    "automod_scam": "Arnaques & phishing",
+    "automod_word": "Contenu interdit",
+    "automod_mention": "Mentions abusives",
+    "automod_spam": "Flood & messages répétés",
+    "spam": "Flood & messages répétés",
+    "antiraid": "Protection anti-raid",
+    "raid": "Protection anti-raid",
 }
 
 _AUTOMOD_LOG_TITLE_LABELS = (
@@ -768,13 +770,19 @@ def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
 
 # Préréglages du niveau de sécurité global (/security-level et page "Sécurité" de /setup).
 SECURITY_PRESETS = {
-    "faible": {"antispam": 0, "antilink": 0, "antiinvite": 0, "antiraid": 0, "antiscam": 1, "antinuke": 1},
-    "moyen": {"antispam": 1, "antilink": 0, "antiinvite": 1, "antiraid": 1, "antiscam": 1, "antinuke": 1},
+    "faible": {
+        "antispam": 0, "antilink": 0, "antiinvite": 0, "antiraid": 0,
+        "antiscam": 1, "antinuke": 1, "escalation": 0,
+    },
+    "moyen": {
+        "antispam": 1, "antilink": 0, "antiinvite": 1, "antiraid": 1,
+        "antiscam": 1, "antinuke": 1, "escalation": 1,
+    },
     "eleve": {
         "antispam": 1, "antilink": 1, "antiinvite": 1, "antiraid": 1, "antiscam": 1,
         "antimention": 1, "antiaccount": 1, "antinuke": 1,
         "security_vanity": 1, "security_prune": 1, "security_permissions": 1,
-        "join_gate": 1, "risk_engine": 1,
+        "join_gate": 1, "risk_engine": 1, "escalation": 1,
     },
 }
 
