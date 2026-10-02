@@ -45,6 +45,32 @@ def _annotation_is_int(value: Any) -> bool:
     return value is int or str(value).strip() in {"int", "<class 'int'>"}
 
 
+def _gamble_amount_contract_ok(command: commands.Command) -> bool:
+    """Gamble accepte un entier OU les mots all/tout/max.
+
+    Le callback est donc volontairement typé str puis délègue à _parse_amount.
+    Exiger int ici casserait l'option "all" alors que son parsing est atomique.
+    """
+    parameter = command.clean_params.get("montant")
+    if parameter is None:
+        return False
+    annotation = getattr(parameter, "annotation", None)
+    if _annotation_is_int(annotation):
+        return True
+    if annotation is not str and str(annotation).strip() not in {"str", "<class 'str'>"}:
+        return False
+
+    callback = getattr(command, "callback", None)
+    code = getattr(callback, "__code__", None)
+    names = set(getattr(code, "co_names", ()) or ())
+    constants = " ".join(
+        str(value)
+        for value in (getattr(code, "co_consts", ()) or ())
+        if isinstance(value, str)
+    ).casefold()
+    return "_parse_amount" in names and "all" in constants
+
+
 def _install_negative_creator_cache(bot: commands.Bot) -> None:
     db = getattr(bot, "db", None)
     if db is None:
@@ -121,10 +147,10 @@ def _command_contract_snapshot(bot: commands.Bot) -> dict[str, Any]:
             errors.append(f"{name}: contrat {actual!r}, attendu {expected!r}")
 
     gamble = bot.get_command("gamble")
-    if gamble is not None:
-        parameter = gamble.clean_params.get("montant")
-        if parameter is None or not _annotation_is_int(getattr(parameter, "annotation", None)):
-            errors.append("gamble: le paramètre montant doit utiliser le convertisseur int")
+    if gamble is not None and not _gamble_amount_contract_ok(gamble):
+        errors.append(
+            "gamble: montant doit être un entier ou utiliser le parseur sécurisé all/tout/max"
+        )
 
     return {
         "ready": not errors,
