@@ -419,8 +419,8 @@ def install(bot: commands.Bot) -> None:
     _patch_setup_controls()
     _patch_setup_embed()
     setup_ui.SetupView._sentrix_setup_core_v119 = True
-    bot._sentrix_setup_oxyde_v69 = True
-    logger.info("V69 actif : ancien design Setup remplacé par le Control Center large page-par-page.")
+    bot._sentrix_setup_core_v119 = True
+    logger.info("SentriX Setup Core actif : navigation manuelle page-par-page.")
 
 
 __all__ = [
