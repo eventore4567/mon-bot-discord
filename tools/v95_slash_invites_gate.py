@@ -104,7 +104,7 @@ async def run() -> int:
         # /musique. Les anciennes racines /help, /play, /pause et /queue ne doivent
         # plus être exigées par ce gate historique.
         required_roots = (
-            "aide", "setup", "ping", "sentrix", "musique",
+            "aide", "setup", "ping", "sentrix",
             "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
             "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
             "clearwarnings", "clear", "lock", "unlock", "slowmode",
@@ -114,6 +114,31 @@ async def run() -> int:
         for required in required_roots:
             if required not in root_names:
                 errors.append(f"racine slash essentielle absente: /{required}")
+
+        # Ce harness V95 ne charge pas toute la pile canonique de production, donc
+        # il ne peut pas exiger que /musique existe ici. En revanche, on verrouille
+        # la politique publique actuelle directement sur les deux autorités de noms.
+        try:
+            import sentrix_canonical_command_surface as canonical_surface
+            import sentrix_command_surface_v110 as surface_v110
+
+            if canonical_surface.ROOTS.get("music") != "musique":
+                errors.append("la surface canonique ne mappe plus music vers /musique")
+            forbidden_direct_music = {"play", "pause", "queue"}
+            leaked = sorted(
+                public
+                for source, public in surface_v110.STANDARD_DIRECT_SLASH.items()
+                if source in forbidden_direct_music or public in forbidden_direct_music
+            )
+            if leaked:
+                errors.append(
+                    "anciennes racines musique directes encore configurees: "
+                    + ", ".join(leaked)
+                )
+        except Exception as exc:
+            errors.append(
+                f"audit politique musique canonique: {type(exc).__name__}: {exc}"
+            )
 
         # Discord limite un groupe et un sous-groupe à 25 options/sous-commandes.
         for root in roots:
