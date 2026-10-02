@@ -689,7 +689,7 @@ def _automod_default_sanction(log_type: str, title: str, protection: str) -> str
 
 
 def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
-    """Uniformise TOUS les logs AutoMod en une carte AutoMod Manage structurée."""
+    """Uniformise tous les logs AutoMod avant leur rendu SentriX Trace."""
     title = str(embed.title or "")
     fields = [
         (str(field.name or ""), str(field.value or ""), bool(field.inline))
@@ -753,7 +753,7 @@ def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
             break
 
     styled = embeds.canonical_log_embed(
-        "AutoMod Manage",
+        "Protection SentriX",
         description=str(embed.description or "")[:3500],
         fields=ordered,
     )
