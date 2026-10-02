@@ -19,6 +19,8 @@ class PublishAudit:
     unexpected_paths: tuple[str, ...]
     musique_paths: tuple[str, ...]
     legacy_music_paths: tuple[str, ...]
+    aide_paths: tuple[str, ...]
+    legacy_help_paths: tuple[str, ...]
 
     @property
     def matches(self) -> bool:
@@ -115,6 +117,14 @@ def audit_published_commands(tree: Any, synced: Iterable[Any]) -> PublishAudit:
         path for path in remote
         if path.casefold() == "music" or path.casefold().startswith("music ")
     )
+    aide = tuple(
+        path for path in remote
+        if path.casefold() == "aide" or path.casefold().startswith("aide ")
+    )
+    legacy_help = tuple(
+        path for path in remote
+        if path.casefold() == "help" or path.casefold().startswith("help ")
+    )
 
     return PublishAudit(
         local_paths=local,
@@ -123,6 +133,8 @@ def audit_published_commands(tree: Any, synced: Iterable[Any]) -> PublishAudit:
         unexpected_paths=tuple(sorted(comparable_remote - comparable_local, key=str.casefold)),
         musique_paths=musique,
         legacy_music_paths=legacy_music,
+        aide_paths=aide,
+        legacy_help_paths=legacy_help,
     )
 
 
