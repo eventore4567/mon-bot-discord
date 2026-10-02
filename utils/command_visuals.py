@@ -130,6 +130,8 @@ def _core_signature(ctx: commands.Context, family: str) -> str:
 def _core_footer(ctx: commands.Context, family: str, footer: str = "") -> str:
     raw = str(footer or "").strip()
     raw = re.sub(r"^SentriX(?:\s*Core)?\s*[•·]\s*", "", raw, flags=re.IGNORECASE).strip()
+    if raw.casefold() in {"sentrix", "sentrix core"}:
+        raw = ""
     base = _core_signature(ctx, family)
     return f"{base} · {raw}" if raw else base
 
