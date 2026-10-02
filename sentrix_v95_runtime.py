@@ -33,6 +33,7 @@ from utils import embeds, log_service
 logger = logging.getLogger("bot.v95")
 
 DIRECT_ROOTS = frozenset({"help", "aide", "setup", "ping", "sentrix"})
+PRESERVED_DIRECT_ROOTS = frozenset({"aide", "setup", "ping", "sentrix"})
 EXCLUDED_COMMANDS = frozenset({"logsdiag"})
 MAX_ROOT_COMMANDS = 100
 MAX_CHILDREN = 25
@@ -535,7 +536,7 @@ def _build_targets(bot: commands.Bot) -> list[SlashTarget]:
 def _remove_old_roots(tree: app_commands.CommandTree) -> None:
     for item in list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)):
         name = str(getattr(item, "name", "") or "").casefold()
-        if name in DIRECT_ROOTS:
+        if name in PRESERVED_DIRECT_ROOTS:
             continue
         try:
             tree.remove_command(name, type=discord.AppCommandType.chat_input)
