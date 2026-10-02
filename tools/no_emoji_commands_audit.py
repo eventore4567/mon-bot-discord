@@ -96,6 +96,32 @@ def run() -> int:
     if any(button.emoji is not None for button in (open_button, save_button, delete_button)):
         errors.append("des emojis décoratifs subsistent sur les actions")
 
+    # Mais une icône SentriX n'est PAS décorative : elle identifie l'action.
+    # « Prendre en charge » et « Libérer » se distinguent d'un coup d'œil par
+    # leur icône, pas par un libellé qu'il faut lire. La règle interdit le
+    # sapin de Noël, pas l'identité du produit — et la frontière est le
+    # préfixe « sentrix_ », pas une liste tenue à la main.
+    from utils import sentrix_emojis
+
+    sentrix_emojis.amorcer(
+        {"sentrix_ticket_claim": "<:sentrix_ticket_claim:410000000000000009>"}
+    )
+    icone = sentrix_emojis.partiel("ticket_claim")
+    if icone is None:
+        errors.append("la résolution des icônes SentriX ne rend rien")
+    else:
+        vue_sentrix = discord.ui.View(timeout=None)
+        bouton_sentrix = discord.ui.Button(
+            label="Prendre en charge",
+            emoji=icone,
+            style=discord.ButtonStyle.secondary,
+            custom_id="ticket:claim",
+        )
+        vue_sentrix.add_item(bouton_sentrix)
+        command_style_v2.style_view(vue_sentrix)
+        if bouton_sentrix.emoji is None:
+            errors.append("les icônes SentriX sont retirées des boutons")
+
     # Le moteur historique doit pointer vers le même renderer, sans wrapper de transport.
     if premium_style.style_embed is not command_style_v2.style_embed:
         errors.append("premium_style.style_embed n'est pas branché sur V2")

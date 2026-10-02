@@ -75,6 +75,11 @@ logger = logging.getLogger("bot")
 
 # Liste des modules (cogs) à charger au démarrage.
 EXTENSIONS = [
+    # Les icônes d'abord : les panneaux chargés ensuite résolvent leurs
+    # icônes à l'affichage, pas à l'import, donc l'ordre n'est pas
+    # critique — mais le téléversement part dès on_ready et autant qu'il
+    # ne soit pas retardé par le reste du chargement.
+    "cogs.sentrix_emoji_sync",
     "cogs.moderation",
     "cogs.automod",
     "cogs.forbidden_words_ui",

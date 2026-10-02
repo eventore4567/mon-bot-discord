@@ -246,6 +246,7 @@ def style_view(view: Any) -> Any:
     # nettoyage retirait l'emoji sans distinction. Mesuré au payload : label
     # '\u200b', emoji None. Le jeu était injouable.
     from utils.game_context import commande_de_jeu
+    from utils.sentrix_emojis import est_sentrix
 
     jeu = commande_de_jeu()
 
@@ -254,7 +255,17 @@ def style_view(view: Any) -> Any:
             if item.label:
                 item.label = _normal_text(item.label, limit=80) or "Action"
             try:
-                if not jeu:
+                # Les icônes SentriX survivent, pour la même raison que les
+                # emojis de jeu juste au-dessus : elles ne décorent pas, elles
+                # IDENTIFIENT. « Prendre en charge » et « Libérer » se
+                # distinguent d'un coup d'œil par leur icône, pas par leur
+                # libellé qu'il faut lire.
+                #
+                # La règle garde donc son sens — aucun emoji Unicode décoratif
+                # sur les boutons — sans interdire l'identité du produit. La
+                # frontière est le préfixe « sentrix_ », pas une liste à tenir
+                # à la main.
+                if not jeu and not est_sentrix(item.emoji):
                     item.emoji = None
             except Exception:
                 logger.warning("Étape non critique ignorée dans style_view", exc_info=True)

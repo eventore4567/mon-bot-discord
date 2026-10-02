@@ -111,30 +111,57 @@ def test_une_erreur_inconnue_reste_traitee():
 # Les trois chemins envoient bien un panneau
 # =============================================================================
 
-def test_le_chemin_gagnant_envoie_un_panneau():
-    """sentrix_product_update est installé EN DERNIER sur on_command_error :
-    c'est lui qui décide pour une commande inconnue. Corriger les deux autres
-    sans celui-ci ne changeait rien à l'écran."""
+def test_le_chemin_gagnant_ne_repond_plus_rien():
+    """``sentrix_product_update`` est installé EN DERNIER sur
+    ``on_command_error`` : c'est lui qui décide pour une commande inconnue.
+
+    Ce test demandait qu'il envoie un PANNEAU. La décision a changé, et pour
+    une bonne raison : sur un serveur qui héberge plusieurs bots, ``+play``
+    destiné à un autre bot ne doit pas faire répondre SentriX. La fonction est
+    désormais vidée volontairement.
+
+    Ce qui reste vérifié, c'est qu'elle se tait VRAIMENT — rien envoyé, rien
+    rendu — parce qu'une couche installée en dernier qui se remettrait à
+    parler annulerait le silence décidé au-dessus d'elle."""
+    import ast
     import inspect
+    import textwrap
 
     import sentrix_product_update as spu
 
-    source = inspect.getsource(spu._plain_send)
-    assert "panels.envoyer" in source
-    assert "depuis_embed" in source
+    arbre = ast.parse(textwrap.dedent(inspect.getsource(spu._plain_send)))
+    envois = [
+        ast.unparse(n)
+        for n in ast.walk(arbre)
+        if isinstance(n, ast.Call) and "send" in ast.unparse(n.func)
+    ]
+    assert envois == [], f"la commande inconnue répond encore : {envois}"
 
 
-def test_le_chemin_gagnant_garde_un_repli_texte():
-    """Cette fonction est appelée DEPUIS la gestion d'erreur : si elle lève,
-    le membre n'a plus aucun message du tout. Un message nu vaut mieux que
-    rien."""
+def test_le_chemin_gagnant_ne_peut_pas_lever():
+    """Cette fonction est appelée DEPUIS la gestion d'erreur : si elle levait,
+    l'erreur initiale serait masquée par la sienne.
+
+    Elle garantissait auparavant un repli texte. Maintenant qu'elle se tait
+    volontairement sur les commandes inconnues, la garantie change de nature :
+    elle ne doit rien faire qui PUISSE lever. Un corps sans appel réseau ni
+    accès d'attribut est la forme la plus sûre, et c'est ce qu'on vérifie."""
+    import ast
     import inspect
+    import textwrap
 
     import sentrix_product_update as spu
 
-    source = inspect.getsource(spu._plain_send)
-    assert "except Exception" in source
-    assert "Messageable.send" in source
+    arbre = ast.parse(textwrap.dedent(inspect.getsource(spu._plain_send)))
+    risques = [
+        ast.unparse(n)
+        for n in ast.walk(arbre)
+        if isinstance(n, ast.Call)
+        and not ast.unparse(n.func).startswith(("del", "return"))
+    ]
+    assert risques == [], (
+        f"la couche de dernier recours peut lever et masquer l'erreur réelle : {risques}"
+    )
 
 
 def test_le_texte_exact_du_contrat_est_conserve():
