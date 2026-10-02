@@ -73,6 +73,19 @@ def callback_key(callback: Any) -> tuple[str, str] | None:
     return module, qualname
 
 
+def original_command_name(callback: Any) -> str | None:
+    """Commande préfixée dont un wrapper slash V95/V110 provient."""
+    current = callback
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        original = str(getattr(current, "_sentrix_original_command", "") or "").strip()
+        if original:
+            return original
+        current = getattr(current, "__wrapped__", None)
+    return None
+
+
 def _slash_children(node: Any) -> list[Any]:
     children = getattr(node, "commands", None)
     if children is None:
@@ -304,6 +317,11 @@ def audit_command_registry(
     }
     prefix_callback_keys: dict[tuple[str, str], list[Any]] = {}
     prefix_tokens: dict[tuple[str, str], list[Any]] = {}
+    prefix_names = {
+        str(getattr(command, "qualified_name", "") or "").casefold().strip()
+        for command in prefix
+        if str(getattr(command, "qualified_name", "") or "").strip()
+    }
     for command in prefix:
         key = callback_key(getattr(command, "callback", None))
         if key is not None:
@@ -374,18 +392,33 @@ def audit_command_registry(
                 )
             )
 
+    native_equivalents = {
+        "aide": "help",
+    }
     for entry in entries:
-        if entry.is_group or entry.callback_key is None:
+        if entry.is_group:
             continue
-        if entry.callback_key not in prefix_callback_keys:
-            issues.append(
-                AuditIssue(
-                    "warning",
-                    "slash-without-prefix-business-command",
-                    f"/{entry.path}",
-                    "Aucune commande metier prefixee associee n'a ete trouvee.",
-                )
+        if entry.callback_key is not None and entry.callback_key in prefix_callback_keys:
+            continue
+
+        callback = getattr(entry.node, "callback", None)
+        original = original_command_name(callback)
+        if original and original.casefold() in prefix_names:
+            continue
+
+        root = entry.path.split(" ", 1)[0].casefold()
+        equivalent = native_equivalents.get(root)
+        if equivalent and equivalent in prefix_names:
+            continue
+
+        issues.append(
+            AuditIssue(
+                "warning",
+                "slash-without-prefix-business-command",
+                f"/{entry.path}",
+                "Aucune commande metier prefixee associee n'a ete trouvee.",
             )
+        )
 
     return issues
 
@@ -426,6 +459,7 @@ __all__ = [
     "audit_command_registry",
     "audit_counts",
     "callback_key",
+    "original_command_name",
     "critical_issues",
     "iter_slash_entries",
 ]
