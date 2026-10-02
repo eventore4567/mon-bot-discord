@@ -81,21 +81,9 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "deposit": "deposit",
     "withdraw": "withdraw",
 
-    # Musique — vocabulaire commun aux bots musique majeurs.
-    # +play reste la commande préfixée historique ; les autres restent aussi accessibles
-    # via +music <action> côté préfixe.
-    "play": "play",
-    "music pause": "pause",
-    "music resume": "resume",
-    "music skip": "skip",
-    "music stop": "stop",
-    "music queue": "queue",
-    "music nowplaying": "nowplaying",
-    "music volume": "volume",
-    "music shuffle": "shuffle",
-    "music join": "join",
-    "music leave": "leave",
-    "music seek": "seek",
+    # Musique : la surface canonique française garde désormais TOUT sous
+    # /musique. Les commandes + historiques restent inchangées, mais V110 ne
+    # republie plus /play, /pause, /queue... à la racine.
 }
 
 # Les rôles sont plus lisibles sous un petit groupe /role que sous des chemins profonds.
@@ -104,9 +92,9 @@ STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "removerole": ("role", "remove"),
 }
 
-# /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
-# `music play`. Publier les deux créerait un faux doublon.
-SUPPRESSED_SLASH_DUPLICATES = frozenset({"music play"})
+# Les doublons de compatibilité musique sont filtrés par la surface canonique :
+# +play reste utilisable, tandis que /musique jouer vient de music play.
+SUPPRESSED_SLASH_DUPLICATES = frozenset()
 
 _TOKEN_SHORTENING = {
     "configuration": "config",
