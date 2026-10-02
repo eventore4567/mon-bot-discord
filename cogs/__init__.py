@@ -67,7 +67,7 @@ from .setup_experience_v74 import install as install_setup_experience_v74
 from .setup_security_choice_v75 import install as install_setup_security_choice_v75
 from .setup_control_center import install as install_setup_control_center
 from .setup_simple_v68 import install as install_setup_simple_v68
-from .setup_oxyde_v69 import install as install_setup_oxyde_v69
+from .setup_core_v119 import install as install_setup_core_v119
 from .setup_polish_v70 import install as install_setup_polish_v70
 from .setup_ticket_autoconfig_v72 import install as install_setup_ticket_autoconfig_v72
 from .shop_default_prices import install as install_shop_default_prices
@@ -275,7 +275,7 @@ async def finalize_runtime(bot: commands.Bot) -> None:
         bot,
     )
     await _run_installer("Setup simple et help V68", install_setup_simple_v68, bot)
-    await _run_installer("Control Center visuel V69", install_setup_oxyde_v69, bot)
+    await _run_installer("SentriX Setup Core", install_setup_core_v119, bot)
     await _run_installer("Finition Control Center V70", install_setup_polish_v70, bot)
     # V71 conserve la dernière autorité de la page Sécurité. V72 s'installe après pour
     # corriger uniquement l'accueil et le système Tickets sans remplacer ses contrôles.
@@ -298,7 +298,7 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("noms courts des commandes", refresh_short_command_names, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Setup V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72."
+        "Runtime SentriX finalisé : Setup Core + V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72."
     )
 
 
