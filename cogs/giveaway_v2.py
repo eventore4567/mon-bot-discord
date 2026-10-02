@@ -256,12 +256,17 @@ class BonusModal(discord.ui.Modal, title="Giveaway — multiplicateur du rôle")
         )
         role = role_setup.owner.ctx.guild.get_role(self.role_id)
         self.multiplier = discord.ui.TextInput(
-            label=f"Multiplicateur — {(role.name if role else 'rôle')[:70]}",
             placeholder="2",
             default=str(current),
             max_length=3,
         )
-        self.add_item(self.multiplier)
+        self.add_item(
+            discord.ui.Label(
+                text=f"Multiplicateur — {(role.name if role else 'rôle')[:70]}",
+                description="Chaque rôle bonus peut avoir son propre multiplicateur.",
+                component=self.multiplier,
+            )
+        )
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -478,7 +483,11 @@ class DestinationSelect(discord.ui.ChannelSelect):
 
     async def callback(self, interaction: discord.Interaction):
         self.owner.builder.state.channel_id = self.values[0].id
-        await interaction.response.send_message(f"Salon choisi : {self.values[0].mention}", ephemeral=True)
+        await interaction.response.edit_message(
+            embed=self.owner.summary_embed(),
+            view=self.owner,
+        )
+        await self.owner.builder.sync_main_message()
 
 
 class DestinationView(discord.ui.View):
@@ -492,6 +501,18 @@ class DestinationView(discord.ui.View):
             await interaction.response.send_message("Ce menu ne vous appartient pas.", ephemeral=True)
             return False
         return True
+
+    def summary_embed(self) -> discord.Embed:
+        channel = self.builder.ctx.guild.get_channel(self.builder.state.channel_id or 0)
+        return discord.Embed(
+            title="Giveaway — salon de publication",
+            description=(
+                f"Salon sélectionné : {channel.mention}"
+                if channel is not None
+                else "Choisissez le salon dans lequel le giveaway sera publié."
+            ),
+            colour=discord.Colour.blurple(),
+        )
 
 
 class GiveawayBuilderView(discord.ui.View):
@@ -580,7 +601,12 @@ class GiveawayBuilderView(discord.ui.View):
 
     @discord.ui.button(label="2. Salon", style=discord.ButtonStyle.primary, row=0)
     async def destination(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await interaction.response.send_message("Choisissez le salon de publication.", view=DestinationView(self), ephemeral=True)
+        view = DestinationView(self)
+        await interaction.response.send_message(
+            embed=view.summary_embed(),
+            view=view,
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="3. Rôles / ping / bonus", style=discord.ButtonStyle.secondary, row=0)
     async def roles(self, interaction: discord.Interaction, _button: discord.ui.Button):
