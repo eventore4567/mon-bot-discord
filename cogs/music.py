@@ -1850,29 +1850,7 @@ class Music(commands.Cog, name="Music"):
     @music.command(name="nowplaying", description="Afficher la musique en cours.")
     async def music_nowplaying(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
-        if not queue.current:
-            return await panels.envoyer(
-                ctx,
-                panels.Panneau(
-                    titre="SentriX — Lecture", sous_titre="Aucune lecture en cours.", kind="info",
-                    sections=[panels.Section("Démarrer", [panels.Ligne("`/music play <titre ou lien>`", "Lance la lecture dans votre salon vocal")])],
-                    pied="SentriX • Musique",
-                ),
-            )
-        piste = queue.current
-        lien = piste.original_url
-        details = [panels.Ligne("Titre", f"[{piste.display_title()}]({lien})" if lien else piste.display_title())]
-        if piste.duration:
-            details.append(panels.Ligne("Position", f"{premium_style.format_duration(int(queue.position_seconds()))} / {premium_style.format_duration(piste.duration)}"))
-        details.append(panels.Ligne("Source des métadonnées", piste.provider))
-        details.append(panels.Ligne("Source de lecture", piste.playback_provider or "—"))
-        lecteur = [
-            panels.Ligne("Volume", f"{round(queue.volume * 100)} %"),
-            panels.Ligne("Boucle", "piste" if queue.loop_track else ("file" if queue.loop_queue else "désactivée")),
-            panels.Ligne("Autoplay", "activé" if queue.autoplay else "désactivé"),
-            panels.Ligne("En attente", f"{len(queue.tracks)} titre(s)"),
-        ]
-        await panels.envoyer(ctx, panels.Panneau(titre="SentriX — En lecture", sous_titre=piste.display_title()[:180], kind="info", vignette=piste.thumbnail, sections=[panels.Section("Piste", details), panels.Section("Lecteur", lecteur, aligne=True)], pied="SentriX • Musique"))
+        await panels.envoyer(ctx, self._music_player_panel(queue))
 
     @music.command(name="volume", description="Régler le volume (0 à 100).")
     @app_commands.describe(niveau="Le niveau de volume entre 0 et 100")
