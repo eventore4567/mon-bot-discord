@@ -68,6 +68,9 @@ async def run() -> int:
         }
         try:
             mapping = await v95.prepare_bot(bot)
+            # Même dernière passe que le wrapper CommandTree.sync de production :
+            # /aide reste, l'ancienne racine /help est supprimée avant publication.
+            v95._remove_legacy_public_roots(bot.tree)
         except Exception as exc:
             import traceback
             traceback.print_exc()
@@ -97,15 +100,16 @@ async def run() -> int:
         if len(roots) > 100:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
 
-        # V110 : les commandes les plus familières doivent être directes, comme sur les
-        # principaux bots Discord. On garde les groupes pour les fonctions avancées.
+        # Surface publique actuelle : l'aide est /aide et la musique vit sous
+        # /musique. Les anciennes racines /help, /play, /pause et /queue ne doivent
+        # plus être exigées par ce gate historique.
         required_roots = (
-            "help", "setup", "ping", "sentrix",
+            "aide", "setup", "ping", "sentrix", "musique",
             "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
             "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
             "clearwarnings", "clear", "lock", "unlock", "slowmode",
             "userinfo", "serverinfo", "avatar", "level", "leaderboard",
-            "balance", "play", "pause", "queue", "role",
+            "balance", "role",
         )
         for required in required_roots:
             if required not in root_names:
@@ -223,7 +227,7 @@ async def run() -> int:
         )
         print(
             f"V110: slash_familiers={len(direct_mapping)} "
-            f"exemples=/ban,/userinfo,/leaderboard,/play,/role give"
+            f"exemples=/ban,/userinfo,/leaderboard,/musique jouer,/role give"
         )
         print(f"V95: inventaire_attendu={len(expected)} manquantes={len(missing)} extras={len(extra)}")
         print(
