@@ -101,6 +101,19 @@ EQUIVALENCES: dict[str, str] = {
     "📥": "member_join", "📤": "member_leave",
 }
 
+#: Version du pack. À incrémenter dès que les FICHIERS changent d'apparence.
+#:
+#: Sans ce numéro, la synchronisation voit les anciennes icônes « déjà en
+#: place » et garde indéfiniment la version précédente : un emoji
+#: d'application ne porte ni date ni empreinte, donc rien ne permet de savoir
+#: que le fichier local a changé.
+VERSION_PACK = 2
+
+#: Icône témoin. Sa présence signifie « ce compte porte déjà cette version ».
+#: Elle occupe un emplacement sur 2000 et n'est jamais affichée — c'est le
+#: prix d'une migration qui ne se rejoue pas à chaque démarrage.
+TEMOIN = f"sentrix_pack_v{VERSION_PACK}"
+
 #: nom -> marquage « <:nom:id> », rempli par synchroniser().
 _RESOLUS: dict[str, str] = {}
 _SYNCHRONISE = False
@@ -280,7 +293,7 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
     if _SYNCHRONISE and not forcer:
         return {"deja_fait": 1}
 
-    bilan = {"existants": 0, "envoyes": 0, "echecs": 0, "absents_du_pack": 0}
+    bilan = {"existants": 0, "envoyes": 0, "echecs": 0, "absents_du_pack": 0, "remplaces": 0}
     try:
         existants = await bot.fetch_application_emojis()
     except Exception:
@@ -290,8 +303,29 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
         )
         return bilan
 
-    for item in existants:
-        nom = str(getattr(item, "name", "") or "")
+    deja = {str(getattr(i, "name", "") or ""): i for i in existants}
+
+    # Version précédente encore en place : on efface avant de reposer. Un
+    # emoji d'application n'est pas modifiable en place, et `create` sur un nom
+    # existant échoue — sans cette purge, les anciennes icônes resteraient
+    # pour toujours.
+    if TEMOIN not in deja:
+        a_effacer = [i for n, i in deja.items() if n.startswith(PREFIXE)]
+        if a_effacer:
+            logger.info(
+                "Pack d'icônes v%s : remplacement de %s icône(s).",
+                VERSION_PACK, len(a_effacer),
+            )
+        for item in a_effacer:
+            try:
+                await item.delete()
+                bilan["remplaces"] += 1
+            except Exception:
+                logger.warning("Icône %s non supprimée.", getattr(item, "name", "?"), exc_info=True)
+            await asyncio.sleep(DELAI_ENTRE_ENVOIS)
+        deja = {}
+
+    for nom, item in deja.items():
         if nom.startswith(PREFIXE):
             _RESOLUS[nom] = str(item)
             bilan["existants"] += 1
@@ -313,10 +347,24 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
             logger.warning("Icône %s non téléversée.", nom, exc_info=True)
         await asyncio.sleep(DELAI_ENTRE_ENVOIS)
 
+    # Le témoin EN DERNIER : s'il était posé avant et qu'un téléversement
+    # échouait, le prochain démarrage croirait la migration finie et laisserait
+    # le pack incomplet.
+    if bilan["envoyes"] and TEMOIN not in _RESOLUS:
+        try:
+            marque = fichier("home")
+            if marque is not None:
+                cree = await bot.create_application_emoji(
+                    name=TEMOIN, image=marque.read_bytes()
+                )
+                _RESOLUS[TEMOIN] = str(cree)
+        except Exception:
+            logger.debug("Témoin de version non posé.", exc_info=True)
+
     _SYNCHRONISE = True
     logger.info(
-        "Icônes SentriX : %s déjà en place, %s téléversées, %s échecs.",
-        bilan["existants"], bilan["envoyes"], bilan["echecs"],
+        "Icônes SentriX v%s : %s déjà en place, %s remplacées, %s téléversées, %s échecs.",
+        VERSION_PACK, bilan["existants"], bilan["remplaces"], bilan["envoyes"], bilan["echecs"],
     )
     return bilan
 

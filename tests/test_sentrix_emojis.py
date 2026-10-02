@@ -164,13 +164,31 @@ class _BotQuiRefuse:
         raise RuntimeError("limite atteinte")
 
 
+class _Emoji:
+    """Emoji d'application que l'on peut supprimer, comme le vrai."""
+
+    def __init__(self, nom, identifiant, journal):
+        self.name = nom
+        self.id = identifiant
+        self._journal = journal
+
+    def __str__(self):
+        return f"<:{self.name}:{self.id}>"
+
+    async def delete(self, *, reason=None):
+        self._journal.append(self.name)
+
+
 class _BotDejaFourni:
-    def __init__(self, noms):
-        self._noms = noms
+    """Compte déjà migré : le témoin de version est présent."""
+
+    def __init__(self, noms, *, avec_temoin=True):
+        self.supprimes = []
+        self._noms = list(noms) + ([se.TEMOIN] if avec_temoin else [])
 
     async def fetch_application_emojis(self):
         return [
-            discord.PartialEmoji(name=n, id=1000 + i)
+            _Emoji(n, 1000 + i, self.supprimes)
             for i, n in enumerate(self._noms)
         ]
 
@@ -197,13 +215,42 @@ async def test_un_refus_de_discord_laisse_les_replis(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_la_synchronisation_est_idempotente():
-    """Un redémarrage ne doit rien re-téléverser : _BotDejaFourni lève si on
-    essaie."""
+    """Un redémarrage ne doit RIEN re-téléverser ni supprimer : le témoin de
+    version dit que ce compte porte déjà ce pack."""
     noms = se.noms_disponibles()
-    bilan = await se.synchroniser(_BotDejaFourni(noms))
-    assert bilan["existants"] == len(noms)
+    bot = _BotDejaFourni(noms)
+    bilan = await se.synchroniser(bot)
+    assert bilan["existants"] == len(noms) + 1  # + le témoin
     assert bilan["envoyes"] == 0
+    assert bot.supprimes == [], "des icônes ont été supprimées sans raison"
     assert se.emoji(noms[0]).startswith("<")
+
+
+@pytest.mark.asyncio
+async def test_une_version_precedente_est_remplacee(monkeypatch):
+    """Sans témoin, le compte porte l'ancien pack : il faut l'effacer.
+
+    Un emoji d'application n'est pas modifiable en place et `create` échoue sur
+    un nom déjà pris. Sans cette purge, les anciennes icônes resteraient pour
+    toujours — c'est exactement ce qui s'est produit quand le pack a changé
+    d'apparence.
+    """
+    monkeypatch.setattr(se, "DELAI_ENTRE_ENVOIS", 0)
+    noms = se.noms_disponibles()[:3]
+    bot = _BotDejaFourni(noms, avec_temoin=False)
+
+    envoyes = []
+
+    async def _creer(*, name, image):
+        envoyes.append(name)
+        return _Emoji(name, 2000 + len(envoyes), [])
+
+    bot.create_application_emoji = _creer
+    bilan = await se.synchroniser(bot)
+
+    assert sorted(bot.supprimes) == sorted(noms), "l'ancien pack n'a pas été effacé"
+    assert bilan["remplaces"] == len(noms)
+    assert se.TEMOIN in envoyes, "le témoin n'a pas été posé après la migration"
 
 
 def test_un_marquage_malforme_ne_produit_pas_de_bouton_casse():
