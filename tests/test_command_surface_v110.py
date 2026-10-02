@@ -21,15 +21,19 @@ def test_core_moderation_uses_common_direct_slash_names() -> None:
         assert surface.STANDARD_DIRECT_SLASH[name] == name
 
 
-def test_info_level_and_music_use_common_names() -> None:
+def test_info_and_level_keep_common_direct_names_but_music_stays_canonical() -> None:
     assert surface.STANDARD_DIRECT_SLASH["avatar"] == "avatar"
     assert surface.STANDARD_DIRECT_SLASH["userinfo"] == "userinfo"
     assert surface.STANDARD_DIRECT_SLASH["serverinfo"] == "serverinfo"
     assert surface.STANDARD_DIRECT_SLASH["leaderboard-levels"] == "leaderboard"
-    assert surface.STANDARD_DIRECT_SLASH["play"] == "play"
-    assert surface.STANDARD_DIRECT_SLASH["music pause"] == "pause"
-    assert surface.STANDARD_DIRECT_SLASH["music queue"] == "queue"
-    assert surface.STANDARD_DIRECT_SLASH["music nowplaying"] == "nowplaying"
+
+    # La musique n'est plus dispersée en /play, /pause, /queue, etc.
+    # La surface unique est /musique ... dans sentrix_canonical_command_surface.
+    assert "play" not in surface.STANDARD_DIRECT_SLASH
+    assert "music pause" not in surface.STANDARD_DIRECT_SLASH
+    assert "music queue" not in surface.STANDARD_DIRECT_SLASH
+    assert "music nowplaying" not in surface.STANDARD_DIRECT_SLASH
+    assert "music play" not in surface.SUPPRESSED_SLASH_DUPLICATES
 
 
 def test_role_management_uses_role_group() -> None:
