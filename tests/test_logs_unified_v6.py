@@ -71,7 +71,9 @@ def test_deleted_attachments_are_archived_in_logs_dossiers():
     assert "attachment.to_file(use_cached=True)" in source
     assert '"deleted_files"' in source
     assert 'log_transport_v52._resolve_setting(\n            bot, guild, "files"' in source
-    assert 'kwargs["files"] = files' in source
+    assert "async def _send_files_log(" in source
+    assert "files=files" in source
+    assert "media_items=media_items" in source
 
 
 def test_ticket_transcript_is_a_button_not_a_permanent_gray_attachment():
