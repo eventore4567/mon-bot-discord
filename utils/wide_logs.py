@@ -906,6 +906,31 @@ def _trace_footer(event_type: str, footer: str = "") -> str:
     return f"{base} · {clean}" if clean else base
 
 
+def _trace_identity_label(event_type: str) -> str:
+    """Libellé humain de l'identité affichée dans SentriX Trace.
+
+    L'ancien rendu disait toujours « Entité Discord », même pour un membre,
+    un salon ou un rôle. Trace garde la même structure légère mais nomme ce que
+    l'on regarde : le panneau paraît moins générique sans ajouter de bloc.
+    """
+    event = canonical_event_type(event_type)
+    if event.startswith("message_"):
+        return "Auteur"
+    if event.startswith(("member_", "voice_", "ticket_", "automod_", "spam_", "raid_")):
+        return "Membre"
+    if event.startswith("channel_") or event == "pins_update":
+        return "Salon"
+    if event.startswith("role_"):
+        return "Rôle"
+    if event == "guild_update":
+        return "Serveur"
+    if event.startswith("invite_"):
+        return "Créateur"
+    if event.startswith(("file_", "resource_")):
+        return "Élément"
+    return "Élément"
+
+
 class WideLogView(discord.ui.LayoutView):
     def __init__(
         self,
@@ -966,8 +991,10 @@ class WideLogView(discord.ui.LayoutView):
         # BLOC 2 — identité concernée, compacte et secondaire.
         if identity_name:
             ident = f"**{safe_text(identity_name)[:80]}**"
+            identity_label = _trace_identity_label(event_type)
+            ident += f"\n-# {identity_label}"
             if identity_id:
-                ident += f"\n-# Entité Discord · ID {identity_id}"
+                ident += f" · ID {identity_id}"
             placed = False
             if identity_icon:
                 try:
@@ -993,7 +1020,7 @@ class WideLogView(discord.ui.LayoutView):
             identity_id=identity_id,
         )
         if body:
-            container.add_item(discord.ui.TextDisplay("### Contexte"))
+            container.add_item(discord.ui.TextDisplay("### Détails"))
             container.add_item(discord.ui.TextDisplay(body[:3000]))
 
         footer = safe_text(getattr(embed.footer, "text", None))[:250]
