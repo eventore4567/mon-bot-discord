@@ -13,6 +13,8 @@ from typing import Any, Iterable
 
 import discord
 
+from utils.sentrix_emojis import est_sentrix
+
 from utils import helpers
 
 import config as _config
@@ -409,7 +411,7 @@ def clean_view(view: Any) -> Any:
             if item.label:
                 item.label = clean_ui_text(item.label, 80, "Action")
             try:
-                if not jeu:
+                if not jeu and not est_sentrix(item.emoji):
                     item.emoji = None
             except Exception:
                 pass
@@ -422,7 +424,7 @@ def clean_view(view: Any) -> Any:
                 if option.description:
                     option.description = clean_ui_text(option.description, 100, "") or None
                 try:
-                    if not jeu:
+                    if not jeu and not est_sentrix(option.emoji):
                         option.emoji = None
                 except Exception:
                     pass

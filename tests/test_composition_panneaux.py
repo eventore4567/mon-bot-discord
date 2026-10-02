@@ -67,8 +67,10 @@ class StructureDUnPanneau(unittest.TestCase):
         self.assertIn(cible.removeprefix("attachment://"), joints)
 
     def test_la_banniere_suit_l_intention(self):
+        """Le liseré du conteneur est retiré : seule la bannière porte encore
+        la couleur de l'intention, et c'est elle qu'on vérifie."""
         self.assertEqual([f.filename for f in self.panneau.fichiers()], ["banner_error.webp"])
-        self.assertEqual(self.panneau.to_components()[0]["accent_color"], config.COLOR_ERROR)
+        self.assertIsNone(self.panneau.to_components()[0].get("accent_color"))
 
     def test_les_sections_restent_sans_filet_decoratif(self):
         types = [i["type"] for i in self.panneau.to_components()[0]["components"]]
@@ -257,12 +259,21 @@ class PontDepuisEmbed(unittest.TestCase):
         self.assertIn("Long détail", texte)
         self.assertIn(long_texte, texte), "le champ long a été tronqué"
 
-    def test_une_sanction_n_est_pas_peinte_en_vert(self):
-        """« Membre banni » n'est pas une bonne nouvelle : c'est un acte de modération."""
+    def test_une_sanction_n_est_pas_classee_comme_une_reussite(self):
+        """« Membre banni » n'est pas une bonne nouvelle : c'est un acte de
+        modération.
+
+        Ce test lisait la couleur du liseré du conteneur. Ce liseré est retiré
+        — il dessinait un trait coloré sur tout le flanc du message et
+        répétait en couleur ce que la signature dit déjà en toutes lettres.
+        La garantie reste entière : l'intention « moderation » ne doit pas se
+        confondre avec une réussite, et c'est elle qui décide de la famille,
+        de l'icône et de la bannière."""
         panneau = panels.depuis_embed(self._embed(), kind="moderation")
-        accent = panneau.to_components()[0]["accent_color"]
+        accent, famille = panels.accord_commande("moderation")
         self.assertNotEqual(accent, config.COLOR_SUCCESS)
-        self.assertEqual(accent, panels.INTENTIONS["moderation"][0])
+        self.assertEqual(famille, "moderation")
+        self.assertEqual(panneau.identite_famille, "moderation")
 
 
 class Confirmations(unittest.TestCase):

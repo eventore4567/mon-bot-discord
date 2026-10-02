@@ -562,7 +562,11 @@ class Panneau(discord.ui.LayoutView):
         )
         self.etat_core = self.kind if self.kind in _STATE_KINDS else None
 
-        conteneur = discord.ui.Container(accent_colour=discord.Colour(accent))
+        # Pas d'accent_colour : il dessine un trait vertical coloré sur tout le flanc
+        # gauche du message. Le domaine est déjà annoncé par la signature
+        # « SENTRIX CORE · … » et par l'icône ; le trait ne fait que répéter en
+        # couleur ce que le texte dit déjà, et il casse la sobriété recherchée.
+        conteneur = discord.ui.Container()
 
         # 1 — bannière pleine largeur, en TÊTE. C'est ce qu'un embed ne sait pas faire.
         #     Pas de description= : elle ferait apparaître un badge « ALT » par-dessus.

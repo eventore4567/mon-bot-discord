@@ -20,6 +20,8 @@ from dataclasses import replace
 from typing import Any
 
 import discord
+
+from utils.sentrix_emojis import est_sentrix
 from discord.ext import commands
 
 from utils import ai_service, design_system, embeds, premium_style, stats_service
@@ -174,7 +176,7 @@ def _clean_embed(embed: discord.Embed) -> discord.Embed:
 def _clean_component(component) -> None:
     jeu = _commande_de_jeu()  # un mini-jeu garde les emojis de ses boutons
     if isinstance(component, discord.ui.Button):
-        if not jeu:
+        if not jeu and not est_sentrix(component.emoji):
             component.emoji = None
         if component.label:
             component.label = strip_decorative_emoji(component.label)[:80] or "Action"
@@ -182,7 +184,7 @@ def _clean_component(component) -> None:
         if component.placeholder:
             component.placeholder = strip_decorative_emoji(component.placeholder)[:150]
         for option in component.options:
-            if not jeu:
+            if not jeu and not est_sentrix(option.emoji):
                 option.emoji = None
             option.label = strip_decorative_emoji(option.label)[:100] or "Option"
             if option.description:

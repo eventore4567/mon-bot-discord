@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 
 import discord
+
+from utils.sentrix_emojis import est_sentrix
 from discord.ext import commands
 
 logger = logging.getLogger("bot.setup-clean-style")
@@ -280,7 +282,8 @@ def install(bot: commands.Bot) -> None:
                     # Les pages setup utilisent des contrôles fonctionnels, pas des emojis
                     # décoratifs. Le style global pourra garder un pictogramme simple sur
                     # les contrôles génériques sans empiler plusieurs icônes.
-                    item.emoji = None
+                    if not est_sentrix(item.emoji):
+                        item.emoji = None
                 elif isinstance(item, discord.ui.Select):
                     placeholder = str(item.placeholder or "").strip()
                     placeholder = placeholder.replace("Choisissez", 'Choisissez').replace("Choisir", 'Choisissez')

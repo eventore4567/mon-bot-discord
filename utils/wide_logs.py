@@ -979,13 +979,14 @@ class WideLogView(discord.ui.LayoutView):
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(
-            accent_colour=discord.Colour(accent) if accent is not None else None
         )
 
-        # 1 — bannière fine, toujours la première pièce visuelle.
-        gallery = discord.ui.MediaGallery()
-        gallery.add_item(media=f"attachment://{banner_filename}")
-        container.add_item(gallery)
+        # Plus de bandeau en tête : le premium vient de l'icône de l'événement,
+        # de la hiérarchie du texte et des actions, pas d'une image qui occupe
+        # le tiers de la carte. La pièce jointe correspondante est retirée au
+        # même endroit (voir `files` plus bas) — les deux DOIVENT disparaître
+        # ensemble, une galerie sans sa pièce jointe fait refuser le message
+        # entier par Discord.
 
         event_type = canonical_event_type(
             log_type,
@@ -1321,12 +1322,9 @@ async def send_wide_log(
         banner_path, banner_path.exists(),
     )
 
-    if not banner_path.exists():
-        logger.error(
-            "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_MISSING path=%s", banner_path
-        )
-        logger.error("SENTRIX TRACE FAILED bannière introuvable: %s", banner_path)
-        return False
+    # Plus d'abandon sur bannière manquante : la carte n'en affiche plus, donc
+    # son absence n'a plus aucune conséquence. Avant ce changement, un fichier
+    # introuvable faisait perdre le log ENTIER.
 
     guild = getattr(channel, "guild", None)
     identity_name, identity_id, identity_icon = derive_identity(
@@ -1360,7 +1358,10 @@ async def send_wide_log(
         return False
 
     try:
-        banner_file = discord.File(str(banner_path), filename=banner_filename)
+        # Plus construit : la carte n'affiche plus de bandeau, et ouvrir un
+        # fichier par log pour ne jamais l'envoyer coûte une lecture disque à
+        # chaque événement.
+        banner_file = None
     except Exception as exc:
         logger.error(
             "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_FILE_FAILED type=%s",
@@ -1369,7 +1370,10 @@ async def send_wide_log(
         logger.error("SENTRIX TRACE FAILED file type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
-    files: list[discord.File] = [banner_file]
+    # Vide : la galerie de bandeau a été retirée ci-dessus, donc plus rien ne
+    # référence ce fichier. Le joindre quand même alourdirait chaque log d'une
+    # image que personne n'affiche.
+    files: list[discord.File] = []
     payload_files: list[discord.File] = []
     if extra_file is not None:
         payload_files.append(extra_file)

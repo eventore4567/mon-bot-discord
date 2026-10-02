@@ -359,7 +359,11 @@ class CommandPanelView(discord.ui.LayoutView):
         accent = getattr(getattr(embed, "colour", None), "value", None) if embed else None
         if not accent:
             accent = _ACCENTS[_resolved_family(kind)]
-        container = discord.ui.Container(accent_colour=discord.Colour(int(accent)))
+        # Pas d'accent_colour : il dessine un trait vertical coloré sur tout le flanc
+        # gauche du message. Le domaine est déjà annoncé par la signature
+        # « SENTRIX CORE · … » et par l'icône ; le trait ne fait que répéter en
+        # couleur ce que le texte dit déjà, et il casse la sobriété recherchée.
+        container = discord.ui.Container()
 
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media=f"attachment://{banner_filename}")
