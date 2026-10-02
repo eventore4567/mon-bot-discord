@@ -74,9 +74,13 @@ class StructureDUnPanneau(unittest.TestCase):
 
     def test_le_mode_aligne_utilise_un_bloc_de_code(self):
         """Discord rend en police proportionnelle : hors bloc de code, rien ne s'aligne."""
+        # Recherche insensible à la casse : la grammaire SentriX Core écrit
+        # « ### 02 · Seconde » et non « ### ● SECONDE ». Ce test porte sur le
+        # bloc de code, pas sur la casse du titre — il levait StopIteration
+        # pour une majuscule.
         aligne = next(
             i for i in self.plat
-            if i["type"] == TEXTE and "SECONDE" in str(i.get("content", ""))
+            if i["type"] == TEXTE and "seconde" in str(i.get("content", "")).casefold()
         )
         self.assertIn("```", aligne["content"])
 
@@ -186,7 +190,9 @@ class PontDepuisEmbed(unittest.TestCase):
     def test_les_emojis_de_tete_sont_retires(self):
         """Le chevron et le filet marquent deja la section ; l'emoji fait du bruit."""
         texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=False))
-        self.assertIn("### ● MEMBRE", texte)
+        entetes = [l for l in texte.splitlines() if l.startswith("### ")]
+        self.assertTrue(entetes, texte)
+        self.assertTrue(any("Membre" in e for e in entetes), entetes)
         self.assertNotIn("👤", texte)
 
     def test_la_barre_dessinee_disparait(self):
@@ -205,8 +211,11 @@ class PontDepuisEmbed(unittest.TestCase):
         mode compact, un seul "### ● RÉSUMÉ" porte tous les champs, une ligne
         chacun."""
         texte = panels.texte_complet(panels.depuis_embed(self._embed(), kind="moderation", compact=True))
+        # Une seule section : c'est ça qui rend la fiche proportionnée. Le
+        # numéro disparaît quand il n'y a qu'une section — numéroter une liste
+        # de un n'apporte rien et fait gabarit.
         self.assertEqual(texte.count("### "), 1)
-        self.assertIn("### ● RÉSUMÉ", texte)
+        self.assertIn("Résumé", texte)
         self.assertIn("**Membre** · <@1>", texte)
         self.assertIn("**Raison** · Spam massif", texte)
 
@@ -236,10 +245,13 @@ class PontDepuisEmbed(unittest.TestCase):
         embed.add_field(name="Court", value="ok", inline=True)
         embed.add_field(name="Long détail", value=long_texte, inline=False)
         texte = panels.texte_complet(panels.depuis_embed(embed, kind="moderation"))
-        self.assertIn("### ● RÉSUMÉ", texte)
+        # L'intention est l'absence de perte, pas une orthographe de titre : la
+        # grammaire SentriX Core numérote les sections (« ### 01 · Résumé »)
+        # au lieu de les mettre en capitales derrière une puce.
+        self.assertIn("Résumé", texte)
         self.assertIn("**Court** · ok", texte)
-        self.assertIn("### ● LONG DÉTAIL", texte)
-        self.assertIn(long_texte, texte)
+        self.assertIn("Long détail", texte)
+        self.assertIn(long_texte, texte), "le champ long a été tronqué"
 
     def test_une_sanction_n_est_pas_peinte_en_vert(self):
         """« Membre banni » n'est pas une bonne nouvelle : c'est un acte de modération."""
@@ -318,8 +330,20 @@ class RenduUnifie(unittest.TestCase):
         from cogs.premium_ui_v82 import PremiumEmbedViewV82
 
         rendu = panels.texte_complet(PremiumEmbedViewV82(self._embed(), compact=True))
-        self.assertTrue(rendu.startswith("## "), rendu[:40])
-        self.assertIn("### ● ", rendu)
+        # Comparé à un VRAI Panneau plutôt qu'à une chaîne figée : ce test doit
+        # dire « même typographie que les autres », pas « cette typographie-là ».
+        # Il rougissait parce que la signature SentriX Core ouvre désormais le
+        # panneau, ce qui est le cas pour tous les panneaux.
+        reference = panels.texte_complet(
+            panels.Panneau(
+                titre="Référence",
+                sections=[panels.Section("Résumé", lignes=[panels.Ligne("A", "b")])],
+            )
+        )
+        prefixe = reference.splitlines()[0].split(" ")[0]
+        self.assertTrue(rendu.startswith(prefixe), rendu[:60])
+        self.assertIn("### ", rendu)
+        self.assertNotIn("### ● ", rendu), "la puce héritée est revenue"
 
     def test_le_mode_compact_tient_sur_moins_de_lignes(self):
         from cogs.premium_ui_v82 import PremiumEmbedViewV82

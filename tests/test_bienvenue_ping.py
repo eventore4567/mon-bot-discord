@@ -190,14 +190,34 @@ def test_il_existe_un_bouton_de_test_du_depart():
 
 def test_le_test_de_depart_ne_notifie_personne():
     """Un test qui pingue le salon à chaque essai de configuration est le
-    meilleur moyen de faire couper le module."""
+    meilleur moyen de faire couper le module.
+
+    Lu sur l'AST : la condition qui choisit entre notifier et se taire doit
+    référencer ``test`` ET le réglage. La version précédente cherchait la
+    chaîne ``"and not test"``, donc elle rougissait sur un code équivalent
+    écrit ``if test or not presentation.get(...)`` — elle verrouillait une
+    orthographe, pas la garantie.
+    """
+    import ast
     import inspect
+    import textwrap
 
     from cogs import setup_v2_completion as sv
 
-    source = inspect.getsource(sv._send_goodbye)
-    assert "and not test" in source, (
-        "le mode test peut encore notifier le membre"
+    arbre = ast.parse(textwrap.dedent(inspect.getsource(sv._send_goodbye)))
+
+    conditions = [
+        ast.unparse(noeud.test)
+        for noeud in ast.walk(arbre)
+        if isinstance(noeud, ast.IfExp)
+        and "AllowedMentions" in ast.unparse(noeud)
+    ]
+    assert conditions, "aucune décision de notification trouvée dans _send_goodbye"
+
+    silence = " ".join(conditions)
+    assert "test" in silence, "le mode test peut encore notifier le membre"
+    assert "goodbye_ping" in silence, (
+        "la notification de départ ne consulte pas son propre réglage"
     )
 
 

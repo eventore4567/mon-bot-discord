@@ -86,8 +86,12 @@ async def _welcome_presentation(bot, guild_id: int) -> dict:
         (guild_id,),
     )
     if row is None:
+        # ping=True : un serveur existant ne change pas de comportement.
+        # goodbye_ping=False : la personne est partie, Discord ne peut plus la
+        # notifier, et pinguer le salon à chaque départ est le meilleur moyen
+        # de faire couper le module.
         return {"title": WELCOME_DEFAULT_TITLE, "show_avatar": True, "show_member_count": True,
-                "mode": "embed", "goodbye_mode": "embed", "ping": True, "goodbye_ping": True}
+                "mode": "embed", "goodbye_mode": "embed", "ping": True, "goodbye_ping": False}
 
     def _drapeau(key: str, defaut: bool) -> bool:
         """Colonne ajoutée après coup : absente sur les bases non migrées."""
@@ -110,10 +114,14 @@ async def _welcome_presentation(bot, guild_id: int) -> dict:
         "show_member_count": bool(row["show_member_count"]),
         "mode": _mode("mode"),
         "goodbye_mode": _mode("goodbye_mode"),
-        "ping": True,
-        # La mention est forcée pour les deux événements. Au départ, Discord peut
-        # afficher le @ mais ne peut plus notifier réellement un membre déjà parti.
-        "goodbye_ping": True,
+        # _drapeau et non un littéral : la colonne est la source de vérité.
+        # Un littéral ici rendait le réglage illisible — un serveur qui avait
+        # coupé le ping était pingué quand même, et « tout personnaliser »
+        # devenait faux.
+        "ping": _drapeau("ping", True),
+        # La mention s'affiche dans les deux cas et reste cliquable : c'est
+        # allowed_mentions qui décide seul de faire sonner le téléphone.
+        "goodbye_ping": _drapeau("goodbye_ping", False),
     }
 
 
@@ -130,8 +138,10 @@ async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, s
         goodbye_ping = current["goodbye_ping"] if goodbye_ping is None else goodbye_ping
     mode = "text" if str(mode) == "text" else "embed"
     goodbye_mode = "text" if str(goodbye_mode) == "text" else "embed"
-    ping = True
-    goodbye_ping = True
+    # Pas de « ping = True » ici : ces deux lignes écrasaient, juste avant
+    # l'INSERT, la valeur que le bloc ci-dessus prend soin de conserver. Le
+    # commentaire « écraser le ping parce qu'on change le titre serait une
+    # surprise désagréable » décrivait l'intention ; le code faisait l'inverse.
     await bot.db.execute(
         "INSERT INTO welcome_presentation_v2 "
         "(guild_id,title,show_avatar,show_member_count,mode,goodbye_mode,ping,goodbye_ping,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
@@ -230,10 +240,12 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     # La mention et la NOTIFICATION sont deux choses distinctes, et les
     # confondre était le défaut. Un vrai @ s'affiche, se clique et ouvre le
     # profil ; allowed_mentions décide seul s'il fait sonner le téléphone.
-    # C'est le réglage « ping / pas ping » demandé par Jayden.
+    # C'est le réglage « ping / pas ping » demandé par Jayden — et il faut le
+    # LIRE : ce commentaire était déjà là alors que le code ne consultait que
+    # `test`. Un serveur qui avait coupé le ping était pingué quand même.
     mentions = (
         discord.AllowedMentions.none()
-        if test
+        if test or not presentation.get("ping", True)
         else discord.AllowedMentions(users=[member], roles=False, everyone=False)
     )
     if presentation.get("mode") == "text":
@@ -317,9 +329,14 @@ async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> d
     if channel is None:
         return None
     template = _conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT)
+    # Réglage SÉPARÉ de celui de la bienvenue, et par défaut à False : la
+    # personne est partie, Discord ne peut plus la notifier, et pinguer le
+    # salon à chaque départ est le meilleur moyen de faire couper le module.
+    # Le @ reste affiché et cliquable dans tous les cas — c'est allowed_mentions
+    # qui décide seul de faire sonner le téléphone.
     mentions_depart = (
         discord.AllowedMentions.none()
-        if test
+        if test or not presentation.get("goodbye_ping", False)
         else discord.AllowedMentions(users=[member], roles=False, everyone=False)
     )
     goodbye_body = _without_duplicate_member_mention(
@@ -432,6 +449,35 @@ def _replace_welcome_listeners(bot) -> None:
     bot.add_listener(on_member_remove, "on_member_remove")
 
 
+def _options_lues(valeur: str) -> dict[str, bool]:
+    """Lit « avatar=on; membres=off; ping=on; ping-depart=off ».
+
+    Un vrai découpage clé=valeur plutôt qu'un ``"ping=off" in texte`` : la
+    sous-chaîne ``ping=off`` ne se distingue pas proprement de
+    ``ping-depart=off`` quand les séparateurs changent, et une option mal
+    reconnue retombe en silence sur le défaut — donc un réglage qui semble
+    accepté sans effet.
+    """
+    lu: dict[str, bool] = {}
+    for morceau in str(valeur or "").casefold().replace(" ", "").split(";"):
+        if "=" not in morceau:
+            continue
+        cle, _, brut = morceau.partition("=")
+        cle = cle.strip()
+        if not cle:
+            continue
+        lu[cle] = brut.strip() in {"on", "oui", "1", "true", "vrai"}
+    return lu
+
+
+def _option(lu: dict[str, bool], *cles: str, defaut: bool) -> bool:
+    """Première clé présente ; sinon le défaut, donc aucun réglage perdu."""
+    for cle in cles:
+        if cle in lu:
+            return lu[cle]
+    return defaut
+
+
 class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
     def __init__(self, owner, *, conf, presentation):
         super().__init__()
@@ -439,29 +485,40 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         self.title_input = discord.ui.TextInput(label="Titre de bienvenue", default=str(presentation["title"] or WELCOME_DEFAULT_TITLE)[:200], max_length=200)
         self.welcome_input = discord.ui.TextInput(label="Message de bienvenue", default=str(_conf_value(conf, "welcome_message", WELCOME_DEFAULT_TEXT))[:1000], max_length=1000, style=discord.TextStyle.paragraph)
         self.goodbye_input = discord.ui.TextInput(label="Message de départ", default=str(_conf_value(conf, "goodbye_message", GOODBYE_DEFAULT_TEXT))[:1000], max_length=1000, style=discord.TextStyle.paragraph)
+        # Discord limite une modale à cinq champs et ils sont pris : les
+        # réglages suivants passent par ce champ, comme l'avatar et le
+        # compteur. « ping » notifie le membre accueilli ; « ping-depart »
+        # est SÉPARÉ et vaut off par défaut — la personne est partie, et
+        # pinguer le salon à chaque départ fait couper le module.
         self.options_input = discord.ui.TextInput(
             label="Options",
-            placeholder="avatar=on; membres=on",
+            placeholder="avatar=on; membres=on; ping=on; ping-depart=off",
             default=(
                 f"avatar={'on' if presentation['show_avatar'] else 'off'}; "
-                f"membres={'on' if presentation['show_member_count'] else 'off'}"
+                f"membres={'on' if presentation['show_member_count'] else 'off'}; "
+                f"ping={'on' if presentation.get('ping', True) else 'off'}; "
+                f"ping-depart={'on' if presentation.get('goodbye_ping', False) else 'off'}"
             ),
-            max_length=80,
+            max_length=120,
         )
         for child in (self.title_input, self.welcome_input, self.goodbye_input, self.options_input):
             self.add_item(child)
 
     async def on_submit(self, interaction):
-        options = str(self.options_input.value).casefold().replace(" ", "")
+        lu = _options_lues(self.options_input.value)
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, "welcome_message", str(self.welcome_input.value).strip() or None)
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, "goodbye_message", str(self.goodbye_input.value).strip() or None)
-        ping = True
-        ping_depart = True
+        # Les défauts sont ceux de la lecture : une option absente du champ ne
+        # change rien. « ping = True » en dur ici rendait le réglage
+        # inconfigurable — Jayden demandait l'inverse, « tout personnaliser,
+        # ping pas ping ».
+        ping = _option(lu, "ping", defaut=True)
+        ping_depart = _option(lu, "ping-depart", "ping_depart", "pingdepart", defaut=False)
         await _save_welcome_presentation(
             self.owner.bot, self.owner.guild.id,
             title=str(self.title_input.value).strip() or WELCOME_DEFAULT_TITLE,
-            show_avatar="avatar=off" not in options,
-            show_member_count=not ("membres=off" in options or "members=off" in options),
+            show_avatar=_option(lu, "avatar", defaut=True),
+            show_member_count=_option(lu, "membres", "members", defaut=True),
             actor_id=interaction.user.id,
             ping=ping,
             goodbye_ping=ping_depart,
@@ -470,9 +527,13 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         # alors que le message de départ venait aussi d'être sauvegardé : on ne
         # voyait donc jamais que le départ était pris en compte, et Jayden l'a
         # signalé — « on voit que bienvenue ».
+        # Dire l'état RÉEL : annoncer « mention activée » quoi qu'il arrive
+        # faisait croire le réglage sans effet.
         recapitulatif = (
-            "**Bienvenue** — message enregistré · mention activée\n"
-            "**Départ** — message enregistré · mention activée\n\n"
+            f"**Bienvenue** — message enregistré · "
+            f"{'notification activée' if ping else 'mention sans notification'}\n"
+            f"**Départ** — message enregistré · "
+            f"{'notification activée' if ping_depart else 'mention sans notification'}\n\n"
             "Les fonds se choisissent dans le dashboard parmi 3 modèles SentriX. "
             "Les tests n'envoient aucune notification."
         )

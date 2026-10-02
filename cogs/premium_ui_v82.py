@@ -81,15 +81,51 @@ def _compact_value(value: object) -> str:
     return "\n".join(lines)
 
 
+#: Au-dela, un champ occupe sa propre ligne : le regrouper rendrait la ligne
+#: illisible et ferait perdre au mode compact la seule chose qu'il apporte.
+_LONGUEUR_COURTE = 24
+
+#: Trois champs par ligne. Au-dela, la ligne depasse la largeur utile sur
+#: mobile et se replie toute seule, ce qui annule le gain.
+_PAR_LIGNE = 3
+
+
 def _compact_field_rows(embed: discord.Embed) -> list[str]:
-    rows: list[str] = []
-    for field in embed.fields:
-        name = _safe_text(field.name)
-        value = _compact_value(field.value)
-        if not name or not value:
+    """Regroupe plusieurs champs COURTS sur une meme ligne.
+
+    C'est la seule raison d'etre du mode compact, et elle avait disparu : cette
+    fonction n'etait plus appelee par personne, et la branche compacte
+    construisait un objet Ligne par champ -- exactement ce que fait le mode
+    large. Les deux rendus etaient identiques au caractere pres, donc +profile,
+    +serverinfo et +leaderboard restaient aussi verticaux qu'avant V82.
+
+    Un champ long garde sa ligne : l'empiler avec un autre produirait une ligne
+    qui se replie, et un repli coute plus de hauteur qu'il n'en economise.
+    """
+    lignes: list[str] = []
+    tampon: list[str] = []
+
+    def vider() -> None:
+        if tampon:
+            lignes.append("  ·  ".join(tampon))
+            tampon.clear()
+
+    for champ in embed.fields:
+        nom = _safe_text(champ.name)
+        valeur = _compact_value(champ.value)
+        if not nom or not valeur:
             continue
-        rows.append(f"**{name}** — {value}")
-    return rows
+        rendu = f"**{nom}** {valeur}"
+        if len(valeur) <= _LONGUEUR_COURTE and "\n" not in valeur:
+            tampon.append(rendu)
+            if len(tampon) >= _PAR_LIGNE:
+                vider()
+        else:
+            vider()
+            lignes.append(rendu)
+
+    vider()
+    return lignes
 
 
 def _clone_button(item: discord.ui.Button) -> discord.ui.Button | None:
@@ -155,14 +191,13 @@ def PremiumEmbedViewV82(
     vignette = _plain(getattr(embed.thumbnail, "url", None))
 
     if compact and embed.fields:
-        # Un champ = une ligne, au lieu d'un en-tete de section suivi de sa
-        # valeur. C'est la seule raison d'etre de ce mode.
-        lignes = [
-            sx_panels.Ligne(_safe_text(f.name), _safe_text(f.value))
-            for f in embed.fields
-            if _safe_text(f.name) and _safe_text(f.value)
-        ]
-        sections = [sx_panels.Section("Résumé", lignes)] if lignes else []
+        # Plusieurs champs courts par ligne, via le texte brut de la section :
+        # un objet Ligne rend toujours UNE ligne par champ, ce qui donnait
+        # exactement le rendu du mode large.
+        rangees = _compact_field_rows(embed)
+        sections = (
+            [sx_panels.Section("Résumé", texte="\n".join(rangees))] if rangees else []
+        )
         panneau = sx_panels.Panneau(
             titre=titre,
             sous_titre=description[:700] if description else None,

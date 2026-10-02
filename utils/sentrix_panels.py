@@ -88,7 +88,18 @@ _FAMILY_LABELS = {
 
 
 def _core_family_label(family: str) -> str:
-    return _FAMILY_LABELS.get(str(family or "").casefold(), str(family or "SentriX").replace("_", " ").title())
+    """Étiquette de domaine, ou chaîne vide s'il n'y en a pas.
+
+    Le défaut était « SentriX », ce qui donnait la signature
+    « SENTRIX CORE · SentriX » — le produit nommé deux fois, ce qui se lit
+    comme un bug. Sans domaine, la signature se contente de « SENTRIX CORE ».
+    """
+    brut = str(family or "").strip()
+    if not brut:
+        return ""
+    etiquette = _FAMILY_LABELS.get(brut.casefold(), brut.replace("_", " ").title())
+    # Un domaine qui répète le nom du produit n'apporte rien.
+    return "" if etiquette.casefold() in {"sentrix", "sentrix core"} else etiquette
 
 
 def _core_command_name() -> str:
@@ -119,7 +130,8 @@ def _core_signature(family: str) -> str:
     command = _core_command_name()
     if command:
         parts.append(command)
-    return " · ".join(parts)
+    # Un morceau vide produirait « SENTRIX CORE ·  · profil ».
+    return " · ".join(p for p in parts if p)
 
 
 def _core_footer(family: str, footer: str | None = None) -> str:
@@ -493,8 +505,16 @@ class Panneau(discord.ui.LayoutView):
             conteneur.add_item(discord.ui.TextDisplay(entete))
 
         # 3 — sections, chacune précédée de son filet.
-        for section_index, section in enumerate(sections, start=1):
-            rendu = section.rendu(section_index)
+        #
+        # Le numéro n'est posé que s'il y a plusieurs sections à distinguer :
+        # un « ### 01 · Résumé » solitaire numérote une liste de un, ce qui
+        # n'apporte aucune information et donne au panneau l'air d'un gabarit.
+        # Un marqueur numéroté dit « ceci est une séquence » ; il ne doit le
+        # dire que quand c'est vrai.
+        visibles = [s for s in sections if s.rendu(None)]
+        numeroter = len(visibles) > 1
+        for position, section in enumerate(visibles, start=1):
+            rendu = section.rendu(position if numeroter else None)
             if not rendu:
                 continue
             conteneur.add_item(discord.ui.TextDisplay(rendu[:_LIMITE_BLOC]))
@@ -508,8 +528,13 @@ class Panneau(discord.ui.LayoutView):
             contenu.add_item(media=str(image))
             conteneur.add_item(contenu)
 
+        # Le pied n'est posé que s'il DIT quelque chose de plus que l'en-tête.
+        # Sans texte métier, _core_footer rend exactement la signature déjà
+        # affichée en tête : le panneau portait alors deux fois la même ligne,
+        # en haut et en bas. C'est du bruit, et ça se voit immédiatement.
         signature_fin = _core_footer(self.famille, pied)
-        conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(signature_fin, 240)}"))
+        if signature_fin.strip() != _core_signature(self.famille).strip():
+            conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(signature_fin, 240)}"))
 
         # 5 — navigation, DANS le conteneur pour rester sous l'accent de couleur.
         rangees = _rangees(boutons)
