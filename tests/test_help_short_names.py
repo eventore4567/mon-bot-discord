@@ -172,3 +172,15 @@ def test_legacy_help_is_removed_after_all_prepare_layers_before_audit():
     sync = source.index("return await _ORIGINAL_SYNC(self, *args, **kwargs)", audit)
 
     assert prepare < cleanup < audit < sync
+
+
+
+def test_components_detail_uses_real_published_slash_path():
+    source = (ROOT / "cogs" / "help.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("def _sections_detail("):
+        source.index("def _sections_liste(", source.index("def _sections_detail("))
+    ]
+
+    assert "slash = _slash_name(bot, command)" in block
+    assert "_slash_map(bot).get(command.qualified_name.casefold())" not in block
