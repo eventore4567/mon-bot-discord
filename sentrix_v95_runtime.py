@@ -32,7 +32,7 @@ from utils import embeds, log_service
 
 logger = logging.getLogger("bot.v95")
 
-DIRECT_ROOTS = frozenset({"help", "setup", "ping", "sentrix"})
+DIRECT_ROOTS = frozenset({"help", "aide", "setup", "ping", "sentrix"})
 EXCLUDED_COMMANDS = frozenset({"logsdiag"})
 MAX_ROOT_COMMANDS = 100
 MAX_CHILDREN = 25
