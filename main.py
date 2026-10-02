@@ -838,42 +838,6 @@ class BotAllInOne(commands.Bot):
                 + traceback.format_exc()
             )
 
-        # Phase 9 : inventaire automatique juste avant publication. Contrairement
-        # au vieux rapport V41 centré sur les permissions, celui-ci inspecte la
-        # forme publique du registre : doublons slash, groupes génériques, options
-        # internes exposées, descriptions invalides et collisions d'alias préfixés.
-        try:
-            from utils.command_registry_audit import (
-                audit_command_registry,
-                audit_counts,
-                critical_issues,
-                iter_slash_entries,
-            )
-
-            registry_issues = audit_command_registry(self)
-            registry_counts = audit_counts(registry_issues)
-            registry_critical = critical_issues(registry_issues)
-            self._sentrix_registry_audit_v2 = tuple(registry_issues)
-            logger.info(
-                "Audit registre SentriX V2 : slash=%s prefix=%s critiques=%s avertissements=%s.",
-                len(iter_slash_entries(self)),
-                len(list(self.walk_commands())),
-                len(registry_critical),
-                registry_counts.get("warning", 0),
-            )
-            if registry_critical:
-                logger.error(
-                    "Audit registre SentriX V2 — anomalies critiques : %s",
-                    " | ".join(
-                        f"[{issue.code}] {issue.path}: {issue.detail}"
-                        for issue in registry_critical[:20]
-                    ),
-                )
-        except Exception:
-            logger.warning(
-                "Audit registre SentriX V2 impossible :\n" + traceback.format_exc()
-            )
-
         try:
             synced = await self.tree.sync()
             logger.info(f"{len(synced)} commandes slash synchronisées globalement.")
