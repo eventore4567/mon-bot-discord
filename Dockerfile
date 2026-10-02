@@ -50,6 +50,7 @@ RUN python -m pytest -q \
     tests/test_ai_actions_permissions.py \
     tests/test_music_voice_persistence.py \
     tests/test_music_cog.py \
+    tests/test_music_playlists_v108.py \
     tests/test_games_runtime_core.py \
     tests/test_game_stakes.py \
     tests/test_services_economy.py \
