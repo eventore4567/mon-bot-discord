@@ -49,6 +49,9 @@ RUN python -m pytest -q \
     tests/test_guild_departure_notify.py \
     tests/test_ai_disable_guard_loading.py \
     tests/test_ai_actions_permissions.py \
+    tests/test_music_matcher.py \
+    tests/test_music_manager.py \
+    tests/test_music_provider_url_matching.py \
     tests/test_music_voice_persistence.py \
     tests/test_music_cog.py \
     tests/test_music_playlists_v108.py \
