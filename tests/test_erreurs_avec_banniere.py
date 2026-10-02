@@ -144,7 +144,7 @@ def test_le_texte_exact_du_contrat_est_conserve():
     import sentrix_product_update as spu
 
     assert spu.UNKNOWN_COMMAND_TEXT == (
-        "Commande introuvable. Merci de consulter les commandes avec /help."
+        "Commande introuvable. Consultez /aide pour voir les commandes."
     )
 
 
