@@ -1,6 +1,6 @@
 """Centre d'aide officiel SentriX.
 
-+help et /help partagent la même logique. L'accueil reste volontairement léger :
++help et /aide partagent la même logique. L'accueil reste volontairement léger :
 il sert à trouver une commande, pas à configurer le serveur.
 """
 from __future__ import annotations
@@ -238,7 +238,7 @@ def _decorate(panel: discord.Embed, bot: commands.Bot) -> discord.Embed:
 def _home(bot: commands.Bot, member=None) -> discord.Embed:
     grouped = _ordered_categories(bot, member)
     panel = embeds.help_embed(
-        "SentriX — Centre d’aide",
+        "Centre d’aide",
         "Retrouvez rapidement les commandes et fonctionnalités de SentriX.",
     )
     lines = []
@@ -263,7 +263,7 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
 def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discord.Embed:
     slash = _slash_name(bot, command)
     requirement = command_requirement(command)
-    panel = embeds.help_embed(f"SentriX — {_display_name(command)}", _description(command))
+    panel = embeds.help_embed(_display_name(command), _description(command))
     panel.add_field(name="Commande", value=f"`{_usage(command, prefix)}`", inline=False)
     if slash:
         panel.add_field(name="Slash", value=f"`/{slash}`", inline=True)
@@ -294,7 +294,7 @@ def _pages(bot: commands.Bot, command_rows: list[commands.Command], prefix: str,
     pages: list[discord.Embed] = []
     for page_index, chunk in enumerate(chunks, start=1):
         panel = embeds.help_embed(
-            f"SentriX — {title}",
+            title,
             "Sélectionnez ou recherchez une commande pour afficher sa fiche complète.",
         )
         if not chunk:
