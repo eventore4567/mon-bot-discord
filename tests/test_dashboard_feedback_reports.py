@@ -36,3 +36,17 @@ def test_dashboard_contains_feedback_button_dialog_and_api_call():
     assert 'id="feedbackTechnical"' in source
     assert "/api/guilds/${state.guildId}/feedback" in source
     assert "register_feedback_routes" in source
+
+
+def test_feedback_inbox_is_owner_only_and_visible_in_dashboard():
+    backend = (ROOT / "web" / "dashboard_feedback_reports.py").read_text(encoding="utf-8")
+    dashboard = (ROOT / "web" / "dashboard.py").read_text(encoding="utf-8")
+
+    assert "await bot.is_owner(" in backend
+    assert "Accès réservé au propriétaire du bot." in backend
+    assert "ORDER BY id DESC" in backend
+    assert "LIMIT 50" in backend
+    assert 'id="feedbackAdmin"' in dashboard
+    assert 'id="feedbackRefresh"' in dashboard
+    assert "loadFeedbackReports" in dashboard
+    assert "state.developer=Boolean(me.developer)" in dashboard
