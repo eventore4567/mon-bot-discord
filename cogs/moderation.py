@@ -1113,18 +1113,14 @@ class Moderation(commands.Cog):
             if invocation_id is None or int(message.id) != int(invocation_id)
         ]
 
-        texte = f"`{len(messages)}` message(s) supprimé(s)."
+        texte = f"{len(messages)} message(s) supprimé(s)."
         if is_prefix:
-            # Texte Discord brut : aucun embed/panel pour la confirmation de clear.
-            await ctx.channel.send(texte, delete_after=4)
+            # Réponse courte, sans embed ni bloc visuel. Elle disparaît rapidement.
+            await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
         else:
-            if ctx.interaction.response.is_done():
-                try:
-                    await ctx.interaction.edit_original_response(content=texte)
-                except discord.HTTPException:
-                    await ctx.interaction.followup.send(texte, ephemeral=True)
-            else:
-                await ctx.interaction.response.send_message(texte, ephemeral=True)
+            # texte_court sait utiliser la réponse différée de /clear et garde la
+            # confirmation éphémère, sans dépendre directement de response.send_message.
+            await panels.texte_court(ctx, texte, ephemere=True)
 
         asyncio.create_task(self._log_clear_safely(ctx, messages, requested))
 

@@ -1,0 +1,192 @@
+name: SentriX Phase 11 Regression Matrix
+
+on:
+  pull_request:
+    branches:
+      - dashboard-refonte-2026-09
+  push:
+    branches:
+      - sentrix-phase-10-11
+  workflow_dispatch:
+
+concurrency:
+  group: sentrix-phase-11-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Commands + permissions
+            tests: >-
+              tests/test_access_matrix.py
+              tests/test_access_tiers_5.py
+              tests/test_global_checks_cannot_grant.py
+              tests/test_global_checks_resilience.py
+              tests/test_permission_audit_gates.py
+              tests/test_permission_audit_regressions.py
+              tests/test_permission_guard_late_sweep.py
+              tests/test_permissions_exhaustives.py
+              tests/test_permissions_explain.py
+              tests/test_permissions_liste.py
+              tests/test_grouped_slash_arguments_v99.py
+              tests/test_command_registry_audit.py
+              tests/test_command_registry_integrity_gates.py
+              tests/test_integrite_registre.py
+              tests/test_canonical_command_surface.py
+              tests/test_command_surface_v110.py
+              tests/test_discord_command_publish_audit.py
+              tests/test_slash_schema_guard_v105.py
+              tests/test_slash_command_budget_hard_limit.py
+              tests/test_sentrix_slash_visibility.py
+              tests/test_hybrid_callback_resync.py
+              tests/test_hybrid_group_native_v105.py
+
+          - name: Music + playlists + voice
+            tests: >-
+              tests/test_music_audio_buffer.py
+              tests/test_music_authorized_fallback.py
+              tests/test_music_cog.py
+              tests/test_music_ffmpeg_options.py
+              tests/test_music_manager.py
+              tests/test_music_matcher.py
+              tests/test_music_playlist_limit_1000.py
+              tests/test_music_playlist_persistence.py
+              tests/test_music_playlists_v108.py
+              tests/test_music_prefix_arguments.py
+              tests/test_music_provider_url_matching.py
+              tests/test_music_smooth_audio.py
+              tests/test_music_voice_persistence.py
+              tests/test_playlist_product_semantics.py
+              tests/test_spotify_playlist_pagination.py
+              tests/test_youtube_playlist_railway_fallback.py
+              tests/test_ha_music_drain.py
+              tests/test_musique_niveaux_surface.py
+
+          - name: Tickets + moderation
+            tests: >-
+              tests/test_ticket_atomic_actions.py
+              tests/test_ticket_claim_security_safe_log.py
+              tests/test_ticket_events_registry.py
+              tests/test_ticket_fermer_nest_pas_supprimer.py
+              tests/test_ticket_journalisation.py
+              tests/test_ticket_open_concurrency.py
+              tests/test_ticket_rating_persistence.py
+              tests/test_ticket_reopen_after_channel_deleted.py
+              tests/test_ticket_reopen_commands_consistency.py
+              tests/test_tickets_autoclose_resilience.py
+              tests/test_tickets_runtime_loading.py
+              tests/test_services_tickets.py
+              tests/test_moderation_ban_cog_wiring.py
+              tests/test_moderation_kick_cog_wiring.py
+              tests/test_moderation_mute_cog_wiring.py
+              tests/test_moderation_tempban_cog_wiring.py
+              tests/test_moderation_unban_cog_wiring.py
+              tests/test_moderation_unmute_cog_wiring.py
+              tests/test_moderation_warn_cog_wiring.py
+              tests/test_moderation_clear_bulk_limit.py
+              tests/test_moderation_logging_resilience.py
+              tests/test_moderation_short_replies.py
+              tests/test_moderation_slash_commands.py
+              tests/test_services_moderation_ban.py
+              tests/test_services_moderation_kick.py
+              tests/test_services_moderation_mute.py
+              tests/test_services_moderation_tempban.py
+              tests/test_services_moderation_unban.py
+              tests/test_services_moderation_unmute.py
+              tests/test_services_moderation_warn.py
+
+          - name: Economy + levels + games
+            tests: >-
+              tests/test_services_economy.py
+              tests/test_economy_race_conditions.py
+              tests/test_services_levels.py
+              tests/test_services_profile.py
+              tests/test_setxp_level_recalc.py
+              tests/test_levels_niveaux_actifs_gaps.py
+              tests/test_niveaux_desactives.py
+              tests/test_profile_niveaux_actifs.py
+              tests/test_profile_me_runtime_contract_v18.py
+              tests/test_profile_me_separation_v18.py
+              tests/test_temporary_boosts.py
+              tests/test_game_stakes.py
+              tests/test_games_runtime_core.py
+              tests/test_games_loot_and_emojis.py
+              tests/test_party_games.py
+              tests/test_pve_engine.py
+
+          - name: Dashboard + product UX
+            tests: >-
+              tests/test_dashboard_runtime_patch_source_contract.py
+              tests/test_dashboard_guild_loading_recovery.py
+              tests/test_dashboard_api_music.py
+              tests/test_dashboard_api_community.py
+              tests/test_dashboard_feedback_reports.py
+              tests/test_dashboard_profile_and_moderation.py
+              tests/test_dashboard_security_observability.py
+              tests/test_dashboard_unified_adapter_v9.py
+              tests/test_dashboard_unified_runtime_bridge_v10.py
+              tests/test_dashboard_unified_product_ux.py
+              tests/test_dashboard_product_ui_v18.py
+              tests/test_dashboard_product_ui_v18_live_fix.py
+              tests/test_dashboard_simple_mode_v20.py
+              tests/test_dashboard_recovery_v54_performance.py
+              tests/test_dashboard_v60_diagnostics_live.py
+              tests/test_dashboard_v60_rework.py
+              tests/test_accessibility.py
+              tests/test_dashboard_install_link.py
+
+          - name: Legacy + commands + release contracts
+            tests: >-
+              tests/test_help_short_names.py
+              tests/test_help_visibility_batch.py
+              tests/test_short_command_names.py
+              tests/test_command_sweep_arguments.py
+              tests/test_command_suggestions.py
+              tests/test_command_suggestion_permissions.py
+              tests/test_command_error_suggestion_permissions.py
+              tests/test_final_runtime_polish_command_surface.py
+              tests/test_user_facing_command_truth_v2.py
+              tests/test_i18n_english_surface.py
+              tests/test_no_cooldown_final.py
+              tests/test_product_runtime_contract.py
+              tests/test_product_update_contract.py
+              tests/test_setup_validation.py
+              tests/test_simple_setup_command_channels_roles.py
+              tests/test_double_confirmation_safety.py
+              tests/test_plain_error_messages.py
+              tests/test_unknown_command_expiry.py
+
+    env:
+      DISCORD_TOKEN: ci.fake.token
+      OPENAI_API_KEY: ""
+      POSTGRES_URL: ""
+      REDIS_URL: ""
+      SENTRIX_SHORT_SLASH_NAMES: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install runtime + test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Compile critical runtime
+        run: python -m compileall -q core cogs utils web main.py railway_boot.py railway_ha_boot.py sentrix_v95_runtime.py sentrix_command_surface_v110.py sentrix_canonical_command_surface.py
+
+      - name: Run ${{ matrix.name }}
+        run: python -m pytest -q ${{ matrix.tests }}

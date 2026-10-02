@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import pathlib
 import re
@@ -65,8 +66,20 @@ GENERIC_PERMISSION_PHRASES = (
 SKIP_COMMANDS = frozenset({"embed import"})
 # Commandes servies par leur propre transport slash (pas par Command.callback) : une
 # réponse suffit à prouver l'accès.
-NATIVE_TRANSPORT = frozenset({"setup"})
+NATIVE_TRANSPORT = frozenset({"setup", "aide"})
 NON_PERMISSION_CAUSES = ("module", "désactivé", "desactive", "message privé", "en attente", "cooldown", "réessayez dans", "réessaie dans")
+_INVOCATION_TIMEOUT_SECONDS = 3.0
+
+
+def belongs_to_shard(transport: str, name: str, shard_index: int, shard_count: int) -> bool:
+    """Répartit chaque commande de façon stable et exclusive entre les shards CI."""
+    if shard_count <= 1:
+        return True
+    if shard_index < 0 or shard_index >= shard_count:
+        raise ValueError("shard_index doit être compris entre 0 et shard_count - 1")
+    key = f"{transport.casefold()}:{name.casefold()}".encode("utf-8")
+    bucket = int.from_bytes(hashlib.sha256(key).digest()[:8], "big") % shard_count
+    return bucket == shard_index
 
 
 class _Audit:
@@ -274,7 +287,10 @@ async def _run_prefix(bot, guild, command, invocation: str, persona: dict) -> tu
     from core.errors import pipeline
     pipeline.subscribe(reports.append)
     try:
-        await asyncio.wait_for(harness.run_prefix(bot, guild, invocation, **persona), 10)
+        await asyncio.wait_for(
+            harness.run_prefix(bot, guild, invocation, **persona),
+            _INVOCATION_TIMEOUT_SECONDS,
+        )
     except Exception as exc:  # noqa: BLE001
         reports.append(exc)
     finally:
@@ -296,7 +312,10 @@ async def _run_slash(bot, guild, root: str, options: list, persona: dict) -> tup
     pipeline.subscribe(reports.append)
     try:
         interaction = harness.build_interaction(bot, root, options, author_id=persona["author_id"], author_roles=persona["author_roles"])
-        await asyncio.wait_for(bot.tree._call(interaction), 10)
+        await asyncio.wait_for(
+            bot.tree._call(interaction),
+            _INVOCATION_TIMEOUT_SECONDS,
+        )
     except Exception as exc:  # noqa: BLE001
         reports.append(exc)
     finally:
@@ -309,7 +328,13 @@ async def _run_slash(bot, guild, root: str, options: list, persona: dict) -> tup
     return "refuse", text, bool(reports) or "SXR-CMD-" in text
 
 
-async def audit(*, only: list[str], transports: set[str]) -> dict[str, Any]:
+async def audit(
+    *,
+    only: list[str],
+    transports: set[str],
+    shard_index: int = 0,
+    shard_count: int = 1,
+) -> dict[str, Any]:
     from utils import access_matrix
     from cogs import setup_v2_core as core
     from database.db import PRIMARY_CREATOR_ID
@@ -325,8 +350,10 @@ async def audit(*, only: list[str], transports: set[str]) -> dict[str, Any]:
 
     rows: list[dict[str, Any]] = []
 
-    def wanted(name: str) -> bool:
-        return not only or any(o.casefold() in name.casefold() for o in only)
+    def wanted(name: str, transport: str) -> bool:
+        if only and not any(o.casefold() in name.casefold() for o in only):
+            return False
+        return belongs_to_shard(transport, name, shard_index, shard_count)
 
     async def with_states(command, root_name: str, runner, transport: str, invocation: str):
         tier = access_matrix.access_tier(root_name)
@@ -377,7 +404,7 @@ async def audit(*, only: list[str], transports: set[str]) -> dict[str, Any]:
         seen: set[str] = set()
         for command in sorted(bot.walk_commands(), key=lambda c: c.qualified_name):
             name = command.qualified_name
-            if command.hidden or name in seen or not wanted(name):
+            if command.hidden or name in seen or not wanted(name, "prefix"):
                 continue
             seen.add(name)
             invocation, missing = command_sweep.prefix_invocation(command)
@@ -392,7 +419,7 @@ async def audit(*, only: list[str], transports: set[str]) -> dict[str, Any]:
             if not isinstance(command, app_commands.Command):
                 continue
             name = command.qualified_name
-            if not wanted(name):
+            if not wanted(name, "slash"):
                 continue
             root, options, missing = command_sweep.slash_invocation(command)
             if missing:
@@ -417,8 +444,16 @@ async def audit(*, only: list[str], transports: set[str]) -> dict[str, Any]:
     for r in issues:
         for issue in r["issues"]:
             counts[issue] = counts.get(issue, 0) + 1
-    return {"generated_at": int(time.time()), "commands_checked": commands_checked, "rows": len(rows),
-            "issue_counts": counts, "issues": issues, "all": rows}
+    return {
+        "generated_at": int(time.time()),
+        "commands_checked": commands_checked,
+        "rows": len(rows),
+        "shard_index": shard_index,
+        "shard_count": shard_count,
+        "issue_counts": counts,
+        "issues": issues,
+        "all": rows,
+    }
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -441,16 +476,34 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--only", nargs="*", default=[])
     parser.add_argument("--transport", choices=("prefix", "slash", "both"), default="both")
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--out", default=str(ROOT / "reports" / "permission_audit"))
     parser.add_argument("--strict", action="store_true")
     args = parser.parse_args(argv)
+    if args.shard_count < 1:
+        parser.error("--shard-count doit être >= 1")
+    if args.shard_index < 0 or args.shard_index >= args.shard_count:
+        parser.error("--shard-index doit être compris entre 0 et shard-count - 1")
     transports = {"prefix", "slash"} if args.transport == "both" else {args.transport}
-    report = asyncio.run(audit(only=args.only, transports=transports))
+    report = asyncio.run(
+        audit(
+            only=args.only,
+            transports=transports,
+            shard_index=args.shard_index,
+            shard_count=args.shard_count,
+        )
+    )
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.with_suffix(".json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     out.with_suffix(".md").write_text(render_markdown(report), encoding="utf-8")
-    print(f"\nAudit terminé : {report['commands_checked']} commandes, {report['rows']} combinaisons, anomalies={report['issue_counts']}\nRapport : {out.with_suffix('.md')}", flush=True)
+    print(
+        f"\nAudit terminé : shard {report['shard_index'] + 1}/{report['shard_count']} · "
+        f"{report['commands_checked']} commandes · {report['rows']} combinaisons · "
+        f"anomalies={report['issue_counts']}\nRapport : {out.with_suffix('.md')}",
+        flush=True,
+    )
     import os
     sys.stdout.flush()
     os._exit(1 if (args.strict and report["issue_counts"]) else 0)

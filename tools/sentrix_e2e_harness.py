@@ -374,6 +374,14 @@ async def setup_world(bot):
     bot.shard_count = 1
 
     await bot.db.set_guild_config(GID, "log_channel", LOGCID)
+    # Les modules qui exigent une ressource doivent être réellement configurés avant
+    # l'activation. Sinon set_module_enabled() refuse (à juste titre) l'activation et
+    # l'audit appelle ensuite cet état "module-on" alors que le module est OFF.
+    await bot.db.set_guild_config(GID, "welcome_channel", CID)
+    await bot.db.set_guild_config(GID, "goodbye_channel", CID)
+    await bot.db.set_guild_config(GID, "level_channel", CID)
+    await bot.db.set_guild_config(GID, "ticket_category", CATEGORY_ID)
+    await bot.db.set_guild_config(GID, "autorole", MEMBER_ROLE_ID)
     from utils import log_service
     for category in ("moderation", "messages", "members", "automod", "security", "tickets", "voice", "roles"):
         try:

@@ -12,7 +12,7 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-EXPECTED_OWNER = pathlib.Path("cogs/error_experience_v3.py")
+EXPECTED_OWNER = pathlib.Path("sentrix_product_update.py")
 
 
 def _is_command_not_found_test(node: ast.AST) -> bool:
@@ -67,15 +67,15 @@ def main() -> int:
                 delegates.append((relative, int(getattr(node, "lineno", 0))))
 
     errors = list(parse_errors)
-    # Le gestionnaire canonique calcule le texte dans la branche CommandNotFound puis
-    # effectue un unique ctx.send commun à toutes les erreurs. Cette structure évite la
-    # duplication historique sans imposer que l'envoi soit imbriqué dans le même ``if``.
+    # L'autorité finale est sentrix_product_update : elle est volontairement
+    # installée après les couches historiques, garde une seule réponse et réutilise
+    # le filtre de suggestions de command_response_guard.
     canonical = ROOT / EXPECTED_OWNER
     canonical_text = canonical.read_text(encoding="utf-8") if canonical.exists() else ""
     canonical_owns = (
-        "isinstance(base, commands.CommandNotFound)" in canonical_text
-        and "await ctx.send(" in canonical_text
-        and "bot.on_command_error = MethodType(improved_on_command_error, bot)" in canonical_text
+        "isinstance(root, commands.CommandNotFound)" in canonical_text
+        and "await _plain_send(ctx, _unknown_command_text(self, ctx))" in canonical_text
+        and "bot.on_command_error = MethodType(exact_error, bot)" in canonical_text
     )
     foreign = [(path, line) for path, line in responders if path != EXPECTED_OWNER]
     if not canonical_owns:
@@ -87,7 +87,7 @@ def main() -> int:
     guard = ROOT / "cogs/command_response_guard.py"
     if guard.exists():
         text = guard.read_text(encoding="utf-8")
-        if "_command_suggestions(bot, ctx, typed)" not in canonical_text:
+        if "command_response_guard._command_suggestions(bot, ctx, typed)" not in canonical_text:
             errors.append("les suggestions de commandes inconnues ne passent plus par le filtre de permissions")
         if "_can_suggest_command" not in text:
             errors.append("le filtre de permissions des suggestions est absent")

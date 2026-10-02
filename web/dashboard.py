@@ -238,17 +238,15 @@ def _verify_signed_oauth_state(request: web.Request, state: str) -> bool:
 
 
 def _invite_url(bot, guild_id: int | None = None) -> str:
-    """Lien officiel d'installation.
+    """Lien canonique d'installation de SentriX.
 
-    Quand le dashboard public est configuré, on passe par /install : Discord ajoute
-    le bot puis renvoie le même navigateur vers /app. Le lien Discord direct reste
-    le repli si OAuth n'est pas disponible.
+    Le bouton « Ajouter SentriX » doit toujours ouvrir l'autorisation Discord
+    officielle validée pour le bot. Le login du dashboard reste un flux OAuth
+    séparé : il ne doit jamais remplacer le lien public d'installation par une
+    route Railway ou dépendre du serveur actuellement sélectionné.
     """
-    base = (config.DASHBOARD_PUBLIC_URL or "").strip().rstrip("/")
-    if not base:
-        return BOT_INSTALL_URL
-    suffix = f"?guild_id={int(guild_id)}" if guild_id else ""
-    return f"{base}/install{suffix}"
+    del bot, guild_id
+    return BOT_INSTALL_URL
 
 
 def _avatar_url(user: dict) -> str | None:

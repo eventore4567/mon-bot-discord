@@ -6,8 +6,9 @@ import sentrix_product_update as update
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_unknown_command_is_exact_plain_help_message():
-    assert update.UNKNOWN_COMMAND_TEXT == "Commande introuvable. Merci de consulter les commandes avec /help."
+def test_unknown_command_fallback_points_to_canonical_aide():
+    assert update.UNKNOWN_COMMAND_TEXT == "Commande introuvable. Consultez /aide pour voir les commandes."
+    assert "/help" not in update.UNKNOWN_COMMAND_TEXT
     assert "Vouliez-vous dire" not in update.UNKNOWN_COMMAND_TEXT
 
 

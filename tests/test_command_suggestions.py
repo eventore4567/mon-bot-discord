@@ -10,19 +10,20 @@ import difflib
 import pytest
 
 from cogs import command_response_guard as guard
-from cogs import final_error_embed_v5 as final
+import sentrix_product_update as final
 
 
 def test_le_handler_canonique_propose_des_suggestions():
     source = final.__file__
     text = open(source, encoding="utf-8").read()
-    assert "_command_suggestions" in text, "le handler final ne suggere rien"
+    assert "command_response_guard._command_suggestions" in text, "le handler final ne suggere rien"
     assert "Vouliez-vous dire" in text
+    assert "_unknown_command_text" in text
 
 
 def test_il_reutilise_la_recherche_existante_au_lieu_d_en_ecrire_une_seconde():
     text = open(final.__file__, encoding="utf-8").read()
-    assert "from . import command_response_guard" in text
+    assert "from cogs import command_response_guard" in text
     assert "difflib" not in text, "une seconde implementation de recherche a ete ecrite"
 
 
