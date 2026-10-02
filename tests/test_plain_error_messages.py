@@ -82,15 +82,23 @@ def test_clear_range_error_guard_is_plain_text():
     assert "embeds.warning(" not in block
 
 
-def test_final_error_v5_never_uses_panels_for_user_facing_errors():
+def test_final_error_v5_keeps_simple_errors_plain_but_technical_errors_unique():
     source = (ROOT / "cogs" / "final_error_embed_v5.py").read_text(encoding="utf-8")
     start = source.index("def install(bot: commands.Bot)")
     block = source[start:]
 
+    # Syntaxe/permission/cooldown restent des phrases courtes.
     assert "_panneau_erreur_simple(ctx, error, texte)" not in block
-    assert "await _raw_slash_send(interaction, panel)" not in block
-    assert "await _raw_slash_send(interaction, _component_error_panel(item))" not in block
-    assert block.count('"Une erreur est survenue. Merci de réessayer."') >= 3
+    assert "await _texte_prefix_send(ctx, texte" in block
+    assert "await _texte_slash_send(interaction, texte)" in block
+
+    # Une vraie erreur technique a un seul panneau traçable, jamais le vieux
+    # fallback générique répété dans le salon.
+    assert "Une erreur est survenue. Merci de réessayer." not in block
+    assert "_sentrix_error_finalized" in block
+    assert "_prefix_error_panel(ctx, error)" in block
+    assert "_slash_error_panel(" in block
+    assert "_component_error_panel(item)" in block
 
 
 def test_global_panel_layer_flattens_simple_command_errors():
