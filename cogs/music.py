@@ -142,11 +142,45 @@ class GuildMusicQueue:
         self.started_at: float = 0.0  # time.monotonic() au dernier (re)démarrage de lecture
         self.disconnect_task: asyncio.Task | None = None
         self.keep_connected: bool = False
+        # Phase 6 — stabilité vocale. Chaque démarrage audio reçoit une génération :
+        # un callback FFmpeg devenu obsolète après seek/skip/stop ne peut plus avancer
+        # la file une deuxième fois. Le verrou sérialise les transitions d'une guilde.
+        self.playback_generation: int = 0
+        self.advance_lock = asyncio.Lock()
+        self.recovery_key: str | None = None
+        self.recovery_attempts: int = 0
+        self.paused_by_user: bool = False
 
     def position_seconds(self) -> float:
         if not self.started_at:
             return self.elapsed_offset
         return self.elapsed_offset + (time.monotonic() - self.started_at)
+
+    def pause_clock(self) -> None:
+        if self.started_at:
+            self.elapsed_offset = self.position_seconds()
+            self.started_at = 0.0
+
+    def resume_clock(self) -> None:
+        if not self.started_at:
+            self.started_at = time.monotonic()
+
+    def reset_clock(self, *, offset: float = 0.0) -> None:
+        self.elapsed_offset = max(0.0, float(offset))
+        self.started_at = 0.0
+
+
+def _track_recovery_key(track: Track) -> str:
+    """Clé stable d'une piste pour borner les reprises automatiques."""
+    return "|".join(
+        (
+            str(track.provider or ""),
+            str(track.playback_provider or ""),
+            str(track.original_url or ""),
+            str(track.artist or ""),
+            str(track.title or ""),
+        )
+    ).casefold()
 
 
 def _classify_engine_error(exc: MusicEngineError) -> tuple[str, str]:
@@ -238,11 +272,9 @@ class MusicVoicePanel(discord.ui.View):
             return await interaction.response.send_message("Lecteur indisponible.", ephemeral=True)
         queue = music.get_queue(self.guild_id)
         voice = queue.voice_client or interaction.guild.voice_client
-        if voice and voice.is_playing():
-            voice.pause()
+        if music._pause_queue(queue):
             message = "Musique mise en pause."
-        elif voice and voice.is_paused():
-            voice.resume()
+        elif music._resume_queue(queue):
             message = "Lecture reprise."
         else:
             message = "Aucune musique n'est en lecture."
@@ -257,8 +289,7 @@ class MusicVoicePanel(discord.ui.View):
         voice = queue.voice_client or interaction.guild.voice_client
         if not voice or not (voice.is_playing() or voice.is_paused()):
             return await interaction.response.send_message("Aucune musique à passer.", ephemeral=True)
-        queue.loop_track = False
-        voice.stop()
+        await music._skip_queue(queue)
         await interaction.response.send_message("Passage au titre suivant.", ephemeral=True)
 
     @discord.ui.button(label="Stop", style=discord.ButtonStyle.danger, row=0)
@@ -268,13 +299,7 @@ class MusicVoicePanel(discord.ui.View):
             return await interaction.response.send_message("Lecteur indisponible.", ephemeral=True)
         queue = music.get_queue(self.guild_id)
         voice = queue.voice_client or interaction.guild.voice_client
-        queue.tracks.clear()
-        queue.loop_track = False
-        queue.loop_queue = False
-        queue.autoplay = False
-        if voice and (voice.is_playing() or voice.is_paused()):
-            voice.stop()
-        queue.current = None
+        await music._stop_queue(queue)
         await interaction.response.send_message("Lecture arrêtée et file vidée.", ephemeral=True)
 
     @discord.ui.button(label="Voir la file", style=discord.ButtonStyle.secondary, row=1)
@@ -412,9 +437,12 @@ class Music(commands.Cog, name="Music"):
         queue.loop_track = False
         queue.loop_queue = False
         queue.autoplay = False
-        queue.current = None
+        queue.paused_by_user = False
+        self._invalidate_playback(queue)
         if voice and (voice.is_playing() or voice.is_paused()):
             voice.stop()
+        queue.current = None
+        queue.reset_clock()
         if voice and voice.is_connected():
             try:
                 await voice.disconnect()
@@ -442,7 +470,11 @@ class Music(commands.Cog, name="Music"):
             if voice.channel.id != channel.id:
                 await voice.move_to(channel)
         else:
-            voice = await channel.connect()
+            try:
+                voice = await channel.connect(timeout=30, reconnect=True)
+            except TypeError:
+                # Les doubles de test plus simples n'acceptent pas ces options.
+                voice = await channel.connect()
         queue.voice_client = voice
         queue.keep_connected = True
         if text_channel is not None:
@@ -542,7 +574,10 @@ class Music(commands.Cog, name="Music"):
                 if getattr(getattr(voice, "channel", None), "id", None) != getattr(channel, "id", None):
                     await voice.move_to(channel)
             else:
-                voice = await channel.connect()
+                try:
+                    voice = await channel.connect(timeout=30, reconnect=True)
+                except TypeError:
+                    voice = await channel.connect()
             queue.voice_client = voice
             queue.text_channel = ctx.channel
             self._cancel_disconnect(queue)
@@ -626,61 +661,273 @@ class Music(commands.Cog, name="Music"):
 
         queue.disconnect_task = asyncio.create_task(_wait_then_leave(), name=f"sentrix-music-disconnect-{queue.guild_id}")
 
-    async def _play_track(self, queue: GuildMusicQueue, track: Track, *, seek_seconds: float = 0.0) -> bool:
-        """Démarre réellement la lecture d'une piste déjà résolue (playable_url
-        connu). Ré-résout une URL de flux fraîche juste avant (les URLs signées
-        expirent). Retourne False si la piste doit être écartée (source devenue
-        indisponible) — l'appelant doit alors passer à la suivante."""
+    def _invalidate_playback(self, queue: GuildMusicQueue) -> None:
+        """Invalide le callback audio de la source actuellement attachée."""
+        queue.playback_generation += 1
+
+    async def _notify_playback_issue(self, queue: GuildMusicQueue, message: str) -> None:
+        target = queue.text_channel
+        if target is None or not hasattr(target, "send"):
+            return
+        try:
+            await target.send(
+                str(message)[:1900],
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except TypeError:
+            try:
+                await target.send(str(message)[:1900])
+            except Exception:
+                logger.debug("music playback notice ignored -> guild=%s", queue.guild_id, exc_info=True)
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            logger.debug("music playback notice ignored -> guild=%s", queue.guild_id, exc_info=True)
+
+    async def _require_control_voice(
+        self,
+        ctx: commands.Context,
+        queue: GuildMusicQueue,
+    ) -> discord.VoiceClient | None:
+        """Les contrôles n'agissent que depuis le même vocal que SentriX."""
+        voice = queue.voice_client or getattr(ctx.guild, "voice_client", None)
+        if voice is None or not voice.is_connected():
+            await panels.texte_court(
+                ctx,
+                "SentriX n'est connecté à aucun salon vocal.",
+                ephemere=bool(ctx.interaction),
+            )
+            return None
+
+        member_channel = getattr(getattr(ctx.author, "voice", None), "channel", None)
+        bot_channel = getattr(voice, "channel", None)
+        if member_channel is None:
+            await panels.texte_court(
+                ctx,
+                "Rejoins le vocal de SentriX pour contrôler la musique.",
+                ephemere=bool(ctx.interaction),
+            )
+            return None
+        if bot_channel is not None and getattr(member_channel, "id", None) != getattr(bot_channel, "id", None):
+            await panels.texte_court(
+                ctx,
+                f"Rejoins **{getattr(bot_channel, 'name', 'le vocal de SentriX')}** pour contrôler la musique.",
+                ephemere=bool(ctx.interaction),
+            )
+            return None
+        queue.voice_client = voice
+        return voice
+
+    def _pause_queue(self, queue: GuildMusicQueue) -> bool:
+        voice = queue.voice_client
+        if voice and voice.is_playing():
+            voice.pause()
+            queue.paused_by_user = True
+            queue.pause_clock()
+            return True
+        return False
+
+    def _resume_queue(self, queue: GuildMusicQueue) -> bool:
+        voice = queue.voice_client
+        if voice and voice.is_paused():
+            voice.resume()
+            queue.paused_by_user = False
+            queue.resume_clock()
+            return True
+        return False
+
+    async def _skip_queue(self, queue: GuildMusicQueue) -> bool:
+        voice = queue.voice_client
+        if not voice or not (voice.is_playing() or voice.is_paused()):
+            return False
+        queue.loop_track = False
+        queue.paused_by_user = False
+        self._invalidate_playback(queue)
+        voice.stop()
+        await self._advance(queue)
+        return True
+
+    async def _stop_queue(self, queue: GuildMusicQueue) -> bool:
+        voice = queue.voice_client
+        had_activity = bool(
+            queue.current
+            or queue.tracks
+            or (voice and (voice.is_playing() or voice.is_paused()))
+        )
+        queue.tracks.clear()
+        queue.loop_track = False
+        queue.loop_queue = False
+        queue.autoplay = False
+        queue.paused_by_user = False
+        self._invalidate_playback(queue)
+        if voice and (voice.is_playing() or voice.is_paused()):
+            voice.stop()
+        queue.current = None
+        queue.reset_clock()
+        return had_activity
+
+    async def _play_track(
+        self,
+        queue: GuildMusicQueue,
+        track: Track,
+        *,
+        seek_seconds: float = 0.0,
+        recovery: bool = False,
+    ) -> bool:
+        """Démarre une piste avec URL fraîche et callback anti-race."""
         try:
             url = await self.manager.refresh_playable_url(track)
         except MusicEngineError as exc:
-            logger.warning("music playback candidate rejected at refresh -> %s (%s)", track.playback_provider, exc)
+            logger.warning(
+                "music playback candidate rejected at refresh -> guild=%s provider=%s error=%s",
+                queue.guild_id,
+                track.playback_provider,
+                exc,
+            )
+            return False
+
+        voice = queue.voice_client
+        if not (voice and voice.is_connected()):
+            logger.warning(
+                "music playback deferred: voice disconnected -> guild=%s track=%s",
+                queue.guild_id,
+                track.display_title(),
+            )
             return False
 
         options = dict(FFMPEG_OPTIONS)
         if seek_seconds > 0:
             options["before_options"] = f"{options['before_options']} -ss {seek_seconds:.2f}"
 
-        ffmpeg_source = discord.FFmpegPCMAudio(url, **options)
-        buffered_source = BufferedPCMAudio(
-            ffmpeg_source,
-            prebuffer_seconds=4.0,
-            max_buffer_seconds=12.0,
-            startup_timeout=5.0,
-            label=f"guild={queue.guild_id}",
-        )
-        source = discord.PCMVolumeTransformer(buffered_source, volume=queue.volume)
+        source = None
+        buffered_source = None
+        try:
+            ffmpeg_source = discord.FFmpegPCMAudio(url, **options)
+            buffered_source = BufferedPCMAudio(
+                ffmpeg_source,
+                prebuffer_seconds=4.0,
+                max_buffer_seconds=12.0,
+                startup_timeout=5.0,
+                label=f"guild={queue.guild_id}",
+            )
+            source = discord.PCMVolumeTransformer(buffered_source, volume=queue.volume)
+        except (discord.ClientException, OSError, RuntimeError) as exc:
+            logger.error(
+                "music ffmpeg start failed -> guild=%s track=%s error=%s",
+                queue.guild_id,
+                track.display_title(),
+                exc,
+            )
+            if source is not None:
+                try:
+                    source.cleanup()
+                except Exception:
+                    pass
+            return False
+
+        generation = queue.playback_generation + 1
+        queue.playback_generation = generation
 
         def _after(error: Exception | None):
             if error:
-                logger.error("music playback error -> guild=%s: %s", queue.guild_id, error)
-            if buffered_source.underruns:
+                logger.error(
+                    "music playback error -> guild=%s generation=%s: %s",
+                    queue.guild_id,
+                    generation,
+                    error,
+                )
+            if buffered_source is not None and buffered_source.underruns:
                 logger.warning(
                     "music jitter buffer stats -> guild=%s underruns=%s",
                     queue.guild_id,
                     buffered_source.underruns,
                 )
-            asyncio.run_coroutine_threadsafe(self._on_track_finished(queue), self.bot.loop)
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._on_track_finished(
+                        queue,
+                        error=error,
+                        generation=generation,
+                        finished_track=track,
+                    ),
+                    self.bot.loop,
+                )
+            except RuntimeError:
+                logger.debug(
+                    "music after callback ignored because loop is closed -> guild=%s",
+                    queue.guild_id,
+                )
 
-        if not (queue.voice_client and queue.voice_client.is_connected()):
-            source.cleanup()
+        try:
+            voice.play(source, after=_after)
+        except (discord.ClientException, OSError, RuntimeError) as exc:
+            logger.error(
+                "music voice play failed -> guild=%s track=%s error=%s",
+                queue.guild_id,
+                track.display_title(),
+                exc,
+            )
+            try:
+                source.cleanup()
+            except Exception:
+                pass
             return False
-        queue.voice_client.play(source, after=_after)
+
         queue.current = track
-        queue.elapsed_offset = seek_seconds
+        queue.elapsed_offset = max(0.0, float(seek_seconds))
         queue.started_at = time.monotonic()
+        key = _track_recovery_key(track)
+        if not recovery or queue.recovery_key != key:
+            queue.recovery_key = key
+            queue.recovery_attempts = 0
         logger.info(
-            "playback started -> %s (metadata=%s, playback=%s, jitter_buffer=4s/12s)",
-            track.display_title(), track.provider, track.playback_provider,
+            "playback started -> %s (metadata=%s, playback=%s, recovery=%s, generation=%s)",
+            track.display_title(),
+            track.provider,
+            track.playback_provider,
+            recovery,
+            generation,
         )
         return True
 
+    async def _notify_skipped_tracks(
+        self,
+        queue: GuildMusicQueue,
+        skipped: list[str],
+        *,
+        resumed_title: str | None = None,
+    ) -> None:
+        if not skipped:
+            return
+        if resumed_title:
+            message = (
+                f"⚠️ SentriX a ignoré **{len(skipped)} titre(s) indisponible(s)** "
+                f"et poursuit avec **{resumed_title}**."
+            )
+        else:
+            message = (
+                f"⚠️ **{len(skipped)} titre(s) indisponible(s)** ont été ignorés. "
+                "La file ne contient plus de titre jouable."
+            )
+        await self._notify_playback_issue(queue, message)
+
     async def _advance(self, queue: GuildMusicQueue) -> None:
-        """Choisit et démarre la piste suivante (boucle piste > file > boucle file
-        > autoplay > rien). Écarte silencieusement (avec log) toute piste dont la
-        source est devenue indisponible entre la résolution et la lecture, et
-        essaie la suivante — jamais d'arrêt complet à cause d'UNE piste cassée."""
+        async with queue.advance_lock:
+            await self._advance_locked(queue)
+
+    async def _advance_locked(self, queue: GuildMusicQueue) -> None:
+        """Transition atomique vers la piste suivante."""
+        skipped: list[str] = []
         while True:
+            voice = queue.voice_client
+            if not (voice and voice.is_connected()):
+                logger.warning(
+                    "music advance paused: voice disconnected, queue preserved -> guild=%s pending=%s",
+                    queue.guild_id,
+                    len(queue.tracks),
+                )
+                if skipped:
+                    await self._notify_skipped_tracks(queue, skipped)
+                return
+
             if queue.loop_track and queue.current:
                 candidate = queue.current
             elif queue.tracks:
@@ -689,10 +936,14 @@ class Music(commands.Cog, name="Music"):
                 candidate = await self._autoplay_candidate(queue)
                 if candidate is None:
                     queue.current = None
+                    queue.reset_clock()
+                    await self._notify_skipped_tracks(queue, skipped)
                     self._schedule_disconnect(queue)
                     return
             else:
                 queue.current = None
+                queue.reset_clock()
+                await self._notify_skipped_tracks(queue, skipped)
                 self._schedule_disconnect(queue)
                 return
 
@@ -702,13 +953,44 @@ class Music(commands.Cog, name="Music"):
                 if queue.loop_queue and not queue.loop_track:
                     queue.tracks.append(previous)
 
+            queue.paused_by_user = False
             started = await self._play_track(queue, candidate)
             if started:
+                await self._notify_skipped_tracks(
+                    queue,
+                    skipped,
+                    resumed_title=candidate.display_title(),
+                )
                 return
-            logger.warning("music track skipped, source unavailable -> %s", candidate.display_title())
+
+            if not (queue.voice_client and queue.voice_client.is_connected()):
+                if candidate is not queue.current:
+                    queue.tracks.insert(0, candidate)
+                else:
+                    queue.current = candidate
+                logger.warning(
+                    "music candidate preserved during voice outage -> guild=%s track=%s",
+                    queue.guild_id,
+                    candidate.display_title(),
+                )
+                await self._notify_playback_issue(
+                    queue,
+                    "⚠️ Connexion vocale interrompue. La file est conservée et SentriX tente de se reconnecter.",
+                )
+                return
+
+            skipped.append(candidate.display_title())
+            logger.warning(
+                "music track auto-skipped, source unavailable -> guild=%s track=%s",
+                queue.guild_id,
+                candidate.display_title(),
+            )
             queue.current = None
+            queue.reset_clock()
             if queue.loop_track:
                 queue.loop_track = False
+            if len(skipped) % 10 == 0:
+                await asyncio.sleep(0)
 
     async def _autoplay_candidate(self, queue: GuildMusicQueue) -> Track | None:
         last = queue.history[-1] if queue.history else None
@@ -723,12 +1005,173 @@ class Music(commands.Cog, name="Music"):
                 return track
         return None
 
-    async def _on_track_finished(self, queue: GuildMusicQueue) -> None:
-        # Une seule source de notification publique :
-        # sentrix_music_playlists_v108 envoie le message texte final avec la mention.
-        # On ne renvoie donc plus ici d'embed "File d'attente terminée" ni
-        # d'embed "Lecture en cours", ce qui supprimait le doublon visible.
-        await self._advance(queue)
+    async def _on_track_finished(
+        self,
+        queue: GuildMusicQueue,
+        *,
+        error: Exception | None = None,
+        generation: int | None = None,
+        finished_track: Track | None = None,
+    ) -> None:
+        async with queue.advance_lock:
+            if generation is not None and generation != queue.playback_generation:
+                logger.debug(
+                    "music stale after callback ignored -> guild=%s callback_generation=%s current_generation=%s",
+                    queue.guild_id,
+                    generation,
+                    queue.playback_generation,
+                )
+                return
+
+            track = finished_track or queue.current
+            played_seconds = queue.position_seconds() if track is not None else 0.0
+
+            if (
+                error is None
+                and track is not None
+                and not track.is_live
+                and track.duration
+                and played_seconds + 8.0 < float(track.duration)
+            ):
+                error = RuntimeError(
+                    f"flux interrompu à {played_seconds:.1f}s sur {track.duration}s"
+                )
+
+            if error is not None and track is not None:
+                resume_at = max(0.0, played_seconds)
+                if track.duration:
+                    resume_at = min(resume_at, max(0.0, float(track.duration) - 1.0))
+                queue.elapsed_offset = resume_at
+                queue.started_at = 0.0
+
+                voice = queue.voice_client
+                if not (voice and voice.is_connected()):
+                    queue.current = track
+                    logger.warning(
+                        "music playback suspended during voice outage -> guild=%s track=%s position=%.1f",
+                        queue.guild_id,
+                        track.display_title(),
+                        resume_at,
+                    )
+                    await self._notify_playback_issue(
+                        queue,
+                        "⚠️ Connexion vocale perdue. La piste et la file sont conservées pendant la reconnexion.",
+                    )
+                    persistent = getattr(self, "_sentrix_persistent_voice", None)
+                    if persistent is not None:
+                        try:
+                            asyncio.create_task(
+                                persistent.restore_all(),
+                                name=f"sentrix-music-recover-voice-{queue.guild_id}",
+                            )
+                        except RuntimeError:
+                            pass
+                    return
+
+                key = _track_recovery_key(track)
+                if queue.recovery_key != key:
+                    queue.recovery_key = key
+                    queue.recovery_attempts = 0
+
+                if queue.recovery_attempts < 1:
+                    queue.recovery_attempts += 1
+                    logger.warning(
+                        "music ffmpeg recovery attempt -> guild=%s track=%s position=%.1f",
+                        queue.guild_id,
+                        track.display_title(),
+                        resume_at,
+                    )
+                    await self._notify_playback_issue(
+                        queue,
+                        f"⚠️ Coupure audio détectée sur **{track.display_title()}**. SentriX relance le flux automatiquement.",
+                    )
+                    restarted = await self._play_track(
+                        queue,
+                        track,
+                        seek_seconds=resume_at,
+                        recovery=True,
+                    )
+                    if restarted:
+                        if queue.paused_by_user and queue.voice_client:
+                            queue.voice_client.pause()
+                            queue.pause_clock()
+                        return
+
+                logger.error(
+                    "music ffmpeg recovery exhausted -> guild=%s track=%s",
+                    queue.guild_id,
+                    track.display_title(),
+                )
+                await self._notify_playback_issue(
+                    queue,
+                    f"⚠️ Impossible de reprendre **{track.display_title()}**. Passage automatique au titre suivant.",
+                )
+                queue.loop_track = False
+                queue.current = None
+                queue.paused_by_user = False
+                queue.reset_clock()
+                if not queue.history or queue.history[-1] is not track:
+                    queue.history.append(track)
+                await self._advance_locked(queue)
+                return
+
+            await self._advance_locked(queue)
+
+    async def resume_after_voice_reconnect(self, queue: GuildMusicQueue) -> bool:
+        """Restaure la piste courante après reconnexion Discord, sans doubler la lecture."""
+        async with queue.advance_lock:
+            voice = queue.voice_client
+            track = queue.current
+            if not (voice and voice.is_connected()) or track is None:
+                return False
+            if voice.is_playing() or voice.is_paused():
+                return True
+
+            resume_at = max(0.0, queue.position_seconds())
+            if track.duration:
+                resume_at = min(resume_at, max(0.0, float(track.duration) - 1.0))
+
+            self._invalidate_playback(queue)
+            restarted = await self._play_track(
+                queue,
+                track,
+                seek_seconds=resume_at,
+                recovery=True,
+            )
+            if restarted:
+                if queue.paused_by_user:
+                    voice.pause()
+                    queue.pause_clock()
+                    state = "restaurée en pause"
+                else:
+                    state = "reprise"
+                logger.warning(
+                    "music playback restored after voice reconnect -> guild=%s track=%s position=%.1f",
+                    queue.guild_id,
+                    track.display_title(),
+                    resume_at,
+                )
+                await self._notify_playback_issue(
+                    queue,
+                    f"✅ Connexion vocale rétablie. Lecture {state} : **{track.display_title()}**.",
+                )
+                return True
+
+            failed = track
+            queue.current = None
+            queue.paused_by_user = False
+            queue.reset_clock()
+            logger.error(
+                "music reconnect restored voice but not track -> guild=%s track=%s",
+                queue.guild_id,
+                failed.display_title(),
+            )
+            await self._notify_playback_issue(
+                queue,
+                f"⚠️ Connexion vocale rétablie, mais **{failed.display_title()}** n'est plus lisible. Passage au suivant.",
+            )
+            await self._advance_locked(queue)
+            return False
 
     async def _voice_chat_target(self, guild_id: int, channel_id: int):
         try:
@@ -1055,21 +1498,31 @@ class Music(commands.Cog, name="Music"):
     @music.command(name="leave", description="Faire quitter le bot du salon vocal.")
     async def music_leave(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
-        if not queue.voice_client:
+        voice = queue.voice_client or getattr(ctx.guild, "voice_client", None)
+        if not voice:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Aucun salon vocal", description="Je ne suis dans aucun salon vocal.", kind="danger")))
         self._cancel_disconnect(queue)
-        await queue.voice_client.disconnect()
+        self._invalidate_playback(queue)
+        if voice.is_playing() or voice.is_paused():
+            voice.stop()
+        try:
+            await voice.disconnect()
+        except discord.HTTPException:
+            pass
         queue.voice_client = None
         queue.tracks.clear()
         queue.history.clear()
         queue.current = None
+        queue.paused_by_user = False
+        queue.reset_clock()
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Salon quitté", description="J'ai quitté le salon vocal.", kind="success")))
 
     @music.command(name="pause", description="Mettre la musique en pause.")
     async def music_pause(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
-        if queue.voice_client and queue.voice_client.is_playing():
-            queue.voice_client.pause()
+        if await self._require_control_voice(ctx, queue) is None:
+            return
+        if self._pause_queue(queue):
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Musique en pause", kind="primary")))
         else:
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien à mettre en pause", description="Aucune musique en cours de lecture.", kind="danger")))
@@ -1077,8 +1530,9 @@ class Music(commands.Cog, name="Music"):
     @music.command(name="resume", description="Reprendre la lecture.")
     async def music_resume(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
-        if queue.voice_client and queue.voice_client.is_paused():
-            queue.voice_client.resume()
+        if await self._require_control_voice(ctx, queue) is None:
+            return
+        if self._resume_queue(queue):
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Lecture reprise", kind="primary")))
         else:
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien à reprendre", description="La musique n'est pas en pause.", kind="danger")))
@@ -1086,9 +1540,9 @@ class Music(commands.Cog, name="Music"):
     @music.command(name="skip", description="Passer à la musique suivante.")
     async def music_skip(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
-        if queue.voice_client and (queue.voice_client.is_playing() or queue.voice_client.is_paused()):
-            queue.loop_track = False
-            queue.voice_client.stop()
+        if await self._require_control_voice(ctx, queue) is None:
+            return
+        if await self._skip_queue(queue):
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Musique passée", kind="success")))
         else:
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien à passer", description="Aucune musique en cours de lecture.", kind="danger")))
@@ -1096,28 +1550,32 @@ class Music(commands.Cog, name="Music"):
     @music.command(name="previous", description="Revenir au titre précédent.")
     async def music_previous(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
+        voice = await self._require_control_voice(ctx, queue)
+        if voice is None:
+            return
         if not queue.history:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien avant", description="Aucun titre précédent dans cette session.", kind="danger")))
         previous_track = queue.history.pop()
-        if queue.current:
-            queue.tracks.insert(0, queue.current)
+        current = queue.current
+        if current:
+            queue.tracks.insert(0, current)
         queue.tracks.insert(0, previous_track)
         queue.loop_track = False
-        if queue.voice_client and (queue.voice_client.is_playing() or queue.voice_client.is_paused()):
-            queue.voice_client.stop()
-        else:
-            await self._advance(queue)
+        queue.paused_by_user = False
+        self._invalidate_playback(queue)
+        if voice.is_playing() or voice.is_paused():
+            voice.stop()
+        queue.current = None
+        queue.reset_clock()
+        await self._advance(queue)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Retour en arrière", description=f"⏮️ **{previous_track.display_title()}**", kind="success")))
 
     @music.command(name="stop", description="Arrêter la musique et vider la file d'attente.")
     async def music_stop(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
-        queue.tracks.clear()
-        queue.loop_track = False
-        queue.loop_queue = False
-        queue.autoplay = False
-        if queue.voice_client:
-            queue.voice_client.stop()
+        if await self._require_control_voice(ctx, queue) is None:
+            return
+        await self._stop_queue(queue)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Musique arrêtée", description="File d'attente vidée.", kind="success")))
 
     @music.command(name="queue", description="Afficher la file d'attente musicale.")
@@ -1250,14 +1708,20 @@ class Music(commands.Cog, name="Music"):
     @app_commands.describe(secondes="Position cible en secondes depuis le début de la piste")
     async def music_seek(self, ctx: commands.Context, secondes: commands.Range[int, 0, 36000]):
         queue = self.get_queue(ctx.guild.id)
-        if not queue.current or not queue.voice_client:
+        voice = await self._require_control_voice(ctx, queue)
+        if voice is None or not queue.current:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien à avancer", description="Aucune musique en cours de lecture.", kind="danger")))
         if queue.current.duration and secondes > queue.current.duration:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Position invalide", description=f"Cette piste dure {premium_style.format_duration(queue.current.duration)}.", kind="danger")))
         track = queue.current
-        queue.voice_client.stop()
+        self._invalidate_playback(queue)
+        if voice.is_playing() or voice.is_paused():
+            voice.stop()
+        queue.paused_by_user = False
         started = await self._play_track(queue, track, seek_seconds=float(secondes))
         if not started:
+            queue.current = None
+            queue.reset_clock()
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Lecture impossible", description="La source de cette piste n'est plus disponible.", kind="danger")))
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Position modifiée", description=f"⏩ Lecture reprise à **{premium_style.format_duration(secondes)}**.", kind="success")))
 
