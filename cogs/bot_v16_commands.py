@@ -273,48 +273,23 @@ def _remove_legacy_unknown_listener(bot: commands.Bot) -> int:
 
 
 def _install_unknown_command_listener(bot: commands.Bot) -> None:
+    """Compatibilité V16 : aucune réponse utilisateur pour CommandNotFound.
+
+    La politique produit finale est silencieuse. Garder un second responder ici
+    recréait exactement le spam que la pile d'erreurs finale cherche à éviter.
+    """
     state = _state(bot)
     if state["unknown_listener_installed"]:
         return
 
     async def unknown_command_v16(ctx: commands.Context, error: commands.CommandError):
+        del ctx
         raw = getattr(error, "original", error)
-        if not isinstance(raw, commands.CommandNotFound):
-            return
-        try:
-            from . import command_response_guard as guard
-            author = getattr(ctx, "author", None)
-            if author is None or not guard._allow_unknown_reply(author.id):
-                return
-            typed = guard._typed_command_path(bot, ctx)
-            if not typed:
-                return
-            suggestions = guard._command_suggestions(bot, ctx, typed)
-        except Exception:
-            suggestions = []
-            content = str(getattr(getattr(ctx, "message", None), "content", "") or "")
-            prefix = str(getattr(ctx, "clean_prefix", None) or "+")
-            typed = content[len(prefix):].split(maxsplit=1)[0] if content.startswith(prefix) else content
+        if isinstance(raw, commands.CommandNotFound):
+            return None
 
-        prefix = str(getattr(ctx, "clean_prefix", None) or "+")
-        if suggestions:
-            options = "\n".join(f"• `{prefix}{name}`" for name in suggestions[:3])
-            text = (
-                f"La commande `{prefix}{typed}` n'existe pas.\n\n"
-                f"Tu voulais peut-être utiliser :\n{options}\n\n"
-                f"Ouvre `{prefix}help` puis utilise **Rechercher** pour voir la syntaxe exacte."
-            )
-        else:
-            text = f"La commande `{prefix}{typed}` n'existe pas.\nOuvre `{prefix}help` pour voir les commandes disponibles."
-        try:
-            await panels.envoyer(
-                ctx,
-                panels.depuis_embed(embeds.warning(text, title='Commande introuvable')),
-                delete_after=5,
-            )
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
+    # Le listener reste présent pour compatibilité avec les audits V16, mais il
+    # est strictement observer/no-op et n'émet jamais de message Discord.
     bot.add_listener(unknown_command_v16, "on_command_error")
     state["unknown_listener_installed"] = True
 
