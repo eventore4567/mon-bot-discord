@@ -222,9 +222,10 @@ SHORT_TARGETS: dict[str, tuple[str, str, str]] = {
     "sanctiondm off": ("sanctiondm", "", "off"), "sanctiondm reset": ("sanctiondm", "", "reset"),
     "sanctiondm status": ("sanctiondm", "", "etat"), "addemoji": ("emoji", "", "ajouter"),
     "deleteemoji": ("emoji", "", "supprimer"), "resetnick": ("moderation", "", "resetnick"),
-    # musique
-    "music remove": ("musique", "file", "enlever"), "music autoplay": ("musique", "lecture", "auto"),
-    "music playlist create": ("musique", "playlist", "sauver"),
+    # musique — même nomenclature canonique que la surface longue.
+    "music remove": ("musique", "file", "retirer"),
+    "music autoplay": ("musique", "", "lecture-auto"),
+    "music playlist create": ("musique", "playlist", "sauvegarder"),
     # niveaux à plat
     "repleaderboard": ("niveaux", "", "toprep"), "rephistory": ("niveaux", "", "rephisto"),
     "voice-time": ("niveaux", "", "vocal"), "set-bio": ("niveaux", "", "bio"),
@@ -327,6 +328,12 @@ def install() -> None:
         name, simple = _qualified(command), _simple(command)
         if getattr(command, "hidden", False) or name in DUPLICATES or simple in DUPLICATES:
             return False
+        # Les groupes servent de conteneurs et ne doivent jamais devenir des
+        # fausses feuilles (/musique lecture music, /musique lecture playlist).
+        # +play reste l'alias préfixé historique ; son slash est fourni une seule
+        # fois par /musique jouer via "music play".
+        if name in {"music", "music playlist", "play"}:
+            return False
         if short and (name in SHORT_DUPLICATES or simple in SHORT_DUPLICATES):
             return False
         return bool(old_should_expose(command))
@@ -356,9 +363,12 @@ def install() -> None:
         if root == "musique" or original_root == "music":
             if original_name.startswith("music playlist "):
                 return "playlist"
-            if simple in {"queue", "shuffle", "remove", "clear"}:
+            if simple in {"queue", "remove", "clear"}:
                 return "file"
-            return "lecture"
+            # Jouer/pause/reprendre/suivant/arrêter/en-cours/volume/boucle/
+            # mélanger/rejoindre/quitter/position/lecture-auto restent directement
+            # sous /musique : pas de sous-groupe "lecture" artificiel.
+            return ""
         original_bucket = old_bucket(original_root, target)
         return BUCKETS.get((original_root, original_bucket), original_bucket)
 
@@ -383,8 +393,10 @@ def install() -> None:
     v95._group_for = group_for
     v95._add_grouped_surface = surface
     v98.semantic_bucket = bucket
+    # La surface canonique utilise des feuilles directement sous /musique et
+    # d'autres racines sémantiques même lorsque le mode "short" est désactivé.
+    _install_flat_bucket_support()
     if short:
-        _install_flat_bucket_support()
         try:
             import sentrix_command_surface_v110 as v110
             v110.STANDARD_DIRECT_SLASH.update(SHORT_DIRECT)
@@ -398,7 +410,6 @@ def install() -> None:
     })
     v95.GROUP_DESCRIPTIONS.update(ROOT_DESCRIPTIONS)
     v98.SUBGROUP_DESCRIPTIONS.update({
-        ("musique", "lecture"): "Lecture et contrôle du lecteur musical.",
         ("musique", "file"): "Afficher et gérer la file d'attente.",
         ("musique", "playlist"): "Sauvegarder, importer et charger vos playlists.",
     })
