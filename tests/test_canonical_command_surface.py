@@ -99,7 +99,9 @@ def test_generic_general_buckets_are_renamed_in_public_surface():
 
     assert surface.BUCKETS[("config", "general")] == "reglages"
     assert surface.BUCKETS[("utility", "general")] == "pratiques"
+    assert surface.BUCKETS[("outils", "general")] == "pratiques"
     assert "general" not in {
         surface.BUCKETS[("config", "general")],
         surface.BUCKETS[("utility", "general")],
+        surface.BUCKETS[("outils", "general")],
     }
