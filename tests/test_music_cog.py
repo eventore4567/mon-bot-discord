@@ -36,6 +36,8 @@ class _FakeVoiceClient:
         self._playing = False
         self._paused = False
         self.source = None
+        self.move_calls = 0
+        self.last_after = None
 
     def is_connected(self):
         return self._connected
@@ -49,6 +51,8 @@ class _FakeVoiceClient:
     def play(self, source, *, after=None):
         self._playing = True
         self._paused = False
+        self.source = source
+        self.last_after = after
 
     def pause(self):
         if self._playing:
@@ -65,6 +69,7 @@ class _FakeVoiceClient:
         self._paused = False
 
     async def move_to(self, channel):
+        self.move_calls += 1
         self.channel = channel
 
     async def disconnect(self):
@@ -77,8 +82,10 @@ class _FakeVoiceChannel:
     def __init__(self, channel_id):
         self.id = channel_id
         self.members = []
+        self.connect_calls = 0
 
     async def connect(self):
+        self.connect_calls += 1
         return _FakeVoiceClient(self)
 
 
@@ -199,6 +206,101 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(queue_b.tracks), 1)  # inchangé côté B
         self.assertEqual(queue_b.tracks[0].title, "B2")
 
+
+    async def test_unconfigured_player_reuses_voice_when_already_in_correct_channel(self):
+        channel = _FakeVoiceChannel(70)
+        ctx = _fake_ctx(7070, voice_channel=channel)
+        queue = self.cog.get_queue(7070)
+        voice = _FakeVoiceClient(channel)
+        queue.voice_client = voice
+
+        resolved = await self.cog._ensure_voice(ctx)
+
+        self.assertIs(resolved, queue)
+        self.assertIs(queue.voice_client, voice)
+        self.assertEqual(channel.connect_calls, 0)
+        self.assertEqual(voice.move_calls, 0)
+
+    async def test_unconfigured_player_moves_existing_voice_instead_of_reconnecting(self):
+        old_channel = _FakeVoiceChannel(71)
+        target_channel = _FakeVoiceChannel(72)
+        ctx = _fake_ctx(7171, voice_channel=target_channel)
+        queue = self.cog.get_queue(7171)
+        voice = _FakeVoiceClient(old_channel)
+        queue.voice_client = voice
+
+        resolved = await self.cog._ensure_voice(ctx)
+
+        self.assertIs(resolved, queue)
+        self.assertIs(queue.voice_client, voice)
+        self.assertIs(voice.channel, target_channel)
+        self.assertEqual(voice.move_calls, 1)
+        self.assertEqual(target_channel.connect_calls, 0)
+
+    async def test_skip_advances_once_and_stop_clears_player_state(self):
+        queue = self.cog.get_queue(7272)
+        voice = _FakeVoiceClient(_FakeVoiceChannel(73))
+        voice._playing = True
+        queue.voice_client = voice
+        first = Track(title="premier", artist="A", duration=180)
+        second = Track(title="second", artist="B", duration=180)
+        queue.current = first
+        queue.tracks = [second]
+        before_generation = queue.playback_generation
+
+        skipped = await self.cog._skip_queue(queue)
+
+        self.assertTrue(skipped)
+        self.assertIs(queue.current, second)
+        self.assertIn(first, queue.history)
+        self.assertGreater(queue.playback_generation, before_generation)
+
+        queue.tracks = [Track(title="reste", artist="C")]
+        voice._playing = True
+        had_activity = await self.cog._stop_queue(queue)
+
+        self.assertTrue(had_activity)
+        self.assertIsNone(queue.current)
+        self.assertEqual(queue.tracks, [])
+        self.assertFalse(queue.loop_track)
+        self.assertFalse(queue.loop_queue)
+        self.assertFalse(queue.autoplay)
+        self.assertEqual(queue.position_seconds(), 0.0)
+
+    async def test_play_track_refreshes_expired_source_before_every_start(self):
+        queue = self.cog.get_queue(7373)
+        voice = _FakeVoiceClient(_FakeVoiceChannel(74))
+        queue.voice_client = voice
+        track = Track(
+            title="URL temporaire",
+            artist="A",
+            duration=180,
+            playable_url="https://expired.example/audio",
+            playback_provider="direct",
+            provider="direct",
+        )
+        manager = SimpleNamespace(
+            refresh_playable_url=AsyncMock(return_value="https://fresh.example/audio")
+        )
+        self.cog.manager = manager
+
+        ffmpeg = SimpleNamespace(cleanup=lambda: None)
+        buffered = SimpleNamespace(underruns=0, cleanup=lambda: None)
+        source = SimpleNamespace(volume=queue.volume, cleanup=lambda: None)
+
+        with (
+            patch("cogs.music.discord.FFmpegPCMAudio", return_value=ffmpeg) as ffmpeg_cls,
+            patch("cogs.music.BufferedPCMAudio", return_value=buffered),
+            patch("cogs.music.discord.PCMVolumeTransformer", return_value=source),
+        ):
+            started = await Music._play_track(self.cog, queue, track)
+
+        self.assertTrue(started)
+        manager.refresh_playable_url.assert_awaited_once_with(track)
+        ffmpeg_cls.assert_called_once()
+        self.assertEqual(ffmpeg_cls.call_args.args[0], "https://fresh.example/audio")
+        self.assertIs(queue.current, track)
+        self.assertIs(voice.source, source)
 
     async def test_pause_resume_freeze_position_clock(self):
         queue = self.cog.get_queue(7007)
