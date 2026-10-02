@@ -4,7 +4,7 @@ Objectifs :
 - Sécurité : un seul bouton Activer / Désactiver. SentriX applique son profil recommandé.
 - Permissions : aucune ACL manuelle dans le Setup principal ; les commandes s'appuient sur
   les permissions Discord réelles et la hiérarchie des rôles.
-- Tickets : configuration rapide fonctionnelle + accès direct à l'éditeur complet existant
+- Tickets : activation manuelle + accès direct à l'éditeur complet existant
   (texte, image, couleur, types/boutons, formulaires, support, salons, logs, etc.).
 - Modération : plus de "rôle staff" ambigu. On peut préparer un vrai rôle Discord de
   modération avec un profil de permissions et, optionnellement, l'attribuer à un membre.
@@ -66,7 +66,7 @@ CATEGORY_META["music"] = (
 CATEGORY_META["tickets"] = (
     "🎫",
     "Tickets",
-    "Configuration rapide ou personnalisation complète du panel et de tous ses boutons.",
+    "Activation manuelle et personnalisation complète du panel et de ses boutons.",
 )
 
 SECURITY_BOT_PERMISSIONS = (
@@ -905,7 +905,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 discord.ui.TextDisplay(
                     "-# SENTRIX CORE · Configuration · setup\n# 🔒 Sécurité\n"
                     "Ici il n’y a plus 15 menus : **un seul bouton**.\n"
-                    "Quand la sécurité est activée, SentriX applique automatiquement son profil "
+                    "Les protections de sécurité sont choisies individuellement dans la couche finale. "
                     "anti-spam, anti-raid, anti-liens, anti-invitations, anti-bot, anti-scam, "
                     "anti-nuke, honeypot et vérification.\n\n"
                     "Les utilisateurs sont autorisés selon leurs **permissions Discord réelles** "
