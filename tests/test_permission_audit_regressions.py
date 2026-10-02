@@ -154,3 +154,22 @@ def test_permission_audit_single_shard_mode_keeps_every_command():
 
     assert belongs_to_shard("prefix", "ban", 0, 1) is True
     assert belongs_to_shard("slash", "musique jouer", 0, 1) is True
+
+
+
+def test_aide_is_a_native_permission_audit_transport():
+    from tools.permission_audit_sweep import NATIVE_TRANSPORT
+
+    assert "aide" in NATIVE_TRANSPORT
+
+
+def test_e2e_world_configures_levels_before_enabling_modules():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "tools" / "sentrix_e2e_harness.py"
+    ).read_text(encoding="utf-8")
+    config = source.index('set_guild_config(GID, "level_channel", CID)')
+    enable = source.index("for module in sorted(setup_v2_core.CONFIGURABLE_MODULES")
+
+    assert config < enable
