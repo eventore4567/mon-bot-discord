@@ -381,7 +381,10 @@ PERMISSION_LABELS = {
     "move_members": "Déplacer des membres",
     "manage_emojis_and_stickers": "Gérer les émojis et autocollants",
     "manage_webhooks": "Gérer les webhooks",
-    "view_audit_log": "Voir les logs d'audit",
+    # Discord affiche « Voir les logs du serveur » dans son interface française :
+    # une étiquette qui ne correspond pas se cherche en vain dans les réglages
+    # de rôle, et le message d'erreur devient inutilisable.
+    "view_audit_log": "Voir les logs du serveur",
 }
 
 # Completement de la table : 46 permissions Discord tombaient dans le repli et

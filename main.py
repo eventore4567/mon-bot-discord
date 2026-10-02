@@ -327,44 +327,16 @@ CATEGORY_COMMANDS = {
     "complete": frozenset({"wipe-server", "roleall", "massrole"}),
 }
 
-DISCORD_PERMISSION_COMMANDS = {
-    "ban": "ban_members",
-    "tempban": "ban_members",
-    "unban": "ban_members",
-    "kick": "kick_members",
-    "mute": "moderate_members",
-    "unmute": "moderate_members",
-    "warn": "moderate_members",
-    "unwarn": "moderate_members",
-    "warnings": "moderate_members",
-    "clearwarnings": "moderate_members",
-    "case": "moderate_members",
-    "modhistory": "moderate_members",
-    "quarantine": "moderate_members",
-    "unquarantine": "moderate_members",
-    "clear": "manage_messages",
-    "say": "manage_messages",
-    "embed-create": "manage_messages",
-    "slowmode": "manage_channels",
-    "lock": "manage_channels",
-    "unlock": "manage_channels",
-    "hide": "manage_channels",
-    "show": "manage_channels",
-    "ticket-reopen": "manage_channels",
-    "tickettranscript": "manage_channels",
-    "ticketstats": "manage_channels",
-    "nickname": "manage_nicknames",
-    "nick": "manage_nicknames",
-    "resetnick": "manage_nicknames",
-    "move": "move_members",
-    "disconnect": "move_members",
-    "role-snapshot": "manage_roles",
-    "role-restore": "manage_roles",
-    "giverole": "manage_roles",
-    "removerole": "manage_roles",
-    "addemoji": "manage_emojis_and_stickers",
-    "deleteemoji": "manage_emojis_and_stickers",
-}
+# Dérivée de la matrice, et non recopiée : les deux tables avaient divergé de
+# huit commandes (casefull, caseproof, modcenter, modundo, protectmember,
+# reopenticket, schedule-cancel, schedule-list). La décision d'autorisation
+# passe par access_matrix.evaluate, donc cette divergence n'ouvrait aucun
+# accès — mais elle faussait KNOWN_PERMISSION_COMMANDS, c'est-à-dire la
+# couverture que les audits de permissions croient vérifier.
+#
+# C'est la même classe de défaut que les deux listes de familles de bannières
+# tenues à la main : une seule source, et le problème ne peut plus revenir.
+DISCORD_PERMISSION_COMMANDS = dict(access_matrix.DISCORD_PERMISSION_COMMANDS)
 
 CUSTOM_PERMISSION_COMMANDS = frozenset({"embed"})
 KNOWN_PERMISSION_COMMANDS = (
