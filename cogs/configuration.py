@@ -131,7 +131,7 @@ LOG_CHANNEL_DEFINITIONS = [
     ("log_voice", "logs-vocal", "Connexions, déconnexions et changements de salon vocal."),
     ("log_roles", "logs-roles", "Rôles ajoutés ou retirés à un membre."),
     ("log_moderation", "logs-moderation", "Sanctions : avertissements, mutes, kicks, bans."),
-    ("log_automod", "logs-securite", "Actions AutoMod et anti-nuke (spam, liens, protection du serveur)."),
+    ("log_automod", "logs-securite", "Journal AutoMode & sécurité : flood, liens, phishing, raids et protections critiques."),
 ]
 
 # Colonne guild_config -> catégorie canonique de log_config. /create-logs doit écrire
@@ -157,7 +157,7 @@ LOG_KIND_LABELS = {
     "log_voice": "Logs vocal",
     "log_roles": "Logs rôles",
     "log_moderation": "Logs modération",
-    "log_automod": "Logs sécurité (AutoMod)",
+    "log_automod": "Journal AutoMode & sécurité",
 }
 
 
@@ -1087,9 +1087,9 @@ SETUP_STEPS = [
     {"key": "tickets", "icon": "🎫", "title": "Tickets", "fields": [], "custom": "tickets"},
     {"key": "channels", "icon": "📢", "title": "Salons annexes", "fields": [], "custom": "picker"},
     {"key": "levels", "icon": "🏆", "title": "Rôles de niveau", "fields": [], "custom": "level_roles"},
-    {"key": "logs", "icon": "📡", "title": "Système de logs", "fields": [], "custom": "logs_setup"},
+    {"key": "logs", "icon": "📡", "title": "Logs & journal AutoMode", "fields": [], "custom": "logs_setup"},
     {"key": "managers", "icon": "👥", "title": "Gestionnaires du bot", "fields": [], "custom": "managers"},
-    {"key": "security", "icon": "🛡️", "title": "Sécurité (AutoMod)", "fields": [], "custom": "security"},
+    {"key": "security", "icon": "🛡️", "title": "Protections automatiques", "fields": [], "custom": "security"},
     {"key": "summary", "icon": "●", "title": "Résumé et confirmation", "fields": [], "custom": "summary"},
 ]
 
@@ -1879,15 +1879,15 @@ class SetupView(discord.ui.View):
 
         elif step["key"] == "logs":
             desc = (
-                "Créez en un clic toute une catégorie de salons de logs privés — le bot y écrit tout seul "
-                "ensuite. Les salons déjà configurés ne sont jamais dupliqués.\n\n"
-                "Cliquez sur **📡 Créer le système de logs** ci-dessous."
+                "Choisissez uniquement des **salons existants**. SentriX ne crée rien depuis cette page. "
+                "Le journal AutoMode regroupe les détections de flood, liens, phishing, raids et protections critiques.\n\n"
+                "Laissez la sélection vide pour désactiver cette route de logs."
             )
             e = embeds.neutral(header, desc, color=SETUP_COLOR_MAIN)
             general = f"<#{conf['log_channel']}>" if conf and conf["log_channel"] else "*Non défini*"
-            e.add_field(name="📝 Salon général de repli", value=general, inline=False)
-            if self.logs_created:
-                e.add_field(name=f"● Créés dans cette session ({len(self.logs_created)})", value="\n".join(c.mention for c in self.logs_created)[:1024], inline=False)
+            automod_log = f"<#{conf['log_automod']}>" if conf and conf["log_automod"] else "*Désactivé*"
+            e.add_field(name="📝 Salon général de repli", value=general, inline=True)
+            e.add_field(name="🛡️ Journal AutoMode & sécurité", value=automod_log, inline=True)
 
         elif step["key"] == "managers":
             desc = (
@@ -1957,7 +1957,7 @@ class SetupView(discord.ui.View):
             ("Tickets", "Configuré" if n_panels else "Partiel"),
             ("Salons annexes", "Configuré" if any(cur(f) for f in ("level_channel", "suggest_channel", "announce_channel", "giveaway_channel")) else "Partiel"),
             ("Rôles de niveau", "Configuré" if n_levels else "Partiel"),
-            ("Logs", "Configuré" if cur("log_channel") else "Non configuré"),
+            ("Logs", "Configuré" if any(cur(f) for f in ("log_channel", "log_messages", "log_members", "log_voice", "log_roles", "log_moderation", "log_automod")) else "Non configuré"),
             ("Gestionnaires", "Configuré" if self.managers else "Partiel"),
             ("Sécurité", "Configuré" if active_security >= 6 else ("Partiel" if active_security > 0 else "Non configuré")),
         ]
@@ -2136,9 +2136,15 @@ class SetupView(discord.ui.View):
             open_btn.callback = self._tickets_hint
             self.add_item(open_btn)
         elif step["key"] == "logs":
-            logs_btn = discord.ui.Button(label="📡 Créer le système de logs", style=discord.ButtonStyle.primary, row=0)
-            logs_btn.callback = self._create_logs_clicked
-            self.add_item(logs_btn)
+            automod_log_select = discord.ui.ChannelSelect(
+                placeholder="🛡️ Salon du journal AutoMode & sécurité",
+                channel_types=[discord.ChannelType.text],
+                min_values=0,
+                max_values=1,
+                row=0,
+            )
+            automod_log_select.callback = self._make_channel_callback("log_automod", automod_log_select)
+            self.add_item(automod_log_select)
         elif step["key"] == "managers":
             add_select = discord.ui.UserSelect(placeholder="➕ Ajouter des gestionnaires", min_values=0, max_values=10, row=0)
             add_select.callback = self._make_manager_add_callback(add_select)
@@ -2347,9 +2353,8 @@ class SetupView(discord.ui.View):
 
     def _make_channel_callback(self, field: str, select: discord.ui.ChannelSelect):
         async def callback(interaction: discord.Interaction):
-            if select.values:
-                self.choices[field] = select.values[0].id
-                self.dirty = True
+            self.choices[field] = select.values[0].id if select.values else None
+            self.dirty = True
             await self.persist_session()
             await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
         return callback
@@ -2577,7 +2582,17 @@ class SetupView(discord.ui.View):
             await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(await self.build_embed()), self))
             return
         for field, value in self.choices.items():
-            await self.bot.db.set_guild_config(self.guild_id, field, value)
+            log_category = LOG_COLUMN_TO_CATEGORY.get(field)
+            if log_category:
+                await log_service.set_log_config(
+                    self.bot,
+                    self.guild_id,
+                    log_category,
+                    channel_id=int(value) if value else None,
+                    enabled=bool(value),
+                )
+            else:
+                await self.bot.db.set_guild_config(self.guild_id, field, value)
             await self.bot.db.log_setup_history(
                 self.guild_id, self.author_id, FIELD_LABELS.get(field, field), "réglage modifié",
                 old_value=None, new_value=str(value),
@@ -2629,7 +2644,17 @@ class SetupView(discord.ui.View):
     async def _finish(self, interaction: discord.Interaction):
         if self.choices:
             for field, value in self.choices.items():
-                await self.bot.db.set_guild_config(self.guild_id, field, value)
+                log_category = LOG_COLUMN_TO_CATEGORY.get(field)
+                if log_category:
+                    await log_service.set_log_config(
+                        self.bot,
+                        self.guild_id,
+                        log_category,
+                        channel_id=int(value) if value else None,
+                        enabled=bool(value),
+                    )
+                else:
+                    await self.bot.db.set_guild_config(self.guild_id, field, value)
             if "prefix" in self.choices:
                 self.bot.prefix_cache[self.guild_id] = self.choices["prefix"]
         lines = [f"● {FIELD_LABELS.get(k, k)}" for k in self.choices]
