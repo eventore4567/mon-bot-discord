@@ -12,6 +12,23 @@ from utils import log_banners
 from utils.log_categories import LOG_REGISTRY
 
 
+
+import pytest
+
+@pytest.fixture
+def bandeaux_actifs(monkeypatch):
+    """Rallume les bandeaux le temps d'un test.
+
+    Ils sont désactivés dans le produit : le premium vient des composants et
+    des icônes, pas d'une image décorative. Mais la plomberie doit rester
+    PROUVÉE — le jour où un écran en redemande un, l'invariant « galerie ⇔
+    pièce jointe » doit déjà être vérifié, pas à réécrire.
+    """
+    from utils import sentrix_panels
+
+    monkeypatch.setattr(sentrix_panels, "BANDEAUX_ACTIFS", True)
+    yield
+
 def test_chaque_famille_fait_1024x64_et_reste_distincte():
     """Seize familles : cinq états et onze domaines. Toutes doivent différer.
 
@@ -225,7 +242,7 @@ def test_la_banniere_prend_la_couleur_de_la_commande_en_cours():
     assert panels.nom_banniere("info") == log_banners.nom_fichier("info")
 
 
-def test_le_panneau_joint_exactement_la_banniere_qu_il_reference():
+def test_le_panneau_joint_exactement_la_banniere_qu_il_reference(bandeaux_actifs):
     """La galerie référence attachment://<fichier> : si fichiers() re-décidait la
     famille plus tard (contexte de commande retombé), l'image serait vide."""
     from types import SimpleNamespace
@@ -287,7 +304,7 @@ def test_les_deux_chemins_de_banniere_ont_les_memes_familles():
     assert set(command_visuals._ACCENTS) == set(log_banners.STYLES)
 
 
-def test_seule_la_reponse_en_texte_libre_perd_sa_banniere():
+def test_seule_la_reponse_en_texte_libre_perd_sa_banniere(bandeaux_actifs):
     """La bannière est sur TOUT sauf la réponse libre elle-même.
 
     Avant, la règle s'appliquait à tout ce qui partait pendant la commande : la

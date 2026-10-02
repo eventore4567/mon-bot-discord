@@ -71,7 +71,41 @@ class _Conteneur:
         self.items.append(item)
 
 
-def test_une_banniere_absente_est_regeneree(tmp_path, monkeypatch):
+@pytest.fixture
+def bandeaux_actifs(monkeypatch):
+    """Rallume les bandeaux le temps d'un test.
+
+    Ils sont désactivés dans le produit — le premium vient des composants et
+    des icônes, pas d'une image décorative. Mais la plomberie doit rester
+    PROUVÉE : le jour où un écran en redemande un, l'invariant « galerie ⇔
+    pièce jointe » doit déjà être vérifié, pas à réécrire.
+    """
+    from utils import sentrix_panels
+
+    monkeypatch.setattr(sentrix_panels, "BANDEAUX_ACTIFS", True)
+    yield
+
+
+def test_par_defaut_aucun_bandeau_et_aucune_piece_jointe():
+    """L'état du produit : les deux absents, ENSEMBLE.
+
+    C'est ce couplage qui compte, pas l'absence elle-même. Retirer la galerie
+    sans la pièce jointe serait sans effet ; retirer la pièce jointe sans la
+    galerie ferait REFUSER le message entier par Discord.
+    """
+    from cogs import setup_components_v73 as v73
+
+    assert v73.banniere_disponible() is False
+    assert v73.entete_banniere() is None
+    assert v73.pieces_jointes_banniere() == []
+    assert "file" not in v73.joindre_banniere({"view": object()})
+
+    conteneur = _Conteneur()
+    v73.poser_banniere(conteneur)
+    assert conteneur.items == []
+
+
+def test_une_banniere_absente_est_regeneree(bandeaux_actifs, tmp_path, monkeypatch):
     """Sur Railway le dossier est VIDE après un déploiement : ``.gitignore``
     ignore ``banner_*.webp``, donc aucune bannière n'est versionnée.
 
@@ -113,7 +147,7 @@ def test_si_la_generation_echoue_ni_galerie_ni_piece_jointe(tmp_path, monkeypatc
     assert conteneur.items == [], "une galerie orpheline a été posée"
 
 
-def test_avec_fichier_les_deux_sont_la():
+def test_avec_fichier_les_deux_sont_la(bandeaux_actifs):
     from cogs import setup_components_v73 as v73
 
     assert v73.banniere_disponible() is True
@@ -121,7 +155,7 @@ def test_avec_fichier_les_deux_sont_la():
     assert "file" in v73.joindre_banniere({"view": object()})
 
 
-def test_le_nom_joint_est_celui_que_la_galerie_reference():
+def test_le_nom_joint_est_celui_que_la_galerie_reference(bandeaux_actifs):
     """Une divergence de nom produit la même erreur Discord qu'une absence."""
     from cogs.setup_components_v73 import BANNIERE, joindre_banniere
     from utils.log_banners import nom_fichier
@@ -130,7 +164,7 @@ def test_le_nom_joint_est_celui_que_la_galerie_reference():
     assert fichier.filename == nom_fichier(BANNIERE)
 
 
-def test_chaque_appel_rend_un_fichier_neuf():
+def test_chaque_appel_rend_un_fichier_neuf(bandeaux_actifs):
     """Un discord.File consommé par un envoi arrive VIDE au suivant — donc une
     pièce jointe absente, donc le même refus."""
     from cogs.setup_components_v73 import joindre_banniere

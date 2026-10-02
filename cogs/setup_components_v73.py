@@ -205,6 +205,15 @@ def banniere_disponible() -> bool:
     chemin que ``fichier_de_famille`` suit pour la pièce jointe, donc les deux
     côtés de la décision ne peuvent pas diverger.
     """
+    from utils.sentrix_panels import BANDEAUX_ACTIFS
+
+    # Les écrans de configuration n'ouvrent plus sur une image. Même règle et
+    # même interrupteur que les panneaux : ce `False` fait disparaître la
+    # galerie ET la pièce jointe ensemble, puisque la pose comme l'envoi
+    # consultent cette fonction. Les séparer ferait refuser le message entier.
+    if not BANDEAUX_ACTIFS:
+        return False
+
     from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
 
     chemin = BANNER_DIR / nom_fichier(BANNIERE)
@@ -226,10 +235,16 @@ def entete_banniere() -> "discord.ui.MediaGallery | None":
     from utils.log_banners import nom_fichier
 
     if not banniere_disponible():
-        logger.warning(
-            "Bannière %s indisponible : écran servi sans bandeau plutôt que refusé.",
-            BANNIERE,
-        )
+        # Pas d'avertissement quand les bandeaux sont DÉSACTIVÉS : c'est l'état
+        # voulu, pas une anomalie. Ne garder l'alerte que pour le cas qui en
+        # est une — un bandeau attendu mais introuvable.
+        from utils.sentrix_panels import BANDEAUX_ACTIFS
+
+        if BANDEAUX_ACTIFS:
+            logger.warning(
+                "Bannière %s indisponible : écran servi sans bandeau plutôt que refusé.",
+                BANNIERE,
+            )
         return None
     galerie = discord.ui.MediaGallery()
     galerie.add_item(media=f"attachment://{nom_fichier(BANNIERE)}")

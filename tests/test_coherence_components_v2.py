@@ -70,7 +70,10 @@ def test_editer_refuse_ce_que_discord_refuse():
             self.recu = kw
 
     cible = _Cible()
-    panneau = panels.Panneau(titre="T", kind="success")
+    # banniere=True explicitement : ce test vérifie que l'édition JOINT bien
+    # les pièces du panneau, donc il lui en faut une. Les bandeaux sont
+    # désactivés par défaut dans le produit.
+    panneau = panels.Panneau(titre="T", kind="success", banniere=True)
     asyncio.run(
         panels.editer(cible, panneau, embed=discord.Embed(title="x"), content="y")
     )

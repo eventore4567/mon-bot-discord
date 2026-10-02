@@ -34,6 +34,21 @@ import pytest
 # Le fichier joint correspond à ce que la galerie référence
 # =============================================================================
 
+
+@pytest.fixture
+def bandeaux_actifs(monkeypatch):
+    """Rallume les bandeaux le temps d'un test.
+
+    Ils sont désactivés dans le produit : le premium vient des composants et
+    des icônes, pas d'une image décorative. Mais la plomberie doit rester
+    PROUVÉE — le jour où un écran en redemande un, l'invariant « galerie ⇔
+    pièce jointe » doit déjà être vérifié, pas à réécrire.
+    """
+    from utils import sentrix_panels
+
+    monkeypatch.setattr(sentrix_panels, "BANDEAUX_ACTIFS", True)
+    yield
+
 def test_le_fichier_joint_porte_le_nom_que_la_galerie_reference():
     """La divergence est invisible : Discord n'émet aucune erreur, il affiche
     simplement une image cassée."""
@@ -70,7 +85,7 @@ def test_la_famille_nest_pas_redecidee_depuis_la_commande():
     assert "from utils.sentrix_panels import fichier_banniere" not in source
 
 
-def test_la_galerie_reference_bien_une_piece_jointe():
+def test_la_galerie_reference_bien_une_piece_jointe(bandeaux_actifs):
     import discord
 
     from cogs.setup_components_v73 import BANNIERE, entete_banniere

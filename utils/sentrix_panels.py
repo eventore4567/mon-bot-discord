@@ -71,6 +71,20 @@ INTENTIONS_NEUTRES = frozenset({"info", "neutral", "brand"})
 # un numéro stable et lisible ("01 · Identité", "02 · Activité", ...).
 CORE_NAME = "SENTRIX CORE"
 
+#: Les bandeaux décoratifs sont retirés de l'interface. Le premium vient des
+#: composants, des icônes et de la hiérarchie du texte — pas d'une image qui
+#: occupe le tiers du message sans rien apprendre au lecteur.
+#:
+#: Un seul interrupteur, et il gouverne les DEUX côtés : `poser_bandeau`
+#: n'affiche plus de galerie, donc `pieces_jointes_de_famille` ne joint plus
+#: de fichier, puisque les deux consultent la même condition. Les séparer
+#: serait dangereux : une galerie sans sa pièce jointe fait REFUSER le message
+#: entier par Discord, pas afficher une image cassée.
+#:
+#: La plomberie reste en place et testée. Un écran qui aurait réellement
+#: besoin d'un bandeau n'a que cette ligne à changer.
+BANDEAUX_ACTIFS = False
+
 _FAMILY_LABELS = {
     "success": "Succès",
     "error": "Erreur",
@@ -432,7 +446,23 @@ def poser_bandeau(container, famille: str) -> bool:
     Rend ``True`` si le bandeau est posé, pour que l'appelant sache quoi
     joindre.
     """
+    # Les bandeaux sont retirés de l'interface. On rend False AVANT toute
+    # autre chose : c'est ce qui garantit que la pièce jointe disparaît avec
+    # la galerie, puisque `pieces_jointes_de_famille` consulte la même
+    # condition. Retirer la galerie sans la pièce jointe serait sans effet ;
+    # retirer la pièce jointe sans la galerie ferait REFUSER le message entier
+    # par Discord.
+    #
+    # La plomberie est conservée et testée : un écran qui aurait réellement
+    # besoin d'un bandeau n'a qu'une ligne à changer.
+    # Pas de verrou sur BANDEAUX_ACTIFS ici : cette constante gouverne le
+    # DÉFAUT du Panneau, pas le droit d'en poser un. La verrouiller des deux
+    # côtés rendait `banniere=True` sans effet — un écran ne pouvait plus
+    # demander son bandeau même explicitement, et les tests de structure ne
+    # testaient plus rien.
     if not famille_joignable(famille):
+        # L'alerte ne vaut que si un bandeau était attendu ; au-dessus,
+        # BANDEAUX_ACTIFS a déjà rendu False sans bruit dans le cas normal.
         logger.warning(
             "Bannière %s indisponible : panneau servi sans bandeau plutôt que refusé.",
             famille,
@@ -495,7 +525,12 @@ class Panneau(discord.ui.LayoutView):
         vignette: str | None = None,
         boutons: Sequence[Bouton] = (),
         pied: str | None = None,
-        banniere: bool = True,
+        # ``None`` = « comme le produit l'a décidé », c'est-à-dire
+        # BANDEAUX_ACTIFS. Un défaut écrit en dur ici créerait un SECOND
+        # interrupteur : basculer la constante ne changerait rien, puisque le
+        # panneau n'appellerait même pas la pose. Un écran peut toujours
+        # forcer True ou False explicitement.
+        banniere: bool | None = None,
         image: str | None = None,
         timeout: float | None = None,
     ) -> None:
@@ -507,6 +542,8 @@ class Panneau(discord.ui.LayoutView):
         self.boutons_source = tuple(boutons)
         self.pied_source = str(pied or "") if pied else ""
         # Réponse en texte libre (IA, traduction) : pas de bandeau au-dessus du texte.
+        if banniere is None:
+            banniere = BANDEAUX_ACTIFS
         self.avec_banniere = banniere and not commande_en_texte_libre()
         banniere = self.avec_banniere
         # La bannière/liseré exprime l'ÉTAT (succès, erreur, attention), tandis que
@@ -975,6 +1012,9 @@ def depuis_embed(
     titre: str | None = None,
     sous_titre: str | None = None,
     pied: str | None = None,
+    # Transmis tel quel au Panneau : ``None`` suit le défaut du produit, et un
+    # appelant peut demander ou refuser son bandeau explicitement.
+    banniere: bool | None = None,
     boutons: Sequence[Bouton] = (),
     compact: bool = True,
 ) -> Panneau:
@@ -1027,6 +1067,7 @@ def depuis_embed(
         sections=sections,
         boutons=boutons,
         pied=pied or pied_embed or "SentriX",
+        banniere=banniere,
     )
 
 

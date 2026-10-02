@@ -70,6 +70,21 @@ def _panneau():
     return panels.Panneau(titre="Titre", kind="info")
 
 
+
+@pytest.fixture
+def bandeaux_actifs(monkeypatch):
+    """Rallume les bandeaux le temps d'un test.
+
+    Ils sont désactivés dans le produit : le premium vient des composants et
+    des icônes, pas d'une image décorative. Mais la plomberie doit rester
+    PROUVÉE — le jour où un écran en redemande un, l'invariant « galerie ⇔
+    pièce jointe » doit déjà être vérifié, pas à réécrire.
+    """
+    from utils import sentrix_panels
+
+    monkeypatch.setattr(sentrix_panels, "BANDEAUX_ACTIFS", True)
+    yield
+
 def test_envoi_vers_un_salon():
     cible = _Salon()
     asyncio.run(panels.envoyer(cible, _panneau()))
@@ -121,7 +136,7 @@ def test_le_panneau_ne_porte_jamais_de_content():
     assert "content" not in cible.appels[0][1]
 
 
-def test_les_fichiers_de_l_appelant_cohabitent_avec_la_banniere():
+def test_les_fichiers_de_l_appelant_cohabitent_avec_la_banniere(bandeaux_actifs):
     """Une transcription de ticket, une carte de profil, une image generee :
     ces fichiers doivent partir AVEC la banniere, pas a sa place. Sans la
     fusion, `files=` ecrasait la banniere et le panneau affichait une galerie
@@ -135,7 +150,7 @@ def test_les_fichiers_de_l_appelant_cohabitent_avec_la_banniere():
     assert noms == ["banner_info.webp", "transcription.txt"], noms
 
 
-def test_un_fichier_unique_est_accepte_aussi():
+def test_un_fichier_unique_est_accepte_aussi(bandeaux_actifs):
     import io as _io
 
     cible = _Salon()

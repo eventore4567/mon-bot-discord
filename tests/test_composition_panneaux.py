@@ -35,7 +35,11 @@ def _aplatir(items, sortie=None):
 
 class StructureDUnPanneau(unittest.TestCase):
     def setUp(self):
+        # banniere=True explicitement : les bandeaux sont désactivés dans le
+        # produit, mais ces tests vérifient précisément leur STRUCTURE. Sans
+        # cette demande, ils ne testeraient plus rien.
         self.panneau = panels.Panneau(
+            banniere=True,
             titre="SentriX — Test",
             sous_titre="Résumé court",
             kind="danger",
@@ -202,7 +206,7 @@ class PontDepuisEmbed(unittest.TestCase):
         self.assertIn("Résumé", texte)
 
     def test_la_banniere_suit_le_domaine_demande(self):
-        panneau = panels.depuis_embed(self._embed(), kind="moderation")
+        panneau = panels.depuis_embed(self._embed(), kind="moderation", banniere=True)
         self.assertEqual([f.filename for f in panneau.fichiers()], ["banner_moderation.webp"])
 
     def test_compact_regroupe_les_champs_dans_une_seule_section(self):
@@ -322,9 +326,14 @@ class RenduUnifie(unittest.TestCase):
 
         vue = PremiumEmbedViewV82(self._embed(), compact=True)
         self.assertIsInstance(vue, panels.Panneau)
-        # fichiers() est le contrat que panels.envoyer utilise pour joindre la
-        # banniere : sans lui, l'appelant plante.
-        self.assertTrue(vue.fichiers())
+        # fichiers() est le CONTRAT que panels.envoyer appelle : sans lui,
+        # l'appelant plante. Ce test exigeait une liste non vide, ce qui
+        # confondait le contrat avec son contenu — les bandeaux sont
+        # désactivés, donc la liste est vide, et c'est correct.
+        fichiers = vue.fichiers()
+        self.assertIsInstance(fichiers, list)
+        # Et la liste suit toujours le bandeau : posé, elle le contient.
+        self.assertEqual(bool(fichiers), bool(vue.avec_banniere))
 
     def test_la_typographie_est_celle_de_tous_les_autres_panneaux(self):
         from cogs.premium_ui_v82 import PremiumEmbedViewV82
