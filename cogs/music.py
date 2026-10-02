@@ -737,7 +737,7 @@ class Music(commands.Cog, name="Music"):
         ]
 
         return panels.Panneau(
-            titre="SentriX Music",
+            titre="Lecture en cours",
             sous_titre=track.display_title()[:180],
             kind="musique",
             vignette=track.thumbnail,
