@@ -61,26 +61,52 @@ def test_la_pose_et_lenvoi_consultent_la_meme_condition():
     assert "banniere_disponible()" in inspect.getsource(v73.joindre_banniere)
 
 
-def test_sans_fichier_ni_galerie_ni_piece_jointe(monkeypatch):
-    """Le cas qui faisait refuser le message. Les deux doivent disparaître
-    ENSEMBLE."""
-    import pathlib as _p
+class _Conteneur:
+    """Juste de quoi observer ce qu'on pose dessus."""
 
+    def __init__(self):
+        self.items = []
+
+    def add_item(self, item):
+        self.items.append(item)
+
+
+def test_une_banniere_absente_est_regeneree(tmp_path, monkeypatch):
+    """Sur Railway le dossier est VIDE après un déploiement : ``.gitignore``
+    ignore ``banner_*.webp``, donc aucune bannière n'est versionnée.
+
+    Un simple test d'existence aurait répondu « non » au premier /setup et
+    l'écran serait parti sans bandeau — valide, mais nu. C'est la plainte
+    « plein de trucs n'ont pas de bannière »."""
     from cogs import setup_components_v73 as v73
     from utils import log_banners
 
-    monkeypatch.setattr(log_banners, "BANNER_DIR", _p.Path("/tmp/sentrix-inexistant"))
+    monkeypatch.setattr(log_banners, "BANNER_DIR", tmp_path)
+    monkeypatch.setattr(log_banners, "_READY", True)  # le cache mentirait
+
+    assert list(tmp_path.iterdir()) == []
+    assert v73.banniere_disponible() is True, "la bannière manquante n'a pas été générée"
+    assert (tmp_path / log_banners.nom_fichier(v73.BANNIERE)).exists()
+    assert v73.entete_banniere() is not None
+    assert "file" in v73.joindre_banniere({"view": object()})
+
+
+def test_si_la_generation_echoue_ni_galerie_ni_piece_jointe(tmp_path, monkeypatch):
+    """Le cas qui faisait refuser le message ENTIER. Quand la bannière est
+    hors d'atteinte, la galerie et la pièce jointe doivent disparaître
+    ENSEMBLE — l'écran perd son bandeau mais reste affichable."""
+    from cogs import setup_components_v73 as v73
+    from utils import log_banners
+
+    def _generation_impossible(force=False):
+        raise OSError("disque en lecture seule")
+
+    monkeypatch.setattr(log_banners, "BANNER_DIR", tmp_path)
+    monkeypatch.setattr(log_banners, "ensure_banners", _generation_impossible)
 
     assert v73.banniere_disponible() is False
     assert v73.entete_banniere() is None
     assert "file" not in v73.joindre_banniere({"view": object()})
-
-    class _Conteneur:
-        def __init__(self):
-            self.items = []
-
-        def add_item(self, item):
-            self.items.append(item)
 
     conteneur = _Conteneur()
     v73.poser_banniere(conteneur)

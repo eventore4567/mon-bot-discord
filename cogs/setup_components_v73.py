@@ -176,10 +176,32 @@ def banniere_disponible() -> bool:
 
     C'est arrivé en production sur /setup. Cette fonction est la condition
     unique que la construction et l'envoi consultent tous les deux.
-    """
-    from utils.log_banners import BANNER_DIR, nom_fichier
 
-    return (BANNER_DIR / nom_fichier(BANNIERE)).exists()
+    Elle GÉNÈRE la bannière manquante avant de répondre, au lieu de se
+    contenter d'un test d'existence. ``.gitignore`` ignore
+    ``assets/log_banners/banner_*.webp`` : aucune bannière n'est versionnée,
+    donc le dossier est vide sur un conteneur fraîchement déployé. Un simple
+    test aurait répondu « non » au premier /setup et l'écran serait parti sans
+    bandeau — valide, mais nu, et c'est précisément ce que Jayden voit comme
+    « plein de trucs n'ont pas de bannière ».
+
+    ``ensure_banners`` est idempotent via son cache ``_READY``, mais ce cache
+    peut être vrai alors que le fichier a disparu du disque — d'où le
+    ``force=True``, qui est aussi ce que fait ``fichier_de_famille`` pour la
+    pièce jointe. Les deux côtés suivent donc le même chemin : ils ne peuvent
+    pas diverger, ce qui est tout l'objet de ce correctif.
+    """
+    from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
+
+    chemin = BANNER_DIR / nom_fichier(BANNIERE)
+    if chemin.exists():
+        return True
+    try:
+        ensure_banners(force=True)
+    except Exception:
+        logger.exception("Génération de la bannière %s impossible.", BANNIERE)
+        return False
+    return chemin.exists()
 
 
 def entete_banniere() -> "discord.ui.MediaGallery | None":
