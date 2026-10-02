@@ -68,6 +68,7 @@ SKIP_COMMANDS = frozenset({"embed import"})
 # réponse suffit à prouver l'accès.
 NATIVE_TRANSPORT = frozenset({"setup", "aide"})
 NON_PERMISSION_CAUSES = ("module", "désactivé", "desactive", "message privé", "en attente", "cooldown", "réessayez dans", "réessaie dans")
+_INVOCATION_TIMEOUT_SECONDS = 3.0
 
 
 def belongs_to_shard(transport: str, name: str, shard_index: int, shard_count: int) -> bool:
@@ -286,7 +287,10 @@ async def _run_prefix(bot, guild, command, invocation: str, persona: dict) -> tu
     from core.errors import pipeline
     pipeline.subscribe(reports.append)
     try:
-        await asyncio.wait_for(harness.run_prefix(bot, guild, invocation, **persona), 10)
+        await asyncio.wait_for(
+            harness.run_prefix(bot, guild, invocation, **persona),
+            _INVOCATION_TIMEOUT_SECONDS,
+        )
     except Exception as exc:  # noqa: BLE001
         reports.append(exc)
     finally:
@@ -308,7 +312,10 @@ async def _run_slash(bot, guild, root: str, options: list, persona: dict) -> tup
     pipeline.subscribe(reports.append)
     try:
         interaction = harness.build_interaction(bot, root, options, author_id=persona["author_id"], author_roles=persona["author_roles"])
-        await asyncio.wait_for(bot.tree._call(interaction), 10)
+        await asyncio.wait_for(
+            bot.tree._call(interaction),
+            _INVOCATION_TIMEOUT_SECONDS,
+        )
     except Exception as exc:  # noqa: BLE001
         reports.append(exc)
     finally:
