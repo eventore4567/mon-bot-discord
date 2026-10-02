@@ -294,6 +294,12 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         # Anciennement fail-closed par oubli
         "suivi-bot", "setup-auto", "server-audit", "healthcheck",
         "level-system", "security-repair",
+        # Aperçu d'arrivée, de départ et de niveau. La commande porte DÉJÀ
+        # is_owner_or_admin_for("configuration") dans cogs/levels.py : le trou
+        # était purement déclaratif, et une commande non classée n'apparaît ni
+        # en + ni en slash. Les deux alias sont classés avec elle, sinon
+        # l'alias retombe en fail-closed alors que le nom principal passe.
+        "test-events", "test-evenements", "preview-events",
         # Vérification par preuve (administration)
         "proofsetup", "proofexample", "proofexample-remove", "proofexamples",
         "proofpanel", "proofreset",

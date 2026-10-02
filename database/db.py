@@ -1767,7 +1767,9 @@ class Database:
             from cogs.setup_v2_core import GUILD_CONFIG_FIELD_MODULE, note_guild_config_change
 
             if field in GUILD_CONFIG_FIELD_MODULE:
-                holder = getattr(self, "_sentrix_module_holder", None) or SimpleNamespace(db=self)
+                holder = getattr(self, "_sentrix_module_holder", None) or SimpleNamespace(
+                    db=self, get_guild=lambda _id: None
+                )
                 self._sentrix_module_holder = holder
                 await note_guild_config_change(holder, int(guild_id), field, value)
         except Exception:

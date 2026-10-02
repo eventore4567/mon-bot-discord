@@ -483,6 +483,19 @@ class BotAllInOne(commands.Bot):
             case_insensitive=True,
         )
         self.db = Database(config.DATABASE_PATH)
+        # Le VRAI bot comme porteur des appels modules déclenchés depuis la base.
+        #
+        # `Database.set_guild_config` active implicitement le module d'une
+        # ressource posée (salon de bienvenue, de départ, autorôle, salon de
+        # niveaux, catégorie de tickets...). Pour cela il appelle
+        # `setup_v2_core`, mais la base ne connaît pas le bot : elle fabriquait
+        # un `SimpleNamespace(db=self)` sous un commentaire affirmant que
+        # setup_v2_core « n'utilise que bot.db ». C'est devenu faux —
+        # `module_activation_issue` appelle `bot.get_guild` pour vérifier que
+        # le salon choisi existe vraiment. L'AttributeError partait dans un
+        # `except Exception`, et le module n'était JAMAIS activé : on
+        # configurait son salon et rien ne s'allumait.
+        self.db._sentrix_module_holder = self
         self.expected_extension_count = len(EXTENSIONS)
         self.module_kernel = ModuleKernel(
             EXTENSIONS,

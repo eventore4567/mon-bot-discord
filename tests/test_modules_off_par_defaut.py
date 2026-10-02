@@ -16,6 +16,8 @@ from types import SimpleNamespace
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from cogs import setup_v2_core as core  # noqa: E402
+import discord
+
 from database.db import Database  # noqa: E402
 from utils import system_features  # noqa: E402
 
@@ -25,9 +27,47 @@ OLD_WELCOME_GUILD = 333
 OLD_EXPLICIT_OFF_GUILD = 444
 
 
+class _Salon(discord.TextChannel):
+    """Un salon que ``isinstance(..., discord.TextChannel)`` accepte.
+
+    ``module_activation_issue`` ne se contente pas de lire l'identifiant en
+    base : il vérifie que le salon EXISTE vraiment sur le serveur, sinon
+    « configuré » voudrait dire « un identifiant est écrit quelque part ».
+    """
+
+    def __init__(self, channel_id: int):
+        self.id = int(channel_id)
+
+
+class _Serveur:
+    """Serveur minimal : il résout n'importe quel salon demandé.
+
+    Le test vérifie l'activation implicite, pas la résolution de salon.
+    """
+
+    def __init__(self, guild_id: int):
+        self.id = int(guild_id)
+
+    def get_channel(self, channel_id: int):
+        return _Salon(channel_id)
+
+
 class _Bot:
+    """Double du bot.
+
+    ``get_guild`` est indispensable : ``module_activation_issue`` l'appelle
+    pour valider le salon choisi. Sans lui, ce double levait une
+    AttributeError que ``note_guild_config_change`` avalait — le module
+    n'était jamais activé et le test voyait « not_configured ». C'était aussi
+    le cas EN PRODUCTION, où la base fabriquait un porteur tout aussi
+    minimal ; le vrai bot s'y installe désormais au démarrage.
+    """
+
     def __init__(self, db):
         self.db = db
+
+    def get_guild(self, guild_id: int):
+        return _Serveur(guild_id)
 
 
 class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
@@ -36,7 +76,32 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         self.db = Database(os.path.join(self._tmpdir.name, "sentrix-test.db"))
         await self.db.connect()
         self.bot = _Bot(self.db)
+        # Comme la production (main.py) : le vrai bot est le porteur des appels
+        # modules déclenchés depuis la base. Sans lui, set_guild_config
+        # fabriquait un porteur minimal, module_activation_issue n'avait pas de
+        # serveur, et l'activation implicite échouait en silence. Le test
+        # passait quand même pour « welcome » — la migration idempotente lui
+        # créait une ligne depuis guild_config — puis échouait sur « goodbye »,
+        # la migration ne se rejouant plus. Un vert pour la mauvaise raison.
+        self.db._sentrix_module_holder = self.bot
         core.invalidate_module_cache()
+
+    async def _configurer(self, module: str) -> None:
+        """Pose la ressource qu'un module configurable exige avant activation.
+
+        ``set_module_enabled`` refuse d'activer un module dont la ressource
+        manque — « Choisis d'abord le salon de bienvenue ». C'est voulu : un
+        module actif sans salon ne ferait rien tout en s'affichant comme actif.
+        Ces tests activaient donc des modules par un chemin qu'un administrateur
+        ne peut pas emprunter.
+        """
+        champ = {
+            "welcome": "welcome_channel",
+            "goodbye": "goodbye_channel",
+            "levels": "level_channel",
+        }.get(module)
+        if champ:
+            await self.db.set_guild_config(NEW_GUILD, champ, 500)
 
     async def asyncTearDown(self):
         await self.db.close()
@@ -62,6 +127,8 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
     # ------------------------------------------------------------ trois états
     async def test_les_trois_etats_sont_distingues(self):
         self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "levels"), core.MODULE_STATE_NOT_CONFIGURED)
+        await self._configurer("levels")
+        await self._configurer("levels")
         await core.set_module_enabled(self.bot, NEW_GUILD, "levels", True)
         self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "levels"), core.MODULE_STATE_ENABLED)
         await core.set_module_enabled(self.bot, NEW_GUILD, "levels", False)
@@ -74,6 +141,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         cases = [(True, True), (True, False), (False, True), (False, False)]
         for levels_on, economy_on in cases:
             with self.subTest(levels=levels_on, economy=economy_on):
+                await self._configurer("levels")
                 await core.set_module_enabled(self.bot, NEW_GUILD, "levels", levels_on)
                 await core.set_module_enabled(self.bot, NEW_GUILD, "economy", economy_on)
                 self.assertEqual(await core.module_enabled(self.bot, NEW_GUILD, "levels"), levels_on)
@@ -87,6 +155,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         await system_features.set_system_feature(self.db, NEW_GUILD, "economy", True)
         self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, "economy"))
         self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "levels"))
+        await self._configurer("levels")
         await system_features.set_system_feature(self.db, NEW_GUILD, "levels", True)
         await system_features.set_system_feature(self.db, NEW_GUILD, "economy", False)
         self.assertTrue(await system_features.is_system_enabled(self.db, NEW_GUILD, "levels"))
@@ -112,6 +181,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
 
     # ------------------------------------------------------------ bienvenue / départ
     async def test_bienvenue_et_depart_sont_deux_modules(self):
+        await self._configurer("welcome")
         await core.set_module_enabled(self.bot, NEW_GUILD, "welcome", True)
         self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, "welcome"))
         self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "goodbye"))

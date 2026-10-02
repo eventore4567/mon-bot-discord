@@ -30,10 +30,17 @@ def _module_for(feature: str) -> str:
 
 
 def _bot_like(db):
-    # setup_v2_core n'utilise que ``bot.db`` et des attributs de verrou posés sur l'objet.
+    # setup_v2_core utilise ``bot.db``, des attributs de verrou, ET bot.get_guild
+    # depuis module_activation_issue. Le commentaire precedent affirmait le
+    # contraire, et le repli minimal levait donc une AttributeError avalee.
+    # get_guild rend None plutot qu'une AttributeError : setup_v2_core en a
+    # besoin pour verifier que le salon choisi existe. Sans lui, l'erreur
+    # partait dans un except Exception et l'activation echouait en silence ;
+    # avec lui, le refus est explicite et journalise. Le vrai bot s'installe
+    # comme porteur au demarrage (main.py), ce chemin est le repli.
     holder = getattr(db, "_sentrix_module_holder", None)
     if holder is None:
-        holder = SimpleNamespace(db=db)
+        holder = SimpleNamespace(db=db, get_guild=lambda _id: None)
         try:
             db._sentrix_module_holder = holder
         except Exception:
