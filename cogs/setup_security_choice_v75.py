@@ -257,7 +257,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
                 "Choisissez **exactement les protections anti** que vous voulez utiliser. "
                 "Vous pouvez en activer une seule, plusieurs ou toutes.\n\n"
                 "Les permissions **Kick, Ban, Timeout, Gérer les messages, Gérer les rôles, "
-                "Gérer les salons, etc. ne se règlent pas ici** : SentriX vérifie automatiquement "
+                "Gérer les salons, etc. ne se règlent pas ici** : SentriX vérifie "
                 "les permissions Discord réelles de la personne qui lance la commande et respecte "
                 "la hiérarchie des rôles."
             ),
