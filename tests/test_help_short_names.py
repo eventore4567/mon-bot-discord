@@ -140,3 +140,11 @@ def test_help_catalog_hides_container_only_and_duplicate_business_callback():
     rows = help_cog._visible(bot)
 
     assert rows == [first]
+
+
+
+def test_aide_root_is_preserved_by_final_slash_rebuild():
+    source = (ROOT / "sentrix_v95_runtime.py").read_text(encoding="utf-8")
+
+    assert '"aide"' in source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
+    assert '"help"' in source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
