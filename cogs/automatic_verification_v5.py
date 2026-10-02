@@ -575,15 +575,57 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
 
         self._tasks[key] = asyncio.create_task(runner())
 
+    async def _remembered_panel_message(
+        self,
+        channel: discord.TextChannel,
+        message_id: int | None,
+    ) -> discord.Message | None:
+        if message_id:
+            try:
+                message = await channel.fetch_message(int(message_id))
+                if self.bot.user is None or message.author.id == self.bot.user.id:
+                    return message
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+
+        # Migration depuis l'ancien comportement : réutilise le dernier panneau
+        # SentriX présent au lieu de le supprimer puis d'en créer un autre.
+        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
+        if bot_user_id is None:
+            return None
+        try:
+            async for message in channel.history(limit=30):
+                if message.author.id == bot_user_id:
+                    return message
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+        return None
+
+    async def _update_or_send_panel(
+        self,
+        channel: discord.TextChannel,
+        panel,
+        message_id: int | None,
+    ) -> discord.Message:
+        existing = await self._remembered_panel_message(channel, message_id)
+        if existing is not None:
+            try:
+                await panels.editer(existing, panel)
+                return existing
+            except (discord.HTTPException, TypeError):
+                # Message historique né en embed : on ne le purge pas en masse.
+                # Un seul nouveau panneau est envoyé puis son ID est mémorisé.
+                pass
+        sent = await panels.envoyer(channel, panel)
+        if not isinstance(sent, discord.Message):
+            raise RuntimeError("Le panneau de vérification n'a pas renvoyé de message Discord.")
+        return sent
+
     async def refresh_existing_panels(
         self,
         guild: discord.Guild,
     ) -> tuple[dict | None, str | None]:
-        """Refresh only the two channels already stored in the active config.
-
-        Missing channels are never recreated here. This is the method used by startup
-        migration and by /setup when verification is already active.
-        """
+        """Met à jour les panneaux existants sans les supprimer au redémarrage."""
         conf = await self.config(guild.id, enabled_only=True)
         if conf is None:
             return None, "La vérification n'est pas active sur ce serveur."
@@ -601,25 +643,47 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
                 "SentriX ne le recrée pas automatiquement."
             )
 
-        from cogs.honeypot_verification_v48 import (
-            _purge_bot_messages,
-            _trap_embed,
-            _web_panel,
+        await self.bot.db.execute(
+            "CREATE TABLE IF NOT EXISTS automatic_verification_panel_messages_v5 ("
+            "guild_id INTEGER PRIMARY KEY, verify_channel_id INTEGER, verify_message_id INTEGER, "
+            "trap_channel_id INTEGER, trap_message_id INTEGER, updated_at INTEGER NOT NULL)"
         )
+        row = await self.bot.db.fetchone(
+            "SELECT verify_message_id,trap_message_id FROM automatic_verification_panel_messages_v5 "
+            "WHERE guild_id=?",
+            (guild.id,),
+        )
+        verify_message_id = int(row["verify_message_id"]) if row and row["verify_message_id"] else None
+        trap_message_id = int(row["trap_message_id"]) if row and row["trap_message_id"] else None
 
-        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
-        removed_verify = await _purge_bot_messages(verify, bot_user_id)
-        removed_trap = await _purge_bot_messages(trap, bot_user_id)
-        await panels.envoyer(verify, await _web_panel(self.bot, guild))
-        await panels.envoyer(
+        from cogs.honeypot_verification_v48 import _trap_embed, _web_panel
+
+        verify_message = await self._update_or_send_panel(
+            verify,
+            await _web_panel(self.bot, guild),
+            verify_message_id,
+        )
+        trap_message = await self._update_or_send_panel(
             trap,
             panels.depuis_embed(_trap_embed(verify, str(conf["sanction"] or "softban"))),
+            trap_message_id,
+        )
+        await self.bot.db.execute(
+            "INSERT INTO automatic_verification_panel_messages_v5 "
+            "(guild_id,verify_channel_id,verify_message_id,trap_channel_id,trap_message_id,updated_at) "
+            "VALUES (?,?,?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET "
+            "verify_channel_id=excluded.verify_channel_id,verify_message_id=excluded.verify_message_id,"
+            "trap_channel_id=excluded.trap_channel_id,trap_message_id=excluded.trap_message_id,"
+            "updated_at=excluded.updated_at",
+            (guild.id, verify.id, verify_message.id, trap.id, trap_message.id, int(time.time())),
         )
         return {
             "verify": verify,
             "trap": trap,
-            "removed_verify_messages": removed_verify,
-            "removed_trap_messages": removed_trap,
+            "verify_message": verify_message,
+            "trap_message": trap_message,
+            "removed_verify_messages": 0,
+            "removed_trap_messages": 0,
         }, None
 
     async def create_or_refresh_system(
@@ -628,13 +692,28 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         *,
         sanction: str = "softban",
     ):
-        """Explicit first activation may create structure; the published flow is web-only."""
+        """Une configuration existante est éditée sur place ; seule la première activation crée."""
+        existing = await self.config(guild.id, enabled_only=True)
+        if existing is not None:
+            verify = guild.get_channel(int(existing["verify_channel_id"] or 0))
+            trap = guild.get_channel(int(existing["trap_channel_id"] or 0))
+            if isinstance(verify, discord.TextChannel) and isinstance(trap, discord.TextChannel):
+                refreshed, refresh_error = await self.refresh_existing_panels(guild)
+                if refresh_error:
+                    return None, refresh_error
+                return {
+                    "verify": refreshed["verify"],
+                    "trap": refreshed["trap"],
+                    "category": guild.get_channel(int(existing["category_id"] or 0)),
+                    "unverified": guild.get_role(int(existing["unverified_role_id"] or 0)),
+                    "verified": guild.get_role(int(existing["verified_role_id"] or 0)),
+                    "sanction": str(existing["sanction"] or sanction),
+                }, None
+
         result, error = await super().create_or_refresh_system(guild, sanction=sanction)
         if error or result is None:
             return result, error
 
-        # super() may publish its historical automatic panel during first activation.
-        # Replace it immediately with the single web-verification panel.
         refreshed, refresh_error = await self.refresh_existing_panels(guild)
         if refresh_error:
             return None, refresh_error

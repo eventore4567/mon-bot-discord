@@ -4,7 +4,7 @@ Objectifs :
 - Sécurité : un seul bouton Activer / Désactiver. SentriX applique son profil recommandé.
 - Permissions : aucune ACL manuelle dans le Setup principal ; les commandes s'appuient sur
   les permissions Discord réelles et la hiérarchie des rôles.
-- Tickets : configuration rapide fonctionnelle + accès direct à l'éditeur complet existant
+- Tickets : activation manuelle + accès direct à l'éditeur complet existant
   (texte, image, couleur, types/boutons, formulaires, support, salons, logs, etc.).
 - Modération : plus de "rôle staff" ambigu. On peut préparer un vrai rôle Discord de
   modération avec un profil de permissions et, optionnellement, l'attribuer à un membre.
@@ -12,13 +12,16 @@ Objectifs :
 """
 from __future__ import annotations
 
+import json
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 import discord
 from discord.ext import commands
 
-from utils import embeds
+from cogs import language_runtime
+from utils import ai_service, embeds
 from utils import sentrix_panels as panels
 from . import security_verification_v71 as security_v71
 from . import setup_components_v73 as v73
@@ -35,10 +38,12 @@ CATEGORY_ORDER = (
     "security",
     "tickets",
     "welcome",
+    "goodbye",
     "roles",
     "logs",
     "levels",
     "notifications",
+    "music",
     "ai",
 )
 
@@ -51,12 +56,17 @@ CATEGORY_META["moderation"] = (
 CATEGORY_META["security"] = (
     "🔒",
     "Sécurité",
-    "Un seul interrupteur : SentriX applique automatiquement le profil recommandé.",
+    "Choisissez les protections adaptées à votre serveur dans la page Sécurité.",
+)
+CATEGORY_META["music"] = (
+    "🎵",
+    "Musique",
+    "Choisissez le vocal musique puis activez le lecteur SentriX.",
 )
 CATEGORY_META["tickets"] = (
     "🎫",
     "Tickets",
-    "Configuration rapide ou personnalisation complète du panel et de tous ses boutons.",
+    "Activation manuelle et personnalisation complète du panel et de ses boutons.",
 )
 
 SECURITY_BOT_PERMISSIONS = (
@@ -144,6 +154,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.moderation_profile = "moderator"
         self.avance = False
 
+    async def rebuild(self) -> None:
+        await super().rebuild()
+        # Le Setup est reconstruit après chaque clic. Sans cette passe finale,
+        # certaines pages repassaient en français après avoir choisi English.
+        language = await language_runtime.get_language(self.bot, self.guild.id)
+        if language == language_runtime.LANG_EN:
+            language_runtime.translate_view_in_place(self, setup=True)
+
     async def _effective_states(self) -> dict[str, str]:
         states = await super()._effective_states()
 
@@ -165,6 +183,18 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             )
         else:
             states["tickets"] = "○ INACTIF"
+        music = self.bot.get_cog("Music")
+        if music is None:
+            states["music"] = "! À CORRIGER"
+        else:
+            music_settings = await music.get_system_settings(self.guild.id)
+            states["music"] = (
+                "● ACTIF"
+                if music_settings.get("enabled")
+                else "○ INACTIF"
+                if music_settings.get("voice_channel_id")
+                else "— À CONFIGURER"
+            )
         states.pop("permissions", None)
         return states
 
@@ -189,7 +219,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# Configuration de SentriX\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX\n"
                     f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules activés\n"
                     "Un module désactivé ou jamais configuré ne fait rien. Activez-le ici, puis "
                     "ouvrez sa page pour choisir ses salons et rôles."
@@ -200,6 +230,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(discord.ui.Separator())
 
         for key, label in setup_ui.MODULE_SWITCHES:
+            # Le premier écran Components V2 est limité à 40 composants Discord.
+            # Notifications reste disponible dans le menu détaillé ; on réserve sa
+            # ligne directe à Musique, demandée comme réglage principal.
+            if key == "notifications":
+                continue
             etat = switch_states.get(key, "not_configured")
             actif = etat == "enabled"
             bouton = discord.ui.Button(
@@ -208,7 +243,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             )
 
             async def basculer(interaction: discord.Interaction, module=key):
-                nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
+                try:
+                    nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
+                except core.ModuleSetupRequired as exc:
+                    return await panels.envoyer(
+                        interaction.response,
+                        panels.depuis_embed(embeds.warning(str(exc))),
+                        ephemere=True,
+                    )
                 try:
                     await self.backend.audit(interaction.user.id, f"module:{module}", "on" if nouveau else "off")
                 except Exception:
@@ -221,6 +263,30 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 discord.ui.Section(discord.ui.TextDisplay(f"**{label}** — {texte_etat}"), accessory=bouton)
             )
 
+        music = self.bot.get_cog("Music")
+        music_settings = await music.get_system_settings(self.guild.id) if music else {}
+        music_state = (
+            "**ON**"
+            if music_settings.get("enabled")
+            else "OFF · vocal configuré"
+            if music_settings.get("voice_channel_id")
+            else "OFF · non configuré"
+        )
+        music_button = discord.ui.Button(label="Configurer", style=discord.ButtonStyle.primary)
+
+        async def open_music(interaction: discord.Interaction):
+            self.page = "music"
+            self.backend = self._new_backend("music")
+            await self.refresh(interaction)
+
+        music_button.callback = open_music
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(f"**Musique** — {music_state}"),
+                accessory=music_button,
+            )
+        )
+
         # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
         options = [
             discord.SelectOption(label=CATEGORY_META[key][1], value=key, emoji=CATEGORY_META[key][0],
@@ -228,6 +294,22 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             for key in CATEGORY_ORDER
             if key in CATEGORY_META
         ]
+        options.append(
+            discord.SelectOption(
+                label="Règlement & accès",
+                value="rules_access",
+                emoji="📜",
+                description="Salon du règlement, rôle Vérifié, CAPTCHA et publication du panneau.",
+            )
+        )
+        options.append(
+            discord.SelectOption(
+                label="Automatisations",
+                value="automation",
+                emoji="⚙️",
+                description="Réactions automatiques et règles de contenu par salon.",
+            )
+        )
         selecteur = discord.ui.Select(placeholder="Configurer un module en détail…", options=options[:25])
 
         async def ouvrir(interaction: discord.Interaction):
@@ -283,7 +365,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# Configuration de SentriX — paramètres avancés\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX — paramètres avancés\n"
                     f"**{active}/{len(CATEGORY_ORDER)} modules actifs**"
                     + (f" · **{problems} à corriger**" if problems else "")
                     + "\nLes permissions des commandes sont vérifiées directement avec Discord."
@@ -333,13 +415,408 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.add_item(container)
 
     async def _build_page(self, page: str) -> None:
+        if page == "rules_access":
+            return await self._build_rules_access()
+        if page == "automation":
+            return await self._build_automation()
         if page == "security":
             return await self._build_security()
         if page == "tickets":
             return await self._build_tickets()
         if page == "moderation":
             return await self._build_moderation()
+        if page == "music":
+            return await self._build_music()
+        if page == "ai":
+            return await self._build_ai()
         return await super()._build_page(page)
+
+    async def _build_ai(self) -> None:
+        settings = await ai_service.get_settings(self.bot, self.guild.id)
+        allowed_ids = [int(value) for value in settings.get("allowed_channel_ids", [])]
+        allowed_channels = [
+            self.guild.get_channel(channel_id)
+            for channel_id in allowed_ids
+            if self.guild.get_channel(channel_id) is not None
+        ]
+
+        language = await language_runtime.get_language(self.bot, self.guild.id)
+        english = language == language_runtime.LANG_EN
+        if allowed_channels:
+            channel_text = ", ".join(channel.mention for channel in allowed_channels[:12])
+            if len(allowed_channels) > 12:
+                channel_text += f" +{len(allowed_channels) - 12}"
+        else:
+            channel_text = "All channels" if english else "Tous les salons"
+
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    (
+                        "# 🤖 AI\nChoose exactly where SentriX may answer. "
+                        "Natural replies and AI commands use the same channel list."
+                        if english
+                        else "# 🤖 IA\nChoisissez exactement où SentriX peut répondre. "
+                        "Les réponses naturelles et les commandes IA utilisent la même liste de salons."
+                    )
+                    + "\n\n"
+                    + (
+                        f"**State:** {'Enabled' if settings['enabled'] else 'Disabled'}\n"
+                        f"**Allowed channels:** {channel_text}\n"
+                        f"**Limits:** {settings['cooldown_seconds']} s · "
+                        f"{settings['per_minute_limit']}/min · {settings['daily_limit']}/day"
+                        if english
+                        else f"**État :** {'Activée' if settings['enabled'] else 'Désactivée'}\n"
+                        f"**Salons autorisés :** {channel_text}\n"
+                        f"**Limites :** {settings['cooldown_seconds']} s · "
+                        f"{settings['per_minute_limit']}/min · {settings['daily_limit']}/jour"
+                    )
+                ),
+                accessory=v73._thumbnail(self.bot),
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        channels = discord.ui.ChannelSelect(
+            placeholder=(
+                "Select one or more AI channels (empty = all)"
+                if english
+                else "Choisir un ou plusieurs salons IA (vide = tous)"
+            ),
+            min_values=0,
+            max_values=25,
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+        )
+
+        async def choose_channels(interaction: discord.Interaction):
+            ids = [int(channel.id) for channel in channels.values]
+            await ai_service.update_setting(
+                self.bot,
+                self.guild.id,
+                "allowed_channel_ids",
+                json.dumps(ids),
+            )
+            try:
+                await self.backend.audit(
+                    interaction.user.id,
+                    "ai:allowed_channels",
+                    ",".join(map(str, ids)) if ids else "all",
+                )
+            except Exception:
+                logger.debug("Audit salons IA indisponible", exc_info=True)
+            await self.refresh(interaction)
+
+        channels.callback = choose_channels
+        container.add_item(discord.ui.ActionRow(channels))
+
+        toggle = discord.ui.Button(
+            label=(
+                ("Disable AI" if settings["enabled"] else "Enable AI")
+                if english
+                else ("Désactiver l’IA" if settings["enabled"] else "Activer l’IA")
+            ),
+            style=discord.ButtonStyle.danger if settings["enabled"] else discord.ButtonStyle.success,
+        )
+        limits = discord.ui.Button(
+            label="Edit limits" if english else "Modifier les limites",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def toggle_ai(interaction: discord.Interaction):
+            await ai_service.update_setting(
+                self.bot,
+                self.guild.id,
+                "enabled",
+                0 if settings["enabled"] else 1,
+            )
+            await self.refresh(interaction)
+
+        async def edit_limits(interaction: discord.Interaction):
+            row = await self.bot.db.fetchone(
+                "SELECT cooldown_seconds,per_minute_limit,daily_limit FROM ai_settings WHERE guild_id=?",
+                (self.guild.id,),
+            )
+            await interaction.response.send_modal(v73.V73AiLimitsModal(self, row))
+
+        toggle.callback = toggle_ai
+        limits.callback = edit_limits
+        container.add_item(discord.ui.ActionRow(toggle, limits))
+        self._add_navigation(container)
+        self.add_item(container)
+
+    async def _build_rules_access(self) -> None:
+        from . import verify_setup_interactive_v78 as rules_setup
+
+        await self.bot.db.execute(rules_setup._SCHEMA)
+        conf = await self.bot.db.get_guild_config(self.guild.id)
+        row = await self.bot.db.fetchone(
+            "SELECT rules_text,image_url,message_id FROM dashboard_verification_panels WHERE guild_id=?",
+            (self.guild.id,),
+        )
+        row = dict(row) if row else {}
+
+        def conf_value(key: str, default=None):
+            try:
+                value = conf[key] if conf is not None else default
+            except (KeyError, IndexError, TypeError):
+                return default
+            return default if value is None else value
+
+        channel_id = conf_value("verification_channel")
+        role_id = conf_value("verify_role", conf_value("verification_role"))
+        channel = self.guild.get_channel(int(channel_id)) if channel_id else None
+        role = self.guild.get_role(int(role_id)) if role_id else None
+        rules_text = str(row.get("rules_text") or "").strip()
+        published = bool(row.get("message_id"))
+
+        language = await language_runtime.get_language(self.bot, self.guild.id)
+        english = language == language_runtime.LANG_EN
+
+        title = "Rules & access" if english else "Règlement & accès"
+        intro = (
+            "Configure the rules channel, Verified role, rules text, optional image and simple CAPTCHA from one place."
+            if english
+            else "Configurez le salon du règlement, le rôle Vérifié, le texte, l’image facultative et le CAPTCHA simple au même endroit."
+        )
+        status_lines = (
+            f"**Channel:** {channel.mention if channel else 'Not configured'}\n"
+            f"**Verified role:** {role.mention if role else 'Not configured'}\n"
+            f"**Rules text:** {'Configured' if rules_text else 'Not configured'}\n"
+            f"**Public panel:** {'Published' if published else 'Not published'}"
+            if english
+            else
+            f"**Salon :** {channel.mention if channel else 'Non configuré'}\n"
+            f"**Rôle Vérifié :** {role.mention if role else 'Non configuré'}\n"
+            f"**Règlement :** {'Configuré' if rules_text else 'Non configuré'}\n"
+            f"**Panneau public :** {'Publié' if published else 'Non publié'}"
+        )
+
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(f"# 📜 {title}\n{intro}\n\n{status_lines}"),
+                accessory=v73._thumbnail(self.bot),
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        configure = discord.ui.Button(
+            label="Configure rules" if english else "Configurer le règlement",
+            style=discord.ButtonStyle.primary,
+        )
+
+        async def open_configurator(interaction: discord.Interaction):
+            view = await rules_setup.build_setup_view(
+                self.bot,
+                self.guild,
+                interaction.user.id,
+            )
+            await panels.envoyer(
+                interaction.response,
+                view.panel(),
+                ephemere=True,
+            )
+            try:
+                view.message = await interaction.original_response()
+            except (discord.NotFound, discord.HTTPException):
+                view.message = None
+
+        configure.callback = open_configurator
+        container.add_item(discord.ui.ActionRow(configure))
+        self._add_navigation(container)
+        self.add_item(container)
+
+    async def _build_automation(self) -> None:
+        from . import setup_v2_ui as automation_ui
+
+        language = await language_runtime.get_language(self.bot, self.guild.id)
+        reactions = await automation_ui._automation_reaction_rows(self.bot, self.guild.id)
+        rules = await automation_ui.channel_message_rules.list_rules(self.bot, self.guild)
+        active_reactions = sum(bool(row["enabled"]) for row in reactions)
+        active_rules = sum(bool(row.get("enabled")) for row in rules)
+
+        title = "Automations" if language == language_runtime.LANG_EN else "Automatisations"
+        description = (
+            "Configure automatic reactions and per-channel content rules."
+            if language == language_runtime.LANG_EN
+            else "Configurez les réactions automatiques et les règles de contenu par salon."
+        )
+
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    f"# ⚙️ {title}\n{description}\n\n"
+                    + (
+                        f"**Active reactions:** {active_reactions}\n**Active rules:** {active_rules}"
+                        if language == language_runtime.LANG_EN
+                        else f"**Réactions actives :** {active_reactions}\n**Règles actives :** {active_rules}"
+                    )
+                ),
+                accessory=v73._thumbnail(self.bot),
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        reactions_button = discord.ui.Button(
+            label="Automatic reactions" if language == language_runtime.LANG_EN else "Réactions automatiques",
+            style=discord.ButtonStyle.primary,
+        )
+        rules_button = discord.ui.Button(
+            label="Channel rules" if language == language_runtime.LANG_EN else "Règles des salons",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def open_reactions(interaction: discord.Interaction):
+            rows = await automation_ui._automation_reaction_rows(self.bot, self.guild.id)
+            panel = embeds.info(
+                (
+                    "Choose a channel, all messages or a keyword, then up to 8 emojis."
+                    if language == language_runtime.LANG_EN
+                    else "Choisissez un salon, tous les messages ou un mot-clé, puis jusqu’à 8 emojis."
+                ),
+                title="Automatic reactions" if language == language_runtime.LANG_EN else "Réactions automatiques",
+            )
+            source = SimpleNamespace(bot=self.bot, guild=self.guild)
+            await panels.envoyer(
+                interaction.response,
+                panels.avec_composants(
+                    panels.depuis_embed(panel),
+                    automation_ui.AutoReactionSetupView(source, interaction.user.id, rows),
+                ),
+                ephemere=True,
+            )
+
+        async def open_rules(interaction: discord.Interaction):
+            rows = await automation_ui.channel_message_rules.list_rules(self.bot, self.guild)
+            panel = embeds.info(
+                (
+                    "**Images only** blocks text and other file types.\n"
+                    "**Messages blocked** removes member messages from the channel."
+                    if language == language_runtime.LANG_EN
+                    else "**Images uniquement** bloque le texte et les autres fichiers.\n"
+                    "**Messages interdits** supprime les messages des membres dans le salon."
+                ),
+                title="Channel rules" if language == language_runtime.LANG_EN else "Règles des salons",
+            )
+            source = SimpleNamespace(bot=self.bot, guild=self.guild)
+            await panels.envoyer(
+                interaction.response,
+                panels.avec_composants(
+                    panels.depuis_embed(panel),
+                    automation_ui.ChannelRuleSetupView(source, interaction.user.id, rows),
+                ),
+                ephemere=True,
+            )
+
+        reactions_button.callback = open_reactions
+        rules_button.callback = open_rules
+        container.add_item(discord.ui.ActionRow(reactions_button, rules_button))
+        self._add_navigation(container)
+        self.add_item(container)
+
+    async def _build_music(self) -> None:
+        music = self.bot.get_cog("Music")
+        settings = await music.get_system_settings(self.guild.id) if music else {
+            "enabled": False,
+            "voice_channel_id": None,
+        }
+        channel = (
+            self.guild.get_channel(int(settings["voice_channel_id"]))
+            if settings.get("voice_channel_id")
+            else None
+        )
+        status = discord.ui.Button(
+            label="Activé" if settings.get("enabled") else "Désactivé",
+            style=discord.ButtonStyle.success if settings.get("enabled") else discord.ButtonStyle.secondary,
+            disabled=True,
+        )
+        container = discord.ui.Container(accent_colour=v73.ACCENT)
+        container.add_item(v73.entete_banniere())
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "-# SENTRIX CORE · Configuration · setup\n# 🎵 Musique\n"
+                    "Choisissez le **vocal musique** puis activez le système. "
+                    "Quand un membre rejoint ce vocal, SentriX le mentionne dans le chat du vocal "
+                    "et affiche le petit lecteur musique.\n\n"
+                    f"Vocal actuel : **{channel.mention if channel else 'Non configuré'}**"
+                ),
+                accessory=status,
+            )
+        )
+        container.add_item(discord.ui.Separator())
+
+        voice_select = discord.ui.ChannelSelect(
+            placeholder="Choisir le vocal musique",
+            min_values=1,
+            max_values=1,
+            channel_types=[discord.ChannelType.voice],
+        )
+
+        async def choose_voice(interaction: discord.Interaction):
+            runtime = self.bot.get_cog("Music")
+            if runtime is None:
+                return await interaction.response.send_message("Le module musique n’est pas chargé.", ephemeral=True)
+            chosen = voice_select.values[0]
+            current = await runtime.get_system_settings(self.guild.id)
+            try:
+                await runtime.configure_system(
+                    self.guild,
+                    enabled=bool(current.get("enabled")),
+                    voice_channel_id=chosen.id,
+                    actor_id=interaction.user.id,
+                )
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
+            await self.refresh(interaction)
+
+        voice_select.callback = choose_voice
+        container.add_item(discord.ui.ActionRow(voice_select))
+
+        activate = discord.ui.Button(label="Activer la musique", style=discord.ButtonStyle.success)
+        disable = discord.ui.Button(label="Désactiver la musique", style=discord.ButtonStyle.danger)
+
+        async def activate_music(interaction: discord.Interaction):
+            runtime = self.bot.get_cog("Music")
+            if runtime is None:
+                return await interaction.response.send_message("Le module musique n’est pas chargé.", ephemeral=True)
+            current = await runtime.get_system_settings(self.guild.id)
+            if not current.get("voice_channel_id"):
+                return await interaction.response.send_message("Choisissez d’abord le vocal musique.", ephemeral=True)
+            try:
+                await runtime.configure_system(
+                    self.guild,
+                    enabled=True,
+                    voice_channel_id=int(current["voice_channel_id"]),
+                    actor_id=interaction.user.id,
+                )
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
+            await self.refresh(interaction)
+
+        async def disable_music(interaction: discord.Interaction):
+            runtime = self.bot.get_cog("Music")
+            if runtime is None:
+                return await interaction.response.send_message("Le module musique n’est pas chargé.", ephemeral=True)
+            current = await runtime.get_system_settings(self.guild.id)
+            await runtime.configure_system(
+                self.guild,
+                enabled=False,
+                voice_channel_id=current.get("voice_channel_id"),
+                actor_id=interaction.user.id,
+            )
+            await self.refresh(interaction)
+
+        activate.callback = activate_music
+        disable.callback = disable_music
+        container.add_item(discord.ui.ActionRow(activate, disable))
+        self._add_navigation(container)
+        self.add_item(container)
 
     def _add_navigation(self, container: discord.ui.Container) -> None:
         back = discord.ui.Button(label="Retour", style=discord.ButtonStyle.primary, emoji="↩️")
@@ -426,9 +903,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# 🔒 Sécurité\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# 🔒 Sécurité\n"
                     "Ici il n’y a plus 15 menus : **un seul bouton**.\n"
-                    "Quand la sécurité est activée, SentriX applique automatiquement son profil "
+                    "Les protections de sécurité sont choisies individuellement dans la couche finale. "
                     "anti-spam, anti-raid, anti-liens, anti-invitations, anti-bot, anti-scam, "
                     "anti-nuke, honeypot et vérification.\n\n"
                     "Les utilisateurs sont autorisés selon leurs **permissions Discord réelles** "
@@ -477,8 +954,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# 🎫 Tickets\n"
-                    "Vous pouvez partir du **réglage par défaut** en un clic ou tout personnaliser : "
+                    "-# SENTRIX CORE · Configuration · setup\n# 🎫 Tickets\n"
+                    "Activez le module puis choisissez vous-même chaque réglage : "
                     "titre, texte, couleur, image, miniature, salon, rôle support, catégorie, logs, "
                     "formulaire, message d’ouverture et boutons.\n\n"
                     "**Un type de ticket = un bouton** en mode boutons. Discord permet jusqu’à "
@@ -499,50 +976,22 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         container.add_item(discord.ui.Section(discord.ui.TextDisplay(summary), accessory=status))
 
-        quick = discord.ui.Button(
-            label="Configuration rapide / réparer",
-            style=discord.ButtonStyle.success,
-            emoji="⚡",
-        )
         full = discord.ui.Button(
             label="Tout personnaliser",
             style=discord.ButtonStyle.primary,
             emoji="🛠️",
         )
-        toggle = discord.ui.Button(
-            label="Désactiver" if enabled else "Activer avec les réglages par défaut",
-            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
-        )
+        if enabled:
+            toggle = discord.ui.Button(
+                label="Désactiver",
+                style=discord.ButtonStyle.danger,
+            )
+        else:
+            toggle = discord.ui.Button(
+                label="Activer",
+                style=discord.ButtonStyle.success,
+            )
 
-        async def quick_config(interaction: discord.Interaction):
-            if not interaction.response.is_done():
-                await interaction.response.defer()
-            try:
-                result = await v72.ensure_ticket_configuration(
-                    self.bot,
-                    self.guild,
-                    actor_id=interaction.user.id,
-                )
-                role = result.get("role")
-                if (
-                    isinstance(interaction.user, discord.Member)
-                    and isinstance(role, discord.Role)
-                    and role not in interaction.user.roles
-                    and self.guild.me is not None
-                    and self.guild.me.guild_permissions.manage_roles
-                    and role < self.guild.me.top_role
-                ):
-                    try:
-                        await interaction.user.add_roles(
-                            role,
-                            reason="SentriX V74 : le configurateur devient Support par défaut",
-                        )
-                    except discord.HTTPException:
-                        logger.debug("Impossible d'attribuer le rôle Support au configurateur", exc_info=True)
-                await self.refresh(interaction)
-                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Tickets prêts. Le panel par défaut a été créé/réparé et publié. Vous pouvez maintenant le personnaliser sans repartir de zéro.')), ephemere=True)
-            except v72.TicketBootstrapError as exc:
-                await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(str(exc))), ephemere=True)
 
         async def full_config(interaction: discord.Interaction):
             ticket_cog = self.bot.get_cog("Tickets")
@@ -560,31 +1009,18 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         async def toggle_tickets(interaction: discord.Interaction):
             if not interaction.response.is_done():
                 await interaction.response.defer()
-            if enabled:
-                await core.set_module_enabled(
-                    self.bot,
-                    self.guild.id,
-                    "tickets",
-                    False,
-                    actor_id=interaction.user.id,
-                )
-                await self.refresh(interaction)
-            else:
-                try:
-                    await v72.ensure_ticket_configuration(
-                        self.bot,
-                        self.guild,
-                        actor_id=interaction.user.id,
-                    )
-                    await self.refresh(interaction)
-                except v72.TicketBootstrapError as exc:
-                    await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(str(exc))), ephemere=True)
+            await core.set_module_enabled(
+                self.bot,
+                self.guild.id,
+                "tickets",
+                not enabled,
+                actor_id=interaction.user.id,
+            )
+            await self.refresh(interaction)
 
-        quick.callback = quick_config
         full.callback = full_config
         toggle.callback = toggle_tickets
-        container.add_item(discord.ui.ActionRow(quick, full))
-        container.add_item(discord.ui.ActionRow(toggle))
+        container.add_item(discord.ui.ActionRow(full, toggle))
         self._add_navigation(container)
         self.add_item(container)
 
@@ -604,7 +1040,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# 🛡️ Modération\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# 🛡️ Modération\n"
                     "Le vieux **« Rôle staff »** n’est plus demandé. SentriX décide l’accès avec "
                     "les permissions Discord réelles : timeout, kick, ban, gérer les messages, "
                     "les salons, les rôles, etc.\n\n"
@@ -643,7 +1079,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         toggle.callback = toggle_moderation
         container.add_item(discord.ui.ActionRow(toggle))
         container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.TextDisplay("### Créer / préparer un vrai rôle de modération"))
+        container.add_item(discord.ui.TextDisplay("### Configurer un rôle de modération existant"))
 
         role_select = discord.ui.RoleSelect(
             placeholder="1. Rôle Discord à configurer",

@@ -48,6 +48,7 @@ from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
+from services import moderation as moderation_service
 
 logger = logging.getLogger("bot")
 
@@ -368,7 +369,23 @@ ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "
 INCIDENT_WINDOW_SECONDS = 30.0
 INCIDENT_LOG_DELAY_SECONDS = 4.0
 SPAM_FILTERS = frozenset({"antispam", "antispam_duplicate", "antiemoji", "antimention"})
-SPAM_TIMEOUT_SECONDS = 600
+
+# Progression dédiée au spam :
+# 1) rappel public avec ping ; 2) vrai warn enregistré ; 3+) timeout croissant.
+# Après 24 h sans nouvel incident de spam, la progression repart au premier rappel.
+SPAM_INCIDENT_WINDOW_SECONDS = 8.0
+SPAM_ESCALATION_RESET_SECONDS = 86400
+SPAM_MUTE_DURATIONS_SECONDS = (600, 1800, 3600, 10800, 21600, 43200, 86400)
+SPAM_TIMEOUT_SECONDS = SPAM_MUTE_DURATIONS_SECONDS[0]
+SPAM_ESCALATION_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sentrix_spam_escalation (
+    guild_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    stage INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (guild_id, user_id)
+)
+"""
 
 
 def _sans_accents(texte: str) -> str:
@@ -381,9 +398,12 @@ class _Incident:
     filter_name: str
     reason: str
     channel_id: int
+    message_preview: str = ""
     deleted: int = 1
     action: str | None = None
+    action_label: str | None = None
     infractions: int = 0
+    spam_stage: int = 0
 
 
 def _normalize_blocked_link_rule(value: str) -> str:
@@ -448,8 +468,27 @@ def _censor_links(content: str) -> str | None:
     return redacted if count else None
 
 
+_CENSORED_INVITE_CODE = "æ@#/%E2%82%AC%C3%9F!%&"
+
+
 def _censor_invites(content: str) -> str | None:
-    redacted, count = INVITE_RE.subn("████ (invitation censurée)", str(content or ""))
+    """Conserve la forme du lien mais détruit définitivement le code d\'invitation.
+
+    Exemple :
+      https://discord.gg/vraicode
+      -> https://discord.gg/æ@#/%E2%82%AC%C3%9F!%& (invitation censurée)
+
+    Le schéma https:// n\'est pas inclus dans INVITE_RE : il reste donc naturellement
+    devant le domaine, exactement comme dans le rendu demandé. Le vrai code ne doit
+    jamais être recopié dans le message webhook.
+    """
+    def replacement(match: re.Match) -> str:
+        raw = str(match.group(0) or "")
+        slash = raw.rfind("/")
+        base = raw[: slash + 1] if slash >= 0 else raw + "/"
+        return f"{base}{_CENSORED_INVITE_CODE} (invitation censurée)"
+
+    redacted, count = INVITE_RE.subn(replacement, str(content or ""))
     return redacted if count else None
 
 
@@ -562,6 +601,170 @@ AUTOMOD_TOGGLE_LABELS = {
     "join_gate": "Join Gate avancé",
     "risk_engine": "Score Risk comportemental",
 }
+
+_AUTOMOD_LOG_EVENT_LABELS = {
+    "automod_link": "Anti-liens",
+    "automod_invite": "Anti-invitations Discord",
+    "automod_scam": "Anti-arnaques",
+    "automod_word": "Mots / contenu interdits",
+    "automod_mention": "Anti-mentions massives",
+    "automod_spam": "Anti-spam",
+    "spam": "Anti-spam",
+    "antiraid": "Anti-raid",
+    "raid": "Anti-raid",
+}
+
+_AUTOMOD_LOG_TITLE_LABELS = (
+    ("anti-nuke", "Anti-nuke"),
+    ("antinuke", "Anti-nuke"),
+    ("antibot", "Anti-bots non autorisés"),
+    ("anti-bot", "Anti-bots non autorisés"),
+    ("antiaccount", "Anti-comptes très récents"),
+    ("anti-account", "Anti-comptes très récents"),
+    ("anti-spam", "Anti-spam"),
+    ("spam", "Anti-spam"),
+    ("anti-lien", "Anti-liens"),
+    ("antiinvite", "Anti-invitations Discord"),
+    ("anti-invite", "Anti-invitations Discord"),
+    ("anti-arnaque", "Anti-arnaques"),
+    ("scam", "Anti-arnaques"),
+    ("multilingue", "Anti-insultes / contenu offensant"),
+    ("mention", "Anti-mentions massives"),
+    ("raid", "Anti-raid"),
+    ("risk score", "Score Risk comportemental"),
+    ("vanity", "Protection vanity URL"),
+    ("prune", "Détection des prunes membres"),
+    ("permissions dangereuses", "Garde permissions dangereuses"),
+    ("garde permissions", "Garde permissions dangereuses"),
+    ("immunité", "Immunité AutoMod"),
+)
+
+
+def _automod_message_preview(message_or_text, *, limit: int = 900) -> str:
+    """Bloc Message lisible pour les logs AutoMod, sans jamais dépasser Discord."""
+    if hasattr(message_or_text, "content"):
+        content = str(getattr(message_or_text, "content", "") or "").strip()
+        attachments = []
+        for attachment in list(getattr(message_or_text, "attachments", ()) or ())[:3]:
+            url = str(getattr(attachment, "url", "") or "").strip()
+            if url:
+                attachments.append(url)
+        if attachments:
+            content = "\n".join(part for part in (content, *attachments) if part)
+    else:
+        content = str(message_or_text or "").strip()
+
+    if not content:
+        return ""
+    content = content.replace("\r\n", "\n").replace("\r", "\n")
+    if len(content) > limit:
+        content = content[: max(1, limit - 1)].rstrip() + "…"
+    # Citation Discord : garde les URLs cliquables et rend même un long texte lisible.
+    return "> " + content.replace("\n", "\n> ")
+
+
+def _automod_protection_label(log_type: str, title: str) -> str:
+    key = str(log_type or "").strip().casefold().replace("-", "_")
+    if key in _AUTOMOD_LOG_EVENT_LABELS:
+        return _AUTOMOD_LOG_EVENT_LABELS[key]
+    sample = str(title or "").casefold()
+    for token, label in _AUTOMOD_LOG_TITLE_LABELS:
+        if token in sample:
+            return label
+    return "Protection AutoMod"
+
+
+def _automod_default_sanction(log_type: str, title: str, protection: str) -> str:
+    key = str(log_type or "").strip().casefold().replace("-", "_")
+    sample = f"{title} {protection}".casefold()
+    if key in {"automod_link", "automod_invite", "automod_scam", "automod_word", "automod_mention", "automod_spam", "spam"}:
+        return "Suppression du message"
+    if "antibot" in sample or "anti-bot" in sample or "antiaccount" in sample or "anti-compte" in sample:
+        return "Expulsion"
+    if "risk" in sample:
+        return "Surveillance renforcée"
+    if "raid" in sample or "nuke" in sample or "permissions" in sample or "vanity" in sample or "prune" in sample:
+        return "Protection automatique"
+    return "Action AutoMod"
+
+
+def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
+    """Uniformise tous les logs AutoMod avant leur rendu SentriX Trace."""
+    title = str(embed.title or "")
+    fields = [
+        (str(field.name or ""), str(field.value or ""), bool(field.inline))
+        for field in embed.fields
+        if str(field.value or "").strip()
+    ]
+
+    def take(*tokens: str):
+        for index, (name, value, inline) in enumerate(fields):
+            low = name.casefold()
+            if any(token in low for token in tokens):
+                return index, name, value, inline
+        return None
+
+    used: set[int] = set()
+
+    identity = take("membre", "bot expuls", "membre expuls", "auteur suspect", "auteur", "acteur", "cible", "utilisateur")
+    protection = take("protection")
+    sanction = take("sanction", "action prise", "action")
+    reason = take("raison", "reason")
+    channel = take("salon", "channel")
+    message = take("message", "contenu", "content")
+
+    ordered: list[tuple[str, str, bool]] = []
+
+    if identity:
+        used.add(identity[0])
+        ordered.append(("Membre", identity[2][:1024], False))
+
+    protection_value = protection[2] if protection else _automod_protection_label(log_type, title)
+    if protection:
+        used.add(protection[0])
+    ordered.append(("Protection", protection_value[:1024], True))
+
+    sanction_value = sanction[2] if sanction else _automod_default_sanction(log_type, title, protection_value)
+    if sanction:
+        used.add(sanction[0])
+    ordered.append(("Sanction", sanction_value[:1024], True))
+
+    if reason:
+        used.add(reason[0])
+        ordered.append(("Raison", reason[2][:1024], False))
+
+    if channel:
+        used.add(channel[0])
+        ordered.append(("Salon", channel[2][:1024], False))
+
+    if message:
+        used.add(message[0])
+        ordered.append(("Message", message[2][:1024], False))
+
+    # Garde tous les détails spécifiques (score, nombre de messages, niveau,
+    # rôle, permissions, etc.) APRÈS le bloc principal au lieu de les perdre.
+    for index, (name, value, inline) in enumerate(fields):
+        if index in used:
+            continue
+        if name.casefold().strip(" :") in {"protection", "sanction", "raison", "salon", "message"}:
+            continue
+        ordered.append((name[:256] or "Détail", value[:1024], inline))
+        if len(ordered) >= 20:
+            break
+
+    styled = embeds.canonical_log_embed(
+        "Protection SentriX",
+        description=str(embed.description or "")[:3500],
+        fields=ordered,
+    )
+    image_url = str(getattr(getattr(embed, "image", None), "url", "") or "")
+    if image_url:
+        styled.set_image(url=image_url)
+    thumbnail_url = str(getattr(getattr(embed, "thumbnail", None), "url", "") or "")
+    if thumbnail_url:
+        styled.set_thumbnail(url=thumbnail_url)
+    return styled
+
 
 # Préréglages du niveau de sécurité global (/security-level et page "Sécurité" de /setup).
 SECURITY_PRESETS = {
@@ -1008,8 +1211,10 @@ class AutoMod(commands.Cog, name="Automod"):
         )
 
     async def _sync_native_harmful_rule(self, guild: discord.Guild) -> bool:
-        conf = await self.bot.db.get_automod(guild.id)
-        enabled = bool(conf and conf["antiinsult"])
+        # Le preset natif Discord mélange grossièretés, contenu sexuel et insultes.
+        # Il peut donc bloquer des phrases neutres avant même que SentriX puisse
+        # appliquer sa détection contextuelle. On le garde désactivé et on utilise
+        # exclusivement le matcher multilingue local, plus précis et token-aware.
         presets = discord.AutoModPresets(
             profanity=True,
             sexual_content=True,
@@ -1019,7 +1224,7 @@ class AutoMod(commands.Cog, name="Automod"):
         return await self._upsert_native_rule(
             guild,
             name=NATIVE_HARMFUL_RULE_NAME,
-            enabled=enabled,
+            enabled=False,
             trigger=trigger,
             custom_message=NATIVE_HARMFUL_CUSTOM_MESSAGE,
         )
@@ -1136,8 +1341,11 @@ class AutoMod(commands.Cog, name="Automod"):
         embed: discord.Embed,
         log_type: str = "automod",
     ):
-        # Le type d'événement pilote aussi la bannière.
-        await helpers.send_log(self.bot, guild, log_type, embed)
+        # Point unique : TOUS les événements AutoMod utilisent le même rendu
+        # AutoMod Manage. helpers.send_log -> log_service -> send_wide_log ajoute
+        # ensuite systématiquement la bannière de sécurité au-dessus de la carte.
+        styled = _style_automod_log(embed, log_type)
+        await helpers.send_log(self.bot, guild, log_type, styled)
 
     # ---------------------------------------------------------------- CACHES
 
@@ -1243,6 +1451,127 @@ class AutoMod(commands.Cog, name="Automod"):
         if exempt_ids and any(r.id in exempt_ids for r in member.roles):
             return True
         return False
+
+    async def _next_spam_stage(self, guild_id: int, user_id: int) -> int:
+        await self.bot.db.execute(SPAM_ESCALATION_SCHEMA)
+        now = int(time.time())
+        row = await self.bot.db.fetchone(
+            "SELECT stage,updated_at FROM sentrix_spam_escalation WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        )
+        previous_stage = int(row["stage"] or 0) if row else 0
+        updated_at = int(row["updated_at"] or 0) if row else 0
+        if not updated_at or now - updated_at > SPAM_ESCALATION_RESET_SECONDS:
+            previous_stage = 0
+        stage = previous_stage + 1
+        await self.bot.db.execute(
+            "INSERT INTO sentrix_spam_escalation (guild_id,user_id,stage,updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(guild_id,user_id) DO UPDATE SET stage=excluded.stage,updated_at=excluded.updated_at",
+            (int(guild_id), int(user_id), int(stage), now),
+        )
+        return stage
+
+    async def _spam_progressive_action(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        reason: str,
+    ) -> tuple[str | None, int, int | None, str]:
+        """Rappel -> warn -> timeout 10m, 30m, 1h, 3h, 6h, 12h, 24h."""
+        stage = await self._next_spam_stage(guild.id, member.id)
+
+        if stage == 1:
+            return (
+                "warning_ping",
+                stage,
+                None,
+                "⚠️ arrête le spam. Si tu continues, tu recevras un avertissement.",
+            )
+
+        if stage == 2:
+            actor = guild.me
+            if actor is None:
+                return (
+                    "warn",
+                    stage,
+                    None,
+                    "⚠️ avertissement : spam répété. Prochaine récidive : mute 10 minutes.",
+                )
+            try:
+                conf = await self.bot.db.get_guild_config(guild.id)
+                warn_role_id = conf["warn_role"] if conf else None
+                warn_role = guild.get_role(int(warn_role_id)) if warn_role_id else None
+            except Exception:
+                warn_role = None
+            outcome = await moderation_service.warn(
+                self.bot,
+                guild=guild,
+                actor=actor,
+                target=member,
+                reason=f"AutoMod : spam répété — {reason}",
+                dm_text=(
+                    f"Vous avez reçu un avertissement automatique sur {guild.name} pour spam répété. "
+                    "Une nouvelle récidive entraînera un mute de 10 minutes."
+                ),
+                warn_role=warn_role,
+                ban_threshold=0,
+            )
+            if outcome.executed:
+                return (
+                    "warn",
+                    stage,
+                    None,
+                    "⚠️ avertissement enregistré pour spam répété. Prochaine récidive : mute 10 minutes.",
+                )
+            return (
+                "warn",
+                stage,
+                None,
+                "⚠️ spam répété détecté. SentriX n’a pas pu enregistrer le warn, mais la prochaine récidive entraînera un mute.",
+            )
+
+        duration = SPAM_MUTE_DURATIONS_SECONDS[
+            min(stage - 3, len(SPAM_MUTE_DURATIONS_SECONDS) - 1)
+        ]
+        me = guild.me
+        if (
+            me is None
+            or not me.guild_permissions.moderate_members
+            or member.id == guild.owner_id
+            or member.top_role >= me.top_role
+        ):
+            return (
+                "mute_failed",
+                stage,
+                duration,
+                f"⚠️ spam répété détecté. Timeout prévu : {helpers.format_duration(duration)}, "
+                "mais SentriX n’a pas la permission ou la hiérarchie nécessaire.",
+            )
+
+        until = discord.utils.utcnow() + timedelta(seconds=duration)
+        current_timeout = member.timed_out_until
+        try:
+            if not current_timeout or current_timeout < until:
+                log_service.mark_sanction(guild.id, member.id, "timeout")
+                await member.timeout(
+                    until,
+                    reason=f"AutoMod : récidive spam niveau {stage} — {reason}",
+                )
+        except (discord.Forbidden, discord.HTTPException):
+            return (
+                "mute_failed",
+                stage,
+                duration,
+                f"⚠️ spam répété détecté. Timeout prévu : {helpers.format_duration(duration)}, "
+                "mais Discord a refusé la sanction.",
+            )
+
+        return (
+            "mute",
+            stage,
+            duration,
+            f"🔇 spam répété : mute de {helpers.format_duration(duration)}.",
+        )
 
     async def _maybe_escalate(self, guild: discord.Guild, member: discord.Member, reason: str) -> tuple[str | None, int]:
         """Enregistre une infraction pour ce membre et, si le nombre d'infractions récentes
@@ -2350,7 +2679,7 @@ class AutoMod(commands.Cog, name="Automod"):
         except discord.HTTPException:
             pass
 
-        # Clone façon DraftBot : seulement APRÈS suppression réussie, et uniquement si
+        # Republication contrôlée SentriX : seulement APRÈS suppression réussie, et uniquement si
         # le texte a pu être censuré de manière sûre. Sans Gérer les webhooks, on garde
         # automatiquement le comportement suppression + avertissement.
         if deleted and censored_content:
@@ -2359,10 +2688,21 @@ class AutoMod(commands.Cog, name="Automod"):
         key = (message.guild.id, message.author.id)
         now_ts = time.monotonic()
         incident = self.incidents.get(key)
-        if incident is not None and now_ts - incident.started < INCIDENT_WINDOW_SECONDS:
+        incident_window = (
+            SPAM_INCIDENT_WINDOW_SECONDS
+            if incident is not None and incident.filter_name in SPAM_FILTERS
+            else INCIDENT_WINDOW_SECONDS
+        )
+        if incident is not None and now_ts - incident.started < incident_window:
             incident.deleted += 1
             return
-        incident = _Incident(started=now_ts, filter_name=filter_name, reason=reason, channel_id=message.channel.id)
+        incident = _Incident(
+            started=now_ts,
+            filter_name=filter_name,
+            reason=reason,
+            channel_id=message.channel.id,
+            message_preview=_automod_message_preview(message),
+        )
         self.incidents[key] = incident
         if len(self.incidents) > 5000:
             cutoff = now_ts - INCIDENT_WINDOW_SECONDS
@@ -2370,27 +2710,103 @@ class AutoMod(commands.Cog, name="Automod"):
                 if item.started < cutoff:
                     self.incidents.pop(candidate, None)
 
-        await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, "suppression", reason)
+        try:
+            await self.bot.db.log_automod_action(
+                message.guild.id,
+                message.author.id,
+                filter_name,
+                "suppression",
+                reason,
+            )
+        except Exception:
+            logger.exception(
+                "Historique AutoMod indisponible après suppression guild=%s user=%s filtre=%s.",
+                message.guild.id,
+                message.author.id,
+                filter_name,
+            )
+
         risk_points = RISK_SIGNAL_POINTS.get(filter_name, 10)
-        await self.add_risk_signal(
-            message.guild,
-            message.author.id,
-            filter_name,
-            risk_points,
-            reason=reason,
-            target=message.author,
-        )
-        action, infraction_count = await self._maybe_escalate(message.guild, message.author, reason)
-        if action is None and filter_name in SPAM_FILTERS:
-            action = await self._spam_timeout(message.guild, message.author, reason)
+        try:
+            await self.add_risk_signal(
+                message.guild,
+                message.author.id,
+                filter_name,
+                risk_points,
+                reason=reason,
+                target=message.author,
+            )
+        except Exception:
+            logger.exception(
+                "Score de risque AutoMod indisponible guild=%s user=%s filtre=%s.",
+                message.guild.id,
+                message.author.id,
+                filter_name,
+            )
+
+        action = None
+        infraction_count = 0
+        spam_stage = 0
+        spam_duration = None
+        spam_public_text = None
+
+        try:
+            if filter_name in SPAM_FILTERS:
+                action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
+                    message.guild,
+                    message.author,
+                    reason,
+                )
+                incident.spam_stage = spam_stage
+                if action == "warning_ping":
+                    incident.action_label = "⚠️ Rappel anti-spam"
+                elif action == "warn":
+                    incident.action_label = "⚠️ Avertissement enregistré"
+                elif action == "mute":
+                    incident.action_label = f"🔇 Mute {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)}"
+                elif action == "mute_failed":
+                    incident.action_label = f"⚠️ Mute prévu {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)} — non appliqué"
+            else:
+                action, infraction_count = await self._maybe_escalate(
+                    message.guild,
+                    message.author,
+                    reason,
+                )
+        except Exception:
+            # L'escalade est secondaire par rapport à la suppression déjà faite :
+            # on garde l'avertissement public et le log d'incident au lieu de perdre
+            # tout le traitement du message.
+            logger.exception(
+                "Escalade AutoMod indisponible guild=%s user=%s filtre=%s.",
+                message.guild.id,
+                message.author.id,
+                filter_name,
+            )
+
         incident.action = action
         incident.infractions = infraction_count
-        if action:
-            await self.bot.db.log_automod_action(message.guild.id, message.author.id, filter_name, action, reason)
+        if action and action != "warning_ping":
+            try:
+                await self.bot.db.log_automod_action(
+                    message.guild.id,
+                    message.author.id,
+                    filter_name,
+                    action,
+                    reason,
+                )
+            except Exception:
+                logger.exception(
+                    "Historique de sanction AutoMod indisponible guild=%s user=%s action=%s.",
+                    message.guild.id,
+                    message.author.id,
+                    action,
+                )
 
-        public_text = self._public_automod_message(filter_name, reason)
-        if action == "mute":
-            public_text += f" Exclusion temporaire de {helpers.format_duration(SPAM_TIMEOUT_SECONDS)}."
+        public_text = (
+            spam_public_text
+            if filter_name in SPAM_FILTERS and spam_public_text
+            else self._public_automod_message(filter_name, reason)
+        )
         try:
             if filter_name in {"blacklist_word", "blacklist_link", "blacklist_word_link", "antilink", "antiinvite", "antiscam"}:
                 note = await panels.envoyer(
@@ -2435,13 +2851,27 @@ class AutoMod(commands.Cog, name="Automod"):
             await asyncio.sleep(INCIDENT_LOG_DELAY_SECONDS)
             title = "🛡️ Action AutoMod"
             color = config.COLOR_WARNING
-            extra = {"📍 Salon": f"<#{incident.channel_id}>", "🗑️ Messages": str(incident.deleted)}
+            extra = {
+                "Salon": f"<#{incident.channel_id}>",
+                "Messages supprimés": str(incident.deleted),
+            }
+            if incident.message_preview:
+                extra["Message"] = incident.message_preview
             if incident.action:
-                title = "🚨 Action AutoMod — sanction appliquée"
+                title = (
+                    "🚨 Action AutoMod — sanction appliquée"
+                    if incident.action not in ("warning_ping",)
+                    else "🛡️ Action AutoMod — rappel anti-spam"
+                )
                 color = config.COLOR_ERROR if incident.action in ("kick", "ban") else config.COLOR_WARNING
-                extra["⚔️ Action"] = ESCALATION_LABELS.get(incident.action, incident.action)
+                extra["Sanction"] = (
+                    incident.action_label
+                    or ESCALATION_LABELS.get(incident.action, incident.action)
+                )
+            if incident.spam_stage:
+                extra["Niveau anti-spam"] = str(incident.spam_stage)
             if incident.infractions:
-                extra["🔢 Infractions (1h)"] = str(incident.infractions)
+                extra["Infractions (1h)"] = str(incident.infractions)
             e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
             event_type = {
                 "antiscam": "automod_scam",
@@ -2449,6 +2879,12 @@ class AutoMod(commands.Cog, name="Automod"):
                 "antilink": "automod_link",
                 "blacklist_link": "automod_link",
                 "blacklist_word_link": "automod_link",
+                "blacklist_word": "automod_word",
+                "antiinsult": "automod_word",
+                "antimention": "automod_mention",
+                "antispam": "automod_spam",
+                "antispam_duplicate": "automod_spam",
+                "antiemoji": "automod_spam",
             }.get(incident.filter_name, "automod")
             await self.log_action(guild, e, event_type)
         except Exception:
@@ -2525,11 +2961,12 @@ class AutoMod(commands.Cog, name="Automod"):
             raison=reason,
             extra={
                 "Salon": f"{message.channel.mention}\n`ID: {message.channel.id}`",
+                "Message": _automod_message_preview(message),
                 "Type de détection": detection_kind.replace("_", " "),
                 "Sanction": timeout_status,
             },
         )
-        await self.log_action(message.guild, e)
+        await self.log_action(message.guild, e, "automod_word")
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):

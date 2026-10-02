@@ -172,6 +172,8 @@ def register(app: web.Application, dashboard) -> None:
         music = _music()
         if music is None:
             return dashboard._json_error("Le module Musique n’est pas chargé.", 503)
+        settings = await music.get_system_settings(guild.id)
+        configured_channel = _voice_channel(guild, settings.get("voice_channel_id"))
         queue = music.get_queue(guild.id)
         voice = queue.voice_client or guild.voice_client
         connected = bool(voice and voice.is_connected())
@@ -220,6 +222,9 @@ def register(app: web.Application, dashboard) -> None:
 
         return web.json_response({
             "ok": True,
+            "system_enabled": bool(settings.get("enabled")),
+            "configured_voice_channel_id": str(settings["voice_channel_id"]) if settings.get("voice_channel_id") else None,
+            "configured_voice_channel_name": configured_channel.name if configured_channel else None,
             "connected": connected,
             "voice_channel_id": str(voice.channel.id) if connected else None,
             "voice_channel_name": voice.channel.name if connected else None,
@@ -237,14 +242,52 @@ def register(app: web.Application, dashboard) -> None:
             "playlists": playlists,
         })
 
+    async def settings_update(request: web.Request):
+        session, guild, error = await _guard(request, write=True)
+        if error:
+            return error
+        payload = await _payload(request)
+        music = _music()
+        if music is None:
+            return dashboard._json_error("Le module Musique n’est pas chargé.", 503)
+        enabled_raw = payload.get("enabled")
+        enabled = enabled_raw is True or str(enabled_raw).strip().lower() in {"1", "true", "yes", "on"}
+        channel = _voice_channel(guild, payload.get("voice_channel_id"))
+        if enabled and channel is None:
+            return dashboard._json_error("Choisissez le vocal musique avant d’activer le système.", 400)
+        try:
+            settings = await music.configure_system(
+                guild,
+                enabled=enabled,
+                voice_channel_id=channel.id if channel else None,
+                actor_id=int(session["user"]["id"]),
+            )
+        except ValueError as exc:
+            return dashboard._json_error(str(exc), 400)
+        return web.json_response({
+            "ok": True,
+            "message": (
+                f"Système musique activé dans {channel.name}."
+                if enabled and channel
+                else "Système musique désactivé."
+            ),
+            "system_enabled": bool(settings["enabled"]),
+            "configured_voice_channel_id": str(settings["voice_channel_id"]) if settings["voice_channel_id"] else None,
+        })
+
     async def connect(request: web.Request):
         _session, guild, error = await _guard(request, write=True)
         if error:
             return error
-        payload = await _payload(request)
-        channel = _voice_channel(guild, payload.get("channel_id"))
+        music = _music()
+        if music is None:
+            return dashboard._json_error("Le module Musique n’est pas chargé.", 503)
+        settings = await music.get_system_settings(guild.id)
+        if not settings["enabled"]:
+            return dashboard._json_error("Activez d’abord le système musique.", 409)
+        channel = _voice_channel(guild, settings.get("voice_channel_id"))
         if channel is None:
-            return dashboard._json_error("Choisissez un salon vocal valide.", 400)
+            return dashboard._json_error("Le vocal musique configuré n’existe plus.", 409)
         try:
             queue = await _connect_to(guild, channel)
         except PermissionError as exc:
@@ -272,22 +315,20 @@ def register(app: web.Application, dashboard) -> None:
         music = _music()
         if music is None:
             return dashboard._json_error("Le module Musique n’est pas chargé.", 503)
+        settings = await music.get_system_settings(guild.id)
+        if not settings["enabled"]:
+            return dashboard._json_error("Activez d’abord le système musique.", 409)
+        channel = _voice_channel(guild, settings.get("voice_channel_id"))
+        if channel is None:
+            return dashboard._json_error("Le vocal musique configuré n’existe plus.", 409)
 
         async with _LOCKS[guild.id]:
-            queue = music.get_queue(guild.id)
-            requested_channel = payload.get("channel_id")
-            if requested_channel:
-                channel = _voice_channel(guild, requested_channel)
-                if channel is None:
-                    return dashboard._json_error("Le salon vocal sélectionné n’existe plus.", 400)
-                try:
-                    queue = await _connect_to(guild, channel)
-                except PermissionError as exc:
-                    return dashboard._json_error(str(exc), 403)
-                except (RuntimeError, discord.Forbidden, discord.HTTPException) as exc:
-                    return dashboard._json_error(str(exc) or "Connexion vocale impossible.", 409)
-            elif not (queue.voice_client and queue.voice_client.is_connected()):
-                return dashboard._json_error("Choisissez d’abord le salon vocal que SentriX doit rejoindre.", 409)
+            try:
+                queue = await _connect_to(guild, channel)
+            except PermissionError as exc:
+                return dashboard._json_error(str(exc), 403)
+            except (RuntimeError, discord.Forbidden, discord.HTTPException) as exc:
+                return dashboard._json_error(str(exc) or "Connexion vocale impossible.", 409)
 
             try:
                 resolved = await music.manager.resolve(query, requested_by=int(session["user"]["id"]))
@@ -327,6 +368,9 @@ def register(app: web.Application, dashboard) -> None:
         music = _music()
         if music is None:
             return dashboard._json_error("Le module Musique n’est pas chargé.", 503)
+        settings = await music.get_system_settings(guild.id)
+        if not settings["enabled"]:
+            return dashboard._json_error("Le système musique est désactivé.", 409)
 
         async with _LOCKS[guild.id]:
             queue = music.get_queue(guild.id)
@@ -535,21 +579,19 @@ def register(app: web.Application, dashboard) -> None:
         music = _music()
         if music is None:
             return dashboard._json_error("Le module Musique n’est pas chargé.", 503)
+        settings = await music.get_system_settings(guild.id)
+        if not settings["enabled"]:
+            return dashboard._json_error("Activez d’abord le système musique.", 409)
+        channel = _voice_channel(guild, settings.get("voice_channel_id"))
+        if channel is None:
+            return dashboard._json_error("Le vocal musique configuré n’existe plus.", 409)
         async with _LOCKS[guild.id]:
-            queue = music.get_queue(guild.id)
-            requested_channel = payload.get("channel_id")
-            if requested_channel:
-                channel = _voice_channel(guild, requested_channel)
-                if channel is None:
-                    return dashboard._json_error("Le salon vocal sélectionné n’existe plus.", 400)
-                try:
-                    queue = await _connect_to(guild, channel)
-                except PermissionError as exc:
-                    return dashboard._json_error(str(exc), 403)
-                except (RuntimeError, discord.Forbidden, discord.HTTPException) as exc:
-                    return dashboard._json_error(str(exc) or "Connexion vocale impossible.", 409)
-            elif not (queue.voice_client and queue.voice_client.is_connected()):
-                return dashboard._json_error("Choisissez le salon vocal avant de lancer la playlist.", 409)
+            try:
+                queue = await _connect_to(guild, channel)
+            except PermissionError as exc:
+                return dashboard._json_error(str(exc), 403)
+            except (RuntimeError, discord.Forbidden, discord.HTTPException) as exc:
+                return dashboard._json_error(str(exc) or "Connexion vocale impossible.", 409)
             tracks = [_item_track(item, user_id) for item in items]
             queue.tracks.extend(tracks)
             voice = queue.voice_client
@@ -589,6 +631,7 @@ def register(app: web.Application, dashboard) -> None:
         return web.json_response({"ok": True, "message": f"Playlist {display} supprimée."})
 
     app.router.add_get("/api/guilds/{guild_id}/music", status)
+    app.router.add_post("/api/guilds/{guild_id}/music/settings", settings_update)
     app.router.add_post("/api/guilds/{guild_id}/music/connect", connect)
     app.router.add_post("/api/guilds/{guild_id}/music/play", play)
     app.router.add_post("/api/guilds/{guild_id}/music/control", control)

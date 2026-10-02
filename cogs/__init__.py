@@ -67,7 +67,7 @@ from .setup_experience_v74 import install as install_setup_experience_v74
 from .setup_security_choice_v75 import install as install_setup_security_choice_v75
 from .setup_control_center import install as install_setup_control_center
 from .setup_simple_v68 import install as install_setup_simple_v68
-from .setup_oxyde_v69 import install as install_setup_oxyde_v69
+from .setup_core_v119 import install as install_setup_core_v119
 from .setup_polish_v70 import install as install_setup_polish_v70
 from .setup_ticket_autoconfig_v72 import install as install_setup_ticket_autoconfig_v72
 from .shop_default_prices import install as install_shop_default_prices
@@ -130,7 +130,7 @@ async def _install_configuration_critical_patches(bot: commands.Bot) -> None:
     await _run_installer("moteur de langue setup", install_language_runtime, bot)
     await _run_installer("finaliseur de langue setup", install_language_setup_finalizer, bot)
     await _run_installer("centre de configuration officiel", install_setup_control_center, bot)
-    await _run_installer("renderer Control Center V3", install_control_center_v3_setup_ui, bot)
+    await _run_installer("renderer Setup V3", install_control_center_v3_setup_ui, bot)
     await _run_installer("pont langue setup officiel", install_language_official_bridge, bot)
 
 
@@ -267,23 +267,23 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("politique finale interactions", install_final_interaction_policy, bot)
     await _run_installer("libération concurrence slash V41", install_command_error_release_v41, bot)
     await _load_official_help(bot)
-    await _run_installer("Control Center V3", install_control_center_v3, bot)
-    await _run_installer("langue Control Center V3", install_control_center_v3_language, bot)
+    await _run_installer("Setup V3", install_control_center_v3, bot)
+    await _run_installer("langue Setup V3", install_control_center_v3_language, bot)
     await _run_installer(
         "permissions Discord natives et Setup restrictif V65",
         install_permission_setup_hardening_v65,
         bot,
     )
     await _run_installer("Setup simple et help V68", install_setup_simple_v68, bot)
-    await _run_installer("Control Center visuel V69", install_setup_oxyde_v69, bot)
-    await _run_installer("Finition Control Center V70", install_setup_polish_v70, bot)
+    await _run_installer("SentriX Setup Core", install_setup_core_v119, bot)
+    await _run_installer("Finition SentriX Setup V70", install_setup_polish_v70, bot)
     # V71 conserve la dernière autorité de la page Sécurité. V72 s'installe après pour
     # corriger uniquement l'accueil et le système Tickets sans remplacer ses contrôles.
     await _run_installer("Sécurité avancée et vérification V71", install_security_verification_v71, bot)
     await _run_installer("Tickets auto-configurables et états Setup V72", install_setup_ticket_autoconfig_v72, bot)
     # V73 garde le style Components V2. V74 construit l'expérience finale, puis V75
     # rend toutes les protections anti sélectionnables sans réintroduire de permissions manuelles.
-    await _run_installer("Control Center Components V2 V73", install_setup_components_v73, bot)
+    await _run_installer("SentriX Setup Components V2 V73", install_setup_components_v73, bot)
     await _run_installer("Setup Experience V74", install_setup_experience_v74, bot)
     await _run_installer("Setup Security Choice V75", install_setup_security_choice_v75, bot)
     # Dernière phase du boot. Le logger n'a plus rien à réinstaller ici : utils.log_service
@@ -298,7 +298,7 @@ async def finalize_runtime(bot: commands.Bot) -> None:
     await _run_installer("noms courts des commandes", refresh_short_command_names, bot)
     bot._sentrix_runtime_finalized_clean = True
     logger.info(
-        "Runtime SentriX finalisé : Setup V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72."
+        "Runtime SentriX finalisé : Setup Core + V75/V74 + Components V2 V73 + Sécurité V71 + Tickets V72."
     )
 
 

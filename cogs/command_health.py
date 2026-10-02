@@ -41,6 +41,7 @@ _USER_ERRORS = frozenset({
     "MemberNotFound", "UserNotFound", "RoleNotFound", "ChannelNotFound",
     "CommandOnCooldown", "MissingPermissions", "BotMissingPermissions",
     "NoPrivateMessage", "CheckFailure", "Forbidden", "NotFound",
+    "ModuleTemporarilyUnavailable", "AppModuleTemporarilyUnavailable",
 })
 
 
@@ -82,6 +83,28 @@ def _record(bot: commands.Bot, entry: error_pipeline.ErrorReport) -> dict[str, A
     if entry.transport not in row["transports"]:
         row["transports"].append(entry.transport)
     return row
+
+
+def _slash_module_name(bot: commands.Bot, command_name: str) -> str | None:
+    root_name = str(command_name or "").split()[0]
+    if not root_name:
+        return None
+    try:
+        command = bot.tree.get_command(root_name)
+    except Exception:
+        command = None
+    if command is None:
+        return None
+    binding = getattr(command, "binding", None)
+    for value in (binding, getattr(command, "callback", None)):
+        if value is None:
+            continue
+        module = str(getattr(value, "__module__", "") or "")
+        if not module:
+            module = str(getattr(getattr(value, "__class__", None), "__module__", "") or "")
+        if module.startswith("cogs."):
+            return module
+    return None
 
 
 def _is_primary_service() -> bool:
@@ -157,6 +180,11 @@ def _make_listener(bot: commands.Bot):
         row = _record(bot, entry)
         if entry.exc_type in _USER_ERRORS:
             return
+        if entry.transport == "slash":
+            kernel = getattr(bot, "module_kernel", None)
+            module_name = _slash_module_name(bot, entry.command)
+            if kernel is not None and module_name and hasattr(kernel, "record_runtime_error"):
+                kernel.record_runtime_error(module_name, entry.exc_type)
         # Le pipeline est synchrone : on planifie l'envoi sans bloquer la commande.
         try:
             loop = asyncio.get_running_loop()

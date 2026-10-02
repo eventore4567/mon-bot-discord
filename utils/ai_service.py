@@ -69,10 +69,13 @@ ERROR_RATE_LIMIT = "__RATE_LIMIT__"
 ERROR_TIMEOUT = "__TIMEOUT__"
 ERROR_CONNECTION = "__CONNECTION__"
 ERROR_GENERIC = "__ERROR__"
+ERROR_DISABLED = "__AI_DISABLED__"
+ERROR_CHANNEL_NOT_ALLOWED = "__AI_CHANNEL_NOT_ALLOWED__"
 
 ALL_ERROR_CODES = frozenset({
     ERROR_NO_KEY, ERROR_SENSITIVE_CONTENT, ERROR_CYBER_POLICY, ERROR_BAD_REQUEST, ERROR_AUTH,
     ERROR_RATE_LIMIT, ERROR_TIMEOUT, ERROR_CONNECTION, ERROR_GENERIC,
+    ERROR_DISABLED, ERROR_CHANNEL_NOT_ALLOWED,
 })
 
 ERROR_MESSAGES = {
@@ -94,6 +97,8 @@ ERROR_MESSAGES = {
     ERROR_TIMEOUT: "⏱️ Le service IA a mis trop de temps à répondre. Réessaie.",
     ERROR_CONNECTION: "🌐 Impossible de contacter le service IA pour le moment. Réessaie plus tard.",
     ERROR_GENERIC: GENERIC_ERROR,
+    ERROR_DISABLED: "L'intelligence artificielle est désactivée sur ce serveur.",
+    ERROR_CHANNEL_NOT_ALLOWED: "L'intelligence artificielle n'est pas autorisée dans ce salon.",
 }
 
 

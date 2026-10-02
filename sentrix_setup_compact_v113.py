@@ -456,24 +456,23 @@ async def _modules_embed(self) -> discord.Embed:
 
 
 async def _build_smart_plan(self) -> list[dict[str, Any]]:
+    """Construit uniquement une liste de recommandations manuelles.
+
+    Ce setup ne crée, ne sélectionne et n'applique plus automatiquement aucun salon,
+    rôle, preset de sécurité ou autre réglage. L'utilisateur garde toujours le choix.
+    """
     _ensure_v4_state(self)
     guild = self._guild()
     conf = await self.bot.db.get_guild_config(self.guild_id)
     if guild is None:
-        return []
-
-    mode = self._v4_mode
-    template = SMART_TEMPLATES.get(self._v4_template) or SMART_TEMPLATES["balanced"]
-    scopes = set(self._v4_scopes) if mode == "custom" else set(AUTO_SCOPES)
-    if mode == "essential":
-        scopes = {"security", "logs", "roles"}
+        return [{"kind": "manual", "scope": "general", "automatic": False, "label": "Serveur introuvable"}]
 
     plan: list[dict[str, Any]] = []
     me = guild.me
     perms = me.guild_permissions if me else None
 
     if me is None:
-        plan.append({"kind": "manual", "scope": "security", "automatic": False, "label": "SentriX n'est pas résolu comme membre du serveur"})
+        plan.append({"kind": "manual", "scope": "security", "automatic": False, "label": "Vérifier la présence de SentriX sur le serveur"})
     else:
         required = (
             ("manage_channels", "Gérer les salons"),
@@ -483,101 +482,51 @@ async def _build_smart_plan(self) -> list[dict[str, Any]]:
         )
         missing = [label for attr, label in required if not (perms.administrator or getattr(perms, attr, False))]
         if missing:
-            plan.append({"kind": "manual", "scope": "security", "automatic": False, "label": "Permissions SentriX à corriger : " + ", ".join(missing)})
-        manageable = [r for r in guild.roles if r != guild.default_role and not r.managed]
-        if manageable and me.top_role.position <= max(r.position for r in manageable):
-            plan.append({"kind": "manual", "scope": "security", "automatic": False, "label": "Remonter le rôle SentriX dans la hiérarchie"})
+            plan.append({"kind": "manual", "scope": "security", "automatic": False, "label": "Permissions à vérifier : " + ", ".join(missing)})
 
-    if "security" in scopes:
-        active = sum(1 for value in self.security_choices.values() if value)
-        total = max(1, len(_CONFIG_MODULE.AUTOMOD_TOGGLE_LABELS))
-        preset = template["security"]
-        target_ratio = {"faible": 0.25, "moyen": 0.5, "eleve": 0.75}.get(preset, 0.5)
-        if active / total < target_ratio:
-            plan.append({
-                "kind": "security_preset", "scope": "security", "automatic": True,
-                "preset": preset, "label": f"Appliquer la protection {preset}",
-            })
+    if not any(self.security_choices.values()):
+        plan.append({"kind": "manual", "scope": "security", "automatic": False, "label": "Choisir les protections de sécurité à activer"})
 
-    if "logs" in scopes and not _logs_configured(conf):
-        if perms and (perms.administrator or perms.manage_channels):
-            plan.append({"kind": "logs", "scope": "logs", "automatic": True, "label": "Créer et connecter le système de logs privés"})
-        else:
-            plan.append({"kind": "manual", "scope": "logs", "automatic": False, "label": "Logs à configurer après correction des permissions"})
+    if not _logs_configured(conf):
+        plan.append({"kind": "manual", "scope": "logs", "automatic": False, "label": "Choisir manuellement les salons de logs"})
 
-    if "roles" in scopes and not _row_value(conf, "mod_role"):
-        role = _find_staff_role(guild)
-        if role:
-            plan.append({"kind": "set_config", "scope": "roles", "automatic": True, "key": "mod_role", "value": role.id, "label": f"Utiliser {role.name} comme rôle staff"})
-        else:
-            plan.append({"kind": "manual", "scope": "roles", "automatic": False, "label": "Choisir le rôle staff (aucun rôle évident détecté)"})
+    if not _row_value(conf, "mod_role"):
+        plan.append({"kind": "manual", "scope": "roles", "automatic": False, "label": "Choisir le rôle staff existant"})
 
-    if "roles" in scopes and not _row_value(conf, "autorole"):
-        role = _find_member_role(guild)
-        if role:
-            plan.append({"kind": "set_config", "scope": "roles", "automatic": True, "key": "autorole", "value": role.id, "label": f"Utiliser {role.name} comme rôle automatique"})
-        elif mode != "essential" and perms and (perms.administrator or perms.manage_roles):
-            plan.append({"kind": "create_role", "scope": "roles", "automatic": True, "key": "autorole", "name": "Membre", "label": "Créer le rôle Membre et l'utiliser comme rôle automatique"})
+    if not _row_value(conf, "welcome_channel"):
+        plan.append({"kind": "manual", "scope": "members", "automatic": False, "label": "Choisir le salon de bienvenue"})
 
-    if mode != "essential" and "channels" in scopes:
-        for key in _template_targets(self._v4_template):
-            if _row_value(conf, key):
-                continue
-            name, aliases = CHANNEL_TARGETS[key]
-            channel = _find_text_channel(guild, aliases)
-            if channel:
-                plan.append({"kind": "set_config", "scope": "channels", "automatic": True, "key": key, "value": channel.id, "label": f"Réutiliser #{channel.name} pour {name}"})
-            elif perms and (perms.administrator or perms.manage_channels):
-                plan.append({"kind": "create_channel", "scope": "channels", "automatic": True, "key": key, "name": name, "label": f"Créer #{name} et le connecter à SentriX"})
-            else:
-                plan.append({"kind": "manual", "scope": "channels", "automatic": False, "label": f"Créer/configurer #{name} après correction des permissions"})
+    if not _row_value(conf, "goodbye_channel"):
+        plan.append({"kind": "manual", "scope": "members", "automatic": False, "label": "Choisir le salon de départ"})
 
     ticket_row = await self.bot.db.fetchone(
         "SELECT COUNT(*) AS n FROM ticket_panels_v2 WHERE guild_id = ?", (self.guild_id,)
     )
-    if mode != "essential" and "community" in scopes and template.get("tickets") and not int(_row_value(ticket_row, "n", 0) or 0):
-        plan.append({"kind": "manual", "scope": "community", "automatic": False, "label": "Configurer le panel de tickets (choix humain requis)"})
-
-    if mode != "essential" and "community" in scopes and self._v4_template in {"community", "marketplace"} and not _row_value(conf, "verify_role"):
-        plan.append({"kind": "manual", "scope": "community", "automatic": False, "label": "Choisir le rôle de vérification"})
+    if not int(_row_value(ticket_row, "n", 0) or 0):
+        plan.append({"kind": "manual", "scope": "tickets", "automatic": False, "label": "Configurer les tickets avec les salons/rôles existants"})
 
     return plan
 
 
 async def _auto_embed(self) -> discord.Embed:
-    _ensure_v4_state(self)
     plan = await _build_smart_plan(self)
-    automatic = [item for item in plan if item.get("automatic")]
-    manual = [item for item in plan if not item.get("automatic")]
-    template = SMART_TEMPLATES.get(self._v4_template) or SMART_TEMPLATES["balanced"]
-    mode_labels = {"essential": "Essentiel", "complete": "Complet", "custom": "Personnalisé"}
-
     e = embeds.neutral(
-        "SentriX • Smart Setup",
-        "Analyse le serveur, prépare un plan précis, puis demande un aperçu avant toute application.",
+        "SentriX • Guide de configuration",
+        "SentriX vérifie ce qu'il reste à configurer, mais ne choisit et n'applique rien automatiquement.",
         color=_CONFIG_MODULE.SETUP_COLOR_SECONDARY,
     )
-    e.add_field(name="Mode", value=f"**{mode_labels.get(self._v4_mode, 'Complet')}**", inline=True)
-    e.add_field(name="Modèle", value=f"**{template['label']}**", inline=True)
-    e.add_field(name="Plan", value=f"**{len(automatic)} auto** · **{len(manual)} manuel**", inline=True)
-
-    if self._v4_preview_ready:
-        auto_lines = [f"• {item['label']}" for item in automatic]
-        manual_lines = [f"• {item['label']}" for item in manual]
-        e.add_field(name="Aperçu — changements automatiques", value="\n".join(auto_lines)[:1024] if auto_lines else "Aucun changement automatique.", inline=False)
-        if manual_lines:
-            e.add_field(name="À faire manuellement", value="\n".join(manual_lines)[:1024], inline=False)
-        e.add_field(name="Sécurité de l'opération", value="**0 suppression automatique** · snapshot avant application · rôles/salons existants conservés.", inline=False)
-    else:
-        recommendations = [f"• {item['label']}" for item in plan[:7]]
-        e.add_field(name="Analyse", value="\n".join(recommendations)[:1024] if recommendations else "Le serveur ne nécessite aucun changement automatique important.", inline=False)
-        e.add_field(name="Avant d'appliquer", value="Clique sur **Prévisualiser** pour verrouiller le plan exact.", inline=False)
-
-    if self._v4_last_result:
-        e.add_field(name="Dernière application", value=self._v4_last_result[:1024], inline=False)
-    if self._v4_last_snapshot:
-        e.add_field(name="Rollback", value=f"Snapshot **#{self._v4_last_snapshot}** disponible. Le rollback restaure la configuration SentriX sans supprimer les rôles/salons créés.", inline=False)
-    return _decorate_embed(self, e, section="Smart Setup")
+    lines = [f"• {item['label']}" for item in plan]
+    e.add_field(
+        name="À configurer",
+        value="\n".join(lines)[:1024] if lines else "Tout ce qui est essentiel est déjà configuré.",
+        inline=False,
+    )
+    e.add_field(
+        name="Règle",
+        value="Aucun salon, rôle, preset ou réglage n'est créé, sélectionné ou appliqué automatiquement.",
+        inline=False,
+    )
+    return _decorate_embed(self, e, section="Guide")
 
 
 async def _diagnostic(self) -> dict[str, Any]:
@@ -678,7 +627,7 @@ def _render_home(self):
     self.add_item(button("prev", self.message_id, label="Configuration", style=discord.ButtonStyle.primary, row=0))
     self.add_item(button("next", self.message_id, label="Sécurité", style=discord.ButtonStyle.primary, row=0))
     self.add_item(button("preview", self.message_id, label="Modules", style=discord.ButtonStyle.secondary, row=0))
-    self.add_item(button("restart", self.message_id, label="Smart Setup", style=discord.ButtonStyle.success, row=1))
+    self.add_item(button("restart", self.message_id, label="Guide", style=discord.ButtonStyle.success, row=1))
     self.add_item(button("summary", self.message_id, label="Terminer", style=discord.ButtonStyle.secondary, row=1))
     tools = discord.ui.Select(
         placeholder="Outils du setup",
@@ -876,108 +825,10 @@ async def _reload_security(view) -> None:
 
 
 async def _apply_auto(view, interaction: discord.Interaction):
-    plan = await _build_smart_plan(view)
-    if not view._v4_preview_ready or view._v4_preview_signature != _plan_signature(plan):
-        view._v4_preview_ready = False
-        view._v4_preview_signature = None
-        view.render_page()
-        await view._refresh_message(interaction)
-        return await interaction.followup.send("Le plan a changé. Prévisualise-le de nouveau avant application.", ephemeral=True) if interaction.response.is_done() else await interaction.response.send_message("Le plan a changé. Prévisualise-le de nouveau avant application.", ephemeral=True)
-
-    automatic = [item for item in plan if item.get("automatic")]
-    if not automatic:
-        return await interaction.response.send_message("Aucun changement automatique nécessaire.", ephemeral=True)
-
-    await interaction.response.defer()
-    guild = interaction.guild
-    ops = getattr(view.bot, "sentrix_ops", None)
-    snapshot_id = None
-    if ops is not None:
-        try:
-            snapshot_id = await ops.capture_snapshot(
-                view.guild_id, interaction.user.id,
-                label=f"Avant Smart Setup {SMART_TEMPLATES.get(view._v4_template, SMART_TEMPLATES['balanced'])['label']}",
-                source="setup-v4-auto",
-            )
-        except Exception:
-            logger.exception("Setup V4 : snapshot auto impossible guild=%s", view.guild_id)
-
-    applied: list[str] = []
-    skipped: list[str] = []
-    config_cog = view.bot.get_cog("Configuration")
-
-    for item in automatic:
-        try:
-            kind = item["kind"]
-            if kind == "security_preset":
-                for field, value in _CONFIG_MODULE.SECURITY_PRESETS.get(item["preset"], {}).items():
-                    await view.bot.db.set_automod(view.guild_id, field, value)
-                    view.security_choices[field] = value
-                await view.bot.db.set_guild_config(view.guild_id, "security_level", item["preset"])
-                automod = view.bot.get_cog("Automod")
-                if automod:
-                    automod.automod_cache.pop(view.guild_id, None)
-                view.security_touched = True
-            elif kind == "logs":
-                if config_cog is None:
-                    raise RuntimeError("Configuration cog absent")
-                created = await config_cog.create_log_channels(guild, interaction.user)
-                view.logs_created.extend(created)
-            elif kind == "set_config":
-                await view.bot.db.set_guild_config(view.guild_id, item["key"], item["value"])
-            elif kind == "create_channel":
-                existing = _find_text_channel(guild, (item["name"],))
-                channel = existing or await guild.create_text_channel(
-                    item["name"], reason=f"SentriX Smart Setup par {interaction.user}"
-                )
-                await view.bot.db.set_guild_config(view.guild_id, item["key"], channel.id)
-            elif kind == "create_role":
-                existing = discord.utils.get(guild.roles, name=item["name"])
-                role = existing or await guild.create_role(
-                    name=item["name"], reason=f"SentriX Smart Setup par {interaction.user}"
-                )
-                await view.bot.db.set_guild_config(view.guild_id, item["key"], role.id)
-            else:
-                continue
-            applied.append(item["label"])
-            await view.bot.db.log_setup_history(
-                view.guild_id, interaction.user.id, "Smart Setup", "réglage automatique", new_value=item["label"]
-            )
-        except (discord.Forbidden, discord.HTTPException) as exc:
-            skipped.append(f"{item['label']} ({type(exc).__name__})")
-        except Exception as exc:
-            logger.exception("Setup V4 : échec action=%s guild=%s", item.get("kind"), view.guild_id)
-            skipped.append(f"{item['label']} ({type(exc).__name__})")
-
-    if ops is not None:
-        try:
-            await ops.log_admin_action(
-                view.guild_id, interaction.user.id, "setup.smart-apply",
-                target_type="setup", target_id=view._v4_template,
-                before={"snapshot": snapshot_id},
-                after={"applied": applied, "skipped": skipped, "mode": view._v4_mode},
-                reversible=bool(snapshot_id),
-            )
-        except Exception:
-            logger.exception("Setup V4 : journal admin impossible guild=%s", view.guild_id)
-
-    if snapshot_id:
-        view._v4_last_snapshot = snapshot_id
-    view._v4_last_result = f"{len(applied)} changement(s) appliqué(s)" + (f" · {len(skipped)} à vérifier" if skipped else "")
-    view._v4_preview_ready = False
-    view._v4_preview_signature = None
-    _invalidate_health(view)
-    await _reload_security(view)
-    await view.persist_session()
-    view.render_page()
-    await view._refresh_message(interaction)
-
-    text = f"Smart Setup terminé : **{len(applied)}** changement(s) appliqué(s)."
-    if snapshot_id:
-        text += f" Snapshot de sécurité : **#{snapshot_id}**."
-    if skipped:
-        text += "\nÀ vérifier : " + " ; ".join(skipped)[:1200]
-    await interaction.followup.send(text, ephemeral=True)
+    await interaction.response.send_message(
+        "La configuration automatique est désactivée. Choisis chaque réglage manuellement dans les sections du setup.",
+        ephemeral=True,
+    )
 
 
 async def _rollback_auto(view, interaction: discord.Interaction):
@@ -1151,51 +1002,12 @@ def _render_page(self):
 
     if self.page == PAGE_AUTO:
         self.clear_items()
-        for label, mode, style in (
-            ("Essentiel", "essential", discord.ButtonStyle.secondary),
-            ("Complet", "complete", discord.ButtonStyle.primary),
-            ("Personnalisé", "custom", discord.ButtonStyle.secondary),
-        ):
-            button = discord.ui.Button(label=label, style=style, row=0, disabled=self._v4_mode == mode)
-            button.callback = _set_auto_mode(self, mode)
-            self.add_item(button)
-        template_select = discord.ui.Select(
-            placeholder="Choisir un modèle de serveur",
-            options=[
-                discord.SelectOption(label=meta["label"], value=key, description=meta["description"][:100], default=self._v4_template == key)
-                for key, meta in SMART_TEMPLATES.items()
-            ],
-            row=1,
-        )
-        template_select.callback = _template_callback(self, template_select)
-        self.add_item(template_select)
-        if self._v4_mode == "custom":
-            scope_select = discord.ui.Select(
-                placeholder="Choisir ce que Smart Setup peut modifier",
-                min_values=1,
-                max_values=len(AUTO_SCOPES),
-                options=[discord.SelectOption(label=label, value=key, default=key in self._v4_scopes) for key, label in AUTO_SCOPES.items()],
-                row=2,
-            )
-            scope_select.callback = _scope_callback(self, scope_select)
-            self.add_item(scope_select)
-        action_row = 3
-        preview = discord.ui.Button(label="Prévisualiser", style=discord.ButtonStyle.secondary, row=action_row)
-        async def preview_callback(interaction: discord.Interaction):
-            await _preview_auto(self, interaction)
-        preview.callback = preview_callback
-        self.add_item(preview)
-        apply_button = discord.ui.Button(label="Appliquer", style=discord.ButtonStyle.success, row=action_row, disabled=not self._v4_preview_ready)
-        async def apply_callback(interaction: discord.Interaction):
-            await _apply_auto(self, interaction)
-        apply_button.callback = apply_callback
-        self.add_item(apply_button)
-        if self._v4_last_snapshot:
-            rollback = discord.ui.Button(label="Rollback config", style=discord.ButtonStyle.danger, row=action_row)
-            async def rollback_callback(interaction: discord.Interaction):
-                await _rollback_auto(self, interaction)
-            rollback.callback = rollback_callback
-            self.add_item(rollback)
+        refresh = discord.ui.Button(label="Actualiser le guide", style=discord.ButtonStyle.secondary, row=0)
+        async def refresh_callback(interaction: discord.Interaction):
+            _invalidate_health(self)
+            await self._refresh_message(interaction)
+        refresh.callback = refresh_callback
+        self.add_item(refresh)
         _add_nav(self, save=False, row=4)
         return
 
@@ -1325,7 +1137,7 @@ def install_for_bot(bot) -> None:
             logger.exception("V113/V4 : impossible de migrer une session /setup ouverte.")
 
     _INSTALLED = True
-    logger.info("SentriX Setup V4 actif : Smart Setup, modèles, preview, snapshot, rollback et diagnostic.")
+    logger.info("SentriX Setup V4 actif : configuration manuelle guidée, diagnostic et navigation simplifiée.")
 
 
 __all__ = [

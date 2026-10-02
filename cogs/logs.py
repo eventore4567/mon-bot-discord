@@ -6,9 +6,11 @@ Discord Event -> Audit Log corrélé -> normalisation -> déduplication -> grand
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
+from types import SimpleNamespace
 
 import discord
 from discord.ext import commands
@@ -70,6 +72,58 @@ def _attachment_urls(message: discord.Message) -> list[str]:
     return [attachment.url for attachment in message.attachments]
 
 
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif")
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv")
+
+
+def _attachment_media(attachments) -> list[tuple[str, str, str]]:
+    """Normalise les pièces jointes pour SentriX Trace.
+
+    Les images peuvent ainsi être prévisualisées en bas du journal, tandis que
+    chaque fichier garde une action d'ouverture dédiée.
+    """
+    items: list[tuple[str, str, str]] = []
+    for index, attachment in enumerate(attachments or [], start=1):
+        url = str(getattr(attachment, "url", attachment) or "").strip()
+        if not url:
+            continue
+        filename = str(getattr(attachment, "filename", "") or "").strip()
+        content_type = str(getattr(attachment, "content_type", "") or "").strip().casefold()
+        clean_url = url.split("?", 1)[0]
+        if not filename:
+            filename = clean_url.rsplit("/", 1)[-1] or f"fichier-{index}"
+        lower = filename.casefold()
+        if not content_type:
+            if lower.endswith(_IMAGE_EXTENSIONS):
+                content_type = "image/unknown"
+            elif lower.endswith(_VIDEO_EXTENSIONS):
+                content_type = "video/unknown"
+        items.append((url, filename[:120], content_type))
+    return items[:10]
+
+
+def _attachment_summary(items: list[tuple[str, str, str]]) -> str | None:
+    if not items:
+        return None
+    names = ", ".join(filename for _url, filename, _type in items[:5])
+    suffix = f" +{len(items) - 5}" if len(items) > 5 else ""
+    label = "fichier" if len(items) == 1 else "fichiers"
+    return _short(f"{len(items)} {label} · {names}{suffix}", 300)
+
+
+def _attachment_links(items: list[tuple[str, str, str]]) -> list[tuple[str, str]]:
+    links: list[tuple[str, str]] = []
+    for index, (url, _filename, content_type) in enumerate(items[:8], start=1):
+        if content_type.startswith("image/"):
+            label = f"Ouvrir image {index}"
+        elif content_type.startswith("video/"):
+            label = f"Ouvrir vidéo {index}"
+        else:
+            label = f"Ouvrir fichier {index}"
+        links.append((label, url))
+    return links
+
+
 def _permission_names(perms: discord.Permissions) -> set[str]:
     return {name for name, enabled in perms if enabled}
 
@@ -91,6 +145,7 @@ class Logs(commands.Cog, name="Logs"):
         *,
         view: discord.ui.View | None = None,
         event_key: str | None = None,
+        media_items: list[tuple[str, str, str]] | None = None,
     ) -> bool:
         logger.debug(
             "SXTRACE 2 CALL guild=%s log_type=%s category=%s event_key=%s target=%s.%s",
@@ -106,6 +161,7 @@ class Logs(commands.Cog, name="Logs"):
             embed,
             view=view,
             event_key=event_key,
+            media_items=media_items,
         )
 
     @staticmethod
@@ -161,6 +217,69 @@ class Logs(commands.Cog, name="Logs"):
         except (discord.Forbidden, discord.HTTPException):
             return None, None
         return None, None
+
+    async def _message_delete_actor(
+        self,
+        guild: discord.Guild,
+        author_id: int,
+        channel_id: int,
+        *,
+        message_id: int | None = None,
+    ) -> tuple[discord.abc.User | None, discord.AuditLogEntry | None]:
+        """Essaie d'identifier qui a supprimé le message.
+
+        Discord ne fournit pas l'ID du message dans l'audit log. On corrèle donc
+        strictement l'auteur cible + le salon + une fenêtre très courte. Une
+        suppression faite par l'auteur lui-même ne produit pas d'entrée d'audit :
+        dans ce cas on laisse explicitement l'exécuteur inconnu au lieu d'inventer.
+        """
+        # Les suppressions effectuées directement par SentriX sont marquées par
+        # les moteurs internes avant l'appel Discord : attribution exacte, même
+        # sans permission Voir le journal d'audit.
+        if message_id is not None:
+            local = getattr(self.bot, "_sentrix_local_message_deleters", None)
+            if isinstance(local, dict):
+                marker = local.pop(int(message_id), None)
+                if marker and time.monotonic() - float(marker[0]) <= 8:
+                    actor_id = int(marker[1] or 0)
+                    actor = guild.get_member(actor_id) or self.bot.get_user(actor_id)
+                    if actor is not None:
+                        return actor, None
+
+        if guild.me is None or not guild.me.guild_permissions.view_audit_log:
+            return None, None
+
+        for delay in (0.15, 0.45, 0.85):
+            if delay:
+                await asyncio.sleep(delay)
+            now = discord.utils.utcnow()
+            try:
+                async for entry in guild.audit_logs(
+                    limit=12,
+                    action=discord.AuditLogAction.message_delete,
+                ):
+                    if getattr(entry.target, "id", None) != int(author_id):
+                        continue
+                    if abs((now - entry.created_at).total_seconds()) > 4:
+                        continue
+                    extra_channel = getattr(getattr(entry, "extra", None), "channel", None)
+                    extra_channel_id = getattr(extra_channel, "id", None)
+                    if extra_channel_id is not None and int(extra_channel_id) != int(channel_id):
+                        continue
+                    return entry.user, entry
+            except (discord.Forbidden, discord.HTTPException):
+                return None, None
+        return None, None
+
+    @staticmethod
+    def _delete_actor_text(actor) -> str:
+        if actor is None:
+            return "Exécuteur inconnu · suppression par l’auteur possible"
+        actor_id = getattr(actor, "id", None)
+        name = getattr(actor, "display_name", None) or getattr(actor, "name", None) or str(actor)
+        if actor_id:
+            return f"{getattr(actor, 'mention', name)}\nID : `{actor_id}`"
+        return str(name)
 
     async def _cache_message(self, message: discord.Message) -> None:
         if message.guild is None or message.author.bot:
@@ -233,23 +352,38 @@ class Logs(commands.Cog, name="Logs"):
             attachments = json.loads(row["attachments"] or "[]")
         except (TypeError, ValueError, json.JSONDecodeError):
             attachments = []
+        media_items = _attachment_media(attachments)
+        actor, audit = await self._message_delete_actor(
+            guild,
+            author_id,
+            channel_id,
+            message_id=message_id,
+        ) if channel_id else (None, None)
         fields = [
             ("Auteur", _user_ref(author_id), True),
+            ("Supprimé par", self._delete_actor_text(actor), True),
             ("Salon", _channel_ref(channel_id) if channel_id else None, True),
             ("Contenu", _short(content, 1024) if content else None, False),
-            (
-                "Pièces jointes",
-                _short("\n".join(map(str, attachments)), 1024) if attachments else None,
-                False,
-            ),
+            ("Pièces jointes", _attachment_summary(media_items), False),
         ]
         member = guild.get_member(author_id)
-        panel = self._embed("Message supprimé", identity=member, fields=fields)
+        identity = member
+        if identity is None:
+            cached_name = str(row["author_name"] or "").strip()
+            if cached_name:
+                identity = SimpleNamespace(
+                    id=author_id,
+                    display_name=cached_name,
+                    name=cached_name,
+                    display_avatar=None,
+                )
+        panel = self._embed("Message supprimé", identity=identity, fields=fields)
         view = log_service.log_actions(
             ids=[
                 ("Copier l'ID de l'auteur", author_id),
                 ("Copier l'ID du message", message_id),
-            ]
+            ],
+            links=_attachment_links(media_items),
         )
         key = log_service.make_event_key(
             guild.id,
@@ -257,7 +391,14 @@ class Logs(commands.Cog, name="Logs"):
             target_id=author_id,
             message_id=message_id,
         )
-        await self._send(guild, "message_delete", panel, view=view, event_key=key)
+        await self._send(
+            guild,
+            "message_delete",
+            panel,
+            view=view,
+            event_key=key,
+            media_items=media_items,
+        )
 
     # ---------------------------------------------------------------- MESSAGES
 
@@ -284,23 +425,27 @@ class Logs(commands.Cog, name="Logs"):
         if log_service.is_purged(message.id):
             # Supprimé par +clear : le récapitulatif de purge remplace la carte individuelle.
             return
+        actor, audit = await self._message_delete_actor(
+            message.guild,
+            message.author.id,
+            message.channel.id,
+            message_id=message.id,
+        )
+        media_items = _attachment_media(message.attachments)
         fields = [
             ("Auteur", _user_ref(message.author.id), True),
+            ("Supprimé par", self._delete_actor_text(actor), True),
             ("Salon", _channel_ref(message.channel.id), True),
             ("Contenu", _short(message.content, 1024) if message.content else None, False),
-            (
-                "Pièces jointes",
-                _short("\n".join(a.url for a in message.attachments), 1024)
-                if message.attachments else None,
-                False,
-            ),
+            ("Pièces jointes", _attachment_summary(media_items), False),
         ]
         panel = self._embed("Message supprimé", identity=message.author, fields=fields)
         view = log_service.log_actions(
             ids=[
                 ("Copier l'ID de l'auteur", message.author.id),
                 ("Copier l'ID du message", message.id),
-            ]
+            ],
+            links=_attachment_links(media_items),
         )
         key = log_service.make_event_key(
             message.guild.id,
@@ -308,7 +453,14 @@ class Logs(commands.Cog, name="Logs"):
             target_id=message.author.id,
             message_id=message.id,
         )
-        await self._send(message.guild, "message_delete", panel, view=view, event_key=key)
+        await self._send(
+            message.guild,
+            "message_delete",
+            panel,
+            view=view,
+            event_key=key,
+            media_items=media_items,
+        )
         await self._forget_cached_message(message.id)
 
     @commands.Cog.listener()
@@ -360,20 +512,35 @@ class Logs(commands.Cog, name="Logs"):
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
         if payload.guild_id is None:
             return
-        if payload.message_ids and all(log_service.is_purged(value) for value in payload.message_ids):
-            return
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
             return
+
         for message_id in payload.message_ids:
-            row = await self._cached_message_row(payload.guild_id, message_id)
-            if row is not None:
+            # Un lot peut mélanger des messages supprimés par +clear et d'autres
+            # suppressions. Tester seulement "all(...)" reloggait les messages du
+            # clear dès qu'un seul message du lot venait d'une autre source.
+            if log_service.is_purged(message_id):
+                continue
+
+            try:
+                row = await self._cached_message_row(payload.guild_id, message_id)
+                if row is None:
+                    continue
                 await self._log_deleted_from_row(
                     guild,
                     row,
                     fallback_channel_id=payload.channel_id,
                 )
                 await self._forget_cached_message(message_id)
+            except Exception:
+                # Une entrée de cache invalide ou un échec de log ne doit jamais
+                # empêcher les autres messages du même lot d'être traités.
+                logger.exception(
+                    "Journal bulk delete impossible guild=%s message=%s ; poursuite du lot.",
+                    payload.guild_id,
+                    message_id,
+                )
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):

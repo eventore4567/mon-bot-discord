@@ -69,7 +69,7 @@ def _panel_embed(guild: discord.Guild, role_ids: list[int]) -> discord.Embed:
         value='Vos choix sont privés et le panneau reste identique pour les autres membres.',
         inline=False,
     )
-    e.set_footer(text="SentriX • Rôles de notifications")
+    e.set_footer(text="SentriX Core · Rôles de notifications")
     return e
 
 
@@ -124,7 +124,7 @@ def _reponse(titre: str, description: str = "", *, kind: str = "configuration"):
     # ont vraiment de la matiere sont composes a la main, la ou ils sont ecrits.
     resume = " ".join(l.strip() for l in str(description or "").split("\n") if l.strip())
     return panels.Panneau(
-        titre=titre if titre.startswith("SentriX") else f"SentriX — {titre}",
+        titre=titre.removeprefix("SentriX — ").strip(),
         sous_titre=resume,
         kind=kind if kind in panels.INTENTIONS else "configuration",
         pied="SentriX",
@@ -318,23 +318,17 @@ class NotificationRolePanels(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def _ensure_roles(self, guild: discord.Guild) -> list[discord.Role]:
-        bot_member = guild.me
-        if bot_member is None or not bot_member.guild_permissions.manage_roles:
-            raise commands.BotMissingPermissions(["manage_roles"])
-
+    async def _existing_roles(self, guild: discord.Guild) -> tuple[list[discord.Role], list[str]]:
+        """Utilise uniquement les rôles déjà présents ; ne crée jamais de rôle."""
         roles: list[discord.Role] = []
+        missing: list[str] = []
         for name, _description in DEFAULT_NOTIFICATION_ROLES:
             role = discord.utils.get(guild.roles, name=name)
             if role is None:
-                role = await guild.create_role(
-                    name=name,
-                    permissions=discord.Permissions.none(),
-                    mentionable=False,
-                    reason="Création du panneau de notifications SentriX",
-                )
-            roles.append(role)
-        return roles[:25]
+                missing.append(name)
+            else:
+                roles.append(role)
+        return roles[:25], missing
 
     async def _save_panel(self, message: discord.Message, creator_id: int, role_ids: list[int]):
         await self.bot.db.execute(
@@ -362,12 +356,29 @@ class NotificationRolePanels(commands.Cog):
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def rolepanel(self, ctx: commands.Context):
-        try:
-            roles = await self._ensure_roles(ctx.guild)
-        except commands.BotMissingPermissions:
-            return await panels.envoyer(ctx, _reponse('Panneau de rôles', 'SentriX a besoin de la permission **Gérer les rôles** pour créer le panneau.', kind='danger'))
-        except discord.Forbidden:
-            return await panels.envoyer(ctx, _reponse('Panneau de rôles', 'Je ne peux pas créer les rôles. Vérifiez la permission **Gérer les rôles**.', kind='danger'))
+        roles, missing = await self._existing_roles(ctx.guild)
+        if missing:
+            names = "\n".join(f"• {name}" for name in missing)
+            return await panels.envoyer(
+                ctx,
+                panels.Panneau(
+                    titre="Rôles de notifications manquants",
+                    sous_titre="SentriX ne crée aucun rôle automatiquement.",
+                    sections=[
+                        panels.Section(
+                            "À créer ou renommer manuellement",
+                            texte=names,
+                        )
+                    ],
+                    kind="configuration",
+                    pied="Rôles de notifications",
+                ),
+            )
+        if not roles:
+            return await panels.texte_court(
+                ctx,
+                "Aucun rôle de notification existant n’a été trouvé.",
+            )
 
         role_ids = [role.id for role in roles]
         view = NotificationRoleView(ctx.guild, role_ids)

@@ -11,9 +11,10 @@ const GLOBAL_PAGES = new Set(['profile', 'servers', 'preferences']);
 let renderToken = 0;
 const REDUCED_MOTION = () => Boolean(state.reduceMotion) || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 const SKELETON = '<div class="grid" aria-hidden="true"><div class="skeleton full" style="min-height:72px"></div><div class="skeleton" style="min-height:180px"></div><div class="skeleton" style="min-height:180px"></div></div>';
-/* render({navigation:true}) = vraie navigation utilisateur (go) : légère sortie, squelette si
-   la page met plus de 150 ms, puis entrée (160 ms). Tout autre appel (enregistrement,
-   Actualiser, tick live) redessine sans transition et garde le contenu visible. */
+/* render({navigation:true}) = vraie navigation utilisateur (go).
+   Si une page est déjà affichée, on la garde visible pendant le chargement et on ne la
+   remplace jamais par un squelette : cela évite le saut de mise en page. La transition
+   ne touche qu'à l'opacité, jamais à la position du contenu. */
 async function render({ navigation = false } = {}) {
   if (!state.guild && !GLOBAL_PAGES.has(state.page)) {
     state.page = 'servers';
@@ -23,10 +24,20 @@ async function render({ navigation = false } = {}) {
   setHead(); renderNav(); renderSubnav(); syncUrl();
   const el = content();
   const animate = navigation && !REDUCED_MOTION();
+  const hadContent = el.children.length > 0;
   el.classList.remove('page-enter');
-  if (animate && el.children.length) el.classList.add('page-leave');
+  if (animate && hadContent) el.classList.add('page-leave');
   let painted = false;
-  const skeleton = navigation ? setTimeout(() => { if (!painted && token === renderToken) { el.classList.remove('page-leave'); el.innerHTML = SKELETON; } }, 150) : null;
+  // Le skeleton n'est autorisé que quand il n'y a encore aucune page à conserver.
+  // En navigation normale, garder l'ancienne page évite le flash et le layout shift.
+  const skeleton = navigation && !hadContent
+    ? setTimeout(() => {
+        if (!painted && token === renderToken && !el.children.length) {
+          el.classList.remove('page-leave');
+          el.innerHTML = SKELETON;
+        }
+      }, 150)
+    : null;
   el.setAttribute('aria-busy', 'true');
   try {
     await (PAGES[state.page] || renderOverview)();

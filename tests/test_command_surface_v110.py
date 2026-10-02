@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import sentrix_command_surface_v110 as surface
 
 
@@ -21,15 +23,19 @@ def test_core_moderation_uses_common_direct_slash_names() -> None:
         assert surface.STANDARD_DIRECT_SLASH[name] == name
 
 
-def test_info_level_and_music_use_common_names() -> None:
+def test_info_and_level_keep_common_direct_names_but_music_stays_canonical() -> None:
     assert surface.STANDARD_DIRECT_SLASH["avatar"] == "avatar"
     assert surface.STANDARD_DIRECT_SLASH["userinfo"] == "userinfo"
     assert surface.STANDARD_DIRECT_SLASH["serverinfo"] == "serverinfo"
     assert surface.STANDARD_DIRECT_SLASH["leaderboard-levels"] == "leaderboard"
-    assert surface.STANDARD_DIRECT_SLASH["play"] == "play"
-    assert surface.STANDARD_DIRECT_SLASH["music pause"] == "pause"
-    assert surface.STANDARD_DIRECT_SLASH["music queue"] == "queue"
-    assert surface.STANDARD_DIRECT_SLASH["music nowplaying"] == "nowplaying"
+
+    # La musique n'est plus dispersée en /play, /pause, /queue, etc.
+    # La surface unique est /musique ... dans sentrix_canonical_command_surface.
+    assert "play" not in surface.STANDARD_DIRECT_SLASH
+    assert "music pause" not in surface.STANDARD_DIRECT_SLASH
+    assert "music queue" not in surface.STANDARD_DIRECT_SLASH
+    assert "music nowplaying" not in surface.STANDARD_DIRECT_SLASH
+    assert "music play" not in surface.SUPPRESSED_SLASH_DUPLICATES
 
 
 def test_role_management_uses_role_group() -> None:
@@ -66,3 +72,28 @@ def test_collision_suffix_is_readable() -> None:
 def test_me_and_profile_are_not_public_direct_slash_commands() -> None:
     assert "profile" not in surface.STANDARD_DIRECT_SLASH
     assert "me" not in surface.STANDARD_DIRECT_SLASH.values()
+
+
+
+def test_grouped_command_is_not_hidden_only_because_simple_name_is_merged(monkeypatch) -> None:
+    monkeypatch.setattr(surface, "_ORIGINAL_SHOULD_EXPOSE", lambda _command: True)
+
+    music_queue = SimpleNamespace(
+        qualified_name="music queue",
+        name="queue",
+        root_parent=object(),
+    )
+    music_resume = SimpleNamespace(
+        qualified_name="music resume",
+        name="resume",
+        root_parent=object(),
+    )
+    music_clear = SimpleNamespace(
+        qualified_name="music clear",
+        name="clear",
+        root_parent=object(),
+    )
+
+    assert surface._compact_should_expose(music_queue) is True
+    assert surface._compact_should_expose(music_resume) is True
+    assert surface._compact_should_expose(music_clear) is True

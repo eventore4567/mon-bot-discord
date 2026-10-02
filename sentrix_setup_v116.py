@@ -67,7 +67,14 @@ MODULES: tuple[ModuleSpec, ...] = (
         _s("staff", "Rôle staff", "Choisir le rôle principal utilisé par les outils de modération.", "config:mod_role"),
         _s("history", "Historique", "Consulter les dernières modifications et actions setup.", "history"),
     )),
-    ModuleSpec("members", "Membres", "Bienvenue, départ, vérification, autorôles et règlement.", (
+    ModuleSpec("automation", "Automatisations", "Réactions automatiques et règles de contenu par salon.", (
+        _s("reactions", "Réactions automatiques", "Choisir un salon et faire réagir SentriX à tous les messages ou à un mot-clé.", "automation:reactions"),
+        _s("channel_rules", "Règles de salons", "Limiter un salon aux images uniquement ou y interdire les messages des membres.", "automation:channel-rules"),
+    )),
+    ModuleSpec("music", "Musique", "Lecteur vocal, salon musique et panneau interactif dans le chat du vocal.", (
+        _s("system", "Système musique", "Activer ou désactiver la musique et choisir le vocal qui héberge le lecteur.", "music-config"),
+    )),
+    ModuleSpec("members", "Bienvenue & Départ", "Arrivées, départs, vérification et rôles choisis manuellement.", (
         _s("welcome", "Bienvenue", "Salon et paramètres d'accueil des nouveaux membres.", "config:welcome_channel"),
         _s("goodbye", "Départ", "Salon et comportement lors du départ d'un membre.", "config:goodbye_channel"),
         _s("verify", "Rôle vérifié", "Choisir le rôle attribué après vérification.", "verification"),
@@ -195,6 +202,28 @@ async def _module_status(view, module_key: str) -> str:
         return f"{active}/{len(v4._CONFIG_MODULE.AUTOMOD_TOGGLE_LABELS)} protections actives"
     if module_key == "moderation":
         return f"Staff : {_mention(guild, conf, 'mod_role', role=True)}"
+    if module_key == "automation":
+        try:
+            from cogs import setup_v2_ui as setup_v2
+            reactions = await setup_v2._automation_reaction_rows(view.bot, view.guild_id)
+            rules = await setup_v2.channel_message_rules.list_rules(view.bot, guild)
+            active_reactions = sum(bool(row["enabled"]) for row in reactions)
+            active_rules = sum(bool(row.get("enabled")) for row in rules)
+            return (
+                f"Réactions : {active_reactions}/{len(reactions)} actives · "
+                f"Règles de salons : {active_rules}/{len(rules)} actives"
+            )
+        except Exception:
+            logger.exception("V116 : lecture des automatisations impossible guild=%s", view.guild_id)
+            return "Automatisations disponibles"
+    if module_key == "music":
+        music = view.bot.get_cog("Music")
+        if music is None:
+            return "Module musique indisponible"
+        settings = await music.get_system_settings(view.guild_id)
+        channel = guild.get_channel(settings["voice_channel_id"]) if settings["voice_channel_id"] else None
+        state = "activé" if settings["enabled"] else "désactivé"
+        return f"Système {state} · Vocal : {channel.mention if channel else 'non configuré'}"
     if module_key == "members":
         return f"Bienvenue : {_mention(guild, conf, 'welcome_channel')} · Autorôle : {_mention(guild, conf, 'autorole', role=True)}"
     if module_key == "logs":
@@ -323,6 +352,151 @@ def _route_to_config(view, field: str) -> None:
     view.picker_selected = field
 
 
+async def _open_automation(view, interaction: discord.Interaction, kind: str) -> None:
+    from types import SimpleNamespace
+    from cogs import setup_v2_ui as setup_v2
+
+    guild = view._guild()
+    if guild is None:
+        return await interaction.response.send_message("Serveur introuvable.", ephemeral=True)
+
+    adapter = SimpleNamespace(bot=view.bot, guild=guild)
+
+    if kind == "reactions":
+        rows = await setup_v2._automation_reaction_rows(view.bot, view.guild_id)
+        embed = embeds.info(
+            "Choisis un salon, puis si SentriX doit réagir à tous les messages ou seulement à un mot-clé. "
+            "Tu peux ajouter jusqu’à 8 emojis et gérer les règles déjà enregistrées.",
+            title="Réactions automatiques",
+        )
+        subview = setup_v2.AutoReactionSetupView(adapter, interaction.user.id, rows)
+    elif kind == "channel-rules":
+        rows = await setup_v2.channel_message_rules.list_rules(view.bot, guild)
+        embed = embeds.info(
+            "**Images uniquement** : une vraie image doit être jointe, sans texte ni autre fichier.\n"
+            "**Messages interdits** : les messages des membres sont supprimés.\n\n"
+            "SentriX ne crée aucun salon et le staff disposant des permissions de gestion n’est pas bloqué.",
+            title="Règles de salons",
+        )
+        subview = setup_v2.ChannelRuleSetupView(adapter, interaction.user.id, rows)
+    else:
+        return await interaction.response.send_message("Automatisation inconnue.", ephemeral=True)
+
+    await panels.envoyer(
+        interaction.response,
+        panels.avec_composants(panels.depuis_embed(embed), subview),
+        ephemere=True,
+    )
+
+
+class MusicSetupView(discord.ui.View):
+    def __init__(self, bot, guild: discord.Guild, owner_id: int, settings: dict):
+        super().__init__(timeout=180)
+        self.bot = bot
+        self.guild = guild
+        self.owner_id = int(owner_id)
+        self.enabled = bool(settings.get("enabled"))
+        self.channel_id = settings.get("voice_channel_id")
+
+        select = discord.ui.ChannelSelect(
+            placeholder="Choisir le vocal musique",
+            min_values=1,
+            max_values=1,
+            channel_types=[discord.ChannelType.voice],
+            row=0,
+        )
+
+        async def select_cb(interaction: discord.Interaction):
+            self.channel_id = select.values[0].id
+            await interaction.response.send_message(
+                f"Vocal sélectionné : {select.values[0].mention}. Appuyez sur Activer pour enregistrer.",
+                ephemeral=True,
+            )
+
+        select.callback = select_cb
+        self.add_item(select)
+
+        activate = discord.ui.Button(label="Activer", style=discord.ButtonStyle.success, row=1)
+        disable = discord.ui.Button(label="Désactiver", style=discord.ButtonStyle.danger, row=1)
+
+        async def activate_cb(interaction: discord.Interaction):
+            if not self.channel_id:
+                return await interaction.response.send_message(
+                    "Choisissez d'abord le vocal musique.",
+                    ephemeral=True,
+                )
+            music = self.bot.get_cog("Music")
+            if music is None:
+                return await interaction.response.send_message("Module musique indisponible.", ephemeral=True)
+            try:
+                await music.configure_system(
+                    self.guild,
+                    enabled=True,
+                    voice_channel_id=self.channel_id,
+                    actor_id=interaction.user.id,
+                )
+            except ValueError as exc:
+                return await interaction.response.send_message(str(exc), ephemeral=True)
+            self.enabled = True
+            await interaction.response.send_message(
+                "Système musique activé. Le panneau apparaîtra dans le chat du vocal quand un membre le rejoint.",
+                ephemeral=True,
+            )
+
+        async def disable_cb(interaction: discord.Interaction):
+            music = self.bot.get_cog("Music")
+            if music is None:
+                return await interaction.response.send_message("Module musique indisponible.", ephemeral=True)
+            await music.configure_system(
+                self.guild,
+                enabled=False,
+                voice_channel_id=self.channel_id,
+                actor_id=interaction.user.id,
+            )
+            self.enabled = False
+            await interaction.response.send_message(
+                "Système musique désactivé et SentriX a quitté le vocal.",
+                ephemeral=True,
+            )
+
+        activate.callback = activate_cb
+        disable.callback = disable_cb
+        self.add_item(activate)
+        self.add_item(disable)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Ce menu ne vous appartient pas.", ephemeral=True)
+            return False
+        return True
+
+
+async def _open_music_config(view, interaction: discord.Interaction) -> None:
+    guild = view._guild()
+    music = view.bot.get_cog("Music")
+    if guild is None or music is None:
+        return await interaction.response.send_message("Module musique indisponible.", ephemeral=True)
+    settings = await music.get_system_settings(view.guild_id)
+    channel = guild.get_channel(settings["voice_channel_id"]) if settings["voice_channel_id"] else None
+    embed = embeds.info(
+        (
+            f"État : **{'Activé' if settings['enabled'] else 'Désactivé'}**\n"
+            f"Vocal : **{channel.mention if channel else 'Non configuré'}**\n\n"
+            "Quand un membre rejoint le vocal configuré, SentriX le mentionne dans le chat du vocal "
+            "et affiche un petit lecteur pour choisir une musique, mettre en pause, passer ou arrêter."
+        ),
+        title="Système musique",
+    )
+    await panels.envoyer(
+        interaction.response,
+        panels.avec_composants(
+            panels.depuis_embed(embed),
+            MusicSetupView(view.bot, guild, interaction.user.id, settings),
+        ),
+        ephemere=True,
+    )
+
+
 async def _run_action(view, interaction: discord.Interaction) -> None:
     _ensure_state(view)
     module = MODULE_BY_KEY[view._v116_module]
@@ -337,6 +511,10 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
         view.page = v4.PAGE_SUMMARY
     elif action == "levels-config":
         return await _open_levels_config(view, interaction)
+    elif action.startswith("automation:"):
+        return await _open_automation(view, interaction, action.split(":", 1)[1])
+    elif action == "music-config":
+        return await _open_music_config(view, interaction)
     elif action == "verification":
         _route_to_config(view, "verify_role")
     elif action == "history":

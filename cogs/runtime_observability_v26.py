@@ -16,6 +16,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from core.module_health import is_technical_failure
+
 logger = logging.getLogger("bot.runtime-observability")
 
 _SLOW_COMMAND_SECONDS = 2.0
@@ -118,6 +120,52 @@ def _wrap_db_method(bot: commands.Bot, method_name: str) -> None:
     setattr(db, method_name, measured)
 
 
+def _module_name_from_object(value: Any) -> str | None:
+    if value is None:
+        return None
+    module = str(getattr(value, "__module__", "") or "")
+    if module.startswith("cogs."):
+        return module
+    cls = getattr(value, "__class__", None)
+    module = str(getattr(cls, "__module__", "") or "")
+    return module if module.startswith("cogs.") else None
+
+
+def _prefix_module_name(ctx: commands.Context) -> str | None:
+    command = getattr(ctx, "command", None)
+    cog = getattr(command, "cog", None)
+    return _module_name_from_object(cog) or _module_name_from_object(getattr(command, "callback", None))
+
+
+def _slash_module_name(command: Any) -> str | None:
+    binding = getattr(command, "binding", None)
+    return _module_name_from_object(binding) or _module_name_from_object(getattr(command, "callback", None))
+
+
+def _is_technical_module_failure(error: BaseException) -> bool:
+    return is_technical_failure(error)
+
+
+def _record_module_runtime_error(bot: commands.Bot, module_name: str | None, error: BaseException) -> None:
+    if not _is_technical_module_failure(error):
+        return
+    kernel = getattr(bot, "module_kernel", None)
+    if module_name and kernel is not None and hasattr(kernel, "record_runtime_error"):
+        kernel.record_runtime_error(module_name, error)
+
+
+def _record_module_runtime_success(bot: commands.Bot, module_name: str | None) -> None:
+    kernel = getattr(bot, "module_kernel", None)
+    if module_name and kernel is not None and hasattr(kernel, "record_runtime_success"):
+        kernel.record_runtime_success(module_name)
+
+
+def _exit_module_runtime(bot: commands.Bot, module_name: str | None) -> None:
+    kernel = getattr(bot, "module_kernel", None)
+    if module_name and kernel is not None and hasattr(kernel, "exit_runtime"):
+        kernel.exit_runtime(module_name)
+
+
 def _command_key(ctx: commands.Context) -> int | None:
     message = getattr(ctx, "message", None)
     message_id = getattr(message, "id", None)
@@ -209,8 +257,12 @@ def install(bot: commands.Bot) -> None:
         started = state["prefix_starts"].pop(key, None)
         if started is None:
             return
-        name = getattr(getattr(ctx, "command", None), "qualified_name", "inconnue")
+        command = getattr(ctx, "command", None)
+        name = getattr(command, "qualified_name", "inconnue")
+        module_name = _prefix_module_name(ctx)
         _record_command_duration(bot, str(name), time.perf_counter() - started, failed=False)
+        _record_module_runtime_success(bot, module_name)
+        _exit_module_runtime(bot, module_name)
 
     async def prefix_error(ctx: commands.Context, error: commands.CommandError):
         key = _command_key(ctx)
@@ -218,8 +270,11 @@ def install(bot: commands.Bot) -> None:
         started = state["prefix_starts"].pop(key, None) if key is not None else None
         name = getattr(getattr(ctx, "command", None), "qualified_name", "inconnue")
         original = getattr(error, "original", error)
+        module_name = _prefix_module_name(ctx)
         if started is not None:
             _record_command_duration(bot, str(name), time.perf_counter() - started, failed=True)
+        _record_module_runtime_error(bot, module_name, original)
+        _exit_module_runtime(bot, module_name)
         record_error(
             bot,
             command=str(name),
@@ -243,7 +298,10 @@ def install(bot: commands.Bot) -> None:
         if started is None:
             return
         name = getattr(command, "qualified_name", getattr(command, "name", "inconnue"))
+        module_name = _slash_module_name(command)
         _record_command_duration(bot, str(name), time.perf_counter() - started, failed=False)
+        _record_module_runtime_success(bot, module_name)
+        _exit_module_runtime(bot, module_name)
 
     bot.add_listener(prefix_start, "on_command")
     bot.add_listener(prefix_complete, "on_command_completion")

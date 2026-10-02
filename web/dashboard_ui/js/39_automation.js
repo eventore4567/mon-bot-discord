@@ -3,6 +3,7 @@
 const _renderAutoReactions = renderAutomation;
 SUBS.automation = [
   ['reactions', 'Réactions automatiques'],
+  ['channel-rules', 'Règles de salons'],
   ['starboard', 'Starboard'],
   ['scheduled', 'Messages programmés'],
   ['sticky', 'Messages sticky'],
@@ -11,6 +12,110 @@ SUBS.automation = [
 ];
 
 const automationPlus = (force = false) => cached('automation-plus', () => gget('/automation/plus'), { force });
+
+const channelMessageRules = (force = false) => cached(
+  'automation-channel-rules',
+  () => gget('/automation/channel-rules'),
+  { force }
+);
+
+async function renderChannelMessageRules() {
+  let d; try { d = await channelMessageRules(true); } catch (e) { return errorView(e); }
+  const items = d.items || [];
+  const modeLabel = mode => mode === 'images_only' ? 'Images uniquement' : 'Messages interdits';
+  content().innerHTML = `<div class="grid">
+    <section class="card full">
+      <div class="card-head">
+        <div>
+          <h2>Règles de salons</h2>
+          <p>Contrôlez ce que les membres ont le droit d’envoyer dans certains salons.</p>
+        </div>
+        <button class="btn primary" id="channelRuleAdd" type="button">Ajouter une règle</button>
+      </div>
+      <div class="list">
+        ${items.length ? items.map(r => `<div class="row">
+          <div class="row-main">
+            <b>${esc(channelName(r.channel_id) || '#' + (r.channel_name || r.channel_id))}</b>
+            <small>${esc(modeLabel(r.mode))} · le staff avec Gérer les messages passe outre</small>
+          </div>
+          <div class="row-actions">
+            <label class="switch-row" style="padding:4px 8px"><input class="switch" type="checkbox" data-channel-rule-toggle="${esc(r.channel_id)}" ${r.enabled ? 'checked' : ''} aria-label="Activer la règle"></label>
+            <button class="btn sm danger" type="button" data-channel-rule-del="${esc(r.channel_id)}">Supprimer</button>
+          </div>
+        </div>`).join('') : emptyState('Aucune règle de salon', 'Exemple : un salon où seuls les screenshots/images sont autorisés.')}
+      </div>
+    </section>
+    <section class="card full">
+      <h2>Modes disponibles</h2>
+      <div class="list compact">
+        <div class="row"><div class="row-main"><b>Messages interdits</b><small>Les messages des membres sont supprimés dans ce salon.</small></div></div>
+        <div class="row"><div class="row-main"><b>Images uniquement</b><small>Il faut joindre au moins une vraie image et ne mettre aucun texte. Les autres fichiers sont refusés.</small></div></div>
+      </div>
+    </section>
+  </div>`;
+
+  $('channelRuleAdd').onclick = () => openModal({
+    title: 'Nouvelle règle de salon',
+    body: `<div class="fields">
+      <div class="field"><label for="channelRuleChannel">Salon</label><select id="channelRuleChannel">${channelOptions('', 'text', 'Choisir un salon')}</select></div>
+      <div class="field"><label for="channelRuleMode">Règle</label><select id="channelRuleMode">
+        <option value="images_only">Images uniquement</option>
+        <option value="blocked">Messages interdits</option>
+      </select></div>
+      <div class="field full"><small>SentriX ne crée aucun salon. Les bots, administrateurs, membres avec Gérer le serveur ou Gérer les messages ne sont pas bloqués.</small></div>
+    </div>`,
+    actions: [
+      { label: 'Annuler' },
+      { label: 'Enregistrer', kind: 'primary', keep: true, onClick: async () => {
+        if (!$('channelRuleChannel').value) return toast('Choisissez un salon.', true);
+        try {
+          const r = await gpost('/automation/channel-rules', {
+            action: 'save',
+            channel_id: $('channelRuleChannel').value,
+            mode: $('channelRuleMode').value,
+          });
+          closeModal();
+          toast(r.message || 'Règle enregistrée.');
+          invalidate('automation-channel-rules');
+          await renderChannelMessageRules();
+        } catch (e) { toast(e.message, true); }
+      } },
+    ],
+  });
+
+  content().querySelectorAll('[data-channel-rule-toggle]').forEach(x => x.onchange = async () => {
+    try {
+      await gpost('/automation/channel-rules', {
+        action: 'toggle',
+        channel_id: x.dataset.channelRuleToggle,
+        enabled: x.checked,
+      });
+      invalidate('automation-channel-rules');
+    } catch (e) {
+      x.checked = !x.checked;
+      toast(e.message, true);
+    }
+  });
+
+  content().querySelectorAll('[data-channel-rule-del]').forEach(x => x.onclick = async () => {
+    if (!(await confirmDialog({
+      title: 'Supprimer cette règle ?',
+      body: 'Les messages de ce salon ne seront plus filtrés par cette règle.',
+      confirm: 'Supprimer',
+      danger: true,
+    }))) return;
+    try {
+      const r = await gpost('/automation/channel-rules', {
+        action: 'delete',
+        channel_id: x.dataset.channelRuleDel,
+      });
+      toast(r.message || 'Règle supprimée.');
+      invalidate('automation-channel-rules');
+      await renderChannelMessageRules();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 
 async function renderStarboard() {
   let d; try { d = await automationPlus(); } catch (e) { return errorView(e); }
@@ -175,6 +280,7 @@ async function renderVoiceHub() {
 renderAutomation = async function renderAutomationHub() {
   if (!SUBS.automation.some(([key]) => key === state.sub)) state.sub = 'reactions';
   if (state.sub === 'reactions') return _renderAutoReactions();
+  if (state.sub === 'channel-rules') return renderChannelMessageRules();
   if (state.sub === 'starboard') return renderStarboard();
   if (state.sub === 'scheduled') return renderScheduledMessages();
   if (state.sub === 'sticky') return renderStickyMessages();

@@ -1,7 +1,8 @@
-"""Renderer Components V2 et historique SQLite des journaux SentriX.
+"""SentriX Trace — renderer Components V2 et historique SQLite des journaux.
 
-Le transport reste strictement Components V2 : bannière en premier, bloc identité,
-bloc événement narratif, puis actions. Aucun fallback ``channel.send(embed=...)``.
+Le transport reste strictement Components V2. Tous les journaux partagent une
+identité visuelle propre à SentriX : bannière, signature Trace, événement,
+identité concernée, contexte, médias et actions. Aucun fallback embed legacy.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ import discord
 import config
 from utils.log_banners import COLORS, get_banner
 from utils.log_categories import (
+    CATEGORIES,
     DEFAULT_EVENT_EMOJI,
     EVENT_EMOJI,
     canonical_event_type,
@@ -739,6 +741,196 @@ def _accent_for_kind(kind: str) -> int | None:
     return (r << 16) | (g << 8) | b
 
 
+_TRACE_TITLES: dict[str, str] = {
+    "member_kick": "Membre expulsé",
+    "member_ban": "Membre banni",
+    "member_unban": "Membre débanni",
+    "member_timeout": "Timeout appliqué",
+    "member_untimeout": "Timeout retiré",
+    "member_warn": "Avertissement ajouté",
+    "member_clear": "Messages nettoyés",
+    "message_delete": "Message supprimé",
+    "message_edit": "Message modifié",
+    "message_bulk": "Suppression multiple",
+    "member_join": "Membre arrivé",
+    "member_leave": "Membre parti",
+    "member_remove": "Membre parti",
+    "member_update": "Profil membre modifié",
+    "member_roles": "Rôles du membre modifiés",
+    "role_add": "Rôle ajouté au membre",
+    "role_remove": "Rôle retiré du membre",
+    "channel_create": "Salon créé",
+    "channel_delete": "Salon supprimé",
+    "channel_update": "Salon modifié",
+    "pins_update": "Épingles modifiées",
+    "role_create": "Rôle créé",
+    "role_delete": "Rôle supprimé",
+    "role_update": "Rôle modifié",
+    "voice_join": "Entrée en vocal",
+    "voice_leave": "Sortie du vocal",
+    "voice_move": "Déplacement vocal",
+    "voice_state": "État vocal modifié",
+    "voice_update": "Vocal modifié",
+    "soundboard_create": "Son ajouté",
+    "soundboard_update": "Son modifié",
+    "soundboard_delete": "Son supprimé",
+    "soundboard_play": "Son joué",
+    "guild_update": "Serveur modifié",
+    "ticket_open": "Ticket ouvert",
+    "ticket_close": "Ticket fermé",
+    "ticket_claim": "Ticket pris en charge",
+    "ticket_unclaim": "Prise en charge retirée",
+    "ticket_member_add": "Membre ajouté au ticket",
+    "ticket_member_remove": "Membre retiré du ticket",
+    "ticket_rename": "Ticket renommé",
+    "ticket_transfer": "Ticket transféré",
+    "ticket_reopen": "Ticket rouvert",
+    "ticket_delete": "Ticket supprimé",
+    "ticket_rating": "Ticket évalué",
+    "ticket_autoclose": "Ticket fermé automatiquement",
+    "ticket_note": "Note ajoutée au ticket",
+    "ticket_bump": "Ticket relancé",
+    "automod_link": "Lien bloqué",
+    "automod_invite": "Invitation bloquée",
+    "automod_scam": "Arnaque bloquée",
+    "automod_word": "Contenu bloqué",
+    "automod_mention": "Mentions bloquées",
+    "automod_spam": "Spam bloqué",
+    "spam_detected": "Spam détecté",
+    "spam_purge": "Spam nettoyé",
+    "antiraid": "Protection anti-raid",
+    "raid_detected": "Raid détecté",
+    "raid_lockdown": "Serveur verrouillé",
+    "emoji_update": "Émojis modifiés",
+    "invite_create": "Invitation créée",
+    "invite_delete": "Invitation supprimée",
+    "sticker_update": "Stickers modifiés",
+    "webhook_update": "Webhooks modifiés",
+    "resource_add": "Ressource ajoutée",
+    "resource_remove": "Ressource supprimée",
+    "file_delete": "Fichier supprimé",
+    "file_upload": "Fichier envoyé",
+    "file_blocked": "Fichier bloqué",
+}
+
+_TRACE_TOKEN_CODES: dict[str, str] = {
+    "member": "MBR",
+    "message": "MSG",
+    "channel": "CH",
+    "role": "ROLE",
+    "voice": "VC",
+    "soundboard": "SND",
+    "guild": "SRV",
+    "ticket": "TKT",
+    "automod": "AM",
+    "spam": "SPAM",
+    "raid": "RAID",
+    "emoji": "EMJ",
+    "invite": "INV",
+    "sticker": "STK",
+    "webhook": "WH",
+    "resource": "RES",
+    "file": "FILE",
+    "create": "NEW",
+    "delete": "DEL",
+    "update": "UPD",
+    "join": "JOIN",
+    "leave": "LEAVE",
+    "remove": "REM",
+    "add": "ADD",
+    "kick": "KICK",
+    "ban": "BAN",
+    "unban": "UNBAN",
+    "timeout": "TO",
+    "untimeout": "UNTO",
+    "warn": "WARN",
+    "clear": "CLR",
+    "edit": "EDIT",
+    "bulk": "BULK",
+    "open": "OPEN",
+    "close": "CLOSE",
+    "claim": "CLAIM",
+    "unclaim": "UNCLAIM",
+    "rename": "RENAME",
+    "transfer": "MOVE",
+    "reopen": "REOPEN",
+    "rating": "RATE",
+    "autoclose": "AUTO",
+    "note": "NOTE",
+    "bump": "BUMP",
+    "link": "LINK",
+    "scam": "SCAM",
+    "word": "WORD",
+    "mention": "MENTION",
+    "detected": "DETECT",
+    "purge": "PURGE",
+    "lockdown": "LOCK",
+    "blocked": "BLOCK",
+    "upload": "UP",
+}
+
+
+def _trace_code(event_type: str) -> str:
+    event = canonical_event_type(event_type)
+    parts = [part for part in str(event or "event").split("_") if part]
+    coded = [
+        _TRACE_TOKEN_CODES.get(part, re.sub(r"[^A-Z0-9]", "", part.upper())[:4] or "EVT")
+        for part in parts
+    ]
+    return "-".join(coded)[:22] or "EVT"
+
+
+def _trace_title(event_type: str, fallback: str = "") -> str:
+    event = canonical_event_type(event_type, fallback, "")
+    if event in _TRACE_TITLES:
+        return _TRACE_TITLES[event]
+    clean = safe_text(fallback or "").strip()
+    if clean and clean.casefold() not in {"journal sentrix", "sentrix"}:
+        return clean[:120]
+    return str(event or "Événement").replace("_", " ").strip().capitalize()[:120]
+
+
+def _trace_meta(event_type: str, *, emoji: str = "") -> str:
+    event = canonical_event_type(event_type)
+    category = category_for(event)
+    category_label = CATEGORIES.get(category, category.replace("_", " ").title())
+    marker = (emoji or EVENT_EMOJI.get(event, DEFAULT_EVENT_EMOJI)).strip()
+    prefix = f"{marker} " if marker else ""
+    return f"-# SENTRIX TRACE · {prefix}{category_label} · {_trace_code(event)}"
+
+
+def _trace_footer(event_type: str, footer: str = "") -> str:
+    clean = safe_text(footer)
+    clean = re.sub(r"^SentriX\s*•\s*", "", clean, flags=re.IGNORECASE).strip()
+    base = f"SentriX Trace · {_trace_code(event_type)}"
+    return f"{base} · {clean}" if clean else base
+
+
+def _trace_identity_label(event_type: str) -> str:
+    """Libellé humain de l'identité affichée dans SentriX Trace.
+
+    L'ancien rendu disait toujours « Entité Discord », même pour un membre,
+    un salon ou un rôle. Trace garde la même structure légère mais nomme ce que
+    l'on regarde : le panneau paraît moins générique sans ajouter de bloc.
+    """
+    event = canonical_event_type(event_type)
+    if event.startswith("message_"):
+        return "Auteur"
+    if event.startswith(("member_", "voice_", "ticket_", "automod_", "spam_", "raid_")):
+        return "Membre"
+    if event.startswith("channel_") or event == "pins_update":
+        return "Salon"
+    if event.startswith("role_"):
+        return "Rôle"
+    if event == "guild_update":
+        return "Serveur"
+    if event.startswith("invite_"):
+        return "Créateur"
+    if event.startswith(("file_", "resource_")):
+        return "Élément"
+    return "Élément"
+
+
 class WideLogView(discord.ui.LayoutView):
     def __init__(
         self,
@@ -751,14 +943,13 @@ class WideLogView(discord.ui.LayoutView):
         identity_icon: str | None = None,
         emoji: str = "",
         log_type: str = "",
+        media_items: list[tuple[str, str, str]] | None = None,
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(
             accent_colour=discord.Colour(accent) if accent is not None else None
         )
 
-        # Deux séparateurs maximum par panneau. Le compteur garantit la règle quelle que
-        # soit la combinaison de blocs présents (identité absente, boutons absents...).
         separators = 0
 
         def add_separator() -> bool:
@@ -768,60 +959,130 @@ class WideLogView(discord.ui.LayoutView):
             try:
                 container.add_item(_sep())
             except Exception:
-                logger.exception("SENTRIX V2 separator")
+                logger.exception("SENTRIX TRACE separator")
                 return False
             separators += 1
             return True
 
-        # add_item(media=...) sans description= : une description affiche un badge « ALT »
-        # par-dessus la bannière.
+        # SIGNATURE — bannière SentriX toujours en premier.
         gallery = discord.ui.MediaGallery()
         gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
         add_separator()
 
-        # BLOC 1 — identité de l'entité concernée, jamais le bot par défaut.
+        event_type = canonical_event_type(
+            log_type,
+            embed.title or "",
+            embed.description or "",
+        )
+
+        # BLOC 1 — l'événement est la première information lisible.
+        container.add_item(
+            discord.ui.TextDisplay(
+                _trace_meta(event_type, emoji=emoji)
+            )
+        )
+        container.add_item(
+            discord.ui.TextDisplay(
+                f"## {_trace_title(event_type, embed.title or '')}"
+            )
+        )
+
+        # BLOC 2 — identité concernée, compacte et secondaire.
         if identity_name:
-            ident = f"## {safe_text(identity_name)[:80]}"
+            ident = f"**{safe_text(identity_name)[:80]}**"
+            identity_label = _trace_identity_label(event_type)
+            ident += f"\n-# {identity_label}"
             if identity_id:
-                ident += f"\n> -# ID : {identity_id}"
+                ident += f" · ID {identity_id}"
             placed = False
             if identity_icon:
                 try:
                     container.add_item(
                         discord.ui.Section(
                             discord.ui.TextDisplay(ident),
-                            # Thumbnail sans description= : sinon Discord affiche « ALT ».
-                        accessory=discord.ui.Thumbnail(str(identity_icon)),
+                            accessory=discord.ui.Thumbnail(str(identity_icon)),
                         )
                     )
                     placed = True
                 except Exception:
-                    logger.exception("SENTRIX V2 identity section")
+                    logger.exception("SENTRIX TRACE identity section")
             if not placed:
                 container.add_item(discord.ui.TextDisplay(ident))
             add_separator()
 
-        # BLOC 2 — événement.
-        title = safe_text(embed.title or "Journal SentriX")[:200]
-        badge = emoji or EVENT_EMOJI.get(log_type, DEFAULT_EVENT_EMOJI)
-        heading = f"### {badge} {title}".strip()
-        container.add_item(discord.ui.TextDisplay(heading))
-
+        # BLOC 3 — contexte humain. Les détails longs restent gérés par
+        # narrative_body(), donc aucun champ historique n'est perdu.
         body = narrative_body(
             embed,
-            log_type=log_type,
+            log_type=event_type,
             identity_name=identity_name,
             identity_id=identity_id,
         )
         if body:
+            container.add_item(discord.ui.TextDisplay("### Détails"))
             container.add_item(discord.ui.TextDisplay(body[:3000]))
 
         footer = safe_text(getattr(embed.footer, "text", None))[:250]
-        if footer:
-            container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
+        container.add_item(
+            discord.ui.TextDisplay(
+                f"-# {_trace_footer(event_type, footer)}"
+            )
+        )
 
-        # Les boutons restent DANS le Container, en ActionRow, tous en secondary.
+        # Médias APRÈS le contexte. La bannière reste donc la seule image
+        # structurelle en haut ; les pièces jointes de l'événement restent en bas.
+        if media_items:
+            media_gallery = discord.ui.MediaGallery()
+            gallery_count = 0
+            fallback_files: list[tuple[str, str]] = []
+
+            for source, filename, content_type in list(media_items)[:10]:
+                source = str(source or "").strip()
+                filename = safe_text(filename or "fichier")[:120]
+                content_type = str(content_type or "").casefold()
+                if not source:
+                    continue
+
+                if content_type.startswith("image/"):
+                    try:
+                        media_gallery.add_item(media=source)
+                        gallery_count += 1
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "SENTRIX TRACE media gallery item failed filename=%s type=%s",
+                            filename,
+                            content_type,
+                        )
+                fallback_files.append((source, filename))
+
+            if gallery_count:
+                try:
+                    container.add_item(media_gallery)
+                except Exception:
+                    logger.exception("SENTRIX TRACE media gallery failed")
+
+            file_cls = getattr(discord.ui, "File", None)
+            for source, filename in fallback_files[:5]:
+                if file_cls is not None and source.startswith("attachment://"):
+                    try:
+                        container.add_item(file_cls(media=source))
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "SENTRIX TRACE file component failed filename=%s",
+                            filename,
+                        )
+                if source.startswith(("https://", "http://")):
+                    container.add_item(
+                        discord.ui.TextDisplay(f"📎 [{filename}]({source})")
+                    )
+                else:
+                    container.add_item(
+                        discord.ui.TextDisplay(f"📎 **{filename}**")
+                    )
+
         rows = build_rows(old_view)
         if rows:
             add_separator()
@@ -1011,6 +1272,8 @@ async def send_wide_log(
     log_type: str,
     old_view: discord.ui.View | None = None,
     extra_file: discord.File | None = None,
+    extra_files: list[discord.File] | None = None,
+    media_items: list[tuple[str, str, str]] | None = None,
     identity_name: str | None = None,
     identity_id: int | None = None,
     identity_icon: str | None = None,
@@ -1039,7 +1302,7 @@ async def send_wide_log(
         logger.error(
             "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_MISSING path=%s", banner_path
         )
-        logger.error("SENTRIX LOG V2 FAILED bannière introuvable: %s", banner_path)
+        logger.error("SENTRIX TRACE FAILED bannière introuvable: %s", banner_path)
         return False
 
     guild = getattr(channel, "guild", None)
@@ -1063,13 +1326,14 @@ async def send_wide_log(
             identity_icon,
             emoji,
             event_type,
+            media_items,
         )
     except Exception as exc:
         logger.error(
             "SXTRACE 6 TRANSPORT phase=abort reason=VIEW_BUILD_FAILED type=%s",
             type(exc).__name__,
         )
-        logger.error("SENTRIX LOG V2 FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
+        logger.error("SENTRIX TRACE FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
     try:
@@ -1079,13 +1343,25 @@ async def send_wide_log(
             "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_FILE_FAILED type=%s",
             type(exc).__name__,
         )
-        logger.error("SENTRIX LOG V2 FAILED file type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
+        logger.error("SENTRIX TRACE FAILED file type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
     files: list[discord.File] = [banner_file]
+    payload_files: list[discord.File] = []
     if extra_file is not None:
-        _rewind_file(extra_file)
-        files.append(extra_file)
+        payload_files.append(extra_file)
+    payload_files.extend(list(extra_files or []))
+
+    seen_names: set[str] = set()
+    for candidate in payload_files:
+        filename = str(getattr(candidate, "filename", "") or "")
+        if not filename or filename in seen_names:
+            continue
+        seen_names.add(filename)
+        _rewind_file(candidate)
+        files.append(candidate)
+        if len(files) >= 10:
+            break
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=before-send channel=%s event_type=%s files=%s view=%s",
@@ -1113,7 +1389,7 @@ async def send_wide_log(
             _mettre_en_quarantaine(getattr(channel, "id", None), exc)
         else:
             logger.error(
-                "SENTRIX LOG V2 FAILED HTTP status=%s code=%s text=%r\n%s",
+                "SENTRIX TRACE FAILED HTTP status=%s code=%s text=%r\n%s",
                 getattr(exc, "status", None), getattr(exc, "code", None),
                 getattr(exc, "text", None), traceback.format_exc(),
             )
@@ -1122,7 +1398,7 @@ async def send_wide_log(
             "SXTRACE 6 TRANSPORT phase=send-failed channel=%s reason=%s",
             getattr(channel, "id", "?"), type(exc).__name__,
         )
-        logger.error("SENTRIX LOG V2 FAILED type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
+        logger.error("SENTRIX TRACE FAILED type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
     return False
 
 

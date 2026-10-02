@@ -106,58 +106,65 @@ def test_les_editions_rejoignent_le_fichier(module, fonction):
 
 def test_les_pages_de_v74_portent_la_banniere():
     """V74 hérite du refresh de V73 mais construit ses propres pages : elles
-    doivent poser l'en-tête elles-mêmes.
-
-    Ces deux tests ont échoué quand le correctif du 02/10/2026 a remplacé
-    ``entete_banniere()`` par ``poser_banniere(container)`` : ils grepaient
-    l'orthographe de l'appel, pas le comportement. Ils visent maintenant le
-    point d'entrée, qui décide de poser ou non selon ``banniere_disponible()``.
-    """
+    doivent poser l'en-tête elles-mêmes."""
     import inspect
 
     from cogs import setup_experience_v74 as v74
 
     source = inspect.getsource(v74)
     conteneurs = source.count("discord.ui.Container(accent_colour=v73.ACCENT)")
-    poses = source.count("v73.poser_banniere(")
+    entetes = source.count("v73.entete_banniere()")
     assert conteneurs >= 1
-    assert poses == conteneurs, (
-        f"{conteneurs} page(s) construites mais {poses} bannière(s) posée(s)"
+    assert entetes == conteneurs, (
+        f"{conteneurs} page(s) construites mais {entetes} bannière(s) posée(s)"
     )
 
 
-def test_lenvoi_initial_joint_la_banniere_sur_chaque_branche():
-    """Trois branches d'envoi — Context, followup, réponse d'interaction — et
-    aucune qui envoie la vue sans passer par le point d'entrée.
-
-    C'est l'oubli exact qui a cassé ``/setup`` en production : une branche
-    envoyait ``view=view`` sans joindre la bannière que le conteneur
-    référence, et Discord refusait le message entier. La fraîcheur du fichier
-    à chaque appel est vérifiée séparément, dans
-    ``test_banniere_jamais_orpheline``.
-    """
-    import ast
+def test_setup_initial_passe_par_un_transport_unique():
+    """Aucun chemin Context/followup/response ne peut oublier la bannière."""
     import inspect
+    from cogs import setup_components_v73 as v73
 
-    from cogs import setup_experience_v74 as v74
+    source = inspect.getsource(v73)
+    assert "def fichiers(self)" in source
+    debut = source.index("async def _send_setup_v73")
+    fin = source.index("def install", debut)
+    envoi = source[debut:fin]
+    assert "return await panels.envoyer(target, view)" in envoi
+    assert "target.send(view=view" not in envoi
+    assert "target.followup.send(view=view" not in envoi
+    assert "target.response.send_message(view=view" not in envoi
 
-    arbre = ast.parse(inspect.getsource(v74))
-    branches, oublis = 0, []
-    for noeud in ast.walk(arbre):
-        if not isinstance(noeud, ast.Call):
-            continue
-        appele = ast.unparse(noeud.func)
-        if not appele.endswith((".send", ".send_message")):
-            continue
-        rendu = ast.unparse(noeud)
-        if "view=view" not in rendu and "joindre_banniere" not in rendu:
-            continue
-        branches += 1
-        if "joindre_banniere" not in rendu:
-            oublis.append(rendu[:70])
 
-    assert branches >= 3, f"{branches} branche(s) d'envoi trouvée(s), 3 attendues"
-    assert oublis == [], f"branche(s) qui envoient sans la bannière : {oublis}"
+def test_setup_invitations_ne_peut_plus_oublier_banner_config():
+    """Le bug production venait de cette quatrième route d'envoi directe."""
+    import inspect
+    from cogs import setup_invitations
+
+    source = inspect.getsource(setup_invitations)
+    debut = source.index("async def final_send_setup")
+    fin = source.index("current = setup_ui.OfficialSetup.send_setup", debut)
+    envoi = source[debut:fin]
+    assert "return await panels.envoyer(target, view)" in envoi
+    assert "target.send(view=view" not in envoi
+    assert "target.followup.send(view=view" not in envoi
+    assert "target.response.send_message(view=view" not in envoi
+
+
+def test_help_initial_et_navigation_utilisent_la_meme_fabrique_de_fichier():
+    """Help doit recréer banner_config.webp pour l'envoi ET chaque édition."""
+    import inspect
+    from cogs import help_complete_v79 as help79
+
+    cls = inspect.getsource(help79.SentriXHelpV79)
+    assert "def fichiers(self)" in cls
+    assert "attachments=self.fichiers()" in cls
+
+    source = inspect.getsource(help79)
+    debut = source.index("async def _send_help_v79")
+    fin = source.index("def install", debut)
+    envoi = source[debut:fin]
+    assert "return await panels.envoyer(target, view)" in envoi
 
 
 # =============================================================================

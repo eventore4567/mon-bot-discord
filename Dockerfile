@@ -16,6 +16,55 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Barrière de syntaxe : aucune erreur Python dans les couches critiques ne doit
+# atteindre le runtime Railway.
+RUN python -m compileall -q core cogs utils web main.py railway_boot.py railway_ha_boot.py railway_ha_product_boot_v8.py
+
+# Barrière de qualité micro-kernel exécutée à chaque build primaire : une release
+# qui casse l'isolation, la readiness, les circuits ou le reload reste hors prod.
+RUN python -m pytest -q \
+    tests/test_module_kernel.py \
+    tests/test_module_runtime.py \
+    tests/test_module_supervisor.py \
+    tests/test_module_gate.py \
+    tests/test_module_policy.py \
+    tests/test_health_runtime_module_readiness.py \
+    tests/test_runtime_observability_module_health.py \
+    tests/test_runtime_attribution.py \
+    tests/test_tickets_autoclose_resilience.py \
+    tests/test_ticket_open_concurrency.py \
+    tests/test_logs_bulk_delete_resilience.py \
+    tests/test_moderation_logging_resilience.py \
+    tests/test_automod_enforcement_resilience.py \
+    tests/test_automod_log_manage_style.py \
+    tests/test_sentrix_trace_style.py \
+    tests/test_sentrix_core_style.py \
+    tests/test_sentrix_native_interactive_surfaces.py \
+    tests/test_plain_error_messages.py \
+    tests/test_short_command_names.py \
+    tests/test_canonical_command_surface.py \
+    tests/test_command_surface_v110.py \
+    tests/test_command_setup_prompt.py \
+    tests/test_help_short_names.py \
+    tests/test_command_registry_audit.py \
+    tests/test_discord_command_publish_audit.py \
+    tests/test_dashboard_feedback_reports.py \
+    tests/test_guild_departure_notify.py \
+    tests/test_ai_disable_guard_loading.py \
+    tests/test_ai_actions_permissions.py \
+    tests/test_music_matcher.py \
+    tests/test_music_manager.py \
+    tests/test_music_provider_url_matching.py \
+    tests/test_music_voice_persistence.py \
+    tests/test_music_cog.py \
+    tests/test_music_playlists_v108.py \
+    tests/test_music_playlist_persistence.py \
+    tests/test_games_runtime_core.py \
+    tests/test_game_stakes.py \
+    tests/test_services_economy.py \
+    tests/test_economy_race_conditions.py \
+    tests/test_v25_quality.py
+
 # Port du dashboard web intégré (voir web/dashboard.py) — Railway fournit sa propre
 # variable PORT au runtime, cette ligne ne sert que de documentation pour Docker.
 EXPOSE 8080

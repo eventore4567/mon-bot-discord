@@ -330,7 +330,13 @@ def register(app: web.Application, dashboard) -> None:
         if error:
             return error
         from cogs.verification import _is_notification_role, _self_role_error
-        notif_panels = await bot.db.fetchall("SELECT channel_id, message_id, title, created_at FROM self_role_panels WHERE guild_id = ? ORDER BY created_at DESC", (guild.id,))
+        notif_panels = await bot.db.fetchall(
+            "SELECT p.channel_id, p.message_id, p.title, p.created_at, COUNT(i.role_id) AS role_count "
+            "FROM self_role_panels p LEFT JOIN self_role_items i "
+            "ON i.guild_id = p.guild_id AND i.panel_message_id = p.message_id "
+            "WHERE p.guild_id = ? GROUP BY p.guild_id, p.message_id ORDER BY p.created_at DESC",
+            (guild.id,),
+        )
         reaction_panels = await bot.db.fetchall(
             "SELECT p.channel_id, p.message_id, p.title, COUNT(r.message_id) AS role_count FROM reaction_role_panels p "
             "LEFT JOIN reaction_roles r ON r.guild_id = p.guild_id AND r.message_id = p.message_id "
@@ -341,7 +347,7 @@ def register(app: web.Application, dashboard) -> None:
         return web.json_response({
             "ok": True,
             "notification_roles": notification_roles,
-            "notification_panels": [{"channel_id": str(p["channel_id"]), "message_id": str(p["message_id"]), "title": p["title"], "created_at": p["created_at"]} for p in notif_panels],
+            "notification_panels": [{"channel_id": str(p["channel_id"]), "message_id": str(p["message_id"]), "title": p["title"], "created_at": p["created_at"], "role_count": int(p["role_count"] or 0)} for p in notif_panels],
             "reaction_panels": [{"channel_id": str(p["channel_id"]), "message_id": str(p["message_id"]), "title": p["title"], "role_count": int(p["role_count"] or 0)} for p in reaction_panels],
             "reaction_roles": [{"channel_id": str(r["channel_id"]) if r["channel_id"] else None, "message_id": str(r["message_id"]), "emoji": r["emoji"], "emoji_key": r["emoji_key"], "role_id": str(r["role_id"]), "label": r["label"]} for r in reactions],
         })

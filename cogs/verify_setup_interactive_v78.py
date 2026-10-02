@@ -1,8 +1,8 @@
-"""SentriX V78 — configurateur complet ``+verify-setup`` en Components V2.
+"""SentriX V78 — configurateur complet du règlement, intégré au Setup.
 
 L'administrateur choisit le salon et le rôle Vérifié, écrit lui-même le règlement,
 ajoute éventuellement une image, règle le CAPTCHA puis publie directement le vrai panneau
-de vérification. ``verify-panel`` n'est plus nécessaire.
+de vérification. Les anciennes commandes verify-setup / verify-panel ne sont plus publiques.
 """
 from __future__ import annotations
 
@@ -305,7 +305,7 @@ class VerifySetupView(discord.ui.View):
         embed.add_field(name="Votre règlement", value=preview, inline=False)
         embed.add_field(name="Image", value=self.image_url or "Aucune image", inline=False)
         embed.set_footer(
-            text="Configurateur fermé — relancez +verify-setup pour modifier."
+            text="Configurateur fermé — rouvrez « Règlement & accès » dans +setup pour modifier."
             if closed
             else "SentriX • Les changements sont persistés lors de la publication"
         )
@@ -381,6 +381,41 @@ class VerifySetupView(discord.ui.View):
         await self.bot.db.set_guild_config(self.guild.id, "verify_role", role.id)
         await self.bot.db.set_guild_config(self.guild.id, "verification_role", role.id)
         await self.bot.db.set_guild_config(self.guild.id, "verification_channel", channel.id)
+
+        # Le rôle choisi ici est l'unique rôle final. Synchronise aussi la
+        # vérification renforcée et nettoie l'ancien rôle final uniquement chez
+        # les membres encore "Non vérifié" (donc encore en attente).
+        reinforced_row = await self.bot.db.fetchone(
+            "SELECT unverified_role_id,verified_role_id FROM honeypot_verification WHERE guild_id=?",
+            (self.guild.id,),
+        )
+        if reinforced_row:
+            old_verified_id = int(reinforced_row["verified_role_id"] or 0)
+            unverified_id = int(reinforced_row["unverified_role_id"] or 0)
+            await self.bot.db.execute(
+                "UPDATE honeypot_verification SET verified_role_id=? WHERE guild_id=?",
+                (role.id, self.guild.id),
+            )
+            old_verified = self.guild.get_role(old_verified_id) if old_verified_id else None
+            unverified = self.guild.get_role(unverified_id) if unverified_id else None
+            if (
+                old_verified is not None
+                and old_verified.id != role.id
+                and unverified is not None
+            ):
+                for pending_member in list(unverified.members):
+                    if old_verified in pending_member.roles:
+                        try:
+                            await pending_member.remove_roles(
+                                old_verified,
+                                reason="SentriX : ancien rôle final remplacé dans +setup",
+                            )
+                        except (discord.Forbidden, discord.HTTPException):
+                            logger.warning(
+                                "Impossible de retirer l'ancien rôle final user=%s guild=%s.",
+                                pending_member.id,
+                                self.guild.id,
+                            )
         await self.bot.db.set_guild_config(self.guild.id, "verify_captcha_enabled", int(self.captcha_enabled))
         await self.bot.db.set_guild_config(self.guild.id, "verify_captcha_max_attempts", self.captcha_max_attempts)
         await self.bot.db.execute(
@@ -464,7 +499,7 @@ async def build_setup_view(
     guild: discord.Guild,
     owner_id: int,
 ) -> VerifySetupView:
-    """Construit le configurateur Règlement pour /setup et +verify-setup."""
+    """Construit le configurateur Règlement utilisé par le Setup officiel."""
     await bot.db.execute(_SCHEMA)
     conf = await bot.db.get_guild_config(guild.id)
     row = await bot.db.fetchone(
@@ -522,29 +557,26 @@ async def _open_setup(ctx: commands.Context) -> None:
 
 
 def install(bot: commands.Bot) -> bool:
+    """Installe uniquement le moteur du configurateur.
+
+    Toute configuration passe désormais par +setup / /setup. Les anciennes commandes
+    sont retirées afin d'éviter deux chemins différents pour le même réglage.
+    """
     if getattr(bot, "_sentrix_verify_setup_v78", False):
         return True
-    bot.remove_command("verify-setup")
-    bot.remove_command("verify-panel")
-    try:
-        bot.tree.remove_command("verify-setup", type=discord.AppCommandType.chat_input)
-    except Exception:
-        logger.warning("Étape non critique ignorée dans install", exc_info=True)
-    try:
-        bot.tree.remove_command("verify-panel", type=discord.AppCommandType.chat_input)
-    except Exception:
-        logger.warning("Étape non critique ignorée dans install", exc_info=True)
 
-    command = commands.Command(
-        _open_setup,
-        name="verify-setup",
-        aliases=["rules-setup", "reglement-setup"],
-        help="Configurer et publier le règlement, le rôle final, l'image et le mode CAPTCHA simple.",
-        description="Ouvrir le configurateur du règlement SentriX.",
-    )
-    bot.add_command(command)
+    for name in ("verify-setup", "verify-panel", "rules-setup", "reglement-setup"):
+        try:
+            bot.remove_command(name)
+        except Exception:
+            pass
+        try:
+            bot.tree.remove_command(name, type=discord.AppCommandType.chat_input)
+        except Exception:
+            pass
+
     bot._sentrix_verify_setup_v78 = True
-    logger.info("V78 actif : configurateur règlement séparé, +verify-setup conservé pour compatibilité.")
+    logger.info("V78 actif : règlement configurable uniquement depuis le Setup officiel.")
     return True
 
 

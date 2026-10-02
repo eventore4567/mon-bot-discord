@@ -32,6 +32,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cogs import language_runtime
 from cogs.ticket_constants import (
     BUTTON_STYLE_NAMES,
     BUTTON_STYLES,
@@ -485,7 +486,7 @@ class TicketRenameModal(discord.ui.Modal, title="✏️ Renommer le ticket"):
 # =============================================================================
 
 class TicketOpenSelect(discord.ui.Select):
-    def __init__(self, panel_id: int, types: list):
+    def __init__(self, panel_id: int, types: list, language: str = language_runtime.LANG_FR):
         options = [
             discord.SelectOption(
                 label=(t["name"] or "Ticket")[:100], value=str(t["id"]),
@@ -494,7 +495,11 @@ class TicketOpenSelect(discord.ui.Select):
             for t in types[:25]
         ]
         super().__init__(
-            placeholder="🎫 Choisissez une catégorie pour ouvrir un ticket...",
+            placeholder=(
+                "🎫 Choose a category to open a ticket..."
+                if language == language_runtime.LANG_EN
+                else "🎫 Choisissez une catégorie pour ouvrir un ticket..."
+            ),
             options=options, custom_id=f"ticket_open_select:{panel_id}", min_values=1, max_values=1,
         )
 
@@ -520,7 +525,7 @@ class TicketPanelView(discord.ui.View):
     base de données à chaque envoi ET après chaque redémarrage (Tickets.restore_panel_views),
     donc toujours à jour avec les types de tickets réellement configurés."""
 
-    def __init__(self, panel, types: list):
+    def __init__(self, panel, types: list, language: str = language_runtime.LANG_FR):
         super().__init__(timeout=None)
         if not types:
             return
@@ -528,7 +533,7 @@ class TicketPanelView(discord.ui.View):
             for t in types[:25]:
                 self.add_item(TicketOpenButton(t))
         else:
-            self.add_item(TicketOpenSelect(panel["id"], types))
+            self.add_item(TicketOpenSelect(panel["id"], types, language))
 
 
 class TicketControlButton(discord.ui.Button):
@@ -928,6 +933,7 @@ class TicketSetupHubView(discord.ui.View):
 class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._ticket_open_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
         self.check_autoclose.start()
 
     def cog_unload(self):
@@ -951,19 +957,39 @@ class Tickets(commands.Cog):
             await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (row["id"],))
 
     async def restore_panel_views(self) -> int:
-        """Réenregistre une vue persistante pour chaque panel actif après un redémarrage,
-        avec ses VRAIES options (types de tickets), pour que les menus/boutons déjà envoyés
-        sur Discord continuent de fonctionner exactement comme avant l'arrêt du bot.
-        Retourne le nombre de panels effectivement restaurés (utilisé pour le log de
-        démarrage — voir main.py)."""
-        panels = await self.bot.db.fetchall("SELECT * FROM ticket_panels_v2 WHERE enabled = 1 AND message_id IS NOT NULL")
+        """Restaure les panels persistants et migre les anciens embeds vers le rendu V2."""
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM ticket_panels_v2 WHERE enabled = 1 AND message_id IS NOT NULL"
+        )
         restored = 0
-        for panel in panels:
+        for panel in rows:
             types = await self.get_panel_types(panel["id"])
             if not types:
                 continue
+            language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
+            message_id = int(panel["message_id"])
+            guild = self.bot.get_guild(int(panel["guild_id"]))
+            channel = guild.get_channel(int(panel["channel_id"])) if guild and panel["channel_id"] else None
+
+            # Migration non destructive : un ancien message embed est remplacé par le
+            # nouveau panel Components V2 dans le même salon, puis son ID est persisté.
+            if channel is not None:
+                try:
+                    old = await channel.fetch_message(message_id)
+                    if old.embeds:
+                        public = await self.build_public_panel(panel, types)
+                        new_message = await sx_panels.envoyer(channel, public)
+                        await old.delete()
+                        message_id = int(new_message.id)
+                        await self.bot.db.execute(
+                            "UPDATE ticket_panels_v2 SET message_id=? WHERE id=?",
+                            (message_id, panel["id"]),
+                        )
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
             try:
-                self.bot.add_view(TicketPanelView(panel, types), message_id=panel["message_id"])
+                self.bot.add_view(TicketPanelView(panel, types, language), message_id=message_id)
                 restored += 1
             except discord.HTTPException:
                 pass
@@ -1032,35 +1058,123 @@ class Tickets(commands.Cog):
 
     # ---------------------------------------------------------------- OUVERTURE
 
-    def build_panel_embed(self, panel) -> discord.Embed:
-        e = embeds.brand(panel["title"] or "🎫 Support", panel["description"] or "")
+    async def build_public_panel(self, panel, types):
+        language = await language_runtime.get_language(self.bot, int(panel["guild_id"]))
+        title = str(panel["title"] or "🎫 Support")
+        description = str(panel["description"] or "")
+        if not description or description == "Choisissez une option ci-dessous pour ouvrir un ticket.":
+            description = (
+                "Choose the category that matches your request. Staff will reply in a private channel."
+                if language == language_runtime.LANG_EN
+                else "Choisissez la catégorie qui correspond à votre demande. Le staff vous répondra dans un salon privé."
+            )
+
+        lines = []
+        for ticket_type in list(types)[:12]:
+            emoji = str(ticket_type["emoji"] or "🎫")
+            name = str(ticket_type["name"] or "Ticket")
+            detail = str(ticket_type["description"] or "").strip()
+            lines.append(f"{emoji} **{name}**" + (f" — {detail}" if detail else ""))
+
+        section_title = "Available categories" if language == language_runtime.LANG_EN else "Catégories disponibles"
+        how_title = "How it works" if language == language_runtime.LANG_EN else "Comment ça marche"
+        how_text = (
+            "Select a category below. A private channel will be created for you and the relevant staff."
+            if language == language_runtime.LANG_EN
+            else "Sélectionnez une catégorie ci-dessous. Un salon privé sera créé pour vous et le staff concerné."
+        )
+        public = sx_panels.Panneau(
+            titre=title,
+            sous_titre=description,
+            sections=[
+                sx_panels.Section(how_title, texte=how_text),
+                sx_panels.Section(section_title, texte="\n".join(lines)),
+            ],
+            kind="tickets",
+            vignette=panel["thumbnail_url"] or None,
+            image=panel["image_url"] or None,
+            pied=panel["footer_text"] or "SentriX",
+        )
         if panel["color"]:
-            e.color = panel["color"]
-        if panel["image_url"]:
-            e.set_image(url=panel["image_url"])
-        if panel["thumbnail_url"]:
-            e.set_thumbnail(url=panel["thumbnail_url"])
-        if panel["footer_text"]:
-            e.set_footer(text=panel["footer_text"])
-        return e
+            try:
+                container = next(x for x in public.children if isinstance(x, discord.ui.Container))
+                container.accent_colour = discord.Colour(int(panel["color"]))
+            except Exception:
+                pass
+        return sx_panels.avec_composants(public, TicketPanelView(panel, types, language))
+
+    async def refresh_public_panels(self, guild_id: int) -> int:
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            return 0
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM ticket_panels_v2 WHERE guild_id=? AND enabled=1 AND channel_id IS NOT NULL AND message_id IS NOT NULL",
+            (int(guild_id),),
+        )
+        changed = 0
+        for panel in rows:
+            channel = guild.get_channel(int(panel["channel_id"]))
+            if channel is None:
+                continue
+            types = await self.get_panel_types(panel["id"])
+            if not types:
+                continue
+            try:
+                old = await channel.fetch_message(int(panel["message_id"]))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                continue
+            public = await self.build_public_panel(panel, types)
+            try:
+                if old.embeds:
+                    msg = await sx_panels.envoyer(channel, public)
+                    await old.delete()
+                else:
+                    await sx_panels.editer(old, public)
+                    msg = old
+                await self.bot.db.execute(
+                    "UPDATE ticket_panels_v2 SET message_id=? WHERE id=?",
+                    (msg.id, panel["id"]),
+                )
+                changed += 1
+            except (discord.Forbidden, discord.HTTPException):
+                logger.exception("Rafraîchissement du panel ticket #%s impossible.", panel["id"])
+        return changed
 
     async def send_panel_preview(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
+        language = await language_runtime.get_language(self.bot, interaction.guild_id)
         if not types:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup`.")), ephemere=True)
-        await sx_panels.envoyer(interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemere=True)
+            text = (
+                "This panel has no ticket type yet."
+                if language == language_runtime.LANG_EN
+                else "Ce panel n’a encore aucun type de ticket."
+            )
+            return await sx_panels.envoyer(
+                interaction.response,
+                sx_panels.depuis_embed(embeds.warning(text)),
+                ephemere=True,
+            )
+        await sx_panels.envoyer(
+            interaction.response,
+            await self.build_public_panel(panel, types),
+            ephemere=True,
+        )
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
+        language = await language_runtime.get_language(self.bot, interaction.guild_id)
         if not panel["channel_id"]:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Choisissez d'abord un salon de destination (menu déroulant du dessus).")), ephemere=True)
+            text = "Choose the destination channel first." if language == language_runtime.LANG_EN else "Choisissez d’abord le salon de destination."
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(text)), ephemere=True)
         if not types:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce panel n’a aucun type de ticket. Ajoutez-en depuis l’éditeur du panel dans `+ticketsetup` avant de l’envoyer.")), ephemere=True)
+            text = "Add at least one ticket type before publishing." if language == language_runtime.LANG_EN else "Ajoutez au moins un type de ticket avant de publier."
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(text)), ephemere=True)
         channel = interaction.guild.get_channel(panel["channel_id"])
         if not channel:
-            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Le salon configuré n'existe plus.")), ephemere=True)
+            text = "The configured channel no longer exists." if language == language_runtime.LANG_EN else "Le salon configuré n’existe plus."
+            return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error(text)), ephemere=True)
 
         await interaction.response.defer(ephemeral=True)
         old_message_id = panel["message_id"]
@@ -1068,11 +1182,19 @@ class Tickets(commands.Cog):
             try:
                 old = await channel.fetch_message(old_message_id)
                 await old.delete()
-            except discord.HTTPException:
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
-        msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
-        await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (msg.id, channel.id, panel_id))
-        await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')), ephemere=True)
+        msg = await sx_panels.envoyer(channel, await self.build_public_panel(panel, types))
+        await self.bot.db.execute(
+            "UPDATE ticket_panels_v2 SET message_id=?, channel_id=? WHERE id=?",
+            (msg.id, channel.id, panel_id),
+        )
+        confirmation = (
+            f"Ticket panel published in {channel.mention}."
+            if language == language_runtime.LANG_EN
+            else f"Panel ticket publié dans {channel.mention}."
+        )
+        await sx_panels.texte_court(interaction, confirmation, ephemere=True)
 
     async def start_ticket_flow(self, interaction: discord.Interaction, type_id: int):
         started = time.monotonic()
@@ -1123,7 +1245,64 @@ class Tickets(commands.Cog):
             level = logger.warning if elapsed > 2.0 else logger.info
             level("Ouverture ticket type #%s traitée en %.2fs (guild=%s, user=%s).", type_id, elapsed, guild_id, user_id)
 
+    def _ticket_open_lock(
+        self,
+        guild_id: int,
+        user_id: int,
+        type_id: int,
+    ) -> asyncio.Lock:
+        key = (int(guild_id), int(user_id), int(type_id))
+        lock = self._ticket_open_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._ticket_open_locks[key] = lock
+
+        # Garde mémoire bornée : les clés anciennes et libres sont éliminées
+        # uniquement quand le registre devient gros. On ne retire jamais un lock
+        # actif, ce qui préserverait mal la sérialisation des interactions en attente.
+        if len(self._ticket_open_locks) > 5000:
+            for candidate, candidate_lock in list(self._ticket_open_locks.items()):
+                if candidate != key and not candidate_lock.locked():
+                    self._ticket_open_locks.pop(candidate, None)
+                    if len(self._ticket_open_locks) <= 4000:
+                        break
+        return lock
+
     async def create_ticket(self, interaction: discord.Interaction, ticket_type, answers: list):
+        guild = interaction.guild
+        user = interaction.user
+        if guild is None or user is None:
+            return
+
+        type_id = int(ticket_type["id"])
+        lock = self._ticket_open_lock(guild.id, user.id, type_id)
+
+        async with lock:
+            # Recontrôle SOUS verrou. Le contrôle précédent dans start_ticket_flow
+            # améliore l'UX, celui-ci garantit réellement la limite en cas de double
+            # clic, formulaire soumis deux fois ou deux interactions concurrentes.
+            limit = int(ticket_type["max_per_member"] or 1)
+            open_count = await count_genuinely_open_tickets(
+                self.bot,
+                guild,
+                user.id,
+                type_id,
+            )
+            if open_count >= limit:
+                return await sx_panels.envoyer(
+                    interaction,
+                    sx_panels.depuis_embed(
+                        embeds.warning(
+                            f"Vous avez déjà **{open_count}** ticket(s) "
+                            f"« {ticket_type['name']} » ouvert(s) (maximum : {limit})."
+                        )
+                    ),
+                    ephemere=True,
+                )
+
+            return await self._create_ticket_locked(interaction, ticket_type, answers)
+
+    async def _create_ticket_locked(self, interaction: discord.Interaction, ticket_type, answers: list):
         guild = interaction.guild
         user = interaction.user
 
@@ -1152,16 +1331,67 @@ class Tickets(commands.Cog):
         except discord.HTTPException:
             return await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.error('Impossible de créer le salon (permissions du bot ou catégorie pleine).')), ephemere=True)
 
-        cur = await self.bot.db.execute(
-            "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, type_id, priority, created_at, last_activity_at) "
-            "VALUES (?, ?, ?, 'ouvert', ?, ?, 'normale', ?, ?)",
-            (guild.id, channel.id, user.id, ticket_type["name"], ticket_type["id"], now(), now()),
-        )
-        ticket_id = cur.lastrowid
+        try:
+            cur = await self.bot.db.execute(
+                "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, type_id, priority, created_at, last_activity_at) "
+                "VALUES (?, ?, ?, 'ouvert', ?, ?, 'normale', ?, ?)",
+                (
+                    guild.id,
+                    channel.id,
+                    user.id,
+                    ticket_type["name"],
+                    ticket_type["id"],
+                    now(),
+                    now(),
+                ),
+            )
+            ticket_id = cur.lastrowid
+        except Exception:
+            # Le salon Discord existe déjà : si la persistance échoue, le garder
+            # créerait un ticket orphelin que SentriX ne peut plus retrouver ni fermer.
+            logger.exception(
+                "Persistance du ticket impossible après création du salon guild=%s channel=%s user=%s type=%s.",
+                guild.id,
+                channel.id,
+                user.id,
+                ticket_type["id"],
+            )
+            try:
+                await channel.delete(
+                    reason="SentriX : rollback d'un ticket non persisté"
+                )
+            except discord.HTTPException:
+                logger.exception(
+                    "Rollback du salon ticket orphelin impossible guild=%s channel=%s.",
+                    guild.id,
+                    channel.id,
+                )
+            return await sx_panels.envoyer(
+                interaction,
+                sx_panels.depuis_embed(
+                    embeds.error(
+                        "Le ticket n'a pas pu être enregistré. "
+                        "Aucun ticket incomplet n'a été conservé."
+                    )
+                ),
+                ephemere=True,
+            )
         for label, value in answers:
-            if value:
+            if not value:
+                continue
+            try:
                 await self.bot.db.execute(
-                    "INSERT INTO ticket_answers (ticket_id, question_label, answer) VALUES (?, ?, ?)", (ticket_id, label, value[:1000])
+                    "INSERT INTO ticket_answers (ticket_id, question_label, answer) VALUES (?, ?, ?)",
+                    (ticket_id, label, value[:1000]),
+                )
+            except Exception:
+                # La réponse du formulaire est secondaire par rapport au ticket déjà
+                # créé. Une seule réponse défectueuse ne doit jamais transformer un
+                # ticket valide en échec complet.
+                logger.exception(
+                    "Réponse de formulaire ticket non persistée ticket=%s label=%r.",
+                    ticket_id,
+                    label,
                 )
 
         # Fiche d'ouverture de ticket (Phase 3, design premium/sombre) — n'affecte QUE ce
@@ -1181,19 +1411,75 @@ class Tickets(commands.Cog):
         for label, value in answers:
             if value:
                 e.add_field(name=label[:256], value=helpers.truncate(value, 1024), inline=False)
-        button_settings = await get_button_settings(self.bot, guild.id)
+        try:
+            button_settings = await get_button_settings(self.bot, guild.id)
+        except Exception:
+            logger.exception(
+                "Configuration des boutons ticket indisponible guild=%s ; valeurs par défaut utilisées.",
+                guild.id,
+            )
+            button_settings = default_button_settings()
+
         content = user.mention
         if ticket_type["mention_staff"] and staff_role:
             content += f" {staff_role.mention}"
         # Ce message DOIT pinguer le membre et le role support : Discord refuse un
         # `content` sur un message Components V2, donc il reste un embed. Le ping
         # prime sur la banniere — c'est une exception assumee, pas un oubli.
-        await channel.send(content=content, embed=e, view=TicketControlView(button_settings))
+        try:
+            await channel.send(
+                content=content,
+                embed=e,
+                view=TicketControlView(button_settings),
+            )
+        except discord.HTTPException:
+            # Sans message de contrôle, le ticket est inutilisable. On revient à un
+            # état propre au lieu de conserver salon + DB partiellement initialisés.
+            logger.exception(
+                "Message de contrôle ticket impossible guild=%s channel=%s ticket=%s ; rollback.",
+                guild.id,
+                channel.id,
+                ticket_id,
+            )
+            try:
+                await self.bot.db.execute(
+                    "DELETE FROM ticket_answers WHERE ticket_id = ?",
+                    (ticket_id,),
+                )
+                await self.bot.db.execute(
+                    "DELETE FROM tickets WHERE id = ?",
+                    (ticket_id,),
+                )
+            except Exception:
+                logger.exception(
+                    "Rollback DB du ticket #%s incomplet.",
+                    ticket_id,
+                )
+            try:
+                await channel.delete(
+                    reason="SentriX : rollback d'un ticket sans message de contrôle"
+                )
+            except discord.HTTPException:
+                logger.exception(
+                    "Rollback du salon ticket #%s impossible channel=%s.",
+                    ticket_id,
+                    channel.id,
+                )
+            return await sx_panels.envoyer(
+                interaction,
+                sx_panels.depuis_embed(
+                    embeds.error(
+                        "Le ticket n'a pas pu être initialisé correctement. "
+                        "La création a été annulée proprement."
+                    )
+                ),
+                ephemere=True,
+            )
 
         await sx_panels.envoyer(
             interaction,
             sx_panels.Panneau(
-                titre="SentriX — Ticket ouvert",
+                titre="Ticket ouvert",
                 sous_titre=f"Votre ticket est prêt dans {channel.mention}.",
                 kind="success",
                 sections=[
@@ -1220,7 +1506,7 @@ class Tickets(commands.Cog):
                         ],
                     ),
                 ],
-                pied="SentriX • Tickets",
+                pied="Tickets",
             ),
             ephemere=True,
         )
@@ -1241,15 +1527,27 @@ class Tickets(commands.Cog):
         # « 📌 Salon » et « 🆔 Ticket » sont retirés d'ici : la primitive les
         # pose elle-même, à l'identique pour les quatorze événements. Les laisser
         # les aurait dupliqués dans l'embed.
-        await tickets_service.journaliser_evenement(
-            self.bot, guild, "ticket_open",
-            ticket_id=ticket_id, channel=channel,
-            # Pas de `cible` : sur une ouverture, l'auteur EST le membre
-            # concerné, et le renseigner deux fois afficherait la même personne
-            # sur deux champs côte à côte.
-            acteur=user,
-            extra=ticket_extra,
-        )
+        try:
+            await tickets_service.journaliser_evenement(
+                self.bot,
+                guild,
+                "ticket_open",
+                ticket_id=ticket_id,
+                channel=channel,
+                # Pas de `cible` : sur une ouverture, l'auteur EST le membre
+                # concerné, et le renseigner deux fois afficherait la même personne
+                # sur deux champs côte à côte.
+                acteur=user,
+                extra=ticket_extra,
+            )
+        except Exception:
+            # Le ticket et son message de contrôle existent déjà : une panne du
+            # journal ne doit pas faire croire que l'ouverture a échoué.
+            logger.exception(
+                "Journal d'ouverture ticket indisponible guild=%s ticket=%s.",
+                guild.id,
+                ticket_id,
+            )
 
     # ---------------------------------------------------------------- BOUTONS STAFF
 
@@ -1571,44 +1869,129 @@ class Tickets(commands.Cog):
 
     @tasks.loop(minutes=15)
     async def check_autoclose(self):
-        rows = await self.bot.db.fetchall(
-            "SELECT t.*, tt.autoclose_hours, tt.log_channel_id FROM tickets t "
-            "JOIN ticket_types tt ON tt.id = t.type_id "
-            "WHERE t.status = 'ouvert' AND tt.autoclose_hours > 0"
-        )
+        try:
+            rows = await self.bot.db.fetchall(
+                "SELECT t.*, tt.autoclose_hours, tt.log_channel_id FROM tickets t "
+                "JOIN ticket_types tt ON tt.id = t.type_id "
+                "WHERE t.status = 'ouvert' AND tt.autoclose_hours > 0"
+            )
+        except Exception:
+            logger.exception(
+                "Lecture des tickets à fermer automatiquement impossible ; "
+                "nouvel essai au prochain cycle."
+            )
+            return
+
         for row in rows:
-            if row["last_activity_at"] is None:
-                continue
-            elapsed = now() - row["last_activity_at"]
-            if elapsed < row["autoclose_hours"] * 3600:
-                continue
-            guild = self.bot.get_guild(row["guild_id"])
-            channel = guild.get_channel(row["channel_id"]) if guild else None
-            if not guild or not channel:
-                await self.bot.db.execute("UPDATE tickets SET status = 'supprime' WHERE id = ?", (row["id"],))
-                continue
-            await self.bot.db.execute("UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 WHERE id = ?", (now(), row["id"]))
+            try:
+                await self._process_autoclose_row(row)
+            except Exception:
+                logger.exception(
+                    "Auto-fermeture du ticket #%s impossible ; les autres tickets "
+                    "continuent d'être traités.",
+                    row["id"],
+                )
+
+    async def _process_autoclose_row(self, row) -> None:
+        if row["last_activity_at"] is None:
+            return
+
+        elapsed = now() - row["last_activity_at"]
+        if elapsed < row["autoclose_hours"] * 3600:
+            return
+
+        guild = self.bot.get_guild(row["guild_id"])
+        channel = guild.get_channel(row["channel_id"]) if guild else None
+        if not guild or not channel:
+            await self.bot.db.execute(
+                "UPDATE tickets SET status = 'supprime' WHERE id = ?",
+                (row["id"],),
+            )
+            return
+
+        # Compare-and-set : deux cycles/reprises ne ferment jamais deux fois le même ticket.
+        cursor = await self.bot.db.execute(
+            "UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 "
+            "WHERE id = ? AND status = 'ouvert'",
+            (now(), row["id"]),
+        )
+        if getattr(cursor, "rowcount", 0) != 1:
+            return
+
+        try:
             transcript = await self.generate_transcript(channel)
-            await sx_panels.envoyer(channel, sx_panels.depuis_embed(embeds.warning('🔒 Ticket fermé automatiquement pour inactivité.')), file=transcript)
-            # Événement PROPRE : ticket_autoclose, pas ticket_close. Ces deux
-            # lignes passaient par log_action, dont le classement était
-            # « "ferm" in title » — une fermeture automatique par inactivité
-            # arrivait donc dans le journal indistinguable d'une fermeture
-            # décidée par un humain, sans acteur et sans durée d'inactivité.
+        except Exception:
+            logger.exception(
+                "Transcription auto-close indisponible pour le ticket #%s.",
+                row["id"],
+            )
+            transcript = None
+
+        try:
+            kwargs = {}
+            if transcript is not None:
+                kwargs["file"] = transcript
+            await sx_panels.envoyer(
+                channel,
+                sx_panels.depuis_embed(
+                    embeds.warning("🔒 Ticket fermé automatiquement pour inactivité.")
+                ),
+                **kwargs,
+            )
+        except discord.HTTPException:
+            logger.warning(
+                "Message d'auto-fermeture non envoyé pour le ticket #%s.",
+                row["id"],
+                exc_info=True,
+            )
+
+        try:
             await tickets_service.journaliser_evenement(
-                self.bot, guild, "ticket_autoclose",
-                ticket_id=row["id"], channel=channel,
+                self.bot,
+                guild,
+                "ticket_autoclose",
+                ticket_id=row["id"],
+                channel=channel,
                 cible=guild.get_member(int(row["user_id"])) if row["user_id"] else None,
                 raison=f"Aucune activité depuis {helpers.format_duration(int(elapsed))}.",
-                extra={"⏳ Seuil configuré": helpers.format_duration(int(row["autoclose_hours"]) * 3600)},
+                extra={
+                    "⏳ Seuil configuré": helpers.format_duration(
+                        int(row["autoclose_hours"]) * 3600
+                    )
+                },
             )
+        except Exception:
+            # Le ticket est réellement fermé même si le journal est momentanément
+            # indisponible. Ne jamais rouvrir/réexécuter la fermeture à cause du log.
+            logger.exception(
+                "Journal auto-close indisponible pour le ticket #%s.",
+                row["id"],
+            )
+
+        try:
             conf = await self.bot.db.get_guild_config(guild.id)
             delay = (conf["ticket_delete_delay"] if conf else 30) or 30
-            asyncio.create_task(self._auto_delete(channel, row["id"], delay))
+        except Exception:
+            logger.exception(
+                "Configuration du délai de suppression indisponible pour le ticket #%s ; "
+                "délai de secours 30s.",
+                row["id"],
+            )
+            delay = 30
+
+        asyncio.create_task(self._auto_delete(channel, row["id"], delay))
 
     @check_autoclose.before_loop
     async def before_check_autoclose(self):
         await self.bot.wait_until_ready()
+
+    @check_autoclose.error
+    async def check_autoclose_error(self, error: BaseException) -> None:
+        logger.error(
+            "Boucle check_autoclose interrompue (%r) ; relance automatique.",
+            error,
+        )
+        self.check_autoclose.restart()
 
     @commands.hybrid_command(name="ticket-reopen", description="Rouvrir un ticket fermé (avant sa suppression automatique).", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
@@ -1674,7 +2057,7 @@ class Tickets(commands.Cog):
             return await sx_panels.envoyer(
                 ctx,
                 sx_panels.Panneau(
-                    titre="SentriX — Tickets",
+                    titre="Tickets",
                     sous_titre="Aucun panel de ticket n'est encore configuré sur ce serveur.",
                     kind="warning",
                     sections=[
@@ -1699,7 +2082,7 @@ class Tickets(commands.Cog):
                             ],
                         ),
                     ],
-                    pied="SentriX • Tickets",
+                    pied="Tickets",
                 ),
                 ephemere=bool(ctx.interaction),
             )

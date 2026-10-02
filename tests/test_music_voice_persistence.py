@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -43,11 +44,20 @@ class FakeDB:
 
 
 class FakeVoiceClient:
-    def __init__(self, channel):
+    def __init__(self, channel, *, connected: bool = True):
         self.channel = channel
+        self._connected = connected
+        self.disconnect_calls = 0
 
     def is_connected(self):
-        return True
+        return self._connected
+
+    async def move_to(self, channel):
+        self.channel = channel
+
+    async def disconnect(self, *, force: bool = False):
+        self.disconnect_calls += 1
+        self._connected = False
 
 
 class FakeVoiceChannel:
@@ -196,6 +206,39 @@ async def test_socket_payload_1006_text_is_treated_as_abnormal_voice_close():
 
     assert channel.connect_calls == 1
     assert await state.is_pinned(123) is True
+
+
+@pytest.mark.asyncio
+async def test_stale_disconnected_voice_client_is_replaced_and_playback_resume_is_called():
+    channel = FakeVoiceChannel(456)
+    guild = FakeGuild(123, channel)
+    stale = FakeVoiceClient(channel, connected=False)
+    guild.voice_client = stale
+    bot = FakeBot(guild)
+
+    class RecoveringCog(FakeCog):
+        def __init__(self):
+            super().__init__()
+            self.resume_calls = 0
+
+        async def resume_after_voice_reconnect(self, queue):
+            self.resume_calls += 1
+            return True
+
+    cog = RecoveringCog()
+    state = PersistentVoiceState(bot, cog)
+
+    await state.remember(123, 456, None)
+    state._disconnected_since[123] = time.monotonic() - 30
+    await state.restore_all()
+
+    queue = cog.get_queue(123)
+    assert stale.disconnect_calls == 1
+    assert channel.connect_calls == 1
+    assert queue.voice_client is not None
+    assert queue.voice_client is not stale
+    assert queue.voice_client.is_connected() is True
+    assert cog.resume_calls == 1
 
 
 def test_runtime_contract_has_no_inactivity_leave_and_unpins_only_on_music_leave():

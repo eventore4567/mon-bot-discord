@@ -1,28 +1,8 @@
-"""Composition des panneaux SentriX : bannière, sections, hiérarchie, boutons.
+"""SentriX Core — composition officielle des réponses structurées de commandes.
 
-Ce module ne change pas une couleur, il change la MISE EN PAGE. Un embed classique
-ne peut pas afficher de bannière en tête — ``set_image`` la place sous les champs.
-Seuls les Components V2 (``LayoutView`` + ``Container`` + ``MediaGallery``)
-permettent la composition demandée :
-
-    ┌──────────────────────────────────────────┐
-    │  [ BANNIÈRE SENTRIX pleine largeur ]     │
-    │  ## Titre du panneau                     │
-    │  Sous-titre court                        │
-    │  ─────────────────────────────────────   │
-    │  ### IDENTITÉ                            │
-    │  **Utilisateur** · @User                 │
-    │  ─────────────────────────────────────   │
-    │  ### ACTIVITÉ                            │
-    │  ```  Niveau      42  ```                │
-    │  -# SentriX • Informations               │
-    │  [ Bouton ] [ Bouton ]                   │
-    └──────────────────────────────────────────┘
-
-La structure reprend celle de ``utils/wide_logs.WideLogView``, éprouvée en
-production pour les journaux, et en applique deux règles déjà apprises ici :
-un ``MediaGallery`` ou un ``Thumbnail`` construit avec ``description=`` fait
-afficher un badge « ALT » par-dessus l'image.
+Le rendu Components V2 suit une grammaire propre à SentriX : bannière de domaine,
+signature Core, titre, sections numérotées, contenu, signature de fin et actions.
+Les confirmations d'une ligne restent volontairement en texte brut.
 
 Les bannières sont générées au démarrage par ``utils/log_banners`` et jointes au
 message (``attachment://``). Elles ne dépendent donc pas du dépôt distant.
@@ -83,11 +63,82 @@ INTENTIONS: dict[str, tuple[int, str]] = {
 # reussite, refus, avertissement — garde evidemment sa couleur.
 INTENTIONS_NEUTRES = frozenset({"info", "neutral", "brand"})
 
-# Marqueur de section. Discord ne sait pas tracer de filet horizontal dans un
-# TextDisplay : le Separator du conteneur s'en charge, et cette puce donne au
-# titre de section une accroche visuelle constante (style arrondi validé par
-# Jayden — remplace l'ancien chevron anguleux "◢").
-CHEVRON = "●"
+# SentriX Core n'utilise ni chevrons ni puces héritées : chaque bloc reçoit
+# un numéro stable et lisible ("01 · Identité", "02 · Activité", ...).
+CORE_NAME = "SENTRIX CORE"
+
+_FAMILY_LABELS = {
+    "success": "Succès",
+    "error": "Erreur",
+    "warning": "Attention",
+    "info": "Information",
+    "special": "SentriX",
+    "moderation": "Modération",
+    "security": "Sécurité",
+    "tickets": "Tickets",
+    "economy": "Économie",
+    "levels": "Niveaux",
+    "music": "Musique",
+    "games": "Jeux",
+    "ai": "IA",
+    "config": "Configuration",
+    "welcome": "Bienvenue",
+    "goodbye": "Départ",
+}
+
+
+def _core_family_label(family: str) -> str:
+    return _FAMILY_LABELS.get(str(family or "").casefold(), str(family or "SentriX").replace("_", " ").title())
+
+
+def _core_command_name() -> str:
+    name, _cog = _commande_en_cours()
+    if not name:
+        return ""
+    try:
+        from cogs import common_command_names
+
+        # Le contexte donne le qualified_name interne ; le nom court reste
+        # l'interface conseillée, mais le panneau ne dépend jamais de sa présence.
+        ctx = None
+        try:
+            from cogs.final_interaction_policy import _COMMAND_CONTEXT
+            ctx = _COMMAND_CONTEXT.get()
+        except Exception:
+            pass
+        command = getattr(ctx, "command", None) if ctx is not None else None
+        if command is not None:
+            return common_command_names.display_name(command)
+    except Exception:
+        pass
+    return str(name)
+
+
+def _core_signature(family: str) -> str:
+    parts = [CORE_NAME, _core_family_label(family)]
+    command = _core_command_name()
+    if command:
+        parts.append(command)
+    return " · ".join(parts)
+
+
+def _core_footer(family: str, footer: str | None = None) -> str:
+    raw = str(footer or "").strip()
+    raw = _re.sub(r"^SentriX(?:\s*Core)?\s*[•·]\s*", "", raw, flags=_re.IGNORECASE).strip()
+    if raw.casefold() in {"sentrix", "sentrix core"}:
+        raw = ""
+    base = _core_signature(family)
+    return f"{base} · {raw}" if raw else base
+
+
+def signature_core(family: str) -> str:
+    """Signature publique du design de commandes SentriX Core."""
+    return _core_signature(family)
+
+
+def pied_core(family: str, footer: str | None = None) -> str:
+    """Pied public SentriX Core, en conservant une information métier utile."""
+    return _core_footer(family, footer)
 
 _LIMITE_LIGNE = 240
 _LIMITE_BLOC = 3800
@@ -122,8 +173,9 @@ class Section:
     texte: str | None = None
     aligne: bool = False
 
-    def rendu(self) -> str:
-        entete = f"### {CHEVRON} {_texte(self.titre, 80).upper()}"
+    def rendu(self, index: int | None = None) -> str:
+        numero = f"{int(index):02d} · " if index is not None else ""
+        entete = f"### {numero}{_texte(self.titre, 80)}"
         corps: list[str] = []
 
         if self.texte:
@@ -167,7 +219,11 @@ def _aligne(lignes: Iterable[Ligne]) -> str:
 
 @dataclass
 class Bouton:
-    """Un bouton de navigation du panneau."""
+    """Un bouton de navigation ou d'action du panneau.
+
+    Le callback permet aux panneaux Components V2 natifs d'être réellement
+    interactifs sans retomber sur un vieux discord.ui.View séparé.
+    """
 
     libelle: str
     custom_id: str | None = None
@@ -175,6 +231,7 @@ class Bouton:
     style: discord.ButtonStyle = discord.ButtonStyle.secondary
     emoji: str | None = None
     desactive: bool = False
+    callback: Any = None
 
 
 def _commande_en_cours() -> tuple[str, str]:
@@ -315,9 +372,15 @@ class Panneau(discord.ui.LayoutView):
         pied: str | None = None,
         banniere: bool = True,
         image: str | None = None,
+        timeout: float | None = None,
     ) -> None:
-        super().__init__(timeout=None)
+        super().__init__(timeout=timeout)
         self.kind = kind if kind in INTENTIONS else "info"
+        self.titre = str(titre or "")
+        self.sous_titre = str(sous_titre or "") if sous_titre else ""
+        self.sections_source = tuple(sections)
+        self.boutons_source = tuple(boutons)
+        self.pied_source = str(pied or "") if pied else ""
         # Réponse en texte libre (IA, traduction) : pas de bandeau au-dessus du texte.
         self.avec_banniere = banniere and not commande_en_texte_libre()
         banniere = self.avec_banniere
@@ -333,6 +396,11 @@ class Panneau(discord.ui.LayoutView):
             galerie = discord.ui.MediaGallery()
             galerie.add_item(media=f"attachment://{nom_fichier(self.famille)}")
             conteneur.add_item(galerie)
+
+        # Signature visuelle SentriX Core : domaine + commande conseillée.
+        conteneur.add_item(
+            discord.ui.TextDisplay(f"-# {_core_signature(self.famille)}")
+        )
 
         # 2 — titre et sous-titre. La vignette, quand il y en a une, se place à
         #     droite du titre plutôt qu'en médaillon perdu dans un coin.
@@ -355,8 +423,8 @@ class Panneau(discord.ui.LayoutView):
             conteneur.add_item(discord.ui.TextDisplay(entete))
 
         # 3 — sections, chacune précédée de son filet.
-        for section in sections:
-            rendu = section.rendu()
+        for section_index, section in enumerate(sections, start=1):
+            rendu = section.rendu(section_index)
             if not rendu:
                 continue
             conteneur.add_item(discord.ui.TextDisplay(rendu[:_LIMITE_BLOC]))
@@ -370,8 +438,8 @@ class Panneau(discord.ui.LayoutView):
             contenu.add_item(media=str(image))
             conteneur.add_item(contenu)
 
-        if pied:
-            conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(pied, 200)}"))
+        signature_fin = _core_footer(self.famille, pied)
+        conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(signature_fin, 240)}"))
 
         # 5 — navigation, DANS le conteneur pour rester sous l'accent de couleur.
         rangees = _rangees(boutons)
@@ -418,15 +486,16 @@ def _rangee(boutons: Sequence[Bouton]) -> discord.ui.ActionRow | None:
                     )
                 )
             else:
-                rangee.add_item(
-                    discord.ui.Button(
-                        label=_texte(bouton.libelle, 80),
-                        custom_id=bouton.custom_id or f"sentrix:panel:{pose}",
-                        style=bouton.style,
-                        emoji=bouton.emoji,
-                        disabled=bouton.desactive,
-                    )
+                item = discord.ui.Button(
+                    label=_texte(bouton.libelle, 80),
+                    custom_id=bouton.custom_id or f"sentrix:panel:{pose}",
+                    style=bouton.style,
+                    emoji=bouton.emoji,
+                    disabled=bouton.desactive,
                 )
+                if callable(bouton.callback):
+                    item.callback = bouton.callback
+                rangee.add_item(item)
             pose += 1
         except Exception:
             logger.exception("Bouton de panneau refusé : %s", bouton.libelle)
@@ -460,6 +529,99 @@ def _message_envoye(resultat: Any):
     return resultat
 
 
+_ERREUR_SIMPLE_RE = _re.compile(
+    r"(?:erreur|invalide|introuvable|permission|cooldown|manque|manquant|"
+    r"requis|impossible|interdit|refus|indisponible|échou|echou|"
+    r"doit être|doit etre|maximum|minim(?:um|ale)|déjà|deja)",
+    _re.IGNORECASE,
+)
+
+
+def _panneau_est_erreur_simple(panneau: Any) -> bool:
+    if not isinstance(panneau, Panneau):
+        return False
+    if getattr(panneau, "boutons_source", ()):
+        return False
+    if getattr(panneau, "kind", "") not in {"danger", "warning"}:
+        return False
+    nom, _ = _commande_en_cours()
+    if not nom:
+        return False
+    texte = " ".join(
+        part
+        for part in (
+            getattr(panneau, "titre", ""),
+            getattr(panneau, "sous_titre", ""),
+            texte_complet(panneau),
+        )
+        if part
+    )
+    return bool(_ERREUR_SIMPLE_RE.search(texte))
+
+
+def _texte_erreur_depuis_panneau(panneau: Panneau) -> str:
+    titre = str(getattr(panneau, "titre", "") or "").strip()
+    sous_titre = str(getattr(panneau, "sous_titre", "") or "").strip()
+
+    # Le sous-titre porte presque toujours le vrai message ("La valeur nombre…").
+    # On évite les gros titres décoratifs et les sections "Commande / Vous avez tapé".
+    texte = sous_titre or titre or "Une erreur est survenue. Merci de réessayer."
+    texte = _sans_barre(texte)
+    texte = _re.sub(r"\s{2,}", " ", texte).strip()
+    return texte[:1900] or "Une erreur est survenue. Merci de réessayer."
+
+
+async def _envoyer_texte_brut_depuis_panneau(
+    destination: Any,
+    texte: str,
+    *,
+    ephemere: bool,
+    extra: dict[str, Any],
+):
+    kwargs = dict(extra)
+    kwargs.pop("file", None)
+    kwargs.pop("files", None)
+    kwargs.pop("view", None)
+    kwargs.pop("embed", None)
+    kwargs.pop("embeds", None)
+    kwargs["content"] = texte[:1900]
+
+    if isinstance(destination, discord.InteractionResponse):
+        if ephemere:
+            kwargs["ephemeral"] = True
+        if not destination.is_done():
+            return _message_envoye(await destination.send_message(**kwargs))
+        parent = getattr(destination, "_parent", None)
+        if parent is not None:
+            return await parent.followup.send(**kwargs)
+
+    interaction = getattr(destination, "interaction", None) or (
+        destination if isinstance(destination, discord.Interaction) else None
+    )
+    if interaction is not None:
+        if ephemere:
+            kwargs["ephemeral"] = True
+        if not interaction.response.is_done():
+            return _message_envoye(await interaction.response.send_message(**kwargs))
+        if reponse_differee_a_finaliser(interaction):
+            try:
+                result = await interaction.edit_original_response(
+                    content=texte[:1900],
+                    embeds=[],
+                    view=None,
+                    attachments=[],
+                )
+                marquer_reponse_differee_finalisee(interaction)
+                return result
+            except (discord.NotFound, discord.HTTPException):
+                logger.debug("Edition texte d'erreur différée impossible.", exc_info=True)
+        return await interaction.followup.send(**kwargs)
+
+    if ephemere and isinstance(destination, discord.Webhook):
+        kwargs["ephemeral"] = True
+    return await destination.send(**kwargs)
+
+
 async def envoyer(
     destination: Any,
     panneau: Panneau,
@@ -481,6 +643,14 @@ async def envoyer(
     reste fermé sur @everyone et sur les rôles : consulter une fiche ne doit jamais
     pouvoir alerter le serveur entier.
     """
+    if _panneau_est_erreur_simple(panneau):
+        return await _envoyer_texte_brut_depuis_panneau(
+            destination,
+            _texte_erreur_depuis_panneau(panneau),
+            ephemere=ephemere,
+            extra=extra,
+        )
+
     # Toute vue exposant fichiers() est acceptee, pas seulement Panneau : les
     # panneaux interactifs (aide, setup) sont des LayoutView batis sur mesure.
     fabrique = getattr(panneau, "fichiers", None)
@@ -712,7 +882,7 @@ def texte_complet(panneau: Panneau) -> str:
 
 __all__ = [
     "Bouton",
-    "CHEVRON",
+    "CORE_NAME",
     "INTENTIONS",
     "Ligne",
     "Panneau",
@@ -734,6 +904,8 @@ __all__ = [
     "REPONSE_LIBRE",
     "COMMANDES_TEXTE_LIBRE",
     "nom_banniere",
+    "signature_core",
+    "pied_core",
 ]
 
 

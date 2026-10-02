@@ -138,17 +138,55 @@ class Moderation(commands.Cog):
             )
             return False
 
-        case_number = await self.bot.db.record_sanction(
-            guild.id, row["user_id"], self.bot.user.id, "unban", "Fin du bannissement temporaire (automatique)"
+        try:
+            case_number = await self.bot.db.record_sanction(
+                guild.id,
+                row["user_id"],
+                self.bot.user.id,
+                "unban",
+                "Fin du bannissement temporaire (automatique)",
+            )
+        except Exception:
+            case_number = None
+            logger.exception(
+                "Dossier d'unban automatique non persisté guild=%s user=%s.",
+                guild.id,
+                row["user_id"],
+            )
+
+        title = (
+            f"⏰ Dossier #{case_number} — Fin de sanction temporaire"
+            if case_number is not None
+            else "⏰ Fin de sanction temporaire — dossier non enregistré"
         )
         e = design_system.create_embed(
-            title=f"⏰ Dossier #{case_number} — Fin de sanction temporaire",
+            title=title,
             colour=config.COLOR_INFO,
             footer="SentriX",
         )
-        e.add_field(name="👤 Utilisateur", value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`", inline=False)
-        e.add_field(name="📄 Détail", value="Débanni automatiquement (fin du tempban)", inline=False)
-        await self.log_action(guild, e)
+        e.add_field(
+            name="👤 Utilisateur",
+            value=f"<@{row['user_id']}>\n`ID: {row['user_id']}`",
+            inline=False,
+        )
+        e.add_field(
+            name="📄 Détail",
+            value="Débanni automatiquement (fin du tempban)",
+            inline=False,
+        )
+        try:
+            await self.log_action(guild, e)
+        except Exception:
+            logger.exception(
+                "Log d'unban automatique non envoyé guild=%s user=%s.",
+                guild.id,
+                row["user_id"],
+            )
+
+        # Discord a confirmé le débannissement : la ligne est consommable même si
+        # l'audit DB/log secondaire a échoué. La conserver ne recréerait pas le log
+        # au prochain cycle (Discord répondrait NotFound), mais laisserait une ligne
+        # temporaire obsolète inutilement.
         return True
 
     @check_tempactions.before_loop
@@ -234,9 +272,26 @@ class Moderation(commands.Cog):
         unban tant qu'ils ne sont pas migrés) déclenche encore la persistance directe,
         non protégée, ici."""
         if case_number is _CASE_NUMBER_UNSET:
-            case_number = await self.bot.db.record_sanction(
-                ctx.guild.id, target.id, ctx.author.id, action, reason, duration_seconds
-            )
+            try:
+                case_number = await self.bot.db.record_sanction(
+                    ctx.guild.id,
+                    target.id,
+                    ctx.author.id,
+                    action,
+                    reason,
+                    duration_seconds,
+                )
+            except Exception:
+                # La sanction Discord peut déjà être réellement appliquée. Une panne
+                # de persistance du dossier ne doit jamais transformer ce succès en
+                # "commande échouée" côté modérateur.
+                case_number = None
+                logger.exception(
+                    "Dossier de sanction non persisté guild=%s target=%s action=%s.",
+                    ctx.guild.id,
+                    target.id,
+                    action,
+                )
         kind = self.SANCTION_KIND.get(action, "danger")
         colour = {"success": config.COLOR_SUCCESS, "warning": config.COLOR_WARNING, "danger": config.COLOR_ERROR}[kind]
         label = self.SANCTION_LABELS.get(action, action)
@@ -252,14 +307,44 @@ class Moderation(commands.Cog):
         )
         e.add_field(name="👤 Membre", value=f"{getattr(target, 'mention', target)}\n`ID: {target.id}`", inline=True)
         e.add_field(name="🛡️ Modérateur", value=f"{ctx.author.mention}\n`ID: {ctx.author.id}`", inline=True)
-        total = await self.bot.db.get_sanction_count(ctx.guild.id, target.id)
-        e.add_field(name="📁 Historique", value=f"{total} sanction(s) au total pour ce membre", inline=True)
+        try:
+            total = await self.bot.db.get_sanction_count(ctx.guild.id, target.id)
+        except Exception:
+            total = None
+            logger.exception(
+                "Comptage de l'historique indisponible guild=%s target=%s.",
+                ctx.guild.id,
+                target.id,
+            )
+        e.add_field(
+            name="📁 Historique",
+            value=(
+                f"{total} sanction(s) au total pour ce membre"
+                if total is not None
+                else "Indisponible temporairement"
+            ),
+            inline=True,
+        )
         if duration_seconds:
             e.add_field(name="⏱️ Durée", value=helpers.format_duration(duration_seconds), inline=True)
         e.add_field(name="📝 Raison", value=reason or "Aucune raison fournie", inline=False)
         for name, value in (extra_fields or {}).items():
             e.add_field(name=name, value=value, inline=False)
-        await self.log_action(ctx.guild, e, self.SANCTION_EVENT_TYPES.get(action, "moderation"))
+        try:
+            await self.log_action(
+                ctx.guild,
+                e,
+                self.SANCTION_EVENT_TYPES.get(action, "moderation"),
+            )
+        except Exception:
+            # Le log est important pour l'audit, mais il reste secondaire par
+            # rapport à la vérité Discord : l'action a déjà été exécutée.
+            logger.exception(
+                "Journal de sanction non envoyé guild=%s target=%s action=%s.",
+                ctx.guild.id,
+                target.id,
+                action,
+            )
         return e
 
     # Deux appels identiques (même serveur, même action, même cible) en moins de
@@ -1014,24 +1099,32 @@ class Moderation(commands.Cog):
         try:
             deleted = await self._purge_messages(ctx, candidates, purge_limit)
         except discord.Forbidden:
-            return await panels.texte_court(
-                ctx.channel if is_prefix else ctx,
-                "Il manque à SentriX la permission **Gérer les messages** ou **Voir l'historique** dans ce salon.",
-                ephemere=True,
-                supprimer_apres=8,
+            message = (
+                "Permission manquante : `Gérer les messages` "
+                "ou `Voir l'historique`."
             )
+            if is_prefix:
+                return await ctx.channel.send(message, delete_after=8)
+            if ctx.interaction.response.is_done():
+                return await ctx.interaction.followup.send(message, ephemeral=True)
+            return await ctx.interaction.response.send_message(message, ephemeral=True)
         messages = [
             message for message in deleted
             if invocation_id is None or int(message.id) != int(invocation_id)
         ]
 
-        texte = f"{len(messages)} message(s) supprimé(s)."
+        texte = f"`{len(messages)}` message(s) supprimé(s)."
         if is_prefix:
-            # Le message de commande vient d'être purgé : la confirmation est éphémère à
-            # sa manière (courte durée), sans référence à un message disparu.
-            await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
+            # Texte Discord brut : aucun embed/panel pour la confirmation de clear.
+            await ctx.channel.send(texte, delete_after=4)
         else:
-            await panels.texte_court(ctx, texte, ephemere=True)
+            if ctx.interaction.response.is_done():
+                try:
+                    await ctx.interaction.edit_original_response(content=texte)
+                except discord.HTTPException:
+                    await ctx.interaction.followup.send(texte, ephemeral=True)
+            else:
+                await ctx.interaction.response.send_message(texte, ephemeral=True)
 
         asyncio.create_task(self._log_clear_safely(ctx, messages, requested))
 

@@ -220,6 +220,7 @@ async function guardDirty() {
 
 /* ---------- options Discord ---------- */
 function roles() { return state.guild?.roles || []; }
+function guildEmojis() { return state.guild?.emojis || []; }
 function channels(type = 'text') {
   const all = state.guild?.channels || [];
   return all.filter(c => {
@@ -239,6 +240,47 @@ function channelOptions(value = '', type = 'text', placeholder = 'Aucun salon') 
 }
 function channelName(id) { const c = (state.guild?.channels || []).find(x => String(x.id) === String(id)); return c ? `#${c.name}` : ''; }
 function roleName(id) { const r = roles().find(x => String(x.id) === String(id)); return r ? `@${r.name}` : ''; }
+function emojiControl(id, value = '', placeholder = 'Emoji Unicode ou du serveur') {
+  const emojis = guildEmojis();
+  const options = emojis.map(emoji => `<button class="emoji-pick-item" type="button" data-emoji-value="${esc(emoji.value)}" data-emoji-name="${esc(emoji.name)}"><img src="${esc(emoji.url)}" alt="" loading="lazy"><span>:${esc(emoji.name)}:</span>${emoji.animated ? '<small>Animé</small>' : ''}</button>`).join('');
+  return `<div class="emoji-control" data-emoji-control>
+    <div class="toolbar"><input class="search-input" id="${esc(id)}" maxlength="100" value="${esc(value || '')}" placeholder="${esc(placeholder)}"><button class="btn" type="button" data-server-emoji-target="${esc(id)}" ${emojis.length ? '' : 'disabled'}>${emojis.length ? 'Emojis du serveur' : 'Aucun emoji serveur'}</button></div>
+    <div class="emoji-picker-inline hidden" data-emoji-picker-for="${esc(id)}">
+      <input class="search-input emoji-picker-search" type="search" placeholder="Rechercher un emoji…" autocomplete="off">
+      <div class="emoji-picker-grid">${options || '<small>Aucun emoji personnalisé disponible.</small>'}</div>
+    </div>
+  </div>`;
+}
+function bindEmojiPickers(root = document) {
+  root.querySelectorAll('[data-server-emoji-target]').forEach(button => {
+    const control = button.closest('[data-emoji-control]');
+    const picker = control?.querySelector('[data-emoji-picker-for]');
+    const search = control?.querySelector('.emoji-picker-search');
+    const items = [...(control?.querySelectorAll('[data-emoji-value]') || [])];
+    if (!picker) return;
+    button.onclick = () => {
+      picker.classList.toggle('hidden');
+      if (!picker.classList.contains('hidden')) {
+        if (search) { search.value = ''; items.forEach(item => item.classList.remove('hidden')); search.focus(); }
+      }
+    };
+    if (search) search.oninput = () => {
+      const query = search.value.trim().toLocaleLowerCase('fr');
+      items.forEach(item => {
+        const name = String(item.dataset.emojiName || '').toLocaleLowerCase('fr');
+        item.classList.toggle('hidden', Boolean(query) && !name.includes(query));
+      });
+    };
+    items.forEach(item => item.onclick = () => {
+      const input = $(button.dataset.serverEmojiTarget);
+      if (!input) return;
+      input.value = item.dataset.emojiValue || '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      picker.classList.add('hidden');
+    });
+  });
+}
 function resourceIssue(field) {
   const d = state.cache.get(`${state.guildId}:diagnostics`)?.value;
   return (d?.invalid_resources || []).find(x => x.field === field) || null;

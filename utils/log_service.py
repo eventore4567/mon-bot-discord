@@ -389,21 +389,49 @@ class LogActionsView(discord.ui.View):
         jump_url: str | None = None,
         ids: list[tuple[str, int]] | None = None,
         invite_code: str | None = None,
+        links: list[tuple[str, str]] | None = None,
     ):
         super().__init__(timeout=None)
+
+        # Les logs fichiers peuvent avoir plusieurs actions. On répartit proprement
+        # les boutons sur plusieurs lignes au lieu de dépasser la limite Discord de
+        # 5 composants par ActionRow.
+        position = 0
+
+        def next_row() -> int:
+            nonlocal position
+            row = min(position // 5, 4)
+            position += 1
+            return row
+
         if jump_url:
             self.add_item(
                 discord.ui.Button(
                     label="Voir le message",
                     style=discord.ButtonStyle.link,
                     url=jump_url,
-                    row=0,
+                    row=next_row(),
                 )
             )
-        for label, entity_id in (ids or [])[:4]:
-            self.add_item(RevealIdButton(label, entity_id, row=0))
+
+        for label, entity_id in (ids or [])[:8]:
+            self.add_item(RevealIdButton(label, entity_id, row=next_row()))
+
         if invite_code:
-            self.add_item(RevealInviteButton(invite_code, row=0))
+            self.add_item(RevealInviteButton(invite_code, row=next_row()))
+
+        for label, url in (links or [])[:12]:
+            clean_url = str(url or "").strip()
+            if not clean_url.startswith(("https://", "http://")):
+                continue
+            self.add_item(
+                discord.ui.Button(
+                    label=str(label or "Ouvrir")[:80],
+                    style=discord.ButtonStyle.link,
+                    url=clean_url,
+                    row=next_row(),
+                )
+            )
 
 
 def log_actions(
@@ -411,10 +439,16 @@ def log_actions(
     jump_url: str | None = None,
     ids: list[tuple[str, int]] | None = None,
     invite_code: str | None = None,
+    links: list[tuple[str, str]] | None = None,
 ) -> LogActionsView | None:
-    if not (jump_url or ids or invite_code):
+    if not (jump_url or ids or invite_code or links):
         return None
-    return LogActionsView(jump_url=jump_url, ids=ids, invite_code=invite_code)
+    return LogActionsView(
+        jump_url=jump_url,
+        ids=ids,
+        invite_code=invite_code,
+        links=links,
+    )
 
 async def _ensure_log_config_schema(bot) -> None:
     """Filet de sécurité : la table canonique est créée par ``Database.connect()``.
@@ -702,6 +736,7 @@ async def send_log(
     identity_name: str | None = None,
     identity_id: int | None = None,
     identity_icon: str | None = None,
+    media_items: list[tuple[str, str, str]] | None = None,
 ) -> bool:
     """Pipeline unique : event -> catégorie -> log_config -> validation -> Components V2."""
     logger.debug(
@@ -873,6 +908,7 @@ async def send_log(
         identity_name=identity_name,
         identity_id=identity_id,
         identity_icon=identity_icon,
+        media_items=media_items,
     )
     if not envoye and wide_logs.echecs_permanents(channel_id) >= ECHECS_AVANT_COUPURE:
         await _couper_route_inaccessible(bot, guild, category, channel_id)

@@ -140,12 +140,16 @@ def _install_clear_error_guard(bot: commands.Bot) -> None:
                 getattr(commands, "BadArgument", None),
                 getattr(commands, "BadUnionArgument", None),
                 getattr(commands, "ConversionError", None),
+                getattr(commands, "RangeError", None),
             ) if isinstance(cls, type)
         )
         if root_name == "clear" and conversion_errors and isinstance(base, conversion_errors):
-            from utils import embeds
-
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('Le nombre doit être un entier entre **1 et 100**.\n\nUtilisez : `+clear <nombre>`', title='Nombre invalide')))
+            sender = getattr(commands.Context.send, "_sentrix_original", commands.Context.send)
+            return await sender(
+                ctx,
+                "Valeur invalide : `nombre` doit être compris entre `2` et `100`.",
+                delete_after=6,
+            )
 
         result = current(ctx, error)
         if inspect.isawaitable(result):

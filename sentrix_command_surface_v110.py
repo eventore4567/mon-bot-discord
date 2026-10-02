@@ -81,21 +81,9 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "deposit": "deposit",
     "withdraw": "withdraw",
 
-    # Musique — vocabulaire commun aux bots musique majeurs.
-    # +play reste la commande préfixée historique ; les autres restent aussi accessibles
-    # via +music <action> côté préfixe.
-    "play": "play",
-    "music pause": "pause",
-    "music resume": "resume",
-    "music skip": "skip",
-    "music stop": "stop",
-    "music queue": "queue",
-    "music nowplaying": "nowplaying",
-    "music volume": "volume",
-    "music shuffle": "shuffle",
-    "music join": "join",
-    "music leave": "leave",
-    "music seek": "seek",
+    # Musique : la surface canonique française garde désormais TOUT sous
+    # /musique. Les commandes + historiques restent inchangées, mais V110 ne
+    # republie plus /play, /pause, /queue... à la racine.
 }
 
 # Les rôles sont plus lisibles sous un petit groupe /role que sous des chemins profonds.
@@ -104,9 +92,9 @@ STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "removerole": ("role", "remove"),
 }
 
-# /play est fourni par la commande top-level `play`, qui appelle déjà le même moteur que
-# `music play`. Publier les deux créerait un faux doublon.
-SUPPRESSED_SLASH_DUPLICATES = frozenset({"music play"})
+# Les doublons de compatibilité musique sont filtrés par la surface canonique :
+# +play reste utilisable, tandis que /musique jouer vient de music play.
+SUPPRESSED_SLASH_DUPLICATES = frozenset()
 
 _TOKEN_SHORTENING = {
     "configuration": "config",
@@ -170,9 +158,16 @@ def _compact_should_expose(command) -> bool:
         return False
 
     qualified, name = _command_key(command)
-    if qualified in STANDARD_DIRECT_SLASH or name in STANDARD_DIRECT_SLASH:
+    is_root = getattr(command, "root_parent", None) is None
+
+    # Un nom simple comme "clear", "queue" ou "resume" peut être une vraie
+    # sous-commande métier d'un groupe. Les anciennes vérifications par nom simple
+    # supprimaient donc music clear/queue/resume parce qu'une AUTRE commande racine
+    # portait le même nom. Les tables directes/merged s'appliquent au qualified_name,
+    # et au nom simple uniquement pour une commande racine.
+    if qualified in STANDARD_DIRECT_SLASH or (is_root and name in STANDARD_DIRECT_SLASH):
         return False
-    if qualified in STANDARD_GROUPED_SLASH or name in STANDARD_GROUPED_SLASH:
+    if qualified in STANDARD_GROUPED_SLASH or (is_root and name in STANDARD_GROUPED_SLASH):
         return False
     if qualified in SUPPRESSED_SLASH_DUPLICATES:
         return False
@@ -183,7 +178,7 @@ def _compact_should_expose(command) -> bool:
         from cogs import command_catalog_cleanup as catalog
 
         merged = set(catalog.MERGED_COMMANDS) | set(catalog.PURE_DUPLICATE_COMMANDS)
-        if qualified in merged or name in merged:
+        if qualified in merged or (is_root and name in merged):
             return False
     except Exception:
         pass

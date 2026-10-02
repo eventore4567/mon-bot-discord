@@ -19,7 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from services import levels as levels_service
-from utils import embeds, checks, helpers, stats_service, design_system, visual_v5, temporary_boosts
+from utils import embeds, checks, helpers, stats_service, design_system, visual_v5, temporary_boosts, member_event_cards
 from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
 
@@ -702,6 +702,60 @@ class Levels(commands.Cog, name="Levels"):
             import logging
             logging.getLogger("bot").exception("Impossible de restaurer les sessions vocales au démarrage")
 
+    async def _send_level_announcement(
+        self,
+        channel: discord.abc.Messageable,
+        member: discord.Member,
+        level: int,
+        *,
+        ping: bool = True,
+    ) -> bool:
+        """Rendu unique des montées de niveau, utilisé en réel et par +test-events."""
+        allowed_mentions = (
+            discord.AllowedMentions(users=[member], roles=False, everyone=False, replied_user=False)
+            if ping else discord.AllowedMentions.none()
+        )
+        try:
+            avatar_bytes = await member_event_cards.read_member_avatar(member)
+            file = member_event_cards.build_member_event_card(
+                member,
+                kind="level",
+                avatar_bytes=avatar_bytes,
+                level=level,
+            )
+            embed = discord.Embed(
+                description=f"**{member.display_name}**, vous venez de passer au niveau **{level}** !",
+                colour=discord.Colour(0x4E5058),
+            )
+            embed.set_image(url="attachment://sentrix_level_up.png")
+            embed.set_footer(text="SentriX")
+            await channel.send(
+                content=member.mention if ping else None,
+                embed=embed,
+                file=file,
+                allowed_mentions=allowed_mentions,
+            )
+            return True
+        except Exception:
+            logger.exception(
+                "Annonce de niveau riche impossible guild=%s user=%s level=%s",
+                getattr(member.guild, "id", 0),
+                member.id,
+                level,
+            )
+            try:
+                await channel.send(
+                    content=member.mention if ping else None,
+                    embed=discord.Embed(
+                        description=f"**{member.display_name}**, vous venez de passer au niveau **{level}** !",
+                        colour=discord.Colour(0x4E5058),
+                    ),
+                    allowed_mentions=allowed_mentions,
+                )
+                return True
+            except discord.HTTPException:
+                return False
+
     # -------------------------------------------------------------- XP
 
     @commands.Cog.listener()
@@ -771,48 +825,12 @@ class Levels(commands.Cog, name="Levels"):
                 if settings.get("level_announce_enabled", True):
                     channel = message.guild.get_channel(conf["level_channel"]) if conf and conf["level_channel"] else message.channel
                     if channel:
-                        allowed_mentions = discord.AllowedMentions(
-                            users=[message.author],
-                            roles=False,
-                            everyone=False,
-                            replied_user=False,
+                        await self._send_level_announcement(
+                            channel,
+                            message.author,
+                            level,
+                            ping=True,
                         )
-                        try:
-                            card_stats = await stats_service.get_member_statistics(
-                                self.bot, message.guild, message.author
-                            )
-                            design_settings = await self.bot.db.get_design_settings(message.guild.id)
-                            buffer = await visual_v5.render_member_card(
-                                message.author,
-                                message.guild,
-                                card_stats,
-                                design_settings,
-                                level_up=level,
-                            )
-                            file = discord.File(buffer, filename="sentrix-level-up.png")
-                            level_embed = discord.Embed(
-                                title="Niveau atteint",
-                                description=f"**{message.author.display_name}** passe au niveau **{level}**.",
-                                colour=discord.Colour(design_settings.get("primary_color", 0x6C5CE7)),
-                            )
-                            level_embed.set_image(url="attachment://sentrix-level-up.png")
-                            await channel.send(
-                                content=message.author.mention,
-                                embed=level_embed,
-                                file=file,
-                                allowed_mentions=allowed_mentions,
-                            )
-                        except Exception:
-                            try:
-                                await channel.send(
-                                    content=message.author.mention,
-                                    embed=embeds.success(
-                                        f"**{message.author.display_name}** passe au niveau **{level}** !"
-                                    ),
-                                    allowed_mentions=allowed_mentions,
-                                )
-                            except discord.HTTPException:
-                                pass
                 await self._assign_level_role(message.guild, message.author, level, settings)
         except Exception:
             import logging
@@ -1654,6 +1672,177 @@ class Levels(commands.Cog, name="Levels"):
             reason = f" — {r['reason']}" if r["reason"] else ""
             lines.append(f"<t:{r['created_at']}:R> **{sign}{r['amount']}** par {giver_name}{reason}")
         await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral(f'📜 Historique de réputation de {membre.display_name}', '\n'.join(lines))))
+
+    @commands.command(
+        name="test-events",
+        aliases=["test-evenements", "preview-events"],
+        help="[Admin] Auto-configurer puis tester arrivée, départ et niveau sans modifier les données membre.",
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def test_events(self, ctx: commands.Context, niveau: int = 1):
+        if ctx.guild is None or not isinstance(ctx.author, discord.Member):
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("Cette commande doit être utilisée sur un serveur.")),
+            )
+
+        # La commande doit être utilisable sans repasser dans /setup :
+        # si une destination manque (ou a été supprimée), le salon courant devient
+        # la destination persistante. Aucun salon n'est créé et une config valide
+        # déjà existante n'est jamais écrasée.
+        fallback = ctx.channel
+        if not isinstance(fallback, (discord.TextChannel, discord.Thread)):
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.warning("Lance cette commande dans un salon texte du serveur.")
+                ),
+            )
+
+        me = ctx.guild.me
+        if me is None:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("SentriX n’est pas disponible dans le cache du serveur.")),
+            )
+        perms = fallback.permissions_for(me)
+        missing_perms = []
+        if not perms.view_channel:
+            missing_perms.append("Voir le salon")
+        if not perms.send_messages:
+            missing_perms.append("Envoyer des messages")
+        if not perms.embed_links:
+            missing_perms.append("Intégrer des liens")
+        if not perms.attach_files:
+            missing_perms.append("Joindre des fichiers")
+        if missing_perms:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.warning(
+                        f"Il manque dans {fallback.mention} : **{', '.join(missing_perms)}**."
+                    )
+                ),
+            )
+
+        from cogs import setup_v2_completion, setup_v2_core
+
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+        configured = {}
+        auto_configured = []
+
+        for field, label in (
+            ("welcome_channel", "Bienvenue"),
+            ("goodbye_channel", "Départ"),
+            ("level_channel", "Niveaux"),
+        ):
+            try:
+                channel_id = conf[field] if conf else None
+            except (KeyError, IndexError, TypeError):
+                channel_id = None
+            channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                await self.bot.db.set_guild_config(ctx.guild.id, field, fallback.id)
+                channel = fallback
+                auto_configured.append(label)
+            configured[field] = channel
+
+        # Pose uniquement les textes par défaut manquants. Une personnalisation existante
+        # reste intacte, même quand la commande répare un salon supprimé.
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+        try:
+            welcome_message = conf["welcome_message"] if conf else None
+        except (KeyError, IndexError, TypeError):
+            welcome_message = None
+        if not str(welcome_message or "").strip():
+            await self.bot.db.set_guild_config(
+                ctx.guild.id,
+                "welcome_message",
+                setup_v2_completion.WELCOME_DEFAULT_TEXT,
+            )
+            auto_configured.append("message de bienvenue")
+
+        conf = await self.bot.db.get_guild_config(ctx.guild.id)
+        try:
+            goodbye_message = conf["goodbye_message"] if conf else None
+        except (KeyError, IndexError, TypeError):
+            goodbye_message = None
+        if not str(goodbye_message or "").strip():
+            await self.bot.db.set_guild_config(
+                ctx.guild.id,
+                "goodbye_message",
+                setup_v2_completion.GOODBYE_DEFAULT_TEXT,
+            )
+            auto_configured.append("message de départ")
+
+        # Même état pour le dashboard, +setup, les commandes + et les commandes /.
+        for module in ("welcome", "goodbye", "levels"):
+            await setup_v2_core.set_module_enabled(
+                self.bot,
+                ctx.guild.id,
+                module,
+                True,
+                actor_id=ctx.author.id,
+            )
+
+        # Si aucune présentation n'existe encore, crée une seule configuration neutre
+        # et cohérente pour arrivée/départ. Ne touche jamais à une présentation existante.
+        presentation_row = await self.bot.db.fetchone(
+            "SELECT guild_id FROM welcome_presentation_v2 WHERE guild_id=?",
+            (ctx.guild.id,),
+        )
+        if presentation_row is None:
+            await setup_v2_completion._save_welcome_presentation(
+                self.bot,
+                ctx.guild.id,
+                title=setup_v2_completion.WELCOME_DEFAULT_TITLE,
+                show_avatar=True,
+                show_member_count=True,
+                actor_id=ctx.author.id,
+                mode="embed",
+                goodbye_mode="embed",
+                ping=True,
+                goodbye_ping=False,
+            )
+            auto_configured.append("présentation arrivée/départ")
+
+        ok_welcome, welcome_result = await setup_v2_completion._send_welcome(
+            self.bot, ctx.author, test=True
+        )
+        goodbye_channel = await setup_v2_completion._send_goodbye(
+            self.bot, ctx.author, test=True
+        )
+        if not ok_welcome or goodbye_channel is None:
+            detail = welcome_result if not ok_welcome else "Le test de départ n’a pas pu être envoyé."
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(detail)))
+
+        fake_level = max(1, min(int(niveau), 1_000_000))
+        if not await self._send_level_announcement(
+            configured["level_channel"],
+            ctx.author,
+            fake_level,
+            ping=True,
+        ):
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(embeds.error("Le test de niveau a été refusé par Discord.")),
+            )
+
+        setup_note = (
+            " Configuration automatique : " + ", ".join(auto_configured) + "."
+            if auto_configured else
+            " La configuration existante a été conservée."
+        )
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.success(
+                    "Tests envoyés : fausse arrivée, faux départ et fausse montée de niveau. "
+                    "Aucune XP, aucun rôle et aucune donnée membre n’ont été modifiés."
+                    + setup_note
+                )
+            ),
+        )
 
     @commands.hybrid_command(name="voice-time", description="Afficher le temps passé en vocal par un membre.", with_app_command=False)
     @app_commands.describe(membre="Le membre visé (optionnel)")

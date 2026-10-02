@@ -191,11 +191,14 @@ def _install_finish_ping(music_cog) -> None:
         return
     original = music_cog._on_track_finished
 
-    async def on_track_finished_with_ping(self, queue):
+    async def on_track_finished_with_ping(self, queue, *args, **kwargs):
         finished = queue.current
         requester_id = getattr(finished, "requested_by", None) if finished else None
         text_channel = queue.text_channel
-        await original(queue)
+        # Phase 6 ajoute des métadonnées au callback audio (erreur, génération,
+        # piste terminée). Le wrapper V108 doit les transmettre telles quelles :
+        # sinon un simple callback FFmpeg provoque un TypeError et casse la file.
+        await original(queue, *args, **kwargs)
 
         # On ping uniquement lorsque la file est réellement terminée. Tant qu'une
         # piste suivante a démarré (ou qu'autoplay en a trouvé une), aucun ping.

@@ -431,20 +431,10 @@ def _patch_setup_v74(bot: commands.Bot) -> None:
             view.page = CATEGORY
             view.backend = view._new_backend(CATEGORY)
         await view.prepare()
-        # Ce chemin-ci est le DERNIER installé : c'est lui qui répond à /setup.
-        # Il envoyait la vue sans joindre la bannière que le conteneur
-        # référence, et Discord refusait le message entier :
-        #   Invalid Form Body — The referenced attachment was not found.
-        # Mesuré en production le 29/09/2026. joindre_banniere consulte la même
-        # condition que la pose de la galerie, donc les deux ne peuvent plus
-        # diverger, quel que soit le chemin d'envoi.
-        from cogs import setup_components_v73 as _v73
-
-        if isinstance(target, commands.Context):
-            return await target.send(**_v73.joindre_banniere({"view": view}))
-        if target.response.is_done():
-            return await target.followup.send(**_v73.joindre_banniere({"view": view}))
-        return await target.response.send_message(**_v73.joindre_banniere({"view": view}))
+        # Ne jamais envoyer cette vue directement : elle référence
+        # attachment://banner_config.webp et doit donc passer par le transport
+        # qui joint view.fichiers() dans le même payload.
+        return await panels.envoyer(target, view)
 
     current = setup_ui.OfficialSetup.send_setup
     if not getattr(current, "_sentrix_invitation_v74_final", False):

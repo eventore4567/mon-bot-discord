@@ -1,4 +1,4 @@
-"""SentriX V75 — protections de sécurité choisies, permissions Discord automatiques.
+"""SentriX V75 — protections choisies manuellement, permissions Discord vérifiées.
 
 Cette couche corrige la page Sécurité de V74 :
 - l'administrateur choisit exactement les protections anti-* à activer ;
@@ -8,7 +8,7 @@ Cette couche corrige la page Sécurité de V74 :
   modifier lui-même son rôle d'intégration géré.
 
 Elle possède aussi la page Logs finale. Cette page n'utilise plus les anciens Select du
-backend V69/V70 déplacés dans Components V2 : catégorie et salon sont des composants natifs
+ancien backend déplacés dans Components V2 : catégorie et salon sont des composants natifs
 de la façade finale, ce qui évite les erreurs de parent/rebuild et rend le choix du salon
 visible immédiatement.
 """
@@ -98,6 +98,37 @@ async def _selected_protections(view: v74.SentriXSetupV74) -> set[str]:
     return selected
 
 
+async def _honeypot_resources_ready(view: v74.SentriXSetupV74) -> bool:
+    """Vrai uniquement si toutes les ressources Honeypot existent déjà.
+
+    SentriX ne crée ni rôle, ni catégorie, ni salon depuis le Setup.
+    """
+    honeypot = view.bot.get_cog("HoneypotVerification")
+    if honeypot is None:
+        return False
+    try:
+        conf = await honeypot.config(view.guild.id, enabled_only=False)
+    except Exception:
+        logger.debug("Lecture Honeypot impossible", exc_info=True)
+        return False
+    if not conf:
+        return False
+
+    unverified = view.guild.get_role(int(_row_get(conf, "unverified_role_id", 0) or 0))
+    verified = view.guild.get_role(int(_row_get(conf, "verified_role_id", 0) or 0))
+    category = view.guild.get_channel(int(_row_get(conf, "category_id", 0) or 0))
+    verify_channel = view.guild.get_channel(int(_row_get(conf, "verify_channel_id", 0) or 0))
+    trap_channel = view.guild.get_channel(int(_row_get(conf, "trap_channel_id", 0) or 0))
+
+    return bool(
+        isinstance(unverified, discord.Role)
+        and isinstance(verified, discord.Role)
+        and isinstance(category, discord.CategoryChannel)
+        and isinstance(verify_channel, discord.TextChannel)
+        and isinstance(trap_channel, discord.TextChannel)
+    )
+
+
 async def _refresh_security_runtime(view: v74.SentriXSetupV74) -> None:
     security_v71._invalidate_automod(view.bot, view.guild.id)
     automod = view.bot.get_cog("Automod")
@@ -118,7 +149,7 @@ async def _save_protections(
     chosen: set[str],
     *,
     actor_id: int,
-) -> None:
+) -> str | None:
     automod_fields = {field for field, _label in setup_ui.AUTOMOD}
     chosen_automod = chosen & automod_fields
 
@@ -134,6 +165,13 @@ async def _save_protections(
     )
 
     await security_v71.ensure_schema(view.bot)
+    notice = None
+    if "honeypot" in chosen and not await _honeypot_resources_ready(view):
+        chosen.discard("honeypot")
+        notice = (
+            "Honeypot n’a pas été activé : ses rôles/salons existants sont manquants. "
+            "SentriX ne crée rien automatiquement."
+        )
     honeypot_enabled = int("honeypot" in chosen)
     verification_enabled = int("verification" in chosen)
     await security_v71.update_setting(
@@ -166,31 +204,19 @@ async def _save_protections(
         actor_id=actor_id,
     )
 
-    # Le vieux panneau marquait le honeypot "actif" en base sans republier les deux
-    # panneaux Discord. Résultat : les salons verification/stay-muted existaient mais
-    # restaient vides. On applique maintenant le runtime réel à chaque sauvegarde.
+    # Aucune création de ressource ici. Si Honeypot est déjà configuré avec des
+    # ressources existantes, on active simplement son état ; sinon il reste off.
     honeypot = view.bot.get_cog("HoneypotVerification")
-    if honeypot is not None:
+    if honeypot is not None and "honeypot" not in chosen:
         try:
-            if "honeypot" in chosen:
-                result, error = await honeypot.create_or_refresh_system(view.guild)
-                if error:
-                    logger.warning("Setup sécurité : honeypot non activé guild=%s: %s", view.guild.id, error)
-                    await security_v71.update_setting(
-                        view.bot, view.guild.id, "honeypot_enabled", 0, actor_id,
-                    )
-                    await view.bot.db.execute(
-                        "UPDATE honeypot_verification SET enabled=0 WHERE guild_id=?",
-                        (view.guild.id,),
-                    )
-            else:
-                conf = await honeypot.config(view.guild.id, enabled_only=False)
-                if conf and conf["enabled"]:
-                    await honeypot.disable_system(view.guild)
+            conf = await honeypot.config(view.guild.id, enabled_only=False)
+            if conf and conf["enabled"]:
+                await honeypot.disable_system(view.guild)
         except Exception:
-            logger.exception("Setup sécurité : synchronisation honeypot impossible guild=%s", view.guild.id)
+            logger.exception("Setup sécurité : désactivation Honeypot impossible guild=%s", view.guild.id)
 
     await _refresh_security_runtime(view)
+    return notice
 
 
 async def _effective_states_v75(self: v74.SentriXSetupV74) -> dict[str, str]:
@@ -223,14 +249,15 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     )
 
     container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
+    container.add_item(v74.v73.entete_banniere())
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
-                "# 🔒 Sécurité\n"
+                "-# SENTRIX CORE · Configuration · setup\n# 🔒 Sécurité\n"
                 "Choisissez **exactement les protections anti** que vous voulez utiliser. "
                 "Vous pouvez en activer une seule, plusieurs ou toutes.\n\n"
                 "Les permissions **Kick, Ban, Timeout, Gérer les messages, Gérer les rôles, "
-                "Gérer les salons, etc. ne se règlent pas ici** : SentriX vérifie automatiquement "
+                "Gérer les salons, etc. ne se règlent pas ici** : SentriX vérifie "
                 "les permissions Discord réelles de la personne qui lance la commande et respecte "
                 "la hiérarchie des rôles."
             ),
@@ -240,13 +267,13 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(discord.ui.Separator())
 
     permissions_text = (
-        "### Permissions gérées automatiquement\n"
+        "### Permissions requises\n"
         "✅ SentriX possède actuellement les permissions nécessaires pour ses fonctions principales.\n"
-        "Aucun rôle `kick`, `ban` ou autre n'est à configurer dans ce panneau."
+        "Aucun rôle `kick`, `ban` ou autre n'est créé par ce panneau."
         if not missing
         else (
-            "### Permissions gérées automatiquement\n"
-            "SentriX choisit automatiquement les permissions requises pour chaque action, "
+            "### Permissions requises\n"
+            "SentriX vérifie les permissions requises pour chaque action, "
             "mais **son propre rôle Discord** ne possède pas encore : "
             + ", ".join(missing[:12])
             + ".\nDiscord ne permet pas au bot de modifier lui-même son rôle d'intégration géré ; "
@@ -309,18 +336,23 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     async def save_selection(interaction: discord.Interaction):
         if not interaction.response.is_done():
             await interaction.response.defer()
-        await _save_protections(
+        notice = await _save_protections(
             self,
             set(protection_select.values),
             actor_id=interaction.user.id,
         )
         await self.refresh(interaction)
+        if notice:
+            try:
+                await interaction.followup.send(notice, ephemeral=True)
+            except discord.HTTPException:
+                pass
 
     protection_select.callback = save_selection
     container.add_item(discord.ui.ActionRow(protection_select))
 
-    all_on = discord.ui.Button(label="Tout activer", style=discord.ButtonStyle.success)
-    all_off = discord.ui.Button(label="Tout désactiver", style=discord.ButtonStyle.danger)
+    all_on = discord.ui.Button(label="Activer toutes les protections", style=discord.ButtonStyle.success)
+    all_off = discord.ui.Button(label="Désactiver toutes les protections", style=discord.ButtonStyle.danger)
 
     async def enable_all(interaction: discord.Interaction):
         if not interaction.response.is_done():
@@ -397,10 +429,11 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
     available = [option.value for option in options]
     if not available:
         container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
+        container.add_item(v74.v73.entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# 📜 Logs du serveur\nAucune catégorie de logs n'est disponible dans ce runtime."
+                    "-# SENTRIX CORE · Configuration · setup\n# 📜 Logs du serveur\nAucune catégorie de logs n'est disponible dans ce runtime."
                 ),
                 accessory=v74.v73._thumbnail(self.bot),
             )
@@ -478,10 +511,11 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
     )
 
     container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
+    container.add_item(v74.v73.entete_banniere())
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
-                "# 📜 Logs du serveur\n"
+                "-# SENTRIX CORE · Configuration · setup\n# 📜 Logs du serveur\n"
                 "Choisissez une catégorie puis **le salon exact** où SentriX doit envoyer ces logs.\n"
                 "Les deux menus restent visibles en permanence : aucun ancien panneau caché n'est utilisé."
             ),
@@ -685,7 +719,7 @@ def install(bot: commands.Bot) -> None:
     v74.CATEGORY_META["security"] = (
         "🔒",
         "Sécurité",
-        "Choisissez individuellement les protections anti ; les permissions Discord sont automatiques.",
+        "Choisissez individuellement les protections ; SentriX vérifie les permissions nécessaires.",
     )
     v74.CATEGORY_META["logs"] = (
         "📜",

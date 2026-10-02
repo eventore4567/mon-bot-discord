@@ -28,6 +28,21 @@ class UserFacingV25Tests(unittest.TestCase):
         self.assertTrue(runtime_quality_v25._annotation_is_int("int"))
         self.assertFalse(runtime_quality_v25._annotation_is_int(str))
 
+    def test_gamble_contract_accepts_secure_all_parser(self):
+        async def callback(ctx, montant: str):
+            all_requested = str(montant).strip().casefold() in {"all", "tout", "max"}
+            return _parse_amount(str(montant), 100) if not all_requested else 100
+
+        callback._sentrix_all_amount_parser = True
+
+        import discord
+        from discord.ext import commands
+
+        bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+        command = commands.Command(callback, name="gamble")
+        bot.add_command(command)
+        self.assertTrue(runtime_quality_v25._gamble_amount_contract_ok(command))
+
 
 class CreatorCacheV25Tests(unittest.IsolatedAsyncioTestCase):
     async def test_negative_results_are_cached_but_positive_results_are_not(self):

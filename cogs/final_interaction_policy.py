@@ -81,7 +81,7 @@ def _root_from_interaction(interaction: discord.Interaction | None) -> str:
 # Racines dont les réponses restent en texte Discord normal. Historique : « sentrix »
 # l'était, puis production_embed_log_repair forçait TOUT en carte, puis la vérification
 # V96 se ré-exemptait — trois couches pour une seule règle, désormais écrite ici.
-PLAIN_ROOTS = frozenset({"verification"})
+PLAIN_ROOTS = frozenset({"verification", "clear"})
 
 
 def _plain_root(root: str) -> bool:
@@ -141,6 +141,52 @@ def _clean_embed(
             inline=field.inline,
         )
     return result
+
+
+_SIMPLE_ERROR_RE = re.compile(
+    r"(?:erreur|invalide|introuvable|permission|cooldown|manque|manquant|"
+    r"requis|impossible|interdit|refus|indisponible|échou|echou|"
+    r"doit être|doit etre|maximum|minim(?:um|ale)|déjà|deja)",
+    re.IGNORECASE,
+)
+
+
+def _command_is_active() -> bool:
+    return bool(_COMMAND_ROOT.get() or _COMMAND_CONTEXT.get() is not None)
+
+
+def _text_is_simple_error(value: Any) -> bool:
+    if not _command_is_active():
+        return False
+    text = str(value or "").strip()
+    return bool(text and len(text) <= 1900 and _SIMPLE_ERROR_RE.search(text))
+
+
+def _embed_is_simple_error(embed: discord.Embed | None) -> bool:
+    if not _command_is_active() or not isinstance(embed, discord.Embed):
+        return False
+    kind = panels.intention_de(embed)
+    if kind not in {"danger", "warning"}:
+        return False
+    title = str(getattr(embed, "title", "") or "")
+    description = str(getattr(embed, "description", "") or "")
+    fields = " ".join(
+        f"{field.name} {field.value}"
+        for field in list(getattr(embed, "fields", ()) or ())[:4]
+    )
+    return bool(_SIMPLE_ERROR_RE.search(" ".join((title, description, fields))))
+
+
+def _plain_text_from_error_embed(embed: discord.Embed) -> str:
+    description = _strip_drawn_dividers(getattr(embed, "description", ""))
+    title = _strip_drawn_dividers(getattr(embed, "title", ""))
+    if description:
+        return description[:1900]
+    for field in list(getattr(embed, "fields", ()) or ()):
+        value = _strip_drawn_dividers(getattr(field, "value", ""))
+        if value:
+            return value[:1900]
+    return title[:1900] or "Une erreur est survenue. Merci de réessayer."
 
 
 def _title_for_text(text: str) -> str:
@@ -349,6 +395,27 @@ def _normalize_existing(
     bot: Any,
 ) -> tuple[tuple, dict]:
     new_kwargs = dict(kwargs)
+
+    # Toute erreur simple émise directement sous forme d'embed par une vieille
+    # commande est ramenée au même contrat texte que les handlers centraux.
+    # Hors commande (logs, notifications automatiques), les embeds restent intacts.
+    if new_kwargs.get("view") is None:
+        single_error = new_kwargs.get("embed")
+        if _embed_is_simple_error(single_error):
+            text = _plain_text_from_error_embed(single_error)
+            new_kwargs.pop("embed", None)
+            new_kwargs.pop("embeds", None)
+            new_kwargs["content"] = text
+        else:
+            embedded = [
+                item for item in list(new_kwargs.get("embeds") or [])
+                if isinstance(item, discord.Embed)
+            ]
+            if len(embedded) == 1 and _embed_is_simple_error(embedded[0]):
+                text = _plain_text_from_error_embed(embedded[0])
+                new_kwargs.pop("embed", None)
+                new_kwargs.pop("embeds", None)
+                new_kwargs["content"] = text
     if isinstance(new_kwargs.get("embed"), discord.Embed):
         new_kwargs["embed"] = _clean_embed(new_kwargs["embed"], root=root, bot=bot)
     if new_kwargs.get("embeds"):
@@ -394,6 +461,8 @@ def _payload_pages(
         args, kwargs, editing=editing, root=root, bot=bot
     )
     content, positional = _content_from(base_args, base_kwargs)
+    if _text_is_simple_error(content):
+        force_embed = False
     if not force_embed or content is None or not str(content).strip():
         return [(base_args, base_kwargs)]
 
@@ -822,64 +891,115 @@ def _install_followups() -> None:
     discord.Webhook.send = webhook_send
 
 
-async def _permission_denial(interaction: discord.Interaction, decision) -> None:
-    # decision.message : la raison seule pour un module coupé / un MP / une liste noire,
-    # l'en-tête « pas accès » uniquement pour un vrai refus de permission.
-    text = str(getattr(decision, "message", None) or getattr(decision, "reason", None) or "Vous n'avez pas accès à cette commande.")
-    panel = sentrix_embeds.error(text)
+async def _send_plain_interaction_error(
+    interaction: discord.Interaction,
+    text: str,
+) -> None:
+    """Envoie une erreur slash en vrai texte Discord, jamais en embed/panneau."""
+    token = panels.TEXTE_BRUT.set(True)
     try:
-        if interaction.response.is_done():
-            response_type = getattr(interaction.response, "type", None)
-            if response_type == discord.InteractionResponseType.deferred_channel_message:
-                await interaction.edit_original_response(content=None, embed=panel)
-            else:
-                await panels.envoyer(interaction.followup, panels.depuis_embed(panel), ephemere=True)
-        else:
-            await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                str(text)[:1900],
+                ephemeral=True,
+            )
+            return
+
+        response_type = getattr(interaction.response, "type", None)
+        if response_type in {
+            discord.InteractionResponseType.deferred_channel_message,
+            discord.InteractionResponseType.deferred_message_update,
+        }:
+            try:
+                await interaction.edit_original_response(
+                    content=str(text)[:1900],
+                    embed=None,
+                    embeds=[],
+                    view=None,
+                )
+                return
+            except (discord.NotFound, discord.HTTPException):
+                logger.debug(
+                    "Édition de l'erreur slash différée impossible, repli follow-up.",
+                    exc_info=True,
+                )
+
+        await interaction.followup.send(
+            str(text)[:1900],
+            ephemeral=True,
+        )
+    finally:
+        panels.TEXTE_BRUT.reset(token)
+
+
+async def _permission_denial(interaction: discord.Interaction, decision) -> None:
+    text = str(
+        getattr(decision, "message", None)
+        or getattr(decision, "reason", None)
+        or "Tu n'as pas la permission d'utiliser cette commande."
+    )
+    try:
+        await _send_plain_interaction_error(interaction, text)
     except (discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
         logger.debug("Impossible d'envoyer un refus slash.", exc_info=True)
 
 
-def _slash_error_embed(error: BaseException) -> discord.Embed:
+def _slash_error_text(error: BaseException) -> str:
     original = getattr(error, "original", error)
+
     if isinstance(error, discord.app_commands.CommandOnCooldown):
-        return sentrix_embeds.warning(
-            f"Cette commande est en recharge. Réessayez dans {max(1, round(error.retry_after))} s."
-        )
+        return f"Réessaie dans `{max(1, round(error.retry_after))}s`."
+
     if isinstance(error, discord.app_commands.MissingPermissions):
-        from utils.error_texts import missing_permissions_text
-        return sentrix_embeds.error(missing_permissions_text(error.missing_permissions))
+        required = ", ".join(
+            str(item).replace("_", " ")
+            for item in error.missing_permissions
+        )
+        return f"Permission(s) manquante(s) : `{required}`."
+
     if isinstance(error, discord.app_commands.BotMissingPermissions):
-        from utils.error_texts import bot_missing_permissions_text
-        return sentrix_embeds.error(bot_missing_permissions_text(error.missing_permissions))
+        required = ", ".join(
+            str(item).replace("_", " ")
+            for item in error.missing_permissions
+        )
+        return f"SentriX n'a pas la permission : `{required}`."
+
     if isinstance(original, discord.Forbidden):
-        return sentrix_embeds.error("Discord a refusé cette action. Vérifiez les permissions du bot.")
-    if isinstance(error, discord.app_commands.CheckFailure) or isinstance(original, commands.CheckFailure):
+        return "SentriX n'a pas la permission nécessaire pour faire ça."
+
+    if isinstance(error, discord.app_commands.CheckFailure) or isinstance(
+        original,
+        commands.CheckFailure,
+    ):
         from utils.error_texts import CHECK_FALLBACK, check_failure_message
-        # Le message du check (système d'argent coupé, propriétaire…) est conservé ;
-        # jamais « pas accès » pour un check muet.
-        return sentrix_embeds.error(check_failure_message(error) or check_failure_message(original) or CHECK_FALLBACK)
-    return sentrix_embeds.error("Cette commande a rencontré un problème technique.")
+
+        return (
+            check_failure_message(error)
+            or check_failure_message(original)
+            or CHECK_FALLBACK
+        )
+
+    return "Une erreur est survenue. Merci de réessayer."
 
 
 def _install_errors(bot: commands.Bot) -> None:
     permission_guard._send_interaction_denial = _permission_denial
 
-    async def tree_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-        panel = _slash_error_embed(error)
+    async def tree_error(
+        interaction: discord.Interaction,
+        error: discord.app_commands.AppCommandError,
+    ):
         try:
-            if not interaction.response.is_done():
-                await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
-                return
-            response_type = getattr(interaction.response, "type", None)
-            if response_type in {
-                discord.InteractionResponseType.deferred_channel_message,
-                discord.InteractionResponseType.deferred_message_update,
-            }:
-                await interaction.edit_original_response(content=None, embed=panel, view=None)
-                return
-            await interaction.edit_original_response(content=None, embed=panel)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.InteractionResponded):
+            await _send_plain_interaction_error(
+                interaction,
+                _slash_error_text(error),
+            )
+        except (
+            discord.NotFound,
+            discord.Forbidden,
+            discord.HTTPException,
+            discord.InteractionResponded,
+        ):
             logger.warning("Impossible d'envoyer l'erreur slash finale.")
 
     tree_error._sentrix_official_error_owner = True

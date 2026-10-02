@@ -1,8 +1,7 @@
-"""Large visual presentation for SentriX command responses.
+"""SentriX Core compatibility renderer for legacy command responses.
 
-This module only styles ``commands.Context.send`` responses. It never touches
-``TextChannel.send`` / ``Messageable.send`` and therefore cannot intercept the
-Components V2 log transport.
+Old embed/content responses are translated into the same Components V2 grammar
+as native SentriX panels. Logs are never intercepted here.
 """
 from __future__ import annotations
 
@@ -83,6 +82,58 @@ def _clean_text(value: object, *, limit: int = 3500) -> str:
     if len(text) > limit:
         text = text[: max(1, limit - 1)].rstrip() + "…"
     return text
+
+
+_CORE_FAMILY_LABELS = {
+    "success": "Succès",
+    "error": "Erreur",
+    "warning": "Attention",
+    "info": "Information",
+    "special": "SentriX",
+    "moderation": "Modération",
+    "security": "Sécurité",
+    "tickets": "Tickets",
+    "economy": "Économie",
+    "levels": "Niveaux",
+    "music": "Musique",
+    "games": "Jeux",
+    "ai": "IA",
+    "config": "Configuration",
+    "welcome": "Bienvenue",
+    "goodbye": "Départ",
+}
+
+
+def _core_command_name(ctx: commands.Context) -> str:
+    command = getattr(ctx, "command", None)
+    if command is None:
+        return _human_command_name(ctx)
+    try:
+        from cogs import common_command_names
+        return common_command_names.display_name(command)
+    except Exception:
+        return str(getattr(command, "qualified_name", "") or _human_command_name(ctx))
+
+
+def _core_signature(ctx: commands.Context, family: str) -> str:
+    family_label = _CORE_FAMILY_LABELS.get(
+        str(family or "").casefold(),
+        str(family or "SentriX").replace("_", " ").title(),
+    )
+    command = _core_command_name(ctx)
+    parts = ["SENTRIX CORE", family_label]
+    if command:
+        parts.append(command)
+    return " · ".join(parts)
+
+
+def _core_footer(ctx: commands.Context, family: str, footer: str = "") -> str:
+    raw = str(footer or "").strip()
+    raw = re.sub(r"^SentriX(?:\s*Core)?\s*[•·]\s*", "", raw, flags=re.IGNORECASE).strip()
+    if raw.casefold() in {"sentrix", "sentrix core"}:
+        raw = ""
+    base = _core_signature(ctx, family)
+    return f"{base} · {raw}" if raw else base
 
 
 def _human_command_name(ctx: commands.Context) -> str:
@@ -267,6 +318,11 @@ class CommandPanelView(discord.ui.LayoutView):
         gallery.add_item(media=f"attachment://{banner_filename}")
         container.add_item(gallery)
 
+        family = _resolved_family(kind)
+        container.add_item(
+            discord.ui.TextDisplay(f"-# {_core_signature(ctx, family)}")
+        )
+
         title = _clean_text(getattr(embed, "title", None) if embed else None, limit=220)
         if not title:
             title = _human_command_name(ctx)
@@ -293,6 +349,7 @@ class CommandPanelView(discord.ui.LayoutView):
         body = "\n\n".join(body_parts).strip()
 
         if body:
+            container.add_item(discord.ui.TextDisplay("### 01 · Résultat"))
             container.add_item(discord.ui.TextDisplay(body[:3900]))
 
         image_url = getattr(getattr(embed, "image", None), "url", None) if embed else None
@@ -305,9 +362,9 @@ class CommandPanelView(discord.ui.LayoutView):
                 logger.exception("COMMAND V2 media fallback command=%s", _human_command_name(ctx))
 
         footer = _clean_text(getattr(getattr(embed, "footer", None), "text", None), limit=300) if embed else ""
-        if not footer:
-            footer = "SentriX"
-        container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
+        container.add_item(
+            discord.ui.TextDisplay(f"-# {_core_footer(ctx, family, footer)}")
+        )
 
         self.add_item(container)
 

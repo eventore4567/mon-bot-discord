@@ -16,6 +16,7 @@ V102 avant tout code applicatif — voir son propre docstring pour le détail ex
 
 import asyncio
 import logging
+import sys
 import traceback
 
 import discord
@@ -33,7 +34,37 @@ from utils.checks import (
 )
 from utils import access_matrix
 from utils import log_hygiene
+from core.module_kernel import ModuleKernel
+from core.module_policy import (
+    CRITICAL_EXTENSIONS,
+    MODULE_BOOT_BUDGET_SECONDS,
+    MODULE_DEPENDENCIES,
+    MODULE_LOAD_TIMEOUT_SECONDS,
+    RUNTIME_LOCKED_EXTENSIONS,
+    validate_policy,
+)
+from core.module_health import is_technical_failure
+from core.runtime_attribution import module_from_traceback
+from core.module_gate import (
+    AppModuleTemporarilyUnavailable,
+    ModuleTemporarilyUnavailable,
+    app_command_module,
+    install_app_gates,
+    prefix_gate,
+)
+from core.module_runtime import ModuleRuntimeController
+from core.module_supervisor import ModuleSupervisor
 from web.dashboard import start_dashboard
+import web.dashboard as dashboard_module
+from web.dashboard_api_forbidden_words import register as register_forbidden_words_routes
+
+_dashboard_build_app = dashboard_module.build_app
+def _build_app_with_forbidden_words(bot):
+    app = _dashboard_build_app(bot)
+    register_forbidden_words_routes(app, dashboard_module)
+    return app
+
+dashboard_module.build_app = _build_app_with_forbidden_words
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 # Compresse les journaux répétitifs SANS jamais toucher aux ERROR/CRITICAL : une
@@ -46,6 +77,7 @@ logger = logging.getLogger("bot")
 EXTENSIONS = [
     "cogs.moderation",
     "cogs.automod",
+    "cogs.forbidden_words_ui",
     # Ces quatre modules n'avaient qu'un install(), déclenché par l'enveloppe de
     # chargement de cogs/__init__ — enveloppe posée sur une classe que la
     # production n'instancie plus depuis la substitution de commands.Bot par
@@ -68,6 +100,7 @@ EXTENSIONS = [
     # claim, add, remove, rename et transfer. Même cause de mort que ci-dessus.
     "cogs.ticket_claim_security",
     "cogs.configuration",
+    "cogs.command_channel_gate",
     "cogs.server_builder",
     "cogs.logs",
     "cogs.soundboard_logs",
@@ -140,7 +173,8 @@ COMMANDS_REPLACED_BY_SETUP = frozenset({
     "setwelcomechannel", "setgoodbyechannel", "setwelcomemessage",
     "setgoodbyemessage", "setticketlogchannel", "setautorole", "createrole",
     "setlevelchannel", "setsuggestchannel", "setannouncechannel",
-    "setgiveawaychannel", "verify-setup",
+    "setgiveawaychannel", "verify-setup", "verify-panel",
+    "rules-setup", "reglement-setup",
     "level-roles", "levelroles", "ticketpanel",
     "ticketpanel-toggle", "tickettype", "ticketform", "ticketconfig",
     "ticketlogs", "ticketlimit", "ticketautoclose",
@@ -375,13 +409,38 @@ def cooldown_text(seconds: float) -> str:
 
 
 INTENTS = discord.Intents.default()
+# Accès privilégiés réellement nécessaires à SentriX :
+# - members : arrivée/départ, modération, vérification et protections anti-raid ;
+# - message_content : commandes + et filtres anti-spam/anti-lien/anti-scam.
+# La présence n'est pas nécessaire au produit et reste explicitement désactivée afin de
+# minimiser l'accès aux données Discord, conformément aux exigences développeur 2026.
 INTENTS.members = True
 INTENTS.message_content = True
+INTENTS.presences = False
 INTENTS.voice_states = True
 # Nécessaire pour que SentriX reçoive les créations/modifications et exécutions
 # de règles Discord AutoMod qu'il synchronise (anti-liens natif notamment).
 INTENTS.auto_moderation_configuration = True
 INTENTS.auto_moderation_execution = True
+
+
+def _log_discord_data_access_readiness() -> None:
+    """Journalise les accès Discord sensibles utilisés par la production.
+
+    Discord exige depuis 2026 une revue à partir de 10 000 utilisateurs pour
+    Message Content / Guild Members / Presence, puis une revue annuelle. Ce
+    diagnostic évite qu'une future modification d'intents passe inaperçue.
+    """
+    logger.info(
+        "Discord data-access readiness — message_content=%s, members=%s, presences=%s, "
+        "automod_config=%s, automod_execution=%s. Slash commands restent disponibles ; "
+        "les commandes + et les protections de contenu nécessitent Message Content.",
+        INTENTS.message_content,
+        INTENTS.members,
+        INTENTS.presences,
+        INTENTS.auto_moderation_configuration,
+        INTENTS.auto_moderation_execution,
+    )
 
 
 class SentriXContext(commands.Context):
@@ -425,12 +484,39 @@ class BotAllInOne(commands.Bot):
         )
         self.db = Database(config.DATABASE_PATH)
         self.expected_extension_count = len(EXTENSIONS)
+        self.module_kernel = ModuleKernel(
+            EXTENSIONS,
+            CRITICAL_EXTENSIONS,
+            dependencies=MODULE_DEPENDENCIES,
+        )
+        self.module_runtime = ModuleRuntimeController(
+            self,
+            self.module_kernel,
+            locked=RUNTIME_LOCKED_EXTENSIONS,
+            operation_timeout_seconds=MODULE_LOAD_TIMEOUT_SECONDS,
+        )
+        self.module_supervisor = ModuleSupervisor(
+            set(EXTENSIONS) - set(RUNTIME_LOCKED_EXTENSIONS)
+        )
+        self._module_supervisor_task: asyncio.Task | None = None
         self.tree.on_error = self.on_app_command_error
         self._cooldown_bucket = commands.CooldownMapping.from_cooldown(
             config.GLOBAL_COOLDOWN_RATE, config.GLOBAL_COOLDOWN_PER, commands.BucketType.user
         )
         self.prefix_cache: dict[int, str] = {}
         self.blacklist_cache: dict[int, str] = {}
+
+    def _refresh_module_health(self) -> dict:
+        return self.module_runtime.refresh()
+
+    async def reload_runtime_module(self, name: str) -> dict:
+        return await self.module_runtime.reload(name)
+
+    async def recover_missing_module(self, name: str) -> dict:
+        return await self.module_runtime.recover_missing(name)
+
+    async def stop_runtime_module(self, name: str) -> dict:
+        return await self.module_runtime.stop(name)
 
     def _prune_redundant_commands(self) -> list[str]:
         removed_names: list[str] = []
@@ -457,7 +543,18 @@ class BotAllInOne(commands.Bot):
         )
         return removed_names
 
+    async def close(self):
+        task = self._module_supervisor_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        await super().close()
+
     async def setup_hook(self):
+        _log_discord_data_access_readiness()
         await self.db.connect()
         logger.info("Base de données connectée.")
 
@@ -483,15 +580,89 @@ class BotAllInOne(commands.Bot):
 
         _install_slash_command_budget(self)
 
+        policy_problems = validate_policy(EXTENSIONS)
+        if policy_problems:
+            logger.error(
+                "Politique modules incohérente : %s",
+                " | ".join(policy_problems),
+            )
+
+        loaded_extensions: list[str] = []
+        failed_extensions: list[dict[str, str]] = []
+        extension_boot_started = asyncio.get_running_loop().time()
         for ext in EXTENSIONS:
+            boot_elapsed = asyncio.get_running_loop().time() - extension_boot_started
+            if boot_elapsed >= MODULE_BOOT_BUDGET_SECONDS:
+                exc = TimeoutError("BootBudgetExceeded")
+                self.module_kernel.begin(ext, operation="boot-budget")
+                self.module_kernel.failed(ext, exc)
+                failed_extensions.append({
+                    "name": ext,
+                    "error": "BootBudgetExceeded",
+                })
+                logger.error(
+                    "Module différé : budget global de boot %.0fs dépassé — %s sera récupéré après démarrage.",
+                    MODULE_BOOT_BUDGET_SECONDS,
+                    ext,
+                )
+                continue
+            blockers = self.module_kernel.blockers(ext)
+            if blockers:
+                self.module_kernel.blocked(ext, blockers)
+                logger.warning(
+                    "Module différé : %s attend %s",
+                    ext,
+                    ", ".join(blockers),
+                )
+                continue
+
+            self.module_kernel.begin(ext)
             try:
-                await self.load_extension(ext)
-                logger.info(f"Module chargé : {ext}")
-            except Exception:
-                logger.error(f"Échec du chargement du module {ext} :\n{traceback.format_exc()}")
+                await asyncio.wait_for(
+                    self.load_extension(ext),
+                    timeout=MODULE_LOAD_TIMEOUT_SECONDS,
+                )
+                self.module_kernel.loaded(ext)
+                loaded_extensions.append(ext)
+                logger.info("Module chargé : %s", ext)
+            except Exception as exc:
+                self.module_kernel.failed(ext, exc)
+                failed_extensions.append({
+                    "name": ext,
+                    "error": type(exc).__name__,
+                })
+                logger.error("Échec du chargement du module %s :\n%s", ext, traceback.format_exc())
+
+        self._sentrix_extension_health = self._refresh_module_health()
+        critical_failed = list(self._sentrix_extension_health["critical_failed"])
+        if critical_failed:
+            logger.critical(
+                "Démarrage dégradé : %s extension(s) critique(s) absente(s) — %s. "
+                "Le healthcheck restera en échec tant que ces modules ne chargent pas.",
+                len(critical_failed),
+                ", ".join(critical_failed),
+            )
+        elif failed_extensions:
+            logger.warning(
+                "Démarrage partiellement dégradé : %s extension(s) optionnelle(s) en échec, "
+                "aucune extension critique touchée.",
+                len(failed_extensions),
+            )
+        else:
+            logger.info(
+                "Santé extensions : %s/%s chargées, toutes les extensions critiques sont actives.",
+                len(loaded_extensions),
+                len(EXTENSIONS),
+            )
 
         self._prune_redundant_commands()
         self._audit_command_permissions()
+
+        if self._module_supervisor_task is None or self._module_supervisor_task.done():
+            self._module_supervisor_task = asyncio.create_task(
+                self.module_supervisor.run(self),
+                name="sentrix-module-supervisor",
+            )
 
         try:
             from cogs.tickets import TicketControlView
@@ -555,6 +726,7 @@ class BotAllInOne(commands.Bot):
 
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
+        self.add_check(prefix_gate)
         # cogs/permission_guard.py::install() s'enregistre désormais lui-même dès
         # qu'il réaffecte self.global_permission_check (docs/core-v2-audit-
         # technical-debt.md, §6) — ne l'ajouter ici qu'en repli, si cette extension
@@ -654,8 +826,57 @@ class BotAllInOne(commands.Bot):
             )
 
         try:
+            gated_slash = install_app_gates(self)
+            if gated_slash:
+                logger.info(
+                    "Micro-kernel : garde de disponibilité installée sur %s commande(s) slash.",
+                    gated_slash,
+                )
+        except Exception:
+            logger.warning(
+                "Installation des gardes de disponibilité slash impossible :\n"
+                + traceback.format_exc()
+            )
+
+        try:
             synced = await self.tree.sync()
             logger.info(f"{len(synced)} commandes slash synchronisées globalement.")
+
+            # Phase 12 : ne pas confondre le tree local avec ce que Discord vient
+            # réellement d'accepter. tree.sync() renvoie les AppCommand distantes ;
+            # on compare donc les deux surfaces et on conserve le rapport pour le
+            # diagnostic runtime/dashboard.
+            from utils.discord_command_publish_audit import audit_published_commands
+
+            publish_audit = audit_published_commands(self.tree, synced)
+            self._sentrix_discord_publish_audit = publish_audit
+            logger.info(
+                "Audit slash Discord post-sync : local=%s distant=%s manquantes=%s inattendues=%s.",
+                len(publish_audit.local_paths),
+                len(publish_audit.remote_paths),
+                len(publish_audit.missing_paths),
+                len(publish_audit.unexpected_paths),
+            )
+            if publish_audit.musique_paths:
+                logger.info(
+                    "Discord slash /musique publié : %s",
+                    ", ".join(f"/{path}" for path in publish_audit.musique_paths),
+                )
+            else:
+                logger.error(
+                    "Audit slash Discord : /musique absent de la surface renvoyée par sync()."
+                )
+            if publish_audit.legacy_music_paths:
+                logger.error(
+                    "Audit slash Discord : ancienne surface /music encore publiée : %s",
+                    ", ".join(f"/{path}" for path in publish_audit.legacy_music_paths),
+                )
+            if publish_audit.missing_paths or publish_audit.unexpected_paths:
+                logger.warning(
+                    "Écart tree local/distant après sync : manquantes=%s | inattendues=%s",
+                    ", ".join(publish_audit.missing_paths[:20]) or "aucune",
+                    ", ".join(publish_audit.unexpected_paths[:20]) or "aucune",
+                )
         except Exception:
             logger.error(f"Échec de la synchronisation des commandes slash :\n{traceback.format_exc()}")
 
@@ -743,6 +964,34 @@ class BotAllInOne(commands.Bot):
                     ctx.command = real_command
         return ctx
 
+    async def on_error(self, event_method: str, *args, **kwargs):
+        exc_type, exc, tb = sys.exc_info()
+        module_name = module_from_traceback(
+            tb,
+            known=self.module_kernel.contains,
+        )
+        if (
+            module_name
+            and exc is not None
+            and is_technical_failure(exc)
+        ):
+            self.module_kernel.record_runtime_error(module_name, exc)
+            self._refresh_module_health()
+            logger.error(
+                "Erreur listener attribuée au module %s (event=%s, type=%s).",
+                module_name,
+                event_method,
+                type(exc).__name__,
+                exc_info=(exc_type, exc, tb),
+            )
+            return
+
+        logger.error(
+            "Erreur listener Discord non attribuée ou attendue (event=%s).",
+            event_method,
+            exc_info=(exc_type, exc, tb) if exc is not None else None,
+        )
+
     async def on_ready(self):
         logger.info(f"Connecté en tant que {self.user} (ID: {self.user.id})")
         logger.info(f"Présent sur {len(self.guilds)} serveur(s).")
@@ -813,91 +1062,79 @@ class BotAllInOne(commands.Bot):
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         error = getattr(error, "original", error)
+        from cogs.command_channel_gate import CommandChannelBlocked
 
-        if isinstance(error, commands.CommandNotFound):
+        if isinstance(error, (CommandChannelBlocked, commands.CommandNotFound)):
             return
 
         if isinstance(error, BotPermissionError):
-            return await ctx.send(embed=embeds.error(error.message))
+            return await ctx.send(f"Permission manquante : `{error.message}`.")
 
         if isinstance(error, BotBlacklistedError):
-            return await ctx.send(embed=embeds.error(f"Vous n'êtes pas autorisé à utiliser ce bot.\nRaison : {error.reason}"))
+            return await ctx.send("Tu ne peux pas utiliser SentriX actuellement.")
+
+        if isinstance(error, ModuleTemporarilyUnavailable):
+            return await ctx.send("Cette fonction est temporairement indisponible. Merci de réessayer.")
 
         if isinstance(error, commands.CommandOnCooldown):
             return await ctx.send(
-                embed=embeds.warning(
-                    f"Cette commande est temporairement en recharge. Vous pourrez la réutiliser dans "
-                    f"**{cooldown_text(error.retry_after)}**."
-                )
+                f"Réessaie dans `{cooldown_text(error.retry_after)}`."
             )
 
         if isinstance(error, commands.MissingPermissions):
             perms = format_permissions(error.missing_permissions)
-            return await ctx.send(embed=embeds.error(
-                f"Votre rôle ne possède pas les autorisations nécessaires pour cette action.\n"
-                f"Permission(s) requise(s) : **{perms}**."
-            ))
+            return await ctx.send(f"Permission(s) manquante(s) : `{perms}`.")
 
         if isinstance(error, commands.BotMissingPermissions):
             perms = format_permissions(error.missing_permissions)
-            return await ctx.send(embed=embeds.error(
-                f"Le bot ne peut pas terminer cette action car il lui manque : **{perms}**.\n"
-                "Un administrateur doit corriger les permissions du rôle SentriX et vérifier qu’il est placé assez haut."
-            ))
+            return await ctx.send(f"SentriX n'a pas la permission : `{perms}`.")
 
         if isinstance(error, commands.UserNotFound):
-            if ctx.command and ctx.command.qualified_name in {"bl", "blinfo", "unbl", "editbl"}:
-                return await ctx.send(embed=embeds.error(
-                    f"`{error.argument}` n'est pas un membre valide (mention `@membre` ou ID attendu).\n\n"
-                    "**`/bl`** bloque un **utilisateur** sur tout le bot (aucune commande nulle part).\n"
-                    "Pour interdire un **mot** (ex: une insulte) dans les messages de ce serveur, utilisez "
-                    "**`/blacklist-add <mot>`** à la place — c'est une fonction différente."
-                ))
-            return await ctx.send(embed=embeds.error("Utilisateur introuvable. Vérifiez la mention ou l'ID."))
+            return await ctx.send(f"Utilisateur introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.MemberNotFound):
-            return await ctx.send(embed=embeds.error("Membre introuvable. Vérifiez le nom ou la mention."))
+            return await ctx.send(f"Membre introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.ChannelNotFound):
-            return await ctx.send(embed=embeds.error("Salon introuvable."))
+            return await ctx.send(f"Salon introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.RoleNotFound):
-            return await ctx.send(embed=embeds.error("Rôle introuvable."))
+            return await ctx.send(f"Rôle introuvable : `{error.argument}`.")
 
         if isinstance(error, commands.MissingRequiredArgument):
+            try:
+                from utils.command_setup_prompt import offer_setup_for_missing_argument
+
+                if await offer_setup_for_missing_argument(ctx, error):
+                    return
+            except Exception:
+                logger.exception(
+                    "Mini-setup d'arguments indisponible pour +%s.",
+                    getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
+                )
+
             usage = command_usage(ctx)
-            detail = f"\nSyntaxe correcte : `{usage}`" if usage else ""
-            return await ctx.send(embed=embeds.error(
-                f"L’argument **{error.param.name}** est obligatoire.{detail}\n"
-                f"Consultez `{ctx.clean_prefix}help {ctx.command.qualified_name}` pour le détail des paramètres."
-            ))
+            text = f"Il manque `{error.param.name}`."
+            if usage:
+                text += f" Utilise `{usage}`."
+            return await ctx.send(text)
 
         if isinstance(error, commands.BadArgument):
             usage = command_usage(ctx)
-            detail = f"\nSyntaxe correcte : `{usage}`" if usage else ""
-            return await ctx.send(embed=embeds.error(
-                "Une valeur fournie n’est pas reconnue. Vérifiez les mentions, nombres et noms indiqués."
-                + detail
-            ))
+            if usage:
+                return await ctx.send(f"Valeur invalide. Utilise `{usage}`.")
+            return await ctx.send("Valeur invalide. Vérifie puis réessaie.")
 
         if isinstance(error, discord.Forbidden):
-            return await ctx.send(embed=embeds.error(
-                "Discord a refusé cette action. Vérifiez les permissions du bot et placez le rôle SentriX "
-                "au-dessus du membre ou du rôle concerné."
-            ))
+            return await ctx.send("SentriX n'a pas la permission nécessaire pour faire ça.")
 
         if isinstance(error, commands.CheckFailure):
-            return await ctx.send(embed=embeds.error(
-                "Vous n’avez pas accès à cette commande. Elle est réservée au staff ou nécessite une permission "
-                "qui n’est pas présente sur votre rôle."
-            ))
+            return await ctx.send("Tu n'as pas la permission d'utiliser cette commande.")
 
-        # Contexte exploitable dans Railway : module, commande, serveur, membre, type —
-        # avec la vraie trace de l'exception reçue (traceback.format_exc() ne voyait
-        # rien ici : l'erreur est passée en argument, pas en cours de levée).
         logger.error(
             "Erreur non gérée | cog=%s commande=%s guild=%s user=%s | %s: %s",
-            getattr(getattr(ctx, "cog", None), "qualified_name", None) or getattr(getattr(ctx.command, "callback", None), "__module__", "?"),
+            getattr(getattr(ctx, "cog", None), "qualified_name", None)
+            or getattr(getattr(ctx.command, "callback", None), "__module__", "?"),
             getattr(ctx.command, "qualified_name", ctx.command),
             getattr(ctx.guild, "id", None),
             getattr(ctx.author, "id", None),
@@ -905,18 +1142,13 @@ class BotAllInOne(commands.Bot):
             str(error)[:300],
             exc_info=(type(error), error, error.__traceback__),
         )
-        if ctx.author.id == PRIMARY_CREATOR_ID:
-            detail = str(error).strip() or "aucun détail"
-            return await ctx.send(
-                embed=embeds.error(
-                    f"Erreur technique : {type(error).__name__}\n{detail[:700]}"
-                )
+        try:
+            await ctx.send("Une erreur est survenue. Merci de réessayer.")
+        except discord.HTTPException:
+            logger.warning(
+                "Impossible d'envoyer la réponse d'erreur pour la commande %s.",
+                getattr(ctx.command, "qualified_name", ctx.command),
             )
-        reference = str(getattr(getattr(ctx, "message", None), "id", "indisponible"))
-        await ctx.send(embed=embeds.error(
-            "Une erreur technique inattendue a interrompu la commande. Aucun changement supplémentaire "
-            f"n’a été appliqué. Référence : `{reference}`."
-        ))
 
     async def on_app_command_error(
         self,
@@ -924,68 +1156,72 @@ class BotAllInOne(commands.Bot):
         error: discord.app_commands.AppCommandError,
     ):
         original = getattr(error, "original", error)
+        kernel = getattr(self, "module_kernel", None)
+        module_name = app_command_module(getattr(interaction, "command", None))
+        if module_name and kernel is not None and hasattr(kernel, "exit_runtime"):
+            kernel.exit_runtime(module_name)
 
         if isinstance(original, BotPermissionError):
-            embed = embeds.error(original.message)
+            message = f"Permission manquante : `{original.message}`."
         elif isinstance(original, BotBlacklistedError):
-            embed = embeds.error(f"Vous n’êtes pas autorisé à utiliser ce bot.\nRaison : {original.reason}")
+            message = "Tu ne peux pas utiliser SentriX actuellement."
+        elif isinstance(original, AppModuleTemporarilyUnavailable) or isinstance(
+            error, AppModuleTemporarilyUnavailable
+        ):
+            message = "Cette fonction est temporairement indisponible. Merci de réessayer."
         elif isinstance(error, discord.app_commands.CommandOnCooldown):
-            embed = embeds.warning(
-                f"Cette commande est temporairement en recharge. Vous pourrez la réutiliser dans "
-                f"**{cooldown_text(error.retry_after)}**."
-            )
+            message = f"Réessaie dans `{cooldown_text(error.retry_after)}`."
         elif isinstance(error, discord.app_commands.MissingPermissions):
-            embed = embeds.error(
-                "Votre rôle ne possède pas les autorisations nécessaires.\n"
-                f"Permission(s) requise(s) : **{format_permissions(error.missing_permissions)}**."
-            )
+            perms = format_permissions(error.missing_permissions)
+            message = f"Permission(s) manquante(s) : `{perms}`."
         elif isinstance(error, discord.app_commands.BotMissingPermissions):
-            embed = embeds.error(
-                "Le bot ne peut pas terminer cette action. Permission(s) manquante(s) : "
-                f"**{format_permissions(error.missing_permissions)}**."
-            )
-        elif isinstance(error, (discord.app_commands.TransformerError, discord.app_commands.CommandSignatureMismatch)):
-            embed = embeds.error(
-                "Une valeur fournie n’est pas valide pour cette commande. Vérifiez les membres, rôles, salons "
-                "et nombres sélectionnés, puis réessayez."
-            )
+            perms = format_permissions(error.missing_permissions)
+            message = f"SentriX n'a pas la permission : `{perms}`."
+        elif isinstance(
+            error,
+            (
+                discord.app_commands.TransformerError,
+                discord.app_commands.CommandSignatureMismatch,
+            ),
+        ):
+            message = "Valeur invalide. Vérifie puis réessaie."
         elif isinstance(original, discord.Forbidden):
-            embed = embeds.error(
-                "Discord a refusé cette action. Vérifiez les permissions et la position du rôle SentriX."
-            )
+            message = "SentriX n'a pas la permission nécessaire pour faire ça."
         elif isinstance(error, discord.app_commands.CheckFailure):
-            embed = embeds.error(
-                "Vous n’avez pas accès à cette commande. Elle est réservée au staff ou nécessite une permission "
-                "supplémentaire."
-            )
+            message = "Tu n'as pas la permission d'utiliser cette commande."
         else:
-            command_name = interaction.command.qualified_name if interaction.command else "inconnue"
+            command_name = (
+                interaction.command.qualified_name
+                if interaction.command
+                else "inconnue"
+            )
             logger.error(
                 "Erreur non gérée | slash=%s module=%s guild=%s user=%s | %s: %s",
                 command_name,
-                getattr(getattr(interaction.command, "callback", None), "__module__", "?"),
+                getattr(
+                    getattr(interaction.command, "callback", None),
+                    "__module__",
+                    "?",
+                ),
                 getattr(interaction.guild, "id", None),
                 getattr(interaction.user, "id", None),
                 type(original).__name__,
                 str(original)[:300],
                 exc_info=(type(original), original, original.__traceback__),
             )
-            if interaction.user.id == PRIMARY_CREATOR_ID:
-                detail = str(original).strip() or "aucun détail"
-                embed = embeds.error(f"Erreur technique : {type(original).__name__}\n{detail[:700]}")
-            else:
-                embed = embeds.error(
-                    "Une erreur technique inattendue a interrompu la commande. Aucun changement supplémentaire "
-                    f"n’a été appliqué. Référence : `{interaction.id}`."
-                )
+            message = "Une erreur est survenue. Merci de réessayer."
 
         try:
             if interaction.response.is_done():
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                await interaction.followup.send(message, ephemeral=True)
             else:
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.response.send_message(message, ephemeral=True)
         except discord.HTTPException:
-            logger.warning("Impossible d’envoyer la réponse d’erreur de l’interaction %s.", interaction.id)
+            logger.warning(
+                "Impossible d'envoyer la réponse d'erreur de l'interaction %s.",
+                interaction.id,
+            )
+
 
 
 async def main():

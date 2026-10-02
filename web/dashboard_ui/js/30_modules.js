@@ -15,6 +15,21 @@ function bindPreviews(root = content()) {
    guild_config (salon, message, image) + welcome_presentation_v2 (type, titre, avatar, compteur). */
 const welcomePresentation = (force = false) => cached('welcome', () => gget('/welcome'), { force });
 const GOODBYE_DEFAULT = 'Au revoir **{username}**. Merci d’avoir fait partie de **{server}**.';
+const EVENT_BACKGROUND_CHOICES = [
+  ['preset:dark', 'Sombre'],
+  ['preset:gray', 'Gris Discord'],
+  ['preset:light', 'Clair'],
+];
+function eventBackgroundPreset(value) {
+  return EVENT_BACKGROUND_CHOICES.some(([key]) => key === String(value || '')) ? String(value) : 'preset:gray';
+}
+function eventBackgroundOptions(value) {
+  const current = eventBackgroundPreset(value);
+  return EVENT_BACKGROUND_CHOICES.map(([key, label]) =>
+    `<option value="${esc(key)}" ${key === current ? 'selected' : ''}>${esc(label)}</option>`
+  ).join('');
+}
+
 function messageTypeSwitch(mode, key = 'mode') {
   return `<div class="field full"><span class="label">Type de message</span><div class="seg" role="radiogroup" aria-label="Type de message" data-mode-key="${esc(key)}"><button type="button" role="radio" aria-checked="${mode !== 'embed'}" data-mode="text" class="${mode !== 'embed' ? 'active' : ''}">Message simple</button><button type="button" role="radio" aria-checked="${mode === 'embed'}" data-mode="embed" class="${mode === 'embed' ? 'active' : ''}">Embed</button></div><small>${mode === 'embed' ? 'Un encadré avec titre, avatar et image.' : 'Un message texte, comme un membre l’écrirait.'}</small></div>`;
 }
@@ -27,7 +42,7 @@ async function renderWelcome() {
   const goodbyeMode = draft.goodbye_mode || pres.goodbye_mode || 'embed';
   if (state.sub === 'departs') {
     const embedMode = goodbyeMode === 'embed';
-    content().innerHTML = `<div class="grid">${await moduleHead('goodbye', 'Message envoyé quand un membre quitte le serveur.', 'Départs')}${card('', '', `<div class="fields">${channelField('Salon des départs', 'goodbye_channel', sv('goodbye_channel'), { full: true, embed: embedMode, hint: 'Le message de départ est envoyé dans ce salon.' })}${messageTypeSwitch(goodbyeMode, 'goodbye_mode')}<div class="field full"><div class="label-row"><label for="f-goodbye_message">Message</label><span class="counter"></span>${variablesButton('f-goodbye_message')}</div><textarea id="f-goodbye_message" data-setting="goodbye_message" maxlength="1000" rows="4" placeholder="${esc(GOODBYE_DEFAULT)}">${esc(sv('goodbye_message') || GOODBYE_DEFAULT)}</textarea></div>${previewBlock('goodbyePreview')}</div>`, 'full')}${embedMode ? advanced(card('Présentation', 'Réglage partagé avec la bienvenue.', `<label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature de l’encadré.</span></span><input class="switch" data-welcome="show_avatar" type="checkbox" ${(draft.show_avatar ?? pres.show_avatar) ? 'checked' : ''}></label>`)) : ''}</div>`;
+    content().innerHTML = `<div class="grid">${await moduleHead('goodbye', 'Message envoyé quand un membre quitte le serveur.', 'Départs')}${card('', '', `<div class="fields">${channelField('Salon des départs', 'goodbye_channel', sv('goodbye_channel'), { full: true, embed: embedMode, hint: 'Le message de départ est envoyé dans ce salon.' })}${messageTypeSwitch(goodbyeMode, 'goodbye_mode')}<div class="field full"><div class="label-row"><label for="f-goodbye_message">Message</label><span class="counter"></span>${variablesButton('f-goodbye_message')}</div><textarea id="f-goodbye_message" data-setting="goodbye_message" maxlength="1000" rows="4" placeholder="${esc(GOODBYE_DEFAULT)}">${esc(sv('goodbye_message') || GOODBYE_DEFAULT)}</textarea></div>${previewBlock('goodbyePreview')}</div>`, 'full')}${embedMode ? advanced(card('Fond et présentation', 'Choisissez un des 3 fonds SentriX prédéfinis.', `<div class="fields">${field('Fond du départ', 'goodbye_image_url', eventBackgroundPreset(sv('goodbye_image_url')), { select: eventBackgroundOptions(sv('goodbye_image_url')), full: true, hint: 'Aucune image personnalisée : uniquement les modèles SentriX.' })}</div><label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature de l’encadré.</span></span><input class="switch" data-welcome="show_avatar" type="checkbox" ${(draft.show_avatar ?? pres.show_avatar) ? 'checked' : ''}></label>`)) : ''}</div>`;
     bindEditable(); bindModuleButtons(); bindVariables(); bindChannelWarnings(); bindModeSwitch();
     bindPreview(content(), 'goodbyePreview', () => {
       const text = $('f-goodbye_message').value || GOODBYE_DEFAULT;
@@ -39,15 +54,15 @@ async function renderWelcome() {
   const mode = draft.mode || pres.mode || 'embed';
   const embedMode = mode === 'embed';
   const channelChosen = Boolean(sv('welcome_channel') && channelName(sv('welcome_channel')));
-  content().innerHTML = `<div class="grid">${await moduleHead('welcome', 'Message envoyé quand un membre arrive.', 'Bienvenue')}${card('', '', `<div class="fields">${channelField('Salon de bienvenue', 'welcome_channel', sv('welcome_channel'), { full: true, embed: embedMode, hint: 'Le message est envoyé dans ce salon, avec une mention du nouveau membre.' })}${messageTypeSwitch(mode)}${embedMode ? `<div class="field full"><div class="label-row"><label for="f-welcome-title">Titre de l’encadré</label>${variablesButton('f-welcome-title')}</div><input id="f-welcome-title" data-welcome="title" maxlength="256" value="${esc(draft.title ?? pres.title ?? '')}" placeholder="Bienvenue sur {server}"></div>` : ''}<div class="field full"><div class="label-row"><label for="f-welcome_message">Message</label><span class="counter"></span>${variablesButton('f-welcome_message')}</div><textarea id="f-welcome_message" data-setting="welcome_message" maxlength="2000" rows="4" placeholder="${esc(pres.default_text || '')}">${esc(sv('welcome_message') || pres.default_text || 'Bienvenue {member} sur {server} !')}</textarea></div>${previewBlock('welcomePreview')}</div><div class="toolbar"><button class="btn" type="button" id="welcomeTest" ${channelChosen ? '' : 'disabled'}>Envoyer un message test</button><small id="welcomeTestHint">${channelChosen ? `Envoyé dans ${esc(channelName(sv('welcome_channel')))}, visible de tous mais sans mention.` : 'Choisissez un salon et enregistrez pour pouvoir tester.'}</small></div>`, 'full')}${embedMode ? advanced(card('Image et présentation', 'Sans image personnalisée, SentriX génère automatiquement une carte avec un fond et « Bienvenue utilisateur ».', `<div class="fields">${field('Grande image personnalisée (HTTPS)', 'welcome_image_url', sv('welcome_image_url') || '', { type: 'url', full: true, placeholder: 'https://…', hint: 'Optionnel : vide = carte automatique SentriX avec le nom du membre.' })}</div><label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature de l’encadré.</span></span><input class="switch" data-welcome="show_avatar" type="checkbox" ${(draft.show_avatar ?? pres.show_avatar) ? 'checked' : ''}></label><label class="switch-row"><span class="switch-copy"><b>Afficher le nombre de membres</b><span>Un champ « Membres » sous le message.</span></span><input class="switch" data-welcome="show_member_count" type="checkbox" ${(draft.show_member_count ?? pres.show_member_count) ? 'checked' : ''}></label>`)) : ''}</div>`;
+  content().innerHTML = `<div class="grid">${await moduleHead('welcome', 'Message envoyé quand un membre arrive.', 'Bienvenue')}${card('', '', `<div class="fields">${channelField('Salon de bienvenue', 'welcome_channel', sv('welcome_channel'), { full: true, embed: embedMode, hint: 'Le message est envoyé dans ce salon, avec une mention du nouveau membre.' })}${messageTypeSwitch(mode)}${embedMode ? `<div class="field full"><div class="label-row"><label for="f-welcome-title">Titre de l’encadré</label>${variablesButton('f-welcome-title')}</div><input id="f-welcome-title" data-welcome="title" maxlength="256" value="${esc(draft.title ?? pres.title ?? '')}" placeholder="Bienvenue sur {server}"></div>` : ''}<div class="field full"><div class="label-row"><label for="f-welcome_message">Message</label><span class="counter"></span>${variablesButton('f-welcome_message')}</div><textarea id="f-welcome_message" data-setting="welcome_message" maxlength="2000" rows="4" placeholder="${esc(pres.default_text || '')}">${esc(sv('welcome_message') || pres.default_text || 'Bienvenue {member} sur {server} !')}</textarea></div>${previewBlock('welcomePreview')}</div><div class="toolbar"><button class="btn" type="button" id="welcomeTest" ${channelChosen ? '' : 'disabled'}>Envoyer un message test</button><small id="welcomeTestHint">${channelChosen ? `Envoyé dans ${esc(channelName(sv('welcome_channel')))}, visible de tous mais sans mention.` : 'Choisissez un salon et enregistrez pour pouvoir tester.'}</small></div>`, 'full')}${embedMode ? advanced(card('Fond et présentation', 'Choisissez un des 3 fonds SentriX prédéfinis.', `<div class="fields">${field('Fond de bienvenue', 'welcome_image_url', eventBackgroundPreset(sv('welcome_image_url')), { select: eventBackgroundOptions(sv('welcome_image_url')), full: true, hint: 'Aucune image personnalisée : uniquement les modèles SentriX.' })}</div><label class="switch-row"><span class="switch-copy"><b>Afficher l’avatar du membre</b><span>En miniature de l’encadré.</span></span><input class="switch" data-welcome="show_avatar" type="checkbox" ${(draft.show_avatar ?? pres.show_avatar) ? 'checked' : ''}></label><label class="switch-row"><span class="switch-copy"><b>Afficher le nombre de membres</b><span>Un champ « Membres » sous le message.</span></span><input class="switch" data-welcome="show_member_count" type="checkbox" ${(draft.show_member_count ?? pres.show_member_count) ? 'checked' : ''}></label>`)) : ''}</div>`;
   bindEditable(); bindModuleButtons(); bindVariables(); bindChannelWarnings(); bindModeSwitch();
   const compute = () => {
-    const text = $('f-welcome_message').value || pres.default_text || '';
+    const text = ($('f-welcome_message').value || pres.default_text || '').replace(/\{(?:member|membre|mention|user)\}/gi, '{username}');
     if (!embedMode) return { content: '{member}\n' + text };
     const avatar = content().querySelector('[data-welcome="show_avatar"]')?.checked ?? pres.show_avatar;
     const count = content().querySelector('[data-welcome="show_member_count"]')?.checked ?? pres.show_member_count;
     const members = Number(state.guild?.guild?.members || 0);
-    return { content: '{member}', embed: { title: $('f-welcome-title').value || pres.default_title || 'Bienvenue sur {server}', description: text, image: $('f-welcome_image_url')?.value || '', thumbnail: avatar ? 'avatar' : '', fields: count ? [{ name: 'Membres', value: `${members} membre${members > 1 ? 's' : ''}` }] : [], footer: 'SentriX' } };
+    return { content: '{member}', embed: { title: $('f-welcome-title').value || pres.default_title || 'Bienvenue sur {server}', description: text, thumbnail: avatar ? 'avatar' : '', fields: count ? [{ name: 'Membres', value: `${members} membre${members > 1 ? 's' : ''}` }] : [], footer: 'SentriX' } };
   };
   bindPreview(content(), 'welcomePreview', compute);
   $('welcomeTest').onclick = async () => {
@@ -72,12 +87,15 @@ function bindModeSwitch(root = content()) {
 
 /* Sécurité : protections / vérification / sanctions */
 const securityOverview = (force = false) => cached('security-overview', () => gget('/security/overview'), { force, ttl: 15000 });
+const forbiddenWordsData = (force = false) => cached('forbidden-words', () => gget('/forbidden-words'), { force, ttl: 5000 });
 
 async function renderSecurity() {
   if (state.sub === 'verification') return renderVerification();
   if (state.sub === 'sanctions') return renderSanctions();
 
   const a = state.guild?.automod || {}, s = settings();
+  let forbidden = { words: [] }; try { forbidden = await forbiddenWordsData(); } catch (_) {}
+  const forbiddenWords = Array.isArray(forbidden?.words) ? forbidden.words : [];
   let d = null; try { d = await diagnostics(); } catch (_) {}
   let sec = null; try { sec = await securityOverview(); } catch (_) {}
   const missing = (sec?.permissions || d?.permissions || []).filter(p => !p.granted);
@@ -147,11 +165,57 @@ async function renderSecurity() {
     ${missing.length ? `<div class="notice warn full">SentriX n’a pas toutes les permissions nécessaires : ${esc(missing.map(p => p.name).join(', '))}. Certaines protections peuvent détecter un risque sans pouvoir agir.</div>` : ''}
 
     ${card('Protections', 'Activez uniquement les protections adaptées à votre serveur.', AUTOMOD.map(([k, l, c]) => switchRow(l, k, Boolean(a[k]), c)).join(''), 'full')}
+    <section class="card full">
+      <div class="card-head">
+        <div><h2>Mots interdits</h2><p>Ajoutez les mots ou expressions que SentriX doit censurer immédiatement.</p></div>
+        <span class="badge">${forbiddenWords.length} configuré(s)</span>
+      </div>
+      <div class="fields" style="margin-top:12px">
+        <div class="field full">
+          <label for="forbiddenWordInput">Nouveau mot ou expression</label>
+          <input id="forbiddenWordInput" maxlength="80" placeholder="Ex. mot à censurer">
+        </div>
+      </div>
+      <div class="toolbar">
+        <button class="btn primary" type="button" id="forbiddenWordAdd">Ajouter aux mots interdits</button>
+      </div>
+      <div class="list" style="margin-top:14px">
+        ${forbiddenWords.length ? forbiddenWords.map(word => `<div class="row"><div class="row-main"><b>${esc(word)}</b><small>Le message sera censuré et l’auteur averti.</small></div><button class="btn sm danger" type="button" data-forbidden-remove="${esc(word)}">Retirer</button></div>`).join('') : emptyState('Aucun mot interdit', 'Ajoutez un mot ci-dessus.')}
+      </div>
+    </section>
+
     ${advanced(card('Politique de sécurité', '', `<div class="fields">${field('Niveau de sécurité', 'security_level', '', { select: ['faible', 'moyen', 'eleve'].map(v => `<option value="${v}" ${s.security_level === v ? 'selected' : ''}>${v === 'eleve' ? 'Élevé' : v[0].toUpperCase() + v.slice(1)}</option>`).join('') })}${field('Avertissements avant ban automatique', 'warn_ban_threshold', s.warn_ban_threshold ?? 0, { type: 'number', min: 0, max: 20, hint: '0 = jamais de ban automatique.' })}</div>` + switchRow('Escalade AutoMod', 'escalation', Boolean(a.escalation), 'Augmente progressivement les sanctions.')))}
   </div>`;
 
   bindEditable();
   bindModuleButtons();
+
+  if ($('forbiddenWordAdd')) $('forbiddenWordAdd').onclick = async () => {
+    const input = $('forbiddenWordInput');
+    const word = input?.value.trim();
+    if (!word) return toast('Entrez un mot ou une expression.', true);
+    try {
+      const result = await gpost('/forbidden-words', { action: 'add', word });
+      toast(result.message || 'Mot interdit ajouté.');
+      invalidate('forbidden-words');
+      await renderSecurity();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  content().querySelectorAll('[data-forbidden-remove]').forEach(button => {
+    button.onclick = async () => {
+      const word = button.dataset.forbiddenRemove;
+      try {
+        const result = await gpost('/forbidden-words', { action: 'remove', word });
+        toast(result.message || 'Mot interdit retiré.');
+        invalidate('forbidden-words');
+        await renderSecurity();
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
 
   if ($('securityRefresh')) $('securityRefresh').onclick = async () => {
     invalidate('security-overview', 'diagnostics');
@@ -329,11 +393,12 @@ async function renderTickets() {
   const del = $('ticketDelete'); if (del) del.onclick = async () => { if (!(await confirmDialog({ title: 'Supprimer ce panneau ?', body: `Le panneau « ${panel.name || 'Support'} » et ses ${plural(panelTypes.length, 'type')} seront supprimés. Les tickets déjà ouverts restent.`, confirm: 'Supprimer', danger: true }))) return; try { await v62Action({ action: 'ticket_panel_delete', panel_id: selected.id }); state.ticketPanelId = null; state.ticketCreate = false; state.ticketEditorOpen = false; await render({ navigation: true }); } catch (e) { toast(e.message, true); } };
   const typeEditor = (t) => openModal({
     title: t ? `Modifier « ${t.name} »` : 'Ajouter un type de ticket',
-    body: `<div class="fields"><div class="field"><label for="ttName">Nom</label><input id="ttName" maxlength="80" value="${esc(t?.name || '')}" placeholder="Support"></div><div class="field"><label for="ttEmoji">Emoji</label><input id="ttEmoji" maxlength="100" value="${esc(t?.emoji || '🎫')}"></div><div class="field full"><label for="ttDesc">Description (visible par les membres)</label><input id="ttDesc" maxlength="150" value="${esc(t?.description || '')}" placeholder="Besoin d’aide ? Ouvrez un ticket."></div><div class="field"><label for="ttStaff">Rôle qui gère ces tickets</label><select id="ttStaff">${roleOptions(t?.staff_role_id || '', 'Rôle staff du serveur')}</select></div><div class="field"><label for="ttCategory">Catégorie des salons</label><select id="ttCategory">${channelOptions(t?.category_id || '', 'category', 'Catégorie par défaut')}</select></div><div class="field"><label for="ttLog">Salon des logs de ces tickets</label><select id="ttLog">${channelOptions(t?.log_channel_id || '', 'text', 'Logs tickets par défaut')}</select></div><div class="field"><label for="ttStyle">Couleur du bouton</label><select id="ttStyle">${BUTTON_STYLES.map(([v, l]) => `<option value="${v}" ${(t?.button_style || 'bleu') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div class="field full"><label for="ttOpen">Message envoyé à l’ouverture (facultatif)</label><textarea id="ttOpen" maxlength="1000" rows="3">${esc(t?.open_message || '')}</textarea></div></div><label class="switch-row"><span class="switch-copy"><b>Mentionner le rôle staff</b><span>À chaque ouverture de ticket.</span></span><input class="switch" id="ttMention" type="checkbox" ${t ? (t.mention_staff ? 'checked' : '') : 'checked'}></label>`,
+    body: `<div class="fields"><div class="field"><label for="ttName">Nom</label><input id="ttName" maxlength="80" value="${esc(t?.name || '')}" placeholder="Support"></div><div class="field full"><label for="ttEmoji">Emoji</label>${emojiControl('ttEmoji', t?.emoji || '🎫')}</div><div class="field full"><label for="ttDesc">Description (visible par les membres)</label><input id="ttDesc" maxlength="150" value="${esc(t?.description || '')}" placeholder="Besoin d’aide ? Ouvrez un ticket."></div><div class="field"><label for="ttStaff">Rôle qui gère ces tickets</label><select id="ttStaff">${roleOptions(t?.staff_role_id || '', 'Rôle staff du serveur')}</select></div><div class="field"><label for="ttCategory">Catégorie des salons</label><select id="ttCategory">${channelOptions(t?.category_id || '', 'category', 'Catégorie par défaut')}</select></div><div class="field"><label for="ttLog">Salon des logs de ces tickets</label><select id="ttLog">${channelOptions(t?.log_channel_id || '', 'text', 'Logs tickets par défaut')}</select></div><div class="field"><label for="ttStyle">Couleur du bouton</label><select id="ttStyle">${BUTTON_STYLES.map(([v, l]) => `<option value="${v}" ${(t?.button_style || 'bleu') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div><div class="field full"><label for="ttOpen">Message envoyé à l’ouverture (facultatif)</label><textarea id="ttOpen" maxlength="1000" rows="3">${esc(t?.open_message || '')}</textarea></div></div><label class="switch-row"><span class="switch-copy"><b>Mentionner le rôle staff</b><span>À chaque ouverture de ticket.</span></span><input class="switch" id="ttMention" type="checkbox" ${t ? (t.mention_staff ? 'checked' : '') : 'checked'}></label>`,
     actions: [{ label: 'Annuler' }, { label: t ? 'Enregistrer' : 'Ajouter', kind: 'primary', keep: true, onClick: async () => {
       if (!$('ttName').value.trim()) return toast('Donnez un nom au type.', true);
       try { await v62Action({ action: 'ticket_type_save', type_id: t?.id || null, panel_id: selected.id, name: $('ttName').value, emoji: $('ttEmoji').value, description: $('ttDesc').value, staff_role_id: $('ttStaff').value, category_id: $('ttCategory').value, log_channel_id: $('ttLog').value, button_style: $('ttStyle').value, open_message: $('ttOpen').value, mention_staff: $('ttMention').checked, use_form: Boolean(t?.use_form), max_per_member: t?.max_per_member || 1, autoclose_hours: t?.autoclose_hours || 0, name_format: t?.name_format || 'ticket-{pseudo}', button_label: t?.button_label || $('ttName').value }); closeModal(); await renderTickets(); } catch (e) { toast(e.message, true); }
     } }],
+    onOpen: () => bindEmojiPickers($('modalBody')),
   });
   const addBtn = $('ticketTypeAdd'); if (addBtn) addBtn.onclick = () => typeEditor(null);
   content().querySelectorAll('[data-type-edit]').forEach(b => b.onclick = () => typeEditor(types.find(t => String(t.id) === b.dataset.typeEdit)));
@@ -370,14 +435,19 @@ async function renderAutomation() {
     const readEmojis = () => { const el = $('reactEmojiInput'); for (const x of (el.value || '').trim().split(/[\s,]+/).filter(Boolean)) { if (reactEmojis.length >= 8) break; if (!reactEmojis.includes(x)) reactEmojis.push(x); } el.value = ''; drawEmojis(); };
     openModal({
       title: 'Nouvelle réaction automatique',
-      body: `<div class="fields"><div class="field"><label for="reactChannel">Salon</label><select id="reactChannel">${channelOptions('')}</select></div><div class="field"><label for="reactMode">Quand ?</label><select id="reactMode"><option value="all">Tous les messages</option><option value="keyword">Si le message contient un mot</option></select></div><div class="field full"><label for="reactKeyword">Mot-clé (si nécessaire)</label><input id="reactKeyword" maxlength="80" placeholder="gg"></div><div class="field full"><label for="reactEmojiInput">Emojis (8 maximum)</label><div class="toolbar"><input class="search-input" id="reactEmojiInput" placeholder="❤️ 🔥 👀 ou <:nom:123…>"><button class="btn" type="button" id="reactEmojiAdd">Ajouter</button></div><div class="toolbar" id="reactEmojiList"></div></div></div><label class="switch-row"><span class="switch-copy"><b>Ignorer les bots</b><span>Évite les boucles de réactions.</span></span><input class="switch" id="reactIgnoreBots" type="checkbox" checked></label>`,
+      body: `<div class="fields"><div class="field"><label for="reactChannel">Salon</label><select id="reactChannel">${channelOptions('')}</select></div><div class="field"><label for="reactMode">Quand ?</label><select id="reactMode"><option value="all">Tous les messages</option><option value="keyword">Si le message contient un mot</option></select></div><div class="field full"><label for="reactKeyword">Mot-clé (si nécessaire)</label><input id="reactKeyword" maxlength="80" placeholder="gg"></div><div class="field full"><label for="reactEmojiInput">Emojis (8 maximum)</label>${emojiControl('reactEmojiInput', '', 'Emoji Unicode ou personnalisé')}<div class="toolbar" style="margin-top:8px"><button class="btn" type="button" id="reactEmojiAdd">Ajouter</button></div><div class="toolbar" id="reactEmojiList"></div></div></div><label class="switch-row"><span class="switch-copy"><b>Ignorer les bots</b><span>Évite les boucles de réactions.</span></span><input class="switch" id="reactIgnoreBots" type="checkbox" checked></label>`,
       actions: [{ label: 'Annuler' }, { label: 'Créer la règle', kind: 'primary', keep: true, onClick: async () => {
         readEmojis();
         if (!$('reactChannel').value) return toast('Choisissez un salon.', true);
         if (!reactEmojis.length) return toast('Choisissez au moins un emoji.', true);
         try { await gpost('/automation/reactions', { action: 'create', channel_id: $('reactChannel').value, mode: $('reactMode').value, keyword: $('reactKeyword').value.trim(), emojis: reactEmojis, ignore_bots: $('reactIgnoreBots').checked }); closeModal(); toast('Réaction automatique créée.'); await renderAutomation(); } catch (e) { toast(e.message, true); }
       } }],
-      onOpen: () => { drawEmojis(); $('reactEmojiAdd').onclick = readEmojis; $('reactEmojiInput').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); readEmojis(); } }; },
+      onOpen: () => {
+        drawEmojis();
+        bindEmojiPickers($('modalBody'));
+        $('reactEmojiAdd').onclick = readEmojis;
+        $('reactEmojiInput').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); readEmojis(); } };
+      },
     });
   };
   content().querySelectorAll('[data-react-toggle]').forEach(x => x.onchange = async () => { try { await gpost('/automation/reactions', { action: 'toggle', id: Number(x.dataset.reactToggle), enabled: x.checked }); } catch (e) { x.checked = !x.checked; toast(e.message, true); } });

@@ -129,12 +129,47 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
             slash_roots = len(self.bot.tree.get_commands())
         except Exception:
             slash_roots = 0
+        kernel = getattr(self.bot, "module_kernel", None)
+        kernel_snapshot = kernel.snapshot() if kernel is not None and hasattr(kernel, "snapshot") else None
+        optional_failed = []
+        runtime_degraded = []
+        open_circuits = []
+        invariant_errors = []
+        if isinstance(kernel_snapshot, dict):
+            optional_failed = [
+                item["name"] for item in kernel_snapshot.get("failed", [])
+                if not item.get("critical")
+            ]
+            runtime_degraded = list(kernel_snapshot.get("runtime_degraded") or [])
+            open_circuits = list(kernel_snapshot.get("open_circuits") or [])
+            invariant_errors = list(kernel_snapshot.get("invariant_errors") or [])
+            if optional_failed:
+                problems.append(f"{len(optional_failed)} module(s) optionnel(s) isolé(s) en échec")
+            if runtime_degraded:
+                problems.append(f"{len(runtime_degraded)} module(s) actif(s) mais dégradé(s)")
+            if open_circuits:
+                problems.append(f"{len(open_circuits)} circuit(s) de module ouvert(s)")
+            if invariant_errors:
+                problems.append(f"{len(invariant_errors)} incohérence(s) interne(s) du noyau")
+
         discord_section = [
             panels.Ligne("Connecté", "Oui" if ready else "Non"),
             panels.Ligne("Serveurs", str(len(self.bot.guilds))),
             panels.Ligne("Extensions", f"{loaded} chargées" + (f" · {len(manquantes)} manquante(s)" if manquantes else "")),
+            panels.Ligne("Noyau modules", (
+                f"{kernel_snapshot.get('loaded', 0)}/{kernel_snapshot.get('expected', 0)} chargés"
+                if kernel_snapshot else "indisponible"
+            )),
             panels.Ligne("Commandes", f"{len(list(self.bot.walk_commands()))} texte · {slash_roots} racines slash"),
         ]
+        if optional_failed:
+            discord_section.append(panels.Ligne("Optionnels isolés", ", ".join(optional_failed[:5])))
+        if runtime_degraded:
+            discord_section.append(panels.Ligne("Actifs mais dégradés", ", ".join(runtime_degraded[:5])))
+        if open_circuits:
+            discord_section.append(panels.Ligne("Circuits ouverts", ", ".join(open_circuits[:5])))
+        if invariant_errors:
+            discord_section.append(panels.Ligne("Noyau incohérent", " · ".join(invariant_errors[:3])))
 
         # TÂCHES DE FOND
         loops_running, loops_stopped = _cog_loops(self.bot)
@@ -143,13 +178,28 @@ class CoreDiagnostics(commands.Cog, name="CoreDiagnostics"):
             problems.append(f"{len(loops_stopped)} boucle(s) de cog arrêtée(s)")
         snapshot = metrics.snapshot()
         recent_failures = sum(int(getattr(s, "recent_failures", 0) or 0) for s in snapshot.values())
+        supervisor = getattr(self.bot, "module_supervisor", None)
+        supervisor_snapshot = supervisor.snapshot() if supervisor is not None and hasattr(supervisor, "snapshot") else {}
+        failed_background_loops = list(supervisor_snapshot.get("failed_background_loops") or [])
+        stuck_modules = list(supervisor_snapshot.get("stuck_modules") or [])
+        if failed_background_loops:
+            problems.append(f"{len(failed_background_loops)} boucle(s) de fond en échec confirmé")
+        if stuck_modules:
+            problems.append(f"{len(stuck_modules)} module(s) avec appel bloqué")
+
         background_section = [
             panels.Ligne("Tâches asyncio actives", str(len(all_tasks))),
             panels.Ligne("Boucles de cogs", f"{loops_running} active(s) · {len(loops_stopped)} arrêtée(s)"),
+            panels.Ligne("Boucles en échec", str(len(failed_background_loops))),
+            panels.Ligne("Modules bloqués", str(len(stuck_modules))),
             panels.Ligne("Échecs de commandes récents", str(recent_failures)),
         ]
         if loops_stopped:
             background_section.append(panels.Ligne("Arrêtées", ", ".join(loops_stopped[:6])))
+        if failed_background_loops:
+            background_section.append(panels.Ligne("Échecs confirmés", ", ".join(failed_background_loops[:4])))
+        if stuck_modules:
+            background_section.append(panels.Ligne("Appels bloqués", ", ".join(stuck_modules[:4])))
 
         # ÉTAT
         degraded = bool(problems)

@@ -22,48 +22,58 @@ PAGE_SIZE = 7
 
 CATEGORY_NAMES = {
     "Moderation": "Modération",
-    "Automod": "Administration",
-    "Security": "Administration",
-    "SecurityTools": "Administration",
-    "Configuration": "Administration",
-    "Logs": "Administration",
-    "ServerBuilder": "Administration",
-    "Verification": "Administration",
-    "Owner": "Administration",
-    "EmbedBuilder": "Administration",
-    "Design": "Administration",
+    "Automod": "Sécurité",
+    "Security": "Sécurité",
+    "SecurityTools": "Sécurité",
+    "Configuration": "Configuration",
+    "Logs": "Configuration",
+    "ServerBuilder": "Configuration",
+    "Verification": "Sécurité",
+    "Owner": "Configuration",
+    "EmbedBuilder": "Configuration",
+    "Design": "Configuration",
+    "Notifications": "Configuration",
     "Utility": "Informations",
     "Stats": "Informations",
-    "Invites": "Informations",
+    "Invites": "Invitations",
     "Economy": "Économie",
-    "Levels": "Économie",
+    "Levels": "Niveaux",
     "GamesEconomy": "Jeux",
     "Minigames": "Jeux",
-    "Music": "Jeux",
-    "Events": "Jeux",
+    "Music": "Musique",
+    "Events": "Événements",
     "Tickets": "Tickets",
     "Ai": "IA",
-    "Notifications": "Administration",
 }
 
 CATEGORY_ORDER = (
     "Modération",
-    "Informations",
-    "Économie",
-    "Jeux",
+    "Sécurité",
     "Tickets",
+    "Musique",
+    "Économie",
+    "Niveaux",
+    "Jeux",
+    "Événements",
+    "Invitations",
+    "Informations",
     "IA",
-    "Administration",
+    "Configuration",
 )
 
 CATEGORY_DESCRIPTIONS = {
-    "Modération": "Ban, kick, mute, warn, clear et sanctions.",
-    "Informations": "Serveur, membre, rôle, statistiques et utilitaires.",
-    "Économie": "Balance, banque, boutique, niveaux et progression.",
-    "Jeux": "Mini-jeux, activités et commandes de divertissement.",
-    "Tickets": "Commandes liées aux tickets et au support.",
-    "IA": "Assistant SentriX et génération d’images.",
-    "Administration": "Configuration, sécurité, logs, rôles et gestion du serveur.",
+    "Modération": "Sanctions, avertissements et gestion des membres.",
+    "Sécurité": "AutoMod, anti-raid, vérification et protections.",
+    "Tickets": "Support, panneaux et gestion des tickets.",
+    "Musique": "Lecture, file, playlists et contrôles vocaux.",
+    "Économie": "Argent, banque, boutique et récompenses.",
+    "Niveaux": "XP, progression et classements.",
+    "Jeux": "Mini-jeux et activités interactives.",
+    "Événements": "Événements, concours et animations.",
+    "Invitations": "Invitations, statistiques et récompenses.",
+    "Informations": "Serveur, membres, rôles, statistiques et utilitaires.",
+    "IA": "Assistant SentriX et outils IA.",
+    "Configuration": "Réglages, logs, design et administration du serveur.",
 }
 
 INVITE_PERMISSION_NAMES = (
@@ -100,18 +110,60 @@ def _visible(bot: commands.Bot, _member=None) -> list[commands.Command]:
     return rows
 
 
-def _slash_map(bot: commands.Bot) -> dict[str, str]:
-    result: dict[str, str] = {}
+def _callback_key(callback) -> tuple[str, str] | None:
+    if callback is None:
+        return None
+    seen: set[int] = set()
+    current = callback
+    while getattr(current, "__wrapped__", None) is not None and id(current) not in seen:
+        seen.add(id(current))
+        current = current.__wrapped__
+    module = str(getattr(current, "__module__", "") or "")
+    qualname = str(getattr(current, "__qualname__", "") or "")
+    return (module, qualname) if module or qualname else None
+
+
+def _slash_indexes(bot: commands.Bot) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
+    by_name: dict[str, str] = {}
+    by_callback: dict[tuple[str, str], str] = {}
 
     def walk(node, parent: str = "") -> None:
         name = f"{parent} {node.name}".strip()
-        result[name.casefold()] = name
+        by_name[name.casefold()] = name
+        key = _callback_key(getattr(node, "callback", None))
+        if key is not None:
+            by_callback.setdefault(key, name)
         for child in getattr(node, "commands", []):
             walk(child, name)
 
     for node in bot.tree.get_commands(type=discord.AppCommandType.chat_input):
         walk(node)
-    return result
+    return by_name, by_callback
+
+
+def _slash_map(bot: commands.Bot) -> dict[str, str]:
+    return _slash_indexes(bot)[0]
+
+
+def _slash_name(bot: commands.Bot, command: commands.Command) -> str | None:
+    by_name, by_callback = _slash_indexes(bot)
+    direct = by_name.get(command.qualified_name.casefold())
+    if direct:
+        return direct
+
+    app_command = getattr(command, "app_command", None)
+    app_qualified = str(getattr(app_command, "qualified_name", "") or "")
+    if app_qualified:
+        published = by_name.get(app_qualified.casefold())
+        if published:
+            return published
+
+    key = _callback_key(getattr(command, "callback", None))
+    if key is not None:
+        published = by_callback.get(key)
+        if published:
+            return published
+    return None
 
 
 def _description(command: commands.Command) -> str:
@@ -119,16 +171,35 @@ def _description(command: commands.Command) -> str:
     return raw.split("\n", 1)[0][:220]
 
 
+def _display_name(command: commands.Command) -> str:
+    try:
+        from . import common_command_names
+
+        return common_command_names.display_name(command)
+    except Exception:
+        return str(command.qualified_name)
+
+
+def _example(command: commands.Command, prefix: str) -> str:
+    example = command_example(command, prefix)
+    long_call = f"{prefix}{command.qualified_name}"
+    short_call = f"{prefix}{_display_name(command)}"
+    if example.startswith(long_call):
+        return short_call + example[len(long_call):]
+    return example
+
+
 def _usage(command: commands.Command, prefix: str) -> str:
+    name = _display_name(command)
     if command.usage:
-        return f"{prefix}{command.qualified_name} {command.usage}".strip()
+        return f"{prefix}{name} {command.usage}".strip()
     signature = getattr(command, "signature", "") or ""
-    return f"{prefix}{command.qualified_name} {signature}".strip()
+    return f"{prefix}{name} {signature}".strip()
 
 
 def _command_label(bot: commands.Bot, command: commands.Command, prefix: str) -> str:
-    slash = _slash_map(bot).get(command.qualified_name.casefold())
-    label = f"{prefix}{command.qualified_name}"
+    slash = _slash_name(bot, command)
+    label = f"{prefix}{_display_name(command)}"
     if slash:
         label += f"   /{slash}"
     return label[:256]
@@ -163,27 +234,36 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
         value="Toutes les commandes sont visibles. La fiche d’une commande indique clairement la permission nécessaire.",
         inline=False,
     )
-    panel.set_footer(text="SentriX • Centre d’aide")
+    panel.set_footer(text="SentriX Core · Centre d’aide")
     return _decorate(panel, bot)
 
 
 def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discord.Embed:
     slash = _slash_map(bot).get(command.qualified_name.casefold())
     requirement = command_requirement(command)
-    panel = embeds.help_embed(f"SentriX — {command.qualified_name}", _description(command))
+    panel = embeds.help_embed(f"SentriX — {_display_name(command)}", _description(command))
     panel.add_field(name="Commande", value=f"`{_usage(command, prefix)}`", inline=False)
     if slash:
         panel.add_field(name="Slash", value=f"`/{slash}`", inline=True)
     panel.add_field(name="Permission nécessaire", value=requirement, inline=True)
     panel.add_field(name="Catégorie", value=_category(command), inline=True)
-    panel.add_field(name="Exemple", value=f"`{command_example(command, prefix)}`", inline=False)
-    if command.aliases:
+    panel.add_field(name="Exemple", value=f"`{_example(command, prefix)}`", inline=False)
+    alternate_names = []
+    short_name = _display_name(command)
+    if short_name != command.qualified_name:
+        alternate_names.append(command.qualified_name)
+    alternate_names.extend(
+        alias
+        for alias in (command.aliases or [])
+        if alias not in alternate_names and alias != short_name
+    )
+    if alternate_names:
         panel.add_field(
-            name="Alias",
-            value=", ".join(f"`{alias}`" for alias in command.aliases[:10]),
+            name="Autres noms",
+            value=", ".join(f"`{prefix}{alias}`" for alias in alternate_names[:10]),
             inline=False,
         )
-    panel.set_footer(text="SentriX • Aide commande")
+    panel.set_footer(text="SentriX Core · Aide commande")
     return _decorate(panel, bot)
 
 
@@ -204,7 +284,7 @@ def _pages(bot: commands.Bot, command_rows: list[commands.Command], prefix: str,
                     value=f"{_description(command)}\n**Permission :** {command_requirement(command)}",
                     inline=False,
                 )
-        panel.set_footer(text=f"SentriX • Page {page_index}/{len(chunks)}")
+        panel.set_footer(text=f"SentriX Core · Page {page_index}/{len(chunks)}")
         pages.append(_decorate(panel, bot))
     return pages
 
@@ -224,7 +304,11 @@ def _ordered_categories(bot: commands.Bot, member=None) -> OrderedDict[str, int]
     return result
 
 
-def _search(command_rows: list[commands.Command], query: str) -> list[commands.Command]:
+def _search(
+    bot: commands.Bot,
+    command_rows: list[commands.Command],
+    query: str,
+) -> list[commands.Command]:
     needle = query.casefold().strip().lstrip("+/")
     if not needle:
         return []
@@ -232,16 +316,17 @@ def _search(command_rows: list[commands.Command], query: str) -> list[commands.C
     for command in command_rows:
         aliases = [alias.casefold() for alias in (command.aliases or [])]
         name = command.qualified_name.casefold()
+        slash = str(_slash_name(bot, command) or "").casefold()
         category = _category(command).casefold()
         description = _description(command).casefold()
-        haystack = " ".join([name, *aliases, category, description])
+        haystack = " ".join([name, slash, *aliases, category, description])
         if needle not in haystack:
             continue
-        if needle == name or needle == command.name.casefold() or needle in aliases:
+        if needle in {name, slash, command.name.casefold(), *aliases}:
             rank = 0
-        elif name.startswith(needle):
+        elif slash.startswith(needle) or name.startswith(needle):
             rank = 1
-        elif needle in name:
+        elif needle in slash or needle in name:
             rank = 2
         elif needle in category:
             rank = 3
@@ -349,7 +434,7 @@ class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
     async def on_submit(self, interaction: discord.Interaction):
         vue = self.help_view
         recherche = str(self.query.value)
-        rows = _search(_visible(vue.bot, interaction.user), recherche)
+        rows = _search(vue.bot, _visible(vue.bot, interaction.user), recherche)
         exact = _exact_match(rows, recherche)
         if exact:
             nouvelle = VueAide(
@@ -416,7 +501,7 @@ def _sections_accueil(bot: commands.Bot, member=None) -> list[panels.Section]:
         panels.Section(
             "Trouver une commande",
             [
-                panels.Ligne("Par son nom", "`+help ban`"),
+                panels.Ligne("Par son nom", "`/aide commande:ban` ou `+help ban`"),
                 panels.Ligne("Par catégorie", "Le menu déroulant ci-dessous"),
                 panels.Ligne("Par mot-clé", "Le bouton **Rechercher**"),
             ],
@@ -440,7 +525,7 @@ def _sections_detail(bot: commands.Bot, command: commands.Command, prefix: str) 
     appel = [panels.Ligne("Préfixe", f"`{_usage(command, prefix)}`")]
     if slash:
         appel.append(panels.Ligne("Slash", f"`/{slash}`"))
-    appel.append(panels.Ligne("Exemple", f"`{command_example(command, prefix)}`"))
+    appel.append(panels.Ligne("Exemple", f"`{_example(command, prefix)}`"))
 
     sections = [
         panels.Section("Comment l'utiliser", appel),
@@ -452,7 +537,15 @@ def _sections_detail(bot: commands.Bot, command: commands.Command, prefix: str) 
             ],
         ),
     ]
-    alias = [a for a in getattr(command, "aliases", ()) if a]
+    alias = []
+    short_name = _display_name(command)
+    if short_name != command.qualified_name:
+        alias.append(command.qualified_name)
+    alias.extend(
+        a
+        for a in (getattr(command, "aliases", ()) or ())
+        if a and a not in alias and a != short_name
+    )
     if alias:
         sections.append(
             panels.Section(
@@ -537,15 +630,20 @@ class VueAide(discord.ui.LayoutView):
         galerie = discord.ui.MediaGallery()
         galerie.add_item(media=f"attachment://{panels.nom_banniere(self.kind)}")
         conteneur.add_item(galerie)
+        conteneur.add_item(
+            discord.ui.TextDisplay(f"-# {panels.signature_core('special')}")
+        )
         conteneur.add_item(discord.ui.TextDisplay(f"## {titre}\n{resume}"))
 
-        for section in sections:
-            rendu = section.rendu()
+        for section_index, section in enumerate(sections, start=1):
+            rendu = section.rendu(section_index)
             if rendu:
                 conteneur.add_item(discord.ui.Separator())
                 conteneur.add_item(discord.ui.TextDisplay(rendu[:3800]))
 
-        conteneur.add_item(discord.ui.TextDisplay("-# SentriX • Centre d'aide"))
+        conteneur.add_item(
+            discord.ui.TextDisplay(f"-# {panels.pied_core('special', 'Centre d’aide')}")
+        )
         conteneur.add_item(discord.ui.Separator())
         conteneur.add_item(discord.ui.ActionRow(CategorySelect(self)))
         conteneur.add_item(discord.ui.ActionRow(*self._navigation()))
@@ -701,12 +799,12 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
             return
 
         if query:
-            rows = _search(_visible(self.bot, member), query)
+            rows = _search(self.bot, _visible(self.bot, member), query)
             exact = _exact_match(rows, query)
             if exact:
                 vue = VueAide(
                     self.bot, prefix, member.id,
-                    titre=f"SentriX — {exact.qualified_name}",
+                    titre=f"SentriX — {_display_name(exact)}",
                     resume=_description(exact),
                     sections=_sections_detail(self.bot, exact, prefix),
                     member=member,

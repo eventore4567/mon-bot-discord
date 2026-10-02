@@ -44,7 +44,11 @@ OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
 # --- Général ---
 DEFAULT_PREFIX = os.getenv("BOT_PREFIX", "+")
 DEFAULT_LANGUAGE = "fr"
-DATABASE_PATH = os.getenv("DATABASE_PATH", "database/bot.db")
+_volume_mount = (os.getenv("RAILWAY_VOLUME_MOUNT_PATH") or "").strip()
+DATABASE_PATH = (
+    (os.getenv("DATABASE_PATH") or "").strip()
+    or (os.path.join(_volume_mount, "bot.db") if _volume_mount else "database/bot.db")
+)
 
 # --- Scalabilité Enterprise ---
 # AutoShardedBot calcule automatiquement le nombre recommandé par Discord si SHARD_COUNT

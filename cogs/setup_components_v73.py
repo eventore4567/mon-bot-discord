@@ -1,4 +1,4 @@
-"""SentriX V73 — Control Center Components V2.
+"""SentriX V73 — interface Setup Components V2.
 
 Cette couche remplace uniquement le rendu de +setup et /setup. Les réglages, callbacks,
 permissions, migrations et moteurs métier restent ceux du Setup final déjà installé
@@ -20,7 +20,7 @@ from . import setup_ticket_autoconfig_v72 as v72
 
 logger = logging.getLogger("bot.setup-components-v73")
 
-RUNTIME_MARKER = "Control Center Components V2 V73"
+RUNTIME_MARKER = "SentriX Setup Components V2 V73"
 # Liseré des conteneurs de +setup et +help, et de dix-neuf autres écrans.
 #
 # Il valait 0x6D5DFB — le violet. Jayden : « enlève le style bleu violet, je
@@ -52,8 +52,13 @@ CATEGORY_META: dict[str, tuple[str, str, str]] = {
     ),
     "welcome": (
         "👋",
-        "Bienvenue & départ",
-        "Messages d’arrivée, de départ et rôles automatiques.",
+        "Bienvenue",
+        "Message d’arrivée, salon et rôle d’arrivée choisi.",
+    ),
+    "goodbye": (
+        "🚪",
+        "Départs",
+        "Message envoyé quand un membre quitte le serveur.",
     ),
     "roles": (
         "🏷️",
@@ -75,6 +80,11 @@ CATEGORY_META: dict[str, tuple[str, str, str]] = {
         "Notifications",
         "YouTube, Twitch, TikTok, salons et rôles de notification.",
     ),
+    "music": (
+        "🎵",
+        "Musique",
+        "Activer le lecteur, choisir le vocal musique et afficher le panneau dans le chat vocal.",
+    ),
     "ai": (
         "🧠",
         "Intelligence artificielle",
@@ -87,16 +97,18 @@ CATEGORY_META: dict[str, tuple[str, str, str]] = {
     ),
 }
 
-# Ordre pensé comme le panneau de référence : protection -> communauté -> services.
+# Ordre SentriX : protection -> communauté -> services.
 CATEGORY_ORDER = (
     "moderation",
     "security",
     "tickets",
     "welcome",
+    "goodbye",
     "roles",
     "logs",
     "levels",
     "notifications",
+    "music",
     "ai",
     "permissions",
 )
@@ -165,85 +177,13 @@ def fichier_banniere() -> "discord.File | None":
         return None
 
 
-def banniere_disponible() -> bool:
-    """Le fichier de bannière est-il réellement produisible ?
-
-    La galerie et la pièce jointe DOIVENT être décidées ensemble. Une galerie
-    qui référence ``attachment://banner_config.webp`` sans que le fichier soit
-    joint ne dégrade pas l'affichage : Discord refuse le message ENTIER avec
-
-        Invalid Form Body — The referenced attachment was not found.
-
-    C'est arrivé en production sur /setup. Cette fonction est la condition
-    unique que la construction et l'envoi consultent tous les deux.
-
-    Elle GÉNÈRE la bannière manquante avant de répondre, au lieu de se
-    contenter d'un test d'existence. ``.gitignore`` ignore
-    ``assets/log_banners/banner_*.webp`` : aucune bannière n'est versionnée,
-    donc le dossier est vide sur un conteneur fraîchement déployé. Un simple
-    test aurait répondu « non » au premier /setup et l'écran serait parti sans
-    bandeau — valide, mais nu, et c'est précisément ce que Jayden voit comme
-    « plein de trucs n'ont pas de bannière ».
-
-    ``ensure_banners`` est idempotent via son cache ``_READY``, mais ce cache
-    peut être vrai alors que le fichier a disparu du disque — d'où le
-    ``force=True``, qui est aussi ce que fait ``fichier_de_famille`` pour la
-    pièce jointe. Les deux côtés suivent donc le même chemin : ils ne peuvent
-    pas diverger, ce qui est tout l'objet de ce correctif.
-    """
-    from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
-
-    chemin = BANNER_DIR / nom_fichier(BANNIERE)
-    if chemin.exists():
-        return True
-    try:
-        ensure_banners(force=True)
-    except Exception:
-        logger.exception("Génération de la bannière %s impossible.", BANNIERE)
-        return False
-    return chemin.exists()
-
-
-def entete_banniere() -> "discord.ui.MediaGallery | None":
-    """La galerie de tête, ou None si le fichier ne peut pas suivre.
-
-    Rendre None plutôt qu'une galerie orpheline : un écran sans bannière reste
-    utilisable, un message refusé par Discord ne l'est pas.
-    """
-    if not banniere_disponible():
-        logger.warning(
-            "Bannière %s introuvable : écran rendu sans bandeau plutôt que refusé.",
-            BANNIERE,
-        )
-        return None
+def entete_banniere() -> "discord.ui.MediaGallery":
+    """La galerie qui affiche la bannière en tête de conteneur."""
     from utils.log_banners import nom_fichier
 
     galerie = discord.ui.MediaGallery()
     galerie.add_item(media=f"attachment://{nom_fichier(BANNIERE)}")
     return galerie
-
-
-def poser_banniere(container) -> None:
-    """Ajoute l'en-tête au conteneur, ou ne fait rien. Point d'entrée unique."""
-    entete = entete_banniere()
-    if entete is not None:
-        container.add_item(entete)
-
-
-def joindre_banniere(kwargs: dict) -> dict:
-    """Ajoute ``file=`` aux arguments d'envoi, si et seulement si la galerie a
-    pu être posée. Même condition que ``poser_banniere`` — c'est ce qui rend
-    les deux indissociables.
-
-    Un fichier NEUF à chaque appel : un discord.File consommé par un envoi ne
-    peut pas servir au suivant.
-    """
-    if not banniere_disponible():
-        return kwargs
-    fichier = fichier_banniere()
-    if fichier is not None:
-        kwargs["file"] = fichier
-    return kwargs
 
 
 def _thumbnail(bot: commands.Bot) -> discord.ui.Thumbnail:
@@ -386,6 +326,15 @@ class SentriXSetupV73(discord.ui.LayoutView):
     async def prepare(self) -> None:
         await self.rebuild()
 
+    def fichiers(self) -> list[discord.File]:
+        """Pièces jointes correspondant exactement à la galerie de cette vue.
+
+        Un fichier neuf est créé à chaque appel : discord.File est consommé après
+        un envoi et ne doit jamais être réutilisé.
+        """
+        fichier = fichier_banniere()
+        return [fichier] if fichier is not None else []
+
     async def refresh(self, interaction: discord.Interaction) -> None:
         # Les opérations Setup peuvent inclure SQL/API Discord. ACK immédiat pour éviter
         # « L'application ne répond plus », puis réédition du message d'origine.
@@ -396,7 +345,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         # « attachment://banner_config.webp ». Sans le fichier joint, Discord
         # affiche une image cassée. Un fichier NEUF à chaque édition — celui de
         # l'envoi précédent est consommé.
-        fichier = fichier_banniere() if banniere_disponible() else None
+        fichier = fichier_banniere()
         await interaction.edit_original_response(
             content=None,
             embed=None,
@@ -430,11 +379,11 @@ class SentriXSetupV73(discord.ui.LayoutView):
         problems = sum("CORRIGER" in value for value in states.values())
 
         container = discord.ui.Container(accent_colour=ACCENT)
-        poser_banniere(container)
+        container.add_item(entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "# Configuration de SentriX\n"
+                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX\n"
                     f"**Bienvenue dans le panneau de configuration de SentriX !** "
                     f"Sélectionnez une catégorie pour configurer les fonctionnalités du bot sur **{self.guild.name}**.\n"
                     f"{active}/{len(CATEGORY_ORDER)} modules actifs"
@@ -496,11 +445,11 @@ class SentriXSetupV73(discord.ui.LayoutView):
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
 
         container = discord.ui.Container(accent_colour=ACCENT)
-        poser_banniere(container)
+        container.add_item(entete_banniere())
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    f"# {emoji} {label}\n{description}\nConfiguration sur **{self.guild.name}**."
+                    f"-# SENTRIX CORE · Configuration · setup\n# {emoji} {label}\n{description}\nConfiguration sur **{self.guild.name}**."
                 ),
                 accessory=_thumbnail(self.bot),
             )
@@ -527,7 +476,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
 
         if movable:
             container.add_item(discord.ui.Separator())
-            container.add_item(discord.ui.TextDisplay("### Réglages"))
+            container.add_item(discord.ui.TextDisplay("### 01 · Réglages"))
             self._append_controls(container, movable)
         else:
             container.add_item(discord.ui.Separator())
@@ -616,7 +565,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         # « attachment://banner_config.webp ». Sans le fichier joint, Discord
         # affiche une image cassée. Un fichier NEUF à chaque édition — celui de
         # l'envoi précédent est consommé.
-        fichier = fichier_banniere() if banniere_disponible() else None
+        fichier = fichier_banniere()
         await interaction.edit_original_response(
             content=None,
             embed=None,
@@ -626,7 +575,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         self.stop()
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
-        logger.error("Erreur Control Center V73", exc_info=(type(error), error, error.__traceback__))
+        logger.error("Erreur SentriX Setup V73", exc_info=(type(error), error, error.__traceback__))
         try:
             panel = embeds.error("Une erreur est survenue dans le panneau de configuration SentriX.")
             if interaction.response.is_done():
@@ -646,13 +595,9 @@ async def _send_setup_v73(self, target):
     view = SentriXSetupV73(self.bot, guild, member.id)
     await view.prepare()
 
-    # Le fichier est refabriqué pour CHAQUE branche : un discord.File consommé
-    # par un envoi ne peut pas servir au suivant.
-    if isinstance(target, commands.Context):
-        return await target.send(**joindre_banniere({"view": view}))
-    if target.response.is_done():
-        return await target.followup.send(**joindre_banniere({"view": view}))
-    return await target.response.send_message(**joindre_banniere({"view": view}))
+    # Un seul transport : panels.envoyer() appelle view.fichiers() et joint
+    # banner_config.webp dans le même payload que la galerie.
+    return await panels.envoyer(target, view)
 
 
 def install(bot: commands.Bot) -> None:

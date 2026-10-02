@@ -12,6 +12,8 @@ import time
 
 from aiohttp import web
 
+from core.module_health import extension_state_from_runtime, supervisor_ready
+
 logger = logging.getLogger("bot.dashboard.health-runtime-v45")
 _INSTALLED = False
 _DB_TIMEOUT_SECONDS = 2.5
@@ -68,10 +70,21 @@ async def _database_probe(bot) -> tuple[bool, float | None]:
     return ok, round((time.perf_counter() - started) * 1000, 2)
 
 
-def _extension_state(bot) -> tuple[int, int, bool]:
+def _extension_state(bot) -> tuple[int, int, bool, list[str], list[dict]]:
+    """Retourne la santé des extensions depuis le micro-kernel si disponible."""
+    refresh = getattr(bot, "_refresh_module_health", None)
+    if callable(refresh):
+        runtime = refresh()
+    else:
+        kernel = getattr(bot, "module_kernel", None)
+        runtime = kernel.snapshot() if kernel is not None and hasattr(kernel, "snapshot") else getattr(bot, "_sentrix_extension_health", None)
     loaded = len(getattr(bot, "extensions", {}) or {})
     expected = int(getattr(bot, "expected_extension_count", loaded) or loaded)
-    return loaded, expected, loaded >= expected
+    return extension_state_from_runtime(
+        runtime if isinstance(runtime, dict) else None,
+        fallback_loaded=loaded,
+        fallback_expected=expected,
+    )
 
 
 def _command_policy_state(bot) -> tuple[bool, int, int]:
@@ -113,9 +126,23 @@ def _backup_state(bot) -> bool | None:
 
 async def _snapshot(bot, dashboard) -> dict:
     database_ok, database_latency_ms = await _database_probe(bot)
-    loaded_extensions, expected_extensions, extensions_ok = _extension_state(bot)
+    (
+        loaded_extensions,
+        expected_extensions,
+        extensions_ok,
+        critical_extensions_failed,
+        failed_extensions,
+    ) = _extension_state(bot)
     command_policy_ok, unknown_commands, dangerous_public_commands = _command_policy_state(bot)
     discord_ready = bool(bot.is_ready())
+
+    supervisor = getattr(bot, "module_supervisor", None)
+    supervisor_snapshot = (
+        supervisor.snapshot()
+        if supervisor is not None and hasattr(supervisor, "snapshot")
+        else None
+    )
+    supervisor_ok = supervisor_ready(supervisor_snapshot)
 
     latency_ms = None
     if discord_ready:
@@ -124,7 +151,13 @@ async def _snapshot(bot, dashboard) -> dict:
         except (TypeError, ValueError):
             latency_ms = None
 
-    healthy = bool(discord_ready and database_ok and extensions_ok and command_policy_ok)
+    healthy = bool(
+        discord_ready
+        and database_ok
+        and extensions_ok
+        and command_policy_ok
+        and supervisor_ok
+    )
     if healthy:
         status = "operational"
     elif not database_ok:
@@ -133,6 +166,8 @@ async def _snapshot(bot, dashboard) -> dict:
         status = "extensions_degraded"
     elif not command_policy_ok:
         status = "security_degraded"
+    elif not supervisor_ok:
+        status = "module_supervisor_unavailable"
     elif not discord_ready:
         status = "discord_not_ready"
     else:
@@ -148,6 +183,57 @@ async def _snapshot(bot, dashboard) -> dict:
         "extensions_ok": extensions_ok,
         "extensions_loaded": loaded_extensions,
         "extensions_expected": expected_extensions,
+        "critical_extensions_failed": critical_extensions_failed,
+        "critical_runtime_degraded": (
+            request_kernel.snapshot().get("critical_runtime_degraded", [])
+            if (request_kernel := getattr(bot, "module_kernel", None)) is not None
+            and hasattr(request_kernel, "snapshot")
+            else []
+        ),
+        "failed_extensions": failed_extensions[:12],
+        "module_kernel": (
+            request_kernel.snapshot()
+            if (request_kernel := getattr(bot, "module_kernel", None)) is not None
+            and hasattr(request_kernel, "snapshot")
+            else None
+        ),
+        "module_supervisor": (
+            request_supervisor.snapshot()
+            if (request_supervisor := getattr(bot, "module_supervisor", None)) is not None
+            and hasattr(request_supervisor, "snapshot")
+            else None
+        ),
+        "flapping_modules": (
+            request_supervisor.snapshot().get("flapping_modules", [])
+            if (request_supervisor := getattr(bot, "module_supervisor", None)) is not None
+            and hasattr(request_supervisor, "snapshot")
+            else []
+        ),
+        "module_runtime": (
+            request_runtime.snapshot()
+            if (request_runtime := getattr(bot, "module_runtime", None)) is not None
+            and hasattr(request_runtime, "snapshot")
+            else None
+        ),
+        "runtime_degraded_modules": (
+            request_kernel.snapshot().get("runtime_degraded", [])
+            if (request_kernel := getattr(bot, "module_kernel", None)) is not None
+            and hasattr(request_kernel, "snapshot")
+            else []
+        ),
+        "open_module_circuits": (
+            request_kernel.snapshot().get("open_circuits", [])
+            if (request_kernel := getattr(bot, "module_kernel", None)) is not None
+            and hasattr(request_kernel, "snapshot")
+            else []
+        ),
+        "module_invariant_errors": (
+            request_kernel.snapshot().get("invariant_errors", [])
+            if (request_kernel := getattr(bot, "module_kernel", None)) is not None
+            and hasattr(request_kernel, "snapshot")
+            else []
+        ),
+        "module_supervisor_ok": supervisor_ok,
         "command_policy_ok": command_policy_ok,
         "unknown_command_policy_count": unknown_commands,
         "dangerous_public_command_count": dangerous_public_commands,
@@ -193,6 +279,7 @@ async def _alert_degraded_startup(bot, data: dict) -> None:
             "Démarrage dégradé détecté : "
             f"status={data['status']}, Discord={data['discord_ready']}, DB={data['database_ok']}, "
             f"extensions={data['extensions_loaded']}/{data['extensions_expected']}, "
+            f"critical_failed={','.join(data.get('critical_extensions_failed') or []) or 'none'}, "
             f"policy={data['command_policy_ok']}."
         )
         await sender(bot, "startup-health-v45", detail)

@@ -3,6 +3,11 @@ un alias court est ajouté et affiché. Permissions, catalogue et récompenses r
 donc strictement identiques (« sûr pour tout le monde »)."""
 from __future__ import annotations
 
+import os
+
+# Le test vérifie uniquement les aliases ; aucun vrai token Discord n'est nécessaire.
+os.environ.setdefault("DISCORD_TOKEN", "test-token")
+
 from discord.ext import commands
 
 from cogs import common_command_names as short
@@ -128,3 +133,122 @@ def test_short_slash_names_are_gated_and_short(monkeypatch):
         seen.add((root, bucket, leaf))
     for source, public in surface.SHORT_DIRECT.items():
         assert len(public) < len(source), (source, public)
+
+
+def test_long_prefix_command_gets_safe_automatic_alias():
+    bot = _bot()
+
+    @bot.command(name="serverconfiguration")
+    async def serverconfiguration(ctx):
+        pass
+
+    short._apply_short_names(bot, bot.get_command("serverconfiguration"))
+
+    command = bot.get_command("serverconfiguration")
+    assert command is not None
+    assert bot.get_command("srvconfig") is command
+    assert command.qualified_name == "serverconfiguration"
+    assert short.display_name(command) == "srvconfig"
+
+
+def test_automatic_alias_never_steals_existing_command():
+    bot = _bot()
+
+    @bot.command(name="srvconfig")
+    async def existing(ctx):
+        pass
+
+    @bot.command(name="serverconfiguration")
+    async def serverconfiguration(ctx):
+        pass
+
+    original_short = bot.get_command("srvconfig")
+    long_command = bot.get_command("serverconfiguration")
+    short._apply_short_names(bot, long_command)
+
+    assert bot.get_command("srvconfig") is original_short
+    assert bot.get_command("serverconfiguration") is long_command
+    assert bot.get_command("srvconfig2") is long_command
+    assert short.display_name(long_command) == "srvconfig2"
+
+
+def test_automatic_alias_does_not_change_slash_or_internal_name():
+    bot = _bot()
+
+    @bot.hybrid_command(name="notification-settings")
+    async def notification_settings(ctx):
+        pass
+
+    command = bot.get_command("notification-settings")
+    short._apply_short_names(bot, command)
+
+    assert command.qualified_name == "notification-settings"
+    assert command.name == "notification-settings"
+    assert "notif-set" in command.aliases
+
+
+def test_long_name_and_short_alias_both_keep_working():
+    bot = _bot()
+
+    @bot.command(name="serverconfiguration")
+    async def serverconfiguration(ctx):
+        pass
+
+    command = bot.get_command("serverconfiguration")
+    short._apply_short_names(bot, command)
+
+    assert bot.get_command("serverconfiguration") is command
+    assert bot.get_command("srvconfig") is command
+
+
+def test_long_subcommand_and_short_alias_both_keep_working():
+    bot = _bot()
+
+    @bot.group(name="administration")
+    async def administration(ctx):
+        pass
+
+    @administration.command(name="notification-settings")
+    async def notification_settings(ctx):
+        pass
+
+    short._apply_short_names(bot, bot.get_command("administration"))
+
+    original = bot.get_command("administration notification-settings")
+    assert original is not None
+    assert bot.get_command("administration notif-set") is original
+
+
+def test_generic_long_command_gets_fallback_alias():
+    bot = _bot()
+
+    @bot.command(name="supercalifragilistic")
+    async def supercalifragilistic(ctx):
+        pass
+
+    command = bot.get_command("supercalifragilistic")
+    short._apply_short_names(bot, command)
+
+    aliases = [alias for alias in command.aliases if len(alias) <= 12]
+    assert aliases
+    assert bot.get_command("supercalifragilistic") is command
+    assert any(bot.get_command(alias) is command for alias in aliases)
+
+
+def test_auto_alias_collision_gets_safe_numbered_variant():
+    bot = _bot()
+
+    @bot.command(name="srvconfig")
+    async def existing(ctx):
+        pass
+
+    @bot.command(name="serverconfiguration")
+    async def serverconfiguration(ctx):
+        pass
+
+    command = bot.get_command("serverconfiguration")
+    short._apply_short_names(bot, command)
+
+    assert bot.get_command("srvconfig") is not command
+    assert bot.get_command("srvconfig2") is command
+    assert bot.get_command("serverconfiguration") is command
