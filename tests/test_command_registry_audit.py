@@ -255,3 +255,19 @@ def test_audit_counts_separates_critical_and_warning():
 
     assert counts["critical"] >= 1
     assert counts["warning"] >= 1
+
+
+
+def test_final_sync_wrapper_gates_the_prepared_registry():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "sentrix_v95_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    prepare_index = source.index("await prepare_bot(client)")
+    audit_index = source.index("issues = assert_registry_clean(client)")
+    sync_index = source.index("return await _ORIGINAL_SYNC(self, *args, **kwargs)")
+
+    assert prepare_index < audit_index < sync_index
+    assert "V95 audit registre final" in source
