@@ -148,3 +148,16 @@ def test_aide_root_is_preserved_by_final_slash_rebuild():
 
     assert '"aide"' in source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
     assert '"help"' in source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
+
+
+
+def test_final_rebuild_removes_legacy_help_but_keeps_aide():
+    source = (ROOT / "sentrix_v95_runtime.py").read_text(encoding="utf-8")
+
+    direct_line = source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
+    preserved_line = source.split("PRESERVED_DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
+
+    assert '"help"' in direct_line
+    assert '"aide"' in direct_line
+    assert '"aide"' in preserved_line
+    assert '"help"' not in preserved_line
