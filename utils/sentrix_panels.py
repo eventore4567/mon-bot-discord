@@ -128,6 +128,16 @@ def _core_footer(family: str, footer: str | None = None) -> str:
     base = _core_signature(family)
     return f"{base} · {raw}" if raw else base
 
+
+def signature_core(family: str) -> str:
+    """Signature publique du design de commandes SentriX Core."""
+    return _core_signature(family)
+
+
+def pied_core(family: str, footer: str | None = None) -> str:
+    """Pied public SentriX Core, en conservant une information métier utile."""
+    return _core_footer(family, footer)
+
 _LIMITE_LIGNE = 240
 _LIMITE_BLOC = 3800
 
@@ -863,7 +873,7 @@ def texte_complet(panneau: Panneau) -> str:
 
 __all__ = [
     "Bouton",
-    "CHEVRON",
+    "CORE_NAME",
     "INTENTIONS",
     "Ligne",
     "Panneau",
@@ -885,6 +895,8 @@ __all__ = [
     "REPONSE_LIBRE",
     "COMMANDES_TEXTE_LIBRE",
     "nom_banniere",
+    "signature_core",
+    "pied_core",
 ]
 
 
