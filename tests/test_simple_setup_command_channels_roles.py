@@ -212,7 +212,7 @@ def test_feature_system_commands_do_not_double_write_through_db_only_facade():
 
 
 
-def test_event_backgrounds_are_limited_to_three_presets_and_pings_are_forced():
+def test_event_backgrounds_are_limited_to_three_presets_and_pings_are_configurable():
     dashboard = (ROOT / "web" / "dashboard.py").read_text()
     frontend = (ROOT / "web" / "dashboard_ui" / "js" / "30_modules.js").read_text()
     setup = (ROOT / "cogs" / "setup_v2_completion.py").read_text()
@@ -227,5 +227,24 @@ def test_event_backgrounds_are_limited_to_three_presets_and_pings_are_forced():
     assert "Aucune image personnalisée" in frontend
     assert 'content=(None if test else member.mention)' in setup
     assert 'content = goodbye_body if test else f"{member.mention}\\n{goodbye_body}"' in setup
-    assert '"ping": True' in setup
-    assert '"goodbye_ping": True' in setup
+    # Le ping n'est plus FORCÉ, il est CONFIGURABLE : Jayden a demandé que
+    # « tout » soit personnalisable, « ping pas ping etc ». Les deux littéraux
+    # `"ping": True` / `"goodbye_ping": True` rendaient le réglage illisible —
+    # un serveur qui avait coupé le ping était pingué quand même, et la colonne
+    # en base ne servait à rien.
+    #
+    # Ce qui est vérifié maintenant : la lecture passe par la colonne, et le
+    # départ vaut off par défaut (la personne est partie, Discord ne peut plus
+    # la notifier, et pinguer le salon à chaque départ fait couper le module).
+    assert '_drapeau("ping", True)' in setup, (
+        "le ping de bienvenue n'est plus lu depuis la colonne"
+    )
+    assert '_drapeau("goodbye_ping", False)' in setup, (
+        "le ping de départ n'a plus son réglage séparé, à off par défaut"
+    )
+    # La mention reste TOUJOURS dans le corps du message : un @ non notifiant
+    # s'affiche et se clique quand même, et c'est toute la demande du
+    # « vrai @ sans ping ». Seul allowed_mentions fait sonner le téléphone.
+    assert "AllowedMentions.none()" in setup
+    assert 'presentation.get("ping"' in setup
+    assert 'presentation.get("goodbye_ping"' in setup
