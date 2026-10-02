@@ -33,8 +33,7 @@ class UserFacingV25Tests(unittest.TestCase):
             all_requested = str(montant).strip().casefold() in {"all", "tout", "max"}
             return _parse_amount(str(montant), 100) if not all_requested else 100
 
-        def _parse_amount(value, available):
-            return int(value) if str(value).isdigit() else available
+        callback._sentrix_all_amount_parser = True
 
         import discord
         from discord.ext import commands
