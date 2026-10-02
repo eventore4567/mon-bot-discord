@@ -373,6 +373,22 @@ def install() -> None:
         return BUCKETS.get((original_root, original_bucket), original_bucket)
 
     def leaf(_root: str, _bucket: str, target: v95.SlashTarget) -> str:
+        root = str(_root).casefold()
+        original_name = str(target.original_name or "").casefold().strip()
+        simple = original_name.split(" ")[-1]
+
+        # _build_targets() rendait les feuilles uniques à l'échelle de toute la
+        # racine avant de connaître les sous-groupes. Ainsi "music remove" et
+        # "music playlist remove" pouvaient produire retirer-2 alors qu'ils vivent
+        # dans deux sous-groupes différents. Recalcule ici le vrai nom public
+        # depuis la commande métier : l'unicité est ensuite gérée dans chaque
+        # sous-groupe par V98.
+        if root == "musique":
+            if original_name.startswith("music playlist "):
+                return v95._safe_name(PLAYLIST_LEAVES.get(simple, simple))
+            if original_name.startswith("music "):
+                return v95._safe_name(MUSIC_LEAVES.get(simple, simple))
+
         return v95._safe_name(target.leaf_name)
 
     def chunks(bucket_name: str, count: int) -> list[str]:
