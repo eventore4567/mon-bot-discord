@@ -156,6 +156,9 @@ EXTENSIONS = [
     "cogs.embed_builder",
     # Message privé à un membre (+dm). La diffusion à tout le serveur a été retirée.
     "cogs.direct_message",
+    # Suite staff : fiches membres, dossiers, incidents, surveillance, absences,
+    # handover, rapports et rappels. Doit être chargée AVANT la finalisation visuelle.
+    "cogs.staff_suite",
     # cogs.visual_experience_v5 declenche finalize_runtime() et doit rester
     # DERNIERE : une extension chargee apres elle echappe a toute la pile de
     # style.
