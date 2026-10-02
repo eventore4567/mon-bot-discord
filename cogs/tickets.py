@@ -39,6 +39,7 @@ from cogs.ticket_constants import (
     CUSTOM_COMPONENT_EMOJI_RE,
     DEFAULT_BUTTON_STYLE,
     DEFAULT_ENABLED_BUTTONS,
+    ICONES_STAFF,
     STAFF_BUTTONS,
     TEXT_STYLES,
 )
@@ -536,11 +537,45 @@ class TicketPanelView(discord.ui.View):
             self.add_item(TicketOpenSelect(panel["id"], types, language))
 
 
+def _emoji_du_bouton(key: str, cfg: dict, default_emoji: str):
+    """Emoji d'un bouton staff, par ordre de priorité.
+
+    1. l'emoji que le serveur a RÉELLEMENT choisi — c'est-à-dire différent du
+       défaut, puisque le défaut est matérialisé dans la configuration ;
+    2. l'icône SentriX de l'action ;
+    3. l'emoji Unicode historique, pour que le bouton reste identique à
+       aujourd'hui tant que les icônes ne sont pas téléversées.
+    """
+    choisi = str(cfg.get("emoji") or "").strip()
+    if choisi and choisi != str(default_emoji or "").strip():
+        if (rendu := parse_component_emoji(choisi)) is not None:
+            return rendu
+    return _icone_staff(key) or parse_component_emoji(default_emoji)
+
+
+def _icone_staff(key: str):
+    """Icône SentriX de cette action, ou ``None`` si elle n'est pas disponible.
+
+    ``None`` est un repli correct : l'appelant retombe alors sur l'emoji
+    Unicode historique, et le bouton reste exactement celui d'aujourd'hui.
+    """
+    from utils.sentrix_emojis import partiel
+
+    nom = ICONES_STAFF.get(str(key or ""))
+    return partiel(nom) if nom else None
+
+
 class TicketControlButton(discord.ui.Button):
     def __init__(self, key: str, cfg: dict, default_label: str, default_emoji: str, row: int):
         super().__init__(
             label=(cfg.get("label") or default_label)[:80],
-            emoji=parse_component_emoji(cfg.get("emoji")) or parse_component_emoji(default_emoji),
+            # Le choix du serveur prime — personne ne doit perdre son emoji
+            # parce que SentriX en propose un. Mais `default_button_settings`
+            # MATÉRIALISE l'emoji par défaut dans la configuration : un simple
+            # `cfg.get("emoji")` est donc toujours rempli, et l'icône SentriX
+            # ne serait jamais atteinte. On ne considère comme choisi que ce
+            # qui diffère du défaut.
+            emoji=_emoji_du_bouton(key, cfg, default_emoji),
             style=BUTTON_STYLES.get(cfg.get("style", DEFAULT_BUTTON_STYLE), discord.ButtonStyle.primary),
             custom_id=f"ticket_ctrl_{key}",
             row=row,
