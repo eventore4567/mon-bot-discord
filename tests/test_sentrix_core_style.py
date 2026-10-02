@@ -79,3 +79,25 @@ def test_active_command_renderers_have_no_external_bot_style_names():
         source = path.read_text(encoding="utf-8").casefold()
         for name in forbidden:
             assert name not in source, f"{path.name}: external style reference {name}"
+
+
+def test_native_core_panel_buttons_can_host_real_callbacks():
+    async def callback(_interaction):
+        return None
+
+    panel = panels.Panneau(
+        titre="Actions",
+        kind="musique",
+        banniere=False,
+        timeout=120,
+        boutons=[
+            panels.Bouton(
+                "Action",
+                custom_id="sentrix:test:action",
+                callback=callback,
+            )
+        ],
+    )
+
+    assert panel.timeout == 120
+    assert panel.boutons_source[0].callback is callback
