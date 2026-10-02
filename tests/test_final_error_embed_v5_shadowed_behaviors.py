@@ -109,3 +109,33 @@ def test_late_error_never_replaces_an_existing_result():
     assert "réponse déjà envoyée conservée" in source
     assert "résultat utilisateur conservé" in source
     assert "replaced = await _replace_prefix_response(ctx, panel)" not in source
+
+
+
+def test_generic_error_spam_text_is_removed():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "final_error_embed_v5.py"
+    ).read_text(encoding="utf-8")
+
+    assert "Une erreur est survenue. Merci de réessayer." not in source
+    assert "_sentrix_error_finalized" in source
+    assert "_prefix_error_panel(ctx, error)" in source
+    assert "_slash_error_panel(" in source
+    assert "_component_error_panel(item)" in source
+
+
+def test_command_not_found_is_silent_in_final_error_owner():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "cogs" / "final_error_embed_v5.py"
+    ).read_text(encoding="utf-8")
+    block = source[
+        source.index("async def prefix_error("):
+        source.index("prefix_error._sentrix_final_error_embed_v5", source.index("async def prefix_error("))
+    ]
+
+    assert "isinstance(base, commands.CommandNotFound)" in block
+    assert "ctx._sentrix_error_finalized = True" in block
