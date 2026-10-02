@@ -242,7 +242,7 @@ async def module_statuses(bot, guild, conf):
 
     welcome_values = [
         (_get(conf, "welcome_channel"), False, "Salon de bienvenue"),
-        (_get(conf, "autorole"), True, "Autorole"),
+        (_get(conf, "autorole"), True, "Rôle donné à l'arrivée"),
     ]
     welcome_errors = [f"{label} introuvable." for value, role, label in welcome_values if _missing_resource(guild, value, role)]
     result["welcome"] = await _apply_module_switch(
@@ -958,7 +958,7 @@ class SetupView(discord.ui.LayoutView):
         elif self.category == "goodbye":
             self.ajouter(FieldChannelSelect(self, "goodbye_channel", "Salon de départ", 2))
         elif self.category == "roles":
-            self.ajouter(FieldRoleSelect(self, "autorole", "Autorole", 2))
+            self.ajouter(FieldRoleSelect(self, "autorole", "Rôle donné à l'arrivée", 2))
             self.ajouter(FieldRoleSelect(self, "verify_role", "Rôle vérifié", 3))
             self.ajouter(FieldRoleSelect(self, "member_role", "Rôle membre", 4))
         elif self.category == "levels":
@@ -1384,7 +1384,7 @@ class SetupView(discord.ui.LayoutView):
                 panels.Section(
                     "Rôles automatiques",
                     [
-                        panels.Ligne("Autorole", _role(self.guild, _get(conf, "autorole"))),
+                        panels.Ligne("Rôle donné à l'arrivée", _role(self.guild, _get(conf, "autorole"))),
                         panels.Ligne("Vérifié", _role(self.guild, _get(conf, "verify_role"))),
                         panels.Ligne("Membre", _role(self.guild, _get(conf, "member_role"))),
                     ],

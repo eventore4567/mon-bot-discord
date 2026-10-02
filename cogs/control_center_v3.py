@@ -703,7 +703,7 @@ async def _v3_build_embed(self) -> discord.Embed:
         panel.add_field(
             name="Rôles principaux",
             value=(
-                f"**Autorole :** {setup_ui._role(self.guild, setup_ui._get(conf, 'autorole'))}\n"
+                f"**Rôle donné à l'arrivée :** {setup_ui._role(self.guild, setup_ui._get(conf, 'autorole'))}\n"
                 f"**Vérifié :** {setup_ui._role(self.guild, setup_ui._get(conf, 'verify_role') or setup_ui._get(conf, 'verification_role'))}\n"
                 f"**Membre principal :** {setup_ui._role(self.guild, setup_ui._get(conf, 'member_role'))}"
             ),
@@ -712,7 +712,7 @@ async def _v3_build_embed(self) -> discord.Embed:
         panel.add_field(name="Récompenses de niveau", value="\n".join(f"Niveau **{row['level']}** → {setup_ui._role(self.guild, row['role_id'])}" for row in rewards[:15]) or "Aucune récompense configurée.", inline=False)
     elif self.category == "welcome":
         panel.add_field(name="Salon de bienvenue", value=setup_ui._channel(self.guild, setup_ui._get(conf, "welcome_channel")), inline=True)
-        panel.add_field(name="Autorole", value=setup_ui._role(self.guild, setup_ui._get(conf, "autorole")), inline=True)
+        panel.add_field(name="Rôle donné à l'arrivée", value=setup_ui._role(self.guild, setup_ui._get(conf, "autorole")), inline=True)
         panel.add_field(name="Variables", value="`{mention}` `{member}` `{user}` `{username}` `{display_name}` `{server}` `{member_count}`", inline=False)
     elif self.category == "goodbye":
         panel.add_field(name="Salon de départ", value=setup_ui._channel(self.guild, setup_ui._get(conf, "goodbye_channel")), inline=True)
@@ -802,7 +802,7 @@ def _v3_render(self) -> None:
         self.add_item(CaptchaMaxAttemptsButton(self))
         self.add_item(SendRulesPanelButton(self))
     elif self.category == "roles":
-        self.add_item(setup_ui.FieldRoleSelect(self, "autorole", "Autorole", 2))
+        self.add_item(setup_ui.FieldRoleSelect(self, "autorole", "Rôle donné à l'arrivée", 2))
         self.add_item(setup_ui.FieldRoleSelect(self, "member_role", "Rôle membre principal", 3))
     elif self.category == "levels":
         self.add_item(setup_ui.FieldChannelSelect(self, "level_channel", "Salon des niveaux", 2))
