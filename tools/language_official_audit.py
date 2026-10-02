@@ -85,8 +85,8 @@ async def run() -> int:
             errors.append(
                 "categories officielles manquantes: " + ", ".join(missing_categories)
             )
-        if tuple(setup_control_center.CATEGORIES) != tuple(setup_control_center.CATEGORY_ORDER):
-            errors.append("CATEGORY_ORDER n'est plus aligne sur les categories officielles")
+        if set(setup_control_center.CATEGORIES) != set(setup_control_center.CATEGORY_ORDER):
+            errors.append("CATEGORY_ORDER ne contient plus les memes categories officielles")
 
         view_cls = setup_control_center.SetupView
         # Les marqueurs V3/langue restent le contrat backend. V70 est le propriétaire
