@@ -248,7 +248,10 @@ class Section:
 
     def rendu(self, index: int | None = None) -> str:
         numero = f"{int(index):02d} · " if index is not None else ""
-        entete = f"### {numero}{_texte(self.titre, 80)}"
+        # Traduction dans l'habillage SEULEMENT : un titre de section est
+        # écrit par SentriX, donc on peut y poser nos icônes. Le corps, lui,
+        # peut citer le message d'un membre — on n'y touche pas.
+        entete = f"### {numero}{_icones(_texte(self.titre, 80))}"
         corps: list[str] = []
 
         if self.texte:
@@ -579,7 +582,7 @@ class Panneau(discord.ui.LayoutView):
 
         # 2 — titre et sous-titre. La vignette, quand il y en a une, se place à
         #     droite du titre plutôt qu'en médaillon perdu dans un coin.
-        entete = f"## {_texte(self.titre, 200)}"
+        entete = f"## {_icones(_texte(self.titre, 200))}"
         if sous_titre:
             entete += f"\n{_texte(sous_titre, 400)}"
         pose = False
@@ -650,6 +653,17 @@ class Panneau(discord.ui.LayoutView):
         if not self.avec_banniere:
             return []
         return pieces_jointes_de_famille(self.famille)
+
+
+def _icones(texte: str) -> str:
+    """Remplace les emojis Unicode de l'HABILLAGE par les icônes SentriX.
+
+    Import tardif : `sentrix_emojis` lit le disque au premier appel, et ce
+    module est importé très tôt dans la chaîne de démarrage.
+    """
+    from utils.sentrix_emojis import traduire
+
+    return traduire(texte)
 
 
 def _rangees(boutons: Sequence[Bouton]) -> list[discord.ui.ActionRow]:
@@ -951,8 +965,18 @@ def _titre_propre(nom: object) -> str:
     font deja ce travail : l'emoji ne fait plus qu'ajouter du bruit a un titre en
     capitales. On le retire ici, jamais a la source : l'embed continue d'alimenter
     les journaux, qui gardent leur propre mise en forme.
+
+    Nuance ajoutée avec la bibliothèque d'icônes : un emoji qui a un
+    ÉQUIVALENT SentriX est traduit au lieu d'être retiré. Un emoji Unicode
+    coloré est du bruit, une icône SentriX monochrome est de l'identité — même
+    distinction que sur les boutons. Ce qui n'a pas d'équivalent est toujours
+    retiré, donc rien ne redevient bruyant.
     """
-    return _EMOJI_DE_TETE.sub("", str(nom or "").strip()).strip() or "Détail"
+    brut = str(nom or "").strip()
+    traduit = _icones(brut)
+    if traduit != brut:
+        return traduit.strip() or "Détail"
+    return _EMOJI_DE_TETE.sub("", brut).strip() or "Détail"
 
 
 _PAR_COULEUR: dict[int, str] = {

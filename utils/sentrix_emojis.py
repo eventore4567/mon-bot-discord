@@ -65,6 +65,42 @@ REPLIS: dict[str, str] = {
     "sentrix_priority": "▲",
 }
 
+#: Emojis Unicode que le pack sait remplacer. Construit sur une mesure : ce
+#: sont ceux qui reviennent le plus dans les titres, libellés et descriptions
+#: du bot. Un emoji absent de cette table garde sa forme Unicode — le
+#: remplacement est progressif, et rien ne disparaît faute d'équivalent.
+#:
+#: Ne s'applique QU'À l'habillage SentriX : un journal qui cite un message
+#: supprimé contenant « 🎁 » doit le montrer tel quel, pas le réécrire.
+EQUIVALENCES: dict[str, str] = {
+    "🎫": "ticket", "🎟": "ticket", "🎟️": "ticket",
+    "🛡": "security", "🛡️": "security",
+    "🔨": "ban", "👢": "kick", "🔇": "mute", "🔊": "voice",
+    "⚠": "warning", "⚠️": "warning",
+    "✅": "success", "☑": "success", "☑️": "success",
+    "❌": "error", "✖": "error", "✖️": "error",
+    "📝": "note", "✏": "message_edit", "✏️": "message_edit",
+    "🗑": "trash", "🗑️": "trash",
+    "🔎": "search", "🔍": "search",
+    "👁": "eye", "👁️": "eye",
+    "👤": "user", "👥": "users",
+    "🏆": "trophy", "🎉": "party", "🎁": "gift",
+    "💰": "wallet", "🪙": "coin", "💳": "bank",
+    "📈": "chart", "📊": "chart",
+    "🔄": "sync", "🔁": "sync",
+    "💾": "backup", "🗄": "database", "🗄️": "database",
+    "🛠": "tools", "🛠️": "tools", "⚙": "settings", "⚙️": "settings",
+    "📋": "logs", "📁": "file", "📂": "file", "📄": "file",
+    "🔒": "lock", "🔓": "unlock",
+    "⏱": "clock", "⏱️": "clock", "🕐": "clock",
+    "🎮": "gamepad", "🎲": "dice", "🎰": "slot",
+    "🤖": "bot", "🧠": "ai",
+    "📬": "ticket_open", "📭": "ticket_close",
+    "⭐": "level", "🌟": "level",
+    "ℹ": "info", "ℹ️": "info",
+    "📥": "member_join", "📤": "member_leave",
+}
+
 #: nom -> marquage « <:nom:id> », rempli par synchroniser().
 _RESOLUS: dict[str, str] = {}
 _SYNCHRONISE = False
@@ -182,6 +218,31 @@ def titre(nom: str, texte: str) -> str:
     return f"{icone} {texte}".strip() if icone else texte
 
 
+def traduire(texte: str) -> str:
+    """Remplace les emojis Unicode connus par leur icône SentriX.
+
+    À n'appliquer QU'À l'habillage du bot — titres de panneau, titres de
+    section, libellés. Jamais au contenu rapporté : un journal qui cite un
+    message supprimé doit le montrer tel qu'il était.
+
+    Un emoji sans équivalent, ou dont l'icône n'est pas encore téléversée,
+    reste intact. Le texte n'est donc jamais dégradé, seulement enrichi.
+    """
+    valeur = str(texte or "")
+    if not valeur or not _RESOLUS:
+        return valeur
+    # Les clés les plus longues d'abord : « ⚠️ » contient « ⚠ » suivi d'un
+    # sélecteur de variante invisible. Traiter la version courte en premier
+    # remplaçait l'emoji et laissait le sélecteur orphelin derrière l'icône.
+    for unicode_, nom in sorted(EQUIVALENCES.items(), key=lambda kv: -len(kv[0])):
+        if unicode_ not in valeur:
+            continue
+        icone = _RESOLUS.get(_normaliser(nom))
+        if icone:
+            valeur = valeur.replace(unicode_, icone)
+    return valeur
+
+
 def est_sentrix(valeur: object) -> bool:
     """Ce marquage est-il une icône SentriX ?
 
@@ -287,4 +348,5 @@ __all__ = [
     "reinitialiser",
     "synchroniser",
     "titre",
+    "traduire",
 ]
