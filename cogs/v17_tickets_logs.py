@@ -380,6 +380,7 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
 
     @logevent.command(name="on")
     async def logevent_on(self, ctx: commands.Context, evenement: str):
+        """Activer un type précis de journal SentriX sur ce serveur."""
         key = evenement.casefold().strip()
         if key not in EVENT_LABELS:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement inconnu. Lancez `+logevent` pour voir les clés.')))
@@ -393,6 +394,7 @@ class V17TicketsLogs(commands.Cog, name="V17TicketsLogs"):
 
     @logevent.command(name="off")
     async def logevent_off(self, ctx: commands.Context, evenement: str):
+        """Désactiver un type précis de journal SentriX sur ce serveur."""
         key = evenement.casefold().strip()
         if key not in EVENT_LABELS:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement inconnu. Lancez `+logevent` pour voir les clés.')))
