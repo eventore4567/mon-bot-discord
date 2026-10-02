@@ -82,6 +82,85 @@ async def _never(_user_id):
     return False
 
 
+
+def test_sanction_permissions_are_reported_before_target_hierarchy():
+    """Une sanction doit d'abord expliquer le droit manquant; la hiérarchie n'est
+    pertinente qu'une fois l'auteur effectivement autorisé."""
+    from utils import access_matrix, checks
+
+    class Backend:
+        async def blacklist_reason(self, _user_id):
+            return None
+
+        async def is_global_owner(self, _user_id):
+            return False
+
+        async def module_enabled(self, _guild_id, _module):
+            return True
+
+        async def explicit_rule(self, _guild_id, _author, _name):
+            return None, ""
+
+        async def has_staff_role(self, _guild_id, _author):
+            return False
+
+        async def ai_features(self, _guild_id):
+            return {"commands_enabled": True, "image_generation_enabled": True}
+
+    guild = SimpleNamespace(id=123, owner_id=999)
+    bot = SimpleNamespace(sentrix_access_backend=Backend())
+
+    expected = {
+        "mute": ("moderate_members", "Modérer les membres"),
+        "ban": ("ban_members", "Bannir des membres"),
+        "kick": ("kick_members", "Expulser des membres"),
+    }
+
+    for command_name, (permission, label) in expected.items():
+        denied_actor = SimpleNamespace(
+            id=10,
+            roles=(),
+            guild_permissions=discord.Permissions.none(),
+        )
+        decision = asyncio.run(
+            access_matrix.evaluate(
+                bot,
+                command_name=command_name,
+                author=denied_actor,
+                guild=guild,
+            )
+        )
+        assert decision.allowed is False
+        assert decision.reason == f"**Permission manquante :** {label}."
+        assert "rôle supérieur ou égal" not in decision.message
+
+        allowed_permissions = discord.Permissions.none()
+        setattr(allowed_permissions, permission, True)
+        allowed_actor = SimpleNamespace(
+            id=10,
+            roles=(),
+            guild_permissions=allowed_permissions,
+        )
+        allowed = asyncio.run(
+            access_matrix.evaluate(
+                bot,
+                command_name=command_name,
+                author=allowed_actor,
+                guild=guild,
+            )
+        )
+        assert allowed.allowed is True
+
+    # Une fois autorisé, et seulement à ce stade, le refus de hiérarchie reste
+    # exactement la phrase courte voulue.
+    hierarchy_guild = SimpleNamespace(owner_id=999)
+    actor = SimpleNamespace(id=10, guild=hierarchy_guild, top_role=50)
+    target = SimpleNamespace(id=20, top_role=50)
+    assert checks.check_hierarchy(actor, target) == (
+        "Vous ne pouvez pas sanctionner un membre ayant un rôle supérieur ou égal au vôtre."
+    )
+
+
 def test_late_added_known_commands_lose_redundant_authorization_checks():
     from cogs import permission_guard
     from utils import checks
