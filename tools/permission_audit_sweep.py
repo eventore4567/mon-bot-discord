@@ -66,7 +66,7 @@ GENERIC_PERMISSION_PHRASES = (
 SKIP_COMMANDS = frozenset({"embed import"})
 # Commandes servies par leur propre transport slash (pas par Command.callback) : une
 # réponse suffit à prouver l'accès.
-NATIVE_TRANSPORT = frozenset({"setup"})
+NATIVE_TRANSPORT = frozenset({"setup", "aide"})
 NON_PERMISSION_CAUSES = ("module", "désactivé", "desactive", "message privé", "en attente", "cooldown", "réessayez dans", "réessaie dans")
 
 
