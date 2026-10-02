@@ -259,11 +259,16 @@ def _render_card_sync(
     if level_up is not None:
         canvas = Image.new("RGBA", (1200, 280), (24, 25, 28, 255))
         draw = ImageDraw.Draw(canvas, "RGBA")
+        # Le liseré prend l'accent du serveur. Le fond reste neutre — « le fond
+        # fait trop IA, mets quelque chose de simple » —, mais sans ce trait la
+        # couleur choisie dans le dashboard n'apparaissait NULLE PART sur la
+        # carte : mesuré, zéro pixel teinté. Un réglage sans effet visible est
+        # un réglage cassé. Un trait de 2 px suffit et ne charge pas la carte.
         draw.rounded_rectangle(
             (24, 24, 1176, 256),
             radius=24,
             fill=(31, 32, 36, 255),
-            outline=(62, 64, 71, 255),
+            outline=(*accent, 255),
             width=2,
         )
         text = f"Bravo {display_name}, tu es passé niveau {int(level_up)}"

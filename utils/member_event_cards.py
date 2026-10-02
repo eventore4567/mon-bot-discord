@@ -26,18 +26,44 @@ EVENT_BACKGROUND_PRESETS = {
 }
 
 
+#: Chemins essayés dans l'ordre. Seuls deux existaient, tous deux Linux : sur
+#: tout hôte sans DejaVu — un Mac de développement, une image de base
+#: différente — la carte entière retombait sur la police bitmap par défaut et
+#: TOUT le texte sortait minuscule, quelle que soit la taille demandée.
+_FONTES = {
+    False: (
+        "DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+    ),
+    True: (
+        "DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Black.ttf",
+        "/Library/Fonts/Arial Bold.ttf",
+    ),
+}
+
+
 def _font(size: int, *, bold: bool = False):
-    names = (
-        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
-        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    )
-    for name in names:
+    for name in _FONTES[bool(bold)]:
         try:
             return ImageFont.truetype(name, size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    # La TAILLE compte aussi dans le repli : `load_default()` sans argument rend
+    # une police bitmap minuscule, et c'est ce qui aplatissait toute la
+    # hiérarchie de la carte — titre et sous-titre sortaient identiques.
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:  # Pillow trop ancien pour la taille
+        return ImageFont.load_default()
 
 
 async def _public_https(url: str) -> bool:
@@ -222,31 +248,39 @@ def build_member_event_card(
     _paste_avatar(image, avatar_bytes, name)
 
     x = 365
+    # Le NOM est l'élément principal, et il n'était pas dessiné du tout : la
+    # carte affichait « Bienvenue / sur le serveur Discord / Le Repaire » sans
+    # jamais nommer la personne accueillie. Il ne servait qu'à l'initiale de
+    # l'avatar. Une carte de bienvenue qui ne dit pas qui arrive ne fait rien.
+    #
+    # Trois niveaux, donc trois tailles : un libellé discret, le nom en grand,
+    # le contexte en dessous. Avant, les trois lignes se valaient et la carte
+    # n'avait aucune hiérarchie.
     if kind == "level":
         current_level = max(1, int(level or 1))
-        title = "Félicitations !"
-        line2 = "vous avez atteint"
-        line3 = f"le niveau {current_level}"
+        libelle = "Niveau atteint"
+        vedette = f"Niveau {current_level}"
+        detail = name
         filename = "sentrix_level_up.png"
     elif kind == "goodbye":
-        title = "À bientôt"
-        line2 = "sur le serveur Discord"
-        line3 = server
+        libelle = "À bientôt"
+        vedette = name
+        detail = f"a quitté {server}"
         filename = "sentrix_goodbye.png"
     else:
-        title = "Bienvenue"
-        line2 = "sur le serveur Discord"
-        line3 = server
+        libelle = "Bienvenue"
+        vedette = name
+        detail = f"vient de rejoindre {server}"
         filename = "sentrix_welcome.png"
 
-    title_text, title_font = _fit_text(draw, title, 760, 68, 42)
-    draw.text((x, 90), title_text, font=title_font, fill=_TEXT)
+    libelle_text, libelle_font = _fit_text(draw, libelle, 760, 30, 22)
+    draw.text((x, 104), libelle_text, font=libelle_font, fill=_MUTED)
 
-    line2_text, line2_font = _fit_text(draw, line2, 760, 34, 26)
-    draw.text((x, 194), line2_text, font=line2_font, fill=_MUTED)
+    vedette_text, vedette_font = _fit_text(draw, vedette, 760, 66, 34)
+    draw.text((x, 150), vedette_text, font=vedette_font, fill=_TEXT)
 
-    line3_text, line3_font = _fit_text(draw, line3, 760, 48, 30)
-    draw.text((x, 244), line3_text, font=line3_font, fill=_TEXT)
+    detail_text, detail_font = _fit_text(draw, detail, 760, 32, 22)
+    draw.text((x, 240), detail_text, font=detail_font, fill=_MUTED)
 
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)

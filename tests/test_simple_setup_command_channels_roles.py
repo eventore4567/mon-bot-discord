@@ -132,11 +132,16 @@ def test_welcome_departure_backgrounds_and_level_card_are_simple():
     assert "EVENT_BACKGROUND_PRESETS" in cards
     assert "Carte sobre façon Discord : avatar rond, gros titre, zéro couleur néon." in cards
     assert 'kind == "level"' in cards
-    assert 'title = "Félicitations !"' in cards
-    assert 'line2 = "vous avez atteint"' in cards
-    assert 'line3 = f"le niveau {current_level}"' in cards
-    assert 'title = "Bienvenue"' in cards
-    assert 'title = "À bientôt"' in cards
+    # La carte NOMME la personne : son nom est la vedette, pas une variable
+    # inutilisée. Elle affichait « Bienvenue / sur le serveur Discord /
+    # Le Repaire » sans jamais dire qui arrivait — le nom ne servait qu'à
+    # l'initiale de l'avatar. Ce test verrouillait cette version-là.
+    assert 'libelle = "Bienvenue"' in cards
+    assert 'libelle = "À bientôt"' in cards
+    assert 'libelle = "Niveau atteint"' in cards
+    assert "vedette = name" in cards, "la carte ne nomme pas le membre"
+    assert 'detail = f"vient de rejoindre {server}"' in cards
+    assert 'detail = f"a quitté {server}"' in cards
     assert "_ACCENT" not in cards
     assert "if: github.event_name != 'push'" in workflow
 
