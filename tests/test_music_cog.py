@@ -325,7 +325,8 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(panel.kind, "musique")
-        self.assertIn("SentriX Music", text)
+        self.assertIn("Lecture en cours", text)
+        self.assertNotIn("SentriX Music", text)
         self.assertIn("Faded", text)
         self.assertIn("Alan Walker", text)
         self.assertIn("Progression", text)
