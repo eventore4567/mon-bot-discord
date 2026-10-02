@@ -580,6 +580,15 @@ async def _raw_slash_send(interaction: discord.Interaction, panneau: panels.Pann
 def install(bot: commands.Bot) -> None:
     async def prefix_error(self: commands.Bot, ctx: commands.Context, error: commands.CommandError):
         base = getattr(error, "original", error)
+
+        # Un seul propriétaire peut répondre à une erreur donnée. Plusieurs couches
+        # historiques appellent encore la chaîne d'erreurs ; ce marqueur empêche le
+        # spam de 5 à 10 messages identiques observé en production.
+        if getattr(ctx, "_sentrix_error_finalized", False):
+            return
+        if isinstance(base, commands.CommandNotFound):
+            ctx._sentrix_error_finalized = True
+            return
         if (
             isinstance(base, commands.MissingRequiredArgument)
             and ctx.command is not None
@@ -611,10 +620,6 @@ def install(bot: commands.Bot) -> None:
                     getattr(getattr(ctx, "command", None), "qualified_name", "commande"),
                 )
 
-        if isinstance(base, commands.CommandNotFound):
-            # Une commande inconnue peut viser un autre bot : SentriX reste silencieux.
-            return
-
         texte = _texte_erreur_prefix(ctx, error)
         if texte == _CHECK_FALLBACK and isinstance(base, commands.CheckFailure):
             try:
@@ -627,12 +632,8 @@ def install(bot: commands.Bot) -> None:
                 logger.debug("Explication du refus impossible.", exc_info=True)
         try:
             if texte is not None:
-                duree = (
-                    _DUREE_COMMANDE_INTROUVABLE
-                    if isinstance(base, commands.CommandNotFound)
-                    else _DUREE_AFFICHAGE
-                )
-                await _texte_prefix_send(ctx, texte, supprimer_apres=duree)
+                ctx._sentrix_error_finalized = True
+                await _texte_prefix_send(ctx, texte, supprimer_apres=_DUREE_AFFICHAGE)
                 return
 
             if getattr(ctx, "_sentrix_response_sent", False):
@@ -642,9 +643,10 @@ def install(bot: commands.Bot) -> None:
                 )
                 return
 
-            await _texte_prefix_send(
+            ctx._sentrix_error_finalized = True
+            await _raw_prefix_send(
                 ctx,
-                "Une erreur est survenue. Merci de réessayer.",
+                _prefix_error_panel(ctx, error),
                 supprimer_apres=_DUREE_AFFICHAGE,
             )
         except Exception:
@@ -654,6 +656,8 @@ def install(bot: commands.Bot) -> None:
     bot.on_command_error = MethodType(prefix_error, bot)
 
     async def slash_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+        if getattr(interaction, "_sentrix_error_finalized", False):
+            return
         command = getattr(interaction, "command", None)
         texte = _texte_erreur_slash(error)
         if texte == _CHECK_FALLBACK:
@@ -667,11 +671,19 @@ def install(bot: commands.Bot) -> None:
                 logger.debug("Explication du refus slash impossible.", exc_info=True)
         try:
             if texte is not None:
+                interaction._sentrix_error_finalized = True
                 await _texte_slash_send(interaction, texte)
                 return
-            await _texte_slash_send(
+
+            interaction._sentrix_error_finalized = True
+            await _raw_slash_send(
                 interaction,
-                "Une erreur est survenue. Merci de réessayer.",
+                _slash_error_panel(
+                    error,
+                    command=str(getattr(command, "qualified_name", "") or "") or None,
+                    guild_id=getattr(interaction, "guild_id", None),
+                    user_id=getattr(getattr(interaction, "user", None), "id", None),
+                ),
             )
         except (discord.NotFound, discord.Forbidden, discord.HTTPException, discord.ClientException):
             logger.exception("V5 : impossible d’envoyer l’erreur slash en embed natif.")
@@ -686,10 +698,13 @@ def install(bot: commands.Bot) -> None:
 
         async def component_error(self, interaction, error, item=None):
             logger.exception("V5 : erreur dans un composant.", exc_info=error)
+            if getattr(interaction, "_sentrix_error_finalized", False):
+                return
+            interaction._sentrix_error_finalized = True
             try:
-                await _texte_slash_send(
+                await _raw_slash_send(
                     interaction,
-                    "Une erreur est survenue. Merci de réessayer.",
+                    _component_error_panel(item),
                 )
             except (
                 discord.NotFound,
