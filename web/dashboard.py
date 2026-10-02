@@ -29,6 +29,7 @@ from aiohttp import BasicAuth, ClientSession, web
 
 import config
 from database.db import now
+from utils import log_service
 
 logger = logging.getLogger("bot.dashboard")
 
@@ -146,6 +147,17 @@ CHANNEL_FIELDS = {
     "bot_commands_channel", "report_channel", "partner_channel", "stats_channel",
     "afk_channel", "error_channel", "log_messages", "log_members", "log_voice",
     "log_roles", "log_server", "log_automod", "log_moderation",
+}
+
+LOG_FIELD_CATEGORIES = {
+    "log_channel": "server",
+    "log_messages": "messages",
+    "log_members": "members",
+    "log_voice": "voice",
+    "log_roles": "roles",
+    "log_server": "channels",
+    "log_automod": "automod",
+    "log_moderation": "moderation",
 }
 
 BOOL_FIELDS = {"ticket_transcript_dm", "ticket_rating_enabled"}
@@ -1507,9 +1519,20 @@ async def handle_update_guild(request: web.Request):
     if validation_error:
         return _json_error(validation_error, 400)
 
-    db = request.app["bot"].db
+    bot = request.app["bot"]
+    db = bot.db
     for field, value in clean_settings.items():
-        await db.set_guild_config(guild_id, field, value)
+        log_category = LOG_FIELD_CATEGORIES.get(field)
+        if log_category:
+            await log_service.set_log_config(
+                bot,
+                guild_id,
+                log_category,
+                channel_id=int(value) if value else None,
+                enabled=bool(value),
+            )
+        else:
+            await db.set_guild_config(guild_id, field, value)
     for field, value in clean_automod.items():
         await db.set_automod(guild_id, field, value)
     if clean_ai:
@@ -1833,16 +1856,22 @@ INDEX_HTML = r"""<!doctype html>
         {key:"security_level",label:"Niveau de sécurité",type:"choice",options:[["faible","Faible"],["moyen","Moyen"],["eleve","Élevé"]]},
         {key:"warn_ban_threshold",label:"Bannissement après avertissements",type:"number",min:1,max:20,hint:"Nombre d'avertissements avant la sanction automatique."}
       ]},
-      security:{title:"Sécurité",description:"Active uniquement les protections que tu veux. SentriX ne choisit rien à ta place.",automod:true,fields:[
-        ["antispam","Anti-spam","Limite les messages envoyés trop rapidement.","Messages et contenu"],["antilink","Bloquer les liens","Interdit les liens web non autorisés.","Messages et contenu"],["antiinvite","Bloquer les invitations","Interdit les invitations Discord.","Messages et contenu"],["antimention","Anti-mentions","Bloque les mentions massives.","Messages et contenu"],["anticaps","Anti-majuscules","Limite les messages presque entièrement en majuscules.","Messages et contenu"],["antiemoji","Anti-spam emojis","Limite les messages remplis d'emojis.","Messages et contenu"],
-        ["antiraid","Anti-raid","Réagit aux arrivées massives de comptes.","Arrivées et comptes"],["antibot","Anti-bot","Contrôle l'arrivée de nouveaux bots.","Arrivées et comptes"],["antiaccount","Comptes récents","Surveille les comptes trop récents.","Arrivées et comptes"],
-        ["antiscam","Anti-arnaque","Détecte les liens et messages suspects.","Protection avancée"],["antinuke","Anti-nuke","Protège les rôles, salons et bannissements massifs.","Protection avancée"],["security_vanity","Vanity URL","Détecte et restaure les changements suspects de lien vanity.","Protection avancée"],["security_prune","Member prune","Détecte les prunes massifs dans le journal d'audit.","Protection avancée"],["security_permissions","Permissions dangereuses","Bloque les élévations de rôles et permissions critiques.","Protection avancée"],["join_gate","Join Gate avancé","Combine âge du compte, avatar et vitesse d'arrivée.","Protection avancée"],["risk_engine","Risk score","Combine plusieurs signaux avec décroissance temporelle.","Protection avancée"],["escalation","Sanctions progressives","Augmente la sanction lors des récidives.","Protection avancée"]
+      security:{title:"Protections automatiques",description:"Active uniquement les protections dont ton serveur a besoin. Chaque protection reste indépendante et peut être coupée sans perdre sa configuration.",automod:true,fields:[
+        ["antispam","Flood & messages répétés","Détecte les rafales, répétitions et messages trop rapides.","Messages et contenu"],["antilink","Liens externes","Bloque les liens web lorsque cette protection est active.","Messages et contenu"],["antiinvite","Invitations Discord","Bloque les invitations Discord non autorisées.","Messages et contenu"],["antimention","Mentions abusives","Détecte les mentions massives ou répétées.","Messages et contenu"],["anticaps","Majuscules excessives","Limite les messages presque entièrement écrits en majuscules.","Messages et contenu"],["antiemoji","Flood d’émojis","Limite les messages saturés d’émojis.","Messages et contenu"],
+        ["antiraid","Protection anti-raid","Réagit aux arrivées massives ou coordonnées.","Arrivées et comptes"],["antibot","Bots non autorisés","Contrôle l’arrivée de nouveaux bots.","Arrivées et comptes"],["antiaccount","Comptes trop récents","Surveille les comptes créés très récemment.","Arrivées et comptes"],
+        ["antiscam","Arnaques & phishing","Détecte les faux cadeaux, domaines suspects et tentatives de phishing.","Protection avancée"],["antinuke","Protection anti-destruction","Protège contre les suppressions ou actions destructrices en masse.","Protection avancée"],["antiinsult","Langage toxique","Analyse le contenu offensant avec le filtre multilingue.","Protection avancée"],["security_vanity","Lien personnalisé du serveur","Surveille les modifications suspectes du lien vanity.","Protection avancée"],["security_prune","Suppressions massives de membres","Détecte les opérations de prune inhabituelles.","Protection avancée"],["security_permissions","Permissions à risque","Bloque les élévations de rôles et permissions critiques.","Protection avancée"],["join_gate","Filtre des nouvelles arrivées","Combine âge du compte, avatar et vitesse d’arrivée.","Protection avancée"],["risk_engine","Analyse comportementale","Combine plusieurs signaux de risque avec décroissance temporelle.","Protection avancée"],["escalation","Sanctions progressives","Augmente progressivement la réponse lors des récidives.","Protection avancée"]
       ].map(x=>({key:x[0],label:x[1],hint:x[2],type:"switch",group:x[3]}))},
       sanctions:{title:"Sanctions",description:"Historique des bannissements, mutes et avertissements appliqués par SentriX sur ce serveur.",sanctions:true,fields:[]},
-      logs:{title:"Logs",description:"Choisis manuellement les salons existants pour chaque type de log.",fields:[
-        ["log_messages","Messages","Par catégorie"],["log_members","Membres","Par catégorie"],["log_voice","Salons vocaux","Par catégorie"],["log_roles","Rôles","Par catégorie"],["log_server","Serveur","Par catégorie"],["log_automod","AutoMod","Par catégorie"],["log_moderation","Modération","Par catégorie"],
-        ["log_channel","Salon de logs général","Repli"]
-      ].map(x=>({key:x[0],label:x[1],type:"channel",group:x[2]}))},
+      logs:{title:"Logs",description:"Choisis uniquement des salons existants. Vider un champ désactive la route correspondante sans créer ni supprimer de salon.",fields:[
+        {key:"log_messages",label:"Messages",type:"channel",group:"Par catégorie"},
+        {key:"log_members",label:"Membres",type:"channel",group:"Par catégorie"},
+        {key:"log_voice",label:"Salons vocaux",type:"channel",group:"Par catégorie"},
+        {key:"log_roles",label:"Rôles",type:"channel",group:"Par catégorie"},
+        {key:"log_server",label:"Serveur & salons",type:"channel",group:"Par catégorie"},
+        {key:"log_moderation",label:"Modération",type:"channel",group:"Par catégorie"},
+        {key:"log_automod",label:"Journal AutoMode & sécurité",type:"channel",group:"Sécurité",hint:"Détections de flood, liens, phishing, raids et protections critiques."},
+        {key:"log_channel",label:"Salon général de repli",type:"channel",group:"Repli",hint:"Utilisé seulement lorsqu’aucune route plus précise n’est configurée."}
+      ]},
       welcome:{title:"Bienvenue & Départ",description:"Configure séparément les arrivées et les départs, dans une seule page cohérente.",fields:[
         {key:"welcome_channel",label:"Salon de bienvenue",type:"channel",group:"Arrivée"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables : {member}, {username}, {server} et {member_count}.",group:"Arrivée"},{key:"welcome_image_url",label:"Fond de bienvenue",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Arrivée"},{key:"autorole",label:"Rôle automatique",type:"role",group:"Arrivée"},
         {key:"goodbye_channel",label:"Salon de départ",type:"channel",group:"Départ"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}.",group:"Départ"},{key:"goodbye_image_url",label:"Fond de départ",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Départ"}
