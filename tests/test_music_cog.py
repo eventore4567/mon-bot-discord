@@ -302,6 +302,40 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(queue.current, track)
         self.assertIs(voice.source, source)
 
+    async def test_sentrix_music_card_is_compact_and_has_five_useful_actions(self):
+        queue = self.cog.get_queue(7474)
+        queue.current = Track(
+            title="Faded",
+            artist="Alan Walker",
+            album="Different World",
+            duration=212,
+            thumbnail="https://example.test/cover.jpg",
+            provider="spotify",
+            playback_provider="youtube",
+        )
+        queue.elapsed_offset = 64.0
+        queue.started_at = 0.0
+        queue.volume = 0.7
+        queue.tracks = [Track(title="Next")]
+
+        panel = self.cog._music_player_panel(queue)
+        text = panel.titre + "\n" + panel.sous_titre + "\n" + "\n".join(
+            section.rendu(index)
+            for index, section in enumerate(panel.sections_source, start=1)
+        )
+
+        self.assertEqual(panel.kind, "musique")
+        self.assertIn("SentriX Music", text)
+        self.assertIn("Faded", text)
+        self.assertIn("Alan Walker", text)
+        self.assertIn("Progression", text)
+        self.assertIn("Spotify → YouTube", text)
+        self.assertIn("70 %", text)
+        self.assertEqual(
+            [button.libelle for button in panel.boutons_source],
+            ["Pause / Reprendre", "Suivant", "Stop", "File", "Playlists"],
+        )
+        self.assertTrue(all(callable(button.callback) for button in panel.boutons_source))
     async def test_pause_resume_freeze_position_clock(self):
         queue = self.cog.get_queue(7007)
         voice = _FakeVoiceClient(_FakeVoiceChannel(77))
