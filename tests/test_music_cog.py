@@ -17,9 +17,10 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
@@ -47,15 +48,29 @@ class _FakeVoiceClient:
 
     def play(self, source, *, after=None):
         self._playing = True
+        self._paused = False
+
+    def pause(self):
+        if self._playing:
+            self._playing = False
+            self._paused = True
+
+    def resume(self):
+        if self._paused:
+            self._paused = False
+            self._playing = True
 
     def stop(self):
         self._playing = False
+        self._paused = False
 
     async def move_to(self, channel):
         self.channel = channel
 
     async def disconnect(self):
         self._connected = False
+        self._playing = False
+        self._paused = False
 
 
 class _FakeVoiceChannel:
@@ -183,6 +198,149 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(queue_a.tracks), 0)
         self.assertEqual(len(queue_b.tracks), 1)  # inchangé côté B
         self.assertEqual(queue_b.tracks[0].title, "B2")
+
+
+    async def test_pause_resume_freeze_position_clock(self):
+        queue = self.cog.get_queue(7007)
+        voice = _FakeVoiceClient(_FakeVoiceChannel(77))
+        voice._playing = True
+        queue.voice_client = voice
+        queue.elapsed_offset = 5.0
+        queue.started_at = time.monotonic() - 10.0
+
+        self.assertTrue(self.cog._pause_queue(queue))
+        paused_position = queue.position_seconds()
+        self.assertEqual(queue.started_at, 0.0)
+        await asyncio.sleep(0.02)
+        self.assertAlmostEqual(queue.position_seconds(), paused_position, delta=0.01)
+
+        self.assertTrue(self.cog._resume_queue(queue))
+        self.assertGreater(queue.started_at, 0.0)
+        self.assertFalse(queue.paused_by_user)
+
+    async def test_stale_audio_callback_cannot_advance_queue_twice(self):
+        queue = self.cog.get_queue(8008)
+        queue.voice_client = _FakeVoiceClient(_FakeVoiceChannel(88))
+        current = Track(title="courant", artist="A", duration=180)
+        following = Track(title="suivant", artist="B", duration=180)
+        queue.current = current
+        queue.tracks = [following]
+        queue.playback_generation = 10
+
+        await self.cog._on_track_finished(
+            queue,
+            generation=9,
+            finished_track=current,
+        )
+
+        self.assertIs(queue.current, current)
+        self.assertEqual(queue.tracks, [following])
+
+    async def test_long_queue_auto_skips_broken_tracks_once_then_continues(self):
+        queue = self.cog.get_queue(9009)
+        queue.voice_client = _FakeVoiceClient(_FakeVoiceChannel(99))
+        queue.text_channel = SimpleNamespace(send=AsyncMock())
+        broken = [
+            Track(title=f"cassé-{index}", artist="X", duration=180)
+            for index in range(25)
+        ]
+        good = Track(title="jouable", artist="Y", duration=180)
+        queue.tracks = [*broken, good]
+
+        async def selective_play(q, track, *, seek_seconds=0.0, recovery=False):
+            if track.title.startswith("cassé-"):
+                return False
+            q.current = track
+            q.playback_generation += 1
+            return True
+
+        self.cog._play_track = selective_play
+        await self.cog._advance(queue)
+
+        self.assertIs(queue.current, good)
+        self.assertEqual(queue.tracks, [])
+        self.assertEqual(queue.text_channel.send.await_count, 1)
+        notice = queue.text_channel.send.await_args.args[0]
+        self.assertIn("25 titre(s) indisponible(s)", notice)
+        self.assertIn("jouable", notice)
+
+    async def test_runtime_audio_error_restarts_same_track_once(self):
+        queue = self.cog.get_queue(10010)
+        queue.voice_client = _FakeVoiceClient(_FakeVoiceChannel(101))
+        queue.text_channel = SimpleNamespace(send=AsyncMock())
+        track = Track(title="fragile", artist="A", duration=180)
+        following = Track(title="après", artist="B", duration=180)
+        queue.current = track
+        queue.tracks = [following]
+        queue.elapsed_offset = 42.0
+        queue.started_at = 0.0
+        queue.playback_generation = 3
+        calls = []
+
+        async def restart(q, candidate, *, seek_seconds=0.0, recovery=False):
+            calls.append((candidate, seek_seconds, recovery))
+            q.current = candidate
+            q.playback_generation += 1
+            return True
+
+        self.cog._play_track = restart
+        await self.cog._on_track_finished(
+            queue,
+            error=RuntimeError("ffmpeg stream ended"),
+            generation=3,
+            finished_track=track,
+        )
+
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0][0], track)
+        self.assertAlmostEqual(calls[0][1], 42.0, delta=0.1)
+        self.assertTrue(calls[0][2])
+        self.assertEqual(queue.tracks, [following])
+        self.assertEqual(queue.recovery_attempts, 1)
+
+    async def test_voice_outage_preserves_current_track_and_pending_queue(self):
+        queue = self.cog.get_queue(11011)
+        voice = _FakeVoiceClient(_FakeVoiceChannel(111))
+        voice._connected = False
+        queue.voice_client = voice
+        queue.text_channel = SimpleNamespace(send=AsyncMock())
+        track = Track(title="à reprendre", artist="A", duration=180)
+        following = Track(title="ensuite", artist="B", duration=180)
+        queue.current = track
+        queue.tracks = [following]
+        queue.elapsed_offset = 30.0
+        queue.playback_generation = 4
+
+        await self.cog._on_track_finished(
+            queue,
+            error=RuntimeError("voice websocket closed"),
+            generation=4,
+            finished_track=track,
+        )
+
+        self.assertIs(queue.current, track)
+        self.assertEqual(queue.tracks, [following])
+        notice = queue.text_channel.send.await_args.args[0]
+        self.assertIn("file sont conservées", notice)
+
+    async def test_wrong_voice_cannot_control_active_player(self):
+        queue = self.cog.get_queue(12012)
+        bot_channel = _FakeVoiceChannel(121)
+        bot_channel.name = "Musique"
+        queue.voice_client = _FakeVoiceClient(bot_channel)
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=12012, voice_client=queue.voice_client),
+            author=SimpleNamespace(voice=SimpleNamespace(channel=_FakeVoiceChannel(122))),
+            interaction=None,
+        )
+
+        short = AsyncMock()
+        with patch("cogs.music.panels.texte_court", new=short):
+            voice = await self.cog._require_control_voice(ctx, queue)
+
+        self.assertIsNone(voice)
+        self.assertEqual(short.await_count, 1)
+        self.assertIn("Rejoins", short.await_args.args[1])
 
 
 if __name__ == "__main__":
