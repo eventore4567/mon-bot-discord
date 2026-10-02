@@ -952,6 +952,22 @@ def _tient_sur_une_ligne(valeur: str) -> bool:
     return bool(texte) and "\n" not in texte and len(texte) <= _LIMITE_LIGNE
 
 
+#: « <@123>\n`123` » : une mention suivie de son identifiant, telle que
+#: ``embeds._who`` la compose. Le saut de ligne la faisait passer pour un champ
+#: LONG, donc elle gagnait sa propre section numérotée — et un panneau de
+#: sanction affichait le membre deux fois, dont une en identifiant brut sous un
+#: titre « 02 · Membre ». L'identifiant reste copiable, sur la même ligne.
+_IDENTITE = _re.compile(r"^(<[@#][!&]?\d{15,25}>)\s*\n\s*(`\d{15,25}`)$")
+
+
+def _identite_compacte(valeur: str) -> str:
+    """Remet une identité « mention + identifiant » sur une seule ligne."""
+    correspondance = _IDENTITE.match(str(valeur or "").strip())
+    if correspondance is None:
+        return valeur
+    return f"{correspondance.group(1)} {correspondance.group(2)}"
+
+
 def depuis_embed(
     embed: discord.Embed,
     *,
@@ -990,7 +1006,7 @@ def depuis_embed(
         courtes: list[Ligne] = []
         sections: list[Section] = []
         for champ in champs:
-            valeur = _sans_barre(champ.value)
+            valeur = _identite_compacte(_sans_barre(champ.value))
             if _tient_sur_une_ligne(valeur):
                 courtes.append(Ligne(_titre_propre(champ.name), valeur))
             else:
