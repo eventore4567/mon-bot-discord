@@ -1275,7 +1275,7 @@ async def send_wide_log(
         logger.error(
             "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_MISSING path=%s", banner_path
         )
-        logger.error("SENTRIX LOG V2 FAILED bannière introuvable: %s", banner_path)
+        logger.error("SENTRIX TRACE FAILED bannière introuvable: %s", banner_path)
         return False
 
     guild = getattr(channel, "guild", None)
@@ -1306,7 +1306,7 @@ async def send_wide_log(
             "SXTRACE 6 TRANSPORT phase=abort reason=VIEW_BUILD_FAILED type=%s",
             type(exc).__name__,
         )
-        logger.error("SENTRIX LOG V2 FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
+        logger.error("SENTRIX TRACE FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
     try:
@@ -1316,7 +1316,7 @@ async def send_wide_log(
             "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_FILE_FAILED type=%s",
             type(exc).__name__,
         )
-        logger.error("SENTRIX LOG V2 FAILED file type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
+        logger.error("SENTRIX TRACE FAILED file type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
     files: list[discord.File] = [banner_file]
@@ -1362,7 +1362,7 @@ async def send_wide_log(
             _mettre_en_quarantaine(getattr(channel, "id", None), exc)
         else:
             logger.error(
-                "SENTRIX LOG V2 FAILED HTTP status=%s code=%s text=%r\n%s",
+                "SENTRIX TRACE FAILED HTTP status=%s code=%s text=%r\n%s",
                 getattr(exc, "status", None), getattr(exc, "code", None),
                 getattr(exc, "text", None), traceback.format_exc(),
             )
@@ -1371,7 +1371,7 @@ async def send_wide_log(
             "SXTRACE 6 TRANSPORT phase=send-failed channel=%s reason=%s",
             getattr(channel, "id", "?"), type(exc).__name__,
         )
-        logger.error("SENTRIX LOG V2 FAILED type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
+        logger.error("SENTRIX TRACE FAILED type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
     return False
 
 
