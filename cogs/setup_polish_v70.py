@@ -1,4 +1,4 @@
-"""SentriX V70 — finition visuelle du Control Center.
+"""SentriX V70 — finition visuelle de SentriX Setup.
 
 V70 ne modifie aucun moteur métier. Elle s'installe après V69 et ne fait que :
 - uniformiser les pages ;
@@ -22,11 +22,11 @@ from discord.ext import commands
 from utils import embeds
 from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
-from . import setup_oxyde_v69 as v69
+from . import setup_core_v119 as v69
 
 logger = logging.getLogger("bot.setup-polish-v70")
 
-RUNTIME_MARKER = "Control Center V70"
+RUNTIME_MARKER = "SentriX Setup Polish V70"
 WIDE_RULE = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 HOME_GROUPS = (
@@ -37,11 +37,11 @@ HOME_GROUPS = (
 
 SHORT_DESCRIPTIONS = {
     "moderation": "Staff, sanctions et rôles de modération.",
-    "security": "Protection automatique du serveur.",
+    "security": "Protections du serveur choisies manuellement.",
     "logs": "Journaux et salons de suivi.",
     "tickets": "Panels et équipe support.",
     "welcome": "Arrivées, départs et autorôle.",
-    "roles": "Rôles automatiques et récompenses.",
+    "roles": "Rôles et récompenses configurés manuellement.",
     "levels": "Progression, XP et économie.",
     "notifications": "YouTube, Twitch et TikTok.",
     "ai": "Assistant et génération d'images.",
@@ -84,7 +84,7 @@ def _panel(title: str, subtitle: str, *, context: str | None = None) -> discord.
 
 def _footer(panel: discord.Embed, *, page: str | None = None) -> discord.Embed:
     suffix = f" • {_label(page)}" if page else ""
-    panel.set_footer(text=f"SentriX • Control Center V70{suffix} • Sauvegarde automatique")
+    panel.set_footer(text=f"SentriX Core · Setup{suffix} · Sauvegarde après chaque choix")
     return panel
 
 
@@ -265,7 +265,7 @@ def _patch_render() -> None:
     def render_v70(self) -> None:
         previous_render(self)
         for child in list(self.children):
-            if isinstance(child, (v69.OxydePageSelect, V70PageSelect)) or getattr(child, "row", None) == 0:
+            if isinstance(child, (v69.SentriXPageSelect, V70PageSelect)) or getattr(child, "row", None) == 0:
                 self.remove_item(child)
         self.add_item(V70PageSelect(self))
         _normalise_control_labels(self)
@@ -273,7 +273,7 @@ def _patch_render() -> None:
 
     render_v70._sentrix_permissions_v66 = True
     render_v70._sentrix_setup_simple_v68 = True
-    render_v70._sentrix_oxyde_v69 = True
+    render_v70._sentrix_setup_core_v119 = True
     render_v70._sentrix_polish_v70 = True
     render_v70._sentrix_previous = previous_render
     cls.render = render_v70
@@ -305,7 +305,7 @@ async def _home(self) -> discord.Embed:
     completion = setup_ui._completion(statuses)
 
     panel = _panel(
-        "SentriX — Control Center",
+        "SentriX Setup",
         f"**{completion}% configuré**  ·  **{active}/{len(statuses)} modules actifs**  ·  **{errors} à corriger**",
         context=self.guild.name,
     )
@@ -334,7 +334,7 @@ async def _home(self) -> discord.Embed:
 
     panel.add_field(
         name="NAVIGATION",
-        value="Choisissez une page dans le menu ci-dessous. Chaque modification est enregistrée automatiquement.",
+        value="Choisis une page dans le menu ci-dessous. Chaque modification est enregistrée après ton action.",
         inline=False,
     )
     return _footer(panel)
@@ -343,7 +343,7 @@ async def _home(self) -> discord.Embed:
 async def _permissions(self) -> discord.Embed:
     enabled = await core.module_enabled(self.bot, self.guild.id, "permissions")
     panel = _panel(
-        "SentriX — Permissions",
+        "Permissions",
         "Restrictions supplémentaires de SentriX.",
         context=self.guild.name,
     )
@@ -363,12 +363,12 @@ async def _security(self) -> discord.Embed:
     total = len(setup_ui.AUTOMOD)
     active = enabled_count > 0
     panel = _panel(
-        "SentriX — Sécurité",
-        "Protection automatique du serveur, sans configuration compliquée.",
+        "Sécurité",
+        "Choisis les protections adaptées à ton serveur, une par une.",
         context=self.guild.name,
     )
     panel.add_field(name="ÉTAT", value="● ACTIF" if active else "○ INACTIF", inline=True)
-    panel.add_field(name="PROFIL", value="AUTOMATIQUE", inline=True)
+    panel.add_field(name="MODE", value="MANUEL", inline=True)
     panel.add_field(name="PROTECTIONS", value=f"**{enabled_count}/{total} actives**", inline=True)
     panel.add_field(
         name="COUVERTURE",
@@ -394,7 +394,7 @@ async def _generic_page(self, source: discord.Embed) -> discord.Embed:
     # retomber sur le libellé nu de la catégorie perdait les sous-pages en route.
     source_title = str(getattr(source, "title", "") or "")
     panel = _panel(
-        f"SentriX — {source_title or _label(page_id)}",
+        f"{source_title or _label(page_id)}",
         _description(page_id),
         context=self.guild.name,
     )
@@ -424,7 +424,7 @@ def _patch_embed() -> None:
 
     build_embed_v70._sentrix_permissions_v66 = True
     build_embed_v70._sentrix_setup_simple_v68 = True
-    build_embed_v70._sentrix_oxyde_v69 = True
+    build_embed_v70._sentrix_setup_core_v119 = True
     build_embed_v70._sentrix_polish_v70 = True
     build_embed_v70._sentrix_previous = previous_build
     cls.build_embed = build_embed_v70
@@ -437,7 +437,7 @@ def install(bot: commands.Bot) -> None:
     _patch_embed()
     setup_ui.SetupView._sentrix_polish_v70 = True
     bot._sentrix_setup_polish_v70 = True
-    logger.info("V70 actif : Control Center uniformisé, accueil compact et navigation finalisée.")
+    logger.info("V70 actif : SentriX Setup uniformisé, accueil compact et navigation finalisée.")
 
 
 __all__ = ["RUNTIME_MARKER", "WIDE_RULE", "install"]
