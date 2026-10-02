@@ -41,7 +41,7 @@ def test_final_security_setup_never_bootstraps_honeypot_resources():
     assert "create_or_refresh_system" not in source
     assert "def _honeypot_resources_ready" in source
     assert "SentriX ne crée rien automatiquement" in source
-    assert "container.add_item(v74.v73.entete_banniere())" in source
+    assert "v74.v73.poser_banniere(container)" in source
     assert "SENTRIX CORE · Configuration · setup" in source
 
 
@@ -80,9 +80,9 @@ def test_setup_core_keeps_current_clean_components_layout():
 
     assert "SENTRIX CORE · Configuration · setup" in v73
     assert "discord.ui.Container" in v73
-    assert "entete_banniere()" in v73
+    assert "poser_banniere(" in v73
     assert "SENTRIX CORE · Configuration · setup" in v75
-    assert "entete_banniere()" in v75
+    assert "poser_banniere(" in v75
 
 
 def test_ticket_and_role_panels_do_not_duplicate_sentrix_brand():

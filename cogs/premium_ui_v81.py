@@ -221,9 +221,15 @@ class PremiumEmbedView(discord.ui.LayoutView):
         # Banniere pleine largeur en tete. Le panneau premium n'en avait aucune :
         # +profile, +serverinfo et +leaderboard passaient par lui et s'ouvraient
         # donc sur un titre nu.
-        galerie = discord.ui.MediaGallery()
-        galerie.add_item(media=f"attachment://{sx_panels.nom_banniere(self.kind)}")
-        container.add_item(galerie)
+        #
+        # La famille est figee ICI et reutilisee par fichiers() : nom_banniere et
+        # fichier_banniere appellent tous deux accord_commande, qui re-decide
+        # depuis le contexte de commande en cours. Entre la construction et
+        # l'envoi ce contexte retombe parfois, et les deux resolvaient alors deux
+        # familles differentes -- galerie sur l'une, piece jointe sur l'autre,
+        # donc une piece jointe absente et un message REFUSE par Discord.
+        self._famille = sx_panels.accord_commande(self.kind)[1]
+        sx_panels.poser_bandeau(container, self._famille)
 
         title = _safe_text(title_override or embed.title or "SentriX")
         description = _safe_text(embed.description)
@@ -262,9 +268,15 @@ class PremiumEmbedView(discord.ui.LayoutView):
         self.add_item(container)
 
     def fichiers(self) -> list[discord.File]:
-        """Meme contrat que sentrix_panels.Panneau : la banniere part avec la vue."""
-        fichier = sx_panels.fichier_banniere(getattr(self, "kind", "brand"))
-        return [fichier] if fichier is not None else []
+        """Meme contrat que sentrix_panels.Panneau : la banniere part avec la vue.
+
+        La famille vient de la construction, pas d'une nouvelle resolution :
+        elle doit correspondre exactement a la galerie posee.
+        """
+        famille = getattr(self, "_famille", None)
+        if famille is None:
+            famille = sx_panels.accord_commande(getattr(self, "kind", "brand"))[1]
+        return sx_panels.pieces_jointes_de_famille(famille)
 
 
 def _intention_depuis(embed: discord.Embed) -> str:

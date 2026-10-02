@@ -86,37 +86,70 @@ def test_la_galerie_reference_bien_une_piece_jointe():
 # Les deux écrans joignent réellement le fichier
 # =============================================================================
 
-@pytest.mark.parametrize("module,fonction", [
-    ("cogs.setup_components_v73", "SentriXSetupV73.refresh"),
-    ("cogs.help_complete_v79", None),
+#: Les façons légitimes de reconstituer les pièces jointes d'une réédition.
+#: Toutes consultent la même condition que la pose du bandeau.
+SOURCES_DE_PIECES_JOINTES = (
+    "pieces_jointes_banniere",
+    "pieces_jointes_de_famille",
+    "fichiers",
+)
+
+
+@pytest.mark.parametrize("module", [
+    "cogs.setup_components_v73",
+    "cogs.help_complete_v79",
 ])
-def test_les_editions_rejoignent_le_fichier(module, fonction):
-    """``attachments=[]`` sur une édition retire la bannière du message. Les
-    vues de navigation passent par là à chaque clic."""
+def test_les_editions_rejoignent_le_fichier(module):
+    """``attachments=[]`` sur une édition retire la bannière du message, et la
+    galerie du conteneur référence alors une pièce jointe absente : Discord
+    refuse le message ENTIER. Les vues de navigation passent par là à chaque
+    clic.
+
+    Lu sur l'AST, et non par sous-chaîne : la version précédente cherchait
+    ``attachments=[]`` dans le source complet et échouait sur sa propre
+    docstring, qui cite ce motif pour l'expliquer.
+    """
+    import ast
     import importlib
     import inspect
 
     mod = importlib.import_module(module)
-    source = inspect.getsource(mod)
-    assert "attachments=[]" not in source or "attachments=[fichier]" in source, (
-        "une édition vide encore ses pièces jointes sans rejoindre la bannière"
+    arbre = ast.parse(inspect.getsource(mod))
+
+    vides = []
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.Call):
+            continue
+        for mot in noeud.keywords:
+            if mot.arg != "attachments":
+                continue
+            rendu = ast.unparse(mot.value)
+            if not any(src in rendu for src in SOURCES_DE_PIECES_JOINTES):
+                vides.append(rendu)
+
+    assert vides == [], (
+        f"ces rééditions vident leurs pièces jointes sans rejoindre la bannière : {vides}"
     )
-    assert "fichier_banniere()" in source
 
 
 def test_les_pages_de_v74_portent_la_banniere():
-    """V74 hérite du refresh de V73 mais construit ses propres pages : elles
-    doivent poser l'en-tête elles-mêmes."""
+    """V74 hérite du refresh de V73 mais construit ses propres pages : chacune
+    doit poser son bandeau.
+
+    Vise ``poser_banniere``, le point d'entrée, et non ``entete_banniere`` :
+    ce dernier rend ``None`` quand la bannière n'est pas joignable, et
+    ``container.add_item(None)`` casserait la vue.
+    """
     import inspect
 
     from cogs import setup_experience_v74 as v74
 
     source = inspect.getsource(v74)
     conteneurs = source.count("discord.ui.Container(accent_colour=v73.ACCENT)")
-    entetes = source.count("v73.entete_banniere()")
+    poses = source.count("v73.poser_banniere(")
     assert conteneurs >= 1
-    assert entetes == conteneurs, (
-        f"{conteneurs} page(s) construites mais {entetes} bannière(s) posée(s)"
+    assert poses >= conteneurs, (
+        f"{conteneurs} page(s) construites mais {poses} bannière(s) posée(s)"
     )
 
 

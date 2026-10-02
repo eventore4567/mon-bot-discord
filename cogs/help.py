@@ -627,9 +627,13 @@ class VueAide(discord.ui.LayoutView):
         conteneur = discord.ui.Container(
             accent_colour=discord.Colour(panels.INTENTIONS[self.kind][0])
         )
-        galerie = discord.ui.MediaGallery()
-        galerie.add_item(media=f"attachment://{panels.nom_banniere(self.kind)}")
-        conteneur.add_item(galerie)
+        # Famille figee ICI et reutilisee par fichiers() : nom_banniere et
+        # fichier_banniere appellent tous deux accord_commande, qui re-decide
+        # depuis le contexte de commande. Ce contexte retombe parfois avant
+        # l'envoi, et les deux resolvaient alors deux familles differentes --
+        # donc une piece jointe absente, donc un message REFUSE par Discord.
+        self._famille = panels.accord_commande(self.kind)[1]
+        panels.poser_bandeau(conteneur, self._famille)
         conteneur.add_item(
             discord.ui.TextDisplay(f"-# {panels.signature_core('special')}")
         )
@@ -715,8 +719,10 @@ class VueAide(discord.ui.LayoutView):
     def fichiers(self) -> list[discord.File]:
         """Banniere a joindre. Meme contrat que panels.Panneau, pour que
         panels.envoyer traite les deux sans savoir lequel il tient."""
-        fichier = panels.fichier_banniere(self.kind)
-        return [fichier] if fichier is not None else []
+        famille = getattr(self, "_famille", None)
+        if famille is None:
+            famille = panels.accord_commande(self.kind)[1]
+        return panels.pieces_jointes_de_famille(famille)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:

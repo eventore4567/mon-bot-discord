@@ -332,6 +332,72 @@ def fichier_banniere(kind: str) -> discord.File | None:
     return fichier_de_famille(accord_commande(kind)[1])
 
 
+def famille_joignable(famille: str) -> bool:
+    """La bannière de cette famille est-elle réellement joignable ?
+
+    Condition UNIQUE que la galerie et la pièce jointe consultent toutes les
+    deux. Une galerie qui référence ``attachment://banner_X.webp`` sans que le
+    fichier accompagne le message ne « casse » pas l'image — Discord refuse le
+    message ENTIER :
+
+        Invalid Form Body — The referenced attachment was not found.
+
+    C'est arrivé en production sur /setup : la commande ne répondait plus du
+    tout. Les deux décisions étaient prises à deux endroits sans lien, et
+    divergeaient.
+
+    La bannière manquante est GÉNÉRÉE ici. ``.gitignore`` ignore
+    ``assets/log_banners/banner_*.webp`` : aucune n'est versionnée, donc le
+    dossier est vide sur un conteneur fraîchement déployé. Un simple test
+    d'existence aurait servi des écrans sans bandeau.
+    """
+    chemin = BANNER_DIR / nom_fichier(famille)
+    if chemin.exists():
+        return True
+    try:
+        ensure_banners(force=True)
+    except Exception:
+        logger.exception("Génération des bannières impossible.")
+        return False
+    return chemin.exists()
+
+
+def poser_bandeau(container, famille: str) -> bool:
+    """Pose le bandeau de CETTE famille en tête de conteneur, ou ne pose rien.
+
+    La famille est passée, jamais re-décidée : ``accord_commande`` consulte le
+    contexte de commande en cours, qui est parfois déjà retombé au moment de
+    l'envoi. Construire la galerie avec une famille et joindre le fichier
+    d'une autre est le second chemin vers le même refus de Discord.
+
+    Rend ``True`` si le bandeau est posé, pour que l'appelant sache quoi
+    joindre.
+    """
+    if not famille_joignable(famille):
+        logger.warning(
+            "Bannière %s indisponible : panneau servi sans bandeau plutôt que refusé.",
+            famille,
+        )
+        return False
+    galerie = discord.ui.MediaGallery()
+    galerie.add_item(media=f"attachment://{nom_fichier(famille)}")
+    container.add_item(galerie)
+    return True
+
+
+def pieces_jointes_de_famille(famille: str) -> list:
+    """Pièces jointes correspondant au bandeau de CETTE famille.
+
+    Un fichier NEUF à chaque appel : un ``discord.File`` est consommé après un
+    envoi et arriverait vide au suivant — donc une pièce jointe absente, donc
+    le même refus.
+    """
+    if not famille_joignable(famille):
+        return []
+    fichier = fichier_de_famille(famille)
+    return [fichier] if fichier is not None else []
+
+
 def fichier_de_famille(famille: str) -> discord.File | None:
     """Bannière prête à joindre pour une famille déjà décidée.
 
@@ -392,10 +458,14 @@ class Panneau(discord.ui.LayoutView):
 
         # 1 — bannière pleine largeur, en TÊTE. C'est ce qu'un embed ne sait pas faire.
         #     Pas de description= : elle ferait apparaître un badge « ALT » par-dessus.
+        #
+        # poser_bandeau rend False quand la bannière n'est pas joignable, et
+        # avec_banniere devient alors la vérité unique que fichiers() consulte :
+        # posé ⇔ joint. Une galerie posée sans sa pièce jointe ne dégrade pas
+        # l'image — Discord refuse le message ENTIER, et le panneau ne s'affiche
+        # plus du tout. C'est arrivé en production sur /setup.
         if banniere:
-            galerie = discord.ui.MediaGallery()
-            galerie.add_item(media=f"attachment://{nom_fichier(self.famille)}")
-            conteneur.add_item(galerie)
+            self.avec_banniere = poser_bandeau(conteneur, self.famille)
 
         # Signature visuelle SentriX Core : domaine + commande conseillée.
         conteneur.add_item(
@@ -450,11 +520,15 @@ class Panneau(discord.ui.LayoutView):
         self.add_item(conteneur)
 
     def fichiers(self) -> list[discord.File]:
-        """Pièces jointes à envoyer avec ce panneau."""
+        """Pièces jointes à envoyer avec ce panneau.
+
+        ``avec_banniere`` dit si le bandeau a RÉELLEMENT été posé, et la
+        famille est celle figée à la construction : les deux côtés ne peuvent
+        pas diverger.
+        """
         if not self.avec_banniere:
             return []
-        fichier = fichier_de_famille(self.famille)
-        return [fichier] if fichier is not None else []
+        return pieces_jointes_de_famille(self.famille)
 
 
 def _rangees(boutons: Sequence[Bouton]) -> list[discord.ui.ActionRow]:

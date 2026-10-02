@@ -144,31 +144,68 @@ def test_chaque_appel_rend_un_fichier_neuf():
 # Aucun expéditeur ne peut oublier
 # =============================================================================
 
+#: Les façons légitimes de faire partir la pièce jointe avec la vue.
+#: Toutes consultent la même condition que la pose du bandeau.
+MOYENS_DE_JOINDRE = (
+    "joindre_banniere",       # au moment de l'envoi
+    "pieces_jointes_banniere",  # à la réédition de navigation
+    "pieces_jointes_de_famille",
+)
+
+
 @pytest.mark.parametrize("chemin", MODULES_A_BANNIERE)
 def test_tout_module_qui_pose_une_banniere_la_joint_aussi(chemin):
     """L'invariant qui ferme le bug : poser sans joindre fait refuser le
     message par Discord. ``setup_invitations`` posait la vue de V74 — donc une
-    galerie — sans jamais joindre quoi que ce soit."""
+    galerie — sans jamais joindre quoi que ce soit.
+
+    Plusieurs moyens de joindre sont acceptés : un écran envoyé passe par
+    ``joindre_banniere``, un écran réédité par ``pieces_jointes_banniere``.
+    Ce qui est interdit, c'est de poser sans aucun des deux.
+    """
     source = _source(chemin)
-    pose = "poser_banniere(" in source
-    joint = "joindre_banniere(" in source
-    assert pose == joint or (joint and not pose), (
-        f"{chemin} pose une bannière sans la joindre"
+    if "poser_banniere(" not in source:
+        pytest.skip(f"{chemin} ne pose aucun bandeau")
+    assert any(moyen in source for moyen in MOYENS_DE_JOINDRE), (
+        f"{chemin} pose une bannière sans jamais la joindre"
     )
 
 
+#: Les seuls modules autorisés à composer ``attachment://banner...`` eux-mêmes.
+#: Ailleurs, la galerie échapperait à la condition partagée.
+POINTS_DENTREE_GALERIE = frozenset({"setup_components_v73.py"})
+
+
 def test_aucun_module_ne_construit_sa_galerie_a_la_main():
-    """Une galerie construite ailleurs échapperait à la condition partagée."""
+    """Une galerie construite ailleurs échapperait à la condition partagée.
+
+    Lu sur l'AST, et non par sous-chaîne : la version précédente accusait
+    ``setup_invitations.py`` pour un COMMENTAIRE qui cite
+    ``attachment://banner_config.webp`` en expliquant pourquoi il faut passer
+    par le transport. Un test qui grep son propre voisinage finit par
+    rougir sur de la prose.
+    """
     coupables = []
-    for fichier in (RACINE / "cogs").glob("*.py"):
-        source = fichier.read_text(encoding="utf-8")
-        if "attachment://banner" not in source:
+    for fichier in sorted((RACINE / "cogs").glob("*.py")):
+        if fichier.name in POINTS_DENTREE_GALERIE:
             continue
-        # Seul le point d'entrée a le droit de composer cette URL.
-        if fichier.name != "setup_components_v73.py":
-            coupables.append(fichier.name)
+        try:
+            arbre = ast.parse(fichier.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover
+            continue
+        for noeud in ast.walk(arbre):
+            # Seules les VRAIES chaînes comptent, pas les commentaires :
+            # l'AST ne les conserve pas, ce qui supprime le faux positif.
+            if isinstance(noeud, ast.Constant) and isinstance(noeud.value, str):
+                if "attachment://banner" in noeud.value:
+                    coupables.append(fichier.name)
+                    break
+            elif isinstance(noeud, ast.JoinedStr):
+                if "attachment://banner" in ast.unparse(noeud):
+                    coupables.append(fichier.name)
+                    break
     assert coupables == [], (
-        f"ces modules référencent une bannière hors du point d'entrée : {coupables}"
+        f"ces modules composent une URL de bannière hors du point d'entrée : {coupables}"
     )
 
 

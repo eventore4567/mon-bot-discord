@@ -177,13 +177,101 @@ def fichier_banniere() -> "discord.File | None":
         return None
 
 
-def entete_banniere() -> "discord.ui.MediaGallery":
-    """La galerie qui affiche la bannière en tête de conteneur."""
+def banniere_disponible() -> bool:
+    """La bannière est-elle réellement joignable ? Condition UNIQUE.
+
+    La galerie et la pièce jointe doivent être décidées ensemble. Une galerie
+    qui référence ``attachment://banner_config.webp`` sans que le fichier
+    accompagne le message ne dégrade pas l'affichage — Discord refuse le
+    message ENTIER :
+
+        Invalid Form Body
+        In data.components.0.components.0.items.0.media.url:
+        The referenced attachment ("attachment://banner_config.webp") was not found.
+
+    C'est arrivé en production sur /setup. Les commentaires voisins disaient
+    « Discord affiche une image cassée » : c'est faux, et c'est pour ça que la
+    porte est restée ouverte. La commande ne répond plus du tout.
+
+    Cette fonction GÉNÈRE la bannière manquante avant de répondre, au lieu de
+    se contenter d'un test d'existence. ``.gitignore`` ignore
+    ``assets/log_banners/banner_*.webp`` : aucune bannière n'est versionnée,
+    donc le dossier est VIDE sur un conteneur fraîchement déployé. Un simple
+    test aurait répondu « non » au premier /setup et l'écran serait parti sans
+    bandeau — valide, mais nu.
+
+    ``force=True`` est nécessaire : le cache ``_READY`` d'``ensure_banners``
+    peut être vrai alors que le fichier a disparu du disque. C'est aussi le
+    chemin que ``fichier_de_famille`` suit pour la pièce jointe, donc les deux
+    côtés de la décision ne peuvent pas diverger.
+    """
+    from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
+
+    chemin = BANNER_DIR / nom_fichier(BANNIERE)
+    if chemin.exists():
+        return True
+    try:
+        ensure_banners(force=True)
+    except Exception:
+        logger.exception("Génération de la bannière %s impossible.", BANNIERE)
+        return False
+    return chemin.exists()
+
+
+def entete_banniere() -> "discord.ui.MediaGallery | None":
+    """La galerie d'en-tête, ou ``None`` si la bannière n'est pas joignable.
+
+    Préférer ``poser_banniere(container)``, qui ne peut pas poser ``None``.
+    """
     from utils.log_banners import nom_fichier
 
+    if not banniere_disponible():
+        logger.warning(
+            "Bannière %s indisponible : écran servi sans bandeau plutôt que refusé.",
+            BANNIERE,
+        )
+        return None
     galerie = discord.ui.MediaGallery()
     galerie.add_item(media=f"attachment://{nom_fichier(BANNIERE)}")
     return galerie
+
+
+def poser_banniere(container: "discord.ui.Container") -> None:
+    """Pose le bandeau en tête de conteneur — ou ne pose rien.
+
+    À utiliser au lieu de ``poser_banniere(container)`` : ce
+    dernier poserait ``None`` quand la bannière manque.
+    """
+    entete = entete_banniere()
+    if entete is not None:
+        container.add_item(entete)
+
+
+def pieces_jointes_banniere() -> list:
+    """Pour ``attachments=...`` lors d'une réédition de navigation.
+
+    Ces vues se réaffichent à chaque clic en vidant leurs pièces jointes : il
+    faut en refabriquer une à chaque fois, parce qu'un ``discord.File`` déjà
+    envoyé est consommé et arriverait VIDE.
+    """
+    if not banniere_disponible():
+        return []
+    fichier = fichier_banniere()
+    return [fichier] if fichier is not None else []
+
+
+def joindre_banniere(kwargs: dict) -> dict:
+    """Ajoute ``file=`` aux arguments d'envoi — ou les laisse intacts.
+
+    Tout envoi d'une vue portant un bandeau DOIT passer par ici, sinon la
+    galerie référence une pièce jointe absente et Discord refuse le message.
+    """
+    if not banniere_disponible():
+        return kwargs
+    fichier = fichier_banniere()
+    if fichier is not None:
+        kwargs["file"] = fichier
+    return kwargs
 
 
 def _thumbnail(bot: commands.Bot) -> discord.ui.Thumbnail:
@@ -332,8 +420,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         Un fichier neuf est créé à chaque appel : discord.File est consommé après
         un envoi et ne doit jamais être réutilisé.
         """
-        fichier = fichier_banniere()
-        return [fichier] if fichier is not None else []
+        return pieces_jointes_banniere()
 
     async def refresh(self, interaction: discord.Interaction) -> None:
         # Les opérations Setup peuvent inclure SQL/API Discord. ACK immédiat pour éviter
@@ -341,15 +428,15 @@ class SentriXSetupV73(discord.ui.LayoutView):
         if not interaction.response.is_done():
             await interaction.response.defer()
         await self.rebuild()
-        # attachments=[fichier] et non [] : la galerie du conteneur référence
-        # « attachment://banner_config.webp ». Sans le fichier joint, Discord
-        # affiche une image cassée. Un fichier NEUF à chaque édition — celui de
-        # l'envoi précédent est consommé.
-        fichier = fichier_banniere()
+        # pieces_jointes_banniere consulte la MÊME condition que poser_banniere.
+        # Si le bandeau n'a pas été posé, la liste est vide et le message reste
+        # valide ; s'il l'a été, le fichier est là. Les deux ne peuvent plus
+        # diverger — et une galerie sans sa pièce jointe ne « casse » pas
+        # l'image, elle fait REFUSER le message entier par Discord.
         await interaction.edit_original_response(
             content=None,
             embed=None,
-            attachments=[fichier] if fichier else [],
+            attachments=pieces_jointes_banniere(),
             view=self,
         )
 
@@ -379,7 +466,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         problems = sum("CORRIGER" in value for value in states.values())
 
         container = discord.ui.Container(accent_colour=ACCENT)
-        container.add_item(entete_banniere())
+        poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -445,7 +532,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         status = discord.ui.Button(label=status_label, style=status_style, disabled=True)
 
         container = discord.ui.Container(accent_colour=ACCENT)
-        container.add_item(entete_banniere())
+        poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -561,15 +648,15 @@ class SentriXSetupV73(discord.ui.LayoutView):
             accent_colour=ACCENT,
         )
         self.add_item(closed)
-        # attachments=[fichier] et non [] : la galerie du conteneur référence
-        # « attachment://banner_config.webp ». Sans le fichier joint, Discord
-        # affiche une image cassée. Un fichier NEUF à chaque édition — celui de
-        # l'envoi précédent est consommé.
-        fichier = fichier_banniere()
+        # pieces_jointes_banniere consulte la MÊME condition que poser_banniere.
+        # Si le bandeau n'a pas été posé, la liste est vide et le message reste
+        # valide ; s'il l'a été, le fichier est là. Les deux ne peuvent plus
+        # diverger — et une galerie sans sa pièce jointe ne « casse » pas
+        # l'image, elle fait REFUSER le message entier par Discord.
         await interaction.edit_original_response(
             content=None,
             embed=None,
-            attachments=[fichier] if fichier else [],
+            attachments=pieces_jointes_banniere(),
             view=self,
         )
         self.stop()

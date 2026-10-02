@@ -367,9 +367,14 @@ class SentriXHelpV79(discord.ui.LayoutView):
         self.rebuild()
 
     def fichiers(self) -> list[discord.File]:
-        """Bannière neuve correspondant à setup_v73.entete_banniere()."""
-        fichier = setup_v73.fichier_banniere()
-        return [fichier] if fichier is not None else []
+        """Bannière neuve correspondant au bandeau posé par poser_banniere.
+
+        Même condition que la pose : si le bandeau n'a pas été posé, la liste
+        est vide et le message reste valide. Une galerie sans sa pièce jointe
+        fait REFUSER le message entier par Discord, pas afficher une image
+        cassée.
+        """
+        return setup_v73.pieces_jointes_banniere()
 
     def show_home(self) -> None:
         self.mode = "home"
@@ -468,7 +473,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         page_keys = keys[start:start + HOME_PAGE_SIZE]
 
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
-        container.add_item(setup_v73.entete_banniere())
+        setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -554,7 +559,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         self.index = min(max(self.index, 0), len(pages) - 1)
         chunk = pages[self.index]
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
-        container.add_item(setup_v73.entete_banniere())
+        setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -636,7 +641,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
             usage_lines.append(f"`{prefix_usage}`")
 
         container = discord.ui.Container(accent_colour=setup_v73.ACCENT)
-        container.add_item(setup_v73.entete_banniere())
+        setup_v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(f"# {_title(entry, self.prefix)}\n{_description(entry)}"),

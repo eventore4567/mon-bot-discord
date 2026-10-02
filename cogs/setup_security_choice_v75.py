@@ -249,7 +249,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     )
 
     container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
-    container.add_item(v74.v73.entete_banniere())
+    v74.v73.poser_banniere(container)
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
@@ -429,7 +429,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
     available = [option.value for option in options]
     if not available:
         container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
-        container.add_item(v74.v73.entete_banniere())
+        v74.v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -511,7 +511,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
     )
 
     container = discord.ui.Container(accent_colour=v74.v73.ACCENT)
-    container.add_item(v74.v73.entete_banniere())
+    v74.v73.poser_banniere(container)
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(

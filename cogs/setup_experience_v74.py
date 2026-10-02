@@ -450,7 +450,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             channel_text = "All channels" if english else "Tous les salons"
 
         container = discord.ui.Container(accent_colour=v73.ACCENT)
-        container.add_item(v73.entete_banniere())
+        v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -594,7 +594,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
 
         container = discord.ui.Container(accent_colour=v73.ACCENT)
-        container.add_item(v73.entete_banniere())
+        v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(f"# 📜 {title}\n{intro}\n\n{status_lines}"),
@@ -646,7 +646,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
 
         container = discord.ui.Container(accent_colour=v73.ACCENT)
-        container.add_item(v73.entete_banniere())
+        v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
@@ -736,7 +736,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             disabled=True,
         )
         container = discord.ui.Container(accent_colour=v73.ACCENT)
-        container.add_item(v73.entete_banniere())
+        v73.poser_banniere(container)
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(

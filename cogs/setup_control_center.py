@@ -808,8 +808,10 @@ class SetupView(discord.ui.LayoutView):
         )
 
     def fichiers(self):
-        fichier = panels.fichier_banniere(self.intention())
-        return [fichier] if fichier is not None else []
+        famille = getattr(self, "_famille", None)
+        if famille is None:
+            famille = panels.accord_commande(self.intention())[1]
+        return panels.pieces_jointes_de_famille(famille)
 
     def intention(self) -> str:
         """La configuration a sa propre famille de banniere : c'est un domaine."""
@@ -865,9 +867,10 @@ class SetupView(discord.ui.LayoutView):
         conteneur = discord.ui.Container(
             accent_colour=discord.Colour(panels.INTENTIONS[self.intention()][0])
         )
-        galerie = discord.ui.MediaGallery()
-        galerie.add_item(media=f"attachment://{panels.nom_banniere(self.intention())}")
-        conteneur.add_item(galerie)
+        # Famille figee ICI (voir fichiers()) : la re-resoudre a l'envoi peut
+        # rendre une autre famille et faire REFUSER le message par Discord.
+        self._famille = panels.accord_commande(self.intention())[1]
+        panels.poser_bandeau(conteneur, self._famille)
         conteneur.add_item(discord.ui.TextDisplay(f"## {titre}\n{resume}"))
 
         for section in sections:
