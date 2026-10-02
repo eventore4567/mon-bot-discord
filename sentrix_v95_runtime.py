@@ -803,6 +803,36 @@ def install_global() -> None:
         client = getattr(self, "client", None) or getattr(self, "_client", None)
         if isinstance(client, commands.Bot):
             await prepare_bot(client)
+
+            # Phase 9 : prepare_bot() construit la surface canonique JUSTE avant
+            # la synchronisation. L'audit doit donc vivre ici, après cette étape,
+            # sinon il ne voit qu'une fraction du tree. Une anomalie critique
+            # bloque la publication Discord plutôt que de publier un registre
+            # ambigu puis d'essayer de le réparer après coup.
+            from utils.command_registry_audit import (
+                assert_registry_clean,
+                audit_counts,
+                iter_slash_entries,
+            )
+
+            issues = assert_registry_clean(client)
+            counts = audit_counts(issues)
+            client._sentrix_registry_audit_v2 = tuple(issues)
+            logger.info(
+                "V95 audit registre final : slash=%s prefix=%s critiques=0 avertissements=%s.",
+                len(iter_slash_entries(client)),
+                len(list(client.walk_commands())),
+                counts.get("warning", 0),
+            )
+            warnings = [issue for issue in issues if issue.severity == "warning"]
+            if warnings:
+                logger.warning(
+                    "V95 audit registre final — avertissements : %s",
+                    " | ".join(
+                        f"[{issue.code}] {issue.path}: {issue.detail}"
+                        for issue in warnings[:12]
+                    ),
+                )
         return await _ORIGINAL_SYNC(self, *args, **kwargs)
 
     sync_v95._sentrix_v95 = True
