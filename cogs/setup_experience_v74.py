@@ -981,10 +981,16 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             style=discord.ButtonStyle.primary,
             emoji="🛠️",
         )
-        toggle = discord.ui.Button(
-            label="Désactiver" if enabled else "Activer",
-            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
-        )
+        if enabled:
+            toggle = discord.ui.Button(
+                label="Désactiver",
+                style=discord.ButtonStyle.danger,
+            )
+        else:
+            toggle = discord.ui.Button(
+                label="Activer",
+                style=discord.ButtonStyle.success,
+            )
 
 
         async def full_config(interaction: discord.Interaction):
