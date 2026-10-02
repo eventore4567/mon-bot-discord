@@ -72,6 +72,58 @@ def _attachment_urls(message: discord.Message) -> list[str]:
     return [attachment.url for attachment in message.attachments]
 
 
+_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif")
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm", ".m4v", ".avi", ".mkv")
+
+
+def _attachment_media(attachments) -> list[tuple[str, str, str]]:
+    """Normalise les pièces jointes pour SentriX Trace.
+
+    Les images peuvent ainsi être prévisualisées en bas du journal, tandis que
+    chaque fichier garde une action d'ouverture dédiée.
+    """
+    items: list[tuple[str, str, str]] = []
+    for index, attachment in enumerate(attachments or [], start=1):
+        url = str(getattr(attachment, "url", attachment) or "").strip()
+        if not url:
+            continue
+        filename = str(getattr(attachment, "filename", "") or "").strip()
+        content_type = str(getattr(attachment, "content_type", "") or "").strip().casefold()
+        clean_url = url.split("?", 1)[0]
+        if not filename:
+            filename = clean_url.rsplit("/", 1)[-1] or f"fichier-{index}"
+        lower = filename.casefold()
+        if not content_type:
+            if lower.endswith(_IMAGE_EXTENSIONS):
+                content_type = "image/unknown"
+            elif lower.endswith(_VIDEO_EXTENSIONS):
+                content_type = "video/unknown"
+        items.append((url, filename[:120], content_type))
+    return items[:10]
+
+
+def _attachment_summary(items: list[tuple[str, str, str]]) -> str | None:
+    if not items:
+        return None
+    names = ", ".join(filename for _url, filename, _type in items[:5])
+    suffix = f" +{len(items) - 5}" if len(items) > 5 else ""
+    label = "fichier" if len(items) == 1 else "fichiers"
+    return _short(f"{len(items)} {label} · {names}{suffix}", 300)
+
+
+def _attachment_links(items: list[tuple[str, str, str]]) -> list[tuple[str, str]]:
+    links: list[tuple[str, str]] = []
+    for index, (url, _filename, content_type) in enumerate(items[:8], start=1):
+        if content_type.startswith("image/"):
+            label = f"Ouvrir image {index}"
+        elif content_type.startswith("video/"):
+            label = f"Ouvrir vidéo {index}"
+        else:
+            label = f"Ouvrir fichier {index}"
+        links.append((label, url))
+    return links
+
+
 def _permission_names(perms: discord.Permissions) -> set[str]:
     return {name for name, enabled in perms if enabled}
 
@@ -93,6 +145,7 @@ class Logs(commands.Cog, name="Logs"):
         *,
         view: discord.ui.View | None = None,
         event_key: str | None = None,
+        media_items: list[tuple[str, str, str]] | None = None,
     ) -> bool:
         logger.debug(
             "SXTRACE 2 CALL guild=%s log_type=%s category=%s event_key=%s target=%s.%s",
@@ -108,6 +161,7 @@ class Logs(commands.Cog, name="Logs"):
             embed,
             view=view,
             event_key=event_key,
+            media_items=media_items,
         )
 
     @staticmethod
@@ -298,6 +352,7 @@ class Logs(commands.Cog, name="Logs"):
             attachments = json.loads(row["attachments"] or "[]")
         except (TypeError, ValueError, json.JSONDecodeError):
             attachments = []
+        media_items = _attachment_media(attachments)
         actor, audit = await self._message_delete_actor(
             guild,
             author_id,
@@ -309,11 +364,7 @@ class Logs(commands.Cog, name="Logs"):
             ("Supprimé par", self._delete_actor_text(actor), True),
             ("Salon", _channel_ref(channel_id) if channel_id else None, True),
             ("Contenu", _short(content, 1024) if content else None, False),
-            (
-                "Pièces jointes",
-                _short("\n".join(map(str, attachments)), 1024) if attachments else None,
-                False,
-            ),
+            ("Pièces jointes", _attachment_summary(media_items), False),
         ]
         member = guild.get_member(author_id)
         identity = member
@@ -331,7 +382,8 @@ class Logs(commands.Cog, name="Logs"):
             ids=[
                 ("Copier l'ID de l'auteur", author_id),
                 ("Copier l'ID du message", message_id),
-            ]
+            ],
+            links=_attachment_links(media_items),
         )
         key = log_service.make_event_key(
             guild.id,
@@ -339,7 +391,14 @@ class Logs(commands.Cog, name="Logs"):
             target_id=author_id,
             message_id=message_id,
         )
-        await self._send(guild, "message_delete", panel, view=view, event_key=key)
+        await self._send(
+            guild,
+            "message_delete",
+            panel,
+            view=view,
+            event_key=key,
+            media_items=media_items,
+        )
 
     # ---------------------------------------------------------------- MESSAGES
 
@@ -372,24 +431,21 @@ class Logs(commands.Cog, name="Logs"):
             message.channel.id,
             message_id=message.id,
         )
+        media_items = _attachment_media(message.attachments)
         fields = [
             ("Auteur", _user_ref(message.author.id), True),
             ("Supprimé par", self._delete_actor_text(actor), True),
             ("Salon", _channel_ref(message.channel.id), True),
             ("Contenu", _short(message.content, 1024) if message.content else None, False),
-            (
-                "Pièces jointes",
-                _short("\n".join(a.url for a in message.attachments), 1024)
-                if message.attachments else None,
-                False,
-            ),
+            ("Pièces jointes", _attachment_summary(media_items), False),
         ]
         panel = self._embed("Message supprimé", identity=message.author, fields=fields)
         view = log_service.log_actions(
             ids=[
                 ("Copier l'ID de l'auteur", message.author.id),
                 ("Copier l'ID du message", message.id),
-            ]
+            ],
+            links=_attachment_links(media_items),
         )
         key = log_service.make_event_key(
             message.guild.id,
@@ -397,7 +453,14 @@ class Logs(commands.Cog, name="Logs"):
             target_id=message.author.id,
             message_id=message.id,
         )
-        await self._send(message.guild, "message_delete", panel, view=view, event_key=key)
+        await self._send(
+            message.guild,
+            "message_delete",
+            panel,
+            view=view,
+            event_key=key,
+            media_items=media_items,
+        )
         await self._forget_cached_message(message.id)
 
     @commands.Cog.listener()
