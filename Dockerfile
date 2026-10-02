@@ -44,6 +44,7 @@ RUN python -m pytest -q \
     tests/test_short_command_names.py \
     tests/test_command_setup_prompt.py \
     tests/test_help_short_names.py \
+    tests/test_command_registry_audit.py \
     tests/test_dashboard_feedback_reports.py \
     tests/test_guild_departure_notify.py \
     tests/test_ai_disable_guard_loading.py \
