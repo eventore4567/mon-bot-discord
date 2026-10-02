@@ -33,7 +33,7 @@ def test_all_automod_logs_use_manage_title_and_main_fields():
     fields = _fields(styled)
     names = [name for name, _ in fields]
 
-    assert styled.title == "AutoMod Manage"
+    assert styled.title == "Protection SentriX"
     assert names[:6] == [
         "Membre",
         "Protection",
