@@ -448,6 +448,38 @@ def _remove_ticket_configuration(bot: commands.Bot) -> tuple[str, ...]:
     return tuple(removed)
 
 
+
+def _ensure_ticket_prefix_command(bot: commands.Bot) -> bool:
+    """Garantit que +ticket reste utilisable après les couches de nettoyage.
+
+    Le bot conserve volontairement les commandes de configuration ticket hors de la
+    surface publique, mais la commande membre `+ticket` ne doit jamais disparaître.
+    """
+    if bot.get_command("ticket") is not None:
+        return True
+
+    cog = bot.get_cog("Tickets")
+    if cog is None:
+        return False
+
+    candidate = next(
+        (
+            command
+            for command in getattr(cog, "get_commands", lambda: [])()
+            if str(getattr(command, "name", "") or "").casefold() == "ticket"
+        ),
+        None,
+    )
+    if candidate is None:
+        return False
+
+    try:
+        bot.add_command(candidate)
+    except commands.CommandRegistrationError:
+        return bot.get_command("ticket") is not None
+    logger.info("Commande membre +ticket restaurée après le nettoyage de surface.")
+    return bot.get_command("ticket") is not None
+
 def _unwrap_error_handler(handler):
     current = handler
     seen = set()
@@ -529,6 +561,7 @@ def _install_unknown_command(bot: commands.Bot) -> bool:
 async def install_runtime(bot: commands.Bot) -> None:
     custom_emoji = _install_rolepanel_custom_emojis()
     removed = _remove_ticket_configuration(bot)
+    ticket_prefix = _ensure_ticket_prefix_command(bot)
     unknown = _install_unknown_command(bot)
 
     # setup_invitations has its own on_ready repair. Make that repair call the exact final
@@ -542,6 +575,7 @@ async def install_runtime(bot: commands.Bot) -> None:
     if not getattr(bot, "_sentrix_product_update_ready_listener", False):
         async def final_ready_repair():
             _remove_ticket_configuration(bot)
+            _ensure_ticket_prefix_command(bot)
             _install_unknown_command(bot)
         bot.add_listener(final_ready_repair, "on_ready")
         bot._sentrix_product_update_ready_listener = True
@@ -550,6 +584,7 @@ async def install_runtime(bot: commands.Bot) -> None:
         "rolepanel_custom_emojis": custom_emoji,
         "ticket_setup_dashboard_only": True,
         "removed_ticket_config_commands": removed,
+        "ticket_prefix_available": ticket_prefix,
         "unknown_command_silent": unknown,
     }
     logger.info("SentriX product update active: %s", bot.sentrix_product_update_state)
