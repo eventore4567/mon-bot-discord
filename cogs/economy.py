@@ -331,7 +331,7 @@ class Economy(commands.Cog, name="Economy"):
         ]
 
         panneau = sx_panels.Panneau(
-            titre="SentriX — Économie",
+            titre="Économie",
             sous_titre=f"{membre.mention} · **{nombre(stats['total_money'])} {emoji}** au total",
             kind="warning" if stats["total_money"] == 0 else "success",
             vignette=membre.display_avatar.url,
@@ -361,7 +361,7 @@ class Economy(commands.Cog, name="Economy"):
         )
         if not ok:
             return await self._panneau_attente(
-                ctx, titre="SentriX — Récompense quotidienne", restant=remaining, commande="daily"
+                ctx, titre="Récompense quotidienne", restant=remaining, commande="daily"
             )
         details = []
         if boost is not None:
@@ -373,7 +373,7 @@ class Economy(commands.Cog, name="Economy"):
             )
         await self._panneau_gain(
             ctx,
-            titre="SentriX — Récompense quotidienne",
+            titre="Récompense quotidienne",
             resume=f"Récompense du jour encaissée par {ctx.author.mention}.",
             montant=amount,
             cooldown=DAILY_COOLDOWN,
@@ -390,7 +390,7 @@ class Economy(commands.Cog, name="Economy"):
         )
         if not ok:
             return await self._panneau_attente(
-                ctx, titre="SentriX — Récompense hebdomadaire", restant=remaining, commande="weekly"
+                ctx, titre="Récompense hebdomadaire", restant=remaining, commande="weekly"
             )
         details = []
         if boost is not None:
@@ -402,7 +402,7 @@ class Economy(commands.Cog, name="Economy"):
             )
         await self._panneau_gain(
             ctx,
-            titre="SentriX — Récompense hebdomadaire",
+            titre="Récompense hebdomadaire",
             resume=f"Récompense de la semaine encaissée par {ctx.author.mention}.",
             montant=amount,
             cooldown=WEEKLY_COOLDOWN,
@@ -420,7 +420,7 @@ class Economy(commands.Cog, name="Economy"):
         )
         if not ok:
             return await self._panneau_attente(
-                ctx, titre="SentriX — Travail", restant=remaining, commande="work"
+                ctx, titre="Travail", restant=remaining, commande="work"
             )
         metiers = ["développeur", "livreur", "chef cuisinier", "streamer", "modérateur", "vendeur"]
         metier = random.choice(metiers)
@@ -434,7 +434,7 @@ class Economy(commands.Cog, name="Economy"):
             )
         await self._panneau_gain(
             ctx,
-            titre="SentriX — Travail",
+            titre="Travail",
             resume=f"{ctx.author.mention} a travaillé comme **{metier}**.",
             montant=amount,
             cooldown=WORK_COOLDOWN,
@@ -552,7 +552,7 @@ class Economy(commands.Cog, name="Economy"):
             return await sx_panels.envoyer(
                 ctx,
                 sx_panels.Panneau(
-                    titre="SentriX — Classement économique",
+                    titre="Classement économique",
                     sous_titre="Personne n'a encore de solde sur ce serveur.",
                     kind="economie",
                     sections=[
@@ -607,7 +607,7 @@ class Economy(commands.Cog, name="Economy"):
         await sx_panels.envoyer(
             ctx,
             sx_panels.Panneau(
-                titre="SentriX — Classement économique",
+                titre="Classement économique",
                 sous_titre=f"**{len(classement)}** membre(s) classé(s) sur {ctx.guild.name}.",
                 kind="economie",
                 sections=sections,
@@ -970,7 +970,7 @@ class Economy(commands.Cog, name="Economy"):
             return await sx_panels.envoyer(
                 ctx,
                 sx_panels.Panneau(
-                    titre="SentriX — Inventaire",
+                    titre="Inventaire",
                     sous_titre=f"L'inventaire de {ctx.author.mention} est vide.",
                     kind="economie",
                     vignette=ctx.author.display_avatar.url,
@@ -992,7 +992,7 @@ class Economy(commands.Cog, name="Economy"):
         await sx_panels.envoyer(
             ctx,
             sx_panels.Panneau(
-                titre="SentriX — Inventaire",
+                titre="Inventaire",
                 sous_titre=f"{ctx.author.mention} possède **{nombre(total_objets)}** objet(s), "
                            f"en **{len(objets)}** type(s).",
                 kind="economie",

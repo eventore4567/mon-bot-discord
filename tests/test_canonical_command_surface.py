@@ -68,3 +68,40 @@ def test_music_direct_actions_have_expected_french_names():
     }
     for source, public in expected.items():
         assert MUSIC_LEAVES[source] == public
+
+
+
+def test_music_leaf_rebuild_prevents_cross_bucket_suffixes(monkeypatch):
+    import sentrix_canonical_command_surface as surface
+
+    captured = {}
+    original = surface.v98.semantic_leaf
+
+    class Target:
+        def __init__(self, original_name, leaf_name):
+            self.original_name = original_name
+            self.leaf_name = leaf_name
+
+    # install() remplace semantic_leaf ; on capture la fonction active sans
+    # dépendre d'un bot réel.
+    surface.install()
+    leaf = surface.v98.semantic_leaf
+
+    assert leaf("musique", "file", Target("music remove", "retirer-2")) == "retirer"
+    assert leaf("musique", "playlist", Target("music playlist clear", "vider-2")) == "vider"
+
+    surface.v98.semantic_leaf = original
+
+
+
+def test_generic_general_buckets_are_renamed_in_public_surface():
+    import sentrix_canonical_command_surface as surface
+
+    assert surface.BUCKETS[("config", "general")] == "reglages"
+    assert surface.BUCKETS[("utility", "general")] == "pratiques"
+    assert surface.BUCKETS[("outils", "general")] == "pratiques"
+    assert "general" not in {
+        surface.BUCKETS[("config", "general")],
+        surface.BUCKETS[("utility", "general")],
+        surface.BUCKETS[("outils", "general")],
+    }

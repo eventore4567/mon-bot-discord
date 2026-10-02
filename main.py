@@ -884,6 +884,20 @@ class BotAllInOne(commands.Bot):
                     "Audit slash Discord : ancienne surface /music encore publiée : %s",
                     ", ".join(f"/{path}" for path in publish_audit.legacy_music_paths),
                 )
+            if publish_audit.aide_paths:
+                logger.info(
+                    "Discord slash /aide publié : %s",
+                    ", ".join(f"/{path}" for path in publish_audit.aide_paths),
+                )
+            else:
+                logger.error(
+                    "Audit slash Discord : /aide absent de la surface renvoyée par sync()."
+                )
+            if publish_audit.legacy_help_paths:
+                logger.error(
+                    "Audit slash Discord : ancienne surface /help encore publiée : %s",
+                    ", ".join(f"/{path}" for path in publish_audit.legacy_help_paths),
+                )
             if publish_audit.missing_paths or publish_audit.unexpected_paths:
                 logger.warning(
                     "Écart tree local/distant après sync : manquantes=%s | inattendues=%s",

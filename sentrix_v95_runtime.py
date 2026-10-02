@@ -32,7 +32,8 @@ from utils import embeds, log_service
 
 logger = logging.getLogger("bot.v95")
 
-DIRECT_ROOTS = frozenset({"help", "setup", "ping", "sentrix"})
+DIRECT_ROOTS = frozenset({"help", "aide", "setup", "ping", "sentrix"})
+PRESERVED_DIRECT_ROOTS = frozenset({"aide", "setup", "ping", "sentrix"})
 EXCLUDED_COMMANDS = frozenset({"logsdiag"})
 MAX_ROOT_COMMANDS = 100
 MAX_CHILDREN = 25
@@ -535,8 +536,22 @@ def _build_targets(bot: commands.Bot) -> list[SlashTarget]:
 def _remove_old_roots(tree: app_commands.CommandTree) -> None:
     for item in list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)):
         name = str(getattr(item, "name", "") or "").casefold()
-        if name in DIRECT_ROOTS:
+        if name in PRESERVED_DIRECT_ROOTS:
             continue
+        try:
+            tree.remove_command(name, type=discord.AppCommandType.chat_input)
+        except TypeError:
+            tree.remove_command(name)
+
+
+def _remove_legacy_public_roots(tree: app_commands.CommandTree) -> None:
+    """Supprime les anciennes racines qui ne doivent plus être publiées.
+
+    Cette passe est volontairement minuscule et se lance après TOUTES les couches
+    de préparation. Certaines couches historiques peuvent recréer /help après le
+    premier nettoyage ; /aide est désormais l'unique entrée publique d'aide.
+    """
+    for name in ("help",):
         try:
             tree.remove_command(name, type=discord.AppCommandType.chat_input)
         except TypeError:
@@ -803,6 +818,37 @@ def install_global() -> None:
         client = getattr(self, "client", None) or getattr(self, "_client", None)
         if isinstance(client, commands.Bot):
             await prepare_bot(client)
+            _remove_legacy_public_roots(self)
+
+            # Phase 9 : prepare_bot() construit la surface canonique JUSTE avant
+            # la synchronisation. L'audit doit donc vivre ici, après cette étape,
+            # sinon il ne voit qu'une fraction du tree. Une anomalie critique
+            # bloque la publication Discord plutôt que de publier un registre
+            # ambigu puis d'essayer de le réparer après coup.
+            from utils.command_registry_audit import (
+                assert_registry_clean,
+                audit_counts,
+                iter_slash_entries,
+            )
+
+            issues = assert_registry_clean(client)
+            counts = audit_counts(issues)
+            client._sentrix_registry_audit_v2 = tuple(issues)
+            logger.info(
+                "V95 audit registre final : slash=%s prefix=%s critiques=0 avertissements=%s.",
+                len(iter_slash_entries(client)),
+                len(list(client.walk_commands())),
+                counts.get("warning", 0),
+            )
+            warnings = [issue for issue in issues if issue.severity == "warning"]
+            if warnings:
+                logger.warning(
+                    "V95 audit registre final — avertissements : %s",
+                    " | ".join(
+                        f"[{issue.code}] {issue.path}: {issue.detail}"
+                        for issue in warnings[:12]
+                    ),
+                )
         return await _ORIGINAL_SYNC(self, *args, **kwargs)
 
     sync_v95._sentrix_v95 = True

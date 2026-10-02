@@ -7,6 +7,7 @@ import pytest
 from utils.command_registry_audit import (
     assert_registry_clean,
     audit_command_registry,
+    audit_counts,
     critical_issues,
 )
 
@@ -38,15 +39,24 @@ def slash(name, *, callback=None, description="Description", children=(), parame
     )
 
 
-def prefix(name, callback, *, hidden=False, description="Description", aliases=()):
+def prefix(
+    name,
+    callback,
+    *,
+    hidden=False,
+    description="Description",
+    aliases=(),
+    parent=None,
+):
     return SimpleNamespace(
-        name=name,
+        name=name.rsplit(" ", 1)[-1],
         qualified_name=name,
         callback=callback,
         hidden=hidden,
         description=description,
         help=None,
         aliases=list(aliases),
+        parent=parent,
     )
 
 
@@ -185,3 +195,122 @@ def test_assert_registry_clean_explains_critical_regressions():
 
     with pytest.raises(AssertionError, match="legacy-generic-name"):
         assert_registry_clean(bot)
+
+
+
+def test_prefix_alias_collision_in_same_scope_is_reported():
+    async def first():
+        return None
+
+    async def second():
+        return None
+
+    bot = FakeBot(
+        prefix=[
+            prefix("ban", first, aliases=["b"]),
+            prefix("block", second, aliases=["b"]),
+        ]
+    )
+
+    issues = audit_command_registry(bot)
+
+    assert any(
+        issue.code == "prefix-token-collision"
+        and issue.path == "<root>:b"
+        for issue in issues
+    )
+    assert critical_issues(issues) == []
+
+
+def test_same_subcommand_alias_in_different_groups_is_not_a_collision():
+    async def first():
+        return None
+
+    async def second():
+        return None
+
+    parent_a = SimpleNamespace(qualified_name="music")
+    parent_b = SimpleNamespace(qualified_name="ticket")
+    bot = FakeBot(
+        prefix=[
+            prefix("music clear", first, aliases=["reset"], parent=parent_a),
+            prefix("ticket clear", second, aliases=["reset"], parent=parent_b),
+        ]
+    )
+
+    issues = audit_command_registry(bot)
+
+    assert not any(issue.code == "prefix-token-collision" for issue in issues)
+
+
+def test_audit_counts_separates_critical_and_warning():
+    async def callback():
+        return None
+
+    bot = FakeBot(
+        roots=[slash("page-2", callback=callback)],
+        prefix=[prefix("ping", callback, aliases=["ping"])],
+    )
+    counts = audit_counts(audit_command_registry(bot))
+
+    assert counts["critical"] >= 1
+    assert counts["warning"] >= 1
+
+
+
+def test_final_sync_wrapper_gates_the_prepared_registry():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1] / "sentrix_v95_runtime.py"
+    ).read_text(encoding="utf-8")
+
+    prepare_index = source.index("await prepare_bot(client)")
+    audit_index = source.index("issues = assert_registry_clean(client)")
+    sync_index = source.index("return await _ORIGINAL_SYNC(self, *args, **kwargs)")
+
+    assert prepare_index < audit_index < sync_index
+    assert "V95 audit registre final" in source
+
+
+
+def test_generated_slash_wrapper_links_back_to_prefix_business_command():
+    async def prefix_action():
+        return None
+
+    async def slash_wrapper():
+        return None
+
+    slash_wrapper._sentrix_original_command = "music play"
+
+    bot = FakeBot(
+        roots=[slash("jouer", callback=slash_wrapper)],
+        prefix=[prefix("music play", prefix_action)],
+    )
+
+    issues = audit_command_registry(bot)
+
+    assert not any(
+        issue.code == "slash-without-prefix-business-command"
+        for issue in issues
+    )
+
+
+def test_native_aide_is_linked_to_prefix_help():
+    async def slash_help():
+        return None
+
+    async def prefix_help():
+        return None
+
+    bot = FakeBot(
+        roots=[slash("aide", callback=slash_help)],
+        prefix=[prefix("help", prefix_help)],
+    )
+
+    issues = audit_command_registry(bot)
+
+    assert not any(
+        issue.code == "slash-without-prefix-business-command"
+        for issue in issues
+    )

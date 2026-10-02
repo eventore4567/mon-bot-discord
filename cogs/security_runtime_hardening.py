@@ -632,6 +632,7 @@ class SecurityHardening(commands.Cog):
     @panic.command(name="status", aliases=["etat", "state"])
     @critical_security_owner_only()
     async def panic_status(self, ctx: commands.Context):
+        """Afficher l'état du mode d'urgence PANIC et son snapshot actif."""
         row = await self._panic_row(ctx.guild.id)
         if not row:
             return await panels.envoyer(ctx, _panneau('PANIC inactif', "Le serveur n'est pas en mode d'urgence.", kind='success'))

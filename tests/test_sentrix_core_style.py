@@ -54,9 +54,9 @@ def test_legacy_command_renderer_uses_same_core_grammar():
     source = (ROOT / "utils" / "command_visuals.py").read_text(encoding="utf-8")
 
     assert '"SENTRIX CORE"' in source
-    assert "_core_signature(ctx, family)" in source
+    assert "_core_signature(ctx, identity_family, state_kind)" in source
     assert '"### 01 · Résultat"' in source
-    assert "_core_footer(ctx, family, footer)" in source
+    assert "_core_footer(ctx, identity_family, footer, state_kind)" in source
 
 
 def test_help_uses_sentrix_core_and_numbered_sections():
@@ -101,3 +101,55 @@ def test_native_core_panel_buttons_can_host_real_callbacks():
 
     assert panel.timeout == 120
     assert panel.boutons_source[0].callback is callback
+
+
+
+def test_core_title_removes_only_redundant_legacy_brand():
+    assert panels.titre_core("SentriX — Économie") == "Économie"
+    assert panels.titre_core("SentriX - SentriX — Inventaire") == "Inventaire"
+    assert panels.titre_core("🎵 Lecture en cours") == "🎵 Lecture en cours"
+
+
+def test_state_panel_keeps_command_domain_identity(monkeypatch):
+    monkeypatch.setattr(panels, "famille_de_la_commande", lambda: "economy")
+
+    panel = panels.Panneau(
+        titre="SentriX — Récompense",
+        sous_titre="250 pièces reçues.",
+        kind="success",
+        banniere=False,
+    )
+    text = panels.texte_complet(panel)
+
+    assert panel.famille == "success"
+    assert panel.identite_famille == "economy"
+    assert panel.titre == "Récompense"
+    assert "SENTRIX CORE · Économie · Succès" in text
+    assert "## Récompense" in text
+
+
+def test_error_panel_keeps_security_domain_identity(monkeypatch):
+    monkeypatch.setattr(panels, "famille_de_la_commande", lambda: "security")
+
+    panel = panels.Panneau(
+        titre="Action impossible",
+        sous_titre="Permission manquante.",
+        kind="danger",
+        banniere=False,
+    )
+    text = panels.texte_complet(panel)
+
+    assert panel.famille == "error"
+    assert panel.identite_famille == "security"
+    assert "SENTRIX CORE · Sécurité · Erreur" in text
+
+
+def test_phase7_native_domains_do_not_repeat_sentrix_in_titles():
+    economy = (ROOT / "cogs" / "economy.py").read_text(encoding="utf-8")
+    music = (ROOT / "cogs" / "music.py").read_text(encoding="utf-8")
+    tickets = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
+
+    assert 'titre="SentriX —' not in economy
+    assert 'titre="SentriX Music"' not in music
+    assert 'titre="Lecture en cours"' in music
+    assert 'titre="Ticket ouvert"' in tickets

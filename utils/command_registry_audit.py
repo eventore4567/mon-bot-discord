@@ -73,6 +73,19 @@ def callback_key(callback: Any) -> tuple[str, str] | None:
     return module, qualname
 
 
+def original_command_name(callback: Any) -> str | None:
+    """Commande préfixée dont un wrapper slash V95/V110 provient."""
+    current = callback
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        original = str(getattr(current, "_sentrix_original_command", "") or "").strip()
+        if original:
+            return original
+        current = getattr(current, "__wrapped__", None)
+    return None
+
+
 def _slash_children(node: Any) -> list[Any]:
     children = getattr(node, "commands", None)
     if children is None:
@@ -118,19 +131,21 @@ def iter_slash_entries(bot: Any) -> list[SlashEntry]:
 
 
 def _slash_parameter_names(node: Any) -> list[str]:
-    params = getattr(node, "parameters", None)
-    if params is not None:
+    # Si discord.py expose l'attribut parameters, même vide, cette liste est la
+    # source de vérité de ce que Discord verra. Retomber sur inspect.signature()
+    # dans ce cas réintroduit self/ctx des callbacks internes et fabrique de faux
+    # positifs alors que ces paramètres ne sont jamais publiés.
+    if hasattr(node, "parameters"):
+        params = getattr(node, "parameters", None)
         try:
-            values = list(params)
+            values = list(params or ())
         except TypeError:
             values = []
-        names = [
+        return [
             str(getattr(param, "name", "") or "").strip()
             for param in values
             if str(getattr(param, "name", "") or "").strip()
         ]
-        if names:
-            return names
 
     callback = _unwrap_callback(getattr(node, "callback", None))
     if callback is None:
@@ -166,6 +181,19 @@ def _description(node: Any) -> str:
         or getattr(node, "help", "")
         or ""
     ).strip()
+
+
+def _prefix_scope(command: Any) -> str:
+    parent = getattr(command, "parent", None)
+    if parent is None:
+        return "<root>"
+    return str(getattr(parent, "qualified_name", "") or getattr(parent, "name", "") or "<root>").casefold()
+
+
+def _prefix_tokens(command: Any) -> list[str]:
+    values = [str(getattr(command, "name", "") or "").strip()]
+    values.extend(str(alias).strip() for alias in (getattr(command, "aliases", None) or ()))
+    return [value.casefold() for value in values if value]
 
 
 def audit_command_registry(
@@ -288,10 +316,20 @@ def audit_command_registry(
         if entry.callback_key is not None and not entry.is_group
     }
     prefix_callback_keys: dict[tuple[str, str], list[Any]] = {}
+    prefix_tokens: dict[tuple[str, str], list[Any]] = {}
+    prefix_names = {
+        str(getattr(command, "qualified_name", "") or "").casefold().strip()
+        for command in prefix
+        if str(getattr(command, "qualified_name", "") or "").strip()
+    }
     for command in prefix:
         key = callback_key(getattr(command, "callback", None))
         if key is not None:
             prefix_callback_keys.setdefault(key, []).append(command)
+
+        scope = _prefix_scope(command)
+        for token in _prefix_tokens(command):
+            prefix_tokens.setdefault((scope, token), []).append(command)
 
         name = str(getattr(command, "name", "") or "")
         aliases = [
@@ -338,24 +376,62 @@ def audit_command_registry(
                 )
             )
 
-    for entry in entries:
-        if entry.is_group or entry.callback_key is None:
-            continue
-        if entry.callback_key not in prefix_callback_keys:
+    for (scope, token), commands_with_token in prefix_tokens.items():
+        identities = {
+            str(getattr(command, "qualified_name", getattr(command, "name", "")) or "")
+            for command in commands_with_token
+        }
+        if len(identities) > 1:
             issues.append(
                 AuditIssue(
                     "warning",
-                    "slash-without-prefix-business-command",
-                    f"/{entry.path}",
-                    "Aucune commande metier prefixee associee n'a ete trouvee.",
+                    "prefix-token-collision",
+                    f"{scope}:{token}",
+                    "Le meme nom/alias prefixe pointe vers plusieurs commandes : "
+                    + ", ".join(sorted(identities, key=str.casefold)),
                 )
             )
+
+    native_equivalents = {
+        "aide": "help",
+    }
+    for entry in entries:
+        if entry.is_group:
+            continue
+        if entry.callback_key is not None and entry.callback_key in prefix_callback_keys:
+            continue
+
+        callback = getattr(entry.node, "callback", None)
+        original = original_command_name(callback)
+        if original and original.casefold() in prefix_names:
+            continue
+
+        root = entry.path.split(" ", 1)[0].casefold()
+        equivalent = native_equivalents.get(root)
+        if equivalent and equivalent in prefix_names:
+            continue
+
+        issues.append(
+            AuditIssue(
+                "warning",
+                "slash-without-prefix-business-command",
+                f"/{entry.path}",
+                "Aucune commande metier prefixee associee n'a ete trouvee.",
+            )
+        )
 
     return issues
 
 
 def critical_issues(issues: Iterable[AuditIssue]) -> list[AuditIssue]:
     return [issue for issue in issues if issue.critical]
+
+
+def audit_counts(issues: Iterable[AuditIssue]) -> dict[str, int]:
+    counts = {"critical": 0, "warning": 0}
+    for issue in issues:
+        counts[issue.severity] = counts.get(issue.severity, 0) + 1
+    return counts
 
 
 def assert_registry_clean(
@@ -381,7 +457,9 @@ __all__ = [
     "SlashEntry",
     "assert_registry_clean",
     "audit_command_registry",
+    "audit_counts",
     "callback_key",
+    "original_command_name",
     "critical_issues",
     "iter_slash_entries",
 ]

@@ -1,11 +1,13 @@
 """Centre d'aide officiel SentriX.
 
-+help et /help partagent la même logique. L'accueil reste volontairement léger :
++help et /aide partagent la même logique. L'accueil reste volontairement léger :
 il sert à trouver une commande, pas à configurer le serveur.
 """
 from __future__ import annotations
 
 import os
+import re
+import unicodedata
 from collections import OrderedDict
 from urllib.parse import urlparse
 
@@ -95,18 +97,39 @@ def _category(command: commands.Command) -> str:
     return CATEGORY_NAMES.get(_cog_name(command), "Informations")
 
 
+def _container_only(command: commands.Command) -> bool:
+    """Vrai pour un groupe qui n'est qu'un dossier de sous-commandes."""
+    children = list(getattr(command, "commands", ()) or ())
+    return bool(children) and not bool(getattr(command, "invoke_without_command", False))
+
+
 def _visible(bot: commands.Bot, _member=None) -> list[commands.Command]:
-    """Toutes les commandes réelles sont visibles dans l'aide, permission ou non."""
+    """Catalogue logique de l'aide.
+
+    On montre toutes les vraies actions, même si le membre n'a pas encore la
+    permission, mais pas les simples conteneurs ni plusieurs façades du même
+    callback métier. Les anciens alias restent indiqués dans la fiche.
+    """
     rows: list[commands.Command] = []
-    seen: set[str] = set()
+    seen_names: set[str] = set()
+    seen_callbacks: set[tuple[str, str]] = set()
+
     for command in bot.walk_commands():
-        if command.hidden:
+        if command.hidden or _container_only(command):
             continue
-        key = command.qualified_name.casefold()
-        if key in seen:
+        name_key = command.qualified_name.casefold().strip()
+        if not name_key or name_key in seen_names:
             continue
-        seen.add(key)
+
+        callback = _callback_key(getattr(command, "callback", None))
+        if callback is not None and callback in seen_callbacks:
+            continue
+
+        seen_names.add(name_key)
+        if callback is not None:
+            seen_callbacks.add(callback)
         rows.append(command)
+
     return rows
 
 
@@ -199,9 +222,8 @@ def _usage(command: commands.Command, prefix: str) -> str:
 
 def _command_label(bot: commands.Bot, command: commands.Command, prefix: str) -> str:
     slash = _slash_name(bot, command)
-    label = f"{prefix}{_display_name(command)}"
-    if slash:
-        label += f"   /{slash}"
+    prefix_name = f"{prefix}{_display_name(command)}"
+    label = f"/{slash}  ·  {prefix_name}" if slash else prefix_name
     return label[:256]
 
 
@@ -216,7 +238,7 @@ def _decorate(panel: discord.Embed, bot: commands.Bot) -> discord.Embed:
 def _home(bot: commands.Bot, member=None) -> discord.Embed:
     grouped = _ordered_categories(bot, member)
     panel = embeds.help_embed(
-        "SentriX — Centre d’aide",
+        "Centre d’aide",
         "Retrouvez rapidement les commandes et fonctionnalités de SentriX.",
     )
     lines = []
@@ -226,7 +248,7 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
     panel.add_field(name="Catégories", value="\n".join(lines), inline=False)
     panel.add_field(
         name="Recherche rapide",
-        value="Tapez `+help ban`, `/help commande:ban` ou utilisez **Rechercher**.",
+        value="Tapez `+help ban`, `/aide commande:ban` ou utilisez **Rechercher**.",
         inline=False,
     )
     panel.add_field(
@@ -239,9 +261,9 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
 
 
 def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discord.Embed:
-    slash = _slash_map(bot).get(command.qualified_name.casefold())
+    slash = _slash_name(bot, command)
     requirement = command_requirement(command)
-    panel = embeds.help_embed(f"SentriX — {_display_name(command)}", _description(command))
+    panel = embeds.help_embed(_display_name(command), _description(command))
     panel.add_field(name="Commande", value=f"`{_usage(command, prefix)}`", inline=False)
     if slash:
         panel.add_field(name="Slash", value=f"`/{slash}`", inline=True)
@@ -272,7 +294,7 @@ def _pages(bot: commands.Bot, command_rows: list[commands.Command], prefix: str,
     pages: list[discord.Embed] = []
     for page_index, chunk in enumerate(chunks, start=1):
         panel = embeds.help_embed(
-            f"SentriX — {title}",
+            title,
             "Sélectionnez ou recherchez une commande pour afficher sa fiche complète.",
         )
         if not chunk:
@@ -304,37 +326,78 @@ def _ordered_categories(bot: commands.Bot, member=None) -> OrderedDict[str, int]
     return result
 
 
+def _search_key(value: object) -> str:
+    raw = unicodedata.normalize("NFKD", str(value or "").casefold())
+    raw = "".join(char for char in raw if not unicodedata.combining(char))
+    raw = raw.replace("_", " ").replace("-", " ")
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", raw)).strip()
+
+
+def _search_terms(bot: commands.Bot, command: commands.Command) -> dict[str, str]:
+    slash = _slash_name(bot, command) or ""
+    aliases = " ".join(str(alias) for alias in (command.aliases or ()))
+    return {
+        "slash": _search_key(slash),
+        "display": _search_key(_display_name(command)),
+        "qualified": _search_key(command.qualified_name),
+        "name": _search_key(command.name),
+        "aliases": _search_key(aliases),
+        "category": _search_key(_category(command)),
+        "description": _search_key(_description(command)),
+        "permission": _search_key(command_requirement(command)),
+    }
+
+
 def _search(
     bot: commands.Bot,
     command_rows: list[commands.Command],
     query: str,
 ) -> list[commands.Command]:
-    needle = query.casefold().strip().lstrip("+/")
+    needle = _search_key(str(query or "").lstrip("+/"))
     if not needle:
         return []
-    ranked: list[tuple[int, commands.Command]] = []
+
+    ranked: list[tuple[int, int, commands.Command]] = []
     for command in command_rows:
-        aliases = [alias.casefold() for alias in (command.aliases or [])]
-        name = command.qualified_name.casefold()
-        slash = str(_slash_name(bot, command) or "").casefold()
-        category = _category(command).casefold()
-        description = _description(command).casefold()
-        haystack = " ".join([name, slash, *aliases, category, description])
+        terms = _search_terms(bot, command)
+        exact = {
+            terms["slash"],
+            terms["display"],
+            terms["qualified"],
+            terms["name"],
+        }
+        exact.update(_search_key(alias) for alias in (command.aliases or ()))
+
+        haystack = " ".join(value for value in terms.values() if value)
         if needle not in haystack:
             continue
-        if needle in {name, slash, command.name.casefold(), *aliases}:
+
+        if needle in exact:
             rank = 0
-        elif slash.startswith(needle) or name.startswith(needle):
+        elif terms["slash"].startswith(needle) or terms["display"].startswith(needle):
             rank = 1
-        elif needle in slash or needle in name:
+        elif needle in terms["slash"] or needle in terms["display"]:
             rank = 2
-        elif needle in category:
+        elif needle in terms["qualified"] or needle in terms["aliases"]:
             rank = 3
-        else:
+        elif needle in terms["category"] or needle in terms["permission"]:
             rank = 4
-        ranked.append((rank, command))
-    ranked.sort(key=lambda row: (row[0], row[1].qualified_name.casefold()))
-    return [command for _, command in ranked]
+        else:
+            rank = 5
+
+        # Les commandes réellement publiées en slash gagnent à rang égal.
+        slash_bonus = 0 if terms["slash"] else 1
+        ranked.append((rank, slash_bonus, command))
+
+    ranked.sort(
+        key=lambda row: (
+            row[0],
+            row[1],
+            _search_key(_display_name(row[2])),
+            _search_key(row[2].qualified_name),
+        )
+    )
+    return [command for _, _, command in ranked]
 
 
 def _recommended_invite_permissions() -> discord.Permissions:
@@ -403,18 +466,23 @@ async def _private_error(interaction: discord.Interaction, text: str) -> None:
         await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
 
 
-def _exact_match(rows: list[commands.Command], query: str) -> commands.Command | None:
-    needle = query.casefold().strip().lstrip("+/")
-    return next(
-        (
-            command for command in rows
-            if needle in {
-                command.name.casefold(), command.qualified_name.casefold(),
-                *(alias.casefold() for alias in command.aliases),
-            }
-        ),
-        None,
-    )
+def _exact_match(
+    bot: commands.Bot,
+    rows: list[commands.Command],
+    query: str,
+) -> commands.Command | None:
+    needle = _search_key(str(query or "").lstrip("+/"))
+    for command in rows:
+        terms = {
+            _search_key(command.name),
+            _search_key(command.qualified_name),
+            _search_key(_display_name(command)),
+            _search_key(_slash_name(bot, command) or ""),
+            *(_search_key(alias) for alias in (command.aliases or ())),
+        }
+        if needle and needle in terms:
+            return command
+    return None
 
 
 def _lots(command_rows: list[commands.Command]) -> list[list[commands.Command]]:
@@ -435,11 +503,11 @@ class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
         vue = self.help_view
         recherche = str(self.query.value)
         rows = _search(vue.bot, _visible(vue.bot, interaction.user), recherche)
-        exact = _exact_match(rows, recherche)
+        exact = _exact_match(vue.bot, rows, recherche)
         if exact:
             nouvelle = VueAide(
                 vue.bot, vue.prefix, interaction.user.id,
-                titre=f"SentriX — {exact.qualified_name}",
+                titre=_display_name(exact),
                 resume=_description(exact),
                 sections=_sections_detail(vue.bot, exact, vue.prefix),
                 member=interaction.user,
@@ -447,7 +515,7 @@ class SearchModal(discord.ui.Modal, title="Rechercher une commande"):
         else:
             nouvelle = VueAide(
                 vue.bot, vue.prefix, interaction.user.id,
-                titre=f"SentriX — recherche « {recherche[:40]} »",
+                titre=f"Recherche · {recherche[:40]}",
                 lots=_lots(rows), index=0, member=interaction.user,
             )
         await _remplacer(interaction, nouvelle)
@@ -458,8 +526,9 @@ class CategorySelect(discord.ui.Select):
         self.owner = owner
         options = [
             discord.SelectOption(
-                label=name[:100], value=name,
-                description=CATEGORY_DESCRIPTIONS.get(name, f"{count} commande(s)")[:100],
+                label=f"{name} · {count}"[:100],
+                value=name,
+                description=CATEGORY_DESCRIPTIONS.get(name, "Commandes SentriX.")[:100],
             )
             for name, count in _ordered_categories(owner.bot, owner.member).items()
         ]
@@ -476,7 +545,7 @@ class CategorySelect(discord.ui.Select):
             interaction,
             VueAide(
                 self.owner.bot, self.owner.prefix, interaction.user.id,
-                titre=f"SentriX — {category}",
+                titre=category,
                 lots=_lots(rows), index=0, member=interaction.user,
             ),
         )
@@ -595,7 +664,7 @@ class VueAide(discord.ui.LayoutView):
         prefix: str,
         author_id: int,
         *,
-        titre: str = "SentriX — Centre d'aide",
+        titre: str = "Centre d'aide",
         resume: str | None = None,
         sections: list[panels.Section] | None = None,
         lots: list[list] | None = None,
@@ -806,11 +875,11 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
 
         if query:
             rows = _search(self.bot, _visible(self.bot, member), query)
-            exact = _exact_match(rows, query)
+            exact = _exact_match(self.bot, rows, query)
             if exact:
                 vue = VueAide(
                     self.bot, prefix, member.id,
-                    titre=f"SentriX — {_display_name(exact)}",
+                    titre=_display_name(exact),
                     resume=_description(exact),
                     sections=_sections_detail(self.bot, exact, prefix),
                     member=member,
@@ -818,7 +887,7 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
             else:
                 vue = VueAide(
                     self.bot, prefix, member.id,
-                    titre=f"SentriX — recherche « {query[:40]} »",
+                    titre=f"Recherche · {query[:40]}",
                     lots=_lots(rows), index=0, member=member,
                 )
         else:
@@ -830,10 +899,27 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
     async def prefix_help(self, ctx: commands.Context, *, query: str | None = None):
         await self.send_help(ctx, query)
 
-    @app_commands.command(name="help", description="Ouvrir le centre d’aide SentriX")
-    @app_commands.describe(commande="Nom ou mot-clé d'une commande")
+    @app_commands.command(name="aide", description="Ouvrir le centre d’aide SentriX")
+    @app_commands.describe(commande="Nom, slash, catégorie ou mot-clé")
     async def slash_help(self, interaction: discord.Interaction, commande: str | None = None):
         await self.send_help(interaction, commande)
+
+    @slash_help.autocomplete("commande")
+    async def slash_help_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str,
+    ) -> list[app_commands.Choice[str]]:
+        rows = _visible(self.bot, interaction.user)
+        matches = _search(self.bot, rows, current) if current.strip() else rows
+        choices: list[app_commands.Choice[str]] = []
+        for command in matches[:25]:
+            slash = _slash_name(self.bot, command)
+            public = f"/{slash}" if slash else f"+{_display_name(command)}"
+            label = f"{public} · {_description(command)}"[:100]
+            value = (slash or _display_name(command))[:100]
+            choices.append(app_commands.Choice(name=label, value=value))
+        return choices
 
 
 async def setup(bot: commands.Bot):
@@ -841,4 +927,5 @@ async def setup(bot: commands.Bot):
     if old is not None:
         bot.remove_command("help")
     bot.tree.remove_command("help", type=discord.AppCommandType.chat_input)
+    bot.tree.remove_command("aide", type=discord.AppCommandType.chat_input)
     await bot.add_cog(OfficialHelp(bot))

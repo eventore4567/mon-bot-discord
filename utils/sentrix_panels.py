@@ -86,6 +86,32 @@ _FAMILY_LABELS = {
     "goodbye": "Départ",
 }
 
+_STATE_LABELS = {
+    "success": "Succès",
+    "danger": "Erreur",
+    "warning": "Attention",
+}
+_STATE_KINDS = frozenset(_STATE_LABELS)
+_LEGACY_BRAND_TITLE_RE = _re.compile(
+    r"^(?:sentrix(?:\s+core)?)(?:\s*[—–-]\s*|\s*[•·:]\s*)+",
+    _re.IGNORECASE,
+)
+
+
+def titre_core(value: object) -> str:
+    """Nettoie seulement la marque héritée répétée dans un titre.
+
+    La marque vit déjà dans la signature SENTRIX CORE. On garde en revanche les
+    mots métier et les emojis utiles : le but est d'enlever "SentriX — SentriX —",
+    pas de rendre les cartes fades.
+    """
+    raw = str(value or "").strip()
+    previous = None
+    while raw and raw != previous:
+        previous = raw
+        raw = _LEGACY_BRAND_TITLE_RE.sub("", raw).strip()
+    return raw or "SentriX"
+
 
 def _core_family_label(family: str) -> str:
     """Étiquette de domaine, ou chaîne vide s'il n'y en a pas.
@@ -125,8 +151,11 @@ def _core_command_name() -> str:
     return str(name)
 
 
-def _core_signature(family: str) -> str:
+def _core_signature(family: str, state_kind: str | None = None) -> str:
     parts = [CORE_NAME, _core_family_label(family)]
+    state_label = _STATE_LABELS.get(str(state_kind or "").casefold())
+    if state_label and state_label != parts[-1]:
+        parts.append(state_label)
     command = _core_command_name()
     if command:
         parts.append(command)
@@ -134,23 +163,36 @@ def _core_signature(family: str) -> str:
     return " · ".join(p for p in parts if p)
 
 
-def _core_footer(family: str, footer: str | None = None) -> str:
+def _core_footer(
+    family: str,
+    footer: str | None = None,
+    state_kind: str | None = None,
+) -> str:
     raw = str(footer or "").strip()
-    raw = _re.sub(r"^SentriX(?:\s*Core)?\s*[•·]\s*", "", raw, flags=_re.IGNORECASE).strip()
+    raw = _re.sub(
+        r"^SentriX(?:\s*Core)?(?:\s*[•·:—–-]\s*)+",
+        "",
+        raw,
+        flags=_re.IGNORECASE,
+    ).strip()
     if raw.casefold() in {"sentrix", "sentrix core"}:
         raw = ""
-    base = _core_signature(family)
+    base = _core_signature(family, state_kind)
     return f"{base} · {raw}" if raw else base
 
 
-def signature_core(family: str) -> str:
+def signature_core(family: str, state_kind: str | None = None) -> str:
     """Signature publique du design de commandes SentriX Core."""
-    return _core_signature(family)
+    return _core_signature(family, state_kind)
 
 
-def pied_core(family: str, footer: str | None = None) -> str:
+def pied_core(
+    family: str,
+    footer: str | None = None,
+    state_kind: str | None = None,
+) -> str:
     """Pied public SentriX Core, en conservant une information métier utile."""
-    return _core_footer(family, footer)
+    return _core_footer(family, footer, state_kind)
 
 _LIMITE_LIGNE = 240
 _LIMITE_BLOC = 3800
@@ -454,7 +496,7 @@ class Panneau(discord.ui.LayoutView):
     ) -> None:
         super().__init__(timeout=timeout)
         self.kind = kind if kind in INTENTIONS else "info"
-        self.titre = str(titre or "")
+        self.titre = titre_core(titre)
         self.sous_titre = str(sous_titre or "") if sous_titre else ""
         self.sections_source = tuple(sections)
         self.boutons_source = tuple(boutons)
@@ -462,9 +504,18 @@ class Panneau(discord.ui.LayoutView):
         # Réponse en texte libre (IA, traduction) : pas de bandeau au-dessus du texte.
         self.avec_banniere = banniere and not commande_en_texte_libre()
         banniere = self.avec_banniere
-        # Une seule décision pour le liseré du conteneur ET la bannière : sur une
-        # réponse neutre, les deux prennent la couleur de la commande en cours.
+        # La bannière/liseré exprime l'ÉTAT (succès, erreur, attention), tandis que
+        # la signature conserve le DOMAINE de la commande. Ainsi une réussite
+        # économique reste immédiatement identifiable comme Économie, sans perdre
+        # son vert de confirmation.
         accent, self.famille = accord_commande(self.kind)
+        command_family = famille_de_la_commande()
+        self.identite_famille = (
+            command_family
+            if self.kind in _STATE_KINDS and command_family
+            else self.famille
+        )
+        self.etat_core = self.kind if self.kind in _STATE_KINDS else None
 
         conteneur = discord.ui.Container(accent_colour=discord.Colour(accent))
 
@@ -481,12 +532,12 @@ class Panneau(discord.ui.LayoutView):
 
         # Signature visuelle SentriX Core : domaine + commande conseillée.
         conteneur.add_item(
-            discord.ui.TextDisplay(f"-# {_core_signature(self.famille)}")
+            discord.ui.TextDisplay(f"-# {_core_signature(self.identite_famille, self.etat_core)}")
         )
 
         # 2 — titre et sous-titre. La vignette, quand il y en a une, se place à
         #     droite du titre plutôt qu'en médaillon perdu dans un coin.
-        entete = f"## {_texte(titre, 200)}"
+        entete = f"## {_texte(self.titre, 200)}"
         if sous_titre:
             entete += f"\n{_texte(sous_titre, 400)}"
         pose = False
@@ -529,11 +580,14 @@ class Panneau(discord.ui.LayoutView):
             conteneur.add_item(contenu)
 
         # Le pied n'est posé que s'il DIT quelque chose de plus que l'en-tête.
-        # Sans texte métier, _core_footer rend exactement la signature déjà
-        # affichée en tête : le panneau portait alors deux fois la même ligne,
-        # en haut et en bas. C'est du bruit, et ça se voit immédiatement.
-        signature_fin = _core_footer(self.famille, pied)
-        if signature_fin.strip() != _core_signature(self.famille).strip():
+        # Sans texte métier ET sans état, _core_footer rend exactement la
+        # signature déjà affichée en tête : le panneau portait alors deux fois
+        # la même ligne, en haut et en bas. C'est du bruit, et ça se voit
+        # immédiatement. Avec un état ou un texte métier, le pied dit quelque
+        # chose de plus et reste posé — les deux améliorations se composent.
+        signature_fin = _core_footer(self.identite_famille, pied, self.etat_core)
+        entete_core = _core_signature(self.identite_famille, self.etat_core)
+        if signature_fin.strip() != entete_core.strip():
             conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(signature_fin, 240)}"))
 
         # 5 — navigation, DANS le conteneur pour rester sous l'accent de couleur.
@@ -945,7 +999,7 @@ def depuis_embed(
     vignette = getattr(getattr(embed, "thumbnail", None), "url", None)
     pied_embed = getattr(getattr(embed, "footer", None), "text", None)
     return Panneau(
-        titre=titre or str(getattr(embed, "title", "") or "SentriX"),
+        titre=titre_core(titre or str(getattr(embed, "title", "") or "SentriX")),
         sous_titre=sous_titre or _sans_barre(getattr(embed, "description", "")) or None,
         kind=kind,
         vignette=vignette,
@@ -1005,6 +1059,7 @@ __all__ = [
     "nom_banniere",
     "signature_core",
     "pied_core",
+    "titre_core",
 ]
 
 
