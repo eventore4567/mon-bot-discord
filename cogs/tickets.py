@@ -1479,7 +1479,7 @@ class Tickets(commands.Cog):
         await sx_panels.envoyer(
             interaction,
             sx_panels.Panneau(
-                titre="SentriX — Ticket ouvert",
+                titre="Ticket ouvert",
                 sous_titre=f"Votre ticket est prêt dans {channel.mention}.",
                 kind="success",
                 sections=[
@@ -1506,7 +1506,7 @@ class Tickets(commands.Cog):
                         ],
                     ),
                 ],
-                pied="SentriX • Tickets",
+                pied="Tickets",
             ),
             ephemere=True,
         )
@@ -2057,7 +2057,7 @@ class Tickets(commands.Cog):
             return await sx_panels.envoyer(
                 ctx,
                 sx_panels.Panneau(
-                    titre="SentriX — Tickets",
+                    titre="Tickets",
                     sous_titre="Aucun panel de ticket n'est encore configuré sur ce serveur.",
                     kind="warning",
                     sections=[
@@ -2082,7 +2082,7 @@ class Tickets(commands.Cog):
                             ],
                         ),
                     ],
-                    pied="SentriX • Tickets",
+                    pied="Tickets",
                 ),
                 ephemere=bool(ctx.interaction),
             )
