@@ -54,9 +54,9 @@ def test_legacy_command_renderer_uses_same_core_grammar():
     source = (ROOT / "utils" / "command_visuals.py").read_text(encoding="utf-8")
 
     assert '"SENTRIX CORE"' in source
-    assert "_core_signature(ctx, family)" in source
+    assert "_core_signature(ctx, identity_family, state_kind)" in source
     assert '"### 01 · Résultat"' in source
-    assert "_core_footer(ctx, family, footer)" in source
+    assert "_core_footer(ctx, identity_family, footer, state_kind)" in source
 
 
 def test_help_uses_sentrix_core_and_numbered_sections():
