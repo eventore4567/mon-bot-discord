@@ -73,6 +73,22 @@ def pictogramme_du_jeu(nom: str) -> str:
 
 # Secours pour les écrans de jeu rattachés à aucun jeu précis (classements,
 # réglages, récapitulatifs) : le catalogue ne peut rien en dire, le titre si.
+#: Un écran de RÉSULTAT dit d'abord le résultat. Ces mots passent AVANT le
+#: pictogramme du jeu : sur « Gagné ! », le pictogramme du pendu répète ce que
+#: le joueur sait déjà, alors que « ✅ » lui apprend quelque chose. Tous les
+#: titres de fin retombaient sur le « 🎮 » générique — « 🎮 Gagné ! »,
+#: « 🎮 Perdu », « 🎮 Temps écoulé » — et les manches se ressemblaient toutes.
+_MOTS_RESULTAT = (
+    (("égalité", "egalite", "match nul"), "🤝"),
+    (("temps écoulé", "temps ecoule", "expiré", "expire", "trop tard"), "⏱️"),
+    (("record", "série", "serie", "combo", "jackpot"), "🔥"),
+    (("gagné", "gagne", "gagnant", "bravo", "bonne réponse", "bonne reponse",
+      "trouvé", "trouve", "réussi", "reussi", "victoire"), "✅"),
+    (("perdu", "perdant", "mauvaise réponse", "mauvaise reponse", "faux",
+      "raté", "rate", "échec", "echec", "défaite", "defaite"), "❌"),
+    (("invalide", "introuvable", "déjà", "deja"), "⚠️"),
+)
+
 _MOTS_CLES = (
     (("réaction", "reaction", "clic"), "⚡"),
     (("vitesse", "retape", "fast"), "⌨️"),
@@ -84,7 +100,14 @@ _MOTS_CLES = (
     (("trésor", "tresor", "treasure"), "💎"),
     (("aventure", "quête", "quete"), "🗺️"),
     (("plus haut", "plus bas"), "🃏"),
-    (("quiz", "trivia"), "❓"),
+    (("quiz", "trivia", "culture générale", "culture generale"), "❓"),
+    # Les cinq mini-jeux de cogs/minigames : ils retombaient sur « 🎮 », donc
+    # cinq jeux différents ouvraient sur la même image.
+    (("pendu", "hangman"), "🪢"),
+    (("morpion", "tictactoe", "tic-tac-toe"), "⭕"),
+    (("pierre-feuille-ciseaux", "pierre feuille", "chifoumi", "rps"), "✌️"),
+    (("devine le nombre", "devine", "guess"), "🔢"),
+    (("mathématique", "mathematique", "calcul"), "🧮"),
     (("course", "race"), "🏁"),
     (("duel",), "⚔️"),
     (("collection", "butin", "prise"), "🎒"),
@@ -99,10 +122,16 @@ def pictogramme_de_titre(titre: str) -> str:
     `dice` est un dé et `slots` une machine à sous —, les mots-clés ensuite,
     et « 🎮 » seulement quand rien d'autre ne dit mieux.
     """
+    valeur = str(titre or "").casefold()
+    # Le résultat d'abord : c'est lui qui porte l'information sur un écran de
+    # fin de manche. Le catalogue sait que `slots` est une machine à sous, mais
+    # sur « Perdu » cette image ne dit rien de plus que le nom de la commande.
+    for mots, icone in _MOTS_RESULTAT:
+        if any(mot in valeur for mot in mots):
+            return icone
     depuis_catalogue = pictogramme_du_jeu(jeu_en_cours())
     if depuis_catalogue:
         return depuis_catalogue
-    valeur = str(titre or "").casefold()
     for mots, icone in _MOTS_CLES:
         if any(mot in valeur for mot in mots):
             return icone

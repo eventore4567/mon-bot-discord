@@ -48,6 +48,10 @@ REWARD_GUESS_BASE = 15  # + bonus selon le nombre d'essais (voir guess_number)
 REWARD_TRIVIA = 20
 REWARD_TICTACTOE = 40
 REWARD_HANGMAN = 25
+#: Essais du pendu. Constante parce que l'affichage en coeurs a besoin du TOTAL
+#: pour dessiner les coeurs vides : deux 6 écrits séparément finiraient par
+#: diverger, et la barre afficherait alors plus de coeurs qu'il n'y a d'essais.
+ESSAIS_PENDU = 6
 REWARD_MATH_QUIZ = 12
 REWARD_BLACKJACK = 25
 REWARD_SLOTS_JACKPOT = 100
@@ -84,6 +88,15 @@ class Minigames(commands.Cog, name="Minigames"):
         # cogs/games_economy : « Question de culture générale » arrivait nu.
         embed.title = f"{pictogramme_de_titre(title)} {resolu}"
         return embed
+
+    @staticmethod
+    def _coeurs(restants: int, total: int = ESSAIS_PENDU) -> str:
+        """Les essais restants en coeurs, parce qu'un chiffre nu se lit mal.
+
+        « Essais restants : 2 » demande de réfléchir ; « ❤️❤️🖤🖤🖤🖤 » se voit.
+        """
+        restants = max(0, min(int(restants), total))
+        return "❤️" * restants + "🖤" * (total - restants)
 
     @staticmethod
     def _reward_line(reward: "game_rewards.GameReward | None") -> str:
@@ -338,7 +351,7 @@ class Minigames(commands.Cog, name="Minigames"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{answer}**.', kind='warning')))
         if game_rewards.answer_matches(msg.content, answer):
             reward = await self._finish(ctx, "trivia", session_id, "win", REWARD_TRIVIA)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='●' + self._reward_line(reward), kind='success')))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='✅ **Bien joué !**' + self._reward_line(reward), kind='success')))
         else:
             await self._finish(ctx, "trivia", session_id, "loss", 0)
             await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Mauvaise réponse', description=f'❌ La bonne réponse était **{answer}**.', kind='danger')))
@@ -393,9 +406,9 @@ class Minigames(commands.Cog, name="Minigames"):
         words = ["python", "discord", "ordinateur", "clavier", "programmation", "serveur", "aventure", "reaction"]
         word = game_rewards.secure_pick(words)
         guessed = set()
-        tries = 6
+        tries = ESSAIS_PENDU
         display = "".join(c if c in guessed else "_" for c in word)
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'🎯 `{display}`\nEssais restants : {tries}')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'🎯 `{display}`\nEssais restants : {self._coeurs(tries)}')))
 
         def check(m):
             return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id and len(m.content) == 1
@@ -408,7 +421,7 @@ class Minigames(commands.Cog, name="Minigames"):
                 return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', description=f'⏱️ Le mot était **{word}**.', kind='warning')))
             letter = m.content.lower()
             if letter in guessed:
-                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'Lettre déjà proposée : **{letter}**\n🎯 `{display}`\nEssais restants : {tries}', kind='warning')))
+                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'Lettre déjà proposée : **{letter}**\n🎯 `{display}`\nEssais restants : {self._coeurs(tries)}', kind='warning')))
                 continue
             if letter in word:
                 guessed.add(letter)
@@ -416,7 +429,7 @@ class Minigames(commands.Cog, name="Minigames"):
             else:
                 guessed.add(letter)
                 tries -= 1
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'🎯 `{display}`\nEssais restants : {tries}')))
+            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Pendu', description=f'🎯 `{display}`\nEssais restants : {self._coeurs(tries)}')))
 
         if "_" not in display:
             reward = await self._finish(ctx, "hangman", session_id, "win", REWARD_HANGMAN)
@@ -448,7 +461,7 @@ class Minigames(commands.Cog, name="Minigames"):
         try:
             if int(msg.content.strip()) == answer:
                 reward = await self._finish(ctx, "math-quiz", session_id, "win", REWARD_MATH_QUIZ)
-                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='●' + self._reward_line(reward), kind='success')))
+                await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='✅ **Bien joué !**' + self._reward_line(reward), kind='success')))
             else:
                 await self._finish(ctx, "math-quiz", session_id, "loss", 0)
                 await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Faux', description=f'❌ La réponse était **{answer}**.', kind='danger')))
