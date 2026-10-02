@@ -118,19 +118,21 @@ def iter_slash_entries(bot: Any) -> list[SlashEntry]:
 
 
 def _slash_parameter_names(node: Any) -> list[str]:
-    params = getattr(node, "parameters", None)
-    if params is not None:
+    # Si discord.py expose l'attribut parameters, même vide, cette liste est la
+    # source de vérité de ce que Discord verra. Retomber sur inspect.signature()
+    # dans ce cas réintroduit self/ctx des callbacks internes et fabrique de faux
+    # positifs alors que ces paramètres ne sont jamais publiés.
+    if hasattr(node, "parameters"):
+        params = getattr(node, "parameters", None)
         try:
-            values = list(params)
+            values = list(params or ())
         except TypeError:
             values = []
-        names = [
+        return [
             str(getattr(param, "name", "") or "").strip()
             for param in values
             if str(getattr(param, "name", "") or "").strip()
         ]
-        if names:
-            return names
 
     callback = _unwrap_callback(getattr(node, "callback", None))
     if callback is None:
