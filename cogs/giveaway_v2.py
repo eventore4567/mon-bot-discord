@@ -1018,15 +1018,21 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         count_row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM giveaway_entries_v2 WHERE giveaway_id=?", (row["id"],))
         count = int(count_row["n"] if count_row else 0)
         try:
-            await panels.editer(
-                interaction.message,
-                await self.public_panel_from_row(
-                    interaction.guild,
-                    row,
-                    count=count,
-                    status="actif",
-                ),
-            )
+            if interaction.message.embeds:
+                # Giveaway créé avant la migration Components V2 : on conserve
+                # uniquement son bouton pour ne pas tenter une conversion que
+                # Discord refuse par édition.
+                await interaction.message.edit(view=AdvancedGiveawayView(count))
+            else:
+                await panels.editer(
+                    interaction.message,
+                    await self.public_panel_from_row(
+                        interaction.guild,
+                        row,
+                        count=count,
+                        status="actif",
+                    ),
+                )
         except discord.HTTPException:
             pass
         await interaction.response.send_message(text, ephemeral=True)
@@ -1069,15 +1075,20 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
                     "SELECT * FROM giveaways_v2 WHERE id=?",
                     (row["id"],),
                 ) or row
-                await panels.editer(
-                    original,
-                    await self.public_panel_from_row(
-                        guild,
-                        fresh,
-                        status="termine",
-                        winners=winners,
-                    ),
+                result_panel = await self.public_panel_from_row(
+                    guild,
+                    fresh,
+                    status="termine",
+                    winners=winners,
                 )
+                if original.embeds:
+                    # Ancien message embed : Discord ne permet pas de le
+                    # transformer en Components V2 par edit. On désactive son
+                    # bouton puis on publie le résultat propre juste après.
+                    await original.edit(view=None)
+                    await panels.envoyer(channel, result_panel)
+                else:
+                    await panels.editer(original, result_panel)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
         return winners
@@ -1120,14 +1131,16 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
                     "SELECT * FROM giveaways_v2 WHERE id=?",
                     (row["id"],),
                 ) or row
-                await panels.editer(
-                    original,
-                    await self.public_panel_from_row(
-                        ctx.guild,
-                        fresh,
-                        status="annule",
-                    ),
+                cancelled_panel = await self.public_panel_from_row(
+                    ctx.guild,
+                    fresh,
+                    status="annule",
                 )
+                if original.embeds:
+                    await original.edit(view=None)
+                    await panels.envoyer(channel, cancelled_panel)
+                else:
+                    await panels.editer(original, cancelled_panel)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
         await panels.texte_court(ctx, "Giveaway annulé.")
