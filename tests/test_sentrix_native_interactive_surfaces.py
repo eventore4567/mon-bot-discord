@@ -122,10 +122,13 @@ def test_infinite_counter_staff_override_is_guarded_and_stale_safe():
     assert "self.accepted_override = True" in source
 
 
-def test_infinite_counter_invalid_message_does_not_ping_anyone():
+def test_infinite_counter_invalid_message_pings_only_the_author():
     source = _source("cogs/infinite_counter.py")
 
-    assert "allowed_mentions=discord.AllowedMentions.none()" in source
+    assert 'content=f"<@{message.author.id}>"' in source
+    assert "users=[message.author]" in source
+    assert "everyone=False" in source
+    assert "roles=False" in source
 
 
 
@@ -138,3 +141,14 @@ def test_infinite_counter_assistant_pings_only_author_and_waits_one_minute():
     assert "everyone=False" in source
     assert "roles=False" in source
     assert "Sans réponse, ton message sera supprimé automatiquement dans 1 minute." in source
+
+
+
+def test_infinite_counter_timeout_deletes_only_when_member_did_not_answer():
+    source = _source("cogs/infinite_counter.py")
+
+    assert "self.responded = False" in source
+    assert "self.responded = True" in source
+    assert "if not self.responded and not self.accepted_override:" in source
+    mistake = source[source.index("async def _mistake"):source.index("async def _correct_counter")]
+    assert "self.stop()" in mistake
