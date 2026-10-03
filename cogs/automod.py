@@ -1552,9 +1552,15 @@ class AutoMod(commands.Cog, name="Automod"):
     @staticmethod
     def _message_scope_ids(message: discord.Message) -> set[int]:
         """IDs du salon courant + parent d'un thread, sans inventer de ressource."""
+        def _id(value: object) -> int:
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
         ids: set[int] = set()
-        channel_id = int(getattr(message.channel, "id", 0) or 0)
-        parent_id = int(getattr(message.channel, "parent_id", 0) or 0)
+        channel_id = _id(getattr(message.channel, "id", 0))
+        parent_id = _id(getattr(message.channel, "parent_id", 0))
         if channel_id:
             ids.add(channel_id)
         if parent_id:
