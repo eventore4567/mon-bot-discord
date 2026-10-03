@@ -1178,6 +1178,16 @@ class WideLogView(discord.ui.LayoutView):
                 else:
                     container.add_item(discord.ui.TextDisplay(f"**{filename}**"))
 
+        # Footer discret AVANT les actions : les boutons restent réellement tout en
+        # bas de la carte, comme une barre d'actions premium, et ne sont plus coupés
+        # du contenu utile par une ligne technique.
+        footer = safe_text(getattr(embed.footer, "text", None))[:160]
+        time_text = _trace_time_text(embed)
+        footer_text = _trace_footer(event_type, footer)
+        if time_text:
+            footer_text = f"{time_text} · {footer_text}"
+        container.add_item(discord.ui.TextDisplay(f"-# {footer_text}"))
+
         rows = build_rows(old_view)
         if rows:
             try:
@@ -1186,14 +1196,6 @@ class WideLogView(discord.ui.LayoutView):
                 logger.exception("SENTRIX TRACE V7 actions separator")
             for row in rows:
                 container.add_item(row)
-
-        # Footer compact : temps relatif + trace. Aucun doublon SentriX.
-        footer = safe_text(getattr(embed.footer, "text", None))[:160]
-        time_text = _trace_time_text(embed)
-        footer_text = _trace_footer(event_type, footer)
-        if time_text:
-            footer_text = f"{time_text} · {footer_text}"
-        container.add_item(discord.ui.TextDisplay(f"-# {footer_text}"))
 
         self.add_item(container)
 
