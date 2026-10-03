@@ -18,6 +18,33 @@ from utils import sentrix_panels as panels
 
 
 logger = logging.getLogger("bot.notifications")
+
+
+class _YTDLPCaptureLogger:
+    """Capture yt-dlp sans polluer stderr.
+
+    yt-dlp imprime certains états normaux (ex. Twitch hors ligne) directement
+    en ERROR même avec quiet=True. On capture donc ces lignes, puis le code
+    appelant décide si c'est une vraie panne ou un état normal.
+    """
+
+    def __init__(self):
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+
+    def debug(self, message):
+        return None
+
+    def info(self, message):
+        return None
+
+    def warning(self, message):
+        self.warnings.append(str(message))
+
+    def error(self, message):
+        self.errors.append(str(message))
+
+
 IMAGE_FLAG_RE = re.compile(r"(?:^|\s)--image\s+(https://\S+)", re.IGNORECASE)
 SUPPORTED_SOCIAL_DOMAINS = (
     "youtube.com", "youtu.be", "tiktok.com", "twitch.tv", "instagram.com",
@@ -145,6 +172,7 @@ def _extract_latest_sync(source_url: str) -> dict | None:
     """Extraction bloquante isolée dans asyncio.to_thread par l'appelant."""
     import yt_dlp
 
+    capture = _YTDLPCaptureLogger()
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -153,10 +181,13 @@ def _extract_latest_sync(source_url: str) -> dict | None:
         "playlistend": 3,
         "ignoreerrors": True,
         "socket_timeout": 12,
+        "logger": capture,
     }
     with yt_dlp.YoutubeDL(options) as downloader:
         info = downloader.extract_info(_url_a_interroger(source_url), download=False)
     if not info:
+        if capture.errors:
+            raise RuntimeError(capture.errors[-1])
         return None
     entries = info.get("entries")
     if entries:
@@ -188,24 +219,22 @@ async def _extract_latest(source_url: str) -> dict | None:
 
 
 def _extract_details_sync(item_url: str) -> dict | None:
-    """Charge les métadonnées complètes UNIQUEMENT pour une nouvelle publication.
-
-    Le scan périodique reste léger grâce à extract_flat. Quand l'identifiant change,
-    on effectue alors un second passage ciblé afin d'obtenir la vraie miniature,
-    le vrai titre et l'URL canonique. TikTok est précisément l'une des plateformes
-    dont les entrées plates omettent souvent la miniature.
-    """
+    """Charge les métadonnées complètes UNIQUEMENT pour une nouvelle publication."""
     import yt_dlp
 
+    capture = _YTDLPCaptureLogger()
     options = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
         "ignoreerrors": True,
         "socket_timeout": 12,
+        "logger": capture,
     }
     with yt_dlp.YoutubeDL(options) as downloader:
         info = downloader.extract_info(item_url, download=False)
+    if not isinstance(info, dict) and capture.errors:
+        raise RuntimeError(capture.errors[-1])
     return info if isinstance(info, dict) else None
 
 
