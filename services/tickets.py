@@ -537,6 +537,147 @@ def duree_du_ticket(ticket, *, fin: int | None = None) -> str | None:
     return helpers.format_duration(ecoule)
 
 
+class BoutonRouvrirTicket(discord.ui.DynamicItem[discord.ui.Button],
+                           template=r"sx_ticket_open:(?P<ticket_id>[0-9]+)"):
+    """Rouvre un ticket fermé et rend immédiatement sa visibilité au membre."""
+
+    def __init__(self, ticket_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label="Rouvrir",
+                emoji="🔓",
+                style=discord.ButtonStyle.success,
+                custom_id=f"sx_ticket_open:{int(ticket_id)}",
+            )
+        )
+        self.ticket_id = int(ticket_id)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(int(match["ticket_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        from utils import embeds as _embeds
+        from utils import sentrix_panels as _panels
+
+        guild = interaction.guild
+        channel = interaction.channel
+        if guild is None or channel is None:
+            return
+
+        perms = getattr(interaction.user, "guild_permissions", None)
+        autorise = bool(
+            (perms and (perms.manage_channels or perms.administrator))
+            or interaction.user.id == guild.owner_id
+        )
+        if not autorise:
+            return await _panels.envoyer(
+                interaction.response,
+                _panels.depuis_embed(
+                    _embeds.error(
+                        "Seul un membre pouvant **gérer les salons** peut rouvrir ce ticket."
+                    )
+                ),
+                ephemere=True,
+            )
+
+        ticket = await interaction.client.db.fetchone(
+            "SELECT * FROM tickets WHERE id = ?",
+            (self.ticket_id,),
+        )
+        if ticket is None:
+            return await _panels.envoyer(
+                interaction.response,
+                _panels.depuis_embed(_embeds.error("Ticket introuvable.")),
+                ephemere=True,
+            )
+        if str(ticket["status"]) != "ferme":
+            return await _panels.envoyer(
+                interaction.response,
+                _panels.depuis_embed(
+                    _embeds.warning("Ce ticket n'est plus fermé.")
+                ),
+                ephemere=True,
+            )
+
+        cursor = await interaction.client.db.execute(
+            "UPDATE tickets SET status='ouvert', closed_at=NULL, locked=0, last_activity_at=? "
+            "WHERE id=? AND status='ferme'",
+            (int(__import__("time").time()), self.ticket_id),
+        )
+        if getattr(cursor, "rowcount", 0) != 1:
+            return await _panels.envoyer(
+                interaction.response,
+                _panels.depuis_embed(_embeds.warning("Ce ticket vient déjà d'être rouvert.")),
+                ephemere=True,
+            )
+
+        owner = guild.get_member(int(ticket["user_id"])) if ticket["user_id"] else None
+        if owner is not None:
+            overwrite = channel.overwrites_for(owner)
+            overwrite.view_channel = True
+            overwrite.send_messages = True
+            overwrite.read_message_history = True
+            try:
+                await channel.set_permissions(
+                    owner,
+                    overwrite=overwrite,
+                    reason=f"Ticket rouvert par {interaction.user}",
+                )
+            except discord.HTTPException:
+                # L'état DB doit suivre l'état réel des permissions : si Discord
+                # refuse, on remet le ticket fermé au lieu de laisser un faux ouvert.
+                await interaction.client.db.execute(
+                    "UPDATE tickets SET status='ferme', locked=1 WHERE id=?",
+                    (self.ticket_id,),
+                )
+                return await _panels.envoyer(
+                    interaction.response,
+                    _panels.depuis_embed(
+                        _embeds.error(
+                            "Discord a refusé de rendre le ticket visible au membre."
+                        )
+                    ),
+                    ephemere=True,
+                )
+
+        try:
+            from cogs.tickets import TicketControlView, get_button_settings
+
+            settings = await get_button_settings(interaction.client, guild.id)
+            panel = _panels.avec_composants(
+                _panels.depuis_embed(
+                    _embeds.success(
+                        f"Ticket **#{self.ticket_id}** rouvert par {interaction.user.mention}. "
+                        "Le membre peut de nouveau voir et utiliser le salon."
+                    )
+                ),
+                TicketControlView(settings),
+            )
+            await _panels.envoyer(interaction.response, panel)
+        except Exception:
+            if not interaction.response.is_done():
+                await _panels.envoyer(
+                    interaction.response,
+                    _panels.depuis_embed(
+                        _embeds.success(
+                            f"Ticket **#{self.ticket_id}** rouvert."
+                        )
+                    ),
+                )
+
+        await journaliser_evenement(
+            interaction.client,
+            guild,
+            "ticket_reopen",
+            ticket_id=self.ticket_id,
+            channel=channel,
+            acteur=interaction.user,
+            cible=owner,
+            raison="Réouverture manuelle depuis le panneau du ticket.",
+        )
+
+
 class BoutonSupprimerTicket(discord.ui.DynamicItem[discord.ui.Button],
                             template=r"sx_ticket_del:(?P<ticket_id>[0-9]+)"):
     """« Supprimer le salon » — l'action explicite que Jayden a demandée.
@@ -628,8 +769,16 @@ class BoutonSupprimerTicket(discord.ui.DynamicItem[discord.ui.Button],
             )
 
 
+def vue_ticket_ferme(ticket_id: int) -> discord.ui.View:
+    """Contrôles persistants d'un ticket fermé : rouvrir ou supprimer."""
+    vue = discord.ui.View(timeout=None)
+    vue.add_item(BoutonRouvrirTicket(int(ticket_id)))
+    vue.add_item(BoutonSupprimerTicket(int(ticket_id)))
+    return vue
+
+
 def vue_supprimer_ticket(ticket_id: int) -> discord.ui.View:
-    """La vue qui porte le bouton, à joindre au message de fermeture."""
+    """Compatibilité historique : vue avec suppression uniquement."""
     vue = discord.ui.View(timeout=None)
     vue.add_item(BoutonSupprimerTicket(int(ticket_id)))
     return vue
