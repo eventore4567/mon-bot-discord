@@ -407,19 +407,16 @@ class LogActionsView(discord.ui.View):
         if jump_url:
             self.add_item(
                 discord.ui.Button(
-                    label="Voir le message",
+                    label="Accéder au message",
                     style=discord.ButtonStyle.link,
                     url=jump_url,
                     row=next_row(),
                 )
             )
 
-        for label, entity_id in (ids or [])[:8]:
-            self.add_item(RevealIdButton(label, entity_id, row=next_row()))
-
-        if invite_code:
-            self.add_item(RevealInviteButton(invite_code, row=next_row()))
-
+        # Les actions utiles passent avant les IDs : sur mobile, l'utilisateur
+        # voit d'abord « Accéder… » / « Télécharger… », les outils techniques
+        # restent ensuite sans pousser la navigation sur une seconde ligne.
         for label, url in (links or [])[:12]:
             clean_url = str(url or "").strip()
             if not clean_url.startswith(("https://", "http://")):
@@ -432,6 +429,12 @@ class LogActionsView(discord.ui.View):
                     row=next_row(),
                 )
             )
+
+        if invite_code:
+            self.add_item(RevealInviteButton(invite_code, row=next_row()))
+
+        for label, entity_id in (ids or [])[:8]:
+            self.add_item(RevealIdButton(label, entity_id, row=next_row()))
 
 
 def log_actions(
