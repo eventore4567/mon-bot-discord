@@ -191,6 +191,7 @@ class SocialNotificationPanel(discord.ui.LayoutView):
         description: str,
         link: str,
         image_url: str | None,
+        creator: str | None = None,
     ):
         super().__init__(timeout=None)
         container = discord.ui.Container()
@@ -198,6 +199,12 @@ class SocialNotificationPanel(discord.ui.LayoutView):
         icon = sxemoji.emoji("video")
         heading = f"{icon} {title}".strip() if icon else title
         container.add_item(discord.ui.TextDisplay(f"## {heading[:220]}"))
+
+        meta = f"**{platform}**"
+        if creator:
+            meta += f" · {str(creator)[:80]}"
+        meta += f" · <t:{int(time.time())}:R>"
+        container.add_item(discord.ui.TextDisplay(meta))
 
         body = str(description or "").strip()
         if body:
@@ -313,17 +320,28 @@ class Notifications(commands.Cog, name="Notifications"):
         title = (item.get("title") or f"Nouvelle publication sur {platform}")[:220]
         description = row["custom_text"] or "Une nouvelle publication vient d’être publiée."
         image_url = _best_thumbnail(item, row["image_url"])
+        creator = (
+            item.get("uploader")
+            or item.get("channel")
+            or item.get("creator")
+            or item.get("uploader_id")
+        )
         notification = SocialNotificationPanel(
             platform=platform,
             title=title,
             description=description,
             link=link,
             image_url=image_url,
+            creator=str(creator) if creator else None,
         )
 
         try:
-            # Le ping reste réel mais ne pollue plus la carte : le petit message
-            # de mention disparaît automatiquement, seule l'interface premium reste.
+            # D'abord la carte. Si Discord refuse le rendu, aucun ping parasite
+            # n'est envoyé et la publication sera retentée au prochain passage.
+            await channel.send(view=notification)
+
+            # Le ping reste réel mais ne pollue plus durablement le salon : ce
+            # message minimal disparaît après quelques secondes.
             await channel.send(
                 content=role.mention,
                 allowed_mentions=discord.AllowedMentions(
@@ -332,9 +350,8 @@ class Notifications(commands.Cog, name="Notifications"):
                     roles=[role],
                     replied_user=False,
                 ),
-                delete_after=3,
+                delete_after=5,
             )
-            await channel.send(view=notification)
         except discord.HTTPException:
             # Ne jamais marquer la publication comme traitée si Discord n'a pas pu
             # l'envoyer : le prochain passage pourra la retenter au lieu de la perdre.
