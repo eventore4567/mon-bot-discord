@@ -184,6 +184,7 @@ class InfiniteMistakeView(discord.ui.LayoutView):
         self.attempted = attempted
         self.reason = str(reason)
         self.accepted_override = False
+        self.responded = False
         self.source_deleted = False
         self._action_lock = asyncio.Lock()
 
@@ -270,9 +271,11 @@ class InfiniteMistakeView(discord.ui.LayoutView):
             if interaction.response.is_done():
                 return
             await interaction.response.defer()
-            # « Je me suis trompé » ferme immédiatement l'aide ; le message
-            # invalide reste soumis au nettoyage automatique du timeout.
+            # Le membre a répondu : le panneau disparaît et SentriX ne supprime
+            # plus automatiquement son message. Il peut alors le corriger lui-même.
+            self.responded = True
             await self._delete_notice()
+            self.stop()
 
     async def _correct_counter(self, interaction: discord.Interaction) -> None:
         member = interaction.user if isinstance(interaction.user, discord.Member) else None
@@ -330,6 +333,7 @@ class InfiniteMistakeView(discord.ui.LayoutView):
             )
             self.cog._invalidate_enabled(self.source_message.guild.id)
             self.accepted_override = True
+            self.responded = True
             await interaction.followup.send(
                 f"Nombre actuel corrigé à **{current}**. Le prochain est **{current + 1}**.",
                 ephemeral=True,
@@ -340,6 +344,7 @@ class InfiniteMistakeView(discord.ui.LayoutView):
     async def _delete_source(self, interaction: discord.Interaction) -> None:
         async with self._action_lock:
             await interaction.response.defer()
+            self.responded = True
             await self._delete_original()
             await self._delete_notice()
             self.stop()
@@ -347,7 +352,7 @@ class InfiniteMistakeView(discord.ui.LayoutView):
     async def on_timeout(self) -> None:
         # Une correction staff transforme le message en étape valide ; sinon il
         # est retiré pour conserver un salon de comptage propre.
-        if not self.accepted_override:
+        if not self.responded and not self.accepted_override:
             await self._delete_original()
         await self._delete_notice()
 
