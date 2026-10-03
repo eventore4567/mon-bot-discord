@@ -580,6 +580,31 @@ TOGGLE_FIELDS = [
     "escalation",
 ]
 
+# Protections qui inspectent un message et pour lesquelles un rôle peut être
+# autorisé à contourner le filtre. Un salon strict reprend toujours la priorité
+# sur les rôles bypass. Les protections serveur (anti-nuke, anti-raid, etc.)
+# restent gérées par leurs garde-fous dédiés car elles ne possèdent pas de
+# notion de salon de message.
+SECURITY_FILTER_POLICY_KEYS = frozenset({
+    "antispam",
+    "antilink",
+    "antiinvite",
+    "antimention",
+    "anticaps",
+    "antiemoji",
+    "antiscam",
+    "antiinsult",
+})
+SECURITY_FILTER_POLICY_ALIASES = {
+    "antispam_duplicate": "antispam",
+    "spam": "antispam",
+    "blacklist_link": "antilink",
+    "blacklist_word_link": "antilink",
+    "dangerous_attachment": "antiscam",
+    "blacklist_word": "antiinsult",
+    "multilingual_toxicity": "antiinsult",
+}
+
 # Libellés lisibles des filtres AutoMod — réutilisés par /automod-status ET par la page
 # "Sécurité" de /setup, pour ne jamais avoir deux endroits à maintenir séparément.
 AUTOMOD_TOGGLE_LABELS = {
@@ -878,6 +903,8 @@ class AutoMod(commands.Cog, name="Automod"):
         self._censor_webhooks: dict[int, discord.Webhook] = {}
         self.exempt_roles_cache: dict[int, set[int]] = {}
         self.ignored_channels_cache: dict[int, set[int]] = {}
+        self.security_filter_policy_cache: dict[tuple[int, str], dict[str, set[int]]] = {}
+        # Compatibilité avec les extensions V1 qui invalidaient encore ce cache.
         self.antispam_policy_cache: dict[int, dict[str, object]] = {}
         self.immunity_overrides_cache: dict[tuple[int, int], bool | None] = {}
         self._native_antilink_locks: dict[int, asyncio.Lock] = {}
@@ -1445,51 +1472,149 @@ class AutoMod(commands.Cog, name="Automod"):
             self.ignored_channels_cache[guild_id] = {r["channel_id"] for r in rows}
         return self.ignored_channels_cache[guild_id]
 
-    async def get_antispam_policy_cached(self, guild_id: int) -> dict[str, object]:
-        cached = self.antispam_policy_cache.get(int(guild_id))
+    @staticmethod
+    def _canonical_security_filter(filter_name: str) -> str:
+        key = str(filter_name or "").strip().casefold().replace("-", "_")
+        return SECURITY_FILTER_POLICY_ALIASES.get(key, key)
+
+    @staticmethod
+    def _message_scope_ids(message: discord.Message) -> set[int]:
+        """IDs du salon courant + parent d'un thread, sans inventer de ressource."""
+        ids: set[int] = set()
+        channel_id = int(getattr(message.channel, "id", 0) or 0)
+        parent_id = int(getattr(message.channel, "parent_id", 0) or 0)
+        if channel_id:
+            ids.add(channel_id)
+        if parent_id:
+            ids.add(parent_id)
+        return ids
+
+    def invalidate_security_filter_policy(self, guild_id: int, filter_name: str | None = None) -> None:
+        guild_id = int(guild_id)
+        if filter_name is None:
+            for key in [key for key in self.security_filter_policy_cache if key[0] == guild_id]:
+                self.security_filter_policy_cache.pop(key, None)
+            self.antispam_policy_cache.pop(guild_id, None)
+            return
+        canonical = self._canonical_security_filter(filter_name)
+        self.security_filter_policy_cache.pop((guild_id, canonical), None)
+        if canonical == "antispam":
+            self.antispam_policy_cache.pop(guild_id, None)
+
+    async def get_security_filter_policy_cached(
+        self,
+        guild_id: int,
+        filter_name: str,
+    ) -> dict[str, set[int]]:
+        canonical = self._canonical_security_filter(filter_name)
+        if canonical not in SECURITY_FILTER_POLICY_KEYS:
+            return {"role_ids": set(), "strict_channel_ids": set()}
+
+        key = (int(guild_id), canonical)
+        cached = self.security_filter_policy_cache.get(key)
         if cached is not None:
             return cached
 
-        row = await self.bot.db.fetchone(
-            "SELECT scope_mode FROM antispam_policy WHERE guild_id=?",
-            (int(guild_id),),
-        )
-        mode = str(row["scope_mode"] if row else "all").strip().casefold()
-        if mode not in {"all", "selected"}:
-            mode = "all"
+        reader = getattr(self.bot.db, "get_security_filter_policy", None)
+        if callable(reader):
+            raw = await reader(int(guild_id), canonical)
+            role_ids = {int(value) for value in (raw.get("role_ids") or [])}
+            strict_channel_ids = {
+                int(value) for value in (raw.get("strict_channel_ids") or [])
+            }
+        else:
+            role_rows = await self.bot.db.fetchall(
+                "SELECT role_id FROM security_filter_bypass_roles "
+                "WHERE guild_id=? AND filter_name=?",
+                (int(guild_id), canonical),
+            )
+            channel_rows = await self.bot.db.fetchall(
+                "SELECT channel_id FROM security_filter_strict_channels "
+                "WHERE guild_id=? AND filter_name=?",
+                (int(guild_id), canonical),
+            )
+            role_ids = {int(row["role_id"]) for row in role_rows}
+            strict_channel_ids = {int(row["channel_id"]) for row in channel_rows}
 
-        role_rows = await self.bot.db.fetchall(
-            "SELECT role_id FROM antispam_exempt_roles WHERE guild_id=?",
-            (int(guild_id),),
-        )
-        channel_rows = await self.bot.db.fetchall(
-            "SELECT channel_id FROM antispam_protected_channels WHERE guild_id=?",
-            (int(guild_id),),
-        )
         policy = {
-            "scope_mode": mode,
-            "role_ids": {int(r["role_id"]) for r in role_rows},
-            "channel_ids": {int(r["channel_id"]) for r in channel_rows},
+            "role_ids": role_ids,
+            "strict_channel_ids": strict_channel_ids,
         }
-        self.antispam_policy_cache[int(guild_id)] = policy
+        self.security_filter_policy_cache[key] = policy
         return policy
 
-    async def antispam_applies_to(self, message: discord.Message) -> bool:
-        """Périmètre anti-spam uniquement, sans affaiblir les autres filtres."""
-        policy = await self.get_antispam_policy_cached(message.guild.id)
+    async def security_filter_applies_to(
+        self,
+        message: discord.Message,
+        filter_name: str,
+    ) -> bool:
+        """Décide si UN filtre doit s'appliquer à ce message.
 
-        exempt_roles = policy["role_ids"]
-        if exempt_roles and isinstance(message.author, discord.Member):
-            if any(role.id in exempt_roles for role in message.author.roles):
+        Priorité :
+        1. immunité personnelle explicitement activée / propriétaire par défaut ;
+        2. salon strict => le filtre s'applique même à un rôle bypass ;
+        3. salon ignoré => filtre ignoré ;
+        4. rôle bypass de ce filtre ou rôle AutoMod global => filtre ignoré ;
+        5. comportement normal.
+
+        Un override personnel OFF transforme le propriétaire en membre normal, comme
+        avant cette politique. Les threads héritent du salon parent.
+        """
+        canonical = self._canonical_security_filter(filter_name)
+        if canonical not in SECURITY_FILTER_POLICY_KEYS:
+            return True
+
+        policy = await self.get_security_filter_policy_cached(message.guild.id, canonical)
+        scope_ids = self._message_scope_ids(message)
+        strict = bool(scope_ids & policy["strict_channel_ids"])
+
+        member = message.author
+        if not isinstance(member, discord.Member):
+            return True
+
+        override = await self.get_immunity_override_cached(member.guild.id, member.id)
+        if override is True:
+            return False
+        if override is None and (
+            member.id == member.guild.owner_id or member.id in config.OWNER_IDS
+        ):
+            return False
+
+        # C'est le point essentiel demandé : dans un salon strict, les rôles
+        # bypass (spécifiques ou globaux) ne court-circuitent PAS le filtre.
+        if strict:
+            return True
+
+        ignored = await self.get_ignored_channels_cached(member.guild.id)
+        if scope_ids & ignored:
+            return False
+
+        if policy["role_ids"] and any(
+            role.id in policy["role_ids"] for role in member.roles
+        ):
+            return False
+
+        # L'override personnel OFF désactive volontairement les immunités
+        # historiques. Sinon, les anciens rôles AutoMod globaux restent compatibles.
+        if override is None:
+            exempt_ids = await self.get_exempt_roles_cached(member.guild.id)
+            if exempt_ids and any(role.id in exempt_ids for role in member.roles):
                 return False
 
-        if policy["scope_mode"] == "selected":
-            protected = policy["channel_ids"]
-            # Les threads héritent du salon parent pour éviter un contournement trivial.
-            channel_id = int(getattr(message.channel, "id", 0) or 0)
-            parent_id = int(getattr(message.channel, "parent_id", 0) or 0)
-            return channel_id in protected or (parent_id and parent_id in protected)
         return True
+
+    async def get_antispam_policy_cached(self, guild_id: int) -> dict[str, object]:
+        """Compatibilité V1 : l'anti-spam est désormais une politique générique."""
+        policy = await self.get_security_filter_policy_cached(guild_id, "antispam")
+        return {
+            "scope_mode": "all",
+            "role_ids": set(policy["role_ids"]),
+            "channel_ids": set(policy["strict_channel_ids"]),
+            "strict_channel_ids": set(policy["strict_channel_ids"]),
+        }
+
+    async def antispam_applies_to(self, message: discord.Message) -> bool:
+        return await self.security_filter_applies_to(message, "antispam")
 
     async def is_automod_exempt(self, member: discord.abc.User) -> bool:
         """Détermine l'immunité AutoMod avec un override personnel explicite."""
@@ -2409,18 +2534,25 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         if personal_immunity is True:
             return
-        if personal_immunity is None and await self.is_automod_exempt(message.author):
-            return
+        # Les exemptions de rôles ne sont plus court-circuitées globalement ici :
+        # chaque filtre les évalue afin qu'un salon strict puisse reprendre priorité.
 
         # Détections prioritaires pouvant être combinées dans un seul avertissement.
-        # Exemple : un même message contient à la fois un mot interdit ET un lien interdit.
+        # Chaque détection consulte sa propre politique de rôles bypass / salons stricts.
         words = await self.get_blacklist_words_cached(message.guild.id)
         blocked_word = self._blacklist_hit(words, message.content)
 
-        # Règles ciblées : « SentriX censure ce lien » ajoute uniquement cette cible.
         blocked_links = await self.get_blacklist_links_cached(message.guild.id)
         blocked_hit = _blocked_link_hit(link_content, blocked_links)
-        if blocked_word and blocked_hit:
+
+        word_applies = bool(blocked_word) and await self.security_filter_applies_to(
+            message, "antiinsult"
+        )
+        link_applies = bool(blocked_hit) and await self.security_filter_applies_to(
+            message, "antilink"
+        )
+
+        if word_applies and link_applies:
             return await self._delete_and_warn(
                 message,
                 "Mot interdit et lien interdit détectés.",
@@ -2429,7 +2561,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     message.content, blocked_word=blocked_word, links=True
                 ),
             )
-        if blocked_hit:
+        if link_applies:
             return await self._delete_and_warn(
                 message,
                 "Lien ciblé interdit par la liste noire du serveur.",
@@ -2437,13 +2569,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 censored_content=_compose_censored_content(message.content, links=True),
             )
 
-        # Mode strict : absolument tous les liens sont supprimés, y compris dans les
-        # salons ignorés, pour le staff/admin et même si le domaine est whitelisté.
+        # Le mode anti-liens strict bloque tous les domaines, mais respecte encore la
+        # politique de ce filtre : rôle bypass hors salon strict, jamais dans un salon strict.
         if (
             conf
             and conf.get("antilink")
             and conf.get("antilink_strict")
             and LINK_RE.search(link_content)
+            and await self.security_filter_applies_to(message, "antilink")
         ):
             return await self._delete_and_warn(
                 message,
@@ -2452,13 +2585,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 censored_content=_compose_censored_content(message.content, links=True),
             )
 
-        # Les autres filtres continuent de respecter les salons ignorés.
-        ignored = await self.get_ignored_channels_cached(message.guild.id)
-        if message.channel.id in ignored:
-            return
-
-        # La liste noire de MOTS s'applique à tout le monde.
-        if blocked_word:
+        if word_applies:
             return await self._delete_and_warn(
                 message,
                 "Mot interdit détecté.",
@@ -2473,7 +2600,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
         # Filtre multilingue d'insultes : uniquement si le serveur l'a activé. Il tournait
         # avant pour tout le monde, sans interrupteur, et appliquait un timeout.
-        if conf.get("antiinsult"):
+        if conf.get("antiinsult") and await self.security_filter_applies_to(message, "antiinsult"):
             dataset_match = self.moderation_dataset.match(message.content)
             if dataset_match:
                 return await self._delete_and_timeout(
@@ -2489,11 +2616,14 @@ class AutoMod(commands.Cog, name="Automod"):
             incident is not None
             and incident.filter_name in SPAM_FILTERS
             and time.monotonic() - incident.started < INCIDENT_WINDOW_SECONDS
+            and await self.security_filter_applies_to(message, incident.filter_name)
         ):
             return await self._delete_and_warn(message, incident.reason, incident.filter_name)
 
         blacklisted_users = await self.get_blacklist_users_cached(message.guild.id)
-        if message.author.id in blacklisted_users:
+        scope_ids = self._message_scope_ids(message)
+        ignored_channels = await self.get_ignored_channels_cached(message.guild.id)
+        if message.author.id in blacklisted_users and not (scope_ids & ignored_channels):
             self._mark_xp_skip(message.id)
             try:
                 await message.delete()
@@ -2501,10 +2631,10 @@ class AutoMod(commands.Cog, name="Automod"):
                 pass
             return
 
-        # Comparaison tolérante aux obfuscations : avant, sept variantes sur huit
-        # de la même arnaque passaient — majuscules, leet, gras mathématique ou
-        # une lettre cyrillique suffisaient (voir utils/text_normalization).
-        motif_scam = _scam_hit(message.content) if conf["antiscam"] else None
+        antiscam_applies = bool(conf["antiscam"]) and await self.security_filter_applies_to(
+            message, "antiscam"
+        )
+        motif_scam = _scam_hit(message.content) if antiscam_applies else None
         if motif_scam:
             return await self._delete_and_warn(
                 message,
@@ -2513,7 +2643,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 censored_content=_compose_censored_content(message.content, scam=True),
             )
 
-        if conf["antiscam"] and message.attachments:
+        if antiscam_applies and message.attachments:
             candidates = [
                 attachment for attachment in message.attachments[:2]
                 if _is_scam_image_attachment(attachment)
@@ -2533,8 +2663,10 @@ class AutoMod(commands.Cog, name="Automod"):
         contenu_invitation = _recoller_hotes_invitation(
             text_normalization.normaliser(message.content)
         )
-        if conf["antiinvite"] and (
-            INVITE_RE.search(link_content) or INVITE_RE.search(contenu_invitation)
+        if (
+            conf["antiinvite"]
+            and await self.security_filter_applies_to(message, "antiinvite")
+            and (INVITE_RE.search(link_content) or INVITE_RE.search(contenu_invitation))
         ):
             return await self._delete_and_warn(
                 message,
@@ -2543,7 +2675,11 @@ class AutoMod(commands.Cog, name="Automod"):
                 censored_content=_compose_censored_content(message.content, invites=True),
             )
 
-        if conf["antilink"] and LINK_RE.search(link_content):
+        if (
+            conf["antilink"]
+            and await self.security_filter_applies_to(message, "antilink")
+            and LINK_RE.search(link_content)
+        ):
             allowed = await self.get_whitelist_domains_cached(message.guild.id)
             if not _domain_allowed(link_content, allowed):
                 return await self._delete_and_warn(
@@ -2553,20 +2689,28 @@ class AutoMod(commands.Cog, name="Automod"):
                     censored_content=_compose_censored_content(message.content, links=True),
                 )
 
-        if conf["antimention"] and len(message.mentions) >= 5:
+        if (
+            conf["antimention"]
+            and await self.security_filter_applies_to(message, "antimention")
+            and len(message.mentions) >= 5
+        ):
             return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
 
-        if conf["anticaps"] and len(message.content) >= 10:
-            letters = [c for c in message.content if c.isalpha()]
-            if letters and sum(1 for c in letters if c.isupper()) / len(letters) > 0.7:
+        if (
+            conf["anticaps"]
+            and await self.security_filter_applies_to(message, "anticaps")
+            and len(message.content) >= 10
+        ):
+            letters = [char for char in message.content if char.isalpha()]
+            if letters and sum(1 for char in letters if char.isupper()) / len(letters) > 0.7:
                 return await self._delete_and_warn(message, "Trop de majuscules (SPAM CAPS).", "anticaps")
 
-        if conf["antiemoji"]:
+        if conf["antiemoji"] and await self.security_filter_applies_to(message, "antiemoji"):
             emoji_count = len(re.findall(r"<a?:\w+:\d+>|[\U0001F300-\U0001FAFF]", message.content))
             if emoji_count > 10:
                 return await self._delete_and_warn(message, "Spam d'émojis détecté.", "antiemoji")
 
-        if conf["antispam"] and await self.antispam_applies_to(message):
+        if conf["antispam"] and await self.security_filter_applies_to(message, "antispam"):
             key = (message.guild.id, message.author.id)
             if self.spam_tracker.ajouter(key) >= SPAM_THRESHOLD:
                 self.spam_tracker.reinitialiser(key)
