@@ -123,3 +123,29 @@ def test_trace_header_does_not_show_raw_identity_id_line():
     ]
     assert '-# ID ·' not in block
     assert "_trace_identity_ref(event_type, identity_id)" in block
+
+
+
+def test_log_actions_put_navigation_before_technical_ids():
+    service = (ROOT / "utils" / "log_service.py").read_text(encoding="utf-8")
+
+    assert 'label="Accéder au message"' in service
+    assert 'sentrix_emojis.partiel("eye")' in service
+    links_pos = service.index("for label, url in (links or [])[:12]:")
+    ids_pos = service.index("for label, entity_id in (ids or [])[:8]:", links_pos)
+    assert links_pos < ids_pos
+
+
+def test_deleted_message_logs_link_to_channel_while_edits_link_to_message():
+    logs = (ROOT / "cogs" / "logs.py").read_text(encoding="utf-8")
+
+    assert '("Accéder au salon", _discord_channel_url(guild.id, channel_id))' in logs
+    assert "jump_url=after.jump_url" in logs
+    assert "def _discord_channel_url" in logs
+
+
+def test_deleted_channel_and_role_cards_do_not_repeat_raw_id_field():
+    logs = (ROOT / "cogs" / "logs.py").read_text(encoding="utf-8")
+
+    assert 'fields = [("Salon", f"`{channel.name}`", True)]' in logs
+    assert 'fields = [("Rôle", f"`{role.name}`", True)]' in logs
