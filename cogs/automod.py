@@ -1552,8 +1552,16 @@ class AutoMod(commands.Cog, name="Automod"):
 
     async def get_ignored_channels_cached(self, guild_id: int) -> set[int]:
         if guild_id not in self.ignored_channels_cache:
-            rows = await self.bot.db.fetchall("SELECT channel_id FROM ignored_channels WHERE guild_id = ?", (guild_id,))
-            self.ignored_channels_cache[guild_id] = {r["channel_id"] for r in rows}
+            fetchall = getattr(self.bot.db, "fetchall", None)
+            rows = (
+                await fetchall(
+                    "SELECT channel_id FROM ignored_channels WHERE guild_id = ?",
+                    (guild_id,),
+                )
+                if callable(fetchall)
+                else []
+            )
+            self.ignored_channels_cache[guild_id] = {int(r["channel_id"]) for r in rows}
         return self.ignored_channels_cache[guild_id]
 
     @staticmethod
