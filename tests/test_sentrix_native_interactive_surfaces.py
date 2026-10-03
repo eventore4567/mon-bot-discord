@@ -152,3 +152,29 @@ def test_infinite_counter_timeout_deletes_only_when_member_did_not_answer():
     assert "if not self.responded and not self.accepted_override:" in source
     mistake = source[source.index("async def _mistake"):source.index("async def _correct_counter")]
     assert "self.stop()" in mistake
+
+
+
+def test_antispam_setup_has_multi_role_and_channel_scope_controls():
+    source = _source("cogs/setup_v2_ui.py")
+
+    assert "class AntiSpamPolicyView(discord.ui.View)" in source
+    assert 'placeholder="Rôles autorisés à contourner l’anti-spam"' in source
+    assert 'placeholder="Salons où le spam doit être interdit"' in source
+    assert 'label="Protéger tous les salons"' in source
+    assert 'label="Configurer l’anti-spam"' in source
+    assert "guild.create_text_channel" not in source[source.index("class AntiSpamPolicyView"):source.index("class PermissionRoleSelect")]
+
+
+def test_dashboard_antispam_policy_has_clean_multi_select_ui_and_api():
+    api = _source("web/dashboard_api_security.py")
+    ui = _source("web/dashboard_ui/js/30_modules.js")
+
+    assert '/security/antispam-policy' in api
+    assert "antispam_exempt_roles" in api
+    assert "antispam_protected_channels" in api
+    assert "Anti-spam · Périmètre" in ui
+    assert 'id="spamBypassRoles"' in ui
+    assert 'id="spamProtectedChannels"' in ui
+    assert "Protéger tout le serveur" in ui
+    assert "Aucun rôle bypass" in ui
