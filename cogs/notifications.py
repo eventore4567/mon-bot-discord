@@ -421,6 +421,9 @@ class Notifications(commands.Cog, name="Notifications"):
         except (TypeError, ValueError):
             published_at = None
 
+        if platform == "Twitch" and kind == "live":
+            link = row["source_url"]
+
         return social_providers.SocialEvent(
             provider=provider,
             platform=platform,
@@ -503,7 +506,20 @@ class Notifications(commands.Cog, name="Notifications"):
         for surface, poll_url, kind in surfaces:
             try:
                 item = await _extract_latest(poll_url)
-            except Exception:
+            except Exception as exc:
+                message = str(exc).casefold()
+                # Twitch hors ligne est un état normal, pas une panne. L'ancien
+                # moteur écrivait un WARNING toutes les 5 minutes pour chaque
+                # chaîne offline et noyait les vraies erreurs.
+                if (
+                    row["platform"] == "Twitch"
+                    and (
+                        "not currently live" in message
+                        or "channel is offline" in message
+                        or "offline" in message
+                    )
+                ):
+                    continue
                 logger.warning(
                     "Lecture impossible abonnement=%s plateforme=%s surface=%s url=%s",
                     row["id"],
