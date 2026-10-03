@@ -570,11 +570,11 @@ class Panneau(discord.ui.LayoutView):
         self.sections_source = tuple(sections)
         self.boutons_source = tuple(boutons)
         self.pied_source = str(pied or "") if pied else ""
-        # Réponse en texte libre (IA, traduction) : pas de bandeau au-dessus du texte.
-        if banniere is None:
-            banniere = BANDEAUX_ACTIFS
-        self.avec_banniere = banniere and not commande_en_texte_libre()
-        banniere = self.avec_banniere
+        # Direction produit : aucune bannière décorative, même si un ancien
+        # appelant passe encore banniere=True. On garde l'argument uniquement pour
+        # compatibilité API, mais le rendu et les pièces jointes restent désactivés.
+        self.avec_banniere = False
+        banniere = False
         # La bannière/liseré exprime l'ÉTAT (succès, erreur, attention), tandis que
         # la signature conserve le DOMAINE de la commande. Ainsi une réussite
         # économique reste immédiatement identifiable comme Économie, sans perdre
@@ -605,11 +605,10 @@ class Panneau(discord.ui.LayoutView):
         if banniere:
             self.avec_banniere = poser_bandeau(conteneur, self.famille)
 
-        # Signature visuelle SentriX Core : domaine + commande conseillée.
-        conteneur.add_item(
-            discord.ui.TextDisplay(f"-# {_core_signature(self.identite_famille, self.etat_core)}")
-        )
-
+        # Le panneau commence directement par l'information utile. L'ancienne
+        # signature « SENTRIX CORE · domaine · commande » surchargeait le haut
+        # de chaque carte et répétait une identité déjà visible via le bot.
+        #
         # 2 — titre et sous-titre. La vignette, quand il y en a une, se place à
         #     droite du titre plutôt qu'en médaillon perdu dans un coin.
         # L'icône du domaine en tête, SAUF si le titre en porte déjà une :
@@ -642,9 +641,10 @@ class Panneau(discord.ui.LayoutView):
         # Un marqueur numéroté dit « ceci est une séquence » ; il ne doit le
         # dire que quand c'est vrai.
         visibles = [s for s in sections if s.rendu(None)]
-        numeroter = len(visibles) > 1
-        for position, section in enumerate(visibles, start=1):
-            rendu = section.rendu(position if numeroter else None)
+        for section in visibles:
+            # Pas de « 01 · / 02 · » : le titre de section suffit et rend les
+            # panneaux plus naturels, surtout sur mobile.
+            rendu = section.rendu(None)
             if not rendu:
                 continue
             conteneur.add_item(discord.ui.TextDisplay(rendu[:_LIMITE_BLOC]))
@@ -664,10 +664,15 @@ class Panneau(discord.ui.LayoutView):
         # la même ligne, en haut et en bas. C'est du bruit, et ça se voit
         # immédiatement. Avec un état ou un texte métier, le pied dit quelque
         # chose de plus et reste posé — les deux améliorations se composent.
-        signature_fin = _core_footer(self.identite_famille, pied, self.etat_core)
-        entete_core = _core_signature(self.identite_famille, self.etat_core)
-        if signature_fin.strip() != entete_core.strip():
-            conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(signature_fin, 240)}"))
+        pied_net = str(pied or "").strip()
+        pied_net = _re.sub(
+            r"^SentriX(?:\s*Core)?(?:\s*[•·:—–-]\s*)+",
+            "",
+            pied_net,
+            flags=_re.IGNORECASE,
+        ).strip()
+        if pied_net and pied_net.casefold() not in {"sentrix", "sentrix core"}:
+            conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(pied_net, 240)}"))
 
         # 5 — navigation, DANS le conteneur pour rester sous l'accent de couleur.
         rangees = _rangees(boutons)
@@ -684,9 +689,9 @@ class Panneau(discord.ui.LayoutView):
         famille est celle figée à la construction : les deux côtés ne peuvent
         pas diverger.
         """
-        if not self.avec_banniere:
-            return []
-        return pieces_jointes_de_famille(self.famille)
+        # Les bandeaux décoratifs sont définitivement désactivés : aucune
+        # pièce jointe de famille ne doit quitter le bot.
+        return []
 
 
 def _icone_de_famille(famille: str, titre: str) -> str:
@@ -1136,6 +1141,7 @@ def depuis_embed(
     if kind is None:
         kind = intention_de(embed)
     vignette = getattr(getattr(embed, "thumbnail", None), "url", None)
+    image_url = getattr(getattr(embed, "image", None), "url", None)
     pied_embed = getattr(getattr(embed, "footer", None), "text", None)
     return Panneau(
         titre=titre_core(titre or str(getattr(embed, "title", "") or "SentriX")),
@@ -1144,8 +1150,9 @@ def depuis_embed(
         vignette=vignette,
         sections=sections,
         boutons=boutons,
-        pied=pied or pied_embed or "SentriX",
-        banniere=banniere,
+        pied=pied or pied_embed or None,
+        banniere=False,
+        image=image_url if image_url else None,
     )
 
 
