@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import time
 import unicodedata
+from types import SimpleNamespace
 from typing import Any
 
 import discord
