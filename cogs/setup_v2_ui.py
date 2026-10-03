@@ -346,10 +346,18 @@ class NotificationSourceModal(discord.ui.Modal, title="Source de notification"):
     text = discord.ui.TextInput(label="Texte personnalisé (facultatif)", required=False, max_length=600, style=discord.TextStyle.paragraph)
     image = discord.ui.TextInput(label="URL d’image facultative", required=False, max_length=500)
 
-    def __init__(self, owner, mode: str):
+    def __init__(self, owner, mode: str, current=None):
         super().__init__()
         self.owner = owner
         self.mode = mode
+        self.current = current
+        if current is not None:
+            try:
+                self.url.default = str(current["source_url"] or "")[:500]
+                self.text.default = str(current["custom_text"] or "")[:600]
+                self.image.default = str(current["image_url"] or "")[:500]
+            except (KeyError, IndexError, TypeError):
+                pass
 
     async def on_submit(self, interaction):
         from . import notifications as notif_mod
@@ -362,18 +370,62 @@ class NotificationSourceModal(discord.ui.Modal, title="Source de notification"):
         if image and not notif_mod._valid_https_url(image):
             return await interaction.response.send_message("L’URL d’image doit être HTTPS.", ephemeral=True)
         if self.mode == "edit" and self.owner.selected_notification:
+            notification_id = int(self.owner.selected_notification)
             duplicate = await self.owner.bot.db.fetchone(
                 "SELECT id FROM social_notifications WHERE guild_id=? AND source_url=? AND id<>?",
-                (self.owner.guild.id, source_url, self.owner.selected_notification),
+                (self.owner.guild.id, source_url, notification_id),
             )
             if duplicate:
-                return await interaction.response.send_message("Cette source existe déjà sur ce serveur.", ephemeral=True)
+                return await interaction.response.send_message(
+                    "Cette source existe déjà sur ce serveur.",
+                    ephemeral=True,
+                )
+
             platform, _ = notif_mod._platform_details(source_url)
+            # Une URL modifiée doit repartir d'un point de référence cohérent :
+            # conserver l'ID de l'ancienne chaîne provoquerait une fausse alerte
+            # au premier passage du moniteur.
+            latest = None
+            try:
+                surfaces = notif_mod.social_providers.source_surfaces(source_url, platform)
+                if surfaces:
+                    _surface, poll_url, _kind = surfaces[0]
+                    latest = await notif_mod._extract_latest(poll_url)
+                    baseline_url = notif_mod._item_url(platform, poll_url, latest or {})
+                else:
+                    baseline_url = source_url
+            except Exception:
+                latest = None
+                baseline_url = source_url
+            latest_id = notif_mod._id_de_publication((latest or {}).get("id")) or None
             await self.owner.bot.db.execute(
-                "UPDATE social_notifications SET source_url=?, platform=?, custom_text=?, image_url=? WHERE guild_id=? AND id=?",
-                (source_url, platform, text, image, self.owner.guild.id, self.owner.selected_notification),
+                "UPDATE social_notifications SET source_url=?, platform=?, custom_text=?, image_url=?, "
+                "last_item_id=?, last_item_url=?, last_checked_at=? WHERE guild_id=? AND id=?",
+                (
+                    source_url,
+                    platform,
+                    text,
+                    image,
+                    latest_id,
+                    baseline_url,
+                    int(time.time()),
+                    self.owner.guild.id,
+                    notification_id,
+                ),
             )
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Source modifiée sans toucher aux autres notifications.')), ephemere=True)
+            await self.owner.bot.db.execute(
+                "DELETE FROM social_notification_state WHERE subscription_id=?",
+                (notification_id,),
+            )
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(
+                    embeds.success(
+                        "Source modifiée. Le salon, le rôle et les autres sources sont inchangés."
+                    )
+                ),
+                ephemere=True,
+            )
         await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.info('Choisissez maintenant le salon et le rôle. La nouvelle source sera ajoutée sans remplacer les autres.')), NotificationDraftView(self.owner, interaction.user.id, source_url, text, image)), ephemere=True)
 
 
@@ -442,54 +494,287 @@ class NotificationDraftView(discord.ui.View):
         await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Nouvelle source ajoutée. Les sources précédentes sont inchangées.')), ephemere=True)
 
 
+def _notification_source_label(row) -> str:
+    platform = str(row["platform"] or "Source")
+    source_url = str(row["source_url"] or "")
+    try:
+        path = urlparse(source_url).path.rstrip("/")
+        tail = path.split("/")[-1] if path else ""
+        if tail in {"videos", "shorts", "streams", "live"} and "/" in path.strip("/"):
+            tail = path.strip("/").split("/")[-2]
+        tail = tail or (urlparse(source_url).hostname or "source")
+    except Exception:
+        tail = "source"
+    return f"{platform} · {tail}"[:100]
+
+
+async def _notification_manage_panel(owner, author_id: int):
+    rows = await owner.bot.db.fetchall(
+        "SELECT id,source_url,platform,discord_channel_id,role_id,custom_text,image_url,enabled "
+        "FROM social_notifications WHERE guild_id=? ORDER BY id ASC LIMIT 25",
+        (owner.guild.id,),
+    )
+    known_ids = {int(row["id"]) for row in rows}
+    if getattr(owner, "selected_notification", None) not in known_ids:
+        owner.selected_notification = None
+
+    selected = next(
+        (row for row in rows if int(row["id"]) == int(owner.selected_notification or 0)),
+        None,
+    )
+    if selected is None:
+        description = (
+            "**Choisis une source dans le menu ci-dessous**, ou ajoute-en une nouvelle.\n"
+            "Modifier, activer, tester et supprimer restent désactivés tant qu’aucune "
+            "source n’est sélectionnée."
+            if rows
+            else "Aucune source configurée. Utilise **Ajouter** pour créer la première."
+        )
+    else:
+        channel = owner.guild.get_channel(int(selected["discord_channel_id"]))
+        role = owner.guild.get_role(int(selected["role_id"]))
+        description = (
+            f"**Source sélectionnée · #{selected['id']}**\n"
+            f"**Plateforme** · {selected['platform']}\n"
+            f"**Lien** · {selected['source_url']}\n"
+            f"**Salon** · {channel.mention if channel else f'ID {selected["discord_channel_id"]}'}\n"
+            f"**Rôle pingé** · {role.mention if role else f'ID {selected["role_id"]}'}\n"
+            f"**État** · {'ACTIF' if selected['enabled'] else 'INACTIF'}"
+        )
+        if selected["custom_text"]:
+            description += f"\n**Texte** · {str(selected['custom_text'])[:180]}"
+
+    panel = embeds.info(description, title="Gestion des sources")
+    view = NotificationManageView(owner, author_id, rows)
+    return panels.avec_composants(panels.depuis_embed(panel), view)
+
+
 class NotificationManageView(discord.ui.View):
-    def __init__(self, owner, author_id: int):
+    """Gestion réelle des sources : sélection d'abord, action ensuite."""
+
+    def __init__(self, owner, author_id: int, rows):
         super().__init__(timeout=180)
         self.owner = owner
-        self.author_id = author_id
+        self.author_id = int(author_id)
+        self.rows = list(rows or [])
+
+        if self.rows:
+            options = [
+                discord.SelectOption(
+                    label=_notification_source_label(row),
+                    value=str(row["id"]),
+                    description=str(row["source_url"] or "")[:100],
+                    default=int(row["id"]) == int(owner.selected_notification or 0),
+                )
+                for row in self.rows[:25]
+            ]
+            selector = discord.ui.Select(
+                placeholder="Sélectionner une source à gérer",
+                min_values=1,
+                max_values=1,
+                options=options,
+                row=0,
+            )
+
+            async def select_source(interaction: discord.Interaction):
+                self.owner.selected_notification = int(selector.values[0])
+                refreshed = await _notification_manage_panel(
+                    self.owner,
+                    interaction.user.id,
+                )
+                await panels.editer(interaction.response, refreshed)
+
+            selector.callback = select_source
+            self.add_item(selector)
+
+        has_selection = any(
+            int(row["id"]) == int(owner.selected_notification or 0)
+            for row in self.rows
+        )
+
+        add = discord.ui.Button(
+            label="Ajouter",
+            style=discord.ButtonStyle.success,
+            row=1,
+        )
+        edit = discord.ui.Button(
+            label="Modifier",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=not has_selection,
+        )
+        toggle = discord.ui.Button(
+            label="Activer / Désactiver",
+            style=discord.ButtonStyle.primary,
+            row=2,
+            disabled=not has_selection,
+        )
+        test = discord.ui.Button(
+            label="Tester",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+            disabled=not has_selection,
+        )
+        delete = discord.ui.Button(
+            label="Supprimer",
+            style=discord.ButtonStyle.danger,
+            row=2,
+            disabled=not has_selection,
+        )
+
+        async def add_cb(interaction: discord.Interaction):
+            await interaction.response.send_modal(NotificationSourceModal(self.owner, "add"))
+
+        async def edit_cb(interaction: discord.Interaction):
+            row = await self._selected_row()
+            if row is None:
+                return await interaction.response.send_message(
+                    "Choisis d’abord une source dans le menu.",
+                    ephemeral=True,
+                )
+            await interaction.response.send_modal(
+                NotificationSourceModal(self.owner, "edit", current=row)
+            )
+
+        async def toggle_cb(interaction: discord.Interaction):
+            row = await self._selected_row()
+            if row is None:
+                return await interaction.response.send_message(
+                    "Choisis d’abord une source dans le menu.",
+                    ephemeral=True,
+                )
+            await self.owner.bot.db.execute(
+                "UPDATE social_notifications SET enabled=? WHERE guild_id=? AND id=?",
+                (
+                    0 if row["enabled"] else 1,
+                    self.owner.guild.id,
+                    int(row["id"]),
+                ),
+            )
+            refreshed = await _notification_manage_panel(
+                self.owner,
+                interaction.user.id,
+            )
+            await panels.editer(interaction.response, refreshed)
+
+        async def test_cb(interaction: discord.Interaction):
+            row = await self._selected_row()
+            if row is None:
+                return await interaction.response.send_message(
+                    "Choisis d’abord une source dans le menu.",
+                    ephemeral=True,
+                )
+            from . import notifications as notif_mod
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            latest = None
+            kind = "post"
+            poll_url = str(row["source_url"])
+            try:
+                for _surface, candidate_url, candidate_kind in notif_mod.social_providers.source_surfaces(
+                    row["source_url"],
+                    row["platform"],
+                ):
+                    try:
+                        candidate = await notif_mod._extract_latest(candidate_url)
+                    except Exception:
+                        continue
+                    if candidate and notif_mod._id_de_publication(candidate.get("id")):
+                        latest = candidate
+                        kind = candidate_kind
+                        poll_url = candidate_url
+                        break
+            except Exception:
+                latest = None
+
+            if latest is None:
+                return await panels.texte_court(
+                    interaction,
+                    "Impossible de lire cette source pour le moment.",
+                    ephemere=True,
+                )
+
+            cog = self.owner.bot.get_cog("Notifications")
+            if cog is None:
+                return await panels.texte_court(
+                    interaction,
+                    "Le moteur de notifications n’est pas chargé.",
+                    ephemere=True,
+                )
+
+            # _item_event enrichit le titre, le créateur et la miniature exactement
+            # comme une vraie notification, sans envoyer le rôle de ping.
+            test_row = dict(row)
+            test_row["source_url"] = poll_url
+            event = await cog._item_event(
+                test_row,
+                latest,
+                kind=kind,
+                provider="setup-test",
+            )
+            preview = notif_mod.SocialNotificationPanel(
+                platform=event.platform,
+                title=event.title,
+                description=str(row["custom_text"] or ""),
+                link=event.url,
+                image_url=row["image_url"] or event.thumbnail_url,
+                creator=event.creator,
+                kind=event.kind,
+                published_at=event.published_at,
+            )
+            await interaction.followup.send(view=preview, ephemeral=True)
+
+        async def delete_cb(interaction: discord.Interaction):
+            row = await self._selected_row()
+            if row is None:
+                return await interaction.response.send_message(
+                    "Choisis d’abord une source dans le menu.",
+                    ephemeral=True,
+                )
+            await self.owner.bot.db.execute(
+                "DELETE FROM social_notification_state WHERE subscription_id=?",
+                (int(row["id"]),),
+            )
+            await self.owner.bot.db.execute(
+                "DELETE FROM social_notifications WHERE guild_id=? AND id=?",
+                (self.owner.guild.id, int(row["id"])),
+            )
+            self.owner.selected_notification = None
+            refreshed = await _notification_manage_panel(
+                self.owner,
+                interaction.user.id,
+            )
+            await panels.editer(interaction.response, refreshed)
+
+        add.callback = add_cb
+        edit.callback = edit_cb
+        toggle.callback = toggle_cb
+        test.callback = test_cb
+        delete.callback = delete_cb
+        self.add_item(add)
+        self.add_item(edit)
+        self.add_item(toggle)
+        self.add_item(test)
+        self.add_item(delete)
 
     async def interaction_check(self, interaction):
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("Ce menu ne vous appartient pas.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ce menu ne vous appartient pas.",
+                ephemeral=True,
+            )
             return False
         return True
 
-    @discord.ui.button(label="Ajouter", style=discord.ButtonStyle.success, row=0)
-    async def add(self, interaction, _button):
-        await interaction.response.send_modal(NotificationSourceModal(self.owner, "add"))
-
-    @discord.ui.button(label="Modifier la source sélectionnée", style=discord.ButtonStyle.secondary, row=0)
-    async def edit(self, interaction, _button):
-        if not self.owner.selected_notification:
-            return await interaction.response.send_message("Sélectionnez d’abord une notification dans +setup.", ephemeral=True)
-        await interaction.response.send_modal(NotificationSourceModal(self.owner, "edit"))
-
-    @discord.ui.button(label="Activer / Désactiver", style=discord.ButtonStyle.primary, row=1)
-    async def toggle(self, interaction, _button):
-        if not self.owner.selected_notification:
-            return await interaction.response.send_message("Sélectionnez d’abord une notification.", ephemeral=True)
-        row = await self.owner.bot.db.fetchone(
-            "SELECT enabled FROM social_notifications WHERE guild_id=? AND id=?",
-            (self.owner.guild.id, self.owner.selected_notification),
+    async def _selected_row(self):
+        notification_id = int(getattr(self.owner, "selected_notification", 0) or 0)
+        if not notification_id:
+            return None
+        return await self.owner.bot.db.fetchone(
+            "SELECT id,source_url,platform,discord_channel_id,role_id,custom_text,image_url,enabled "
+            "FROM social_notifications WHERE guild_id=? AND id=?",
+            (self.owner.guild.id, notification_id),
         )
-        if row is None:
-            return await interaction.response.send_message("Notification introuvable.", ephemeral=True)
-        await self.owner.bot.db.execute(
-            "UPDATE social_notifications SET enabled=? WHERE guild_id=? AND id=?",
-            (0 if row["enabled"] else 1, self.owner.guild.id, self.owner.selected_notification),
-        )
-        await interaction.response.send_message("État modifié. Les autres sources ne changent pas.", ephemeral=True)
-
-    @discord.ui.button(label="Supprimer", style=discord.ButtonStyle.danger, row=1)
-    async def delete(self, interaction, _button):
-        if not self.owner.selected_notification:
-            return await interaction.response.send_message("Sélectionnez d’abord une notification.", ephemeral=True)
-        await self.owner.bot.db.execute(
-            "DELETE FROM social_notifications WHERE guild_id=? AND id=?",
-            (self.owner.guild.id, self.owner.selected_notification),
-        )
-        self.owner.selected_notification = None
-        await interaction.response.send_message("Source supprimée. Les autres notifications restent intactes.", ephemeral=True)
 
 
 async def _permission_decision_for_view(view) -> str | None:
@@ -1190,9 +1475,18 @@ def _patch_render() -> None:
             self.add_item(text_button)
 
         elif category == "notifications":
-            manage = discord.ui.Button(label="Ajouter / modifier des sources", style=discord.ButtonStyle.secondary, row=1)
+            manage = discord.ui.Button(
+                label="Gérer les sources",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
             async def manage_cb(interaction):
-                await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.info('Ajoutez une nouvelle source ou modifiez uniquement celle sélectionnée. Aucune autre source n’est écrasée.')), NotificationManageView(self, interaction.user.id)), ephemere=True)
+                panel = await _notification_manage_panel(self, interaction.user.id)
+                await panels.envoyer(
+                    interaction.response,
+                    panel,
+                    ephemere=True,
+                )
             manage.callback = manage_cb
             self.add_item(manage)
 
