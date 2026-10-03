@@ -15,6 +15,7 @@ import discord
 from discord.ext import commands, tasks
 
 from utils import helpers
+from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
 
 
@@ -463,10 +464,10 @@ class RoleSetupView(discord.ui.View):
                 ephemeral=True,
             )
         view = BonusMultiplierView(self)
-        await interaction.response.send_message(
-            embed=view.summary_embed(),
-            view=view,
-            ephemeral=True,
+        await panels.envoyer(
+            interaction.response,
+            panels.avec_composants(panels.depuis_embed(view.summary_embed()), view),
+            ephemere=True,
         )
 
 
@@ -631,7 +632,18 @@ class GiveawayBuilderView(discord.ui.View):
         if missing:
             return await interaction.response.send_message("Il manque : " + ", ".join(missing) + ".", ephemeral=True)
         end_at = int(time.time()) + int(self.state.duration_seconds or 0)
-        await interaction.response.send_message(embed=self.cog.build_public_embed(self.ctx.guild, self.state, end_at, self.ctx.author), ephemeral=True)
+        await panels.envoyer(
+            interaction.response,
+            self.cog.build_public_panel(
+                self.ctx.guild,
+                self.state,
+                end_at,
+                self.ctx.author,
+                count=0,
+                interactive=False,
+            ),
+            ephemere=True,
+        )
 
     @discord.ui.button(label="Publier", style=discord.ButtonStyle.success, row=1)
     async def publish(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -676,7 +688,12 @@ class AdvancedGiveawayView(discord.ui.View):
     def __init__(self, count: int | None = None):
         super().__init__(timeout=None)
         label = "Participer" if count is None else f"Participer • {count}"
-        button = discord.ui.Button(label=label, emoji="🎉", style=discord.ButtonStyle.primary, custom_id="sentrix:giveaway:v2:enter")
+        button = discord.ui.Button(
+            label=label,
+            emoji=sxemoji.partiel("giveaway") or sxemoji.partiel("gift"),
+            style=discord.ButtonStyle.primary,
+            custom_id="sentrix:giveaway:v2:enter",
+        )
         button.callback = self.enter
         self.add_item(button)
 
@@ -721,50 +738,132 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         msg = await panels.envoyer(ctx, panneau)
         view.message = msg
 
-    def build_public_embed(self, guild: discord.Guild, state: BuilderState, end_at: int, author) -> discord.Embed:
-        e = discord.Embed(
-            title=f"Giveaway — {state.prize}",
-            description=(
-                ((state.description + "\n\n") if state.description else "")
-                + "Cliquez sur **Participer** pour entrer dans le tirage. "
-                + "Les conditions sont vérifiées à l’entrée puis de nouveau au tirage."
-            ),
-            colour=discord.Colour.blurple(),
-        )
-        e.add_field(name="Récompense", value=f"**{state.prize}**", inline=False)
-        e.add_field(name="Fin", value=f"<t:{end_at}:R>\n<t:{end_at}:F>", inline=True)
-        e.add_field(name="Gagnants", value=str(state.winners), inline=True)
-        e.add_field(name="Organisé par", value=getattr(author, "mention", str(author)), inline=True)
-
-        conditions = []
+    def build_public_panel(
+        self,
+        guild: discord.Guild,
+        state: BuilderState,
+        end_at: int,
+        author,
+        *,
+        count: int = 0,
+        interactive: bool = True,
+        status: str = "actif",
+        winners: list[int] | None = None,
+    ) -> panels.Panneau:
+        conditions: list[str] = []
         if state.required_roles:
-            conditions.append("**Obligatoire** — " + ", ".join(f"<@&{x}>" for x in state.required_roles))
+            conditions.append("**Obligatoire** · " + ", ".join(f"<@&{x}>" for x in state.required_roles))
         if state.excluded_roles:
-            conditions.append("**Interdit** — " + ", ".join(f"<@&{x}>" for x in state.excluded_roles))
+            conditions.append("**Interdit** · " + ", ".join(f"<@&{x}>" for x in state.excluded_roles))
         if state.min_invites:
-            conditions.append(f"**Invitations** — {state.min_invites} minimum")
+            conditions.append(f"**Invitations** · {state.min_invites} minimum")
         if state.min_account_age_days:
-            conditions.append(f"**Âge du compte** — {state.min_account_age_days} jour(s) minimum")
+            conditions.append(f"**Âge du compte** · {state.min_account_age_days} jour(s) minimum")
         if state.min_server_age_days:
-            conditions.append(f"**Présence serveur** — {state.min_server_age_days} jour(s) minimum")
+            conditions.append(f"**Présence serveur** · {state.min_server_age_days} jour(s) minimum")
         if state.custom_condition:
-            conditions.append(f"**Condition personnalisée** — {state.custom_condition}")
-        e.add_field(
-            name="Conditions",
-            value="\n".join(conditions)[:1024] if conditions else "Aucune condition supplémentaire.",
-            inline=False,
+            conditions.append(f"**Condition personnalisée** · {state.custom_condition}")
+
+        bonus_lines = [
+            f"<@&{role_id}> · **x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}**"
+            for role_id in state.bonus_roles
+        ]
+
+        info_lines = [
+            panels.Ligne("Fin", f"<t:{end_at}:R> · <t:{end_at}:F>"),
+            panels.Ligne("Gagnants", str(state.winners)),
+            panels.Ligne("Participants", str(count)),
+            panels.Ligne("Organisé par", getattr(author, "mention", str(author))),
+        ]
+        if status == "termine":
+            mentions = ", ".join(f"<@{uid}>" for uid in (winners or [])) or "Aucun participant éligible"
+            info_lines.append(panels.Ligne("Résultat", mentions))
+        elif status == "annule":
+            info_lines.append(panels.Ligne("Statut", "Annulé"))
+
+        sections = [
+            panels.Section("Informations", info_lines),
+            panels.Section(
+                "Conditions",
+                texte="\n".join(conditions) if conditions else "Aucune condition supplémentaire.",
+            ),
+        ]
+        if bonus_lines:
+            sections.append(panels.Section("Chances bonus", texte="\n".join(bonus_lines)))
+
+        description = str(state.description or "").strip()
+        if status == "actif":
+            helper = "Cliquez sur **Participer** pour entrer ou vous retirer du tirage."
+            description = f"{description}\n{helper}".strip()
+        elif status == "termine":
+            description = f"{description}\nLe tirage est terminé.".strip()
+        else:
+            description = f"{description}\nCe giveaway a été annulé.".strip()
+
+        panel = panels.Panneau(
+            titre=f"Giveaway — {state.prize}",
+            sous_titre=description or None,
+            kind="info" if status == "actif" else ("success" if status == "termine" else "warning"),
+            sections=sections,
+            image=state.image_url,
+            pied="Giveaway",
+        )
+        if interactive and status == "actif":
+            panel = panels.avec_composants(panel, AdvancedGiveawayView(count))
+        return panel
+
+    def _state_from_row(self, row) -> BuilderState:
+        bonus_map = _bonus(row["bonus_roles_json"])
+        return BuilderState(
+            author_id=int(row["created_by"]),
+            guild_id=int(row["guild_id"]),
+            prize=str(row["prize"]),
+            duration_seconds=max(0, int(row["end_at"]) - int(row["created_at"])),
+            winners=max(1, int(row["winners_count"] or 1)),
+            channel_id=int(row["channel_id"]),
+            required_roles=_ids(row["required_roles_json"]),
+            excluded_roles=_ids(row["excluded_roles_json"]),
+            bonus_roles=list(bonus_map.keys()),
+            bonus_multiplier=2,
+            bonus_multipliers=bonus_map,
+            ping_role_id=row["ping_role_id"],
+            min_invites=int(row["min_invites"] or 0),
+            min_account_age_days=int(row["min_account_age_days"] or 0),
+            min_server_age_days=int(row["min_server_age_days"] or 0),
+            custom_condition=row["custom_condition"],
+            image_url=row["image_url"],
+            description=row["description"],
         )
 
-        if state.bonus_roles:
-            bonus_lines = [
-                f"<@&{role_id}> — **x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}**"
-                for role_id in state.bonus_roles
-            ]
-            e.add_field(name="Chances bonus", value="\n".join(bonus_lines)[:1024], inline=False)
-        if state.image_url:
-            e.set_image(url=state.image_url)
-        e.set_footer(text="SentriX • Giveaway")
-        return e
+    async def public_panel_from_row(
+        self,
+        guild: discord.Guild,
+        row,
+        *,
+        count: int | None = None,
+        status: str | None = None,
+        winners: list[int] | None = None,
+    ) -> panels.Panneau:
+        if count is None:
+            count_row = await self.bot.db.fetchone(
+                "SELECT COUNT(*) AS n FROM giveaway_entries_v2 WHERE giveaway_id=?",
+                (row["id"],),
+            )
+            count = int(count_row["n"] if count_row else 0)
+        state = self._state_from_row(row)
+        author = guild.get_member(int(row["created_by"])) or discord.Object(id=int(row["created_by"]))
+        if not hasattr(author, "mention"):
+            author = f"<@{row['created_by']}>"
+        return self.build_public_panel(
+            guild,
+            state,
+            int(row["end_at"]),
+            author,
+            count=count,
+            interactive=(status or row["status"]) == "actif",
+            status=str(status or row["status"]),
+            winners=winners if winners is not None else _ids(row["winners_json"]),
+        )
 
     async def publish(self, guild: discord.Guild, state: BuilderState, author) -> discord.Message:
         await self.ensure_schema()
@@ -772,14 +871,24 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         if not isinstance(channel, (discord.TextChannel, discord.Thread)) and getattr(channel, "send", None) is None:
             raise ValueError("salon de destination introuvable")
         end_at = int(time.time()) + int(state.duration_seconds or 0)
-        embed = self.build_public_embed(guild, state, end_at, author)
-        content = f"<@&{state.ping_role_id}>" if state.ping_role_id else None
-        msg = await channel.send(
-            content=content,
-            embed=embed,
-            view=AdvancedGiveawayView(0),
-            allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False, replied_user=False),
-        )
+        panel = self.build_public_panel(guild, state, end_at, author, count=0)
+
+        # Le panneau Components V2 ne peut pas porter de content. Le ping éventuel
+        # est donc un message minimal et temporaire, envoyé APRÈS le panneau afin
+        # de ne jamais laisser un ping orphelin si le rendu échoue.
+        msg = await panels.envoyer(channel, panel)
+        if state.ping_role_id:
+            try:
+                await channel.send(
+                    f"<@&{state.ping_role_id}>",
+                    allowed_mentions=discord.AllowedMentions(
+                        roles=True, users=False, everyone=False, replied_user=False
+                    ),
+                    delete_after=5,
+                )
+            except discord.HTTPException:
+                pass
+
         bonus_map = {
             str(role_id): int(state.bonus_multipliers.get(role_id, state.bonus_multiplier))
             for role_id in state.bonus_roles
@@ -863,7 +972,15 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         count_row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM giveaway_entries_v2 WHERE giveaway_id=?", (row["id"],))
         count = int(count_row["n"] if count_row else 0)
         try:
-            await interaction.message.edit(view=AdvancedGiveawayView(count))
+            await panels.editer(
+                interaction.message,
+                await self.public_panel_from_row(
+                    interaction.guild,
+                    row,
+                    count=count,
+                    status="actif",
+                ),
+            )
         except discord.HTTPException:
             pass
         await interaction.response.send_message(text, ephemeral=True)
@@ -899,17 +1016,22 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         else:
             await self.bot.db.execute("UPDATE giveaways_v2 SET winners_json=? WHERE id=?", (json.dumps(winners), row["id"]))
         channel = guild.get_channel(int(row["channel_id"]))
-        mentions = ", ".join(f"<@{x}>" for x in winners) if winners else "Aucun participant éligible"
         if channel and getattr(channel, "send", None):
-            title = "🎉 Nouveau tirage" if reroll else "🎉 Giveaway terminé"
-            await channel.send(embed=discord.Embed(title=title, description=f"**{row['prize']}**\n\nGagnant(s) : {mentions}", colour=discord.Colour.blurple()))
             try:
                 original = await channel.fetch_message(int(row["message_id"]))
-                if original.embeds:
-                    embed = original.embeds[0]
-                    embed.description = (embed.description or "") + f"\n\n**Terminé — gagnant(s) :** {mentions}"
-                    embed.colour = discord.Colour.dark_grey()
-                    await original.edit(embed=embed, view=None)
+                fresh = await self.bot.db.fetchone(
+                    "SELECT * FROM giveaways_v2 WHERE id=?",
+                    (row["id"],),
+                ) or row
+                await panels.editer(
+                    original,
+                    await self.public_panel_from_row(
+                        guild,
+                        fresh,
+                        status="termine",
+                        winners=winners,
+                    ),
+                )
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
         return winners
@@ -948,14 +1070,21 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         if channel:
             try:
                 original = await channel.fetch_message(message_id)
-                if original.embeds:
-                    embed = original.embeds[0]
-                    embed.description = (embed.description or "") + "\n\n**Giveaway annulé.**"
-                    embed.colour = discord.Colour.dark_grey()
-                    await original.edit(embed=embed, view=None)
+                fresh = await self.bot.db.fetchone(
+                    "SELECT * FROM giveaways_v2 WHERE id=?",
+                    (row["id"],),
+                ) or row
+                await panels.editer(
+                    original,
+                    await self.public_panel_from_row(
+                        ctx.guild,
+                        fresh,
+                        status="annule",
+                    ),
+                )
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
-        await ctx.send("Giveaway annulé.")
+        await panels.texte_court(ctx, "Giveaway annulé.")
         return True
 
     @tasks.loop(seconds=15)
