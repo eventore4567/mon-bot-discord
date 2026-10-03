@@ -566,17 +566,22 @@ def _icone_staff(key: str):
 
 
 class TicketControlButton(discord.ui.Button):
-    def __init__(self, key: str, cfg: dict, default_label: str, default_emoji: str, row: int):
+    def __init__(self, key: str, cfg: dict, default_label: str, default_emoji: str, row: int = 0):
+        # Les deux actions principales restent visibles : prise en charge et
+        # fermeture. Tout le reste passe par le menu « Actions staff… ».
+        style = BUTTON_STYLES.get(
+            cfg.get("style", DEFAULT_BUTTON_STYLE),
+            discord.ButtonStyle.primary,
+        )
+        if key == "close":
+            style = discord.ButtonStyle.danger
+        elif key == "claim":
+            style = discord.ButtonStyle.primary
+
         super().__init__(
             label=(cfg.get("label") or default_label)[:80],
-            # Le choix du serveur prime — personne ne doit perdre son emoji
-            # parce que SentriX en propose un. Mais `default_button_settings`
-            # MATÉRIALISE l'emoji par défaut dans la configuration : un simple
-            # `cfg.get("emoji")` est donc toujours rempli, et l'icône SentriX
-            # ne serait jamais atteinte. On ne considère comme choisi que ce
-            # qui diffère du défaut.
             emoji=_emoji_du_bouton(key, cfg, default_emoji),
-            style=BUTTON_STYLES.get(cfg.get("style", DEFAULT_BUTTON_STYLE), discord.ButtonStyle.primary),
+            style=style,
             custom_id=f"ticket_ctrl_{key}",
             row=row,
         )
@@ -587,26 +592,91 @@ class TicketControlButton(discord.ui.Button):
         await cog.handle_control_button(interaction, self.key)
 
 
+class TicketControlSelect(discord.ui.Select):
+    """Regroupe les actions secondaires pour éviter la grille de gros boutons."""
+
+    def __init__(self, settings: dict):
+        options: list[discord.SelectOption] = []
+        descriptions = {
+            "unclaim": "Libérer la prise en charge",
+            "add": "Donner l'accès à un membre",
+            "remove": "Retirer l'accès d'un membre",
+            "rename": "Changer le nom du salon",
+            "transfer": "Transférer la prise en charge",
+            "note": "Ajouter une note interne",
+            "bump": "Relancer le membre",
+        }
+        for key, (default_label, default_emoji) in STAFF_BUTTONS.items():
+            if key in {"claim", "close"}:
+                continue
+            cfg = settings.get(key, {"enabled": key in DEFAULT_ENABLED_BUTTONS})
+            if not cfg.get("enabled", True):
+                continue
+            options.append(
+                discord.SelectOption(
+                    label=(cfg.get("label") or default_label)[:100],
+                    value=key,
+                    description=descriptions.get(key),
+                    emoji=_emoji_du_bouton(key, cfg, default_emoji),
+                )
+            )
+
+        # Une vue persistante doit toujours reconstruire le même custom_id.
+        # Quand aucune action secondaire n'est activée, on n'ajoute simplement
+        # pas le menu à TicketControlView.
+        super().__init__(
+            placeholder="Actions staff…",
+            min_values=1,
+            max_values=1,
+            options=options[:25] or [
+                discord.SelectOption(label="Aucune action disponible", value="noop")
+            ],
+            custom_id="ticket_ctrl_actions",
+            disabled=not bool(options),
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        key = self.values[0]
+        if key == "noop":
+            return await interaction.response.defer()
+        cog: "Tickets" = interaction.client.get_cog("Tickets")
+        await cog.handle_control_button(interaction, key)
+
+
 class TicketControlView(discord.ui.View):
-    """Vue de contrôle affichée dans chaque salon de ticket. `button_settings=None` sert
-    UNIQUEMENT à l'enregistrement générique après redémarrage (voir main.py) : elle affiche
-    alors tous les boutons pour que le routage des custom_id fonctionne quel que soit le
-    serveur — les vraies vues envoyées aux salons utilisent toujours la config réelle."""
+    """Contrôles staff compacts : deux actions essentielles + un menu secondaire.
+
+    `button_settings=None` sert aussi à l'enregistrement persistant au boot.
+    Le custom_id du menu reste fixe ; les valeurs sélectionnées sont routées
+    vers les mêmes handlers que les anciens boutons.
+    """
 
     def __init__(self, button_settings: dict | None = None):
         super().__init__(timeout=None)
         settings = button_settings if button_settings is not None else default_button_settings()
-        row = 0
-        count_in_row = 0
-        for key, (default_label, default_emoji) in STAFF_BUTTONS.items():
+
+        for key in ("claim", "close"):
+            default_label, default_emoji = STAFF_BUTTONS[key]
             cfg = settings.get(key, {"enabled": key in DEFAULT_ENABLED_BUTTONS})
-            if not cfg.get("enabled", True):
-                continue
-            self.add_item(TicketControlButton(key, cfg, default_label, default_emoji, row))
-            count_in_row += 1
-            if count_in_row >= 5:
-                row += 1
-                count_in_row = 0
+            if cfg.get("enabled", True):
+                self.add_item(
+                    TicketControlButton(
+                        key,
+                        cfg,
+                        default_label,
+                        default_emoji,
+                        row=0,
+                    )
+                )
+
+        secondary_enabled = any(
+            settings.get(key, {"enabled": key in DEFAULT_ENABLED_BUTTONS}).get("enabled", True)
+            for key in STAFF_BUTTONS
+            if key not in {"claim", "close"}
+        )
+        if secondary_enabled:
+            self.add_item(TicketControlSelect(settings))
 
 
 class TicketRatingButton(
