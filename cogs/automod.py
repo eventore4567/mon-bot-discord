@@ -1026,6 +1026,41 @@ class AutoMod(commands.Cog, name="Automod"):
         elif field == "antiinsult":
             await self._sync_native_harmful_rule(guild)
 
+    async def _native_policy_exemptions(
+        self,
+        guild: discord.Guild,
+        filter_name: str,
+    ) -> tuple[list[discord.Role], list[discord.abc.GuildChannel]] | None:
+        """Traduit la politique SentriX vers les exemptions AutoMod Discord.
+
+        Discord sait exempter un rôle OU un salon, mais ne sait pas exprimer
+        « ce rôle est exempt partout SAUF dans ces salons stricts ». Si les deux
+        sont configurés simultanément, la règle native SentriX est donc retirée et
+        le moteur local (qui sait respecter cette priorité) devient l'autorité.
+        """
+        policy = await self.get_security_filter_policy_cached(guild.id, filter_name)
+        bypass_role_ids = set(policy["role_ids"])
+        bypass_role_ids.update(await self.get_exempt_roles_cached(guild.id))
+        strict_channel_ids = set(policy["strict_channel_ids"])
+
+        if strict_channel_ids and bypass_role_ids:
+            return None
+
+        roles = [
+            role for role_id in bypass_role_ids
+            if (role := guild.get_role(int(role_id))) is not None
+        ]
+
+        ignored = await self.get_ignored_channels_cached(guild.id)
+        channels: list[discord.abc.GuildChannel] = []
+        for channel_id in ignored:
+            if int(channel_id) in strict_channel_ids:
+                continue
+            channel = guild.get_channel(int(channel_id))
+            if isinstance(channel, (discord.TextChannel, discord.ForumChannel)):
+                channels.append(channel)
+        return roles, channels
+
     async def _sync_native_antilink_rule(self, guild: discord.Guild) -> bool:
         """Synchronise l'anti-liens SentriX avec Discord AutoMod.
 
@@ -1067,6 +1102,17 @@ class AutoMod(commands.Cog, name="Automod"):
                 except (discord.Forbidden, discord.HTTPException):
                     logger.warning("Suppression doublon AutoMod impossible guild=%s rule=%s", guild.id, duplicate.id)
 
+            native_policy = await self._native_policy_exemptions(guild, "antilink")
+            if enabled and native_policy is None:
+                # Discord ne peut pas représenter strict-channel > role-bypass.
+                if rule is not None:
+                    try:
+                        await rule.delete(reason="SentriX: politique anti-liens gérée par le moteur local")
+                    except (discord.Forbidden, discord.HTTPException):
+                        return False
+                return True
+            exempt_roles, exempt_channels = native_policy or ([], [])
+
             if not enabled:
                 if rule is not None:
                     try:
@@ -1097,8 +1143,8 @@ class AutoMod(commands.Cog, name="Automod"):
                         trigger=trigger,
                         actions=actions,
                         enabled=True,
-                        exempt_roles=[],
-                        exempt_channels=[],
+                        exempt_roles=exempt_roles,
+                        exempt_channels=exempt_channels,
                         reason="SentriX: anti-liens activé",
                     )
                 else:
@@ -1106,8 +1152,8 @@ class AutoMod(commands.Cog, name="Automod"):
                         trigger=trigger,
                         actions=actions,
                         enabled=True,
-                        exempt_roles=[],
-                        exempt_channels=[],
+                        exempt_roles=exempt_roles,
+                        exempt_channels=exempt_channels,
                         reason="SentriX: synchronisation anti-liens",
                     )
                 return True
@@ -1127,6 +1173,7 @@ class AutoMod(commands.Cog, name="Automod"):
         enabled: bool,
         trigger: discord.AutoModTrigger | None,
         custom_message: str,
+        policy_filter: str | None = None,
     ) -> bool:
         """Crée/modifie/supprime une règle AutoMod SentriX sans doublon."""
         me = guild.me
@@ -1146,6 +1193,17 @@ class AutoMod(commands.Cog, name="Automod"):
             except (discord.Forbidden, discord.HTTPException):
                 pass
 
+        exempt_roles: list[discord.Role] = []
+        exempt_channels: list[discord.abc.GuildChannel] = []
+        if enabled and policy_filter:
+            native_policy = await self._native_policy_exemptions(guild, policy_filter)
+            if native_policy is None:
+                # Correctness first: le moteur local sait appliquer le salon strict
+                # avant le rôle bypass, Discord AutoMod natif ne le sait pas.
+                enabled = False
+            else:
+                exempt_roles, exempt_channels = native_policy
+
         if not enabled or trigger is None:
             if rule is not None:
                 try:
@@ -1163,8 +1221,8 @@ class AutoMod(commands.Cog, name="Automod"):
                     trigger=trigger,
                     actions=actions,
                     enabled=True,
-                    exempt_roles=[],
-                    exempt_channels=[],
+                    exempt_roles=exempt_roles,
+                    exempt_channels=exempt_channels,
                     reason=f"SentriX: activation {name}",
                 )
             else:
@@ -1172,8 +1230,8 @@ class AutoMod(commands.Cog, name="Automod"):
                     trigger=trigger,
                     actions=actions,
                     enabled=True,
-                    exempt_roles=[],
-                    exempt_channels=[],
+                    exempt_roles=exempt_roles,
+                    exempt_channels=exempt_channels,
                     reason=f"SentriX: synchronisation {name}",
                 )
             return True
@@ -1203,6 +1261,7 @@ class AutoMod(commands.Cog, name="Automod"):
             enabled=bool(keywords),
             trigger=trigger,
             custom_message=NATIVE_TARGET_LINKS_CUSTOM_MESSAGE,
+            policy_filter="antilink",
         )
 
     async def _sync_native_antiinvite_rule(self, guild: discord.Guild) -> bool:
@@ -1215,6 +1274,7 @@ class AutoMod(commands.Cog, name="Automod"):
             enabled=enabled,
             trigger=trigger,
             custom_message=NATIVE_ANTIINVITE_CUSTOM_MESSAGE,
+            policy_filter="antiinvite",
         )
 
     async def _sync_native_antiscam_rule(self, guild: discord.Guild) -> bool:
@@ -1229,6 +1289,7 @@ class AutoMod(commands.Cog, name="Automod"):
             enabled=enabled,
             trigger=trigger,
             custom_message=NATIVE_ANTISCAM_CUSTOM_MESSAGE,
+            policy_filter="antiscam",
         )
 
     async def _sync_native_antimention_rule(self, guild: discord.Guild) -> bool:
@@ -1244,6 +1305,7 @@ class AutoMod(commands.Cog, name="Automod"):
             enabled=enabled,
             trigger=trigger,
             custom_message=NATIVE_ANTIMENTION_CUSTOM_MESSAGE,
+            policy_filter="antimention",
         )
 
     async def _sync_native_harmful_rule(self, guild: discord.Guild) -> bool:
@@ -1324,6 +1386,16 @@ class AutoMod(commands.Cog, name="Automod"):
                 except (discord.Forbidden, discord.HTTPException):
                     pass
 
+            native_policy = await self._native_policy_exemptions(guild, "antiinsult")
+            if keywords and native_policy is None:
+                if rule is not None:
+                    try:
+                        await rule.delete(reason="SentriX: politique mots interdits gérée par le moteur local")
+                    except (discord.Forbidden, discord.HTTPException):
+                        return False
+                return True
+            exempt_roles, exempt_channels = native_policy or ([], [])
+
             if not keywords:
                 if rule is not None:
                     try:
@@ -1344,8 +1416,8 @@ class AutoMod(commands.Cog, name="Automod"):
                         trigger=trigger,
                         actions=actions,
                         enabled=True,
-                        exempt_roles=[],
-                        exempt_channels=[],
+                        exempt_roles=exempt_roles,
+                        exempt_channels=exempt_channels,
                         reason="SentriX: synchronisation mots interdits",
                     )
                 else:
@@ -1353,8 +1425,8 @@ class AutoMod(commands.Cog, name="Automod"):
                         trigger=trigger,
                         actions=actions,
                         enabled=True,
-                        exempt_roles=[],
-                        exempt_channels=[],
+                        exempt_roles=exempt_roles,
+                        exempt_channels=exempt_channels,
                         reason="SentriX: synchronisation mots interdits",
                     )
                 return True
