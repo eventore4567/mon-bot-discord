@@ -160,9 +160,9 @@ class InfiniteSetupView(discord.ui.View):
 class InfiniteMistakeView(discord.ui.LayoutView):
     """Assistant compact pour une erreur du compteur infini.
 
-    Le panneau ne ping personne, ne modifie jamais le compteur tout seul et
-    disparaît après chaque action. Le message invalide est nettoyé au timeout
-    si personne n'agit.
+    Le panneau ping uniquement le membre concerné, ne modifie jamais le compteur
+    tout seul et disparaît après chaque action. Le message invalide est nettoyé
+    après 60 secondes si personne n'agit.
     """
 
     def __init__(
@@ -175,7 +175,7 @@ class InfiniteMistakeView(discord.ui.LayoutView):
         attempted: int | None,
         reason: str,
     ):
-        super().__init__(timeout=12)
+        super().__init__(timeout=60)
         self.cog = cog
         self.source_message = source_message
         self.notice_message: discord.Message | None = None
@@ -197,7 +197,7 @@ class InfiniteMistakeView(discord.ui.LayoutView):
         container.add_item(
             discord.ui.TextDisplay(
                 f"{error_icon} **{text}**\n"
-                f"-# {hint} · Le message sera nettoyé automatiquement si tu ne choisis rien."
+                f"-# {hint} · Sans réponse, ton message sera supprimé automatiquement dans 1 minute."
             )
         )
 
@@ -395,8 +395,14 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
         )
         try:
             notice = await message.channel.send(
+                content=f"<@{message.author.id}>",
                 view=view,
-                allowed_mentions=discord.AllowedMentions.none(),
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False,
+                    roles=False,
+                    users=[message.author],
+                    replied_user=False,
+                ),
             )
         except (discord.Forbidden, discord.HTTPException):
             # Si SentriX ne peut pas afficher l'assistant, garder le comportement
