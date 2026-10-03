@@ -145,6 +145,37 @@ SECURITY_POLICY_FILTERS: tuple[tuple[str, str], ...] = (
 )
 _SECURITY_POLICY_LABELS = dict(SECURITY_POLICY_FILTERS)
 
+# Centre unique de sécurité, inspiré d'une UX de bot premium sans recopier une
+# interface tierce. Les filtres de messages ont en plus rôles bypass + salons
+# stricts ; les protections serveur gardent leurs réglages adaptés.
+SECURITY_CENTER_PROTECTIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("antispam", "Anti-spam", "Messages", "Flood, rafales et répétitions."),
+    ("antilink", "Anti-liens", "Messages", "Liens externes non autorisés."),
+    ("antilink_strict", "Blocage total des liens", "Messages", "Refuse tous les liens hors exceptions explicites."),
+    ("antiinvite", "Anti-invitations", "Messages", "Invitations Discord non autorisées."),
+    ("antimention", "Anti-mentions", "Messages", "Mentions et pings massifs."),
+    ("anticaps", "Anti-majuscules", "Messages", "Majuscules abusives."),
+    ("antiemoji", "Anti-émojis", "Messages", "Flood massif d'émojis."),
+    ("antiscam", "Anti-scam", "Messages", "Phishing, faux Nitro, crypto et images suspectes."),
+    ("antiinsult", "Anti-insultes / mots interdits", "Messages", "Insultes et expressions interdites."),
+    ("antiraid", "Anti-raid", "Arrivées", "Arrivées massives et mode raid."),
+    ("antibot", "Anti-bots", "Arrivées", "Bots ajoutés de manière suspecte."),
+    ("antiaccount", "Anti-comptes récents", "Arrivées", "Comptes Discord trop récents."),
+    ("join_gate", "Join Gate", "Arrivées", "Âge du compte, avatar et vitesse d'arrivée."),
+    ("risk_engine", "Moteur de risque", "Arrivées", "Score multi-signaux et alertes graduées."),
+    ("antinuke", "Anti-nuke", "Serveur", "Rôles, salons, webhooks et actions critiques."),
+    ("security_vanity", "Protection Vanity URL", "Serveur", "Surveille le lien personnalisé du serveur."),
+    ("security_prune", "Protection Prune", "Serveur", "Détecte les suppressions massives de membres."),
+    ("security_permissions", "Permissions dangereuses", "Serveur", "Bloque les élévations critiques de permissions."),
+    ("escalation", "Escalade AutoMod", "Réponse", "Augmente les sanctions lors des récidives."),
+    ("honeypot", "Honeypot anti-bot", "Avancé", "Piège les comptes suspects dans le salon prévu."),
+    ("verification", "Vérification anti-alt", "Avancé", "Score de confiance et validation humaine."),
+)
+_SECURITY_CENTER_META = {
+    key: {"label": label, "group": group, "description": description}
+    for key, label, group, description in SECURITY_CENTER_PROTECTIONS
+}
+
 
 async def _get_security_filter_policy(bot, guild_id: int, filter_name: str) -> dict:
     if filter_name not in _SECURITY_POLICY_LABELS:
@@ -244,13 +275,39 @@ async def _replace_security_filter_policy(
         logger.debug("Synchronisation native après politique sécurité impossible", exc_info=True)
 
 
+async def _security_center_state(bot, guild_id: int, filter_name: str) -> tuple[bool, dict]:
+    if filter_name in {"honeypot", "verification"}:
+        from . import security_verification_v71 as security_v71
+        cfg = await security_v71.settings(bot, guild_id)
+        enabled = bool(
+            cfg["honeypot_enabled"] if filter_name == "honeypot"
+            else cfg["verification_enabled"]
+        )
+        return enabled, cfg
+
+    conf = await bot.db.get_automod(guild_id)
+    try:
+        enabled = bool(conf and conf[filter_name])
+    except (KeyError, IndexError, TypeError):
+        enabled = False
+    return enabled, {}
+
+
 async def _security_policy_setup_panel(owner, author_id: int, filter_name: str = "antispam"):
-    if filter_name not in _SECURITY_POLICY_LABELS:
+    """Centre de sécurité unique : toutes les protections, un seul parcours."""
+    if filter_name not in _SECURITY_CENTER_META:
         filter_name = "antispam"
-    policy = await _get_security_filter_policy(owner.bot, owner.guild.id, filter_name)
-    conf = await owner.bot.db.get_automod(owner.guild.id)
-    enabled = bool(conf and conf[filter_name])
-    label = _SECURITY_POLICY_LABELS[filter_name]
+
+    meta = _SECURITY_CENTER_META[filter_name]
+    supports_policy = filter_name in _SECURITY_POLICY_LABELS
+    policy = (
+        await _get_security_filter_policy(owner.bot, owner.guild.id, filter_name)
+        if supports_policy
+        else {"role_ids": [], "strict_channel_ids": []}
+    )
+    enabled, advanced = await _security_center_state(
+        owner.bot, owner.guild.id, filter_name
+    )
 
     roles = [owner.guild.get_role(role_id) for role_id in policy["role_ids"]]
     roles = [role for role in roles if role is not None]
@@ -260,28 +317,56 @@ async def _security_policy_setup_panel(owner, author_id: int, filter_name: str =
     ]
     strict_channels = [channel for channel in strict_channels if channel is not None]
 
-    role_text = ", ".join(role.mention for role in roles[:12]) or "Aucun rôle"
-    if len(roles) > 12:
-        role_text += f" +{len(roles) - 12}"
-    strict_text = ", ".join(channel.mention for channel in strict_channels[:12]) or "Aucun salon strict"
-    if len(strict_channels) > 12:
-        strict_text += f" +{len(strict_channels) - 12}"
+    role_text = ", ".join(role.mention for role in roles[:8]) or "Aucun"
+    if len(roles) > 8:
+        role_text += f" +{len(roles) - 8}"
+    strict_text = ", ".join(channel.mention for channel in strict_channels[:8]) or "Aucun"
+    if len(strict_channels) > 8:
+        strict_text += f" +{len(strict_channels) - 8}"
+
+    details = [
+        f"**État** · {'● ACTIF' if enabled else '○ INACTIF'}",
+        f"**Catégorie** · {meta['group']}",
+        f"**Fonction** · {meta['description']}",
+    ]
+    if supports_policy:
+        details.extend(
+            [
+                f"**Rôles bypass** · {role_text}",
+                f"**Salons stricts — bypass interdit** · {strict_text}",
+                "",
+                "**Priorité : salon strict → rôle bypass → protection normale.**",
+                "Un rôle bypass reste bloqué dans un salon strict. Les threads héritent du salon parent.",
+            ]
+        )
+    elif filter_name == "antiraid":
+        details.append(
+            f"**Intensité** · {advanced.get('raid_intensity', 'normal').replace('eleve', 'élevé').title()}"
+        )
+    elif filter_name == "honeypot":
+        details.append(
+            f"**Action** · {advanced.get('honeypot_action', 'softban')}"
+        )
+    elif filter_name == "verification":
+        details.append(
+            f"**Seuil** · {advanced.get('verification_threshold', 1888)}/2000"
+        )
+    else:
+        details.extend(
+            [
+                "",
+                "Cette protection agit globalement sur le serveur ou les arrivées : "
+                "les salons stricts ne sont pas applicables.",
+            ]
+        )
 
     panel = embeds.info(
-        (
-            f"**{label}** · {'ACTIF' if enabled else 'INACTIF'}\n"
-            f"**Rôles autorisés à contourner** · {role_text}\n"
-            f"**Salons stricts — aucun bypass** · {strict_text}\n\n"
-            "**Priorité : salon strict → rôle bypass → protection normale.**\n"
-            "Dans un salon strict, même un rôle configuré en bypass reste soumis à cette "
-            "protection. Les threads héritent du salon parent. Chaque protection possède "
-            "ses propres exceptions."
-        ),
-        title="Sécurité · Exceptions par protection",
+        "\n".join(details),
+        title=f"Sécurité · {meta['label']}",
     )
     return panels.avec_composants(
         panels.depuis_embed(panel),
-        SecurityPolicyView(owner, author_id, filter_name, policy, enabled),
+        SecurityPolicyView(owner, author_id, filter_name, policy, enabled, advanced),
     )
 
 
@@ -298,25 +383,29 @@ class SecurityPolicyView(discord.ui.View):
         filter_name: str,
         policy: dict,
         enabled: bool,
+        advanced: dict | None = None,
     ):
-        super().__init__(timeout=180)
+        super().__init__(timeout=240)
         self.owner = owner
         self.author_id = int(author_id)
         self.filter_name = filter_name
         self.policy = policy
         self.enabled = bool(enabled)
+        self.advanced = advanced or {}
+        self.supports_policy = filter_name in _SECURITY_POLICY_LABELS
 
         protection_select = discord.ui.Select(
-            placeholder="Protection à configurer",
+            placeholder="Choisir une protection à configurer",
             min_values=1,
             max_values=1,
             options=[
                 discord.SelectOption(
-                    label=label,
+                    label=label[:100],
                     value=key,
+                    description=f"{group} · {description}"[:100],
                     default=key == filter_name,
                 )
-                for key, label in SECURITY_POLICY_FILTERS
+                for key, label, group, description in SECURITY_CENTER_PROTECTIONS
             ],
             row=0,
         )
@@ -331,131 +420,210 @@ class SecurityPolicyView(discord.ui.View):
         protection_select.callback = protection_cb
         self.add_item(protection_select)
 
-        role_select = discord.ui.RoleSelect(
-            placeholder=f"Rôles bypass · {_SECURITY_POLICY_LABELS[filter_name]}"[:150],
-            min_values=1,
-            max_values=25,
-            row=1,
-        )
-
-        async def role_cb(interaction: discord.Interaction):
-            valid = [
-                role.id
-                for role in role_select.values
-                if isinstance(role, discord.Role)
-                and role.guild.id == self.owner.guild.id
-                and role != self.owner.guild.default_role
-            ]
-            await _replace_security_filter_policy(
-                self.owner.bot,
-                self.owner.guild.id,
-                self.filter_name,
-                role_ids=valid,
-                strict_channel_ids=list(self.policy["strict_channel_ids"]),
-            )
-            await panels.editer(
-                interaction.response,
-                await _security_policy_setup_panel(
-                    self.owner, interaction.user.id, self.filter_name
-                ),
+        if self.supports_policy:
+            role_select = discord.ui.RoleSelect(
+                placeholder=f"Rôles bypass · {_SECURITY_POLICY_LABELS[filter_name]}"[:150],
+                min_values=1,
+                max_values=25,
+                row=1,
             )
 
-        role_select.callback = role_cb
-        self.add_item(role_select)
+            async def role_cb(interaction: discord.Interaction):
+                valid = [
+                    role.id
+                    for role in role_select.values
+                    if isinstance(role, discord.Role)
+                    and role.guild.id == self.owner.guild.id
+                    and role != self.owner.guild.default_role
+                ]
+                await _replace_security_filter_policy(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    self.filter_name,
+                    role_ids=valid,
+                    strict_channel_ids=list(self.policy["strict_channel_ids"]),
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
 
-        channel_select = discord.ui.ChannelSelect(
-            placeholder=f"Salons stricts · {_SECURITY_POLICY_LABELS[filter_name]}"[:150],
-            min_values=1,
-            max_values=25,
-            channel_types=[
-                discord.ChannelType.text,
-                discord.ChannelType.news,
-                discord.ChannelType.forum,
-            ],
-            row=2,
-        )
+            role_select.callback = role_cb
+            self.add_item(role_select)
 
-        async def channel_cb(interaction: discord.Interaction):
-            ids = [
-                channel.id
-                for channel in channel_select.values
-                if getattr(channel, "guild", None) is not None
-                and channel.guild.id == self.owner.guild.id
-            ]
-            await _replace_security_filter_policy(
-                self.owner.bot,
-                self.owner.guild.id,
-                self.filter_name,
-                role_ids=list(self.policy["role_ids"]),
-                strict_channel_ids=ids,
+            channel_select = discord.ui.ChannelSelect(
+                placeholder=f"Salons stricts · {_SECURITY_POLICY_LABELS[filter_name]}"[:150],
+                min_values=1,
+                max_values=25,
+                channel_types=[
+                    discord.ChannelType.text,
+                    discord.ChannelType.news,
+                    discord.ChannelType.forum,
+                ],
+                row=2,
             )
-            await panels.editer(
-                interaction.response,
-                await _security_policy_setup_panel(
-                    self.owner, interaction.user.id, self.filter_name
-                ),
+
+            async def channel_cb(interaction: discord.Interaction):
+                ids = [
+                    channel.id
+                    for channel in channel_select.values
+                    if getattr(channel, "guild", None) is not None
+                    and channel.guild.id == self.owner.guild.id
+                ]
+                await _replace_security_filter_policy(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    self.filter_name,
+                    role_ids=list(self.policy["role_ids"]),
+                    strict_channel_ids=ids,
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            channel_select.callback = channel_cb
+            self.add_item(channel_select)
+
+        elif filter_name == "antiraid":
+            from . import security_verification_v71 as security_v71
+            intensity = discord.ui.Select(
+                placeholder="Intensité anti-raid",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=security_v71.RAID_LABELS[key],
+                        value=key,
+                        default=key == self.advanced.get("raid_intensity", "normal"),
+                    )
+                    for key in ("faible", "normal", "eleve", "extreme")
+                ],
+                row=1,
             )
 
-        channel_select.callback = channel_cb
-        self.add_item(channel_select)
+            async def intensity_cb(interaction: discord.Interaction):
+                await security_v71.update_setting(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    "raid_intensity",
+                    intensity.values[0],
+                    interaction.user.id,
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            intensity.callback = intensity_cb
+            self.add_item(intensity)
+
+        elif filter_name == "honeypot":
+            from . import security_verification_v71 as security_v71
+            action = discord.ui.Select(
+                placeholder="Action du honeypot",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=security_v71.ACTION_LABELS[key],
+                        value=key,
+                        default=key == self.advanced.get("honeypot_action", "softban"),
+                    )
+                    for key in ("softban", "kick", "ban", "mute")
+                ],
+                row=1,
+            )
+
+            async def action_cb(interaction: discord.Interaction):
+                await security_v71.update_setting(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    "honeypot_action",
+                    action.values[0],
+                    interaction.user.id,
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            action.callback = action_cb
+            self.add_item(action)
+
+        elif filter_name == "verification":
+            from . import security_verification_v71 as security_v71
+            threshold = discord.ui.Select(
+                placeholder="Seuil de confiance",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=f"{value}/2000",
+                        value=str(value),
+                        default=int(self.advanced.get("verification_threshold", 1888)) == value,
+                    )
+                    for value in (1700, 1800, 1888, 1950, 1990)
+                ],
+                row=1,
+            )
+
+            async def threshold_cb(interaction: discord.Interaction):
+                await security_v71.update_setting(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    "verification_threshold",
+                    int(threshold.values[0]),
+                    interaction.user.id,
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            threshold.callback = threshold_cb
+            self.add_item(threshold)
 
         toggle = discord.ui.Button(
             label="Désactiver" if enabled else "Activer",
             style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
             row=3,
         )
-        clear_roles = discord.ui.Button(
-            label="Retirer rôles bypass",
-            style=discord.ButtonStyle.secondary,
-            row=3,
-            disabled=not bool(policy["role_ids"]),
-        )
-        clear_strict = discord.ui.Button(
-            label="Aucun salon strict",
-            style=discord.ButtonStyle.secondary,
-            row=3,
-            disabled=not bool(policy["strict_channel_ids"]),
-        )
 
         async def toggle_cb(interaction: discord.Interaction):
-            await self.owner.bot.db.set_automod(
-                self.owner.guild.id,
-                self.filter_name,
-                0 if self.enabled else 1,
-            )
-            _invalidate_security_filter_policy(
-                self.owner.bot, self.owner.guild.id, self.filter_name
-            )
-            await panels.editer(
-                interaction.response,
-                await _security_policy_setup_panel(
-                    self.owner, interaction.user.id, self.filter_name
-                ),
-            )
-
-        async def clear_roles_cb(interaction: discord.Interaction):
-            await _replace_security_filter_policy(
-                self.owner.bot,
-                self.owner.guild.id,
-                self.filter_name,
-                role_ids=[],
-                strict_channel_ids=list(self.policy["strict_channel_ids"]),
-            )
-            await panels.editer(
-                interaction.response,
-                await _security_policy_setup_panel(
-                    self.owner, interaction.user.id, self.filter_name
-                ),
-            )
-
-        async def clear_strict_cb(interaction: discord.Interaction):
-            await _replace_security_filter_policy(
-                self.owner.bot,
-                self.owner.guild.id,
-                self.filter_name,
-                role_ids=list(self.policy["role_ids"]),
-                strict_channel_ids=[],
-            )
+            if self.filter_name in {"honeypot", "verification"}:
+                from . import security_verification_v71 as security_v71
+                field = (
+                    "honeypot_enabled"
+                    if self.filter_name == "honeypot"
+                    else "verification_enabled"
+                )
+                await security_v71.update_setting(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    field,
+                    0 if self.enabled else 1,
+                    interaction.user.id,
+                )
+            else:
+                await self.owner.bot.db.set_automod(
+                    self.owner.guild.id,
+                    self.filter_name,
+                    0 if self.enabled else 1,
+                )
+                _invalidate_security_filter_policy(
+                    self.owner.bot, self.owner.guild.id, self.filter_name
+                )
             await panels.editer(
                 interaction.response,
                 await _security_policy_setup_panel(
@@ -464,11 +632,56 @@ class SecurityPolicyView(discord.ui.View):
             )
 
         toggle.callback = toggle_cb
-        clear_roles.callback = clear_roles_cb
-        clear_strict.callback = clear_strict_cb
         self.add_item(toggle)
-        self.add_item(clear_roles)
-        self.add_item(clear_strict)
+
+        if self.supports_policy:
+            clear_roles = discord.ui.Button(
+                label="Retirer bypass",
+                style=discord.ButtonStyle.secondary,
+                row=3,
+                disabled=not bool(policy["role_ids"]),
+            )
+            clear_strict = discord.ui.Button(
+                label="Retirer salons stricts",
+                style=discord.ButtonStyle.secondary,
+                row=3,
+                disabled=not bool(policy["strict_channel_ids"]),
+            )
+
+            async def clear_roles_cb(interaction: discord.Interaction):
+                await _replace_security_filter_policy(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    self.filter_name,
+                    role_ids=[],
+                    strict_channel_ids=list(self.policy["strict_channel_ids"]),
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            async def clear_strict_cb(interaction: discord.Interaction):
+                await _replace_security_filter_policy(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    self.filter_name,
+                    role_ids=list(self.policy["role_ids"]),
+                    strict_channel_ids=[],
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            clear_roles.callback = clear_roles_cb
+            clear_strict.callback = clear_strict_cb
+            self.add_item(clear_roles)
+            self.add_item(clear_strict)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
