@@ -453,6 +453,10 @@ def famille_joignable(famille: str) -> bool:
     dossier est vide sur un conteneur fraîchement déployé. Un simple test
     d'existence aurait servi des écrans sans bandeau.
     """
+    # Politique produit globale : un ancien appel explicite ne doit plus
+    # pouvoir générer, référencer ou joindre un bandeau décoratif.
+    if not BANDEAUX_ACTIFS:
+        return False
     chemin = BANNER_DIR / nom_fichier(famille)
     if chemin.exists():
         return True
@@ -484,11 +488,8 @@ def poser_bandeau(container, famille: str) -> bool:
     #
     # La plomberie est conservée et testée : un écran qui aurait réellement
     # besoin d'un bandeau n'a qu'une ligne à changer.
-    # Pas de verrou sur BANDEAUX_ACTIFS ici : cette constante gouverne le
-    # DÉFAUT du Panneau, pas le droit d'en poser un. La verrouiller des deux
-    # côtés rendait `banniere=True` sans effet — un écran ne pouvait plus
-    # demander son bandeau même explicitement, et les tests de structure ne
-    # testaient plus rien.
+    if not BANDEAUX_ACTIFS:
+        return False
     if not famille_joignable(famille):
         # L'alerte ne vaut que si un bandeau était attendu ; au-dessus,
         # BANDEAUX_ACTIFS a déjà rendu False sans bruit dans le cas normal.
@@ -510,7 +511,7 @@ def pieces_jointes_de_famille(famille: str) -> list:
     envoi et arriverait vide au suivant — donc une pièce jointe absente, donc
     le même refus.
     """
-    if not famille_joignable(famille):
+    if not BANDEAUX_ACTIFS or not famille_joignable(famille):
         return []
     fichier = fichier_de_famille(famille)
     return [fichier] if fichier is not None else []
@@ -524,6 +525,8 @@ def fichier_de_famille(famille: str) -> discord.File | None:
     contexte de commande est alors parfois déjà retombé) et la galerie
     référencerait une pièce jointe absente — donc une bannière vide.
     """
+    if not BANDEAUX_ACTIFS:
+        return None
     nom = nom_fichier(famille)
     chemin = BANNER_DIR / nom
     if not chemin.exists():
@@ -573,7 +576,7 @@ class Panneau(discord.ui.LayoutView):
         # Réponse en texte libre (IA, traduction) : pas de bandeau au-dessus du texte.
         if banniere is None:
             banniere = BANDEAUX_ACTIFS
-        self.avec_banniere = banniere and not commande_en_texte_libre()
+        self.avec_banniere = bool(BANDEAUX_ACTIFS and banniere and not commande_en_texte_libre())
         banniere = self.avec_banniere
         # La bannière/liseré exprime l'ÉTAT (succès, erreur, attention), tandis que
         # la signature conserve le DOMAINE de la commande. Ainsi une réussite
@@ -605,12 +608,9 @@ class Panneau(discord.ui.LayoutView):
         if banniere:
             self.avec_banniere = poser_bandeau(conteneur, self.famille)
 
-        # Signature visuelle SentriX Core : domaine + commande conseillée.
-        conteneur.add_item(
-            discord.ui.TextDisplay(f"-# {_core_signature(self.identite_famille, self.etat_core)}")
-        )
-
-        # 2 — titre et sous-titre. La vignette, quand il y en a une, se place à
+        # 2 — titre et sous-titre. L'icône de domaine suffit à identifier la
+        # surface ; l'ancienne signature répétait trop d'étiquettes avant le
+        # contenu utile. La vignette, quand il y en a une, se place à
         #     droite du titre plutôt qu'en médaillon perdu dans un coin.
         # L'icône du domaine en tête, SAUF si le titre en porte déjà une :
         # « 🎫 Ticket #42 » devient une icône de ticket par traduction, en

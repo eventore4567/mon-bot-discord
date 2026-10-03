@@ -247,18 +247,8 @@ def resolve_kind(
 
 
 def banniere_desactivee() -> bool:
-    """Vrai quand la commande en cours répond en texte libre (IA, traduction).
-
-    Le chemin embed pose la bannière par URL, indépendamment du chemin panneau :
-    sans cette garde, +sentrix gardait un bandeau alors que la règle existait déjà
-    côté pièce jointe.
-    """
-    try:
-        from .sentrix_panels import commande_en_texte_libre
-
-        return commande_en_texte_libre()
-    except Exception:
-        return False
+    """Les bannières décoratives sont désactivées sur toutes les commandes."""
+    return True
 
 
 def _resolved_family(kind: str) -> str:
@@ -285,7 +275,7 @@ def _is_command_banner(url: object) -> bool:
 
 
 def _decorate_embed(embed: discord.Embed, kind: str) -> discord.Embed:
-    """Add the command banner without replacing a semantic image."""
+    """Retire une ancienne bannière sans toucher aux images métier."""
     result = embed.copy()
     try:
         from .sentrix_panels import titre_core
@@ -297,8 +287,6 @@ def _decorate_embed(embed: discord.Embed, kind: str) -> discord.Embed:
     if banniere_desactivee():
         if current_image and _is_command_banner(current_image):
             result.set_image(url=None)
-    elif not current_image or _is_command_banner(current_image):
-        result.set_image(url=banner_url(kind))
     return result
 
 
@@ -365,18 +353,9 @@ class CommandPanelView(discord.ui.LayoutView):
         # couleur ce que le texte dit déjà, et il casse la sobriété recherchée.
         container = discord.ui.Container()
 
-        gallery = discord.ui.MediaGallery()
-        gallery.add_item(media=f"attachment://{banner_filename}")
-        container.add_item(gallery)
-
         visual_family = _resolved_family(kind)
         identity_family = _identity_family(ctx, kind, visual_family)
         state_kind = kind if kind in {"success", "error", "warning"} else None
-        container.add_item(
-            discord.ui.TextDisplay(
-                f"-# {_core_signature(ctx, identity_family, state_kind)}"
-            )
-        )
 
         title = _clean_text(getattr(embed, "title", None) if embed else None, limit=220)
         if title:
@@ -410,7 +389,6 @@ class CommandPanelView(discord.ui.LayoutView):
         body = "\n\n".join(body_parts).strip()
 
         if body:
-            container.add_item(discord.ui.TextDisplay("### 01 · Résultat"))
             container.add_item(discord.ui.TextDisplay(body[:3900]))
 
         image_url = getattr(getattr(embed, "image", None), "url", None) if embed else None
@@ -423,13 +401,36 @@ class CommandPanelView(discord.ui.LayoutView):
                 logger.exception("COMMAND V2 media fallback command=%s", _human_command_name(ctx))
 
         footer = _clean_text(getattr(getattr(embed, "footer", None), "text", None), limit=300) if embed else ""
-        container.add_item(
-            discord.ui.TextDisplay(
-                f"-# {_core_footer(ctx, identity_family, footer, state_kind)}"
-            )
-        )
+        if footer and footer.casefold() not in {"sentrix", "sentrix core"}:
+            container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
         self.add_item(container)
+
+
+#: Teinte du liseré d'un embed qui part SANS être converti en conteneur :
+#: la surface sombre de Discord. Le trait existe toujours — un embed en a
+#: forcément un — mais il se confond avec le fond au lieu de barrer le
+#: message d'une bande colorée.
+COULEUR_SANS_LISERE = 0x2B2D31
+
+
+def _sans_lisere(embed: discord.Embed) -> discord.Embed:
+    """Rend discret le liseré d'un embed affiché tel quel.
+
+    Un embed accompagné d'une vue classique ne peut PAS devenir un conteneur
+    Components V2 — les deux ne cohabitent pas — donc il arrive à l'écran avec
+    sa barre colorée. C'est le dernier endroit où elle restait visible.
+
+    La couleur n'est touchée qu'ICI, au transport. Les constructeurs
+    d'`utils/embeds` gardent leurs couleurs d'état : elles ne sont pas
+    décoratives, elles disent réussite, refus ou avertissement, et une
+    vingtaine de vérifications s'appuient dessus — dont un gate de sécurité.
+    """
+    try:
+        embed.colour = discord.Colour(COULEUR_SANS_LISERE)
+    except Exception:
+        logger.debug("Liseré d'embed non ajustable.", exc_info=True)
+    return embed
 
 
 def _native_payload(
@@ -443,18 +444,15 @@ def _native_payload(
     output = dict(kwargs)
 
     if embed is not None:
-        output["embed"] = _decorate_embed(embed, kind)
+        output["embed"] = _sans_lisere(_decorate_embed(embed, kind))
         return content, output
 
     if content is not None:
         panel = discord.Embed(
             title=_human_command_name(ctx),
             description=_clean_text(content, limit=3900) or None,
-            colour=discord.Colour(_ACCENTS[kind]),
         )
-        if not banniere_desactivee():
-            panel.set_image(url=banner_url(kind))
-        output["embed"] = panel
+        output["embed"] = _sans_lisere(panel)
         return None, output
 
     return content, output
@@ -499,12 +497,7 @@ async def _styled_context_send(self: commands.Context, *args: Any, **kwargs: Any
 
     kind = resolve_kind(self, embed=embed, content=content)
     family = _resolved_family(kind)
-    ensure_banners()
-    banner_path = BANNER_DIR / nom_fichier(family)
-    if not banner_path.exists():
-        ensure_banners(force=True)
-
-    banner_filename = f"sentrix_command_{family}.webp"
+    banner_filename = ""
     try:
         layout = CommandPanelView(
             self,
@@ -513,7 +506,6 @@ async def _styled_context_send(self: commands.Context, *args: Any, **kwargs: Any
             kind=kind,
             banner_filename=banner_filename,
         )
-        banner_file = discord.File(str(banner_path), filename=banner_filename)
     except Exception:
         logger.exception("COMMAND V2 build failed command=%s; native fallback", _human_command_name(self))
         native_content, native_kwargs = _native_payload(self, content, embed, kwargs)
@@ -523,16 +515,11 @@ async def _styled_context_send(self: commands.Context, *args: Any, **kwargs: Any
     output.pop("embed", None)
     output.pop("content", None)
     output["view"] = layout
-    output["file"] = banner_file
 
     try:
         return await _ORIGINAL_CONTEXT_SEND(self, None, **output)
     except discord.HTTPException:
         logger.exception("COMMAND V2 send failed command=%s; native fallback", _human_command_name(self))
-        try:
-            banner_file.close()
-        except Exception:
-            logger.warning("Étape non critique ignorée dans _styled_context_send", exc_info=True)
         native_content, native_kwargs = _native_payload(self, content, embed, kwargs)
         return await _ORIGINAL_CONTEXT_SEND(self, native_content, **native_kwargs)
 
@@ -568,8 +555,8 @@ def _install_embed_banner_factory() -> None:
             kind = _kind_from_colour(getattr(result, "colour", None)) or "special"
 
         current_image = getattr(getattr(result, "image", None), "url", None)
-        if not current_image and not banniere_desactivee():
-            result.set_image(url=banner_url(kind))
+        if current_image and _is_command_banner(current_image):
+            result.set_image(url=None)
         return result
 
     branded_base._sentrix_command_banner = True

@@ -53,23 +53,17 @@ class StructureDUnPanneau(unittest.TestCase):
         )
         self.plat = _aplatir(self.panneau.to_components())
 
-    def test_la_banniere_est_le_premier_element(self):
-        """Un embed ne peut pas faire cela : set_image place l'image SOUS les champs."""
+    def test_le_contenu_utile_est_le_premier_element(self):
         conteneur = self.panneau.to_components()[0]
         self.assertEqual(conteneur["type"], CONTENEUR)
-        self.assertEqual(conteneur["components"][0]["type"], GALERIE)
+        self.assertNotEqual(conteneur["components"][0]["type"], GALERIE)
 
-    def test_la_banniere_part_dans_le_meme_message(self):
-        galerie = next(i for i in self.plat if i["type"] == GALERIE)
-        cible = galerie["items"][0]["media"]["url"]
-        joints = [f.filename for f in self.panneau.fichiers()]
-        self.assertTrue(cible.startswith("attachment://"))
-        self.assertIn(cible.removeprefix("attachment://"), joints)
+    def test_aucune_banniere_ne_part_dans_le_message(self):
+        self.assertFalse(any(i["type"] == GALERIE for i in self.plat))
+        self.assertEqual(self.panneau.fichiers(), [])
 
-    def test_la_banniere_suit_l_intention(self):
-        """Le liseré du conteneur est retiré : seule la bannière porte encore
-        la couleur de l'intention, et c'est elle qu'on vérifie."""
-        self.assertEqual([f.filename for f in self.panneau.fichiers()], ["banner_error.webp"])
+    def test_banniere_et_lisere_restent_absents_meme_si_demandes(self):
+        self.assertEqual(self.panneau.fichiers(), [])
         self.assertIsNone(self.panneau.to_components()[0].get("accent_color"))
 
     def test_les_sections_restent_sans_filet_decoratif(self):
@@ -207,9 +201,9 @@ class PontDepuisEmbed(unittest.TestCase):
         self.assertNotIn("━━━━━━", texte)
         self.assertIn("Résumé", texte)
 
-    def test_la_banniere_suit_le_domaine_demande(self):
+    def test_le_domaine_ne_reactive_pas_la_banniere(self):
         panneau = panels.depuis_embed(self._embed(), kind="moderation", banniere=True)
-        self.assertEqual([f.filename for f in panneau.fichiers()], ["banner_moderation.webp"])
+        self.assertEqual(panneau.fichiers(), [])
 
     def test_compact_regroupe_les_champs_dans_une_seule_section(self):
         """Un dossier de sanction a sept champs courts : chacun avec son propre

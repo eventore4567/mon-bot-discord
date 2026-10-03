@@ -83,7 +83,7 @@ async def _webhook_send(self, *args: Any, **kwargs: Any):
 
 
 def install_top_banner_guard() -> None:
-    """Install the final command-banner transport guard once."""
+    """N'installe plus le garde qui restaurait les anciennes bannières."""
     global _INSTALLED
     global _ORIGINAL_BANNER_CHECK
     global _ORIGINAL_INTERACTION_SEND
@@ -92,6 +92,9 @@ def install_top_banner_guard() -> None:
     if _INSTALLED:
         return
     _INSTALLED = True
+
+    logger.info("Top banner transport guard disabled globally")
+    return
 
     current_check = visuals._is_command_banner
     if not getattr(current_check, "_sentrix_extended_banner_check", False):

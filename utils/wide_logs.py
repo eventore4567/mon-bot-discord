@@ -1312,14 +1312,12 @@ async def send_wide_log(
     log_runtime_capabilities()
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     _category, emoji, kind = resolve(event_type, embed.title or "", embed.description or "")
-    banner_path = get_banner(event_type, embed.title or "", embed.description or "")
-    banner_filename = f"sentrix_log_{kind}.png"
+    banner_filename = ""
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
-        "banner=%s banner_exists=%s",
+        "decorative_banner=disabled",
         getattr(channel, "id", "?"), log_type, event_type, kind,
-        banner_path, banner_path.exists(),
     )
 
     # Plus d'abandon sur bannière manquante : la carte n'en affiche plus, donc

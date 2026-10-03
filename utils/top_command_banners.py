@@ -187,7 +187,7 @@ async def _message_edit(self, *args: Any, **kwargs: Any):
 
 
 def install_top_command_banners() -> None:
-    """Install the top-banner compatibility layer once."""
+    """Compatibilité conservée sans réinstaller de bannière décorative."""
     global _INSTALLED
     global _ORIGINAL_INTERACTION_RESPONSE_EDIT
     global _ORIGINAL_INTERACTION_EDIT_ORIGINAL
@@ -196,6 +196,13 @@ def install_top_command_banners() -> None:
     if _INSTALLED:
         return
     _INSTALLED = True
+
+    # Les panneaux n'ont plus de bandeau global. Ne remplace surtout pas le
+    # transport natif par `_native_payload_top`, qui recréerait un embed image
+    # au-dessus des vues interactives. Les helpers restent importables pour
+    # nettoyer d'anciens messages, mais aucun nouveau payload ne les utilise.
+    logger.info("Command top banners disabled globally")
+    return
 
     # The old factory inserted ``set_image`` directly into every embed created by
     # utils.embeds, including callbacks that bypass Context.send. Restore the original

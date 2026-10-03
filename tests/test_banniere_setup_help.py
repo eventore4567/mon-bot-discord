@@ -52,12 +52,9 @@ def bandeaux_actifs(monkeypatch):
 def test_le_fichier_joint_porte_le_nom_que_la_galerie_reference():
     """La divergence est invisible : Discord n'émet aucune erreur, il affiche
     simplement une image cassée."""
-    from cogs.setup_components_v73 import BANNIERE, fichier_banniere
-    from utils.log_banners import nom_fichier
+    from cogs.setup_components_v73 import fichier_banniere
 
-    fichier = fichier_banniere()
-    assert fichier is not None
-    assert fichier.filename == nom_fichier(BANNIERE)
+    assert fichier_banniere() is None
 
 
 def test_chaque_appel_rend_un_fichier_neuf():
@@ -68,8 +65,8 @@ def test_chaque_appel_rend_un_fichier_neuf():
 
     premier = fichier_banniere()
     second = fichier_banniere()
-    assert premier is not second
-    assert premier.filename == second.filename
+    assert premier is None
+    assert second is None
 
 
 def test_la_famille_nest_pas_redecidee_depuis_la_commande():

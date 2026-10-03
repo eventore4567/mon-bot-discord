@@ -189,8 +189,8 @@ def test_command_visuals_never_look_for_png_runtime_banners():
     source = (log_banners.ROOT / "utils" / "command_visuals.py").read_text(encoding="utf-8")
     assert 'banner_{kind}.png' not in source
     assert 'sentrix_command_{kind}.png' not in source
-    assert "nom_fichier(family)" in source
-    assert 'sentrix_command_{family}.webp' in source
+    assert 'banner_filename = ""' in source
+    assert "ensure_banners()" not in source
 
 
 def test_banner_uses_the_repository_logo():
@@ -349,7 +349,7 @@ def test_le_bloc_texte_libre_vaut_aussi_pour_le_chemin_embed():
     try:
         with panels.reponse_en_texte_libre():
             assert command_visuals.banniere_desactivee() is True
-        assert command_visuals.banniere_desactivee() is False
+        assert command_visuals.banniere_desactivee() is True
     finally:
         policy._COMMAND_CONTEXT.reset(jeton)
 

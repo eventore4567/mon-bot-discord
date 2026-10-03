@@ -300,7 +300,9 @@ class EvidenceModal(discord.ui.Modal, title="Ajouter une preuve"):
             )
         parts = []
         if attachment is not None:
-            stable = str(attachment.url).split("?", 1)[0]
+            # Les URL CDN Discord sont signées : retirer les paramètres peut
+            # rendre la preuve immédiatement inaccessible.
+            stable = str(attachment.url)
             parts.append(f"[{attachment.filename}]({stable})")
         if note:
             parts.append(note)
@@ -1561,8 +1563,8 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
     async def history(self, ctx: commands.Context, membre: discord.Member):
         await panels.envoyer(ctx, await self.history_panel(ctx.guild, membre))
 
-    @commands.hybrid_command(name="proof", aliases=["preuve"], description="Gérer les preuves d'un dossier staff.", with_app_command=False)
-    async def proof(self, ctx: commands.Context, case_id: int):
+    @commands.hybrid_command(name="staff-proof", aliases=["preuve-dossier"], description="Gérer les preuves d'un dossier staff.")
+    async def staff_proof(self, ctx: commands.Context, case_id: int):
         row = await self.bot.db.fetchone(
             "SELECT * FROM staff_cases_v1 WHERE id=? AND guild_id=?",
             (case_id, ctx.guild.id),

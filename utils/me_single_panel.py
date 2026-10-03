@@ -112,11 +112,6 @@ class MeSinglePanel(discord.ui.LayoutView):
         colour_value = int(getattr(getattr(embed, "colour", None), "value", 0) or 0x3B82F6)
         container = discord.ui.Container()
 
-        # The banner is part of the SAME container, so +me is no longer two embeds.
-        gallery = discord.ui.MediaGallery()
-        gallery.add_item(media=visuals.banner_url("info"))
-        container.add_item(gallery)
-
         title = _clean(embed.title or "Profil", limit=180)
         description = _clean(embed.description, limit=1000)
         header_text = f"## {title}"

@@ -165,7 +165,36 @@ def _kind_from_text(title: Any, description: Any = "") -> str:
     return "brand"
 
 
+#: Teinte du liseré vertical des embeds. C'est la surface sombre de Discord :
+#: le trait existe toujours — un embed en a forcément un — mais il se confond
+#: avec le fond au lieu de barrer le message d'une bande colorée.
+#:
+#: Jayden l'a demandé deux fois : « je ne veux plus voir ça, quelle que soit
+#: la commande ». Les conteneurs Components V2 ont perdu leur accent ; les
+#: embeds, eux, ne peuvent pas ne pas avoir de couleur, donc on la rend
+#: invisible.
+#:
+#: L'état continue d'être porté par ce qui le dit vraiment : l'icône du titre,
+#: le mot employé, et la couleur des BOUTONS — vert pour valider, rouge pour
+#: détruire — qui elle n'a pas changé.
+COULEUR_DISCRETE = 0x2B2D31
+
+#: Les couleurs d'état restent EN PLACE. Les neutraliser ici a cassé vingt
+#: tests, dont un gate de sécurité et un contrat explicite — « chaque état a
+#: sa propre couleur ». La couleur d'un embed n'est pas décorative : elle dit
+#: réussite, refus ou avertissement, et plusieurs vérifications s'appuient
+#: dessus.
+#:
+#: Le liseré visible par l'utilisateur se traite autrement : les réponses de
+#: commandes passent en conteneurs Components V2, qui n'ont plus d'accent.
+#: Un embed qui arrive encore brut jusqu'à l'écran est un chemin de transport
+#: à corriger, pas une couleur à effacer.
+LISERES_COLORES = True
+
+
 def _colour(kind: str | None = None, fallback: int | None = None) -> int:
+    if not LISERES_COLORES:
+        return COULEUR_DISCRETE
     if fallback is not None:
         return int(fallback)
     return {

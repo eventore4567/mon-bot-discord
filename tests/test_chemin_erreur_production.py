@@ -63,15 +63,15 @@ class PanneauDeComposant(unittest.TestCase):
         self.assertIn("aucune modification", texte)
 
     def test_il_a_l_identite_des_autres_erreurs(self):
-        """Banniere en tete, accent rouge, sections : comme tous les autres."""
+        """Sans bannière ni liseré, avec les sections utiles."""
         panneau = erreurs._component_error_panel(None)
         composants = panneau.to_components()
-        self.assertEqual(composants[0]["accent_color"], config.COLOR_ERROR)
+        self.assertIsNone(composants[0].get("accent_color"))
         texte = panels.texte_complet(panneau)
         self.assertIn("## Action interrompue", texte)
         self.assertGreaterEqual(texte.count("### "), 2, "il faut au moins deux sections")
-        self.assertIn("SentriX", texte)
-        self.assertEqual([f.filename for f in panneau.fichiers()], ["banner_error.webp"])
+        self.assertIn("sentrix", texte.casefold())
+        self.assertEqual(panneau.fichiers(), [])
 
 
 class AutresRenderers(unittest.TestCase):

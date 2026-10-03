@@ -100,6 +100,43 @@ def _item_url(platform: str, source_url: str, item: dict) -> str:
     return source_url
 
 
+#: Un identifiant de chaîne YouTube, qui ne doit JAMAIS servir d'identifiant
+#: de publication : il ne change jamais, donc le bot ne notifierait plus
+#: jamais après l'avoir enregistré une fois.
+_ID_CHAINE_YOUTUBE = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
+
+
+def _url_a_interroger(source_url: str) -> str:
+    """URL réellement interrogée pour trouver la dernière publication.
+
+    Une URL de chaîne YouTube nue (« /@MrBeast ») ne rend PAS ses vidéos :
+    yt-dlp y voit une page qui contient plusieurs onglets, et renvoie la
+    chaîne elle-même. Le bot enregistrait donc l'identifiant de la chaîne
+    comme « dernière publication vue », et comme il ne change jamais, YouTube
+    ne notifiait plus jamais. Mesuré :
+
+        /@MrBeast          -> id = UCX6OQ3DkcsbYNE6H8uQQuVA  (la chaîne)
+        /@MrBeast/videos   -> id = v9QtM6qnG50               (une vidéo)
+
+    L'onglet « videos » contient aussi les directs terminés et les directs en
+    cours, donc une seule URL suffit pour les deux usages.
+    """
+    url = str(source_url or "").strip()
+    hote = urlparse(url).hostname or ""
+    if "youtube.com" not in hote.casefold():
+        return url
+    chemin = urlparse(url).path.rstrip("/")
+    # Déjà un onglet ou une vidéo précise : on n'y touche pas.
+    if any(chemin.endswith(f"/{onglet}") for onglet in
+           ("videos", "streams", "shorts", "live", "featured", "playlists")):
+        return url
+    if "/watch" in chemin or "/playlist" in chemin:
+        return url
+    if chemin.startswith("/@") or "/channel/" in chemin or "/c/" in chemin or "/user/" in chemin:
+        return f"{url.rstrip('/')}/videos"
+    return url
+
+
 def _extract_latest_sync(source_url: str) -> dict | None:
     """Extraction bloquante isolée dans asyncio.to_thread par l'appelant."""
     import yt_dlp
@@ -114,16 +151,29 @@ def _extract_latest_sync(source_url: str) -> dict | None:
         "socket_timeout": 12,
     }
     with yt_dlp.YoutubeDL(options) as downloader:
-        info = downloader.extract_info(source_url, download=False)
+        info = downloader.extract_info(_url_a_interroger(source_url), download=False)
     if not info:
         return None
     entries = info.get("entries")
     if entries:
         for entry in entries:
-            if entry and entry.get("id"):
+            if entry and _id_de_publication(entry.get("id")):
                 return entry
         return None
-    return info if info.get("id") else None
+    return info if _id_de_publication(info.get("id")) else None
+
+
+def _id_de_publication(valeur: object) -> str:
+    """L'identifiant d'une VRAIE publication, ou une chaîne vide.
+
+    Un identifiant de chaîne enregistré comme « dernière publication vue »
+    éteint définitivement les notifications de ce serveur, sans la moindre
+    erreur pour le signaler. Ce filet aurait attrapé le défaut YouTube seul.
+    """
+    identifiant = str(valeur or "").strip()
+    if not identifiant or _ID_CHAINE_YOUTUBE.match(identifiant):
+        return ""
+    return identifiant
 
 
 async def _extract_latest(source_url: str) -> dict | None:
@@ -207,6 +257,13 @@ class Notifications(commands.Cog, name="Notifications"):
             notification.set_image(url=image_url)
 
         try:
+            # Reste un embed, volontairement. Un panneau Components V2 n'accepte
+            # PAS de `content`, et c'est le `content` qui porte la mention du
+            # rôle : convertir ferait perdre le ping, c'est-à-dire la seule
+            # chose que cette notification doit faire.
+            #
+            # Le liseré coloré qui la rendait voyante est réglé ailleurs : tous
+            # les embeds prennent désormais la teinte du fond Discord.
             await channel.send(
                 content=role.mention,
                 embed=notification,

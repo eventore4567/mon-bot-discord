@@ -80,9 +80,7 @@ def test_editer_refuse_ce_que_discord_refuse():
     assert "embed" not in cible.recu
     assert "content" not in cible.recu
     assert cible.recu["view"] is panneau
-    # La banniere est reattachee : un panneau d'une autre intention pointe vers
-    # un AUTRE nom de fichier, et Discord garderait sinon l'ancienne image.
-    assert [f.filename for f in cible.recu["attachments"]] == ["banner_success.webp"]
+    assert cible.recu["attachments"] == []
 
 
 def test_avec_composants_preserves_original_business_view_for_callbacks():
