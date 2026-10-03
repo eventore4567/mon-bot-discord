@@ -134,3 +134,31 @@ def test_ytdlp_capture_logger_keeps_expected_offline_errors_out_of_stderr():
     logger.warning("warning")
     assert logger.errors[-1].endswith("not currently live")
     assert logger.warnings == ["warning"]
+
+
+def test_phyllo_webhook_signatures_accepts_multiple_values_during_rotation():
+    body = b'{"event":"CONTENTS_FETCH.SUCCESS"}'
+    secret = "new-secret"
+    good = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    header = f"v1=deadbeef, v1={good}"
+    assert social_providers.verify_phyllo_signature(body, header, secret)
+
+
+def test_phyllo_webhook_signatures_accepts_base64_digest():
+    import base64
+
+    body = b'{"event":"CONTENTS_FETCH.SUCCESS"}'
+    secret = "new-secret"
+    raw = hmac.new(secret.encode(), body, hashlib.sha256).digest()
+    signature = base64.b64encode(raw).decode()
+    assert social_providers.verify_phyllo_signature(
+        body, f"sha256={signature}", secret
+    )
+
+
+def test_webhook_http_handler_prefers_current_insightiq_header():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "web" / "phyllo_webhook.py").read_text(encoding="utf-8")
+    assert 'request.headers.get("Webhook-Signatures"' in source
+    assert 'request.headers.get("X-Phyllo-Signature"' in source
