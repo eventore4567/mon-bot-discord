@@ -533,12 +533,14 @@ async def _notification_manage_panel(owner, author_id: int):
     else:
         channel = owner.guild.get_channel(int(selected["discord_channel_id"]))
         role = owner.guild.get_role(int(selected["role_id"]))
+        channel_text = channel.mention if channel else f"ID {selected['discord_channel_id']}"
+        role_text = role.mention if role else f"ID {selected['role_id']}"
         description = (
             f"**Source sélectionnée · #{selected['id']}**\n"
             f"**Plateforme** · {selected['platform']}\n"
             f"**Lien** · {selected['source_url']}\n"
-            f"**Salon** · {channel.mention if channel else f'ID {selected["discord_channel_id"]}'}\n"
-            f"**Rôle pingé** · {role.mention if role else f'ID {selected["role_id"]}'}\n"
+            f"**Salon** · {channel_text}\n"
+            f"**Rôle pingé** · {role_text}\n"
             f"**État** · {'ACTIF' if selected['enabled'] else 'INACTIF'}"
         )
         if selected["custom_text"]:
