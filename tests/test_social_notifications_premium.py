@@ -19,8 +19,8 @@ def test_social_monitor_does_not_send_the_old_embed_card():
     source = inspect.getsource(notifications.Notifications._check_subscription)
     assert "embed=notification" not in source
     assert "SocialNotificationPanel(" in source
-    assert "delete_after=3" in source
-    assert "await channel.send(view=notification)" in source
+    assert "delete_after=5" in source
+    assert "await channel.send(view=notification)" in source\n    assert source.index("await channel.send(view=notification)") < source.index("delete_after=5")
 
 
 def test_thumbnail_prefers_configured_media_but_falls_back_to_real_item_thumbnail():
