@@ -377,14 +377,15 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(discord.ui.Separator())
     container.add_item(
         discord.ui.TextDisplay(
-            "### Exceptions par protection\n"
-            "Pour les protections de messages, vous pouvez choisir des **rôles bypass** "
-            "et des **salons stricts**. Dans un salon strict, même un rôle bypass reste "
-            "soumis à la protection. Les threads héritent du salon parent."
+            "### Centre de sécurité\n"
+            "Ouvrez une protection précise pour gérer son état et ses réglages. "
+            "Les protections de messages proposent en plus les **rôles bypass** et "
+            "les **salons stricts** ; l'anti-raid, le honeypot, la vérification et "
+            "les protections serveur utilisent leurs réglages adaptés."
         )
     )
     exceptions = discord.ui.Button(
-        label="Configurer les rôles bypass et salons stricts",
+        label="Ouvrir le centre de sécurité",
         style=discord.ButtonStyle.primary,
     )
 
