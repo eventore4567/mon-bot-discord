@@ -112,3 +112,17 @@ def test_phyllo_environment_config_is_non_secret_and_explicit():
 
     assert config.PHYLLO_ENVIRONMENT in {"sandbox", "staging", "production"}
     assert config.PHYLLO_BASE_URL.startswith("https://")
+
+
+def test_phyllo_non_content_webhook_is_ignored():
+    payload = {
+        "event": "ACCOUNTS.UPDATED",
+        "data": {
+            "account": {
+                "id": "account-123",
+                "url": "https://www.youtube.com/@creator",
+                "username": "creator",
+            }
+        },
+    }
+    assert social_providers.parse_phyllo_webhook(payload) == []
