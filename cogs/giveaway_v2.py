@@ -6,6 +6,7 @@ commandes restent disponibles comme filet de compatibilité.
 """
 from __future__ import annotations
 
+import io
 import json
 import random
 import time
@@ -96,7 +97,9 @@ def _is_image_attachment(attachment: discord.Attachment) -> bool:
 
 
 def _stable_attachment_url(attachment: discord.Attachment) -> str:
-    return str(attachment.url).split("?", 1)[0]
+    # Les URLs Discord peuvent être signées : leur query-string fait partie de
+    # l'URL valide et ne doit jamais être supprimée.
+    return str(attachment.url)
 
 
 @dataclass
@@ -110,6 +113,11 @@ class BuilderState:
     channel_id: int | None = None
     description: str | None = None
     image_url: str | None = None
+    # Média choisi depuis Discord avant publication. Les octets restent en
+    # mémoire jusqu'à l'envoi afin que le giveaway possède une vraie pièce
+    # jointe durable, plutôt qu'une URL d'upload temporaire.
+    image_bytes: bytes | None = field(default=None, repr=False)
+    image_filename: str | None = None
     ping_role_id: int | None = None
     required_roles: list[int] = field(default_factory=list)
     excluded_roles: list[int] = field(default_factory=list)
@@ -234,8 +242,24 @@ class MediaModal(discord.ui.Modal, title="Giveaway — média"):
 
         if remove:
             self.owner.state.image_url = None
+            self.owner.state.image_bytes = None
+            self.owner.state.image_filename = None
         elif attachment is not None:
-            self.owner.state.image_url = _stable_attachment_url(attachment)
+            try:
+                payload = await attachment.read()
+            except Exception:
+                payload = None
+            if payload:
+                filename = str(getattr(attachment, "filename", "") or "giveaway-media.png")
+                filename = filename.replace("/", "_").replace("\\", "_")[:120]
+                self.owner.state.image_bytes = bytes(payload)
+                self.owner.state.image_filename = filename
+                self.owner.state.image_url = None
+            else:
+                # Repli exceptionnel si Discord ne fournit pas les octets.
+                self.owner.state.image_url = _stable_attachment_url(attachment)
+                self.owner.state.image_bytes = None
+                self.owner.state.image_filename = None
 
         await self.owner.refresh(interaction)
 
@@ -579,7 +603,7 @@ class GiveawayBuilderView(discord.ui.View):
         e.add_field(name="Essentiel", value="\n".join(essentials), inline=False)
         e.add_field(name="Rôles et bonus", value="\n".join(roles) if roles else "Aucun rôle configuré.", inline=False)
         e.add_field(name="Conditions", value="\n".join(conditions) if conditions else "Aucune condition supplémentaire.", inline=False)
-        e.add_field(name="Média", value="Image / GIF sélectionné depuis Discord." if state.image_url else "Aucun média.", inline=False)
+        e.add_field(name="Média", value="Image / GIF sélectionné depuis Discord." if (state.image_url or state.image_bytes) else "Aucun média.", inline=False)
         e.set_footer(text="SentriX • Aperçu avant publication disponible")
         return e
 
@@ -632,6 +656,7 @@ class GiveawayBuilderView(discord.ui.View):
         if missing:
             return await interaction.response.send_message("Il manque : " + ", ".join(missing) + ".", ephemeral=True)
         end_at = int(time.time()) + int(self.state.duration_seconds or 0)
+        preview_file = self.cog.media_file(self.state)
         await panels.envoyer(
             interaction.response,
             self.cog.build_public_panel(
@@ -643,6 +668,7 @@ class GiveawayBuilderView(discord.ui.View):
                 interactive=False,
             ),
             ephemere=True,
+            file=preview_file,
         )
 
     @discord.ui.button(label="Publier", style=discord.ButtonStyle.success, row=1)
@@ -738,6 +764,15 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         msg = await panels.envoyer(ctx, panneau)
         view.message = msg
 
+    @staticmethod
+    def media_file(state: BuilderState) -> discord.File | None:
+        if not state.image_bytes or not state.image_filename:
+            return None
+        return discord.File(
+            io.BytesIO(state.image_bytes),
+            filename=state.image_filename,
+        )
+
     def build_public_panel(
         self,
         guild: discord.Guild,
@@ -805,7 +840,11 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             sous_titre=description or None,
             kind="info" if status == "actif" else ("success" if status == "termine" else "warning"),
             sections=sections,
-            image=state.image_url,
+            image=(
+                f"attachment://{state.image_filename}"
+                if state.image_bytes and state.image_filename
+                else state.image_url
+            ),
             pied="Giveaway",
         )
         if interactive and status == "actif":
@@ -876,7 +915,14 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         # Le panneau Components V2 ne peut pas porter de content. Le ping éventuel
         # est donc un message minimal et temporaire, envoyé APRÈS le panneau afin
         # de ne jamais laisser un ping orphelin si le rendu échoue.
-        msg = await panels.envoyer(channel, panel)
+        media_file = self.media_file(state)
+        msg = await panels.envoyer(channel, panel, file=media_file)
+        published_image_url = state.image_url
+        if state.image_filename:
+            for attachment in getattr(msg, "attachments", ()) or ():
+                if str(getattr(attachment, "filename", "")) == state.image_filename:
+                    published_image_url = str(attachment.url)
+                    break
         if state.ping_role_id:
             try:
                 await channel.send(
@@ -897,7 +943,7 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             "INSERT INTO giveaways_v2 (guild_id,channel_id,message_id,prize,winners_count,end_at,status,created_by,created_at,ping_role_id,image_url,description,custom_condition,min_invites,min_account_age_days,min_server_age_days,required_roles_json,excluded_roles_json,bonus_roles_json,winners_json) VALUES (?,?,?,?,?,?,'actif',?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 guild.id, channel.id, msg.id, state.prize, state.winners, end_at,
-                author.id, int(time.time()), state.ping_role_id, state.image_url, state.description,
+                author.id, int(time.time()), state.ping_role_id, published_image_url, state.description,
                 state.custom_condition, state.min_invites, state.min_account_age_days, state.min_server_age_days,
                 json.dumps(state.required_roles), json.dumps(state.excluded_roles), json.dumps(bonus_map), "[]",
             ),
