@@ -158,7 +158,21 @@ def parse_phyllo_webhook(payload: dict) -> list[SocialEvent]:
     events: list[SocialEvent] = []
     seen: set[tuple[str, str]] = set()
 
+    # Les webhooks Phyllo couvrent aussi comptes/profils/syncs. Ne jamais
+    # transformer un simple profil contenant {id,url} en "nouvelle vidéo".
+    event_is_content = "CONTENT" in event_name.upper() if event_name else False
+
     for node in _walk_dicts(payload):
+        node_is_content = any(
+            key in node
+            for key in (
+                "content_id", "post_id", "video_id", "content_type",
+                "media_type", "thumbnail_url", "post_url", "content_url",
+            )
+        )
+        if not event_is_content and not node_is_content:
+            continue
+
         item_id = _first(node, "content_id", "post_id", "video_id", "id")
         url = _first(
             node,
