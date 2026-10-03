@@ -1898,21 +1898,6 @@ class Tickets(commands.Cog):
         else:
             await helpers.send_log(self.bot, interaction.guild, "moderation", log_e)
 
-        try:
-            await tickets_service.journaliser_evenement(
-                self.bot,
-                interaction.guild,
-                "ticket_close",
-                ticket_id=ticket_id,
-                channel=channel,
-                acteur=interaction.user,
-                cible=owner,
-                raison=reason,
-                extra={"État": "Fermé · visibilité membre retirée"},
-            )
-        except Exception:
-            logger.exception("Journal ticket_close indisponible ticket=%s.", ticket_id)
-
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
                 await sx_panels.envoyer(owner, sx_panels.depuis_embed(embeds.info(f'Voici la transcription de votre ticket sur **{interaction.guild.name}**.')), file=self._transcript_file(channel, transcript_text))
@@ -1988,7 +1973,6 @@ class Tickets(commands.Cog):
             )
             return
 
-        # Compare-and-set : deux cycles/reprises ne ferment jamais deux fois le même ticket.
         cursor = await self.bot.db.execute(
             "UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 "
             "WHERE id = ? AND status = 'ouvert'",
@@ -1996,6 +1980,26 @@ class Tickets(commands.Cog):
         )
         if getattr(cursor, "rowcount", 0) != 1:
             return
+
+        owner = guild.get_member(int(row["user_id"])) if row["user_id"] else None
+        if owner is not None:
+            overwrite = channel.overwrites_for(owner)
+            overwrite.view_channel = False
+            overwrite.send_messages = False
+            overwrite.read_message_history = False
+            try:
+                await channel.set_permissions(
+                    owner,
+                    overwrite=overwrite,
+                    reason="Ticket fermé automatiquement pour inactivité",
+                )
+            except discord.HTTPException:
+                await self.bot.db.execute(
+                    "UPDATE tickets SET status='ouvert', closed_at=NULL, locked=0 "
+                    "WHERE id=? AND status='ferme'",
+                    (row["id"],),
+                )
+                return
 
         try:
             transcript = await self.generate_transcript(channel)
@@ -2010,13 +2014,17 @@ class Tickets(commands.Cog):
             kwargs = {}
             if transcript is not None:
                 kwargs["file"] = transcript
-            await sx_panels.envoyer(
-                channel,
+            panel = sx_panels.avec_composants(
                 sx_panels.depuis_embed(
-                    embeds.warning("🔒 Ticket fermé automatiquement pour inactivité.")
+                    embeds.warning(
+                        "Ticket fermé automatiquement pour inactivité.\n\n"
+                        "Le membre ne peut plus voir le salon. "
+                        "Le staff peut le **rouvrir** ou le **supprimer définitivement**."
+                    )
                 ),
-                **kwargs,
+                tickets_service.vue_ticket_ferme(row["id"]),
             )
+            await sx_panels.envoyer(channel, panel, **kwargs)
         except discord.HTTPException:
             logger.warning(
                 "Message d'auto-fermeture non envoyé pour le ticket #%s.",
@@ -2031,34 +2039,23 @@ class Tickets(commands.Cog):
                 "ticket_autoclose",
                 ticket_id=row["id"],
                 channel=channel,
-                cible=guild.get_member(int(row["user_id"])) if row["user_id"] else None,
+                cible=owner,
                 raison=f"Aucune activité depuis {helpers.format_duration(int(elapsed))}.",
                 extra={
                     "⏳ Seuil configuré": helpers.format_duration(
                         int(row["autoclose_hours"]) * 3600
-                    )
+                    ),
+                    "État": "Fermé · suppression manuelle",
                 },
             )
         except Exception:
-            # Le ticket est réellement fermé même si le journal est momentanément
-            # indisponible. Ne jamais rouvrir/réexécuter la fermeture à cause du log.
             logger.exception(
                 "Journal auto-close indisponible pour le ticket #%s.",
                 row["id"],
             )
 
-        try:
-            conf = await self.bot.db.get_guild_config(guild.id)
-            delay = (conf["ticket_delete_delay"] if conf else 30) or 30
-        except Exception:
-            logger.exception(
-                "Configuration du délai de suppression indisponible pour le ticket #%s ; "
-                "délai de secours 30s.",
-                row["id"],
-            )
-            delay = 30
-
-        asyncio.create_task(self._auto_delete(channel, row["id"], delay))
+        # Important : auto-close ferme le ticket, mais ne détruit jamais le salon.
+        # La suppression reste une action staff explicite via le bouton rouge.
 
     @check_autoclose.before_loop
     async def before_check_autoclose(self):
@@ -2072,7 +2069,7 @@ class Tickets(commands.Cog):
         )
         self.check_autoclose.restart()
 
-    @commands.hybrid_command(name="ticket-reopen", description="Rouvrir un ticket fermé (avant sa suppression automatique).", with_app_command=False)
+    @commands.hybrid_command(name="ticket-reopen", description="Rouvrir un ticket fermé et rendre le salon au membre.", with_app_command=False)
     @checks.has_permission_or_modrole("manage_channels")
     async def ticket_reopen(self, ctx: commands.Context):
         ticket = await self.get_ticket_by_channel(ctx.channel.id)
@@ -2093,8 +2090,26 @@ class Tickets(commands.Cog):
         owner = ctx.guild.get_member(ticket["user_id"])
         if owner:
             overwrite = ctx.channel.overwrites_for(owner)
+            overwrite.view_channel = True
             overwrite.send_messages = True
-            await ctx.channel.set_permissions(owner, overwrite=overwrite)
+            overwrite.read_message_history = True
+            try:
+                await ctx.channel.set_permissions(
+                    owner,
+                    overwrite=overwrite,
+                    reason=f"Ticket rouvert par {getattr(ctx, 'author', 'staff')}",
+                )
+            except discord.HTTPException:
+                await self.bot.db.execute(
+                    "UPDATE tickets SET status='ferme', closed_at=?, locked=1 WHERE id=?",
+                    (now(), ticket["id"]),
+                )
+                return await sx_panels.envoyer(
+                    ctx,
+                    sx_panels.depuis_embed(
+                        embeds.error("Discord a refusé de rendre le ticket visible au membre.")
+                    ),
+                )
         reference = await tickets_service.journaliser_evenement(
             self.bot, ctx.guild, "ticket_reopen",
             ticket_id=ticket["id"], channel=ctx.channel,
@@ -2104,10 +2119,7 @@ class Tickets(commands.Cog):
             # est censé supprimer. Un Context réel a toujours .author ; ce qui
             # appelle sans en avoir un n'a pas à en pâtir.
             acteur=getattr(ctx, "author", None), cible=owner,
-            # La suppression automatique programmée à la fermeture s'annule
-            # d'elle-même en relisant le statut (voir _auto_delete) — le dire
-            # évite au staff de croire le ticket encore condamné.
-            extra={"🛑 Suppression automatique": "annulée"},
+            extra={"👁️ Visibilité membre": "rétablie"},
         )
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'🔓 Le ticket a été rouvert.\nRéférence : `{reference}`')))
 
