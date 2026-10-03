@@ -92,15 +92,23 @@ def source_surfaces(source_url: str, platform: str) -> list[tuple[str, str, str]
     ]
 
 
-def verify_phyllo_signature(body: bytes, signature: str, secret: str) -> bool:
-    """Verify X-Phyllo-Signature (HMAC-SHA256 over raw body)."""
-    if not body or not signature or not secret:
+def verify_phyllo_signature(body: bytes, signatures: str, secret: str) -> bool:
+    """Verify InsightIQ ``Webhook-Signatures`` over the raw request body.
+
+    InsightIQ can send several comma-separated signatures while an API secret
+    is being rotated.  Accepting any matching signature is the documented
+    behaviour.  ``sha256=`` remains tolerated for older Phyllo integrations.
+    """
+    if not body or not signatures or not secret:
         return False
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    supplied = str(signature).strip()
-    if supplied.casefold().startswith("sha256="):
-        supplied = supplied.split("=", 1)[1]
-    return hmac.compare_digest(expected.casefold(), supplied.casefold())
+    for candidate in str(signatures).split(","):
+        supplied = candidate.strip().strip('"')
+        if supplied.casefold().startswith("sha256="):
+            supplied = supplied.split("=", 1)[1]
+        if hmac.compare_digest(expected.casefold(), supplied.casefold()):
+            return True
+    return False
 
 
 def _walk_dicts(value: Any) -> Iterable[dict]:

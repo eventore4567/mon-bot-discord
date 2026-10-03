@@ -31,7 +31,12 @@ async def handle_phyllo_webhook(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"ok": False, "error": "invalid_body"}, status=400)
 
-    signature = request.headers.get("X-Phyllo-Signature", "")
+    # InsightIQ's current header is Webhook-Signatures and can contain several
+    # comma-separated values during secret rotation.  Keep the legacy header
+    # as a compatibility fallback for older Phyllo tenants.
+    signature = request.headers.get("Webhook-Signatures", "")
+    if not signature:
+        signature = request.headers.get("X-Phyllo-Signature", "")
     if not social_providers.verify_phyllo_signature(raw, signature, secret):
         logger.warning("Webhook Phyllo rejeté : signature invalide.")
         return web.json_response({"ok": False, "error": "invalid_signature"}, status=401)

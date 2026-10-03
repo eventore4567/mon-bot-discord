@@ -39,6 +39,9 @@ def test_phyllo_signature_uses_hmac_sha256_raw_body():
     assert social_providers.verify_phyllo_signature(
         body, f"sha256={signature}", secret
     )
+    assert social_providers.verify_phyllo_signature(
+        body, f'"bad-signature", "{signature}"', secret
+    )
     assert not social_providers.verify_phyllo_signature(
         body, "deadbeef", secret
     )
