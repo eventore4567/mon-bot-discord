@@ -111,12 +111,25 @@ def _field_map(embed: discord.Embed) -> list[tuple[str, str]]:
         name = safe_text(field.name)
         value = _clean_lines(safe_text(field.value))
         if name and value:
-            if name.casefold().strip(" :") in {"salon", "channel"}:
-                mention = _CHANNEL_MENTION_RE.search(value)
-                if mention:
-                    value = mention.group(0)
+            # Ne plus réduire « Salon » à sa seule mention. Discord peut rendre
+            # une mention privée comme « #inconnu » ; le nom brut conservé par
+            # le producteur du log est alors la seule information lisible.
             result.append((name, value))
     return result
+
+
+def _normalise_field_name(name: str) -> str:
+    text = safe_text(name).casefold()
+    text = re.sub(r"[^a-z0-9à-ÿ]+", " ", text, flags=re.IGNORECASE)
+    return " ".join(text.split())
+
+
+def _field_value_exact(embed: discord.Embed, *tokens: str) -> str:
+    wanted = {_normalise_field_name(token) for token in tokens}
+    for name, value in _field_map(embed):
+        if _normalise_field_name(name) in wanted:
+            return value
+    return ""
 
 
 def _field_value(embed: discord.Embed, *tokens: str) -> str:
@@ -616,7 +629,14 @@ def narrative_body(
             ("Longueur", "longueur"),
             ("Ouvert", "ouvert"),
         ):
-            valeur = _field_value(embed, *noms)
+            # « Ouvert par » est l'acteur, « 🕒 Ouvert » est la date. Le vieux
+            # matching par sous-chaîne confondait les deux et affichait le
+            # membre + son ID à la place de l'heure d'ouverture.
+            valeur = (
+                _field_value_exact(embed, *noms)
+                if libelle == "Ouvert"
+                else _field_value(embed, *noms)
+            )
             if valeur:
                 details.append(f"{libelle} : {valeur}")
         if details:
