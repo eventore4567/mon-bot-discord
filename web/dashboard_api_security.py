@@ -229,6 +229,107 @@ def register(app: web.Application, dashboard) -> None:
             )
         )
 
+    async def antispam_policy(request: web.Request):
+        write = request.method == "POST"
+        session, guild, error = await _guard(request, write=write)
+        if error:
+            return error
+
+        if request.method == "POST":
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
+
+            mode = str((payload or {}).get("scope_mode") or "all").strip().casefold()
+            if mode not in {"all", "selected"}:
+                return dashboard._json_error("Périmètre anti-spam invalide.", 400)
+
+            raw_roles = (payload or {}).get("role_ids") or []
+            raw_channels = (payload or {}).get("channel_ids") or []
+            try:
+                role_ids = list(dict.fromkeys(int(v) for v in raw_roles))[:25]
+                channel_ids = list(dict.fromkeys(int(v) for v in raw_channels))[:25]
+            except (TypeError, ValueError):
+                return dashboard._json_error("Rôle ou salon invalide.", 400)
+
+            valid_roles = {
+                int(role.id)
+                for role in guild.roles
+                if role != guild.default_role
+            }
+            valid_channels = {
+                int(channel.id)
+                for channel in guild.channels
+                if isinstance(channel, (discord.TextChannel, discord.ForumChannel))
+            }
+            if any(role_id not in valid_roles for role_id in role_ids):
+                return dashboard._json_error("Un rôle sélectionné n'existe plus.", 409)
+            if any(channel_id not in valid_channels for channel_id in channel_ids):
+                return dashboard._json_error("Un salon sélectionné n'existe plus.", 409)
+            if mode == "selected" and not channel_ids:
+                return dashboard._json_error(
+                    "Choisissez au moins un salon protégé ou utilisez « Tous les salons ».",
+                    400,
+                )
+
+            await bot.db.execute(
+                "DELETE FROM antispam_exempt_roles WHERE guild_id=?",
+                (guild.id,),
+            )
+            for role_id in role_ids:
+                await bot.db.execute(
+                    "INSERT OR IGNORE INTO antispam_exempt_roles (guild_id,role_id) VALUES (?,?)",
+                    (guild.id, role_id),
+                )
+
+            await bot.db.execute(
+                "DELETE FROM antispam_protected_channels WHERE guild_id=?",
+                (guild.id,),
+            )
+            if mode == "selected":
+                for channel_id in channel_ids:
+                    await bot.db.execute(
+                        "INSERT OR IGNORE INTO antispam_protected_channels (guild_id,channel_id) VALUES (?,?)",
+                        (guild.id, channel_id),
+                    )
+
+            await bot.db.execute(
+                "INSERT INTO antispam_policy (guild_id,scope_mode,updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET "
+                "scope_mode=excluded.scope_mode,updated_at=excluded.updated_at",
+                (guild.id, mode, int(time.time())),
+            )
+
+            automod = bot.get_cog("Automod") if hasattr(bot, "get_cog") else None
+            if automod is not None:
+                automod.antispam_policy_cache.pop(guild.id, None)
+
+        policy_row = await bot.db.fetchone(
+            "SELECT scope_mode FROM antispam_policy WHERE guild_id=?",
+            (guild.id,),
+        )
+        role_rows = await bot.db.fetchall(
+            "SELECT role_id FROM antispam_exempt_roles WHERE guild_id=? ORDER BY role_id",
+            (guild.id,),
+        )
+        channel_rows = await bot.db.fetchall(
+            "SELECT channel_id FROM antispam_protected_channels WHERE guild_id=? ORDER BY channel_id",
+            (guild.id,),
+        )
+        conf = await bot.db.get_automod(guild.id)
+        mode = str(policy_row["scope_mode"] if policy_row else "all").casefold()
+        if mode not in {"all", "selected"}:
+            mode = "all"
+        return web.json_response({
+            "ok": True,
+            "enabled": bool(conf and conf["antispam"]),
+            "scope_mode": mode,
+            "role_ids": [str(row["role_id"]) for row in role_rows],
+            "channel_ids": [str(row["channel_id"]) for row in channel_rows],
+            "message": "Périmètre anti-spam enregistré." if write else None,
+        })
+
     async def simulate(request: web.Request):
         session, guild, error = await _guard(request)
         if error:
@@ -378,6 +479,8 @@ def register(app: web.Application, dashboard) -> None:
 
     app.router.add_get("/api/guilds/{guild_id}/security/overview", overview)
     app.router.add_get("/api/guilds/{guild_id}/security/simulate", simulate)
+    app.router.add_get("/api/guilds/{guild_id}/security/antispam-policy", antispam_policy)
+    app.router.add_post("/api/guilds/{guild_id}/security/antispam-policy", antispam_policy)
     app.router.add_post("/api/guilds/{guild_id}/security/panic", panic)
 
 
