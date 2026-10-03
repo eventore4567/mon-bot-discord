@@ -843,6 +843,50 @@ class EmergencyView(OwnedView):
         await self._ask(interaction, "unlock", "Déverrouiller ce salon")
 
 
+class StaffReminderModal(discord.ui.Modal, title="Rappel staff"):
+    duration = discord.ui.TextInput(
+        label="Dans combien de temps ?",
+        placeholder="Ex. 30m, 2h, 1j",
+        max_length=20,
+    )
+    note = discord.ui.TextInput(
+        label="Rappel",
+        placeholder="Ex. Revoir le dossier SC-0042",
+        style=discord.TextStyle.paragraph,
+        max_length=900,
+    )
+
+    def __init__(self, suite: "StaffSuite", guild_id: int):
+        super().__init__()
+        self.suite = suite
+        self.guild_id = guild_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        seconds = helpers.parse_duration(str(self.duration.value))
+        if not seconds:
+            return await interaction.response.send_message(
+                "Durée invalide. Exemples : 30m, 2h, 1j.",
+                ephemeral=True,
+            )
+        timestamp = now()
+        await self.suite.bot.db.execute(
+            "INSERT INTO staff_reminders_v1 "
+            "(guild_id,created_by,note,remind_at,status,created_at) VALUES (?,?,?,?,'actif',?)",
+            (
+                self.guild_id,
+                interaction.user.id,
+                str(self.note.value)[:900],
+                timestamp + seconds,
+                timestamp,
+            ),
+        )
+        await panels.texte_court(
+            interaction.response,
+            f"Rappel staff programmé pour <t:{timestamp + seconds}:R>.",
+            ephemere=True,
+        )
+
+
 class StaffCenterView(OwnedView):
     @discord.ui.button(label="Dossiers", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("case"))
     async def cases(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -893,6 +937,44 @@ class StaffCenterView(OwnedView):
         await panels.envoyer(
             interaction.response,
             await self.suite.audit_panel(interaction.guild),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Rappel", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("reminder"))
+    async def reminder(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(
+            StaffReminderModal(self.suite, interaction.guild.id)
+        )
+
+    @discord.ui.button(label="Urgence", style=discord.ButtonStyle.danger, emoji=sxemoji.partiel("alert"))
+    async def emergency(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            return await interaction.response.send_message(
+                "Les actions d’urgence sont disponibles dans un salon texte.",
+                ephemeral=True,
+            )
+        panel = panels.Panneau(
+            titre="Mode urgence",
+            sous_titre=f"Salon actuel : {channel.mention}",
+            kind="warning",
+            sections=[
+                panels.Section(
+                    "Actions",
+                    texte=(
+                        "Chaque action sensible demande une seconde confirmation. "
+                        "Aucun salon n'est créé et aucune action globale n'est lancée automatiquement."
+                    ),
+                )
+            ],
+            pied="SentriX • Sécurité",
+        )
+        await panels.envoyer(
+            interaction.response,
+            panels.avec_composants(
+                panel,
+                EmergencyView(self.suite, interaction.user.id, channel.id),
+            ),
             ephemere=True,
         )
 
