@@ -273,6 +273,27 @@ CREATE TABLE IF NOT EXISTS automod_exempt_roles (
     PRIMARY KEY (guild_id, role_id)
 );
 
+-- Périmètre dédié à l'anti-spam. Séparé des exemptions AutoMod globales :
+-- un rôle peut contourner uniquement l'anti-spam sans devenir immunisé aux
+-- liens, scams, insultes ou autres protections.
+CREATE TABLE IF NOT EXISTS antispam_policy (
+    guild_id INTEGER PRIMARY KEY,
+    scope_mode TEXT NOT NULL DEFAULT 'all',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS antispam_exempt_roles (
+    guild_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS antispam_protected_channels (
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, channel_id)
+);
+
 CREATE TABLE IF NOT EXISTS user_immunity_settings (
     guild_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
