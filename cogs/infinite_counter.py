@@ -1,8 +1,8 @@
 """Compteur communautaire infini : +infinit.
 
-Un même membre ne peut pas valider deux nombres consécutifs. Les erreurs sont supprimées
-après un court délai, le prochain nombre est rappelé puis le rappel disparaît après 10 s.
-L'état est stocké en SQLite afin de survivre aux redémarrages.
+Un même membre ne peut pas valider deux nombres consécutifs. Tout message invalide est
+supprimé immédiatement et silencieusement : aucun avertissement, aucun ping, aucun panneau
+n'est envoyé dans le salon. L'état est stocké en SQLite afin de survivre aux redémarrages.
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import discord
 from discord.ext import commands
 
 from utils import access_matrix, checks
-from utils import sentrix_emojis
 from utils import sentrix_panels as panels
 
 
@@ -157,206 +156,6 @@ class InfiniteSetupView(discord.ui.View):
         await panels.editer(interaction.response, panneau)
 
 
-class InfiniteMistakeView(discord.ui.LayoutView):
-    """Assistant compact pour une erreur du compteur infini.
-
-    Le panneau ping uniquement le membre concerné, ne modifie jamais le compteur
-    tout seul et disparaît après chaque action. Le message invalide est nettoyé
-    après 60 secondes si personne n'agit.
-    """
-
-    def __init__(
-        self,
-        cog: "InfiniteCounter",
-        source_message: discord.Message,
-        *,
-        text: str,
-        expected: int,
-        attempted: int | None,
-        reason: str,
-    ):
-        super().__init__(timeout=60)
-        self.cog = cog
-        self.source_message = source_message
-        self.notice_message: discord.Message | None = None
-        self.author_id = int(source_message.author.id)
-        self.expected = int(expected)
-        self.attempted = attempted
-        self.reason = str(reason)
-        self.accepted_override = False
-        self.responded = False
-        self.source_deleted = False
-        self._action_lock = asyncio.Lock()
-
-        error_icon = sentrix_emojis.emoji("error") or "✕"
-        hint = (
-            "Quelqu’un d’autre doit continuer la suite."
-            if self.reason == "consecutive"
-            else f"Le prochain nombre attendu est **{self.expected}**."
-        )
-        container = discord.ui.Container()
-        container.add_item(
-            discord.ui.TextDisplay(
-                f"{error_icon} **{text}**\n"
-                f"-# {hint} · Sans réponse, ton message sera supprimé automatiquement dans 1 minute."
-            )
-        )
-
-        row = discord.ui.ActionRow()
-
-        mistake = discord.ui.Button(
-            label="Je me suis trompé",
-            style=discord.ButtonStyle.secondary,
-            emoji=sentrix_emojis.partiel("warning"),
-        )
-        mistake.callback = self._mistake
-        row.add_item(mistake)
-
-        current_number = self.attempted if self.attempted is not None else self.expected
-        correct = discord.ui.Button(
-            label=f"Modifier le nombre actuel ({current_number})"[:80],
-            style=discord.ButtonStyle.primary,
-            emoji=sentrix_emojis.partiel("message_edit"),
-        )
-        correct.callback = self._correct_counter
-        row.add_item(correct)
-
-        delete = discord.ui.Button(
-            label="Supprimer ce message",
-            style=discord.ButtonStyle.danger,
-            emoji=sentrix_emojis.partiel("trash"),
-        )
-        delete.callback = self._delete_source
-        row.add_item(delete)
-
-        container.add_item(row)
-        self.add_item(container)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if int(interaction.user.id) == self.author_id:
-            return True
-        if isinstance(interaction.user, discord.Member):
-            perms = interaction.user.guild_permissions
-            if perms.manage_messages or perms.manage_guild or perms.administrator:
-                return True
-        await interaction.response.send_message(
-            "Ce panneau appartient au membre qui a envoyé le nombre.",
-            ephemeral=True,
-        )
-        return False
-
-    async def _delete_notice(self) -> None:
-        message = self.notice_message
-        if message is None:
-            return
-        try:
-            await message.delete()
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            pass
-        self.notice_message = None
-
-    async def _delete_original(self) -> None:
-        if self.source_deleted:
-            return
-        try:
-            await self.source_message.delete()
-            self.source_deleted = True
-        except discord.NotFound:
-            self.source_deleted = True
-        except (discord.Forbidden, discord.HTTPException):
-            pass
-
-    async def _mistake(self, interaction: discord.Interaction) -> None:
-        async with self._action_lock:
-            if interaction.response.is_done():
-                return
-            await interaction.response.defer()
-            # Le membre a répondu : le panneau disparaît et SentriX ne supprime
-            # plus automatiquement son message. Il peut alors le corriger lui-même.
-            self.responded = True
-            await self._delete_notice()
-            self.stop()
-
-    async def _correct_counter(self, interaction: discord.Interaction) -> None:
-        member = interaction.user if isinstance(interaction.user, discord.Member) else None
-        perms = member.guild_permissions if member is not None else None
-        allowed = bool(
-            perms
-            and (
-                perms.manage_messages
-                or perms.manage_guild
-                or perms.administrator
-            )
-        )
-        if not allowed:
-            return await interaction.response.send_message(
-                "Seul le staff peut modifier le nombre actuel.",
-                ephemeral=True,
-            )
-
-        async with self._action_lock:
-            await interaction.response.defer(ephemeral=True)
-            row = await self.cog.bot.db.fetchone(
-                "SELECT channel_id,next_number FROM infinite_counter_config "
-                "WHERE guild_id=? AND enabled=1",
-                (self.source_message.guild.id,),
-            )
-            if (
-                row is None
-                or int(row["channel_id"]) != self.source_message.channel.id
-                or int(row["next_number"]) != self.expected
-            ):
-                await interaction.followup.send(
-                    "Le compteur a déjà avancé : aucune modification effectuée.",
-                    ephemeral=True,
-                )
-                await self._delete_notice()
-                return
-
-            current = self.attempted if self.attempted is not None else self.expected
-            if current < 1:
-                await interaction.followup.send(
-                    "Ce nombre ne peut pas devenir le nombre actuel.",
-                    ephemeral=True,
-                )
-                return
-
-            await self.cog.bot.db.execute(
-                "UPDATE infinite_counter_config "
-                "SET next_number=?,last_user_id=?,updated_at=? WHERE guild_id=?",
-                (
-                    int(current) + 1,
-                    self.author_id,
-                    int(time.time()),
-                    self.source_message.guild.id,
-                ),
-            )
-            self.cog._invalidate_enabled(self.source_message.guild.id)
-            self.accepted_override = True
-            self.responded = True
-            await interaction.followup.send(
-                f"Nombre actuel corrigé à **{current}**. Le prochain est **{current + 1}**.",
-                ephemeral=True,
-            )
-            await self._delete_notice()
-            self.stop()
-
-    async def _delete_source(self, interaction: discord.Interaction) -> None:
-        async with self._action_lock:
-            await interaction.response.defer()
-            self.responded = True
-            await self._delete_original()
-            await self._delete_notice()
-            self.stop()
-
-    async def on_timeout(self) -> None:
-        # Une correction staff transforme le message en étape valide ; sinon il
-        # est retiré pour conserver un salon de comptage propre.
-        if not self.responded and not self.accepted_override:
-            await self._delete_original()
-        await self._delete_notice()
-
-
 class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -384,40 +183,24 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
     async def _invalid(
         self,
         message: discord.Message,
-        text: str,
+        _text: str,
         *,
         expected: int,
         attempted: int | None = None,
         reason: str = "invalid",
     ):
-        view = InfiniteMistakeView(
-            self,
-            message,
-            text=text,
-            expected=int(expected),
-            attempted=attempted,
-            reason=reason,
-        )
+        """Nettoie silencieusement une entrée invalide du salon de comptage.
+
+        Aucun message de correction, ping, embed ou panneau n'est envoyé : le salon
+        reste uniquement composé des nombres valides. Les paramètres supplémentaires
+        restent acceptés afin de conserver les appels existants et faciliter l'audit.
+        """
+        _ = (expected, attempted, reason)
         try:
-            notice = await message.channel.send(
-                content=f"<@{message.author.id}>",
-                view=view,
-                allowed_mentions=discord.AllowedMentions(
-                    everyone=False,
-                    roles=False,
-                    users=[message.author],
-                    replied_user=False,
-                ),
-            )
-        except (discord.Forbidden, discord.HTTPException):
-            # Si SentriX ne peut pas afficher l'assistant, garder le comportement
-            # sûr : le message invalide ne doit pas rester dans le compteur.
-            try:
-                await message.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass
-            return
-        view.notice_message = notice
+            await message.delete()
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
+
 
     @commands.group(name="infinit", aliases=["infinite", "compteur-infini"], invoke_without_command=True)
     @commands.guild_only()
