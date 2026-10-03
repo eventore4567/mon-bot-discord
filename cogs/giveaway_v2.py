@@ -43,7 +43,8 @@ SCHEMA = (
         required_roles_json TEXT NOT NULL DEFAULT '[]',
         excluded_roles_json TEXT NOT NULL DEFAULT '[]',
         bonus_roles_json TEXT NOT NULL DEFAULT '{}',
-        winners_json TEXT NOT NULL DEFAULT '[]'
+        winners_json TEXT NOT NULL DEFAULT '[]',
+        result_message_id INTEGER
     )
     """,
     """
@@ -730,6 +731,89 @@ class AdvancedGiveawayView(discord.ui.View):
         await cog.toggle_entry(interaction)
 
 
+class GiveawayResultView(discord.ui.LayoutView):
+    """Annonce de gagnant simple, proche d'un message Discord natif premium."""
+
+    def __init__(self, cog: "GiveawayV2", row, winners: list[int]):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.giveaway_id = int(row["id"])
+        self.guild_id = int(row["guild_id"])
+        self.channel_id = int(row["channel_id"])
+        self.message_id = int(row["message_id"])
+
+        winner_mentions = ", ".join(f"<@{uid}>" for uid in winners)
+        if winners:
+            verb = "a gagné" if len(winners) == 1 else "ont gagné"
+            result_text = f"{winner_mentions} {verb} le giveaway de **{row['prize']}** !"
+        else:
+            result_text = f"Aucun participant éligible pour **{row['prize']}**."
+
+        container = discord.ui.Container()
+        container.add_item(discord.ui.TextDisplay("## Félicitations ! 🎉"))
+        container.add_item(discord.ui.TextDisplay(result_text))
+        container.add_item(
+            discord.ui.TextDisplay(f"**Organisé par** · <@{int(row['created_by'])}>")
+        )
+
+        actions = discord.ui.ActionRow()
+        actions.add_item(
+            discord.ui.Button(
+                label="Aller au giveaway",
+                url=(
+                    f"https://discord.com/channels/{self.guild_id}/"
+                    f"{self.channel_id}/{self.message_id}"
+                ),
+            )
+        )
+        reroll_button = discord.ui.Button(
+            label="Relancer le tirage",
+            style=discord.ButtonStyle.secondary,
+            emoji=sxemoji.partiel("refresh") or sxemoji.partiel("sync"),
+            custom_id=f"sentrix:giveaway:v2:result-reroll:{self.giveaway_id}",
+        )
+        reroll_button.callback = self.reroll
+        actions.add_item(reroll_button)
+        container.add_item(actions)
+        self.add_item(container)
+
+    async def reroll(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.response.send_message(
+                "Cette action doit être utilisée dans le serveur.",
+                ephemeral=True,
+            )
+        perms = getattr(interaction.user, "guild_permissions", None)
+        is_admin = bool(perms and perms.administrator)
+        if interaction.user.id != guild.owner_id and not is_admin:
+            return await interaction.response.send_message(
+                "Seul le propriétaire ou un administrateur peut relancer ce tirage.",
+                ephemeral=True,
+            )
+
+        row = await self.cog.bot.db.fetchone(
+            "SELECT * FROM giveaways_v2 WHERE id=? AND guild_id=?",
+            (self.giveaway_id, guild.id),
+        )
+        if row is None or row["status"] != "termine":
+            return await interaction.response.send_message(
+                "Ce giveaway n'est plus disponible pour un nouveau tirage.",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        winners = await self.cog.finish(row, reroll=True)
+        await interaction.followup.send(
+            (
+                f"Nouveau tirage effectué : {len(winners)} gagnant(s)."
+                if winners
+                else "Nouveau tirage effectué, mais aucun participant n'est éligible."
+            ),
+            ephemeral=True,
+        )
+
+
 class GiveawayV2(commands.Cog, name="GiveawayV2"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -739,6 +823,18 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
     async def cog_load(self):
         await self.ensure_schema()
         self.bot.add_view(AdvancedGiveawayView())
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM giveaways_v2 "
+            "WHERE status='termine' AND result_message_id IS NOT NULL"
+        )
+        for row in rows:
+            try:
+                self.bot.add_view(
+                    GiveawayResultView(self, row, _ids(row["winners_json"])),
+                    message_id=int(row["result_message_id"]),
+                )
+            except (TypeError, ValueError):
+                continue
 
     def cog_unload(self):
         self.check_ends.cancel()
@@ -748,6 +844,15 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             return
         for statement in SCHEMA:
             await self.bot.db.execute(statement)
+
+        # Migration additive pour les bases déjà existantes : CREATE TABLE IF NOT
+        # EXISTS n'ajoute pas les nouvelles colonnes.
+        columns = await self.bot.db.fetchall("PRAGMA table_info(giveaways_v2)")
+        column_names = {str(row["name"]) for row in columns}
+        if "result_message_id" not in column_names:
+            await self.bot.db.execute(
+                "ALTER TABLE giveaways_v2 ADD COLUMN result_message_id INTEGER"
+            )
         self._schema_ready = True
 
     def missing_base(self, state: BuilderState) -> list[str]:
@@ -1052,45 +1157,88 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
                 pool.append((member.id, weight))
         return pool
 
+    async def _upsert_result_announcement(
+        self,
+        guild: discord.Guild,
+        row,
+        winners: list[int],
+    ) -> discord.Message | None:
+        channel = guild.get_channel(int(row["channel_id"]))
+        if channel is None or getattr(channel, "send", None) is None:
+            return None
+
+        view = GiveawayResultView(self, row, winners)
+        result_message_id = row["result_message_id"]
+        if result_message_id:
+            try:
+                message = await channel.fetch_message(int(result_message_id))
+                await message.edit(view=view)
+                return message
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+
+        message = await channel.send(view=view)
+        await self.bot.db.execute(
+            "UPDATE giveaways_v2 SET result_message_id=? WHERE id=?",
+            (message.id, row["id"]),
+        )
+        return message
+
     async def finish(self, row, *, reroll: bool = False) -> list[int]:
         guild = self.bot.get_guild(int(row["guild_id"]))
         if guild is None:
             return []
+
         pool = await self._eligible_pool(row, guild)
         previous = _ids(row["winners_json"])
         if reroll and previous:
             without_previous = [(uid, weight) for uid, weight in pool if uid not in previous]
             if without_previous:
                 pool = without_previous
+
         winners = _weighted_unique(pool, int(row["winners_count"] or 1))
         if not reroll:
-            await self.bot.db.execute("UPDATE giveaways_v2 SET status='termine', winners_json=? WHERE id=?", (json.dumps(winners), row["id"]))
+            await self.bot.db.execute(
+                "UPDATE giveaways_v2 SET status='termine', winners_json=? WHERE id=?",
+                (json.dumps(winners), row["id"]),
+            )
         else:
-            await self.bot.db.execute("UPDATE giveaways_v2 SET winners_json=? WHERE id=?", (json.dumps(winners), row["id"]))
-        channel = guild.get_channel(int(row["channel_id"]))
+            await self.bot.db.execute(
+                "UPDATE giveaways_v2 SET winners_json=? WHERE id=?",
+                (json.dumps(winners), row["id"]),
+            )
+
+        fresh = await self.bot.db.fetchone(
+            "SELECT * FROM giveaways_v2 WHERE id=?",
+            (row["id"],),
+        ) or row
+
+        channel = guild.get_channel(int(fresh["channel_id"]))
         if channel and getattr(channel, "send", None):
             try:
-                original = await channel.fetch_message(int(row["message_id"]))
-                fresh = await self.bot.db.fetchone(
-                    "SELECT * FROM giveaways_v2 WHERE id=?",
-                    (row["id"],),
-                ) or row
-                result_panel = await self.public_panel_from_row(
+                original = await channel.fetch_message(int(fresh["message_id"]))
+                finished_panel = await self.public_panel_from_row(
                     guild,
                     fresh,
                     status="termine",
                     winners=winners,
                 )
                 if original.embeds:
-                    # Ancien message embed : Discord ne permet pas de le
-                    # transformer en Components V2 par edit. On désactive son
-                    # bouton puis on publie le résultat propre juste après.
+                    # Message historique : on retire seulement l'ancien bouton.
                     await original.edit(view=None)
-                    await panels.envoyer(channel, result_panel)
                 else:
-                    await panels.editer(original, result_panel)
+                    await panels.editer(original, finished_panel)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
+
+            # Une seule annonce "Félicitations" par giveaway. Un reroll met à
+            # jour ce même message au lieu d'en créer un nouveau.
+            fresh = await self.bot.db.fetchone(
+                "SELECT * FROM giveaways_v2 WHERE id=?",
+                (row["id"],),
+            ) or fresh
+            await self._upsert_result_announcement(guild, fresh, winners)
+
         return winners
 
     async def handle_end(self, ctx: commands.Context, message_id: int) -> bool:
@@ -1104,15 +1252,51 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         await ctx.send(f"Giveaway terminé. {len(winners)} gagnant(s) tiré(s).")
         return True
 
-    async def handle_reroll(self, ctx: commands.Context, message_id: int) -> bool:
-        row = await self.bot.db.fetchone("SELECT * FROM giveaways_v2 WHERE guild_id=? AND message_id=?", (ctx.guild.id, message_id))
-        if row is None:
-            return False
+    async def handle_reroll(
+        self,
+        ctx: commands.Context,
+        message_id: int | None = None,
+    ) -> bool:
+        if message_id is None:
+            row = await self.bot.db.fetchone(
+                "SELECT * FROM giveaways_v2 "
+                "WHERE guild_id=? AND status='termine' "
+                "ORDER BY end_at DESC, id DESC LIMIT 1",
+                (ctx.guild.id,),
+            )
+            if row is None:
+                await panels.texte_court(
+                    ctx,
+                    "Aucun giveaway V2 terminé à relancer.",
+                    ephemere=bool(ctx.interaction),
+                )
+                return True
+        else:
+            row = await self.bot.db.fetchone(
+                "SELECT * FROM giveaways_v2 WHERE guild_id=? AND message_id=?",
+                (ctx.guild.id, message_id),
+            )
+            if row is None:
+                return False
+
         if row["status"] != "termine":
-            await ctx.send("Terminez d’abord ce giveaway avant de refaire un tirage.")
+            await panels.texte_court(
+                ctx,
+                "Terminez d’abord ce giveaway avant de refaire un tirage.",
+                ephemere=bool(ctx.interaction),
+            )
             return True
+
         winners = await self.finish(row, reroll=True)
-        await ctx.send(f"Nouveau tirage effectué : {len(winners)} gagnant(s).")
+        await panels.texte_court(
+            ctx,
+            (
+                f"Tirage relancé : {len(winners)} gagnant(s)."
+                if winners
+                else "Tirage relancé : aucun participant éligible."
+            ),
+            ephemere=bool(ctx.interaction),
+        )
         return True
 
     async def handle_cancel(self, ctx: commands.Context, message_id: int) -> bool:
