@@ -82,6 +82,10 @@ def _channel_ref(channel_id: int) -> str:
     return f"<#{int(channel_id)}>"
 
 
+def _discord_channel_url(guild_id: int, channel_id: int) -> str:
+    return f"https://discord.com/channels/{int(guild_id)}/{int(channel_id)}"
+
+
 def _attachment_urls(message: discord.Message) -> list[str]:
     return [attachment.url for attachment in message.attachments]
 
@@ -392,12 +396,16 @@ class Logs(commands.Cog, name="Logs"):
                     display_avatar=None,
                 )
         panel = self._embed("Message supprimé", identity=identity, fields=fields)
+        links = [
+            ("Accéder au salon", _discord_channel_url(guild.id, channel_id))
+        ] if channel_id else []
+        links.extend(_attachment_links(media_items))
         view = log_service.log_actions(
             ids=[
                 ("Copier l'ID de l'auteur", author_id),
                 ("Copier l'ID du message", message_id),
             ],
-            links=_attachment_links(media_items),
+            links=links,
         )
         key = log_service.make_event_key(
             guild.id,
@@ -513,7 +521,11 @@ class Logs(commands.Cog, name="Logs"):
             description="Le contenu n’était pas disponible dans le cache SentriX.",
         )
         view = log_service.log_actions(
-            ids=[("Copier l'ID du message", payload.message_id)]
+            ids=[("Copier l'ID du message", payload.message_id)],
+            links=[(
+                "Accéder au salon",
+                _discord_channel_url(guild.id, payload.channel_id),
+            )],
         )
         key = log_service.make_event_key(
             guild.id,
@@ -904,7 +916,10 @@ class Logs(commands.Cog, name="Logs"):
             channel.guild,
             "channel_create",
             panel,
-            view=log_service.log_actions(ids=ids),
+            view=log_service.log_actions(
+                ids=ids,
+                links=[("Accéder au salon", _discord_channel_url(channel.guild.id, channel.id))],
+            ),
             event_key=key,
         )
 
@@ -915,7 +930,7 @@ class Logs(commands.Cog, name="Logs"):
             discord.AuditLogAction.channel_delete,
             channel.id,
         )
-        fields = [("Salon", f"`{channel.name}`", True), ("ID", f"`{channel.id}`", True)]
+        fields = [("Salon", f"`{channel.name}`", True)]
         if actor:
             fields.append(("Responsable", _user_ref(actor.id), True))
         panel = self._embed("Salon supprimé", fields=fields)
@@ -1002,7 +1017,10 @@ class Logs(commands.Cog, name="Logs"):
             after.guild,
             "channel_update",
             panel,
-            view=log_service.log_actions(ids=ids),
+            view=log_service.log_actions(
+                ids=ids,
+                links=[("Accéder au salon", _discord_channel_url(after.guild.id, after.id))],
+            ),
             event_key=key,
         )
 
@@ -1044,7 +1062,7 @@ class Logs(commands.Cog, name="Logs"):
             discord.AuditLogAction.role_delete,
             role.id,
         )
-        fields = [("Rôle", f"`{role.name}`", True), ("ID", f"`{role.id}`", True)]
+        fields = [("Rôle", f"`{role.name}`", True)]
         if actor:
             fields.append(("Responsable", _user_ref(actor.id), True))
         panel = self._embed("Rôle supprimé", fields=fields)
