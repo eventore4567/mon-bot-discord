@@ -94,3 +94,35 @@ def test_ticket_and_role_panels_do_not_duplicate_sentrix_brand():
     assert 'titre="Ticket ouvert"' in tickets
     assert 'titre="Tickets"' in tickets
     assert 'f"SentriX — {titre}"' not in roles
+
+
+
+def test_infinite_counter_error_assistant_is_native_sentrix_and_self_cleaning():
+    source = _source("cogs/infinite_counter.py")
+
+    assert "class InfiniteMistakeView(discord.ui.LayoutView)" in source
+    assert "sentrix_emojis.emoji(\"error\")" in source
+    assert "sentrix_emojis.partiel(\"message_edit\")" in source
+    assert "sentrix_emojis.partiel(\"trash\")" in source
+    assert 'label="Je me suis trompé"' in source
+    assert 'label="Supprimer ce message"' in source
+    assert "await self._delete_notice()" in source
+    assert "await self._delete_original()" in source
+    assert "async def on_timeout(self)" in source
+
+
+def test_infinite_counter_staff_override_is_guarded_and_stale_safe():
+    source = _source("cogs/infinite_counter.py")
+
+    assert "perms.manage_messages" in source
+    assert "perms.manage_guild" in source
+    assert "perms.administrator" in source
+    assert 'int(row["next_number"]) != self.expected' in source
+    assert "SET next_number=?,last_user_id=?,updated_at=?" in source
+    assert "self.accepted_override = True" in source
+
+
+def test_infinite_counter_invalid_message_does_not_ping_anyone():
+    source = _source("cogs/infinite_counter.py")
+
+    assert "allowed_mentions=discord.AllowedMentions.none()" in source
