@@ -114,3 +114,32 @@ def test_giveaway_media_is_rendered_as_panel_content_image():
         interactive=False,
     )
     assert "https://cdn.example.test/giveaway.gif" in repr(panel.to_components())
+
+
+def test_giveaway_result_announcement_matches_simple_winner_style():
+    source = inspect.getsource(giveaway_v2.GiveawayResultView)
+    assert "Félicitations ! 🎉" in source
+    assert "a gagné" in source
+    assert "ont gagné" in source
+    assert 'label="Aller au giveaway"' in source
+    assert 'label="Relancer le tirage"' in source
+    assert "discord.Embed" not in source
+    assert "accent_color" not in source
+    assert "accent_colour" not in source
+
+
+def test_reroll_updates_the_same_result_message_and_persists_its_id():
+    helper = inspect.getsource(giveaway_v2.GiveawayV2._upsert_result_announcement)
+    assert "result_message_id" in helper
+    assert "await message.edit(view=view)" in helper
+    assert "UPDATE giveaways_v2 SET result_message_id=?" in helper
+
+    finish = inspect.getsource(giveaway_v2.GiveawayV2.finish)
+    assert "_upsert_result_announcement" in finish
+
+
+def test_reroll_can_target_latest_finished_v2_without_message_id():
+    source = inspect.getsource(giveaway_v2.GiveawayV2.handle_reroll)
+    assert "message_id: int | None = None" in source
+    assert "status='termine'" in source
+    assert "ORDER BY end_at DESC, id DESC LIMIT 1" in source
