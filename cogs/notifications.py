@@ -7,6 +7,8 @@ import time
 from urllib.parse import urlparse, urlunparse
 
 import discord
+
+import config
 from discord.ext import commands, tasks
 
 from services import social_providers
@@ -750,6 +752,119 @@ class Notifications(commands.Cog, name="Notifications"):
                 )
             ),
         )
+
+    @commands.hybrid_command(
+        name="notifs-status",
+        description="Afficher l'état du moteur de notifications sociales.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def notifs_status(self, ctx: commands.Context):
+        if ctx.guild is None:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.error("Cette commande doit être utilisée dans un serveur.")
+                ),
+            )
+
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM social_notifications WHERE guild_id=? ORDER BY id ASC",
+            (ctx.guild.id,),
+        )
+        active = sum(1 for row in rows if row["enabled"])
+        states = 0
+        if rows:
+            placeholders = ",".join("?" for _ in rows)
+            state_row = await self.bot.db.fetchone(
+                f"SELECT COUNT(*) AS n FROM social_notification_state "
+                f"WHERE subscription_id IN ({placeholders})",
+                tuple(int(row["id"]) for row in rows),
+            )
+            states = int(state_row["n"] if state_row else 0)
+
+        provider = (
+            f"Phyllo {config.PHYLLO_ENVIRONMENT} prêt"
+            if config.PHYLLO_ENABLED
+            else "Phyllo non configuré — fallback actif"
+        )
+        webhook = (
+            "Webhook signé prêt"
+            if config.PHYLLO_WEBHOOK_ENABLED
+            else "Webhook Phyllo non configuré"
+        )
+        body = (
+            f"**Provider** · {provider}\n"
+            f"**Webhook** · {webhook}\n"
+            f"**Fallback** · yt-dlp/API toutes les 5 minutes\n"
+            f"**Surveillances** · {active}/{len(rows)} actives\n"
+            f"**États multi-format** · {states}\n"
+            f"**YouTube** · vidéos + Shorts + lives séparés"
+        )
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.info(body, title="Notifications sociales")
+            ),
+        )
+
+    @commands.hybrid_command(
+        name="notifs-test",
+        description="Prévisualiser le nouveau style d'une notification sociale.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def notifs_test(
+        self,
+        ctx: commands.Context,
+        plateforme: str = "YouTube",
+        type_contenu: str = "video",
+    ):
+        platform_key = str(plateforme or "").strip().casefold()
+        platform = {
+            "youtube": "YouTube",
+            "yt": "YouTube",
+            "tiktok": "TikTok",
+            "tt": "TikTok",
+            "twitch": "Twitch",
+            "instagram": "Instagram",
+            "insta": "Instagram",
+            "x": "X",
+            "twitter": "X",
+        }.get(platform_key)
+        if platform is None:
+            return await panels.texte_court(
+                ctx,
+                "Plateforme valide : YouTube, TikTok, Twitch, Instagram ou X.",
+                ephemere=bool(ctx.interaction),
+            )
+
+        kind = str(type_contenu or "").strip().casefold()
+        if kind not in {"video", "short", "live", "post"}:
+            return await panels.texte_court(
+                ctx,
+                "Type valide : video, short, live ou post.",
+                ephemere=bool(ctx.interaction),
+            )
+
+        fake_urls = {
+            "YouTube": "https://www.youtube.com/",
+            "TikTok": "https://www.tiktok.com/",
+            "Twitch": "https://www.twitch.tv/",
+            "Instagram": "https://www.instagram.com/",
+            "X": "https://x.com/",
+        }
+        preview = SocialNotificationPanel(
+            platform=platform,
+            title="Exemple de nouvelle publication SentriX",
+            description="Aperçu du nouveau rendu premium des notifications.",
+            link=fake_urls[platform],
+            image_url=None,
+            creator="Créateur",
+            kind=kind,
+            published_at=int(time.time()),
+        )
+        await ctx.send(view=preview)
 
     @commands.hybrid_command(name="notifs-list", description="Afficher les chaînes sociales surveillées.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")
