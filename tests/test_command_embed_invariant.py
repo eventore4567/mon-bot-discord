@@ -117,7 +117,9 @@ class CommandEmbedInvariantTests(unittest.TestCase):
         )
         card = sx_embeds.success("Configuration enregistrée.")
         self.assertEqual(card.title, "Succès")
-        self.assertEqual(card.colour.value, sx_embeds.COLOR_SUCCESS)
+        # Le statut reste sémantique dans le texte, mais aucun colour Discord
+        # ne doit réintroduire le liseré vertical sur le côté.
+        self.assertIsNone(card.colour)
 
 
 
@@ -146,6 +148,18 @@ class CommandEmbedInvariantTests(unittest.TestCase):
         assert "conteneur.add_item(discord.ui.Separator())" not in sources["panels"]
         assert "container.add_item(_small_separator())" not in sources["visuals"]
         assert 'BAR = ""' in sources["errors"]
+
+    def test_final_transport_removes_embed_side_accent(self):
+        import discord
+        from cogs import final_interaction_policy as policy
+
+        embed = discord.Embed(
+            title="Ancien panneau",
+            description="Contenu",
+            colour=discord.Colour.red(),
+        )
+        cleaned = policy._clean_embed(embed)
+        self.assertIsNone(cleaned.colour)
 
     def test_final_transport_strips_legacy_drawn_dividers(self):
         from cogs import final_interaction_policy as policy
