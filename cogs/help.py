@@ -694,26 +694,19 @@ class VueAide(discord.ui.LayoutView):
             )
 
         conteneur = discord.ui.Container()
-        # Famille figee ICI et reutilisee par fichiers() : nom_banniere et
-        # fichier_banniere appellent tous deux accord_commande, qui re-decide
-        # depuis le contexte de commande. Ce contexte retombe parfois avant
-        # l'envoi, et les deux resolvaient alors deux familles differentes --
-        # donc une piece jointe absente, donc un message REFUSE par Discord.
         self._famille = panels.accord_commande(self.kind)[1]
-        panels.poser_bandeau(conteneur, self._famille)
-        conteneur.add_item(
-            discord.ui.TextDisplay(f"-# {panels.signature_core('special')}")
-        )
+        # Le centre d'aide suit désormais le même contrat que tous les panneaux :
+        # aucune bannière, aucune signature technique en haut, aucune numérotation.
         conteneur.add_item(discord.ui.TextDisplay(f"## {titre}\n{resume}"))
 
-        for section_index, section in enumerate(sections, start=1):
-            rendu = section.rendu(section_index)
+        for section in sections:
+            rendu = section.rendu(None)
             if rendu:
                 conteneur.add_item(discord.ui.Separator())
                 conteneur.add_item(discord.ui.TextDisplay(rendu[:3800]))
 
         conteneur.add_item(
-            discord.ui.TextDisplay(f"-# {panels.pied_core('special', 'Centre d’aide')}")
+            discord.ui.TextDisplay("-# Centre d’aide")
         )
         conteneur.add_item(discord.ui.Separator())
         conteneur.add_item(discord.ui.ActionRow(CategorySelect(self)))
@@ -784,12 +777,8 @@ class VueAide(discord.ui.LayoutView):
         return boutons[:5]
 
     def fichiers(self) -> list[discord.File]:
-        """Banniere a joindre. Meme contrat que panels.Panneau, pour que
-        panels.envoyer traite les deux sans savoir lequel il tient."""
-        famille = getattr(self, "_famille", None)
-        if famille is None:
-            famille = panels.accord_commande(self.kind)[1]
-        return panels.pieces_jointes_de_famille(famille)
+        """Aucun asset décoratif : l'aide est entièrement rendue par Discord."""
+        return []
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.author_id:
@@ -799,16 +788,12 @@ class VueAide(discord.ui.LayoutView):
 
 
 async def _remplacer(interaction: discord.Interaction, vue: "VueAide") -> None:
-    """Remplace le message par la nouvelle vue, banniere comprise.
-
-    `attachments=` doit reprendre la banniere : sans elle, l'edition la retire et
-    la galerie pointerait vers une piece jointe disparue.
-    """
+    """Remplace le message d'aide sans pièce jointe décorative."""
     await interaction.response.edit_message(
         content=None,
         embeds=[],
         view=vue,
-        attachments=[f for f in (panels.fichier_banniere(vue.kind),) if f is not None],
+        attachments=[],
     )
 
 
