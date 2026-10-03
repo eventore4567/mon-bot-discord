@@ -23,7 +23,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from utils import helpers
+from utils import checks, helpers
 from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
 
@@ -1647,6 +1647,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, await self.member_panel(ctx.guild, membre, ctx.author.id))
 
     @commands.hybrid_command(name="note", description="Consulter ou ajouter une note staff privée.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre concerné")
     async def note(self, ctx: commands.Context, membre: discord.Member):
         rows = await self.bot.db.fetchall(
@@ -1680,6 +1681,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, await self.case_panel(ctx.guild, row, ctx.author.id))
 
     @commands.hybrid_command(name="incident", description="Ouvrir le centre des incidents staff.")
+    @checks.has_permission_or_modrole("moderate_members")
     async def incident(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.incident_center_panel(ctx.guild, ctx.author.id))
 
@@ -1703,6 +1705,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
 
     @commands.hybrid_command(name="staff", description="Ouvrir le centre staff SentriX.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Afficher les statistiques d'un membre du staff (facultatif)")
     async def staff(self, ctx: commands.Context, membre: discord.Member | None = None):
         if membre is None:
@@ -1779,23 +1782,28 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         )
 
     @commands.hybrid_command(name="audit", description="Auditer la configuration staff et les permissions SentriX.")
+    @checks.is_owner_or_admin_for("configuration")
     async def audit(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.audit_panel(ctx.guild))
 
     @commands.hybrid_command(name="diagnostic", description="Ouvrir le diagnostic SentriX du serveur.")
+    @checks.is_owner_or_admin_for("configuration")
     async def diagnostic(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.audit_panel(ctx.guild))
 
     @commands.hybrid_command(name="report", aliases=["rapport"], description="Générer un rapport staff sur une période.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(jours="Nombre de jours à analyser (1 à 30)")
     async def report(self, ctx: commands.Context, jours: int = 7):
         await panels.envoyer(ctx, await self.report_panel(ctx.guild, days=jours))
 
     @commands.hybrid_command(name="absence", description="Gérer les absences du staff.")
+    @checks.has_permission_or_modrole("moderate_members")
     async def absence(self, ctx: commands.Context):
         await self.send_absence_center(ctx, ctx.guild, ctx.author.id)
 
     @commands.hybrid_command(name="staff-reminder", aliases=["rappel-staff"], description="Créer un rappel staff lié à un dossier ou une tâche.", with_app_command=False)
+    @checks.has_permission_or_modrole("moderate_members")
     async def staff_reminder(
         self,
         ctx: commands.Context,
