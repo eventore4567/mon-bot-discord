@@ -117,6 +117,18 @@ DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
 PHYLLO_CLIENT_ID = os.getenv("PHYLLO_CLIENT_ID", "").strip()
 PHYLLO_CLIENT_SECRET = os.getenv("PHYLLO_CLIENT_SECRET", "").strip()
 PHYLLO_WEBHOOK_SECRET = os.getenv("PHYLLO_WEBHOOK_SECRET", "").strip()
+PHYLLO_ENVIRONMENT = os.getenv("PHYLLO_ENVIRONMENT", "staging").strip().casefold()
+if PHYLLO_ENVIRONMENT not in {"sandbox", "staging", "production"}:
+    PHYLLO_ENVIRONMENT = "staging"
+_PHYLLO_DEFAULT_BASES = {
+    "sandbox": "https://api.sandbox.getphyllo.com",
+    "staging": "https://api.staging.getphyllo.com",
+    "production": "https://api.getphyllo.com",
+}
+PHYLLO_BASE_URL = (
+    os.getenv("PHYLLO_BASE_URL", "").strip().rstrip("/")
+    or _PHYLLO_DEFAULT_BASES[PHYLLO_ENVIRONMENT]
+)
 PHYLLO_ENABLED = bool(PHYLLO_CLIENT_ID and PHYLLO_CLIENT_SECRET)
 PHYLLO_WEBHOOK_ENABLED = bool(PHYLLO_WEBHOOK_SECRET)
 
