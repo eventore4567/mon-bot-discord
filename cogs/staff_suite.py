@@ -666,8 +666,10 @@ class AbsenceSelect(discord.ui.Select):
             )
         super().__init__(
             placeholder="Demande à traiter" if options else "Aucune demande en attente",
-            min_values=1 if options else 0,
-            max_values=1 if options else 0,
+            # Même désactivé, Discord attend un Select avec une plage valide.
+            # Le faux choix ne peut pas être cliqué puisque disabled=True.
+            min_values=1,
+            max_values=1,
             options=options or [discord.SelectOption(label="Aucune demande", value="0")],
             disabled=not bool(options),
             row=0,
