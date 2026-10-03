@@ -1819,37 +1819,64 @@ class Tickets(commands.Cog):
             except discord.InteractionResponded:
                 pass
             return
+
         owner = interaction.guild.get_member(ticket["user_id"])
         if owner:
+            # CLOSE = le membre ne voit plus du tout le salon. Les permissions
+            # staff/rôles du ticket restent intactes, donc le support garde accès.
             overwrite = channel.overwrites_for(owner)
+            overwrite.view_channel = False
             overwrite.send_messages = False
+            overwrite.read_message_history = False
             try:
-                await channel.set_permissions(owner, overwrite=overwrite)
+                await channel.set_permissions(
+                    owner,
+                    overwrite=overwrite,
+                    reason=f"Ticket fermé par {interaction.user}",
+                )
             except discord.HTTPException:
-                pass
+                # Ne jamais annoncer un ticket fermé si Discord n'a pas appliqué
+                # l'isolation demandée. On remet l'état précédent.
+                await self.bot.db.execute(
+                    "UPDATE tickets SET status='ouvert', closed_at=NULL, locked=0 "
+                    "WHERE id=? AND status='ferme'",
+                    (ticket_id,),
+                )
+                try:
+                    await interaction.response.send_message(
+                        "Impossible de fermer le ticket : Discord a refusé de masquer le salon au membre.",
+                        ephemeral=True,
+                    )
+                except discord.InteractionResponded:
+                    pass
+                return
 
-        # BUG CORRIGÉ (perf) : la transcription était relue 3 fois de suite (message du
-        # salon, log, DM) via 3 lectures complètes et séparées de l'historique du salon —
-        # jusqu'à 3x plus d'appels à l'API Discord que nécessaire à CHAQUE fermeture de
-        # ticket. Sur un serveur de 200k membres où les tickets se ferment en continu, ça
-        # représente une charge inutile. On ne lit l'historique qu'une seule fois maintenant.
+        # Une seule lecture de l'historique sert au message staff, au log et au DM.
         try:
             transcript_text = await self._fetch_transcript_text(channel)
         except discord.HTTPException:
             transcript_text = "Transcription indisponible (erreur lors de la lecture du salon)."
 
-        delay = (conf["ticket_delete_delay"] if conf else 30) or 30
-
-        # BUG CORRIGÉ (fiabilité) : cette suppression automatique est maintenant programmée
-        # AVANT les envois qui suivent (message, log, DM), pas après. Avant, si l'envoi du DM
-        # de transcription échouait pour une raison autre qu'un DM fermé (erreur réseau,
-        # timeout Discord...), l'exception non rattrapée empêchait ce create_task de
-        # s'exécuter : le salon du ticket restait alors ouvert indéfiniment, sans suppression
-        # automatique et sans aucune erreur visible pour le staff.
-        asyncio.create_task(self._auto_delete(channel, ticket_id, delay))
-
+        # Fermer n'est PLUS supprimer : aucune tâche de suppression automatique
+        # n'est programmée ici. Le salon reste invisible au membre jusqu'à ce
+        # qu'un staff clique sur « Rouvrir » ou « Supprimer le salon ».
         try:
-            await sx_panels.envoyer(channel, sx_panels.depuis_embed(embeds.warning(f'🔒 Ticket fermé par {interaction.user.mention}.\nRaison : {reason}\n\nSuppression automatique dans **{helpers.format_duration(delay)}**.')), file=self._transcript_file(channel, transcript_text))
+            closed_panel = sx_panels.avec_composants(
+                sx_panels.depuis_embed(
+                    embeds.warning(
+                        f"Ticket fermé par {interaction.user.mention}.\n"
+                        f"Raison : {reason}\n\n"
+                        "Le membre ne peut plus voir ce salon. "
+                        "Le staff peut le **rouvrir** ou le **supprimer définitivement**."
+                    )
+                ),
+                tickets_service.vue_ticket_ferme(ticket_id),
+            )
+            await sx_panels.envoyer(
+                channel,
+                closed_panel,
+                file=self._transcript_file(channel, transcript_text),
+            )
         except discord.HTTPException:
             pass
 
@@ -1870,6 +1897,21 @@ class Tickets(commands.Cog):
                 await helpers.send_log(self.bot, interaction.guild, "moderation", log_e)
         else:
             await helpers.send_log(self.bot, interaction.guild, "moderation", log_e)
+
+        try:
+            await tickets_service.journaliser_evenement(
+                self.bot,
+                interaction.guild,
+                "ticket_close",
+                ticket_id=ticket_id,
+                channel=channel,
+                acteur=interaction.user,
+                cible=owner,
+                raison=reason,
+                extra={"État": "Fermé · visibilité membre retirée"},
+            )
+        except Exception:
+            logger.exception("Journal ticket_close indisponible ticket=%s.", ticket_id)
 
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
