@@ -98,16 +98,40 @@ async function renderSecurity() {
   const forbiddenWords = Array.isArray(forbidden?.words) ? forbidden.words : [];
   let d = null; try { d = await diagnostics(); } catch (_) {}
   let sec = null; try { sec = await securityOverview(); } catch (_) {}
-  let spamPolicy = { enabled: Boolean(a.antispam), scope_mode: 'all', role_ids: [], channel_ids: [] };
-  try { spamPolicy = await gget('/security/antispam-policy'); } catch (_) {}
-  const spamRoleIds = new Set((spamPolicy.role_ids || []).map(String));
-  const spamChannelIds = new Set((spamPolicy.channel_ids || []).map(String));
-  const spamRoleOptions = roles()
-    .filter(r => String(r.id) !== String(state.guildId))
-    .map(r => `<option value="${esc(r.id)}" ${spamRoleIds.has(String(r.id)) ? 'selected' : ''}>@${esc(r.name)}</option>`)
+  const securityPolicyOrder = [
+    'antispam', 'antilink', 'antiinvite', 'antimention',
+    'anticaps', 'antiemoji', 'antiscam', 'antiinsult'
+  ];
+  let policyBundle = { filters: {} };
+  try { policyBundle = await gget('/security/filter-policies'); } catch (_) {}
+  const securityPolicies = policyBundle?.filters || {};
+  const requestedPolicyKey = String(state.securityPolicyFilter || 'antispam');
+  const policyKey = securityPolicies[requestedPolicyKey]
+    ? requestedPolicyKey
+    : securityPolicyOrder.find(key => securityPolicies[key]) || 'antispam';
+  state.securityPolicyFilter = policyKey;
+  const policy = securityPolicies[policyKey] || {
+    key: policyKey,
+    label: 'Protection',
+    enabled: Boolean(a[policyKey]),
+    role_ids: [],
+    strict_channel_ids: [],
+  };
+  const policyRoleIds = new Set((policy.role_ids || []).map(String));
+  const policyStrictChannelIds = new Set((policy.strict_channel_ids || []).map(String));
+  const policyFilterOptions = securityPolicyOrder
+    .filter(key => securityPolicies[key] || key === policyKey)
+    .map(key => {
+      const item = securityPolicies[key] || { label: key };
+      return `<option value="${esc(key)}" ${key === policyKey ? 'selected' : ''}>${esc(item.label || key)}</option>`;
+    })
     .join('');
-  const spamChannelOptions = channels('text')
-    .map(ch => `<option value="${esc(ch.id)}" ${spamChannelIds.has(String(ch.id)) ? 'selected' : ''}>#${esc(ch.name)}</option>`)
+  const policyRoleOptions = roles()
+    .filter(r => String(r.id) !== String(state.guildId))
+    .map(r => `<option value="${esc(r.id)}" ${policyRoleIds.has(String(r.id)) ? 'selected' : ''}>@${esc(r.name)}</option>`)
+    .join('');
+  const policyChannelOptions = channels('text')
+    .map(ch => `<option value="${esc(ch.id)}" ${policyStrictChannelIds.has(String(ch.id)) ? 'selected' : ''}>#${esc(ch.name)}</option>`)
     .join('');
   const missing = (sec?.permissions || d?.permissions || []).filter(p => !p.granted);
   const risk = sec?.risk || { score: 0, protection_score: 100, level: 'inconnu' };
@@ -180,37 +204,35 @@ async function renderSecurity() {
     <section class="card full">
       <div class="card-head">
         <div>
-          <h2>Anti-spam · Périmètre</h2>
-          <p>Choisissez qui peut contourner uniquement l’anti-spam et dans quels salons le spam est interdit.</p>
+          <h2>Exceptions par protection</h2>
+          <p>Configurez les rôles qui peuvent contourner une protection et les salons où ce contournement est interdit.</p>
         </div>
-        <span class="badge ${Boolean(a.antispam) ? 'ok' : ''}">${Boolean(a.antispam) ? 'ACTIF' : 'INACTIF'}</span>
+        <span class="badge ${Boolean(policy.enabled) ? 'ok' : ''}">${Boolean(policy.enabled) ? 'ACTIF' : 'INACTIF'}</span>
       </div>
       <div class="notice" style="margin-top:12px">
-        Les rôles bypass ci-dessous restent soumis aux autres protections : anti-lien, anti-scam, insultes, mentions, etc.
+        Priorité : <b>salon strict → rôle bypass → protection normale</b>. Dans un salon strict, même un rôle autorisé à contourner cette protection reste bloqué. Les threads héritent du salon parent.
       </div>
       <div class="fields" style="margin-top:12px">
         <div class="field full">
-          <div class="label-row"><label for="spamBypassRoles">Rôles qui peuvent contourner l’anti-spam</label></div>
-          <select id="spamBypassRoles" multiple size="5">${spamRoleOptions || '<option disabled>Aucun rôle disponible</option>'}</select>
-          <small>Cmd/Ctrl + clic pour sélectionner plusieurs rôles.</small>
-        </div>
-        <div class="field">
-          <div class="label-row"><label for="spamScopeMode">Où l’anti-spam s’applique</label></div>
-          <select id="spamScopeMode">
-            <option value="all" ${spamPolicy.scope_mode === 'all' ? 'selected' : ''}>Tous les salons</option>
-            <option value="selected" ${spamPolicy.scope_mode === 'selected' ? 'selected' : ''}>Seulement les salons choisis</option>
-          </select>
+          <div class="label-row"><label for="securityPolicyFilter">Protection à configurer</label></div>
+          <select id="securityPolicyFilter">${policyFilterOptions}</select>
+          <small>Chaque protection possède sa propre liste de rôles bypass et de salons stricts.</small>
         </div>
         <div class="field full">
-          <div class="label-row"><label for="spamProtectedChannels">Salons où le spam est interdit</label></div>
-          <select id="spamProtectedChannels" multiple size="7" ${spamPolicy.scope_mode === 'selected' ? '' : 'disabled'}>${spamChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
-          <small>En mode « Tous les salons », cette liste est ignorée. Les threads héritent du salon parent.</small>
+          <div class="label-row"><label for="securityPolicyBypassRoles">Rôles autorisés à contourner</label></div>
+          <select id="securityPolicyBypassRoles" multiple size="6">${policyRoleOptions || '<option disabled>Aucun rôle disponible</option>'}</select>
+          <small>Ces rôles contournent uniquement <b>${esc(policy.label || policyKey)}</b>, jamais les autres protections.</small>
+        </div>
+        <div class="field full">
+          <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — aucun bypass</label></div>
+          <select id="securityPolicyStrictChannels" multiple size="7">${policyChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
+          <small>Dans ces salons, les rôles sélectionnés ci-dessus restent soumis à la protection.</small>
         </div>
       </div>
       <div class="toolbar">
-        <button class="btn primary" type="button" id="spamPolicySave">Enregistrer le périmètre</button>
-        <button class="btn ghost" type="button" id="spamPolicyAll">Protéger tout le serveur</button>
-        <button class="btn ghost" type="button" id="spamPolicyClearRoles">Aucun rôle bypass</button>
+        <button class="btn primary" type="button" id="securityPolicySave">Enregistrer</button>
+        <button class="btn ghost" type="button" id="securityPolicyClearRoles">Retirer les rôles bypass</button>
+        <button class="btn ghost" type="button" id="securityPolicyClearStrict">Aucun salon strict</button>
       </div>
     </section>
 
@@ -239,66 +261,36 @@ async function renderSecurity() {
   bindEditable();
   bindModuleButtons();
 
-  const spamScopeMode = $('spamScopeMode');
-  const spamChannels = $('spamProtectedChannels');
-  if (spamScopeMode && spamChannels) {
-    spamScopeMode.onchange = () => {
-      spamChannels.disabled = spamScopeMode.value !== 'selected';
-    };
-  }
-
   const selectedValues = select => [...(select?.selectedOptions || [])].map(option => option.value).filter(Boolean);
-  if ($('spamPolicySave')) $('spamPolicySave').onclick = async () => {
-    const mode = $('spamScopeMode')?.value || 'all';
-    const roleIds = selectedValues($('spamBypassRoles'));
-    const channelIds = selectedValues($('spamProtectedChannels'));
-    if (mode === 'selected' && !channelIds.length) {
-      return toast('Choisissez au moins un salon protégé ou utilisez « Tous les salons ».', true);
-    }
-    const button = $('spamPolicySave');
-    button.disabled = true;
+
+  if ($('securityPolicyFilter')) $('securityPolicyFilter').onchange = async () => {
+    state.securityPolicyFilter = $('securityPolicyFilter').value || 'antispam';
+    await renderSecurity();
+  };
+
+  const saveSecurityPolicy = async ({ clearRoles = false, clearStrict = false } = {}) => {
+    const roleIds = clearRoles ? [] : selectedValues($('securityPolicyBypassRoles'));
+    const strictChannelIds = clearStrict ? [] : selectedValues($('securityPolicyStrictChannels'));
+    const button = $('securityPolicySave');
+    if (button) button.disabled = true;
     try {
-      const result = await gpost('/security/antispam-policy', {
-        scope_mode: mode,
+      const result = await gpost('/security/filter-policies', {
+        filter_name: state.securityPolicyFilter || policyKey,
         role_ids: roleIds,
-        channel_ids: mode === 'selected' ? channelIds : [],
+        strict_channel_ids: strictChannelIds,
       });
-      toast(result.message || 'Périmètre anti-spam enregistré.');
+      toast(result.message || 'Exceptions de sécurité enregistrées.');
       invalidate('security-overview');
       await renderSecurity();
     } catch (e) {
       toast(e.message, true);
-      button.disabled = false;
+      if (button) button.disabled = false;
     }
   };
-  if ($('spamPolicyAll')) $('spamPolicyAll').onclick = async () => {
-    const roleIds = selectedValues($('spamBypassRoles'));
-    try {
-      const result = await gpost('/security/antispam-policy', {
-        scope_mode: 'all',
-        role_ids: roleIds,
-        channel_ids: [],
-      });
-      toast(result.message || 'Anti-spam appliqué à tous les salons.');
-      await renderSecurity();
-    } catch (e) { toast(e.message, true); }
-  };
-  if ($('spamPolicyClearRoles')) $('spamPolicyClearRoles').onclick = async () => {
-    const mode = $('spamScopeMode')?.value || 'all';
-    const channelIds = selectedValues($('spamProtectedChannels'));
-    if (mode === 'selected' && !channelIds.length) {
-      return toast('Choisissez au moins un salon protégé avant de retirer les rôles bypass.', true);
-    }
-    try {
-      const result = await gpost('/security/antispam-policy', {
-        scope_mode: mode,
-        role_ids: [],
-        channel_ids: mode === 'selected' ? channelIds : [],
-      });
-      toast(result.message || 'Rôles bypass retirés.');
-      await renderSecurity();
-    } catch (e) { toast(e.message, true); }
-  };
+
+  if ($('securityPolicySave')) $('securityPolicySave').onclick = () => saveSecurityPolicy();
+  if ($('securityPolicyClearRoles')) $('securityPolicyClearRoles').onclick = () => saveSecurityPolicy({ clearRoles: true });
+  if ($('securityPolicyClearStrict')) $('securityPolicyClearStrict').onclick = () => saveSecurityPolicy({ clearStrict: true });
 
   if ($('forbiddenWordAdd')) $('forbiddenWordAdd').onclick = async () => {
     const input = $('forbiddenWordInput');
