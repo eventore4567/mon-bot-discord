@@ -22,6 +22,7 @@ import time
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 import pytest
+import discord
 
 from services import tickets as ts
 
