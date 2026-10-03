@@ -162,3 +162,26 @@ def test_webhook_http_handler_prefers_current_insightiq_header():
     source = (Path(__file__).resolve().parents[1] / "web" / "phyllo_webhook.py").read_text(encoding="utf-8")
     assert 'request.headers.get("Webhook-Signatures"' in source
     assert 'request.headers.get("X-Phyllo-Signature"' in source
+
+
+def test_youtube_thumbnail_fallback_uses_video_id():
+    item = {"id": "abc123XYZ"}
+    assert notifications._best_thumbnail(
+        item,
+        platform="YouTube",
+    ) == "https://i.ytimg.com/vi/abc123XYZ/hqdefault.jpg"
+
+
+def test_notification_preview_supports_real_link_metadata():
+    source = inspect.getsource(notifications.Notifications.notifs_test.callback)
+    assert "Prévisualiser une notification avec titre et miniature réels." in inspect.getsource(notifications.Notifications)
+    assert "details.get(\"title\")" in source
+    assert "_best_thumbnail(" in source
+    assert "hqdefault.jpg" in source
+    assert "description=\"\"" in source
+
+
+def test_real_social_event_passes_platform_to_thumbnail_resolver():
+    source = inspect.getsource(notifications.Notifications._item_event)
+    assert "platform=platform" in source
+    assert "thumbnail_url=_best_thumbnail" in source
