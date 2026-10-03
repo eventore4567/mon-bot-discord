@@ -31,7 +31,12 @@ async def handle_phyllo_webhook(request: web.Request) -> web.Response:
     except Exception:
         return web.json_response({"ok": False, "error": "invalid_body"}, status=400)
 
-    signature = request.headers.get("X-Phyllo-Signature", "")
+    # InsightIQ/Phyllo actuel : Webhook-Signatures. L'ancien header est
+    # conservé pour compatibilité avec les anciennes configurations Phyllo.
+    signature = (
+        request.headers.get("Webhook-Signatures", "")
+        or request.headers.get("X-Phyllo-Signature", "")
+    )
     if not social_providers.verify_phyllo_signature(raw, signature, secret):
         logger.warning("Webhook Phyllo rejeté : signature invalide.")
         return web.json_response({"ok": False, "error": "invalid_signature"}, status=401)
