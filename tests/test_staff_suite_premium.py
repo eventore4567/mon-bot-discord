@@ -71,8 +71,8 @@ def test_staff_sensitive_commands_are_in_the_access_matrix():
 
 
 def test_staff_slash_roots_are_protected_by_the_global_budget():
-    assert {"staff", "member", "diagnostic"} <= slash_command_budget.STAFF_SLASH_PREFERRED
-    assert {"staff", "member", "diagnostic"} <= slash_command_budget._required_names()
+    assert {"staff", "member", "case", "diagnostic"} <= slash_command_budget.STAFF_SLASH_PREFERRED
+    assert {"staff", "member", "case", "diagnostic"} <= slash_command_budget._required_names()
 
 
 def test_watch_panel_is_event_driven_and_has_pause_stop_controls():
@@ -86,3 +86,13 @@ def test_watch_panel_is_event_driven_and_has_pause_stop_controls():
     controls = inspect.getsource(staff_suite.WatchControlView)
     assert 'label="Pause"' in controls
     assert 'label="Terminer"' in controls
+
+
+def test_case_command_opens_staff_center_without_breaking_numeric_sanction_lookup():
+    from cogs import moderation
+
+    source = inspect.getsource(moderation.Moderation.case)
+    assert "numero: int | None = None" in source
+    assert 'self.bot.get_cog("StaffSuite")' in source
+    assert "open_case_center(ctx)" in source
+    assert "get_sanction_by_case" in source
