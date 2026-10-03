@@ -471,15 +471,74 @@ class MemberPanelView(OwnedView):
         )
 
 
+class CaseStatusSelect(discord.ui.Select):
+    def __init__(self, owner: "CaseActionsView", current: str):
+        self.owner = owner
+        options = [
+            discord.SelectOption(label="Ouvert", value="ouvert", default=current == "ouvert"),
+            discord.SelectOption(label="En enquête", value="en_enquete", default=current == "en_enquete"),
+            discord.SelectOption(label="En attente", value="en_attente", default=current == "en_attente"),
+            discord.SelectOption(label="Résolu", value="resolu", default=current == "resolu"),
+            discord.SelectOption(label="Archivé", value="archive", default=current == "archive"),
+        ]
+        super().__init__(
+            placeholder="Changer le statut du dossier",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        status = self.values[0]
+        await self.owner.suite.bot.db.execute(
+            "UPDATE staff_cases_v1 SET status=?, updated_at=? WHERE id=? AND guild_id=?",
+            (status, now(), self.owner.case_id, interaction.guild.id),
+        )
+        row = await self.owner.suite.bot.db.fetchone(
+            "SELECT * FROM staff_cases_v1 WHERE id=? AND guild_id=?",
+            (self.owner.case_id, interaction.guild.id),
+        )
+        if row:
+            await panels.editer(
+                interaction.response,
+                await self.owner.suite.case_panel(interaction.guild, row, interaction.user.id),
+            )
+
+
 class CaseActionsView(OwnedView):
-    def __init__(self, suite: "StaffSuite", owner_id: int, case_id: int, *, resolved: bool = False):
+    def __init__(
+        self,
+        suite: "StaffSuite",
+        owner_id: int,
+        case_id: int,
+        *,
+        status: str = "ouvert",
+    ):
         super().__init__(suite, owner_id)
         self.case_id = case_id
-        self.resolve.disabled = resolved
+        self.status = status
+        self.add_item(CaseStatusSelect(self, status))
 
     @discord.ui.button(label="Ajouter une preuve", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("evidence"))
     async def evidence(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(EvidenceModal(self.suite, self.case_id))
+
+    @discord.ui.button(label="M’assigner", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("staff"))
+    async def assign(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self.suite.bot.db.execute(
+            "UPDATE staff_cases_v1 SET assigned_to=?, updated_at=? WHERE id=? AND guild_id=?",
+            (interaction.user.id, now(), self.case_id, interaction.guild.id),
+        )
+        row = await self.suite.bot.db.fetchone(
+            "SELECT * FROM staff_cases_v1 WHERE id=? AND guild_id=?",
+            (self.case_id, interaction.guild.id),
+        )
+        if row:
+            await panels.editer(
+                interaction.response,
+                await self.suite.case_panel(interaction.guild, row, interaction.user.id),
+            )
 
     @discord.ui.button(label="Résoudre", style=discord.ButtonStyle.success, emoji=sxemoji.partiel("success"))
     async def resolve(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -598,10 +657,60 @@ class IncidentModal(discord.ui.Modal, title="Nouvel incident"):
         await panels.texte_court(interaction.response, "Incident enregistré.", ephemere=True)
 
 
+class IncidentSelect(discord.ui.Select):
+    def __init__(self, owner: "IncidentCenterView", rows):
+        self.owner = owner
+        options = [
+            discord.SelectOption(
+                label=f"#{row['id']} · {str(row['category'])[:70]}",
+                value=str(row["id"]),
+                description=f"{row['severity']} · {_status_label(row['status'])}"[:100],
+            )
+            for row in rows[:25]
+        ]
+        super().__init__(
+            placeholder="Choisir un incident" if options else "Aucun incident",
+            min_values=1,
+            max_values=1,
+            options=options or [discord.SelectOption(label="Aucun incident", value="0")],
+            disabled=not bool(options),
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.owner.incident_id = int(self.values[0])
+        await interaction.response.defer()
+
+
 class IncidentCenterView(OwnedView):
-    @discord.ui.button(label="Nouvel incident", style=discord.ButtonStyle.primary, emoji=sxemoji.partiel("alert"))
+    def __init__(self, suite: "StaffSuite", owner_id: int, rows):
+        super().__init__(suite, owner_id)
+        self.incident_id: int | None = None
+        self.add_item(IncidentSelect(self, rows))
+
+    @discord.ui.button(label="Nouvel incident", style=discord.ButtonStyle.primary, row=1, emoji=sxemoji.partiel("alert"))
     async def create(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(IncidentModal(self.suite, interaction.guild.id))
+
+    @discord.ui.button(label="M’assigner", style=discord.ButtonStyle.secondary, row=1, emoji=sxemoji.partiel("staff"))
+    async def assign(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if not self.incident_id:
+            return await interaction.response.send_message("Choisissez un incident.", ephemeral=True)
+        await self.suite.bot.db.execute(
+            "UPDATE staff_incidents_v1 SET assigned_to=?, updated_at=? WHERE id=? AND guild_id=?",
+            (interaction.user.id, now(), self.incident_id, interaction.guild.id),
+        )
+        await panels.texte_court(interaction.response, "Incident assigné.", ephemere=True)
+
+    @discord.ui.button(label="Résoudre", style=discord.ButtonStyle.success, row=1, emoji=sxemoji.partiel("success"))
+    async def resolve(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if not self.incident_id:
+            return await interaction.response.send_message("Choisissez un incident.", ephemeral=True)
+        await self.suite.bot.db.execute(
+            "UPDATE staff_incidents_v1 SET status='resolu', updated_at=? WHERE id=? AND guild_id=?",
+            (now(), self.incident_id, interaction.guild.id),
+        )
+        await panels.texte_court(interaction.response, "Incident résolu.", ephemere=True)
 
 
 class AbsenceModal(discord.ui.Modal, title="Déclarer une absence"):
@@ -747,6 +856,34 @@ class WatchControlView(OwnedView):
             interaction.response,
             await self.suite.watch_panel(interaction.guild, self.member_id, interaction.user.id),
         )
+
+    @discord.ui.button(label="Rapport", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("history"))
+    async def report(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        row = await self.suite.bot.db.fetchone(
+            "SELECT * FROM staff_watches_v1 WHERE id=? AND guild_id=?",
+            (self.watch_id, interaction.guild.id),
+        )
+        events = await self.suite.bot.db.fetchall(
+            "SELECT * FROM staff_watch_events_v1 WHERE watch_id=? ORDER BY created_at DESC LIMIT 25",
+            (self.watch_id,),
+        )
+        if row is None:
+            return await interaction.response.send_message("Surveillance introuvable.", ephemeral=True)
+        body = "\n".join(
+            f"<t:{event['created_at']}:R> · **{event['event_type']}** · {_trim(event['summary'], 500)}"
+            for event in events
+        ) or "Aucun événement enregistré."
+        report = panels.Panneau(
+            titre=f"Rapport surveillance #{self.watch_id}",
+            sous_titre=f"{_mention(self.member_id)} · {_status_label(row['status'])}",
+            kind="moderation",
+            sections=[
+                panels.Section("Raison", texte=row["reason"]),
+                panels.Section("Chronologie", texte=body),
+            ],
+            pied="Surveillance",
+        )
+        await panels.envoyer(interaction.response, report, ephemere=True)
 
     @discord.ui.button(label="Terminer", style=discord.ButtonStyle.danger, emoji=sxemoji.partiel("stop"))
     async def stop(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -1292,7 +1429,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                 self,
                 owner_id,
                 int(row["id"]),
-                resolved=str(row["status"]) in {"resolu", "archive"},
+                status=str(row["status"]),
             ),
         )
 
@@ -1396,7 +1533,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             sections=[panels.Section("Historique récent", texte=text)],
             pied="SentriX • Incidents",
         )
-        return panels.avec_composants(panel, IncidentCenterView(self, owner_id))
+        return panels.avec_composants(panel, IncidentCenterView(self, owner_id, rows))
 
     async def send_absence_center(self, destination, guild: discord.Guild, owner_id: int):
         pending = await self.bot.db.fetchall(
