@@ -126,3 +126,15 @@ def test_infinite_counter_invalid_message_does_not_ping_anyone():
     source = _source("cogs/infinite_counter.py")
 
     assert "allowed_mentions=discord.AllowedMentions.none()" in source
+
+
+
+def test_infinite_counter_assistant_pings_only_author_and_waits_one_minute():
+    source = _source("cogs/infinite_counter.py")
+
+    assert "super().__init__(timeout=60)" in source
+    assert 'content=f"<@{message.author.id}>"' in source
+    assert "users=[message.author]" in source
+    assert "everyone=False" in source
+    assert "roles=False" in source
+    assert "Sans réponse, ton message sera supprimé automatiquement dans 1 minute." in source
