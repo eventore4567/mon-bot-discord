@@ -30,6 +30,41 @@ MODULE_BY_CATEGORY = {
     "ai": "ai",
 }
 
+_SOURCE_ACTION_COOLDOWNS: dict[tuple[int, int, str], float] = {}
+
+
+def _claim_source_cooldown(owner, user_id: int, action: str, seconds: float) -> float:
+    """Petit verrou anti double-clic pour les actions réseau / destructives du setup."""
+    now_mono = time.monotonic()
+    key = (int(owner.guild.id), int(user_id), str(action))
+    expires = _SOURCE_ACTION_COOLDOWNS.get(key, 0.0)
+    if expires > now_mono:
+        return expires - now_mono
+    _SOURCE_ACTION_COOLDOWNS[key] = now_mono + float(seconds)
+    if len(_SOURCE_ACTION_COOLDOWNS) > 4096:
+        for stale_key, stale_expiry in list(_SOURCE_ACTION_COOLDOWNS.items()):
+            if stale_expiry <= now_mono:
+                _SOURCE_ACTION_COOLDOWNS.pop(stale_key, None)
+    return 0.0
+
+
+async def _source_cooldown_blocked(
+    interaction: discord.Interaction,
+    owner,
+    *,
+    action: str,
+    seconds: float,
+) -> bool:
+    retry = _claim_source_cooldown(owner, interaction.user.id, action, seconds)
+    if retry <= 0:
+        return False
+    await interaction.response.send_message(
+        f"Réessaie dans {retry:.1f} s.",
+        ephemeral=True,
+    )
+    return True
+
+
 SCOPE_LABELS = {
     "public": "Membres / utilitaires",
     "moderation": "Modération",
@@ -625,9 +660,17 @@ class NotificationManageView(discord.ui.View):
         )
 
         async def add_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="manage", seconds=3.0
+            ):
+                return
             await interaction.response.send_modal(NotificationSourceModal(self.owner, "add"))
 
         async def edit_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="manage", seconds=3.0
+            ):
+                return
             row = await self._selected_row()
             if row is None:
                 return await interaction.response.send_message(
@@ -639,6 +682,10 @@ class NotificationManageView(discord.ui.View):
             )
 
         async def toggle_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="manage", seconds=3.0
+            ):
+                return
             row = await self._selected_row()
             if row is None:
                 return await interaction.response.send_message(
@@ -660,6 +707,10 @@ class NotificationManageView(discord.ui.View):
             await panels.editer(interaction.response, refreshed)
 
         async def test_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="test", seconds=10.0
+            ):
+                return
             row = await self._selected_row()
             if row is None:
                 return await interaction.response.send_message(
@@ -727,6 +778,10 @@ class NotificationManageView(discord.ui.View):
             await interaction.followup.send(view=preview, ephemeral=True)
 
         async def delete_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="manage", seconds=3.0
+            ):
+                return
             row = await self._selected_row()
             if row is None:
                 return await interaction.response.send_message(
@@ -1483,6 +1538,10 @@ def _patch_render() -> None:
                 row=1,
             )
             async def manage_cb(interaction):
+                if await _source_cooldown_blocked(
+                    interaction, self, action="open", seconds=2.0
+                ):
+                    return
                 panel = await _notification_manage_panel(self, interaction.user.id)
                 await panels.envoyer(
                     interaction.response,
