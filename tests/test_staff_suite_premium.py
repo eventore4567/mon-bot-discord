@@ -37,6 +37,8 @@ def test_staff_center_is_panel_first_not_command_syntax_first():
         'label="Rapport"',
         'label="Handover"',
         'label="Diagnostic"',
+        'label="Rappel"',
+        'label="Urgence"',
     ):
         assert label in source
 
