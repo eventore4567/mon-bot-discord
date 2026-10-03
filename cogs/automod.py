@@ -1522,8 +1522,20 @@ class AutoMod(commands.Cog, name="Automod"):
 
     async def get_exempt_roles_cached(self, guild_id: int) -> set[int]:
         if guild_id not in self.exempt_roles_cache:
-            rows = await self.bot.db.list_automod_exempt_roles(guild_id)
-            self.exempt_roles_cache[guild_id] = {r["role_id"] for r in rows}
+            reader = getattr(self.bot.db, "list_automod_exempt_roles", None)
+            if callable(reader):
+                rows = await reader(guild_id)
+            else:
+                fetchall = getattr(self.bot.db, "fetchall", None)
+                rows = (
+                    await fetchall(
+                        "SELECT role_id FROM automod_exempt_roles WHERE guild_id = ?",
+                        (guild_id,),
+                    )
+                    if callable(fetchall)
+                    else []
+                )
+            self.exempt_roles_cache[guild_id] = {int(r["role_id"]) for r in rows}
         return self.exempt_roles_cache[guild_id]
 
     async def get_immunity_override_cached(self, guild_id: int, user_id: int) -> bool | None:
@@ -1601,18 +1613,26 @@ class AutoMod(commands.Cog, name="Automod"):
                 int(value) for value in (raw.get("strict_channel_ids") or [])
             }
         else:
-            role_rows = await self.bot.db.fetchall(
-                "SELECT role_id FROM security_filter_bypass_roles "
-                "WHERE guild_id=? AND filter_name=?",
-                (int(guild_id), canonical),
-            )
-            channel_rows = await self.bot.db.fetchall(
-                "SELECT channel_id FROM security_filter_strict_channels "
-                "WHERE guild_id=? AND filter_name=?",
-                (int(guild_id), canonical),
-            )
-            role_ids = {int(row["role_id"]) for row in role_rows}
-            strict_channel_ids = {int(row["channel_id"]) for row in channel_rows}
+            # Compatibilité avec les doubles de test et un éventuel runtime ancien
+            # pendant un rolling deploy : sans API générique disponible, la politique
+            # est vide plutôt que de casser tout le moteur AutoMod.
+            fetchall = getattr(self.bot.db, "fetchall", None)
+            if callable(fetchall):
+                role_rows = await fetchall(
+                    "SELECT role_id FROM security_filter_bypass_roles "
+                    "WHERE guild_id=? AND filter_name=?",
+                    (int(guild_id), canonical),
+                )
+                channel_rows = await fetchall(
+                    "SELECT channel_id FROM security_filter_strict_channels "
+                    "WHERE guild_id=? AND filter_name=?",
+                    (int(guild_id), canonical),
+                )
+                role_ids = {int(row["role_id"]) for row in role_rows}
+                strict_channel_ids = {int(row["channel_id"]) for row in channel_rows}
+            else:
+                role_ids = set()
+                strict_channel_ids = set()
 
         policy = {
             "role_ids": role_ids,
