@@ -52,11 +52,14 @@ def test_security_dashboard_does_not_poll_or_mutate_dom_periodically():
     assert "dataset.sxTab" not in section
 
 
-def test_security_dashboard_exposes_per_filter_bypass_and_strict_channels():
+def test_security_dashboard_exposes_full_center_and_per_filter_exceptions():
     for marker in (
-        "Exceptions par protection",
+        "Centre de sécurité",
+        "Messages",
+        "Arrivées",
+        "Serveur",
         "Rôles autorisés à contourner",
-        "Salons stricts — aucun bypass",
+        "Salons stricts — bypass interdit",
         "salon strict → rôle bypass → protection normale",
         "/security/filter-policies",
     ):
