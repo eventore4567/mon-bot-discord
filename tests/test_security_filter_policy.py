@@ -10,6 +10,7 @@ import pytest
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from cogs.automod import AutoMod
+from database.db import Database
 
 
 def _cog() -> AutoMod:
@@ -146,3 +147,42 @@ async def test_duplicate_spam_alias_uses_antispam_policy():
     _policy(cog, "antispam", roles=(123,))
 
     assert await cog.security_filter_applies_to(message, "antispam_duplicate") is False
+
+
+@pytest.mark.asyncio
+async def test_database_policy_roundtrip_and_antispam_legacy_bridge(tmp_path):
+    db = Database(str(tmp_path / "sentrix-security-policy.db"))
+    await db.connect()
+    try:
+        await db.set_security_filter_policy(
+            123,
+            "antispam",
+            role_ids=[11, 22, 11],
+            strict_channel_ids=[77, 88, 77],
+        )
+
+        policy = await db.get_security_filter_policy(123, "antispam")
+        assert policy == {
+            "role_ids": [11, 22],
+            "strict_channel_ids": [77, 88],
+        }
+
+        legacy_roles = await db.fetchall(
+            "SELECT role_id FROM antispam_exempt_roles WHERE guild_id=? ORDER BY role_id",
+            (123,),
+        )
+        legacy_channels = await db.fetchall(
+            "SELECT channel_id FROM antispam_protected_channels "
+            "WHERE guild_id=? ORDER BY channel_id",
+            (123,),
+        )
+        legacy_policy = await db.fetchone(
+            "SELECT scope_mode FROM antispam_policy WHERE guild_id=?",
+            (123,),
+        )
+
+        assert [int(row["role_id"]) for row in legacy_roles] == [11, 22]
+        assert [int(row["channel_id"]) for row in legacy_channels] == [77, 88]
+        assert legacy_policy["scope_mode"] == "all"
+    finally:
+        await db.close()
