@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from types import SimpleNamespace
 
@@ -44,6 +45,19 @@ CREATE TABLE IF NOT EXISTS message_log_cache (
 def _short(value: object, limit: int = 1000) -> str:
     text = str(value or "").strip()
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+_TICKET_SYSTEM_TOPIC_RE = re.compile(
+    r"^Opened\s+<t:\d+:[A-Za-z]>\s+by\s+<@!?\d+>"
+    r"(?:\s*[•·]\s*Claimed\s+by\s+<@!?\d+>\s+at\s+<t:\d+:[A-Za-z]>)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_ticket_system_topic(value: object) -> bool:
+    """Sujet technique géré par le système de tickets, déjà journalisé côté Tickets."""
+    text = str(value or "").strip()
+    return bool(text and _TICKET_SYSTEM_TOPIC_RE.fullmatch(text))
 
 
 def _active_timeout(member: discord.Member):
@@ -937,14 +951,23 @@ class Logs(commands.Cog, name="Logs"):
             after_category = _channel_ref(after.category_id) if after.category_id else "Aucune"
             fields.append(("Catégorie", f"{before_category} → {after_category}", False))
         if getattr(before, "topic", None) != getattr(after, "topic", None):
-            fields.append(
-                (
-                    "Sujet",
-                    f"`{_short(getattr(before, 'topic', '') or 'Vide', 400)}` → "
-                    f"`{_short(getattr(after, 'topic', '') or 'Vide', 400)}`",
-                    False,
+            before_topic = getattr(before, "topic", None)
+            after_topic = getattr(after, "topic", None)
+            # Les tickets mettent à jour leur sujet interne ("Opened … · Claimed …").
+            # Le journal Tickets couvre déjà ces actions ; les recopier dans Salons
+            # exposait du texte technique et créait un log CH-UPD inutile.
+            if not (
+                _is_ticket_system_topic(before_topic)
+                and _is_ticket_system_topic(after_topic)
+            ):
+                fields.append(
+                    (
+                        "Sujet",
+                        f"`{_short(before_topic or 'Vide', 400)}` → "
+                        f"`{_short(after_topic or 'Vide', 400)}`",
+                        False,
+                    )
                 )
-            )
         if getattr(before, "slowmode_delay", None) != getattr(after, "slowmode_delay", None):
             fields.append(
                 (
