@@ -25,6 +25,7 @@ from utils.log_categories import (
     category_for,
     resolve,
 )
+from utils import sentrix_emojis
 from utils import wide_logs
 from utils.wide_logs import derive_identity, send_wide_log
 
@@ -366,6 +367,7 @@ class RevealIdButton(
                 label=label[:80],
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"sxid:{self.entity_id}",
+                emoji=sentrix_emojis.partiel("info"),
                 row=row,
             )
         )
@@ -410,6 +412,7 @@ class LogActionsView(discord.ui.View):
                     label="Accéder au message",
                     style=discord.ButtonStyle.link,
                     url=jump_url,
+                    emoji=sentrix_emojis.partiel("eye"),
                     row=next_row(),
                 )
             )
@@ -421,11 +424,20 @@ class LogActionsView(discord.ui.View):
             clean_url = str(url or "").strip()
             if not clean_url.startswith(("https://", "http://")):
                 continue
+            lower_label = str(label or "").casefold()
+            icon_name = (
+                "download"
+                if "télécharg" in lower_label or "download" in lower_label
+                else "eye"
+                if "accéder" in lower_label or "voir" in lower_label or "ouvrir" in lower_label
+                else "link"
+            )
             self.add_item(
                 discord.ui.Button(
                     label=str(label or "Ouvrir")[:80],
                     style=discord.ButtonStyle.link,
                     url=clean_url,
+                    emoji=sentrix_emojis.partiel(icon_name),
                     row=next_row(),
                 )
             )
