@@ -842,6 +842,34 @@ class EmergencyView(OwnedView):
 
 
 class StaffCenterView(OwnedView):
+    @discord.ui.button(label="Dossiers", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("case"))
+    async def cases(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await panels.envoyer(
+            interaction.response,
+            await self.suite.cases_center_panel(interaction.guild, interaction.user.id),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Incidents", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("alert"))
+    async def incidents(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await panels.envoyer(
+            interaction.response,
+            await self.suite.incident_center_panel(interaction.guild, interaction.user.id),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Surveillances", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("watch"))
+    async def watches(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await panels.envoyer(
+            interaction.response,
+            await self.suite.watches_center_panel(interaction.guild),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Absences", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("absence"))
+    async def absences(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self.suite.send_absence_center(interaction.response, interaction.guild, interaction.user.id)
+
     @discord.ui.button(label="Rapport", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("chart"))
     async def report(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await panels.envoyer(
@@ -858,15 +886,11 @@ class StaffCenterView(OwnedView):
             ephemere=True,
         )
 
-    @discord.ui.button(label="Absences", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("absence"))
-    async def absences(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self.suite.send_absence_center(interaction.response, interaction.guild, interaction.user.id)
-
-    @discord.ui.button(label="Surveillances", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("watch"))
-    async def watches(self, interaction: discord.Interaction, _button: discord.ui.Button):
+    @discord.ui.button(label="Diagnostic", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("tools"))
+    async def diagnostic(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await panels.envoyer(
             interaction.response,
-            await self.suite.watches_center_panel(interaction.guild),
+            await self.suite.audit_panel(interaction.guild),
             ephemere=True,
         )
 
@@ -1672,6 +1696,10 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
 
     @commands.hybrid_command(name="audit", description="Auditer la configuration staff et les permissions SentriX.")
     async def audit(self, ctx: commands.Context):
+        await panels.envoyer(ctx, await self.audit_panel(ctx.guild))
+
+    @commands.hybrid_command(name="diagnostic", description="Ouvrir le diagnostic SentriX du serveur.")
+    async def diagnostic(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.audit_panel(ctx.guild))
 
     @commands.hybrid_command(name="report", aliases=["rapport"], description="Générer un rapport staff sur une période.")
