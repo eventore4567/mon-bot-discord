@@ -114,12 +114,14 @@ def _base(
 ) -> discord.Embed:
     del banner
     safe_title = sx.clean_ui_text(title, 90, "Information")
-    resolved_kind = kind or sx._kind_from_text(safe_title, description)
+    # Les anciens paramètres kind/colour restent acceptés pour compatibilité,
+    # mais aucune couleur n'est envoyée : sur Discord elle devient un liseré
+    # vertical sur le côté gauche de l'embed.
+    del kind, colour
     body = sx.clean_multiline_ui_text(description, 3960) if clean_description else sx.clip(description, 3960)
     embed = discord.Embed(
         title=safe_title,
         description=_with_bar(body, 4096),
-        colour=discord.Colour(sx._colour(resolved_kind, colour)),
         timestamp=datetime.now(timezone.utc) if timestamp else None,
     )
     if thumbnail:
