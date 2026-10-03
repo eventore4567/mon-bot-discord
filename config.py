@@ -110,6 +110,16 @@ DASHBOARD_SHARE_URL = _raw_dashboard_share_url
 # Ancien réglage conservé pour ne pas casser les installations existantes.
 DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "")
 
+# --- Notifications sociales / provider unifié ---
+# Phyllo reste OPTIONNEL : sans ces variables, SentriX continue d'utiliser son
+# moteur de polling existant (yt-dlp/API) et aucune notification actuelle ne casse.
+# Les secrets doivent vivre dans Railway, jamais dans GitHub.
+PHYLLO_CLIENT_ID = os.getenv("PHYLLO_CLIENT_ID", "").strip()
+PHYLLO_CLIENT_SECRET = os.getenv("PHYLLO_CLIENT_SECRET", "").strip()
+PHYLLO_WEBHOOK_SECRET = os.getenv("PHYLLO_WEBHOOK_SECRET", "").strip()
+PHYLLO_ENABLED = bool(PHYLLO_CLIENT_ID and PHYLLO_CLIENT_SECRET)
+PHYLLO_WEBHOOK_ENABLED = bool(PHYLLO_WEBHOOK_SECRET)
+
 # ---------------------------------------------------------------------------
 # PALETTE SEMANTIQUE — SOURCE UNIQUE
 #
