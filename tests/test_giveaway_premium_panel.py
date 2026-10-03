@@ -32,20 +32,26 @@ def test_giveaway_bonus_multiplier_is_per_role():
         bonus_multipliers={10: 3, 20: 5},
     )
     cog = object.__new__(giveaway_v2.GiveawayV2)
-    embed = giveaway_v2.GiveawayV2.build_public_embed(
+    panel = giveaway_v2.GiveawayV2.build_public_panel(
         cog,
         SimpleNamespace(),
         state,
         2_000_000_000,
         SimpleNamespace(mention="<@1>"),
+        count=12,
+        interactive=False,
     )
 
-    bonus = next(field.value for field in embed.fields if field.name == "Chances bonus")
-    assert "<@&10> — **x3**" in bonus
-    assert "<@&20> — **x5**" in bonus
+    from utils import sentrix_panels
+    text = sentrix_panels.texte_complet(panel)
+    assert "<@&10> · **x3**" in text
+    assert "<@&20> · **x5**" in text
+    assert "Participants** · 12" in text
 
     source = inspect.getsource(giveaway_v2.GiveawayV2.publish)
     assert "state.bonus_multipliers.get(role_id, state.bonus_multiplier)" in source
+    assert "embed=" not in source
+    assert "panels.envoyer(channel, panel)" in source
 
 
 def test_role_setup_updates_existing_panel_instead_of_spamming_success_cards():
@@ -75,3 +81,36 @@ def test_excluded_role_error_identifies_the_blocking_role():
     source = inspect.getsource(giveaway_v2.GiveawayV2._eligibility)
     assert "Vous avez un rôle interdit pour ce giveaway" in source
     assert "<@&{role_id}>" in source
+
+
+def test_public_giveaway_is_components_v2_without_coloured_embed_bar():
+    source = inspect.getsource(giveaway_v2.GiveawayV2.publish)
+    assert "discord.Embed" not in source
+    assert "embed=" not in source
+    assert "build_public_panel" in source
+
+    finish = inspect.getsource(giveaway_v2.GiveawayV2.finish)
+    assert "channel.send(embed=" not in finish
+    assert "panels.editer" in finish
+
+
+def test_giveaway_media_is_rendered_as_panel_content_image():
+    state = giveaway_v2.BuilderState(
+        author_id=1,
+        guild_id=2,
+        prize="Nitro",
+        duration_seconds=1800,
+        winners=1,
+        channel_id=3,
+        image_url="https://cdn.example.test/giveaway.gif",
+    )
+    cog = object.__new__(giveaway_v2.GiveawayV2)
+    panel = giveaway_v2.GiveawayV2.build_public_panel(
+        cog,
+        SimpleNamespace(),
+        state,
+        2_000_000_000,
+        SimpleNamespace(mention="<@1>"),
+        interactive=False,
+    )
+    assert "https://cdn.example.test/giveaway.gif" in repr(panel.to_components())
