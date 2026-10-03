@@ -76,9 +76,12 @@ def source_surfaces(source_url: str, platform: str) -> list[tuple[str, str, str]
     path = parsed.path.rstrip("/")
     if "/watch" in path or "/playlist" in path:
         return [("videos", source_url, "video")]
-    if path.endswith("/shorts") or "/shorts/" in path:
+    # Une URL de CONTENU précise reste une surface unique. Une URL d'onglet de
+    # chaîne (/videos, /shorts, /streams) est au contraire ramenée à la chaîne
+    # afin que SentriX surveille les trois formats ensemble.
+    if "/shorts/" in path:
         return [("shorts", source_url, "short")]
-    if path.endswith("/streams") or path.endswith("/live") or "/live/" in path:
+    if "/live/" in path:
         return [("streams", source_url, "live")]
 
     base = _youtube_base(source_url)
