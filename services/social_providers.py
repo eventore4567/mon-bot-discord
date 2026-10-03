@@ -8,6 +8,7 @@ verification plus a normalized event model shared by every provider.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import base64
 import hashlib
 import hmac
 import json
@@ -93,14 +94,41 @@ def source_surfaces(source_url: str, platform: str) -> list[tuple[str, str, str]
 
 
 def verify_phyllo_signature(body: bytes, signature: str, secret: str) -> bool:
-    """Verify X-Phyllo-Signature (HMAC-SHA256 over raw body)."""
+    """Vérifie une ou plusieurs signatures HMAC-SHA256 Phyllo/InsightIQ.
+
+    Le fournisseur actuel utilise `Webhook-Signatures` et peut envoyer plusieurs
+    signatures pendant une rotation de secret. L'ancien header
+    `X-Phyllo-Signature` reste supporté côté HTTP pour compatibilité.
+    """
     if not body or not signature or not secret:
         return False
-    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    supplied = str(signature).strip()
-    if supplied.casefold().startswith("sha256="):
-        supplied = supplied.split("=", 1)[1]
-    return hmac.compare_digest(expected.casefold(), supplied.casefold())
+
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256)
+    expected_hex = digest.hexdigest().casefold()
+    expected_b64 = base64.b64encode(digest.digest()).decode("ascii").rstrip("=")
+
+    # Formats tolérés sans affaiblir la vérification : valeur brute, sha256=...,
+    # v1=..., liste séparée par virgule/espace/point-virgule.
+    header = str(signature).strip()
+    candidates: list[str] = []
+    for token in re.split(r"[\s,;]+", header):
+        token = token.strip().strip('"')
+        if not token:
+            continue
+        if "=" in token:
+            _label, token = token.rsplit("=", 1)
+        elif ":" in token and not token.startswith("http"):
+            _label, token = token.rsplit(":", 1)
+        token = token.strip().strip('"')
+        if token:
+            candidates.append(token)
+
+    for supplied in candidates:
+        if hmac.compare_digest(expected_hex, supplied.casefold()):
+            return True
+        if hmac.compare_digest(expected_b64, supplied.rstrip("=")):
+            return True
+    return False
 
 
 def _walk_dicts(value: Any) -> Iterable[dict]:
