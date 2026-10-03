@@ -1020,13 +1020,33 @@ class Moderation(commands.Cog):
 
     # ---------------------------------------------------------------- DOSSIERS DE SANCTION
 
-    @commands.hybrid_command(name="case", description="Retrouver une sanction précise via son numéro de dossier.", with_app_command=False)
-    @app_commands.describe(numero="Le numéro de dossier (voir la fiche envoyée lors de la sanction)")
+    @commands.hybrid_command(
+        name="case",
+        description="Ouvrir le centre des dossiers ou consulter une sanction par numéro.",
+    )
+    @app_commands.describe(numero="Numéro d'une sanction existante (facultatif)")
     @checks.has_permission_or_modrole("moderate_members")
-    async def case(self, ctx: commands.Context, numero: int):
+    async def case(self, ctx: commands.Context, numero: int | None = None):
+        # Sans numéro, /case devient la porte d'entrée premium des dossiers staff.
+        # Avec un numéro, l'ancien comportement reste strictement compatible.
+        if numero is None:
+            suite = self.bot.get_cog("StaffSuite")
+            if suite is None:
+                return await self._reply(
+                    ctx,
+                    "Le centre des dossiers staff n'est pas disponible pour le moment.",
+                    ephemere=True,
+                )
+            return await suite.open_case_center(ctx)
+
         await self._ack(ctx)
         row = await self.bot.db.get_sanction_by_case(ctx.guild.id, numero)
         if not row:
+            # Le même numéro peut désigner un nouveau dossier staff SC-XXXX :
+            # on le tente avant d'annoncer qu'il n'existe nulle part.
+            suite = self.bot.get_cog("StaffSuite")
+            if suite is not None and await suite.open_case_if_exists(ctx, numero):
+                return
             return await self._reply(ctx, f"Aucun dossier #{numero} sur ce serveur.", ephemere=True)
         label = self.SANCTION_LABELS.get(row["action"], row["action"])
         kind = self.SANCTION_KIND.get(row["action"], "danger")
