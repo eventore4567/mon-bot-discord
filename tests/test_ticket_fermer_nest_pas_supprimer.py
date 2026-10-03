@@ -149,11 +149,29 @@ def test_le_bouton_est_enregistre_au_demarrage():
     """Un DynamicItem non enregistré via add_dynamic_items ne répond plus après
     un redémarrage. C'est l'erreur qui avait déjà cassé la notation des tickets
     pendant des mois."""
+    import ast
     from pathlib import Path
 
-    source = Path("main.py").read_text(encoding="utf-8")
-    assert "BoutonSupprimerTicket" in source
-    assert "add_dynamic_items(BoutonSupprimerTicket)" in source
+    # Lu sur l'AST, et non par sous-chaîne : main.py enregistre les deux boutons
+    # en UN SEUL appel — add_dynamic_items(BoutonRouvrirTicket,
+    # BoutonSupprimerTicket). Chercher « add_dynamic_items(BoutonSupprimerTicket) »
+    # rougissait sur du code parfaitement correct, et aurait aussi bien rougi sur
+    # un simple changement d'ordre des arguments.
+    arbre = ast.parse(Path("main.py").read_text(encoding="utf-8"))
+    enregistres = set()
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.Call):
+            continue
+        if not ast.unparse(noeud.func).endswith("add_dynamic_items"):
+            continue
+        enregistres.update(ast.unparse(arg) for arg in noeud.args)
+
+    for bouton in ("BoutonSupprimerTicket", "BoutonRouvrirTicket"):
+        assert bouton in enregistres, (
+            f"{bouton} n'est passé à aucun add_dynamic_items : après un "
+            f"redémarrage, le bouton ne répondrait plus. Enregistrés : "
+            f"{sorted(enregistres)}"
+        )
 
 
 # =============================================================================
