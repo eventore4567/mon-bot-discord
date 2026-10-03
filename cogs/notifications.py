@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlunparse
 import discord
 from discord.ext import commands, tasks
 
+from services import social_providers
 from utils import checks, embeds
 from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
@@ -231,7 +232,7 @@ def _best_thumbnail(item: dict, custom_url: str | None = None) -> str | None:
 
 
 class SocialNotificationPanel(discord.ui.LayoutView):
-    """Carte sociale premium sans embed, bannière, liseré latéral ni signature lourde."""
+    """Carte sociale commune YouTube/TikTok/Twitch, proche du style natif premium."""
 
     def __init__(
         self,
@@ -242,23 +243,33 @@ class SocialNotificationPanel(discord.ui.LayoutView):
         link: str,
         image_url: str | None,
         creator: str | None = None,
+        kind: str = "post",
+        published_at: int | None = None,
     ):
         super().__init__(timeout=None)
         container = discord.ui.Container()
 
-        icon = sxemoji.emoji("video")
-        heading = f"{icon} {title}".strip() if icon else title
-        container.add_item(discord.ui.TextDisplay(f"## {heading[:220]}"))
+        creator_name = str(creator or platform).strip()
+        if kind == "short":
+            headline = f"**{creator_name}** vient de sortir un nouveau Short sur **{platform}** !"
+        elif kind == "live":
+            headline = f"🔴 **{creator_name}** est en LIVE sur **{platform}** !"
+        elif platform == "TikTok":
+            headline = f"**{creator_name}** vient de publier un nouveau TikTok !"
+        elif kind == "video":
+            headline = f"**{creator_name}** vient de sortir une nouvelle vidéo sur **{platform}** !"
+        else:
+            headline = f"**{creator_name}** vient de publier sur **{platform}** !"
 
-        meta = f"**{platform}**"
-        if creator:
-            meta += f" · {str(creator)[:80]}"
-        meta += f" · <t:{int(time.time())}:R>"
-        container.add_item(discord.ui.TextDisplay(meta))
+        container.add_item(discord.ui.TextDisplay(f"## {headline}"))
+
+        clean_title = str(title or "").strip()
+        if clean_title:
+            container.add_item(discord.ui.TextDisplay(f"### [{clean_title[:220]}]({link})"))
 
         body = str(description or "").strip()
         if body:
-            container.add_item(discord.ui.TextDisplay(body[:900]))
+            container.add_item(discord.ui.TextDisplay(body[:700]))
 
         if image_url:
             try:
@@ -277,9 +288,11 @@ class SocialNotificationPanel(discord.ui.LayoutView):
             )
         )
         container.add_item(row)
-        container.add_item(
-            discord.ui.TextDisplay(f"-# SentriX · {platform} · publication automatique")
-        )
+
+        if published_at:
+            container.add_item(
+                discord.ui.TextDisplay(f"-# Publié <t:{int(published_at)}:R>")
+            )
         self.add_item(container)
 
 
@@ -302,7 +315,19 @@ class Notifications(commands.Cog, name="Notifications"):
             async with semaphore:
                 await self._check_subscription(row)
 
-        await asyncio.gather(*(check(row) for row in rows), return_exceptions=True)
+        results = await asyncio.gather(
+            *(check(row) for row in rows),
+            return_exceptions=True,
+        )
+        # L'ancienne version avalait silencieusement les exceptions de gather().
+        for row, result in zip(rows, results):
+            if isinstance(result, BaseException):
+                logger.error(
+                    "Échec non géré du moniteur social abonnement=%s plateforme=%s",
+                    row["id"],
+                    row["platform"],
+                    exc_info=(type(result), result, result.__traceback__),
+                )
 
     @social_monitor.before_loop
     async def before_social_monitor(self):
@@ -315,83 +340,128 @@ class Notifications(commands.Cog, name="Notifications"):
             exc_info=(type(error), error, error.__traceback__),
         )
 
-    async def _check_subscription(self, row):
-        guild = self.bot.get_guild(row["guild_id"])
-        if guild is None:
-            return
-        channel = guild.get_channel(row["discord_channel_id"])
-        role = guild.get_role(row["role_id"])
-        if channel is None or role is None:
-            await self.bot.db.execute(
-                "UPDATE social_notifications SET enabled = 0 WHERE id = ?",
-                (row["id"],),
-            )
-            return
+    async def _surface_state(self, subscription_id: int, surface: str):
+        return await self.bot.db.fetchone(
+            "SELECT * FROM social_notification_state "
+            "WHERE subscription_id=? AND surface=?",
+            (subscription_id, surface),
+        )
 
-        try:
-            item = await _extract_latest(row["source_url"])
-        except Exception:
-            logger.warning("Lecture impossible de l'abonnement social %s", row["id"], exc_info=True)
-            return
-        if not item:
-            return
+    async def _update_surface_state(
+        self,
+        subscription_id: int,
+        surface: str,
+        item_id: str,
+        item_url: str,
+    ):
+        timestamp = int(time.time())
+        await self.bot.db.execute(
+            "INSERT INTO social_notification_state "
+            "(subscription_id,surface,last_item_id,last_item_url,last_checked_at) "
+            "VALUES (?,?,?,?,?) "
+            "ON CONFLICT(subscription_id,surface) DO UPDATE SET "
+            "last_item_id=excluded.last_item_id,last_item_url=excluded.last_item_url,"
+            "last_checked_at=excluded.last_checked_at",
+            (subscription_id, surface, item_id, item_url, timestamp),
+        )
 
-        item_id = str(item.get("id") or "")
-        if not item_id:
-            return
-        if not row["last_item_id"]:
-            await self._update_last_item(row["id"], item_id, row["source_url"])
-            return
-        if item_id == str(row["last_item_id"]):
-            return
+    async def _touch_surface(self, subscription_id: int, surface: str):
+        await self.bot.db.execute(
+            "UPDATE social_notification_state SET last_checked_at=? "
+            "WHERE subscription_id=? AND surface=?",
+            (int(time.time()), subscription_id, surface),
+        )
 
+    async def _item_event(
+        self,
+        row,
+        item: dict,
+        *,
+        kind: str,
+        provider: str = "fallback",
+    ) -> social_providers.SocialEvent:
         platform = row["platform"]
         link = _item_url(platform, row["source_url"], item)
 
-        # Les entrées "plates" sont suffisantes pour détecter une nouveauté mais
-        # pas pour l'afficher joliment (TikTok n'y expose souvent aucune image).
-        # On enrichit seulement la NOUVELLE publication afin de ne pas alourdir
-        # le scan de cinq minutes.
+        # Une nouvelle publication seulement : enrichissement coûteux à ce moment,
+        # jamais pendant les scans qui n'ont rien détecté.
         try:
             details = await _extract_details(link)
         except Exception:
             details = None
-            logger.debug(
-                "Métadonnées détaillées indisponibles pour l'abonnement social %s",
+            logger.info(
+                "Métadonnées détaillées indisponibles abonnement=%s provider=%s",
                 row["id"],
+                provider,
                 exc_info=True,
             )
         if details:
             merged = dict(item)
-            merged.update({k: v for k, v in details.items() if v not in (None, "", [], {})})
+            merged.update(
+                {k: v for k, v in details.items() if v not in (None, "", [], {})}
+            )
             item = merged
             link = _item_url(platform, row["source_url"], item)
 
-        title = (item.get("title") or f"Nouvelle publication sur {platform}")[:220]
-        description = row["custom_text"] or "Une nouvelle publication vient d’être publiée."
-        image_url = _best_thumbnail(item, row["image_url"])
         creator = (
             item.get("uploader")
             or item.get("channel")
             or item.get("creator")
             or item.get("uploader_id")
         )
-        notification = SocialNotificationPanel(
+        published_at = (
+            item.get("timestamp")
+            or item.get("release_timestamp")
+            or item.get("modified_timestamp")
+        )
+        try:
+            published_at = int(published_at) if published_at else None
+        except (TypeError, ValueError):
+            published_at = None
+
+        return social_providers.SocialEvent(
+            provider=provider,
             platform=platform,
-            title=title,
-            description=description,
-            link=link,
-            image_url=image_url,
+            item_id=str(item.get("id") or ""),
+            url=link,
+            title=(item.get("title") or f"Nouvelle publication sur {platform}")[:300],
             creator=str(creator) if creator else None,
+            creator_url=item.get("channel_url") or item.get("uploader_url"),
+            thumbnail_url=_best_thumbnail(item, row["image_url"]),
+            published_at=published_at,
+            kind=kind,
         )
 
-        try:
-            # D'abord la carte. Si Discord refuse le rendu, aucun ping parasite
-            # n'est envoyé et la publication sera retentée au prochain passage.
-            await channel.send(view=notification)
+    async def _send_social_event(self, row, event: social_providers.SocialEvent) -> bool:
+        guild = self.bot.get_guild(int(row["guild_id"]))
+        if guild is None:
+            return False
+        channel = guild.get_channel(int(row["discord_channel_id"]))
+        role = guild.get_role(int(row["role_id"]))
+        if channel is None or role is None:
+            await self.bot.db.execute(
+                "UPDATE social_notifications SET enabled=0 WHERE id=?",
+                (row["id"],),
+            )
+            logger.warning(
+                "Abonnement social désactivé : salon/rôle introuvable id=%s",
+                row["id"],
+            )
+            return False
 
-            # Le ping reste réel mais ne pollue plus durablement le salon : ce
-            # message minimal disparaît après quelques secondes.
+        description = row["custom_text"] or ""
+        notification = SocialNotificationPanel(
+            platform=event.platform,
+            title=event.title,
+            description=description,
+            link=event.url,
+            image_url=row["image_url"] or event.thumbnail_url,
+            creator=event.creator,
+            kind=event.kind,
+            published_at=event.published_at,
+        )
+        try:
+            await channel.send(view=notification)
             await channel.send(
                 content=role.mention,
                 allowed_mentions=discord.AllowedMentions(
@@ -403,16 +473,143 @@ class Notifications(commands.Cog, name="Notifications"):
                 delete_after=5,
             )
         except discord.HTTPException:
-            # Ne jamais marquer la publication comme traitée si Discord n'a pas pu
-            # l'envoyer : le prochain passage pourra la retenter au lieu de la perdre.
-            logger.warning("Envoi impossible pour l'abonnement social %s", row["id"], exc_info=True)
+            logger.warning(
+                "Envoi impossible abonnement=%s provider=%s item=%s",
+                row["id"],
+                event.provider,
+                event.item_id,
+                exc_info=True,
+            )
+            return False
+        return True
+
+    async def _check_subscription(self, row):
+        guild = self.bot.get_guild(row["guild_id"])
+        if guild is None:
+            return
+        if guild.get_channel(row["discord_channel_id"]) is None or guild.get_role(row["role_id"]) is None:
+            await self.bot.db.execute(
+                "UPDATE social_notifications SET enabled=0 WHERE id=?",
+                (row["id"],),
+            )
             return
 
-        await self._update_last_item(row["id"], item_id, link)
+        surfaces = social_providers.source_surfaces(
+            row["source_url"],
+            row["platform"],
+        )
+        for surface, poll_url, kind in surfaces:
+            try:
+                item = await _extract_latest(poll_url)
+            except Exception:
+                logger.warning(
+                    "Lecture impossible abonnement=%s plateforme=%s surface=%s url=%s",
+                    row["id"],
+                    row["platform"],
+                    surface,
+                    poll_url,
+                    exc_info=True,
+                )
+                continue
+            if not item:
+                continue
+
+            item_id = _id_de_publication(item.get("id"))
+            if not item_id:
+                logger.warning(
+                    "Publication sans ID exploitable abonnement=%s surface=%s",
+                    row["id"],
+                    surface,
+                )
+                continue
+            item_url = _item_url(row["platform"], poll_url, item)
+            state = await self._surface_state(int(row["id"]), surface)
+
+            if state is None:
+                # Compatibilité des abonnements existants : l'ancien last_item_id
+                # correspond à la surface principale. Les nouvelles surfaces
+                # Shorts/streams sont initialisées sans spammer de vieux contenus.
+                legacy_id = (
+                    str(row["last_item_id"] or "")
+                    if surface in {"default", "videos"}
+                    else ""
+                )
+                if legacy_id and legacy_id != item_id:
+                    event = await self._item_event(row, item, kind=kind)
+                    if await self._send_social_event(row, event):
+                        await self._update_surface_state(
+                            int(row["id"]), surface, item_id, event.url
+                        )
+                        await self._update_last_item(row["id"], item_id, event.url)
+                else:
+                    await self._update_surface_state(
+                        int(row["id"]), surface, item_id, item_url
+                    )
+                continue
+
+            previous = str(state["last_item_id"] or "")
+            if item_id == previous:
+                await self._touch_surface(int(row["id"]), surface)
+                continue
+
+            event = await self._item_event(row, item, kind=kind)
+            if await self._send_social_event(row, event):
+                await self._update_surface_state(
+                    int(row["id"]), surface, item_id, event.url
+                )
+                await self._update_last_item(row["id"], item_id, event.url)
+
+    async def handle_provider_webhook(
+        self,
+        payload: dict,
+        *,
+        provider: str = "phyllo",
+    ) -> int:
+        if provider != "phyllo":
+            return 0
+        events = social_providers.parse_phyllo_webhook(payload)
+        if not events:
+            return 0
+
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM social_notifications WHERE enabled=1 ORDER BY id ASC"
+        )
+        delivered = 0
+        for event in events:
+            for row in rows:
+                if str(row["platform"]).casefold() != event.platform.casefold():
+                    continue
+                if not social_providers.same_creator(row["source_url"], event):
+                    continue
+
+                surface = (
+                    "shorts"
+                    if event.kind == "short"
+                    else "streams"
+                    if event.kind == "live"
+                    else "videos"
+                    if event.platform == "YouTube"
+                    else "default"
+                )
+                state = await self._surface_state(int(row["id"]), surface)
+                if state and str(state["last_item_id"] or "") == event.item_id:
+                    continue
+
+                # L'image personnalisée de l'abonnement garde la priorité.
+                if await self._send_social_event(row, event):
+                    await self._update_surface_state(
+                        int(row["id"]), surface, event.item_id, event.url
+                    )
+                    await self._update_last_item(
+                        int(row["id"]), event.item_id, event.url
+                    )
+                    delivered += 1
+        return delivered
 
     async def _update_last_item(self, subscription_id: int, item_id: str, item_url: str):
         await self.bot.db.execute(
-            "UPDATE social_notifications SET last_item_id = ?, last_item_url = ?, last_checked_at = ? WHERE id = ?",
+            "UPDATE social_notifications SET last_item_id=?, last_item_url=?, "
+            "last_checked_at=? WHERE id=?",
             (item_id, item_url, int(time.time()), subscription_id),
         )
 
@@ -453,35 +650,106 @@ class Notifications(commands.Cog, name="Notifications"):
 
         source_url = _normalize_source_url(lien)
         platform, _ = _platform_details(source_url)
-        status = await panels.envoyer(ctx, panels.depuis_embed(embeds.info(f'Vérification de la chaîne {platform}…')))
-        try:
-            latest = await _extract_latest(source_url)
-        except asyncio.TimeoutError:
-            return await panels.editer(status, panels.depuis_embed(embeds.error('La plateforme met trop de temps à répondre. Réessayez dans quelques instants.')))
-        except Exception:
-            logger.warning("Impossible de configurer la source sociale %s", source_url, exc_info=True)
-            return await panels.editer(status, panels.depuis_embed(embeds.error('Impossible de lire cette chaîne. Vérifiez que le lien est public et complet.')))
-        if not latest or not latest.get("id"):
-            return await panels.editer(status, panels.depuis_embed(embeds.error("Aucune publication publique n'a été trouvée sur cette chaîne.")))
+        status = await panels.envoyer(
+            ctx,
+            panels.depuis_embed(embeds.info(f"Vérification de la chaîne {platform}…")),
+        )
 
-        latest_id = str(latest["id"])
-        latest_url = _item_url(platform, source_url, latest)
+        baselines: list[tuple[str, str, str, dict]] = []
+        surfaces = social_providers.source_surfaces(source_url, platform)
+        for surface, poll_url, kind in surfaces:
+            try:
+                latest = await _extract_latest(poll_url)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Timeout configuration source=%s surface=%s",
+                    source_url,
+                    surface,
+                )
+                continue
+            except Exception:
+                logger.warning(
+                    "Impossible de lire source=%s surface=%s",
+                    source_url,
+                    surface,
+                    exc_info=True,
+                )
+                continue
+            if latest and _id_de_publication(latest.get("id")):
+                baselines.append((surface, poll_url, kind, latest))
+
+        if not baselines:
+            return await panels.editer(
+                status,
+                panels.depuis_embed(
+                    embeds.error(
+                        "Aucune publication publique n'a été trouvée sur cette chaîne."
+                    )
+                ),
+            )
+
+        primary_surface, primary_url, _kind, primary = baselines[0]
+        latest_id = _id_de_publication(primary["id"])
+        latest_url = _item_url(platform, primary_url, primary)
+        timestamp = int(time.time())
         await self.bot.db.execute(
             "INSERT INTO social_notifications "
-            "(guild_id, source_url, platform, discord_channel_id, role_id, custom_text, image_url, "
-            "last_item_id, last_item_url, enabled, created_at, last_checked_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) "
-            "ON CONFLICT(guild_id, source_url) DO UPDATE SET "
-            "platform = excluded.platform, discord_channel_id = excluded.discord_channel_id, "
-            "role_id = excluded.role_id, custom_text = excluded.custom_text, image_url = excluded.image_url, "
-            "last_item_id = excluded.last_item_id, last_item_url = excluded.last_item_url, "
-            "enabled = 1, last_checked_at = excluded.last_checked_at",
+            "(guild_id,source_url,platform,discord_channel_id,role_id,custom_text,image_url,"
+            "last_item_id,last_item_url,enabled,created_at,last_checked_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,1,?,?) "
+            "ON CONFLICT(guild_id,source_url) DO UPDATE SET "
+            "platform=excluded.platform,discord_channel_id=excluded.discord_channel_id,"
+            "role_id=excluded.role_id,custom_text=excluded.custom_text,image_url=excluded.image_url,"
+            "last_item_id=excluded.last_item_id,last_item_url=excluded.last_item_url,"
+            "enabled=1,last_checked_at=excluded.last_checked_at",
             (
-                ctx.guild.id, source_url, platform, ctx.channel.id, role.id, texte or None,
-                image_url, latest_id, latest_url, int(time.time()), int(time.time()),
+                ctx.guild.id,
+                source_url,
+                platform,
+                ctx.channel.id,
+                role.id,
+                texte or None,
+                image_url,
+                latest_id,
+                latest_url,
+                timestamp,
+                timestamp,
             ),
         )
-        await panels.editer(status, panels.depuis_embed(embeds.success(f'Surveillance **{platform}** activée.\n**Rôle pingé :** {role.mention}\n**Salon des notifications :** {ctx.channel.mention}\n**Vérification :** toutes les 5 minutes\n' + ('**Image personnalisée :** activée' if image_url else '**Image personnalisée :** automatique ou aucune'))))
+        saved = await self.bot.db.fetchone(
+            "SELECT * FROM social_notifications WHERE guild_id=? AND source_url=?",
+            (ctx.guild.id, source_url),
+        )
+        if saved:
+            for surface, poll_url, _kind, latest in baselines:
+                item_id = _id_de_publication(latest.get("id"))
+                item_url = _item_url(platform, poll_url, latest)
+                await self._update_surface_state(
+                    int(saved["id"]), surface, item_id, item_url
+                )
+
+        surfaces_label = (
+            "vidéos + Shorts + lives"
+            if platform == "YouTube"
+            else "publications / live"
+        )
+        await panels.editer(
+            status,
+            panels.depuis_embed(
+                embeds.success(
+                    f"Surveillance **{platform}** activée.\n"
+                    f"**Formats :** {surfaces_label}\n"
+                    f"**Rôle pingé :** {role.mention}\n"
+                    f"**Salon :** {ctx.channel.mention}\n"
+                    "**Fallback :** vérification toutes les 5 minutes\n"
+                    + (
+                        "**Image personnalisée :** activée"
+                        if image_url
+                        else "**Image :** miniature automatique"
+                    )
+                )
+            ),
+        )
 
     @commands.hybrid_command(name="notifs-list", description="Afficher les chaînes sociales surveillées.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")
