@@ -20,28 +20,35 @@ def test_web_verification_files_compile():
 
 def test_challenge_is_signed_and_bound_to_user_and_guild(monkeypatch):
     monkeypatch.setattr(config, "DISCORD_CLIENT_SECRET", "x" * 64)
-    token = web_verify.issue_challenge(123, 456, "ABC234", "17")
+    token = web_verify.issue_challenge(123, 456, "ABC234")
     assert web_verify.validate_challenge(
         token,
         guild_id=123,
         user_id=456,
         captcha="abc234",
-        math_answer="17",
     )
     assert not web_verify.validate_challenge(
         token,
         guild_id=123,
         user_id=999,
         captcha="ABC234",
-        math_answer="17",
     )
     assert not web_verify.validate_challenge(
         token,
         guild_id=123,
         user_id=456,
         captcha="WRONG1",
-        math_answer="17",
     )
+
+
+def test_web_captcha_no_longer_asks_for_math():
+    assert 'id="math"' not in WEB_SOURCE
+    assert "math_question" not in WEB_SOURCE
+    assert "math_answer" not in WEB_SOURCE
+    assert "mathPlaceholder" not in WEB_SOURCE
+    assert "réponds au calcul" not in WEB_SOURCE
+    assert "quick math challenge" not in WEB_SOURCE
+    assert "web_oauth+captcha+math" not in WEB_SOURCE
 
 
 def test_verification_session_is_signed_and_scoped(monkeypatch):
