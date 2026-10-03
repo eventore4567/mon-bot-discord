@@ -400,7 +400,7 @@ async def _security_embed(self) -> discord.Embed:
     e = embeds.neutral(
         "SentriX • Sécurité",
         "Préréglage rapide ou contrôle précis. Les corrections automatiques restent limitées aux actions sûres. "
-        "Le bouton « Rôles bypass / salons stricts » règle les exceptions séparément pour chaque protection de message.",
+        "Le bouton « Centre de sécurité » ouvre chaque protection individuellement avec ses réglages adaptés.",
         color=_score_colour(health["security_score"]),
     )
     e.add_field(name="Protection", value=f"**{health['security_score']}/100**", inline=True)
@@ -978,7 +978,7 @@ def _render_page(self):
         self.add_item(fix_button)
 
         exceptions_button = discord.ui.Button(
-            label="Rôles bypass / salons stricts",
+            label="Centre de sécurité",
             style=discord.ButtonStyle.primary,
             row=2,
         )
