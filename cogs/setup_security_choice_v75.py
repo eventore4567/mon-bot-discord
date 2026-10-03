@@ -374,6 +374,31 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     all_off.callback = disable_all
     container.add_item(discord.ui.ActionRow(all_on, all_off))
 
+    container.add_item(discord.ui.Separator())
+    container.add_item(
+        discord.ui.TextDisplay(
+            "### Exceptions par protection\n"
+            "Pour les protections de messages, vous pouvez choisir des **rôles bypass** "
+            "et des **salons stricts**. Dans un salon strict, même un rôle bypass reste "
+            "soumis à la protection. Les threads héritent du salon parent."
+        )
+    )
+    exceptions = discord.ui.Button(
+        label="Configurer les rôles bypass et salons stricts",
+        style=discord.ButtonStyle.primary,
+    )
+
+    async def open_exceptions(interaction: discord.Interaction):
+        from . import setup_v2_ui as v2_ui
+        await panels.envoyer(
+            interaction.response,
+            await v2_ui._security_policy_setup_panel(self, interaction.user.id, "antispam"),
+            ephemere=True,
+        )
+
+    exceptions.callback = open_exceptions
+    container.add_item(discord.ui.ActionRow(exceptions))
+
     active_labels = [label for key, label, _description in option_specs if key in selected]
     if active_labels:
         container.add_item(discord.ui.TextDisplay("**Actuellement :** " + " · ".join(active_labels)))

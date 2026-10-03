@@ -40,6 +40,12 @@ jobs:
           DATABASE_PATH: "/tmp/sentrix-v21-security.db"
         run: python tools/security_runtime_audit.py
 
+      - name: Per-filter security bypass regression
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-filter-policy-tests.db"
+        run: python -m pytest -q tests/test_security_filter_policy.py tests/test_automod_live_matrix.py
+
       - name: Multi-instance isolation audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
