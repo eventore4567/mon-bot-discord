@@ -17,7 +17,7 @@ GLOBAL_CHAT_INPUT_BUDGET = 100
 PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofexample", "proofstatus"})
 # Les deux portes d'entrée de la suite staff et son diagnostic doivent rester
 # disponibles même quand les 100 racines globales sont déjà occupées.
-STAFF_SLASH_PREFERRED = frozenset({"staff", "member", "diagnostic"})
+STAFF_SLASH_PREFERRED = frozenset({"staff", "member", "case", "diagnostic"})
 
 
 def _v110_public_root_names() -> set[str]:
