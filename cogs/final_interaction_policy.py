@@ -140,6 +140,11 @@ def _clean_embed(
             value=value or "Aucune information.",
             inline=field.inline,
         )
+
+    # Garantie transport : quelle que soit la source de l'embed (ancien cog,
+    # logs, notification, erreur, plugin), aucune couleur ne part vers Discord.
+    # Discord affiche cette couleur comme un trait vertical sur le côté.
+    result.colour = None
     return result
 
 
@@ -702,8 +707,13 @@ def _install_messageable_send() -> None:
             return first
         if isinstance(kwargs.get("embed"), discord.Embed):
             kwargs["embed"] = _clean_embed(kwargs["embed"])
-            if kwargs.get("view") is not None:
-                kwargs["view"] = sentrix_embeds.clean_view(kwargs["view"])
+        if kwargs.get("embeds"):
+            kwargs["embeds"] = [
+                _clean_embed(item) if isinstance(item, discord.Embed) else item
+                for item in list(kwargs["embeds"])
+            ][:10]
+        if kwargs.get("view") is not None:
+            kwargs["view"] = sentrix_embeds.clean_view(kwargs["view"])
         result = await base(self, *args, **kwargs)
         if root:
             _mark_context_response(ctx, result)
@@ -732,6 +742,17 @@ def _install_message_edit() -> None:
             root=root,
         )
         if not root or _plain_root(root):
+            # Les éditions hors commande (logs, notifications, panneaux persistants)
+            # doivent respecter exactement le même contrat visuel.
+            if isinstance(kwargs.get("embed"), discord.Embed):
+                kwargs["embed"] = _clean_embed(kwargs["embed"])
+            if kwargs.get("embeds"):
+                kwargs["embeds"] = [
+                    _clean_embed(item) if isinstance(item, discord.Embed) else item
+                    for item in list(kwargs["embeds"])
+                ][:10]
+            if kwargs.get("view") is not None:
+                kwargs["view"] = sentrix_embeds.clean_view(kwargs["view"])
             return await base(self, *args, **kwargs)
         pages = _payload_pages(args, kwargs, editing=True, root=root)
         first_args, first_kwargs = pages[0]
