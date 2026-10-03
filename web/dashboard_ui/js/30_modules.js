@@ -98,6 +98,17 @@ async function renderSecurity() {
   const forbiddenWords = Array.isArray(forbidden?.words) ? forbidden.words : [];
   let d = null; try { d = await diagnostics(); } catch (_) {}
   let sec = null; try { sec = await securityOverview(); } catch (_) {}
+  let spamPolicy = { enabled: Boolean(a.antispam), scope_mode: 'all', role_ids: [], channel_ids: [] };
+  try { spamPolicy = await gget('/security/antispam-policy'); } catch (_) {}
+  const spamRoleIds = new Set((spamPolicy.role_ids || []).map(String));
+  const spamChannelIds = new Set((spamPolicy.channel_ids || []).map(String));
+  const spamRoleOptions = roles()
+    .filter(r => String(r.id) !== String(state.guildId))
+    .map(r => `<option value="${esc(r.id)}" ${spamRoleIds.has(String(r.id)) ? 'selected' : ''}>@${esc(r.name)}</option>`)
+    .join('');
+  const spamChannelOptions = channels('text')
+    .map(ch => `<option value="${esc(ch.id)}" ${spamChannelIds.has(String(ch.id)) ? 'selected' : ''}>#${esc(ch.name)}</option>`)
+    .join('');
   const missing = (sec?.permissions || d?.permissions || []).filter(p => !p.granted);
   const risk = sec?.risk || { score: 0, protection_score: 100, level: 'inconnu' };
   const coverage = sec?.coverage || { active: AUTOMOD.filter(([k]) => Boolean(a[k])).length, total: AUTOMOD.length };
@@ -165,6 +176,44 @@ async function renderSecurity() {
     ${missing.length ? `<div class="notice warn full">SentriX n’a pas toutes les permissions nécessaires : ${esc(missing.map(p => p.name).join(', '))}. Certaines protections peuvent détecter un risque sans pouvoir agir.</div>` : ''}
 
     ${card('Protections', 'Activez uniquement les protections adaptées à votre serveur.', AUTOMOD.map(([k, l, c]) => switchRow(l, k, Boolean(a[k]), c)).join(''), 'full')}
+
+    <section class="card full">
+      <div class="card-head">
+        <div>
+          <h2>Anti-spam · Périmètre</h2>
+          <p>Choisissez qui peut contourner uniquement l’anti-spam et dans quels salons le spam est interdit.</p>
+        </div>
+        <span class="badge ${Boolean(a.antispam) ? 'ok' : ''}">${Boolean(a.antispam) ? 'ACTIF' : 'INACTIF'}</span>
+      </div>
+      <div class="notice" style="margin-top:12px">
+        Les rôles bypass ci-dessous restent soumis aux autres protections : anti-lien, anti-scam, insultes, mentions, etc.
+      </div>
+      <div class="fields" style="margin-top:12px">
+        <div class="field full">
+          <div class="label-row"><label for="spamBypassRoles">Rôles qui peuvent contourner l’anti-spam</label></div>
+          <select id="spamBypassRoles" multiple size="5">${spamRoleOptions || '<option disabled>Aucun rôle disponible</option>'}</select>
+          <small>Cmd/Ctrl + clic pour sélectionner plusieurs rôles.</small>
+        </div>
+        <div class="field">
+          <div class="label-row"><label for="spamScopeMode">Où l’anti-spam s’applique</label></div>
+          <select id="spamScopeMode">
+            <option value="all" ${spamPolicy.scope_mode === 'all' ? 'selected' : ''}>Tous les salons</option>
+            <option value="selected" ${spamPolicy.scope_mode === 'selected' ? 'selected' : ''}>Seulement les salons choisis</option>
+          </select>
+        </div>
+        <div class="field full">
+          <div class="label-row"><label for="spamProtectedChannels">Salons où le spam est interdit</label></div>
+          <select id="spamProtectedChannels" multiple size="7" ${spamPolicy.scope_mode === 'selected' ? '' : 'disabled'}>${spamChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
+          <small>En mode « Tous les salons », cette liste est ignorée. Les threads héritent du salon parent.</small>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button class="btn primary" type="button" id="spamPolicySave">Enregistrer le périmètre</button>
+        <button class="btn ghost" type="button" id="spamPolicyAll">Protéger tout le serveur</button>
+        <button class="btn ghost" type="button" id="spamPolicyClearRoles">Aucun rôle bypass</button>
+      </div>
+    </section>
+
     <section class="card full">
       <div class="card-head">
         <div><h2>Mots interdits</h2><p>Ajoutez les mots ou expressions que SentriX doit censurer immédiatement.</p></div>
@@ -189,6 +238,67 @@ async function renderSecurity() {
 
   bindEditable();
   bindModuleButtons();
+
+  const spamScopeMode = $('spamScopeMode');
+  const spamChannels = $('spamProtectedChannels');
+  if (spamScopeMode && spamChannels) {
+    spamScopeMode.onchange = () => {
+      spamChannels.disabled = spamScopeMode.value !== 'selected';
+    };
+  }
+
+  const selectedValues = select => [...(select?.selectedOptions || [])].map(option => option.value).filter(Boolean);
+  if ($('spamPolicySave')) $('spamPolicySave').onclick = async () => {
+    const mode = $('spamScopeMode')?.value || 'all';
+    const roleIds = selectedValues($('spamBypassRoles'));
+    const channelIds = selectedValues($('spamProtectedChannels'));
+    if (mode === 'selected' && !channelIds.length) {
+      return toast('Choisissez au moins un salon protégé ou utilisez « Tous les salons ».', true);
+    }
+    const button = $('spamPolicySave');
+    button.disabled = true;
+    try {
+      const result = await gpost('/security/antispam-policy', {
+        scope_mode: mode,
+        role_ids: roleIds,
+        channel_ids: mode === 'selected' ? channelIds : [],
+      });
+      toast(result.message || 'Périmètre anti-spam enregistré.');
+      invalidate('security-overview');
+      await renderSecurity();
+    } catch (e) {
+      toast(e.message, true);
+      button.disabled = false;
+    }
+  };
+  if ($('spamPolicyAll')) $('spamPolicyAll').onclick = async () => {
+    const roleIds = selectedValues($('spamBypassRoles'));
+    try {
+      const result = await gpost('/security/antispam-policy', {
+        scope_mode: 'all',
+        role_ids: roleIds,
+        channel_ids: [],
+      });
+      toast(result.message || 'Anti-spam appliqué à tous les salons.');
+      await renderSecurity();
+    } catch (e) { toast(e.message, true); }
+  };
+  if ($('spamPolicyClearRoles')) $('spamPolicyClearRoles').onclick = async () => {
+    const mode = $('spamScopeMode')?.value || 'all';
+    const channelIds = selectedValues($('spamProtectedChannels'));
+    if (mode === 'selected' && !channelIds.length) {
+      return toast('Choisissez au moins un salon protégé avant de retirer les rôles bypass.', true);
+    }
+    try {
+      const result = await gpost('/security/antispam-policy', {
+        scope_mode: mode,
+        role_ids: [],
+        channel_ids: mode === 'selected' ? channelIds : [],
+      });
+      toast(result.message || 'Rôles bypass retirés.');
+      await renderSecurity();
+    } catch (e) { toast(e.message, true); }
+  };
 
   if ($('forbiddenWordAdd')) $('forbiddenWordAdd').onclick = async () => {
     const input = $('forbiddenWordInput');
