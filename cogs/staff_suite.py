@@ -1741,6 +1741,44 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             panels.Ligne(label, "OK" if ok else "Manquante")
             for label, ok in checks
         ]
+
+        # Ressources réellement configurées : on ne crée rien et on ne répare
+        # rien automatiquement. Le diagnostic signale seulement ce qui a été
+        # supprimé ou ce qui n'est pas configuré.
+        resource_lines: list[panels.Ligne] = []
+        try:
+            raw_conf = await self.bot.db.get_guild_config(guild.id)
+            conf = dict(raw_conf) if raw_conf is not None else {}
+        except Exception:
+            conf = {}
+        resource_keys = (
+            ("log_channel", "Logs généraux"),
+            ("error_channel", "Erreurs"),
+            ("ticket_log_channel", "Logs tickets"),
+            ("welcome_channel", "Bienvenue"),
+            ("goodbye_channel", "Départ"),
+            ("verification_channel", "Vérification"),
+            ("suggest_channel", "Suggestions"),
+        )
+        for key, label in resource_keys:
+            if key not in conf:
+                continue
+            channel_id = conf.get(key)
+            if not channel_id:
+                resource_lines.append(panels.Ligne(label, "Non configuré"))
+                continue
+            channel = guild.get_channel(int(channel_id))
+            if channel is None:
+                resource_lines.append(panels.Ligne(label, "Salon supprimé"))
+                issues.append(f"{label} : salon supprimé")
+            else:
+                perms_here = channel.permissions_for(me)
+                if not (perms_here.view_channel and perms_here.send_messages):
+                    resource_lines.append(panels.Ligne(label, f"{channel.mention} · permissions insuffisantes"))
+                    issues.append(f"{label} : permissions")
+                else:
+                    resource_lines.append(panels.Ligne(label, f"{channel.mention} · OK"))
+
         open_cases = await self._safe_count(
             "SELECT COUNT(*) AS n FROM staff_cases_v1 WHERE guild_id=? AND status NOT IN ('resolu','archive')",
             (guild.id,),
@@ -1759,6 +1797,11 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             kind="warning" if issues else "success",
             sections=[
                 panels.Section("Permissions du bot", modules),
+                *(
+                    [panels.Section("Ressources configurées", resource_lines)]
+                    if resource_lines
+                    else []
+                ),
                 panels.Section(
                     "État staff",
                     [
@@ -1768,7 +1811,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                     ],
                 ),
             ],
-            pied="SentriX • Audit non destructif",
+            pied="Audit non destructif",
         )
 
     async def _safe_count(self, query: str, params: tuple) -> int:
