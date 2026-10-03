@@ -26,7 +26,6 @@ from . import security_verification_v71 as security_v71
 from . import setup_control_center as setup_ui
 from . import setup_experience_v74 as v74
 from . import setup_v2_core as core
-from . import setup_v2_ui as v2_ui
 
 logger = logging.getLogger("bot.setup-security-choice-v75")
 
@@ -390,6 +389,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     )
 
     async def open_exceptions(interaction: discord.Interaction):
+        from . import setup_v2_ui as v2_ui
         await panels.envoyer(
             interaction.response,
             await v2_ui._security_policy_setup_panel(self, interaction.user.id, "antispam"),
