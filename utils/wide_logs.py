@@ -340,11 +340,8 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
 
 
 def _with_id(mention: str) -> str:
-    """Mention suivie de son ID en inline code, comme demandé par le format narratif."""
-    if not mention:
-        return ""
-    snowflake = _first_snowflake(mention)
-    return f"{mention} (`{snowflake}`)" if snowflake else mention
+    """Garde la mention lisible sans répéter le snowflake dans la phrase."""
+    return str(mention or "")
 
 
 #: Une phrase par événement de ticket. ``{membre}`` est le membre concerné,
@@ -437,7 +434,25 @@ def narrative_body(
         if after:
             lines.append(f"**Après**\n{_code_block(after)}")
     elif event_type == "message_bulk":
-        lines.append((embed.description or "Plusieurs messages ont été supprimés.").strip())
+        count = _field_value_exact(
+            embed,
+            "Messages supprimés",
+            "Nombre de messages",
+            "Nombre",
+        )
+        command = _field_value_exact(embed, "Commande")
+        actor = _first_user_ref(moderator) or moderator
+        if count:
+            sentence = f"**{count} message(s)** ont été supprimé(s)"
+        else:
+            sentence = "Plusieurs messages ont été supprimés"
+        if channel:
+            sentence += f" dans {channel}"
+        if actor:
+            sentence += f" par {actor}"
+        lines.append(sentence + ".")
+        if command:
+            lines.append(f"**Commande :** {command}")
     elif event_type == "member_join":
         lines.append(f"{member or 'Un membre'} vient de rejoindre le serveur.")
         if account_created:
@@ -493,8 +508,12 @@ def narrative_body(
     elif event_type in {"channel_create", "channel_delete", "channel_update"}:
         verb = {"channel_create": "créé", "channel_delete": "supprimé", "channel_update": "modifié"}[event_type]
         entity = identity_name or channel or "Un salon"
-        id_part = f" (`{identity_id}`)" if identity_id else ""
-        lines.append(f"Le salon **{entity}**{id_part} a été {verb}" + (f" par {moderator}" if moderator else "") + ".")
+        actor = _first_user_ref(moderator) or moderator
+        lines.append(
+            f"Le salon **{entity}** a été {verb}"
+            + (f" par {actor}" if actor else "")
+            + "."
+        )
     elif event_type in {"role_create", "role_delete", "role_update"}:
         verb = {"role_create": "créé", "role_delete": "supprimé", "role_update": "modifié"}[event_type]
         # Un mention de rôle (<@&id>) reste toujours cliquable et lisible ; un
@@ -912,22 +931,21 @@ def _trace_title(event_type: str, fallback: str = "") -> str:
 
 
 def _trace_meta(event_type: str, *, emoji: str = "") -> str:
+    """En-tête utilisateur : famille lisible, jamais le code technique interne."""
     event = canonical_event_type(event_type)
     category = category_for(event)
     category_label = CATEGORIES.get(category, category.replace("_", " ").title())
-    # L'icône SentriX d'abord, l'emoji Unicode en repli : tant que la
-    # synchronisation n'a pas eu lieu, la carte reste exactement celle
-    # d'aujourd'hui.
     marker = (emoji or marqueur_evenement(event)).strip()
     prefix = f"{marker} " if marker else ""
-    return f"-# SENTRIX TRACE · {prefix}{category_label} · {_trace_code(event)}"
+    return f"-# {prefix}{category_label}"
 
 
 def _trace_footer(event_type: str, footer: str = "") -> str:
+    """Pied compact : aucune référence à Trace/CH-NEW/MSG-DEL côté utilisateur."""
+    del event_type
     clean = safe_text(footer)
-    clean = re.sub(r"^SentriX\s*•\s*", "", clean, flags=re.IGNORECASE).strip()
-    base = f"SentriX Trace · {_trace_code(event_type)}"
-    return f"{base} · {clean}" if clean else base
+    clean = re.sub(r"^SentriX\s*(?:Trace)?\s*[•·]\s*", "", clean, flags=re.IGNORECASE).strip()
+    return f"SentriX · {clean}" if clean else "SentriX"
 
 
 def _trace_identity_label(event_type: str) -> str:
