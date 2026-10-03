@@ -425,14 +425,18 @@ def _native_payload(
     output = dict(kwargs)
 
     if embed is not None:
-        output["embed"] = _decorate_embed(embed, kind)
+        cleaned = _decorate_embed(embed, kind)
+        # Les embeds natifs sont conservés uniquement lorsque la vue historique
+        # exige encore un embed. Sans couleur, Discord ne dessine plus le liseré
+        # vertical qui jurait avec les panneaux V2.
+        cleaned.colour = None
+        output["embed"] = cleaned
         return content, output
 
     if content is not None:
         panel = discord.Embed(
             title=_human_command_name(ctx),
             description=_clean_text(content, limit=3900) or None,
-            colour=discord.Colour(_ACCENTS[kind]),
         )
         output["embed"] = panel
         return None, output
