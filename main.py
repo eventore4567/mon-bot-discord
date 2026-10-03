@@ -712,10 +712,10 @@ class BotAllInOne(commands.Bot):
         # de répondre après un redéploiement, les salons fermés s'accumuleraient
         # sans que personne ne puisse rien y faire.
         try:
-            from services.tickets import BoutonSupprimerTicket
-            self.add_dynamic_items(BoutonSupprimerTicket)
+            from services.tickets import BoutonRouvrirTicket, BoutonSupprimerTicket
+            self.add_dynamic_items(BoutonRouvrirTicket, BoutonSupprimerTicket)
         except Exception:
-            logger.warning("Impossible d'enregistrer le bouton de suppression de ticket :\n" + traceback.format_exc())
+            logger.warning("Impossible d'enregistrer les boutons persistants de ticket fermé :\n" + traceback.format_exc())
 
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
