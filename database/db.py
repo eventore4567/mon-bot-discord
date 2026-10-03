@@ -147,6 +147,24 @@ CREATE TABLE IF NOT EXISTS social_notifications (
 CREATE INDEX IF NOT EXISTS idx_social_notifications_enabled
 ON social_notifications (enabled, guild_id);
 
+-- État séparé par surface. YouTube possède plusieurs flux indépendants
+-- (videos / shorts / streams) ; un seul last_item_id ne suffit pas.
+CREATE TABLE IF NOT EXISTS social_notification_state (
+    subscription_id INTEGER NOT NULL,
+    surface TEXT NOT NULL,
+    last_item_id TEXT,
+    last_item_url TEXT,
+    last_checked_at INTEGER,
+    PRIMARY KEY (subscription_id, surface)
+);
+
+-- Déduplication des webhooks provider (Phyllo ou futur provider).
+CREATE TABLE IF NOT EXISTS social_webhook_events (
+    event_key TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    received_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sanction_dm_templates (
     guild_id INTEGER NOT NULL,
     action TEXT NOT NULL,
