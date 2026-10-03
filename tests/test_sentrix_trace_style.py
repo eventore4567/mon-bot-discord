@@ -17,11 +17,11 @@ def test_trace_titles_are_sentrix_owned_and_event_specific():
     assert wide_logs._trace_title("automod_link", "ancien titre") == "Lien bloqué"
 
 
-def test_trace_meta_has_brand_category_and_event_code():
+def test_trace_meta_is_human_facing_without_internal_event_codes():
     meta = wide_logs._trace_meta("message_delete", emoji="")
-    assert "SENTRIX TRACE" in meta
     assert "Messages" in meta
-    assert "MSG-DEL" in meta
+    assert "SENTRIX TRACE" not in meta
+    assert "MSG-DEL" not in meta
 
 
 def test_trace_identity_labels_are_human_not_generic():
@@ -33,12 +33,14 @@ def test_trace_identity_labels_are_human_not_generic():
     assert wide_logs._trace_identity_label("invite_create") == "Créateur"
 
 
-def test_trace_footer_removes_old_brand_prefix():
+def test_trace_footer_removes_internal_trace_code():
     footer = wide_logs._trace_footer(
         "member_timeout",
         "SentriX • 02/10/2026 10:00",
     )
-    assert footer == "SentriX Trace · MBR-TO · 02/10/2026 10:00"
+    assert footer == "SentriX · 02/10/2026 10:00"
+    assert "Trace" not in footer
+    assert "MBR-TO" not in footer
 
 
 def test_every_wide_log_uses_the_trace_renderer():
