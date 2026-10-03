@@ -136,16 +136,27 @@ def test_infinite_counter_no_longer_has_public_correction_assistant():
         assert obsolete not in source
 
 
-def test_security_setup_has_per_filter_bypass_and_strict_channel_controls():
+def test_security_setup_has_full_premium_center_and_per_filter_exceptions():
     source = _source("cogs/setup_v2_ui.py")
 
     assert "SECURITY_POLICY_FILTERS" in source
+    assert "SECURITY_CENTER_PROTECTIONS" in source
     assert "class SecurityPolicyView(discord.ui.View)" in source
-    assert "Rôles bypass ·" in source
-    assert "Salons stricts ·" in source
-    assert 'label="Retirer rôles bypass"' in source
-    assert 'label="Aucun salon strict"' in source
-    assert "set_security_filter_policy" in source
+    for marker in (
+        '"antispam"',
+        '"antiraid"',
+        '"antinuke"',
+        '"security_permissions"',
+        '"honeypot"',
+        '"verification"',
+        "Rôles bypass ·",
+        "Salons stricts ·",
+        "set_security_filter_policy",
+        "raid_intensity",
+        "honeypot_action",
+        "verification_threshold",
+    ):
+        assert marker in source
     block = source[
         source.index("class SecurityPolicyView"):
         source.index("class PermissionRoleSelect")
@@ -153,15 +164,20 @@ def test_security_setup_has_per_filter_bypass_and_strict_channel_controls():
     assert "guild.create_text_channel" not in block
 
 
-def test_dashboard_security_policy_has_clean_per_filter_multi_select_ui_and_api():
+def test_dashboard_security_has_full_control_center_and_per_filter_policy():
     api = _source("web/dashboard_api_security.py")
     ui = _source("web/dashboard_ui/js/30_modules.js")
 
     assert '/security/filter-policies' in api
+    assert "_PROTECTION_CATALOG" in api
     assert "security_filter_bypass_roles" in api
     assert "security_filter_strict_channels" in api
-    assert "Exceptions par protection" in ui
+    assert "Centre de sécurité" in ui
+    assert "Messages" in ui
+    assert "Arrivées" in ui
+    assert "Serveur" in ui
+    assert 'data-security-config=' in ui
     assert 'id="securityPolicyBypassRoles"' in ui
     assert 'id="securityPolicyStrictChannels"' in ui
-    assert "Salons stricts — aucun bypass" in ui
+    assert "salon strict → rôle bypass → protection normale" in ui
     assert "Retirer les rôles bypass" in ui
