@@ -51,7 +51,7 @@ def test_every_wide_log_uses_the_trace_renderer():
     assert "_trace_title(event_type" in source
     assert "_trace_identity_label(event_type)" in source
     assert "_trace_body_parts(body)" in source
-    assert 'discord.ui.TextDisplay("### Informations")' in source
+    assert 'discord.ui.TextDisplay("### Informations")' not in source
     assert "### Détails" not in source
     assert "_trace_time_text(embed)" in source
     assert "_trace_footer(event_type, footer)" in source
@@ -98,3 +98,28 @@ def test_trace_v7_layout_is_compact_and_media_stays_below_context():
     assert "summary, details = _trace_body_parts(body)" in block
     assert block.index("summary, details = _trace_body_parts(body)") < block.index("if media_items:")
     assert "📎" not in block
+
+
+
+def test_message_content_keeps_real_mentions_outside_code_blocks():
+    rendered = wide_logs._message_quote("<@1499827796560580850> salut")
+    assert "<@1499827796560580850>" in rendered
+    assert "```" not in rendered
+    assert rendered.startswith("> ")
+
+
+def test_trace_identity_uses_real_discord_references():
+    assert wide_logs._trace_identity_ref("message_edit", 1499827796560580850) == "<@1499827796560580850>"
+    assert wide_logs._trace_identity_ref("member_ban", 1499827796560580850) == "<@1499827796560580850>"
+    assert wide_logs._trace_identity_ref("channel_update", 1499827796560580850) == "<#1499827796560580850>"
+    assert wide_logs._trace_identity_ref("role_update", 1499827796560580850) == "<@&1499827796560580850>"
+
+
+def test_trace_header_does_not_show_raw_identity_id_line():
+    source = (ROOT / "utils" / "wide_logs.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("class WideLogView"):
+        source.index("def _database_path", source.index("class WideLogView"))
+    ]
+    assert '-# ID ·' not in block
+    assert "_trace_identity_ref(event_type, identity_id)" in block
