@@ -126,3 +126,11 @@ def test_phyllo_non_content_webhook_is_ignored():
         },
     }
     assert social_providers.parse_phyllo_webhook(payload) == []
+
+
+def test_ytdlp_capture_logger_keeps_expected_offline_errors_out_of_stderr():
+    logger = notifications._YTDLPCaptureLogger()
+    logger.error("ERROR: [twitch:stream] creator: The channel is not currently live")
+    logger.warning("warning")
+    assert logger.errors[-1].endswith("not currently live")
+    assert logger.warnings == ["warning"]
