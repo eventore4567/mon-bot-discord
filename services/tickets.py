@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import io
 import logging
+from types import SimpleNamespace
 
 import discord
 
@@ -349,6 +350,48 @@ async def journaliser_evenement(
         return reference_incident(ticket_id, None)
 
 
+_OWNER_TARGET_EVENTS = {
+    "ticket_close",
+    "ticket_autoclose",
+    "ticket_claim",
+    "ticket_unclaim",
+    "ticket_reopen",
+    "ticket_delete",
+    "ticket_rating",
+    "ticket_bump",
+}
+
+
+async def _resolve_ticket_user(bot, guild: discord.Guild, user_id: int | None):
+    """Résout le vrai utilisateur du ticket, même s'il n'est plus en cache."""
+    if not user_id:
+        return None
+    user_id = int(user_id)
+    user = guild.get_member(user_id)
+    if user is None:
+        try:
+            user = bot.get_user(user_id)
+        except Exception:
+            user = None
+    if user is None:
+        try:
+            user = await bot.fetch_user(user_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError):
+            user = None
+    if user is not None:
+        return user
+
+    # Dernier repli : on conserve AU MOINS la mention et l'ID exacts au lieu
+    # d'afficher « Utilisateur Discord » / « utilisateur-inconnu ».
+    return SimpleNamespace(
+        id=user_id,
+        mention=f"<@{user_id}>",
+        display_name=f"Utilisateur {user_id}",
+        name=f"Utilisateur {user_id}",
+        display_avatar=None,
+    )
+
+
 async def _journaliser(
     bot,
     guild: discord.Guild,
@@ -372,7 +415,34 @@ async def _journaliser(
         evenement, (f"🎫 {evenement}", "Acteur")
     )
     guild_id = getattr(guild, "id", None)
+
+    # Les anciens logs perdaient parfois le membre et le salon parce qu'ils ne
+    # dépendaient que du cache Discord du moment. On relit la source durable du
+    # ticket avant de construire le journal.
+    ticket_row = None
+    if ticket_id:
+        try:
+            ticket_row = await bot.db.fetchone(
+                "SELECT user_id, channel_id FROM tickets WHERE id=? AND guild_id=?",
+                (int(ticket_id), int(guild_id)),
+            )
+        except Exception:
+            ticket_row = None
+
+    if channel is None and ticket_row is not None and ticket_row["channel_id"]:
+        channel = guild.get_channel(int(ticket_row["channel_id"]))
+
+    if (
+        cible is None
+        and evenement in _OWNER_TARGET_EVENTS
+        and ticket_row is not None
+        and ticket_row["user_id"]
+    ):
+        cible = await _resolve_ticket_user(bot, guild, int(ticket_row["user_id"]))
+
     channel_id = getattr(channel, "id", None)
+    if channel_id is None and ticket_row is not None:
+        channel_id = ticket_row["channel_id"]
 
     ligne_id = await enregistrer_evenement(
         bot,
@@ -390,11 +460,19 @@ async def _journaliser(
     if ticket_id:
         champs["🎟️ Ticket"] = f"#{int(ticket_id)}"
     if channel is not None:
-        # Le nom EN PLUS de la mention : après suppression du salon, une mention
-        # s'affiche « #deleted-channel » et l'information est perdue.
+        # Toujours conserver le nom brut. Une mention de salon peut être rendue
+        # « #inconnu » par Discord si le lecteur n'a pas accès au salon, alors
+        # que le nom historique reste utile au staff.
         nom = getattr(channel, "name", None)
         mention = getattr(channel, "mention", None)
-        champs["📌 Salon"] = f"{mention} (`{nom}`)" if mention and nom else (mention or f"`{nom}`")
+        if nom and mention:
+            champs["📌 Salon"] = f"#{nom} · {mention}"
+        elif nom:
+            champs["📌 Salon"] = f"#{nom}"
+        elif mention:
+            champs["📌 Salon"] = mention
+    elif channel_id:
+        champs["📌 Salon"] = f"Salon `{int(channel_id)}`"
     if extra:
         champs.update(extra)
     champs["🔖 Référence"] = f"`{reference}`"
