@@ -23,7 +23,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from utils import helpers
+from utils import checks, helpers
 from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
 
@@ -300,8 +300,8 @@ class EvidenceModal(discord.ui.Modal, title="Ajouter une preuve"):
             )
         parts = []
         if attachment is not None:
-            # Les URL CDN Discord sont signées : retirer les paramètres peut
-            # rendre la preuve immédiatement inaccessible.
+            # Pas de .split("?") : l'URL CDN porte sa signature dans la query
+            # (ex/is/hm). L'amputer rend le lien de preuve mort immediatement.
             stable = str(attachment.url)
             parts.append(f"[{attachment.filename}]({stable})")
         if note:
@@ -473,15 +473,74 @@ class MemberPanelView(OwnedView):
         )
 
 
+class CaseStatusSelect(discord.ui.Select):
+    def __init__(self, owner: "CaseActionsView", current: str):
+        self.owner = owner
+        options = [
+            discord.SelectOption(label="Ouvert", value="ouvert", default=current == "ouvert"),
+            discord.SelectOption(label="En enquête", value="en_enquete", default=current == "en_enquete"),
+            discord.SelectOption(label="En attente", value="en_attente", default=current == "en_attente"),
+            discord.SelectOption(label="Résolu", value="resolu", default=current == "resolu"),
+            discord.SelectOption(label="Archivé", value="archive", default=current == "archive"),
+        ]
+        super().__init__(
+            placeholder="Changer le statut du dossier",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=1,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        status = self.values[0]
+        await self.owner.suite.bot.db.execute(
+            "UPDATE staff_cases_v1 SET status=?, updated_at=? WHERE id=? AND guild_id=?",
+            (status, now(), self.owner.case_id, interaction.guild.id),
+        )
+        row = await self.owner.suite.bot.db.fetchone(
+            "SELECT * FROM staff_cases_v1 WHERE id=? AND guild_id=?",
+            (self.owner.case_id, interaction.guild.id),
+        )
+        if row:
+            await panels.editer(
+                interaction.response,
+                await self.owner.suite.case_panel(interaction.guild, row, interaction.user.id),
+            )
+
+
 class CaseActionsView(OwnedView):
-    def __init__(self, suite: "StaffSuite", owner_id: int, case_id: int, *, resolved: bool = False):
+    def __init__(
+        self,
+        suite: "StaffSuite",
+        owner_id: int,
+        case_id: int,
+        *,
+        status: str = "ouvert",
+    ):
         super().__init__(suite, owner_id)
         self.case_id = case_id
-        self.resolve.disabled = resolved
+        self.status = status
+        self.add_item(CaseStatusSelect(self, status))
 
     @discord.ui.button(label="Ajouter une preuve", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("evidence"))
     async def evidence(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(EvidenceModal(self.suite, self.case_id))
+
+    @discord.ui.button(label="M’assigner", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("staff"))
+    async def assign(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self.suite.bot.db.execute(
+            "UPDATE staff_cases_v1 SET assigned_to=?, updated_at=? WHERE id=? AND guild_id=?",
+            (interaction.user.id, now(), self.case_id, interaction.guild.id),
+        )
+        row = await self.suite.bot.db.fetchone(
+            "SELECT * FROM staff_cases_v1 WHERE id=? AND guild_id=?",
+            (self.case_id, interaction.guild.id),
+        )
+        if row:
+            await panels.editer(
+                interaction.response,
+                await self.suite.case_panel(interaction.guild, row, interaction.user.id),
+            )
 
     @discord.ui.button(label="Résoudre", style=discord.ButtonStyle.success, emoji=sxemoji.partiel("success"))
     async def resolve(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -600,10 +659,60 @@ class IncidentModal(discord.ui.Modal, title="Nouvel incident"):
         await panels.texte_court(interaction.response, "Incident enregistré.", ephemere=True)
 
 
+class IncidentSelect(discord.ui.Select):
+    def __init__(self, owner: "IncidentCenterView", rows):
+        self.owner = owner
+        options = [
+            discord.SelectOption(
+                label=f"#{row['id']} · {str(row['category'])[:70]}",
+                value=str(row["id"]),
+                description=f"{row['severity']} · {_status_label(row['status'])}"[:100],
+            )
+            for row in rows[:25]
+        ]
+        super().__init__(
+            placeholder="Choisir un incident" if options else "Aucun incident",
+            min_values=1,
+            max_values=1,
+            options=options or [discord.SelectOption(label="Aucun incident", value="0")],
+            disabled=not bool(options),
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.owner.incident_id = int(self.values[0])
+        await interaction.response.defer()
+
+
 class IncidentCenterView(OwnedView):
-    @discord.ui.button(label="Nouvel incident", style=discord.ButtonStyle.primary, emoji=sxemoji.partiel("alert"))
+    def __init__(self, suite: "StaffSuite", owner_id: int, rows):
+        super().__init__(suite, owner_id)
+        self.incident_id: int | None = None
+        self.add_item(IncidentSelect(self, rows))
+
+    @discord.ui.button(label="Nouvel incident", style=discord.ButtonStyle.primary, row=1, emoji=sxemoji.partiel("alert"))
     async def create(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(IncidentModal(self.suite, interaction.guild.id))
+
+    @discord.ui.button(label="M’assigner", style=discord.ButtonStyle.secondary, row=1, emoji=sxemoji.partiel("staff"))
+    async def assign(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if not self.incident_id:
+            return await interaction.response.send_message("Choisissez un incident.", ephemeral=True)
+        await self.suite.bot.db.execute(
+            "UPDATE staff_incidents_v1 SET assigned_to=?, updated_at=? WHERE id=? AND guild_id=?",
+            (interaction.user.id, now(), self.incident_id, interaction.guild.id),
+        )
+        await panels.texte_court(interaction.response, "Incident assigné.", ephemere=True)
+
+    @discord.ui.button(label="Résoudre", style=discord.ButtonStyle.success, row=1, emoji=sxemoji.partiel("success"))
+    async def resolve(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if not self.incident_id:
+            return await interaction.response.send_message("Choisissez un incident.", ephemeral=True)
+        await self.suite.bot.db.execute(
+            "UPDATE staff_incidents_v1 SET status='resolu', updated_at=? WHERE id=? AND guild_id=?",
+            (now(), self.incident_id, interaction.guild.id),
+        )
+        await panels.texte_court(interaction.response, "Incident résolu.", ephemere=True)
 
 
 class AbsenceModal(discord.ui.Modal, title="Déclarer une absence"):
@@ -668,8 +777,10 @@ class AbsenceSelect(discord.ui.Select):
             )
         super().__init__(
             placeholder="Demande à traiter" if options else "Aucune demande en attente",
-            min_values=1 if options else 0,
-            max_values=1 if options else 0,
+            # Même désactivé, Discord attend un Select avec une plage valide.
+            # Le faux choix ne peut pas être cliqué puisque disabled=True.
+            min_values=1,
+            max_values=1,
             options=options or [discord.SelectOption(label="Aucune demande", value="0")],
             disabled=not bool(options),
             row=0,
@@ -747,6 +858,34 @@ class WatchControlView(OwnedView):
             interaction.response,
             await self.suite.watch_panel(interaction.guild, self.member_id, interaction.user.id),
         )
+
+    @discord.ui.button(label="Rapport", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("history"))
+    async def report(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        row = await self.suite.bot.db.fetchone(
+            "SELECT * FROM staff_watches_v1 WHERE id=? AND guild_id=?",
+            (self.watch_id, interaction.guild.id),
+        )
+        events = await self.suite.bot.db.fetchall(
+            "SELECT * FROM staff_watch_events_v1 WHERE watch_id=? ORDER BY created_at DESC LIMIT 25",
+            (self.watch_id,),
+        )
+        if row is None:
+            return await interaction.response.send_message("Surveillance introuvable.", ephemeral=True)
+        body = "\n".join(
+            f"<t:{event['created_at']}:R> · **{event['event_type']}** · {_trim(event['summary'], 500)}"
+            for event in events
+        ) or "Aucun événement enregistré."
+        report = panels.Panneau(
+            titre=f"Rapport surveillance #{self.watch_id}",
+            sous_titre=f"{_mention(self.member_id)} · {_status_label(row['status'])}",
+            kind="moderation",
+            sections=[
+                panels.Section("Raison", texte=row["reason"]),
+                panels.Section("Chronologie", texte=body),
+            ],
+            pied="Surveillance",
+        )
+        await panels.envoyer(interaction.response, report, ephemere=True)
 
     @discord.ui.button(label="Terminer", style=discord.ButtonStyle.danger, emoji=sxemoji.partiel("stop"))
     async def stop(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -843,7 +982,79 @@ class EmergencyView(OwnedView):
         await self._ask(interaction, "unlock", "Déverrouiller ce salon")
 
 
+class StaffReminderModal(discord.ui.Modal, title="Rappel staff"):
+    duration = discord.ui.TextInput(
+        label="Dans combien de temps ?",
+        placeholder="Ex. 30m, 2h, 1j",
+        max_length=20,
+    )
+    note = discord.ui.TextInput(
+        label="Rappel",
+        placeholder="Ex. Revoir le dossier SC-0042",
+        style=discord.TextStyle.paragraph,
+        max_length=900,
+    )
+
+    def __init__(self, suite: "StaffSuite", guild_id: int):
+        super().__init__()
+        self.suite = suite
+        self.guild_id = guild_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        seconds = helpers.parse_duration(str(self.duration.value))
+        if not seconds:
+            return await interaction.response.send_message(
+                "Durée invalide. Exemples : 30m, 2h, 1j.",
+                ephemeral=True,
+            )
+        timestamp = now()
+        await self.suite.bot.db.execute(
+            "INSERT INTO staff_reminders_v1 "
+            "(guild_id,created_by,note,remind_at,status,created_at) VALUES (?,?,?,?,'actif',?)",
+            (
+                self.guild_id,
+                interaction.user.id,
+                str(self.note.value)[:900],
+                timestamp + seconds,
+                timestamp,
+            ),
+        )
+        await panels.texte_court(
+            interaction.response,
+            f"Rappel staff programmé pour <t:{timestamp + seconds}:R>.",
+            ephemere=True,
+        )
+
+
 class StaffCenterView(OwnedView):
+    @discord.ui.button(label="Dossiers", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("case"))
+    async def cases(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await panels.envoyer(
+            interaction.response,
+            await self.suite.cases_center_panel(interaction.guild, interaction.user.id),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Incidents", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("alert"))
+    async def incidents(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await panels.envoyer(
+            interaction.response,
+            await self.suite.incident_center_panel(interaction.guild, interaction.user.id),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Surveillances", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("watch"))
+    async def watches(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await panels.envoyer(
+            interaction.response,
+            await self.suite.watches_center_panel(interaction.guild),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Absences", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("absence"))
+    async def absences(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self.suite.send_absence_center(interaction.response, interaction.guild, interaction.user.id)
+
     @discord.ui.button(label="Rapport", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("chart"))
     async def report(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await panels.envoyer(
@@ -860,15 +1071,49 @@ class StaffCenterView(OwnedView):
             ephemere=True,
         )
 
-    @discord.ui.button(label="Absences", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("absence"))
-    async def absences(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self.suite.send_absence_center(interaction.response, interaction.guild, interaction.user.id)
-
-    @discord.ui.button(label="Surveillances", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("watch"))
-    async def watches(self, interaction: discord.Interaction, _button: discord.ui.Button):
+    @discord.ui.button(label="Diagnostic", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("tools"))
+    async def diagnostic(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await panels.envoyer(
             interaction.response,
-            await self.suite.watches_center_panel(interaction.guild),
+            await self.suite.audit_panel(interaction.guild),
+            ephemere=True,
+        )
+
+    @discord.ui.button(label="Rappel", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("reminder"))
+    async def reminder(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(
+            StaffReminderModal(self.suite, interaction.guild.id)
+        )
+
+    @discord.ui.button(label="Urgence", style=discord.ButtonStyle.danger, emoji=sxemoji.partiel("alert"))
+    async def emergency(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        channel = interaction.channel
+        if not isinstance(channel, discord.TextChannel):
+            return await interaction.response.send_message(
+                "Les actions d’urgence sont disponibles dans un salon texte.",
+                ephemeral=True,
+            )
+        panel = panels.Panneau(
+            titre="Mode urgence",
+            sous_titre=f"Salon actuel : {channel.mention}",
+            kind="warning",
+            sections=[
+                panels.Section(
+                    "Actions",
+                    texte=(
+                        "Chaque action sensible demande une seconde confirmation. "
+                        "Aucun salon n'est créé et aucune action globale n'est lancée automatiquement."
+                    ),
+                )
+            ],
+            pied="SentriX • Sécurité",
+        )
+        await panels.envoyer(
+            interaction.response,
+            panels.avec_composants(
+                panel,
+                EmergencyView(self.suite, interaction.user.id, channel.id),
+            ),
             ephemere=True,
         )
 
@@ -1186,7 +1431,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                 self,
                 owner_id,
                 int(row["id"]),
-                resolved=str(row["status"]) in {"resolu", "archive"},
+                status=str(row["status"]),
             ),
         )
 
@@ -1290,7 +1535,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             sections=[panels.Section("Historique récent", texte=text)],
             pied="SentriX • Incidents",
         )
-        return panels.avec_composants(panel, IncidentCenterView(self, owner_id))
+        return panels.avec_composants(panel, IncidentCenterView(self, owner_id, rows))
 
     async def send_absence_center(self, destination, guild: discord.Guild, owner_id: int):
         pending = await self.bot.db.fetchall(
@@ -1498,6 +1743,44 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             panels.Ligne(label, "OK" if ok else "Manquante")
             for label, ok in checks
         ]
+
+        # Ressources réellement configurées : on ne crée rien et on ne répare
+        # rien automatiquement. Le diagnostic signale seulement ce qui a été
+        # supprimé ou ce qui n'est pas configuré.
+        resource_lines: list[panels.Ligne] = []
+        try:
+            raw_conf = await self.bot.db.get_guild_config(guild.id)
+            conf = dict(raw_conf) if raw_conf is not None else {}
+        except Exception:
+            conf = {}
+        resource_keys = (
+            ("log_channel", "Logs généraux"),
+            ("error_channel", "Erreurs"),
+            ("ticket_log_channel", "Logs tickets"),
+            ("welcome_channel", "Bienvenue"),
+            ("goodbye_channel", "Départ"),
+            ("verification_channel", "Vérification"),
+            ("suggest_channel", "Suggestions"),
+        )
+        for key, label in resource_keys:
+            if key not in conf:
+                continue
+            channel_id = conf.get(key)
+            if not channel_id:
+                resource_lines.append(panels.Ligne(label, "Non configuré"))
+                continue
+            channel = guild.get_channel(int(channel_id))
+            if channel is None:
+                resource_lines.append(panels.Ligne(label, "Salon supprimé"))
+                issues.append(f"{label} : salon supprimé")
+            else:
+                perms_here = channel.permissions_for(me)
+                if not (perms_here.view_channel and perms_here.send_messages):
+                    resource_lines.append(panels.Ligne(label, f"{channel.mention} · permissions insuffisantes"))
+                    issues.append(f"{label} : permissions")
+                else:
+                    resource_lines.append(panels.Ligne(label, f"{channel.mention} · OK"))
+
         open_cases = await self._safe_count(
             "SELECT COUNT(*) AS n FROM staff_cases_v1 WHERE guild_id=? AND status NOT IN ('resolu','archive')",
             (guild.id,),
@@ -1516,6 +1799,11 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             kind="warning" if issues else "success",
             sections=[
                 panels.Section("Permissions du bot", modules),
+                *(
+                    [panels.Section("Ressources configurées", resource_lines)]
+                    if resource_lines
+                    else []
+                ),
                 panels.Section(
                     "État staff",
                     [
@@ -1525,7 +1813,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                     ],
                 ),
             ],
-            pied="SentriX • Audit non destructif",
+            pied="Audit non destructif",
         )
 
     async def _safe_count(self, query: str, params: tuple) -> int:
@@ -1536,11 +1824,13 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             return 0
 
     @commands.hybrid_command(name="member", description="Ouvrir la fiche staff interactive d'un membre.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre à consulter")
     async def member(self, ctx: commands.Context, membre: discord.Member):
         await panels.envoyer(ctx, await self.member_panel(ctx.guild, membre, ctx.author.id))
 
     @commands.hybrid_command(name="note", description="Consulter ou ajouter une note staff privée.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre concerné")
     async def note(self, ctx: commands.Context, membre: discord.Member):
         rows = await self.bot.db.fetchall(
@@ -1559,12 +1849,16 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
 
     @commands.hybrid_command(name="history", aliases=["historique"], description="Afficher la timeline staff complète d'un membre.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre à consulter")
     async def history(self, ctx: commands.Context, membre: discord.Member):
         await panels.envoyer(ctx, await self.history_panel(ctx.guild, membre))
 
-    @commands.hybrid_command(name="staff-proof", aliases=["preuve-dossier"], description="Gérer les preuves d'un dossier staff.")
-    async def staff_proof(self, ctx: commands.Context, case_id: int):
+    # Prefixe « staff- » : « proof » est deja la commande PUBLIQUE de verification
+    # par preuve (cogs/proof_verification.py). Meme nom = cog entier refuse.
+    @commands.hybrid_command(name="staff-proof", aliases=["preuve-dossier"], description="Gérer les preuves d'un dossier staff.", with_app_command=False)
+    @checks.has_permission_or_modrole("moderate_members")
+    async def proof(self, ctx: commands.Context, case_id: int):
         row = await self.bot.db.fetchone(
             "SELECT * FROM staff_cases_v1 WHERE id=? AND guild_id=?",
             (case_id, ctx.guild.id),
@@ -1574,10 +1868,12 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, await self.case_panel(ctx.guild, row, ctx.author.id))
 
     @commands.hybrid_command(name="incident", description="Ouvrir le centre des incidents staff.")
+    @checks.has_permission_or_modrole("moderate_members")
     async def incident(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.incident_center_panel(ctx.guild, ctx.author.id))
 
     @commands.hybrid_command(name="watch", aliases=["surveillance"], description="Gérer la surveillance d'un membre.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre concerné (facultatif)")
     async def watch(self, ctx: commands.Context, membre: discord.Member | None = None):
         if membre is None:
@@ -1597,6 +1893,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
 
     @commands.hybrid_command(name="staff", description="Ouvrir le centre staff SentriX.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Afficher les statistiques d'un membre du staff (facultatif)")
     async def staff(self, ctx: commands.Context, membre: discord.Member | None = None):
         if membre is None:
@@ -1647,10 +1944,12 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, panel)
 
     @commands.hybrid_command(name="handover", description="Générer la transmission pour l'équipe suivante.", with_app_command=False)
+    @checks.has_permission_or_modrole("moderate_members")
     async def handover(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.handover_panel(ctx.guild, ctx.author))
 
     @commands.hybrid_command(name="urgence", aliases=["emergency"], description="Ouvrir les actions d'urgence du salon.", with_app_command=False)
+    @checks.has_permission_or_modrole("manage_channels")
     async def urgence(self, ctx: commands.Context):
         panel = panels.Panneau(
             titre="Mode urgence",
@@ -1673,19 +1972,31 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         )
 
     @commands.hybrid_command(name="audit", description="Auditer la configuration staff et les permissions SentriX.")
+    @checks.is_owner_or_admin_for("configuration")
     async def audit(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.audit_panel(ctx.guild))
 
+    # Prefixe « staff- » : « diagnostic » est deja /diagnostic (cogs/stats.py),
+    # une commande etablie et documentee. Le doublon faisait echouer add_cog,
+    # et c'est la suite staff ENTIERE — 14 commandes — qui disparaissait.
+    @commands.hybrid_command(name="staff-diagnostic", aliases=["diagnostic-staff"], description="Ouvrir le diagnostic SentriX du serveur.")
+    @checks.is_owner_or_admin_for("configuration")
+    async def diagnostic(self, ctx: commands.Context):
+        await panels.envoyer(ctx, await self.audit_panel(ctx.guild))
+
     @commands.hybrid_command(name="report", aliases=["rapport"], description="Générer un rapport staff sur une période.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(jours="Nombre de jours à analyser (1 à 30)")
     async def report(self, ctx: commands.Context, jours: int = 7):
         await panels.envoyer(ctx, await self.report_panel(ctx.guild, days=jours))
 
     @commands.hybrid_command(name="absence", description="Gérer les absences du staff.")
+    @checks.has_permission_or_modrole("moderate_members")
     async def absence(self, ctx: commands.Context):
         await self.send_absence_center(ctx, ctx.guild, ctx.author.id)
 
     @commands.hybrid_command(name="staff-reminder", aliases=["rappel-staff"], description="Créer un rappel staff lié à un dossier ou une tâche.", with_app_command=False)
+    @checks.has_permission_or_modrole("moderate_members")
     async def staff_reminder(
         self,
         ctx: commands.Context,

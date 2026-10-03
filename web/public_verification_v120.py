@@ -261,7 +261,8 @@ def _answer_digest(salt: str, label: str, value: str) -> str:
     return hmac.new(_secret(), payload, hashlib.sha256).hexdigest()
 
 
-def issue_challenge(guild_id: int, user_id: int, code: str, math_answer: str) -> str:
+def issue_challenge(guild_id: int, user_id: int, code: str) -> str:
+    """Émet un challenge humain signé, sans calcul mathématique."""
     salt = secrets.token_urlsafe(12)
     return _issue({
         "kind": "verify_challenge",
@@ -269,7 +270,6 @@ def issue_challenge(guild_id: int, user_id: int, code: str, math_answer: str) ->
         "uid": int(user_id),
         "salt": salt,
         "captcha": _answer_digest(salt, "captcha", code),
-        "math": _answer_digest(salt, "math", math_answer),
         "exp": int(time.time()) + CHALLENGE_TTL,
         "nonce": secrets.token_urlsafe(10),
     })
@@ -281,7 +281,6 @@ def validate_challenge(
     guild_id: int,
     user_id: int,
     captcha: str,
-    math_answer: str,
 ) -> bool:
     payload = _decode(token, kind="verify_challenge")
     if not payload:
@@ -294,10 +293,9 @@ def validate_challenge(
     if not salt:
         return False
     expected_captcha = str(payload.get("captcha") or "")
-    expected_math = str(payload.get("math") or "")
-    return (
-        secrets.compare_digest(expected_captcha, _answer_digest(salt, "captcha", captcha))
-        and secrets.compare_digest(expected_math, _answer_digest(salt, "math", math_answer))
+    return secrets.compare_digest(
+        expected_captcha,
+        _answer_digest(salt, "captcha", captcha),
     )
 
 
@@ -813,7 +811,7 @@ async def _complete_verification(
             guild.id,
             member.id,
             int(time.time()),
-            "web_oauth+captcha+math",
+            "web_oauth+captcha",
             account_age,
         ),
     )
@@ -846,7 +844,7 @@ async def _complete_verification(
                 f"Compte âgé de : **{account_age // 86400} jour(s)**\n"
                 f"Score sécurité : **{security_score:.1f}/{security_threshold:.0f}**\n"
                 f"Observations : **{security_observations}** sur **{security_scans} passes**\n"
-                "Méthode : **OAuth Discord + règlement courant + CAPTCHA web + calcul + analyse adaptative multi-passes**."
+                "Méthode : **OAuth Discord + règlement courant + CAPTCHA web + analyse adaptative multi-passes**."
             ),
             colour=discord.Colour.green(),
         )
@@ -882,9 +880,8 @@ COPY_FR = {
     "preparing": "Préparation du contrôle humain…",
     "start": "Commencer la vérification",
     "captchaTitle": "Vérification humaine",
-    "captchaHint": "Recopie le code affiché puis réponds au calcul.",
+    "captchaHint": "Recopie simplement le code affiché ci-dessous.",
     "captchaPlaceholder": "Code CAPTCHA",
-    "mathPlaceholder": "Résultat du calcul",
     "rulesTitle": "Règlement du serveur",
     "rulesAccept": "J'ai lu et j'accepte la version actuelle du règlement.",
     "verify": "Me vérifier",
@@ -929,9 +926,8 @@ COPY_EN = {
     "preparing": "Preparing the human check…",
     "start": "Start verification",
     "captchaTitle": "Human verification",
-    "captchaHint": "Enter the code shown below and solve the quick math challenge.",
+    "captchaHint": "Simply enter the code shown below.",
     "captchaPlaceholder": "CAPTCHA code",
-    "mathPlaceholder": "Math answer",
     "rulesTitle": "Server rules",
     "rulesAccept": "I have read and accept the current server rules.",
     "verify": "Verify me",
@@ -1010,7 +1006,6 @@ button{appearance:none;border:0;border-radius:13px;padding:13px 17px;font:inheri
         <img id="captchaImage" alt="CAPTCHA">
         <div class="grid">
           <input id="captcha" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="6">
-          <input id="math" inputmode="numeric" autocomplete="off">
         </div>
         <div id="rulesWrap" class="hidden">
           <h3 id="rulesTitle"></h3>
@@ -1039,7 +1034,7 @@ const CAPTCHA_LENGTH=6;
 const $=id=>document.getElementById(id);
 $("eyebrow").textContent=C.eyebrow;$("title").textContent=C.title;$("subtitle").textContent=C.subtitle;
 $("loadingText").textContent=C.loading;$("start").textContent=C.start;$("captchaTitle").textContent=C.captchaTitle;
-$("captchaHint").textContent=C.captchaHint;$("captcha").placeholder=C.captchaPlaceholder;$("math").placeholder=C.mathPlaceholder;
+$("captchaHint").textContent=C.captchaHint;$("captcha").placeholder=C.captchaPlaceholder;
 $("rulesTitle").textContent=C.rulesTitle;$("rulesAccept").textContent=C.rulesAccept;$("verify").textContent=C.verify;
 $("successTitle").textContent=C.success;$("successText").textContent=C.successText;$("redirectText").textContent=C.redirect;
 C.stages.forEach((name,i)=>{const d=document.createElement("div");d.className="stage";d.dataset.i=i;const dot=document.createElement("i");const s=document.createElement("span");s.textContent=name;d.append(dot,s);$("stages").appendChild(d)});
@@ -1066,12 +1061,10 @@ function rulesReady(){return $("rulesWrap").classList.contains("hidden")||$("acc
 function maybeAutoVerify(){
   clearTimeout(autoVerifyTimer);
   const captcha=$("captcha").value.trim().toUpperCase();
-  const math=$("math").value.trim();
-  if(verifyInFlight||captcha.length!==CAPTCHA_LENGTH||!/^-?\d+$/.test(math)||!rulesReady())return;
+  if(verifyInFlight||captcha.length!==CAPTCHA_LENGTH||!rulesReady())return;
   autoVerifyTimer=setTimeout(()=>{if(!verifyInFlight&&rulesReady())$("verify").click()},900);
 }
 $("captcha").addEventListener("input",()=>{$("captcha").value=$("captcha").value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,CAPTCHA_LENGTH);maybeAutoVerify()});
-$("math").addEventListener("input",maybeAutoVerify);
 $("acceptRules").addEventListener("change",maybeAutoVerify);
 async function boot(){
   if(!AUTHENTICATED){setTimeout(()=>location.href="/login?verify_guild="+GUILD_ID,700);return}
@@ -1090,8 +1083,8 @@ $("start").onclick=async()=>{
   try{
     const data=await api("/api/verify/"+GUILD_ID+"/challenge",{method:"POST",body:"{}"});
     challengeToken=data.challenge_token;
-    $("captcha").value="";$("math").value="";$("acceptRules").checked=false;
-    const captchaImage=$("captchaImage");captchaImage.src=data.captcha_image;$("math").placeholder=data.math_question;
+    $("captcha").value="";$("acceptRules").checked=false;
+    const captchaImage=$("captchaImage");captchaImage.src=data.captcha_image;
     try{if(captchaImage.decode)await captchaImage.decode()}catch(e){}
     if(data.rules_published&&!data.rules_accepted){$("rulesText").textContent=data.rules_text||"";$("rulesWrap").classList.remove("hidden")}else{$("rulesWrap").classList.add("hidden")}
     $("loading").classList.add("hidden");$("challenge").classList.remove("hidden");mark(1,"done");mark(2,data.rules_published&&!data.rules_accepted?"active":"done");mark(3,"active");
@@ -1106,7 +1099,7 @@ $("verify").onclick=async()=>{
   [0,1,2,3].forEach(i=>mark(i,"done"));mark(4,"active");mark(5,"");
   startSecurityProgress();
   try{
-    const data=await api("/api/verify/"+GUILD_ID+"/complete",{method:"POST",body:JSON.stringify({challenge_token:challengeToken,captcha:$("captcha").value,math_answer:$("math").value,accept_rules:$("acceptRules").checked})});
+    const data=await api("/api/verify/"+GUILD_ID+"/complete",{method:"POST",body:JSON.stringify({challenge_token:challengeToken,captcha:$("captcha").value,accept_rules:$("acceptRules").checked})});
     stopSecurityProgress();mark(4,"done");mark(5,"done");showSuccess(data.channel_id);
   }catch(e){
     stopSecurityProgress();$("loading").classList.add("hidden");fail(e.message);
@@ -1229,14 +1222,11 @@ async def handle_challenge(request: web.Request) -> web.Response:
 
     rng = secrets.SystemRandom()
     code = "".join(rng.choice(CAPTCHA_ALPHABET) for _ in range(6))
-    left, right = rng.randrange(3, 17), rng.randrange(2, 12)
-    answer = str(left + right)
-    token = issue_challenge(guild.id, member.id, code, answer)
+    token = issue_challenge(guild.id, member.id, code)
     return web.json_response({
         "ok": True,
         "challenge_token": token,
         "captcha_image": _captcha_png(code),
-        "math_question": f"{left} + {right} = ?",
         "expires_in": CHALLENGE_TTL,
         "rules_published": payload["rules_published"],
         "rules_accepted": payload["rules_accepted"],
@@ -1259,7 +1249,6 @@ async def handle_complete(request: web.Request) -> web.Response:
 
     token = str((payload or {}).get("challenge_token") or "")
     captcha = str((payload or {}).get("captcha") or "")
-    math_answer = str((payload or {}).get("math_answer") or "")
     accept_rules = bool((payload or {}).get("accept_rules"))
 
     bot = request.app["bot"]
@@ -1272,7 +1261,6 @@ async def handle_complete(request: web.Request) -> web.Response:
         guild_id=guild.id,
         user_id=member.id,
         captcha=captcha,
-        math_answer=math_answer,
     ):
         locked = await _record_failure(bot, guild.id, member.id)
         event = getattr(cog, "_event", None)
@@ -1281,7 +1269,7 @@ async def handle_complete(request: web.Request) -> web.Response:
                 await event(guild.id, member.id, "web_captcha_failed")
             except Exception:
                 pass
-        message = "CAPTCHA ou calcul incorrect. Un nouveau challenge sera nécessaire."
+        message = "Code CAPTCHA incorrect. Un nouveau challenge sera nécessaire."
         if locked > 0:
             message += f" Trop d'échecs : réessaie dans environ {max(1, (locked + 59) // 60)} minute(s)."
         return _json_error(message, 429 if locked else 400, code="challenge_failed")

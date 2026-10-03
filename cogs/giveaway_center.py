@@ -147,15 +147,39 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
 
     @giveaway.command(name="reroll", aliases=["relancer", "retirage"])
     @checks.is_owner_or_admin()
-    async def giveaway_reroll(self, ctx: commands.Context, message_id: str):
-        """Refaire un tirage sans doublonner un ancien gagnant si possible."""
+    async def giveaway_reroll(
+        self,
+        ctx: commands.Context,
+        message_id: str | None = None,
+    ):
+        """Relancer simplement le dernier tirage, ou cibler un message précis."""
+        v2 = self._v2()
+
+        # Chemin simple demandé : +giveaway reroll suffit et cible le dernier
+        # giveaway V2 terminé du serveur.
+        if message_id is None:
+            if v2 is None:
+                return await panels.texte_court(
+                    ctx,
+                    "Le moteur Giveaway V2 n’est pas disponible.",
+                    ephemere=bool(ctx.interaction),
+                )
+            await v2.handle_reroll(ctx, None)
+            return
+
         try:
             numeric_id = int(message_id)
         except ValueError:
-            return await ctx.send(embed=embeds.error("L’ID du message doit être un nombre."))
-        v2 = self._v2()
+            return await panels.texte_court(
+                ctx,
+                "L’ID du message doit être un nombre.",
+                ephemere=bool(ctx.interaction),
+            )
+
         if v2 and await v2.handle_reroll(ctx, numeric_id):
             return
+        # Compatibilité stricte avec l'ancien moteur lorsque l'utilisateur
+        # fournit explicitement un ID historique.
         await self._deleguer(ctx, "reroll", message_id=message_id)
 
     @giveaway.command(name="cancel", aliases=["annuler"])

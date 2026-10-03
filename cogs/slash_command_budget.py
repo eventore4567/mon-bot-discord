@@ -15,6 +15,11 @@ GLOBAL_CHAT_INPUT_BUDGET = 100
 # proof ci-dessous doivent rester disponibles même quand le catalogue historique remplit
 # déjà le budget.
 PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofexample", "proofstatus"})
+# Les deux portes d'entrée de la suite staff et son diagnostic doivent rester
+# disponibles même quand les 100 racines globales sont déjà occupées.
+# « diagnostic » reste celui de cogs/stats.py ; « staff-diagnostic » est celui de
+# la suite staff. Les deux gardent leur creneau : ce sont deux commandes.
+STAFF_SLASH_PREFERRED = frozenset({"staff", "member", "case", "diagnostic", "staff-diagnostic"})
 
 
 def _v110_public_root_names() -> set[str]:
@@ -70,6 +75,7 @@ def _required_names() -> set[str]:
         _v110_public_root_names()
         | _canonical_group_root_names()
         | set(PROOF_SLASH_PREFERRED)
+        | set(STAFF_SLASH_PREFERRED)
     )
 
 
@@ -242,6 +248,6 @@ def install(bot: commands.Bot) -> None:
         "Budget slash SentriX actif : maximum %s racines, tier1=%s, proof=%s, V110=%s.",
         GLOBAL_CHAT_INPUT_BUDGET,
         len(_required_names()),
-        ",".join(sorted(PROOF_SLASH_PREFERRED)),
+        ",".join(sorted(PROOF_SLASH_PREFERRED | STAFF_SLASH_PREFERRED)),
         len(_v110_public_root_names()),
     )

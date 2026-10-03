@@ -6,6 +6,7 @@ commandes restent disponibles comme filet de compatibilité.
 """
 from __future__ import annotations
 
+import io
 import json
 import random
 import time
@@ -15,6 +16,7 @@ import discord
 from discord.ext import commands, tasks
 
 from utils import helpers
+from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
 
 
@@ -41,7 +43,8 @@ SCHEMA = (
         required_roles_json TEXT NOT NULL DEFAULT '[]',
         excluded_roles_json TEXT NOT NULL DEFAULT '[]',
         bonus_roles_json TEXT NOT NULL DEFAULT '{}',
-        winners_json TEXT NOT NULL DEFAULT '[]'
+        winners_json TEXT NOT NULL DEFAULT '[]',
+        result_message_id INTEGER
     )
     """,
     """
@@ -95,7 +98,9 @@ def _is_image_attachment(attachment: discord.Attachment) -> bool:
 
 
 def _stable_attachment_url(attachment: discord.Attachment) -> str:
-    return str(attachment.url).split("?", 1)[0]
+    # Les URLs Discord peuvent être signées : leur query-string fait partie de
+    # l'URL valide et ne doit jamais être supprimée.
+    return str(attachment.url)
 
 
 @dataclass
@@ -109,6 +114,11 @@ class BuilderState:
     channel_id: int | None = None
     description: str | None = None
     image_url: str | None = None
+    # Média choisi depuis Discord avant publication. Les octets restent en
+    # mémoire jusqu'à l'envoi afin que le giveaway possède une vraie pièce
+    # jointe durable, plutôt qu'une URL d'upload temporaire.
+    image_bytes: bytes | None = field(default=None, repr=False)
+    image_filename: str | None = None
     ping_role_id: int | None = None
     required_roles: list[int] = field(default_factory=list)
     excluded_roles: list[int] = field(default_factory=list)
@@ -233,8 +243,24 @@ class MediaModal(discord.ui.Modal, title="Giveaway — média"):
 
         if remove:
             self.owner.state.image_url = None
+            self.owner.state.image_bytes = None
+            self.owner.state.image_filename = None
         elif attachment is not None:
-            self.owner.state.image_url = _stable_attachment_url(attachment)
+            try:
+                payload = await attachment.read()
+            except Exception:
+                payload = None
+            if payload:
+                filename = str(getattr(attachment, "filename", "") or "giveaway-media.png")
+                filename = filename.replace("/", "_").replace("\\", "_")[:120]
+                self.owner.state.image_bytes = bytes(payload)
+                self.owner.state.image_filename = filename
+                self.owner.state.image_url = None
+            else:
+                # Repli exceptionnel si Discord ne fournit pas les octets.
+                self.owner.state.image_url = _stable_attachment_url(attachment)
+                self.owner.state.image_bytes = None
+                self.owner.state.image_filename = None
 
         await self.owner.refresh(interaction)
 
@@ -463,10 +489,10 @@ class RoleSetupView(discord.ui.View):
                 ephemeral=True,
             )
         view = BonusMultiplierView(self)
-        await interaction.response.send_message(
-            embed=view.summary_embed(),
-            view=view,
-            ephemeral=True,
+        await panels.envoyer(
+            interaction.response,
+            panels.avec_composants(panels.depuis_embed(view.summary_embed()), view),
+            ephemere=True,
         )
 
 
@@ -578,7 +604,7 @@ class GiveawayBuilderView(discord.ui.View):
         e.add_field(name="Essentiel", value="\n".join(essentials), inline=False)
         e.add_field(name="Rôles et bonus", value="\n".join(roles) if roles else "Aucun rôle configuré.", inline=False)
         e.add_field(name="Conditions", value="\n".join(conditions) if conditions else "Aucune condition supplémentaire.", inline=False)
-        e.add_field(name="Média", value="Image / GIF sélectionné depuis Discord." if state.image_url else "Aucun média.", inline=False)
+        e.add_field(name="Média", value="Image / GIF sélectionné depuis Discord." if (state.image_url or state.image_bytes) else "Aucun média.", inline=False)
         e.set_footer(text="SentriX • Aperçu avant publication disponible")
         return e
 
@@ -631,7 +657,20 @@ class GiveawayBuilderView(discord.ui.View):
         if missing:
             return await interaction.response.send_message("Il manque : " + ", ".join(missing) + ".", ephemeral=True)
         end_at = int(time.time()) + int(self.state.duration_seconds or 0)
-        await interaction.response.send_message(embed=self.cog.build_public_embed(self.ctx.guild, self.state, end_at, self.ctx.author), ephemeral=True)
+        preview_file = self.cog.media_file(self.state)
+        await panels.envoyer(
+            interaction.response,
+            self.cog.build_public_panel(
+                self.ctx.guild,
+                self.state,
+                end_at,
+                self.ctx.author,
+                count=0,
+                interactive=False,
+            ),
+            ephemere=True,
+            file=preview_file,
+        )
 
     @discord.ui.button(label="Publier", style=discord.ButtonStyle.success, row=1)
     async def publish(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -676,7 +715,12 @@ class AdvancedGiveawayView(discord.ui.View):
     def __init__(self, count: int | None = None):
         super().__init__(timeout=None)
         label = "Participer" if count is None else f"Participer • {count}"
-        button = discord.ui.Button(label=label, emoji="🎉", style=discord.ButtonStyle.primary, custom_id="sentrix:giveaway:v2:enter")
+        button = discord.ui.Button(
+            label=label,
+            emoji=sxemoji.partiel("giveaway") or sxemoji.partiel("gift"),
+            style=discord.ButtonStyle.primary,
+            custom_id="sentrix:giveaway:v2:enter",
+        )
         button.callback = self.enter
         self.add_item(button)
 
@@ -685,6 +729,89 @@ class AdvancedGiveawayView(discord.ui.View):
         if cog is None:
             return await interaction.response.send_message("Le module giveaway redémarre. Réessayez dans quelques secondes.", ephemeral=True)
         await cog.toggle_entry(interaction)
+
+
+class GiveawayResultView(discord.ui.LayoutView):
+    """Annonce de gagnant simple, proche d'un message Discord natif premium."""
+
+    def __init__(self, cog: "GiveawayV2", row, winners: list[int]):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.giveaway_id = int(row["id"])
+        self.guild_id = int(row["guild_id"])
+        self.channel_id = int(row["channel_id"])
+        self.message_id = int(row["message_id"])
+
+        winner_mentions = ", ".join(f"<@{uid}>" for uid in winners)
+        if winners:
+            verb = "a gagné" if len(winners) == 1 else "ont gagné"
+            result_text = f"{winner_mentions} {verb} le giveaway de **{row['prize']}** !"
+        else:
+            result_text = f"Aucun participant éligible pour **{row['prize']}**."
+
+        container = discord.ui.Container()
+        container.add_item(discord.ui.TextDisplay("## Félicitations ! 🎉"))
+        container.add_item(discord.ui.TextDisplay(result_text))
+        container.add_item(
+            discord.ui.TextDisplay(f"**Organisé par** · <@{int(row['created_by'])}>")
+        )
+
+        actions = discord.ui.ActionRow()
+        actions.add_item(
+            discord.ui.Button(
+                label="Aller au giveaway",
+                url=(
+                    f"https://discord.com/channels/{self.guild_id}/"
+                    f"{self.channel_id}/{self.message_id}"
+                ),
+            )
+        )
+        reroll_button = discord.ui.Button(
+            label="Relancer le tirage",
+            style=discord.ButtonStyle.secondary,
+            emoji=sxemoji.partiel("refresh") or sxemoji.partiel("sync"),
+            custom_id=f"sentrix:giveaway:v2:result-reroll:{self.giveaway_id}",
+        )
+        reroll_button.callback = self.reroll
+        actions.add_item(reroll_button)
+        container.add_item(actions)
+        self.add_item(container)
+
+    async def reroll(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        if guild is None:
+            return await interaction.response.send_message(
+                "Cette action doit être utilisée dans le serveur.",
+                ephemeral=True,
+            )
+        perms = getattr(interaction.user, "guild_permissions", None)
+        is_admin = bool(perms and perms.administrator)
+        if interaction.user.id != guild.owner_id and not is_admin:
+            return await interaction.response.send_message(
+                "Seul le propriétaire ou un administrateur peut relancer ce tirage.",
+                ephemeral=True,
+            )
+
+        row = await self.cog.bot.db.fetchone(
+            "SELECT * FROM giveaways_v2 WHERE id=? AND guild_id=?",
+            (self.giveaway_id, guild.id),
+        )
+        if row is None or row["status"] != "termine":
+            return await interaction.response.send_message(
+                "Ce giveaway n'est plus disponible pour un nouveau tirage.",
+                ephemeral=True,
+            )
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        winners = await self.cog.finish(row, reroll=True)
+        await interaction.followup.send(
+            (
+                f"Nouveau tirage effectué : {len(winners)} gagnant(s)."
+                if winners
+                else "Nouveau tirage effectué, mais aucun participant n'est éligible."
+            ),
+            ephemeral=True,
+        )
 
 
 class GiveawayV2(commands.Cog, name="GiveawayV2"):
@@ -696,6 +823,18 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
     async def cog_load(self):
         await self.ensure_schema()
         self.bot.add_view(AdvancedGiveawayView())
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM giveaways_v2 "
+            "WHERE status='termine' AND result_message_id IS NOT NULL"
+        )
+        for row in rows:
+            try:
+                self.bot.add_view(
+                    GiveawayResultView(self, row, _ids(row["winners_json"])),
+                    message_id=int(row["result_message_id"]),
+                )
+            except (TypeError, ValueError):
+                continue
 
     def cog_unload(self):
         self.check_ends.cancel()
@@ -705,6 +844,15 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             return
         for statement in SCHEMA:
             await self.bot.db.execute(statement)
+
+        # Migration additive pour les bases déjà existantes : CREATE TABLE IF NOT
+        # EXISTS n'ajoute pas les nouvelles colonnes.
+        columns = await self.bot.db.fetchall("PRAGMA table_info(giveaways_v2)")
+        column_names = {str(row["name"]) for row in columns}
+        if "result_message_id" not in column_names:
+            await self.bot.db.execute(
+                "ALTER TABLE giveaways_v2 ADD COLUMN result_message_id INTEGER"
+            )
         self._schema_ready = True
 
     def missing_base(self, state: BuilderState) -> list[str]:
@@ -721,50 +869,145 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         msg = await panels.envoyer(ctx, panneau)
         view.message = msg
 
-    def build_public_embed(self, guild: discord.Guild, state: BuilderState, end_at: int, author) -> discord.Embed:
-        e = discord.Embed(
-            title=f"Giveaway — {state.prize}",
-            description=(
-                ((state.description + "\n\n") if state.description else "")
-                + "Cliquez sur **Participer** pour entrer dans le tirage. "
-                + "Les conditions sont vérifiées à l’entrée puis de nouveau au tirage."
-            ),
-            colour=discord.Colour.blurple(),
+    @staticmethod
+    def media_file(state: BuilderState) -> discord.File | None:
+        if not state.image_bytes or not state.image_filename:
+            return None
+        return discord.File(
+            io.BytesIO(state.image_bytes),
+            filename=state.image_filename,
         )
-        e.add_field(name="Récompense", value=f"**{state.prize}**", inline=False)
-        e.add_field(name="Fin", value=f"<t:{end_at}:R>\n<t:{end_at}:F>", inline=True)
-        e.add_field(name="Gagnants", value=str(state.winners), inline=True)
-        e.add_field(name="Organisé par", value=getattr(author, "mention", str(author)), inline=True)
 
-        conditions = []
+    def build_public_panel(
+        self,
+        guild: discord.Guild,
+        state: BuilderState,
+        end_at: int,
+        author,
+        *,
+        count: int = 0,
+        interactive: bool = True,
+        status: str = "actif",
+        winners: list[int] | None = None,
+    ) -> panels.Panneau:
+        conditions: list[str] = []
         if state.required_roles:
-            conditions.append("**Obligatoire** — " + ", ".join(f"<@&{x}>" for x in state.required_roles))
+            conditions.append("**Obligatoire** · " + ", ".join(f"<@&{x}>" for x in state.required_roles))
         if state.excluded_roles:
-            conditions.append("**Interdit** — " + ", ".join(f"<@&{x}>" for x in state.excluded_roles))
+            conditions.append("**Interdit** · " + ", ".join(f"<@&{x}>" for x in state.excluded_roles))
         if state.min_invites:
-            conditions.append(f"**Invitations** — {state.min_invites} minimum")
+            conditions.append(f"**Invitations** · {state.min_invites} minimum")
         if state.min_account_age_days:
-            conditions.append(f"**Âge du compte** — {state.min_account_age_days} jour(s) minimum")
+            conditions.append(f"**Âge du compte** · {state.min_account_age_days} jour(s) minimum")
         if state.min_server_age_days:
-            conditions.append(f"**Présence serveur** — {state.min_server_age_days} jour(s) minimum")
+            conditions.append(f"**Présence serveur** · {state.min_server_age_days} jour(s) minimum")
         if state.custom_condition:
-            conditions.append(f"**Condition personnalisée** — {state.custom_condition}")
-        e.add_field(
-            name="Conditions",
-            value="\n".join(conditions)[:1024] if conditions else "Aucune condition supplémentaire.",
-            inline=False,
+            conditions.append(f"**Condition personnalisée** · {state.custom_condition}")
+
+        bonus_lines = [
+            f"<@&{role_id}> · **x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}**"
+            for role_id in state.bonus_roles
+        ]
+
+        info_lines = [
+            panels.Ligne("Fin", f"<t:{end_at}:R> · <t:{end_at}:F>"),
+            panels.Ligne("Gagnants", str(state.winners)),
+            panels.Ligne("Participants", str(count)),
+            panels.Ligne("Organisé par", getattr(author, "mention", str(author))),
+        ]
+        if status == "termine":
+            mentions = ", ".join(f"<@{uid}>" for uid in (winners or [])) or "Aucun participant éligible"
+            info_lines.append(panels.Ligne("Résultat", mentions))
+        elif status == "annule":
+            info_lines.append(panels.Ligne("Statut", "Annulé"))
+
+        sections = [
+            panels.Section("Informations", info_lines),
+            panels.Section(
+                "Conditions",
+                texte="\n".join(conditions) if conditions else "Aucune condition supplémentaire.",
+            ),
+        ]
+        if bonus_lines:
+            sections.append(panels.Section("Chances bonus", texte="\n".join(bonus_lines)))
+
+        description = str(state.description or "").strip()
+        if status == "actif":
+            helper = "Cliquez sur **Participer** pour entrer ou vous retirer du tirage."
+            description = f"{description}\n{helper}".strip()
+        elif status == "termine":
+            description = f"{description}\nLe tirage est terminé.".strip()
+        else:
+            description = f"{description}\nCe giveaway a été annulé.".strip()
+
+        panel = panels.Panneau(
+            titre=f"Giveaway — {state.prize}",
+            sous_titre=description or None,
+            kind="info" if status == "actif" else ("success" if status == "termine" else "warning"),
+            sections=sections,
+            image=(
+                f"attachment://{state.image_filename}"
+                if state.image_bytes and state.image_filename
+                else state.image_url
+            ),
+            pied="Giveaway",
+        )
+        if interactive and status == "actif":
+            panel = panels.avec_composants(panel, AdvancedGiveawayView(count))
+        return panel
+
+    def _state_from_row(self, row) -> BuilderState:
+        bonus_map = _bonus(row["bonus_roles_json"])
+        return BuilderState(
+            author_id=int(row["created_by"]),
+            guild_id=int(row["guild_id"]),
+            prize=str(row["prize"]),
+            duration_seconds=max(0, int(row["end_at"]) - int(row["created_at"])),
+            winners=max(1, int(row["winners_count"] or 1)),
+            channel_id=int(row["channel_id"]),
+            required_roles=_ids(row["required_roles_json"]),
+            excluded_roles=_ids(row["excluded_roles_json"]),
+            bonus_roles=list(bonus_map.keys()),
+            bonus_multiplier=2,
+            bonus_multipliers=bonus_map,
+            ping_role_id=row["ping_role_id"],
+            min_invites=int(row["min_invites"] or 0),
+            min_account_age_days=int(row["min_account_age_days"] or 0),
+            min_server_age_days=int(row["min_server_age_days"] or 0),
+            custom_condition=row["custom_condition"],
+            image_url=row["image_url"],
+            description=row["description"],
         )
 
-        if state.bonus_roles:
-            bonus_lines = [
-                f"<@&{role_id}> — **x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}**"
-                for role_id in state.bonus_roles
-            ]
-            e.add_field(name="Chances bonus", value="\n".join(bonus_lines)[:1024], inline=False)
-        if state.image_url:
-            e.set_image(url=state.image_url)
-        e.set_footer(text="SentriX • Giveaway")
-        return e
+    async def public_panel_from_row(
+        self,
+        guild: discord.Guild,
+        row,
+        *,
+        count: int | None = None,
+        status: str | None = None,
+        winners: list[int] | None = None,
+    ) -> panels.Panneau:
+        if count is None:
+            count_row = await self.bot.db.fetchone(
+                "SELECT COUNT(*) AS n FROM giveaway_entries_v2 WHERE giveaway_id=?",
+                (row["id"],),
+            )
+            count = int(count_row["n"] if count_row else 0)
+        state = self._state_from_row(row)
+        author = guild.get_member(int(row["created_by"])) or discord.Object(id=int(row["created_by"]))
+        if not hasattr(author, "mention"):
+            author = f"<@{row['created_by']}>"
+        return self.build_public_panel(
+            guild,
+            state,
+            int(row["end_at"]),
+            author,
+            count=count,
+            interactive=(status or row["status"]) == "actif",
+            status=str(status or row["status"]),
+            winners=winners if winners is not None else _ids(row["winners_json"]),
+        )
 
     async def publish(self, guild: discord.Guild, state: BuilderState, author) -> discord.Message:
         await self.ensure_schema()
@@ -772,14 +1015,31 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         if not isinstance(channel, (discord.TextChannel, discord.Thread)) and getattr(channel, "send", None) is None:
             raise ValueError("salon de destination introuvable")
         end_at = int(time.time()) + int(state.duration_seconds or 0)
-        embed = self.build_public_embed(guild, state, end_at, author)
-        content = f"<@&{state.ping_role_id}>" if state.ping_role_id else None
-        msg = await channel.send(
-            content=content,
-            embed=embed,
-            view=AdvancedGiveawayView(0),
-            allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False, replied_user=False),
-        )
+        panel = self.build_public_panel(guild, state, end_at, author, count=0)
+
+        # Le panneau Components V2 ne peut pas porter de content. Le ping éventuel
+        # est donc un message minimal et temporaire, envoyé APRÈS le panneau afin
+        # de ne jamais laisser un ping orphelin si le rendu échoue.
+        media_file = self.media_file(state)
+        msg = await panels.envoyer(channel, panel, file=media_file)
+        published_image_url = state.image_url
+        if state.image_filename:
+            for attachment in getattr(msg, "attachments", ()) or ():
+                if str(getattr(attachment, "filename", "")) == state.image_filename:
+                    published_image_url = str(attachment.url)
+                    break
+        if state.ping_role_id:
+            try:
+                await channel.send(
+                    f"<@&{state.ping_role_id}>",
+                    allowed_mentions=discord.AllowedMentions(
+                        roles=True, users=False, everyone=False, replied_user=False
+                    ),
+                    delete_after=5,
+                )
+            except discord.HTTPException:
+                pass
+
         bonus_map = {
             str(role_id): int(state.bonus_multipliers.get(role_id, state.bonus_multiplier))
             for role_id in state.bonus_roles
@@ -788,7 +1048,7 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             "INSERT INTO giveaways_v2 (guild_id,channel_id,message_id,prize,winners_count,end_at,status,created_by,created_at,ping_role_id,image_url,description,custom_condition,min_invites,min_account_age_days,min_server_age_days,required_roles_json,excluded_roles_json,bonus_roles_json,winners_json) VALUES (?,?,?,?,?,?,'actif',?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 guild.id, channel.id, msg.id, state.prize, state.winners, end_at,
-                author.id, int(time.time()), state.ping_role_id, state.image_url, state.description,
+                author.id, int(time.time()), state.ping_role_id, published_image_url, state.description,
                 state.custom_condition, state.min_invites, state.min_account_age_days, state.min_server_age_days,
                 json.dumps(state.required_roles), json.dumps(state.excluded_roles), json.dumps(bonus_map), "[]",
             ),
@@ -863,7 +1123,21 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         count_row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM giveaway_entries_v2 WHERE giveaway_id=?", (row["id"],))
         count = int(count_row["n"] if count_row else 0)
         try:
-            await interaction.message.edit(view=AdvancedGiveawayView(count))
+            if interaction.message.embeds:
+                # Giveaway créé avant la migration Components V2 : on conserve
+                # uniquement son bouton pour ne pas tenter une conversion que
+                # Discord refuse par édition.
+                await interaction.message.edit(view=AdvancedGiveawayView(count))
+            else:
+                await panels.editer(
+                    interaction.message,
+                    await self.public_panel_from_row(
+                        interaction.guild,
+                        row,
+                        count=count,
+                        status="actif",
+                    ),
+                )
         except discord.HTTPException:
             pass
         await interaction.response.send_message(text, ephemeral=True)
@@ -883,35 +1157,88 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
                 pool.append((member.id, weight))
         return pool
 
+    async def _upsert_result_announcement(
+        self,
+        guild: discord.Guild,
+        row,
+        winners: list[int],
+    ) -> discord.Message | None:
+        channel = guild.get_channel(int(row["channel_id"]))
+        if channel is None or getattr(channel, "send", None) is None:
+            return None
+
+        view = GiveawayResultView(self, row, winners)
+        result_message_id = row["result_message_id"]
+        if result_message_id:
+            try:
+                message = await channel.fetch_message(int(result_message_id))
+                await message.edit(view=view)
+                return message
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+
+        message = await channel.send(view=view)
+        await self.bot.db.execute(
+            "UPDATE giveaways_v2 SET result_message_id=? WHERE id=?",
+            (message.id, row["id"]),
+        )
+        return message
+
     async def finish(self, row, *, reroll: bool = False) -> list[int]:
         guild = self.bot.get_guild(int(row["guild_id"]))
         if guild is None:
             return []
+
         pool = await self._eligible_pool(row, guild)
         previous = _ids(row["winners_json"])
         if reroll and previous:
             without_previous = [(uid, weight) for uid, weight in pool if uid not in previous]
             if without_previous:
                 pool = without_previous
+
         winners = _weighted_unique(pool, int(row["winners_count"] or 1))
         if not reroll:
-            await self.bot.db.execute("UPDATE giveaways_v2 SET status='termine', winners_json=? WHERE id=?", (json.dumps(winners), row["id"]))
+            await self.bot.db.execute(
+                "UPDATE giveaways_v2 SET status='termine', winners_json=? WHERE id=?",
+                (json.dumps(winners), row["id"]),
+            )
         else:
-            await self.bot.db.execute("UPDATE giveaways_v2 SET winners_json=? WHERE id=?", (json.dumps(winners), row["id"]))
-        channel = guild.get_channel(int(row["channel_id"]))
-        mentions = ", ".join(f"<@{x}>" for x in winners) if winners else "Aucun participant éligible"
+            await self.bot.db.execute(
+                "UPDATE giveaways_v2 SET winners_json=? WHERE id=?",
+                (json.dumps(winners), row["id"]),
+            )
+
+        fresh = await self.bot.db.fetchone(
+            "SELECT * FROM giveaways_v2 WHERE id=?",
+            (row["id"],),
+        ) or row
+
+        channel = guild.get_channel(int(fresh["channel_id"]))
         if channel and getattr(channel, "send", None):
-            title = "🎉 Nouveau tirage" if reroll else "🎉 Giveaway terminé"
-            await channel.send(embed=discord.Embed(title=title, description=f"**{row['prize']}**\n\nGagnant(s) : {mentions}", colour=discord.Colour.blurple()))
             try:
-                original = await channel.fetch_message(int(row["message_id"]))
+                original = await channel.fetch_message(int(fresh["message_id"]))
+                finished_panel = await self.public_panel_from_row(
+                    guild,
+                    fresh,
+                    status="termine",
+                    winners=winners,
+                )
                 if original.embeds:
-                    embed = original.embeds[0]
-                    embed.description = (embed.description or "") + f"\n\n**Terminé — gagnant(s) :** {mentions}"
-                    embed.colour = discord.Colour.dark_grey()
-                    await original.edit(embed=embed, view=None)
+                    # Message historique : on retire seulement l'ancien bouton.
+                    await original.edit(view=None)
+                else:
+                    await panels.editer(original, finished_panel)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
+
+            # Une seule annonce "Félicitations" par giveaway. Un reroll met à
+            # jour ce même message au lieu d'en créer un nouveau.
+            fresh = await self.bot.db.fetchone(
+                "SELECT * FROM giveaways_v2 WHERE id=?",
+                (row["id"],),
+            ) or fresh
+            await self._upsert_result_announcement(guild, fresh, winners)
+
         return winners
 
     async def handle_end(self, ctx: commands.Context, message_id: int) -> bool:
@@ -925,15 +1252,51 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         await ctx.send(f"Giveaway terminé. {len(winners)} gagnant(s) tiré(s).")
         return True
 
-    async def handle_reroll(self, ctx: commands.Context, message_id: int) -> bool:
-        row = await self.bot.db.fetchone("SELECT * FROM giveaways_v2 WHERE guild_id=? AND message_id=?", (ctx.guild.id, message_id))
-        if row is None:
-            return False
+    async def handle_reroll(
+        self,
+        ctx: commands.Context,
+        message_id: int | None = None,
+    ) -> bool:
+        if message_id is None:
+            row = await self.bot.db.fetchone(
+                "SELECT * FROM giveaways_v2 "
+                "WHERE guild_id=? AND status='termine' "
+                "ORDER BY end_at DESC, id DESC LIMIT 1",
+                (ctx.guild.id,),
+            )
+            if row is None:
+                await panels.texte_court(
+                    ctx,
+                    "Aucun giveaway V2 terminé à relancer.",
+                    ephemere=bool(ctx.interaction),
+                )
+                return True
+        else:
+            row = await self.bot.db.fetchone(
+                "SELECT * FROM giveaways_v2 WHERE guild_id=? AND message_id=?",
+                (ctx.guild.id, message_id),
+            )
+            if row is None:
+                return False
+
         if row["status"] != "termine":
-            await ctx.send("Terminez d’abord ce giveaway avant de refaire un tirage.")
+            await panels.texte_court(
+                ctx,
+                "Terminez d’abord ce giveaway avant de refaire un tirage.",
+                ephemere=bool(ctx.interaction),
+            )
             return True
+
         winners = await self.finish(row, reroll=True)
-        await ctx.send(f"Nouveau tirage effectué : {len(winners)} gagnant(s).")
+        await panels.texte_court(
+            ctx,
+            (
+                f"Tirage relancé : {len(winners)} gagnant(s)."
+                if winners
+                else "Tirage relancé : aucun participant éligible."
+            ),
+            ephemere=bool(ctx.interaction),
+        )
         return True
 
     async def handle_cancel(self, ctx: commands.Context, message_id: int) -> bool:
@@ -948,14 +1311,23 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         if channel:
             try:
                 original = await channel.fetch_message(message_id)
+                fresh = await self.bot.db.fetchone(
+                    "SELECT * FROM giveaways_v2 WHERE id=?",
+                    (row["id"],),
+                ) or row
+                cancelled_panel = await self.public_panel_from_row(
+                    ctx.guild,
+                    fresh,
+                    status="annule",
+                )
                 if original.embeds:
-                    embed = original.embeds[0]
-                    embed.description = (embed.description or "") + "\n\n**Giveaway annulé.**"
-                    embed.colour = discord.Colour.dark_grey()
-                    await original.edit(embed=embed, view=None)
+                    await original.edit(view=None)
+                    await panels.envoyer(channel, cancelled_panel)
+                else:
+                    await panels.editer(original, cancelled_panel)
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
-        await ctx.send("Giveaway annulé.")
+        await panels.texte_court(ctx, "Giveaway annulé.")
         return True
 
     @tasks.loop(seconds=15)

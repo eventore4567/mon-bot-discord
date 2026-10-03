@@ -235,10 +235,12 @@ def _base(
 ) -> discord.Embed:
     safe_title = clean_ui_text(title, 90, "Information")
     resolved_kind = kind or _kind_from_text(safe_title, description)
+    # Aucun colour/color sur les embeds SentriX : Discord transforme cette
+    # valeur en liseré vertical coloré sur le côté gauche. Le design officiel
+    # utilise désormais le contenu, les icônes et les composants, jamais ce trait.
     embed = discord.Embed(
         title=safe_title,
         description=_panel_description(description, clean=clean_description),
-        colour=discord.Colour(_colour(resolved_kind, colour)),
         timestamp=datetime.now(timezone.utc) if timestamp else None,
     )
     if thumbnail:
@@ -384,7 +386,7 @@ def enrich_ping(embed: discord.Embed, bot: Any) -> discord.Embed:
     embed.add_field(name="Serveurs", value=f"{server_count:,}", inline=True)
     embed.add_field(name="Membres", value=f"{member_count:,}", inline=True)
     embed.add_field(name="Shards", value=str(shard_count), inline=True)
-    embed.colour = discord.Colour(COLOR_INFO)
+    embed.colour = None
     embed.set_footer(text="SentriX • Mesure en temps réel")
     return embed
 
@@ -398,12 +400,9 @@ def style_existing(embed: discord.Embed | None, *, root: str = "", bot: Any = No
         embed.description = f"{BAR}\n{clip(description, 3970)}" if description else BAR
     for index, field in enumerate(list(embed.fields)):
         embed.set_field_at(index, name=clean_ui_text(field.name, 256, "Information"), value=str(field.value or "—")[:1024], inline=bool(field.inline))
-    kind = _kind_from_text(embed.title, embed.description)
-    current_colour = int(getattr(getattr(embed, "colour", None), "value", 0) or 0)
-    if kind != "brand":
-        embed.colour = discord.Colour(_colour(kind))
-    elif not current_colour:
-        embed.colour = discord.Colour(COLOR_BRAND_UI)
+    # Nettoyage global du liseré vertical historique. Même un embed créé par
+    # un ancien cog avec colour=/color= perd sa couleur avant envoi.
+    embed.colour = None
     author_name = str(getattr(getattr(embed, "author", None), "name", "") or "")
     if author_name.casefold().startswith(("sentrix", "odboug")):
         embed.remove_author()
@@ -436,6 +435,16 @@ def clean_view(view: Any) -> Any:
     jeu = commande_de_jeu()
 
     for item in _iter_view_items(view):
+        # Components V2 peut lui aussi afficher un accent vertical si un vieux
+        # Container a reçu accent_color/accent_colour. On le neutralise ici
+        # dans le dernier nettoyage de vue.
+        if isinstance(item, discord.ui.Container):
+            for attr in ("accent_color", "accent_colour"):
+                try:
+                    if hasattr(item, attr):
+                        setattr(item, attr, None)
+                except Exception:
+                    pass
         if isinstance(item, discord.ui.Button):
             if item.label:
                 item.label = clean_ui_text(item.label, 80, "Action")

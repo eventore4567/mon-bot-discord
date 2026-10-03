@@ -1412,7 +1412,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                     f"Portail : {result['verify'].mention}\n"
                     f"Piège : {result['trap'].mention}\n"
                     f"Sanction honeypot : **{'Softban' if sanction == 'softban' else 'Expulsion'}**\n"
-                    "Accès : OAuth Discord + règlement + contrôle du compte + CAPTCHA web + calcul. "
+                    "Accès : OAuth Discord + règlement + contrôle du compte + CAPTCHA web. "
                     "Une mise à jour ne crée aucun nouveau salon."
                 ),
                 ephemeral=True,
@@ -1449,7 +1449,7 @@ async def _patch_setup_when_available(bot: commands.Bot) -> None:
                 f"● **Web** — Honeypot : **{sanction}**\n"
                 f"Vérification : {verify}\n"
                 f"Salon piège : {trap}\n"
-                "Contrôles : OAuth Discord + règlement + âge du compte + CAPTCHA web + calcul"
+                "Contrôles : OAuth Discord + règlement + âge du compte + CAPTCHA web"
             )
         embed.add_field(name="🔐 Vérification d'accès", value=value, inline=False)
         return embed

@@ -10,6 +10,7 @@ import discord
 from discord.ext import commands, tasks
 
 from utils import checks, embeds
+from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
 
 
@@ -183,6 +184,105 @@ async def _extract_latest(source_url: str) -> dict | None:
     )
 
 
+def _extract_details_sync(item_url: str) -> dict | None:
+    """Charge les métadonnées complètes UNIQUEMENT pour une nouvelle publication.
+
+    Le scan périodique reste léger grâce à extract_flat. Quand l'identifiant change,
+    on effectue alors un second passage ciblé afin d'obtenir la vraie miniature,
+    le vrai titre et l'URL canonique. TikTok est précisément l'une des plateformes
+    dont les entrées plates omettent souvent la miniature.
+    """
+    import yt_dlp
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "ignoreerrors": True,
+        "socket_timeout": 12,
+    }
+    with yt_dlp.YoutubeDL(options) as downloader:
+        info = downloader.extract_info(item_url, download=False)
+    return info if isinstance(info, dict) else None
+
+
+async def _extract_details(item_url: str) -> dict | None:
+    return await asyncio.wait_for(
+        asyncio.to_thread(_extract_details_sync, item_url),
+        timeout=20,
+    )
+
+
+def _best_thumbnail(item: dict, custom_url: str | None = None) -> str | None:
+    """Retourne une image exploitable, sans laisser une URL vide casser la carte."""
+    candidates = [
+        custom_url,
+        item.get("thumbnail"),
+    ]
+    thumbnails = item.get("thumbnails") or []
+    if isinstance(thumbnails, list):
+        for thumb in reversed(thumbnails):
+            if isinstance(thumb, dict):
+                candidates.append(thumb.get("url"))
+    for candidate in candidates:
+        if isinstance(candidate, str) and _valid_https_url(candidate):
+            return candidate
+    return None
+
+
+class SocialNotificationPanel(discord.ui.LayoutView):
+    """Carte sociale premium sans embed, bannière, liseré latéral ni signature lourde."""
+
+    def __init__(
+        self,
+        *,
+        platform: str,
+        title: str,
+        description: str,
+        link: str,
+        image_url: str | None,
+        creator: str | None = None,
+    ):
+        super().__init__(timeout=None)
+        container = discord.ui.Container()
+
+        icon = sxemoji.emoji("video")
+        heading = f"{icon} {title}".strip() if icon else title
+        container.add_item(discord.ui.TextDisplay(f"## {heading[:220]}"))
+
+        meta = f"**{platform}**"
+        if creator:
+            meta += f" · {str(creator)[:80]}"
+        meta += f" · <t:{int(time.time())}:R>"
+        container.add_item(discord.ui.TextDisplay(meta))
+
+        body = str(description or "").strip()
+        if body:
+            container.add_item(discord.ui.TextDisplay(body[:900]))
+
+        if image_url:
+            try:
+                gallery = discord.ui.MediaGallery()
+                gallery.add_item(media=image_url)
+                container.add_item(gallery)
+            except Exception:
+                logger.debug("Miniature sociale refusée : %s", image_url, exc_info=True)
+
+        row = discord.ui.ActionRow()
+        row.add_item(
+            discord.ui.Button(
+                label=f"Voir sur {platform}"[:80],
+                url=link,
+                emoji=sxemoji.partiel("video"),
+            )
+        )
+        container.add_item(row)
+        container.add_item(
+            discord.ui.TextDisplay(f"-# SentriX · {platform} · publication automatique")
+        )
+        self.add_item(container)
+
+
 class Notifications(commands.Cog, name="Notifications"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -247,37 +347,68 @@ class Notifications(commands.Cog, name="Notifications"):
 
         platform = row["platform"]
         link = _item_url(platform, row["source_url"], item)
-        title = (item.get("title") or f"Nouvelle publication sur {platform}")[:256]
-        description = row["custom_text"] or "Une nouvelle publication vient d'être mise en ligne."
-        notification = discord.Embed(title=title, description=description, color=_platform_details(row["source_url"])[1])
-        notification.add_field(name="Voir la publication", value=f"[Ouvrir sur {platform}]({link})", inline=False)
-        notification.set_footer(text=f"Notification automatique SentriX • {platform}")
-        image_url = row["image_url"] or item.get("thumbnail")
-        if image_url and _valid_https_url(image_url):
-            notification.set_image(url=image_url)
+
+        # Les entrées "plates" sont suffisantes pour détecter une nouveauté mais
+        # pas pour l'afficher joliment (TikTok n'y expose souvent aucune image).
+        # On enrichit seulement la NOUVELLE publication afin de ne pas alourdir
+        # le scan de cinq minutes.
+        try:
+            details = await _extract_details(link)
+        except Exception:
+            details = None
+            logger.debug(
+                "Métadonnées détaillées indisponibles pour l'abonnement social %s",
+                row["id"],
+                exc_info=True,
+            )
+        if details:
+            merged = dict(item)
+            merged.update({k: v for k, v in details.items() if v not in (None, "", [], {})})
+            item = merged
+            link = _item_url(platform, row["source_url"], item)
+
+        title = (item.get("title") or f"Nouvelle publication sur {platform}")[:220]
+        description = row["custom_text"] or "Une nouvelle publication vient d’être publiée."
+        image_url = _best_thumbnail(item, row["image_url"])
+        creator = (
+            item.get("uploader")
+            or item.get("channel")
+            or item.get("creator")
+            or item.get("uploader_id")
+        )
+        notification = SocialNotificationPanel(
+            platform=platform,
+            title=title,
+            description=description,
+            link=link,
+            image_url=image_url,
+            creator=str(creator) if creator else None,
+        )
 
         try:
-            # Reste un embed, volontairement. Un panneau Components V2 n'accepte
-            # PAS de `content`, et c'est le `content` qui porte la mention du
-            # rôle : convertir ferait perdre le ping, c'est-à-dire la seule
-            # chose que cette notification doit faire.
-            #
-            # Le liseré coloré qui la rendait voyante est réglé ailleurs : tous
-            # les embeds prennent désormais la teinte du fond Discord.
+            # D'abord la carte. Si Discord refuse le rendu, aucun ping parasite
+            # n'est envoyé et la publication sera retentée au prochain passage.
+            await channel.send(view=notification)
+
+            # Le ping reste réel mais ne pollue plus durablement le salon : ce
+            # message minimal disparaît après quelques secondes.
             await channel.send(
                 content=role.mention,
-                embed=notification,
                 allowed_mentions=discord.AllowedMentions(
                     everyone=False,
                     users=False,
                     roles=[role],
                     replied_user=False,
                 ),
+                delete_after=5,
             )
         except discord.HTTPException:
+            # Ne jamais marquer la publication comme traitée si Discord n'a pas pu
+            # l'envoyer : le prochain passage pourra la retenter au lieu de la perdre.
             logger.warning("Envoi impossible pour l'abonnement social %s", row["id"], exc_info=True)
-        finally:
-            await self._update_last_item(row["id"], item_id, link)
+            return
+
+        await self._update_last_item(row["id"], item_id, link)
 
     async def _update_last_item(self, subscription_id: int, item_id: str, item_url: str):
         await self.bot.db.execute(

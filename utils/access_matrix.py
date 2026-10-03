@@ -314,7 +314,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "giveaway-blacklist", "giveaway-unblacklist", "event-create",
         "event-cancel", "tournament-create", "tournament-start", "announce",
         "notifs-ping", "notifs-list", "notifs-remove", "welcome-config",
-        "set-nickname", "alias", "diagnostic",
+        "set-nickname", "alias", "diagnostic", "staff-diagnostic",
         # Anciennement fail-closed par oubli
         "suivi-bot", "setup-auto", "server-audit", "healthcheck",
         "level-system", "security-repair",

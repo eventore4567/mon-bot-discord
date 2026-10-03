@@ -632,7 +632,7 @@ class Verification(commands.Cog, name="Verification"):
                     (
                         f"Règlement accepté. Continue maintenant dans {destination}.\n"
                         "La vérification renforcée contrôle ensuite l'ancienneté du compte, "
-                        "la séquence anti-automatisation, le code unique et le calcul."
+                        "la séquence anti-automatisation et le code CAPTCHA."
                     ),
                     view=HoneypotVerifyView(),
                     ephemeral=True,
