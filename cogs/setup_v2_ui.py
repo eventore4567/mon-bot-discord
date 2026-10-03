@@ -133,6 +133,217 @@ async def set_ai_feature(bot, guild_id: int, key: str, value: bool, actor_id: in
     )
 
 
+async def _get_antispam_policy(bot, guild_id: int) -> dict:
+    row = await bot.db.fetchone(
+        "SELECT scope_mode FROM antispam_policy WHERE guild_id=?",
+        (int(guild_id),),
+    )
+    role_rows = await bot.db.fetchall(
+        "SELECT role_id FROM antispam_exempt_roles WHERE guild_id=? ORDER BY role_id",
+        (int(guild_id),),
+    )
+    channel_rows = await bot.db.fetchall(
+        "SELECT channel_id FROM antispam_protected_channels WHERE guild_id=? ORDER BY channel_id",
+        (int(guild_id),),
+    )
+    mode = str(row["scope_mode"] if row else "all").casefold()
+    if mode not in {"all", "selected"}:
+        mode = "all"
+    return {
+        "scope_mode": mode,
+        "role_ids": [int(r["role_id"]) for r in role_rows],
+        "channel_ids": [int(r["channel_id"]) for r in channel_rows],
+    }
+
+
+def _invalidate_antispam_policy(bot, guild_id: int) -> None:
+    automod = bot.get_cog("Automod")
+    if automod is not None:
+        automod.antispam_policy_cache.pop(int(guild_id), None)
+        automod.automod_cache.pop(int(guild_id), None)
+
+
+async def _replace_antispam_roles(bot, guild_id: int, role_ids: list[int]) -> None:
+    await bot.db.execute(
+        "DELETE FROM antispam_exempt_roles WHERE guild_id=?",
+        (int(guild_id),),
+    )
+    for role_id in dict.fromkeys(int(v) for v in role_ids):
+        await bot.db.execute(
+            "INSERT OR IGNORE INTO antispam_exempt_roles (guild_id,role_id) VALUES (?,?)",
+            (int(guild_id), role_id),
+        )
+    _invalidate_antispam_policy(bot, guild_id)
+
+
+async def _replace_antispam_channels(bot, guild_id: int, channel_ids: list[int]) -> None:
+    await bot.db.execute(
+        "DELETE FROM antispam_protected_channels WHERE guild_id=?",
+        (int(guild_id),),
+    )
+    for channel_id in dict.fromkeys(int(v) for v in channel_ids):
+        await bot.db.execute(
+            "INSERT OR IGNORE INTO antispam_protected_channels (guild_id,channel_id) VALUES (?,?)",
+            (int(guild_id), channel_id),
+        )
+    await bot.db.execute(
+        "INSERT INTO antispam_policy (guild_id,scope_mode,updated_at) VALUES (?,?,?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET scope_mode=excluded.scope_mode,updated_at=excluded.updated_at",
+        (int(guild_id), "selected" if channel_ids else "all", int(time.time())),
+    )
+    _invalidate_antispam_policy(bot, guild_id)
+
+
+async def _antispam_setup_panel(owner, author_id: int):
+    policy = await _get_antispam_policy(owner.bot, owner.guild.id)
+    conf = await owner.bot.db.get_automod(owner.guild.id)
+    enabled = bool(conf and conf["antispam"])
+
+    roles = [owner.guild.get_role(role_id) for role_id in policy["role_ids"]]
+    roles = [role for role in roles if role is not None]
+    protected = [owner.guild.get_channel(channel_id) for channel_id in policy["channel_ids"]]
+    protected = [channel for channel in protected if channel is not None]
+
+    role_text = ", ".join(role.mention for role in roles[:12]) or "Aucun rôle"
+    if len(roles) > 12:
+        role_text += f" +{len(roles) - 12}"
+    if policy["scope_mode"] == "all":
+        channel_text = "Tous les salons du serveur"
+    else:
+        channel_text = ", ".join(channel.mention for channel in protected[:12]) or "Aucun salon sélectionné"
+        if len(protected) > 12:
+            channel_text += f" +{len(protected) - 12}"
+
+    panel = embeds.info(
+        (
+            f"**Anti-spam** · {'ACTIF' if enabled else 'INACTIF'}\n"
+            f"**Rôles qui contournent uniquement l’anti-spam** · {role_text}\n"
+            f"**Salons protégés** · {channel_text}\n\n"
+            "Les exemptions ici concernent seulement le spam : les liens, scams, insultes "
+            "et autres protections restent actives. Les threads héritent du salon parent."
+        ),
+        title="Anti-spam · Périmètre",
+    )
+    return panels.avec_composants(
+        panels.depuis_embed(panel),
+        AntiSpamPolicyView(owner, author_id, policy, enabled),
+    )
+
+
+class AntiSpamPolicyView(discord.ui.View):
+    def __init__(self, owner, author_id: int, policy: dict, enabled: bool):
+        super().__init__(timeout=180)
+        self.owner = owner
+        self.author_id = int(author_id)
+        self.policy = policy
+        self.enabled = bool(enabled)
+
+        role_select = discord.ui.RoleSelect(
+            placeholder="Rôles autorisés à contourner l’anti-spam",
+            min_values=1,
+            max_values=10,
+            row=0,
+        )
+        async def role_cb(interaction: discord.Interaction):
+            valid = [
+                role.id for role in role_select.values
+                if isinstance(role, discord.Role)
+                and role.guild.id == self.owner.guild.id
+                and role != self.owner.guild.default_role
+            ]
+            await _replace_antispam_roles(self.owner.bot, self.owner.guild.id, valid)
+            await panels.editer(
+                interaction.response,
+                await _antispam_setup_panel(self.owner, interaction.user.id),
+            )
+        role_select.callback = role_cb
+        self.add_item(role_select)
+
+        channel_select = discord.ui.ChannelSelect(
+            placeholder="Salons où le spam doit être interdit",
+            min_values=1,
+            max_values=25,
+            channel_types=[
+                discord.ChannelType.text,
+                discord.ChannelType.news,
+                discord.ChannelType.forum,
+            ],
+            row=1,
+        )
+        async def channel_cb(interaction: discord.Interaction):
+            ids = [
+                channel.id for channel in channel_select.values
+                if getattr(channel, "guild", None) is not None
+                and channel.guild.id == self.owner.guild.id
+            ]
+            await _replace_antispam_channels(self.owner.bot, self.owner.guild.id, ids)
+            await panels.editer(
+                interaction.response,
+                await _antispam_setup_panel(self.owner, interaction.user.id),
+            )
+        channel_select.callback = channel_cb
+        self.add_item(channel_select)
+
+        toggle = discord.ui.Button(
+            label="Désactiver l’anti-spam" if enabled else "Activer l’anti-spam",
+            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
+            row=2,
+        )
+        all_channels = discord.ui.Button(
+            label="Protéger tous les salons",
+            style=discord.ButtonStyle.primary,
+            row=2,
+        )
+        clear_roles = discord.ui.Button(
+            label="Retirer les rôles bypass",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+            disabled=not bool(policy["role_ids"]),
+        )
+
+        async def toggle_cb(interaction: discord.Interaction):
+            await self.owner.bot.db.set_automod(
+                self.owner.guild.id,
+                "antispam",
+                0 if self.enabled else 1,
+            )
+            _invalidate_antispam_policy(self.owner.bot, self.owner.guild.id)
+            await panels.editer(
+                interaction.response,
+                await _antispam_setup_panel(self.owner, interaction.user.id),
+            )
+
+        async def all_cb(interaction: discord.Interaction):
+            await _replace_antispam_channels(self.owner.bot, self.owner.guild.id, [])
+            await panels.editer(
+                interaction.response,
+                await _antispam_setup_panel(self.owner, interaction.user.id),
+            )
+
+        async def clear_roles_cb(interaction: discord.Interaction):
+            await _replace_antispam_roles(self.owner.bot, self.owner.guild.id, [])
+            await panels.editer(
+                interaction.response,
+                await _antispam_setup_panel(self.owner, interaction.user.id),
+            )
+
+        toggle.callback = toggle_cb
+        all_channels.callback = all_cb
+        clear_roles.callback = clear_roles_cb
+        self.add_item(toggle)
+        self.add_item(all_channels)
+        self.add_item(clear_roles)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Ce menu ne vous appartient pas.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+
 class PermissionRoleSelect(discord.ui.RoleSelect):
     def __init__(self, owner):
         self.owner = owner
@@ -1477,6 +1688,20 @@ def _patch_render() -> None:
             self.add_item(channel_rules_button)
 
         elif category == "security":
+            antispam = discord.ui.Button(
+                label="Configurer l’anti-spam",
+                style=discord.ButtonStyle.primary,
+                row=1,
+            )
+            async def antispam_cb(interaction):
+                await panels.envoyer(
+                    interaction.response,
+                    await _antispam_setup_panel(self, interaction.user.id),
+                    ephemere=True,
+                )
+            antispam.callback = antispam_cb
+            self.add_item(antispam)
+
             self.add_item(WhitelistUserSelect(self))
             add = discord.ui.Button(label="Whitelister globalement", style=discord.ButtonStyle.success, row=4)
             remove = discord.ui.Button(label="Retirer de la whitelist", style=discord.ButtonStyle.danger, row=4)
@@ -1675,6 +1900,32 @@ def _patch_build_embed() -> None:
             panel.add_field(
                 name="Effet",
                 value="Une personne whitelistée est ignorée par les protections automatiques SentriX concernées, notamment AutoMod, anti-raid et anti-nuke.",
+                inline=False,
+            )
+            spam_policy = await _get_antispam_policy(self.bot, self.guild.id)
+            spam_roles = [
+                self.guild.get_role(role_id)
+                for role_id in spam_policy["role_ids"]
+            ]
+            spam_roles = [role for role in spam_roles if role is not None]
+            spam_channels = [
+                self.guild.get_channel(channel_id)
+                for channel_id in spam_policy["channel_ids"]
+            ]
+            spam_channels = [channel for channel in spam_channels if channel is not None]
+            panel.add_field(
+                name="Anti-spam",
+                value=(
+                    f"**Périmètre :** "
+                    + (
+                        "Tous les salons"
+                        if spam_policy["scope_mode"] == "all"
+                        else ", ".join(channel.mention for channel in spam_channels[:8])
+                        or "Aucun salon"
+                    )
+                    + "\n**Rôles bypass :** "
+                    + (", ".join(role.mention for role in spam_roles[:8]) or "Aucun")
+                ),
                 inline=False,
             )
 
