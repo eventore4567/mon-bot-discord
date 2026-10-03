@@ -1642,6 +1642,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             return 0
 
     @commands.hybrid_command(name="member", description="Ouvrir la fiche staff interactive d'un membre.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre à consulter")
     async def member(self, ctx: commands.Context, membre: discord.Member):
         await panels.envoyer(ctx, await self.member_panel(ctx.guild, membre, ctx.author.id))
@@ -1666,11 +1667,13 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
 
     @commands.hybrid_command(name="history", aliases=["historique"], description="Afficher la timeline staff complète d'un membre.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre à consulter")
     async def history(self, ctx: commands.Context, membre: discord.Member):
         await panels.envoyer(ctx, await self.history_panel(ctx.guild, membre))
 
     @commands.hybrid_command(name="proof", aliases=["preuve"], description="Gérer les preuves d'un dossier staff.", with_app_command=False)
+    @checks.has_permission_or_modrole("moderate_members")
     async def proof(self, ctx: commands.Context, case_id: int):
         row = await self.bot.db.fetchone(
             "SELECT * FROM staff_cases_v1 WHERE id=? AND guild_id=?",
@@ -1686,6 +1689,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, await self.incident_center_panel(ctx.guild, ctx.author.id))
 
     @commands.hybrid_command(name="watch", aliases=["surveillance"], description="Gérer la surveillance d'un membre.")
+    @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre concerné (facultatif)")
     async def watch(self, ctx: commands.Context, membre: discord.Member | None = None):
         if membre is None:
@@ -1756,10 +1760,12 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await panels.envoyer(ctx, panel)
 
     @commands.hybrid_command(name="handover", description="Générer la transmission pour l'équipe suivante.", with_app_command=False)
+    @checks.has_permission_or_modrole("moderate_members")
     async def handover(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.handover_panel(ctx.guild, ctx.author))
 
     @commands.hybrid_command(name="urgence", aliases=["emergency"], description="Ouvrir les actions d'urgence du salon.", with_app_command=False)
+    @checks.has_permission_or_modrole("manage_channels")
     async def urgence(self, ctx: commands.Context):
         panel = panels.Panneau(
             titre="Mode urgence",
