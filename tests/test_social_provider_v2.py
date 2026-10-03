@@ -98,3 +98,17 @@ def test_webhook_event_key_is_deterministic_without_explicit_id():
     second = social_providers.webhook_event_key(payload, body)
     assert first == second
     assert first.startswith("phyllo:")
+
+
+def test_notification_diagnostic_commands_are_available():
+    source = inspect.getsource(notifications.Notifications)
+    assert 'name="notifs-status"' in source
+    assert 'name="notifs-test"' in source
+    assert "YouTube** · vidéos + Shorts + lives séparés" in source
+
+
+def test_phyllo_environment_config_is_non_secret_and_explicit():
+    import config
+
+    assert config.PHYLLO_ENVIRONMENT in {"sandbox", "staging", "production"}
+    assert config.PHYLLO_BASE_URL.startswith("https://")
