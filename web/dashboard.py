@@ -100,7 +100,7 @@ ADMINISTRATOR = 1 << 3
 MANAGE_GUILD = 1 << 5
 
 AUTOMOD_FIELDS = {
-    "antispam", "antilink", "antiinvite", "antimention", "anticaps",
+    "antispam", "antilink", "antilink_strict", "antiinvite", "antimention", "anticaps",
     "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
     "antinuke", "antiinsult", "escalation", "security_vanity", "security_prune",
     "security_permissions", "join_gate", "risk_engine",
