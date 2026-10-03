@@ -245,20 +245,37 @@ async def _extract_details(item_url: str) -> dict | None:
     )
 
 
-def _best_thumbnail(item: dict, custom_url: str | None = None) -> str | None:
-    """Retourne une image exploitable, sans laisser une URL vide casser la carte."""
+def _best_thumbnail(
+    item: dict,
+    custom_url: str | None = None,
+    *,
+    platform: str | None = None,
+) -> str | None:
+    """Retourne la vraie miniature du contenu avec un fallback YouTube fiable."""
     candidates = [
         custom_url,
         item.get("thumbnail"),
+        item.get("cover"),
+        item.get("cover_url"),
+        item.get("image"),
+        item.get("image_url"),
     ]
     thumbnails = item.get("thumbnails") or []
     if isinstance(thumbnails, list):
         for thumb in reversed(thumbnails):
             if isinstance(thumb, dict):
                 candidates.append(thumb.get("url"))
+
     for candidate in candidates:
         if isinstance(candidate, str) and _valid_https_url(candidate):
             return candidate
+
+    # Les entrées YouTube "flat" n'incluent pas toujours thumbnails. L'ID vidéo
+    # suffit pourtant à obtenir la miniature officielle, y compris pour Shorts.
+    if platform == "YouTube":
+        item_id = _id_de_publication(item.get("id"))
+        if item_id:
+            return f"https://i.ytimg.com/vi/{item_id}/hqdefault.jpg"
     return None
 
 
@@ -461,7 +478,11 @@ class Notifications(commands.Cog, name="Notifications"):
             title=(item.get("title") or f"Nouvelle publication sur {platform}")[:300],
             creator=str(creator) if creator else None,
             creator_url=item.get("channel_url") or item.get("uploader_url"),
-            thumbnail_url=_best_thumbnail(item, row["image_url"]),
+            thumbnail_url=_best_thumbnail(
+                item,
+                row["image_url"],
+                platform=platform,
+            ),
             published_at=published_at,
             kind=kind,
         )
@@ -855,7 +876,7 @@ class Notifications(commands.Cog, name="Notifications"):
 
     @commands.hybrid_command(
         name="notifs-test",
-        description="Prévisualiser le nouveau style d'une notification sociale.",
+        description="Prévisualiser une notification avec titre et miniature réels.",
         with_app_command=False,
     )
     @checks.is_owner_or_admin_for("configuration")
@@ -864,6 +885,7 @@ class Notifications(commands.Cog, name="Notifications"):
         ctx: commands.Context,
         plateforme: str = "YouTube",
         type_contenu: str = "video",
+        lien: str = "",
     ):
         platform_key = str(plateforme or "").strip().casefold()
         platform = {
@@ -892,22 +914,110 @@ class Notifications(commands.Cog, name="Notifications"):
                 ephemere=bool(ctx.interaction),
             )
 
-        fake_urls = {
-            "YouTube": "https://www.youtube.com/",
-            "TikTok": "https://www.tiktok.com/",
-            "Twitch": "https://www.twitch.tv/",
-            "Instagram": "https://www.instagram.com/",
-            "X": "https://x.com/",
-        }
+        link = str(lien or "").strip()
+        title = "Exemple de nouvelle publication SentriX"
+        creator = "Créateur"
+        image_url = None
+        published_at = int(time.time())
+
+        # Avec un lien réel, le test affiche exactement les mêmes métadonnées que
+        # la notification automatique : titre, créateur et miniature réels.
+        if link:
+            if not _is_supported_social_url(link):
+                return await panels.texte_court(
+                    ctx,
+                    "Le lien doit être une URL publique YouTube, TikTok, Twitch, Instagram ou X.",
+                    ephemere=bool(ctx.interaction),
+                )
+            detected_platform, _ = _platform_details(link)
+            if detected_platform != "Réseau social":
+                platform = detected_platform
+
+            path = (urlparse(link).path or "").casefold()
+            if platform == "YouTube" and "/shorts/" in path:
+                kind = "short"
+            elif platform == "YouTube" and "/live/" in path:
+                kind = "live"
+            elif platform == "Twitch":
+                kind = "live"
+
+            try:
+                details = await _extract_details(link)
+            except Exception:
+                details = None
+                logger.info(
+                    "Prévisualisation sociale : métadonnées indisponibles pour %s",
+                    link,
+                    exc_info=True,
+                )
+
+            if details:
+                title = str(
+                    details.get("title")
+                    or details.get("fulltitle")
+                    or title
+                )[:300]
+                creator = str(
+                    details.get("uploader")
+                    or details.get("channel")
+                    or details.get("creator")
+                    or details.get("uploader_id")
+                    or creator
+                )[:120]
+                image_url = _best_thumbnail(
+                    details,
+                    platform=platform,
+                )
+                timestamp = (
+                    details.get("timestamp")
+                    or details.get("release_timestamp")
+                    or details.get("modified_timestamp")
+                )
+                try:
+                    published_at = int(timestamp) if timestamp else published_at
+                except (TypeError, ValueError):
+                    pass
+            elif platform == "YouTube":
+                match = re.search(
+                    r"(?:youtu\.be/|v=|/shorts/|/live/)([A-Za-z0-9_-]{6,})",
+                    link,
+                )
+                if match:
+                    image_url = f"https://i.ytimg.com/vi/{match.group(1)}/hqdefault.jpg"
+        else:
+            # Sans lien, on montre quand même le rendu complet avec une vraie
+            # miniature HTTP pour que le test ne paraisse plus vide.
+            sample_links = {
+                "YouTube": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+                "TikTok": "https://www.tiktok.com/",
+                "Twitch": "https://www.twitch.tv/",
+                "Instagram": "https://www.instagram.com/",
+                "X": "https://x.com/",
+            }
+            link = sample_links[platform]
+            if platform == "YouTube":
+                title = (
+                    "Buddha V1 VERSUS V2 — exemple de Short"
+                    if kind == "short"
+                    else "Exemple de nouvelle vidéo YouTube"
+                )
+                image_url = "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg"
+            elif platform == "TikTok":
+                title = "Exemple de nouveau TikTok"
+            elif platform == "Twitch":
+                title = "Exemple de nouveau live Twitch"
+            else:
+                title = f"Exemple de nouvelle publication {platform}"
+
         preview = SocialNotificationPanel(
             platform=platform,
-            title="Exemple de nouvelle publication SentriX",
-            description="Aperçu du nouveau rendu premium des notifications.",
-            link=fake_urls[platform],
-            image_url=None,
-            creator="Créateur",
+            title=title,
+            description="",
+            link=link,
+            image_url=image_url,
+            creator=creator,
             kind=kind,
-            published_at=int(time.time()),
+            published_at=published_at,
         )
         await ctx.send(view=preview)
 
