@@ -98,8 +98,11 @@ def test_infinite_counter_persists_and_never_resets_on_invalid_input():
     assert "CREATE TABLE IF NOT EXISTS infinite_counter_config" in source
     assert "last_user_id" in source
     assert "asyncio.Lock" in source
-    assert "delete_after=10" in source
-    assert "await asyncio.sleep(2)" in source
+    assert "class InfiniteMistakeView(discord.ui.LayoutView)" in source
+    assert 'label="Je me suis trompé"' in source
+    assert 'label=f"Modifier le nombre actuel ({current_number})"' in source
+    assert 'label="Supprimer ce message"' in source
+    assert "async def on_timeout" in source
     # Progress only advances in the valid branch; invalid branches return before this UPDATE.
     assert "next_number=?,last_user_id=?" in source
     assert "next_number=1" not in source
