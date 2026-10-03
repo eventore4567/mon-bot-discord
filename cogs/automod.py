@@ -878,6 +878,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self._censor_webhooks: dict[int, discord.Webhook] = {}
         self.exempt_roles_cache: dict[int, set[int]] = {}
         self.ignored_channels_cache: dict[int, set[int]] = {}
+        self.antispam_policy_cache: dict[int, dict[str, object]] = {}
         self.immunity_overrides_cache: dict[tuple[int, int], bool | None] = {}
         self._native_antilink_locks: dict[int, asyncio.Lock] = {}
         self._native_automod_bootstrap_task: asyncio.Task | None = None
@@ -1443,6 +1444,52 @@ class AutoMod(commands.Cog, name="Automod"):
             rows = await self.bot.db.fetchall("SELECT channel_id FROM ignored_channels WHERE guild_id = ?", (guild_id,))
             self.ignored_channels_cache[guild_id] = {r["channel_id"] for r in rows}
         return self.ignored_channels_cache[guild_id]
+
+    async def get_antispam_policy_cached(self, guild_id: int) -> dict[str, object]:
+        cached = self.antispam_policy_cache.get(int(guild_id))
+        if cached is not None:
+            return cached
+
+        row = await self.bot.db.fetchone(
+            "SELECT scope_mode FROM antispam_policy WHERE guild_id=?",
+            (int(guild_id),),
+        )
+        mode = str(row["scope_mode"] if row else "all").strip().casefold()
+        if mode not in {"all", "selected"}:
+            mode = "all"
+
+        role_rows = await self.bot.db.fetchall(
+            "SELECT role_id FROM antispam_exempt_roles WHERE guild_id=?",
+            (int(guild_id),),
+        )
+        channel_rows = await self.bot.db.fetchall(
+            "SELECT channel_id FROM antispam_protected_channels WHERE guild_id=?",
+            (int(guild_id),),
+        )
+        policy = {
+            "scope_mode": mode,
+            "role_ids": {int(r["role_id"]) for r in role_rows},
+            "channel_ids": {int(r["channel_id"]) for r in channel_rows},
+        }
+        self.antispam_policy_cache[int(guild_id)] = policy
+        return policy
+
+    async def antispam_applies_to(self, message: discord.Message) -> bool:
+        """Périmètre anti-spam uniquement, sans affaiblir les autres filtres."""
+        policy = await self.get_antispam_policy_cached(message.guild.id)
+
+        exempt_roles = policy["role_ids"]
+        if exempt_roles and isinstance(message.author, discord.Member):
+            if any(role.id in exempt_roles for role in message.author.roles):
+                return False
+
+        if policy["scope_mode"] == "selected":
+            protected = policy["channel_ids"]
+            # Les threads héritent du salon parent pour éviter un contournement trivial.
+            channel_id = int(getattr(message.channel, "id", 0) or 0)
+            parent_id = int(getattr(message.channel, "parent_id", 0) or 0)
+            return channel_id in protected or (parent_id and parent_id in protected)
+        return True
 
     async def is_automod_exempt(self, member: discord.abc.User) -> bool:
         """Détermine l'immunité AutoMod avec un override personnel explicite."""
@@ -2519,7 +2566,7 @@ class AutoMod(commands.Cog, name="Automod"):
             if emoji_count > 10:
                 return await self._delete_and_warn(message, "Spam d'émojis détecté.", "antiemoji")
 
-        if conf["antispam"]:
+        if conf["antispam"] and await self.antispam_applies_to(message):
             key = (message.guild.id, message.author.id)
             if self.spam_tracker.ajouter(key) >= SPAM_THRESHOLD:
                 self.spam_tracker.reinitialiser(key)
