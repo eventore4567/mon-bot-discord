@@ -97,62 +97,43 @@ def test_ticket_and_role_panels_do_not_duplicate_sentrix_brand():
 
 
 
-def test_infinite_counter_error_assistant_is_native_sentrix_and_self_cleaning():
+def test_infinite_counter_invalid_messages_are_deleted_silently():
+    source = _source("cogs/infinite_counter.py")
+    invalid = source[
+        source.index("    async def _invalid("):
+        source.index('    @commands.group(name="infinit"', source.index("    async def _invalid("))
+    ]
+
+    assert "await message.delete()" in invalid
+    assert ".channel.send(" not in invalid
+    assert "send_message(" not in invalid
+    assert "panels." not in invalid
+    assert "InfiniteMistakeView" not in source
+    assert 'content=f"<@{message.author.id}>"' not in source
+
+
+def test_infinite_counter_keeps_progression_and_same_member_guard():
     source = _source("cogs/infinite_counter.py")
 
-    assert "class InfiniteMistakeView(discord.ui.LayoutView)" in source
-    assert "sentrix_emojis.emoji(\"error\")" in source
-    assert "sentrix_emojis.partiel(\"message_edit\")" in source
-    assert "sentrix_emojis.partiel(\"trash\")" in source
-    assert 'label="Je me suis trompé"' in source
-    assert 'label="Supprimer ce message"' in source
-    assert "await self._delete_notice()" in source
-    assert "await self._delete_original()" in source
-    assert "async def on_timeout(self)" in source
-
-
-def test_infinite_counter_staff_override_is_guarded_and_stale_safe():
-    source = _source("cogs/infinite_counter.py")
-
-    assert "perms.manage_messages" in source
-    assert "perms.manage_guild" in source
-    assert "perms.administrator" in source
-    assert 'int(row["next_number"]) != self.expected' in source
+    assert 'int(row["last_user_id"]) == message.author.id' in source
+    assert 'reason="consecutive"' in source
     assert "SET next_number=?,last_user_id=?,updated_at=?" in source
-    assert "self.accepted_override = True" in source
+    assert "next_number=1" not in source
 
 
-def test_infinite_counter_invalid_message_pings_only_the_author():
+def test_infinite_counter_no_longer_has_public_correction_assistant():
     source = _source("cogs/infinite_counter.py")
 
-    assert 'content=f"<@{message.author.id}>"' in source
-    assert "users=[message.author]" in source
-    assert "everyone=False" in source
-    assert "roles=False" in source
-
-
-
-def test_infinite_counter_assistant_pings_only_author_and_waits_one_minute():
-    source = _source("cogs/infinite_counter.py")
-
-    assert "super().__init__(timeout=60)" in source
-    assert 'content=f"<@{message.author.id}>"' in source
-    assert "users=[message.author]" in source
-    assert "everyone=False" in source
-    assert "roles=False" in source
-    assert "Sans réponse, ton message sera supprimé automatiquement dans 1 minute." in source
-
-
-
-def test_infinite_counter_timeout_deletes_only_when_member_did_not_answer():
-    source = _source("cogs/infinite_counter.py")
-
-    assert "self.responded = False" in source
-    assert "self.responded = True" in source
-    assert "if not self.responded and not self.accepted_override:" in source
-    mistake = source[source.index("async def _mistake"):source.index("async def _correct_counter")]
-    assert "self.stop()" in mistake
-
+    for obsolete in (
+        "class InfiniteMistakeView",
+        'label="Je me suis trompé"',
+        'label="Supprimer ce message"',
+        "super().__init__(timeout=60)",
+        "Sans réponse, ton message sera supprimé automatiquement dans 1 minute.",
+        "self.accepted_override",
+        "self.responded",
+    ):
+        assert obsolete not in source
 
 
 def test_security_setup_has_per_filter_bypass_and_strict_channel_controls():
