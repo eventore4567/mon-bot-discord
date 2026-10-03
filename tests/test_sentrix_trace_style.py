@@ -149,3 +149,13 @@ def test_deleted_channel_and_role_cards_do_not_repeat_raw_id_field():
 
     assert 'fields = [("Salon", f"`{channel.name}`", True)]' in logs
     assert 'fields = [("Rôle", f"`{role.name}`", True)]' in logs
+
+
+
+def test_log_footer_stays_above_bottom_action_bar():
+    source = (ROOT / "utils" / "wide_logs.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("class WideLogView"):
+        source.index("def _database_path", source.index("class WideLogView"))
+    ]
+    assert block.index("footer_text = _trace_footer") < block.index("rows = build_rows(old_view)")
