@@ -22,6 +22,7 @@ import time
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 import pytest
+import discord
 
 from services import tickets as ts
 
@@ -153,3 +154,59 @@ def test_le_bouton_est_enregistre_au_demarrage():
     source = Path("main.py").read_text(encoding="utf-8")
     assert "BoutonSupprimerTicket" in source
     assert "add_dynamic_items(BoutonSupprimerTicket)" in source
+
+
+# =============================================================================
+# Close / Open / Delete — contrat 2026-10-03
+# =============================================================================
+
+def test_vue_ticket_ferme_propose_rouvrir_et_supprimer():
+    vue = ts.vue_ticket_ferme(42)
+    custom_ids = [item.custom_id for item in vue.children]
+    assert "sx_ticket_open:42" in custom_ids
+    assert "sx_ticket_del:42" in custom_ids
+
+    buttons = [item.item for item in vue.children]
+    labels = {button.label for button in buttons}
+    assert "Rouvrir" in labels
+    assert "Supprimer le salon" in labels
+
+
+def test_bouton_rouvrir_est_persistant_et_encode_ticket_id():
+    vue = ts.vue_ticket_ferme(7)
+    open_item = next(item for item in vue.children if item.custom_id.startswith("sx_ticket_open:"))
+    assert open_item.custom_id == "sx_ticket_open:7"
+    assert open_item.item.style is discord.ButtonStyle.success
+
+
+def test_close_masque_completement_le_salon_au_membre_et_ne_programme_plus_de_delete():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "ticket_claim_security.py").read_text(encoding="utf-8")
+    block = source.split("async def secure_close_ticket", 1)[1].split("async def secure_claim", 1)[0]
+
+    assert "overwrite.view_channel = False" in block
+    assert "overwrite.send_messages = False" in block
+    assert "overwrite.read_message_history = False" in block
+    assert "vue_ticket_ferme(ticket_id)" in block
+    assert "asyncio.create_task(self._auto_delete" not in block
+
+
+def test_reopen_restores_full_member_visibility():
+    from pathlib import Path
+
+    service_source = (Path(__file__).resolve().parents[1] / "services" / "tickets.py").read_text(encoding="utf-8")
+    block = service_source.split("class BoutonRouvrirTicket", 1)[1].split("class BoutonSupprimerTicket", 1)[0]
+
+    assert "overwrite.view_channel = True" in block
+    assert "overwrite.send_messages = True" in block
+    assert "overwrite.read_message_history = True" in block
+    assert "status='ouvert'" in block
+
+
+def test_reopen_button_is_registered_at_startup():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+    assert "BoutonRouvrirTicket" in source
+    assert "self.add_dynamic_items(BoutonRouvrirTicket, BoutonSupprimerTicket)" in source

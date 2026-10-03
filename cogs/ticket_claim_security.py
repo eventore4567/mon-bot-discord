@@ -395,37 +395,46 @@ def install(bot: commands.Bot) -> None:
         owner = guild.get_member(int(ticket["user_id"]))
         if owner:
             overwrite = channel.overwrites_for(owner)
+            overwrite.view_channel = False
             overwrite.send_messages = False
+            overwrite.read_message_history = False
             try:
-                await channel.set_permissions(owner, overwrite=overwrite)
+                await channel.set_permissions(
+                    owner,
+                    overwrite=overwrite,
+                    reason=f"Ticket fermé par {interaction.user}",
+                )
             except discord.HTTPException:
-                pass
+                await self.bot.db.execute(
+                    "UPDATE tickets SET status='ouvert', closed_at=NULL, locked=0 "
+                    "WHERE id=? AND status='ferme'",
+                    (ticket_id,),
+                )
+                return await _private_reply(
+                    interaction,
+                    tickets.embeds.error(
+                        "Impossible de fermer le ticket : Discord a refusé de masquer "
+                        "le salon au membre."
+                    ),
+                )
 
         try:
             transcript_text = await self._fetch_transcript_text(channel)
         except discord.HTTPException:
             transcript_text = "Transcription indisponible (erreur lors de la lecture du salon)."
 
-        # Fermer n'est plus forcément supprimer. `ticket_delete_delay` à 0 veut
-        # dire « le staff décide » — ce qui était impossible à exprimer avant,
-        # parce que les six lecteurs de ce réglage écrivaient tous
-        # `(...) or 30`, et `0 or 30` rend 30.
-        delay = tickets_service.delai_de_suppression(conf)
+        # Nouveau contrat tickets :
+        # - Close masque le salon au membre, sans le supprimer.
+        # - Rouvrir restaure la visibilité.
+        # - Supprimer détruit le salon uniquement sur action staff explicite.
+        # Aucun ticket fermé manuellement n'est donc programmé pour auto-delete.
         duree = tickets_service.duree_du_ticket(ticket, fin=closed_at)
-
         reason_text = (reason or "Non précisée").strip()[:1200]
-        if delay is None:
-            suite = (
-                "Le salon reste ouvert à la relecture. "
-                "Un membre du staff le supprimera avec le bouton ci-dessous."
-            )
-            vue_fermeture = tickets_service.vue_supprimer_ticket(ticket_id)
-        else:
-            asyncio.create_task(self._auto_delete(channel, ticket_id, delay))
-            suite = f"Suppression automatique dans **{tickets.helpers.format_duration(delay)}**."
-            # Le bouton est proposé même avec un délai : il sert à supprimer
-            # tout de suite, sans attendre.
-            vue_fermeture = tickets_service.vue_supprimer_ticket(ticket_id)
+        suite = (
+            "Le membre ne peut plus voir ce salon. "
+            "Le staff peut le **rouvrir** ou le **supprimer définitivement**."
+        )
+        vue_fermeture = tickets_service.vue_ticket_ferme(ticket_id)
 
         ligne_duree = f"\nOuvert pendant : **{duree}**" if duree else ""
         try:
