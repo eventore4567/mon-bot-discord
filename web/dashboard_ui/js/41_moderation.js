@@ -35,26 +35,26 @@ async function openModerationSanctions(member, initialPage = 1) {
     try { d = await moderationMemberSanctions(member.id, page); }
     catch (e) { box.innerHTML = emptyState('Historique indisponible', e.message || 'Impossible de charger les sanctions.'); return; }
     const items = d.sanctions || [];
-    box.innerHTML = \`
+    box.innerHTML = `
       <div class="card-head">
-        <div><h3>\${esc(title)}</h3><p>\${plural(Number(d.total || 0), 'sanction')} · page \${number(d.page || 1)}/\${number(d.pages || 1)}</p></div>
+        <div><h3>${esc(title)}</h3><p>${plural(Number(d.total || 0), 'sanction')} · page ${number(d.page || 1)}/${number(d.pages || 1)}</p></div>
       </div>
       <div class="list compact" style="margin-top:10px">
-        \${items.length ? items.map(x => \`<div class="row">
+        ${items.length ? items.map(x => `<div class="row">
           <div class="row-main">
-            <b>\${esc('Dossier #' + x.case_number + ' · ' + (x.action || 'action'))}</b>
-            <small>\${esc(x.reason || 'Aucune raison')}\${x.created_at ? ' · ' + esc(when(x.created_at)) : ''} · modérateur \${esc(x.moderator_id || 'inconnu')}</small>
+            <b>${esc('Dossier #' + x.case_number + ' · ' + (x.action || 'action'))} ${moderationStatusBadge(x)}</b>
+            <small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''} · modérateur ${esc(x.moderator_id || 'inconnu')}</small>
           </div>
           <div class="row-actions">
-            <button class="btn sm" type="button" data-edit-member-case="\${esc(x.case_number)}" data-current-reason="\${esc(x.reason || '')}">Modifier la raison</button>
+            <button class="btn sm" type="button" data-edit-member-case="${esc(x.case_number)}" data-current-reason="${esc(x.reason || '')}">Modifier la raison</button>
           </div>
-        </div>\`).join('') : emptyState('Aucune sanction', 'Aucun dossier n’est enregistré pour ce membre.')}
+        </div>`).join('') : emptyState('Aucune sanction', 'Aucun dossier n’est enregistré pour ce membre.')}
       </div>
       <div class="toolbar" style="margin-top:12px;justify-content:flex-end">
-        <button class="btn sm ghost" type="button" id="memberSanctionsPrev" \${Number(d.page || 1) <= 1 ? 'disabled' : ''}>Précédent</button>
-        <span class="badge">\${number(d.page || 1)}/\${number(d.pages || 1)}</span>
-        <button class="btn sm ghost" type="button" id="memberSanctionsNext" \${Number(d.page || 1) >= Number(d.pages || 1) ? 'disabled' : ''}>Suivant</button>
-      </div>\`;
+        <button class="btn sm ghost" type="button" id="memberSanctionsPrev" ${Number(d.page || 1) <= 1 ? 'disabled' : ''}>Précédent</button>
+        <span class="badge">${number(d.page || 1)}/${number(d.pages || 1)}</span>
+        <button class="btn sm ghost" type="button" id="memberSanctionsNext" ${Number(d.page || 1) >= Number(d.pages || 1) ? 'disabled' : ''}>Suivant</button>
+      </div>`;
     const prev = $('memberSanctionsPrev'), next = $('memberSanctionsNext');
     if (prev) prev.onclick = () => paint(Math.max(1, Number(d.page || 1) - 1));
     if (next) next.onclick = () => paint(Math.min(Number(d.pages || 1), Number(d.page || 1) + 1));
@@ -76,6 +76,12 @@ function moderationActionLabel(action) {
 }
 function moderationActionClass(action) {
   return action === 'ban' || action === 'kick' ? 'danger' : action === 'mute' ? 'primary' : '';
+}
+function moderationStatusBadge(item) {
+  const status = String(item?.status || 'history');
+  if (status === 'active') return '<span class="badge ok">Actif</span>';
+  if (status === 'lifted') return '<span class="badge blue">Levée</span>';
+  return '<span class="badge">Historique</span>';
 }
 
 async function openModerationAction(member, action) {
@@ -260,7 +266,7 @@ renderSanctions = async function renderModerationCenter() {
       <div class="card-head"><div><h3>Dernières sanctions de ce membre</h3><p>Raison, date et modérateur.</p></div></div>
       <div class="list compact" style="margin-top:8px">
         ${(d.recent || []).length ? d.recent.map(x => `<div class="row">
-          <div class="row-main"><b>${esc((x.case_number ? 'Dossier #' + x.case_number + ' · ' : '') + (x.action || 'action'))}</b><small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''}${x.moderator_id ? ' · modérateur ' + esc(x.moderator_id) : ''}</small></div>
+          <div class="row-main"><b>${esc((x.case_number ? 'Dossier #' + x.case_number + ' · ' : '') + (x.action || 'action'))} ${moderationStatusBadge(x)}</b><small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''}${x.moderator_id ? ' · modérateur ' + esc(x.moderator_id) : ''}</small></div>
           <div class="row-actions">${x.case_number ? `<button class="btn sm ghost" type="button" data-member-edit-reason="${esc(x.case_number)}" data-member-edit-current="${esc(x.reason || '')}">Modifier raison</button>` : ''}</div>
         </div>`).join('') : '<p class="info">Aucune sanction enregistrée.</p>'}
       </div>
