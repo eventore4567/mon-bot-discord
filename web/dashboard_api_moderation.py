@@ -56,6 +56,19 @@ def register(app: web.Application, dashboard) -> None:
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             return None
 
+    async def _actor_can(actor: discord.Member, permission: str) -> bool:
+        """Même politique que les commandes Discord : permission native OU rôle staff Setup."""
+        if actor.id == actor.guild.owner_id or actor.guild_permissions.administrator:
+            return True
+        if getattr(actor.guild_permissions, permission, False):
+            return True
+        try:
+            conf = await bot.db.get_guild_config(actor.guild.id)
+            role_id = int(conf["mod_role"] or 0) if conf and conf["mod_role"] else 0
+        except Exception:
+            role_id = 0
+        return bool(role_id and any(role.id == role_id for role in actor.roles))
+
     async def _target(guild: discord.Guild, user_id: int) -> discord.Member | None:
         member = guild.get_member(user_id)
         if member is not None:
@@ -67,18 +80,45 @@ def register(app: web.Application, dashboard) -> None:
 
     def _member_json(member: discord.abc.User) -> dict:
         roles = getattr(member, "roles", ())
+        is_member = isinstance(member, discord.Member)
+        top_role = getattr(member, "top_role", None)
+        guild_permissions = getattr(member, "guild_permissions", None)
+        important_permissions = []
+        if guild_permissions is not None:
+            for key, label in (
+                ("administrator", "Administrateur"),
+                ("manage_guild", "Gérer le serveur"),
+                ("ban_members", "Bannir"),
+                ("kick_members", "Expulser"),
+                ("moderate_members", "Modérer"),
+                ("manage_messages", "Gérer les messages"),
+            ):
+                if getattr(guild_permissions, key, False):
+                    important_permissions.append(label)
         return {
             "id": str(member.id),
             "username": member.name,
             "display_name": getattr(member, "display_name", member.name),
             "avatar_url": str(member.display_avatar.url),
             "bot": bool(member.bot),
-            "present": isinstance(member, discord.Member),
+            "present": is_member,
+            "created_at": int(member.created_at.timestamp()) if getattr(member, "created_at", None) else None,
+            "joined_at": (
+                int(member.joined_at.timestamp())
+                if is_member and getattr(member, "joined_at", None)
+                else None
+            ),
+            "top_role": (
+                {"id": str(top_role.id), "name": top_role.name}
+                if top_role is not None and not top_role.is_default()
+                else None
+            ),
+            "permissions": important_permissions,
             "roles": [
                 {"id": str(role.id), "name": role.name}
                 for role in roles
                 if not role.is_default()
-            ][-8:],
+            ][-12:],
         }
 
     async def members_get(request: web.Request):
@@ -150,9 +190,14 @@ def register(app: web.Application, dashboard) -> None:
             (guild.id, member.id),
         )
         recent = await db.fetchall(
-            "SELECT case_number,action,reason,duration_seconds,created_at "
+            "SELECT case_number,action,reason,duration_seconds,moderator_id,created_at "
             "FROM sanctions WHERE guild_id=? AND user_id=? "
             "ORDER BY case_number DESC,id DESC LIMIT 8",
+            (guild.id, member.id),
+        )
+        latest_note = await db.fetchone(
+            "SELECT note,author_id,created_at FROM v17_staff_notes "
+            "WHERE guild_id=? AND user_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
             (guild.id, member.id),
         )
         timed_out_until = getattr(member, "timed_out_until", None)
@@ -170,7 +215,119 @@ def register(app: web.Application, dashboard) -> None:
             "sanctions": int(sanctions_row["n"] if sanctions_row else 0),
             "timed_out_until": timed_out_until.isoformat() if timed_out_until else None,
             "currently_banned": currently_banned,
+            "latest_note": dict(latest_note) if latest_note else None,
             "recent": [dict(row) for row in recent],
+        })
+
+    async def member_sanctions_get(request: web.Request):
+        _session, guild, error = await _guard(request)
+        if error:
+            return error
+        try:
+            user_id = int(request.match_info["user_id"])
+        except (TypeError, ValueError):
+            return dashboard._json_error("Identifiant de membre invalide.", 400)
+        try:
+            page = max(1, int(request.query.get("page") or 1))
+        except (TypeError, ValueError):
+            page = 1
+        page_size = 8
+        total = await bot.db.get_sanction_count(guild.id, user_id)
+        max_page = max(1, (int(total) + page_size - 1) // page_size)
+        page = min(page, max_page)
+        rows = await bot.db.fetchall(
+            "SELECT * FROM sanctions WHERE guild_id=? AND user_id=? "
+            "ORDER BY case_number DESC,id DESC LIMIT ? OFFSET ?",
+            (guild.id, user_id, page_size, (page - 1) * page_size),
+        )
+        return web.json_response({
+            "ok": True,
+            "user_id": str(user_id),
+            "page": page,
+            "pages": max_page,
+            "page_size": page_size,
+            "total": int(total),
+            "sanctions": [dict(row) for row in rows],
+        })
+
+    async def sanction_reason_post(request: web.Request):
+        session, guild, error = await _guard(request, write=True)
+        if error:
+            return error
+        try:
+            case_number = int(request.match_info["case_number"])
+        except (TypeError, ValueError):
+            return dashboard._json_error("Numéro de dossier invalide.", 400)
+
+        actor = await _actor(session, guild)
+        if actor is None:
+            return dashboard._json_error("Votre compte Discord n'est plus présent sur ce serveur.", 403)
+        if not await _actor_can(actor, "moderate_members"):
+            return dashboard._json_error(
+                "Vous n'avez pas la permission de modifier les dossiers de modération.",
+                403,
+            )
+
+        payload = await _payload(request)
+        reason = str(payload.get("reason") or "").strip()
+        if not reason or len(reason) > 500:
+            return dashboard._json_error("La raison doit contenir entre 1 et 500 caractères.", 400)
+
+        before = await bot.db.get_sanction_by_case(guild.id, case_number)
+        if before is None:
+            return dashboard._json_error("Dossier de sanction introuvable.", 404)
+        old_reason = str(before["reason"] or "")
+
+        try:
+            updated = await bot.db.update_sanction_reason(
+                guild.id,
+                case_number,
+                actor.id,
+                reason,
+            )
+        except ValueError as exc:
+            return dashboard._json_error(str(exc), 400)
+        if updated is None:
+            return dashboard._json_error("Dossier de sanction introuvable.", 404)
+
+        try:
+            target = await _target(guild, int(updated["user_id"]))
+            if target is None:
+                target = await bot.fetch_user(int(updated["user_id"]))
+            embed = discord.Embed(
+                title=f"Dossier #{case_number} — raison modifiée",
+                description="Modification effectuée depuis le dashboard SentriX.",
+                colour=discord.Colour.orange(),
+            )
+            embed.add_field(name="Membre", value=f"<@{updated['user_id']}>\nID: {updated['user_id']}", inline=True)
+            embed.add_field(name="Modérateur", value=f"{actor.mention}\nID: {actor.id}", inline=True)
+            embed.add_field(name="Ancienne raison", value=old_reason or "Aucune raison", inline=False)
+            embed.add_field(name="Nouvelle raison", value=reason, inline=False)
+            await log_service.send_log(
+                bot,
+                guild,
+                "sanction_reason_edit",
+                embed,
+                event_key=log_service.make_event_key(
+                    guild.id,
+                    "sanction_reason_edit",
+                    target_id=int(updated["user_id"]),
+                    executor_id=actor.id,
+                    discriminator=f"{case_number}:{int(time.time())}",
+                ),
+                identity_name=getattr(target, "display_name", str(target)),
+                identity_id=int(updated["user_id"]),
+                identity_icon=str(getattr(getattr(target, "display_avatar", None), "url", "") or ""),
+            )
+        except Exception:
+            pass
+
+        edits = await bot.db.get_sanction_reason_edits(guild.id, case_number, limit=10)
+        return web.json_response({
+            "ok": True,
+            "case_number": case_number,
+            "reason": reason,
+            "edits": [dict(row) for row in edits],
         })
 
     async def _template(action: str, guild: discord.Guild, actor: discord.Member, target: discord.Member, reason: str):
@@ -258,15 +415,14 @@ def register(app: web.Application, dashboard) -> None:
             return dashboard._json_error("Le centre de modération ne sanctionne pas les bots depuis le dashboard.", 400)
 
         _event, _label, bot_permission = _ACTION_META[action]
-        actor_permissions = actor.guild_permissions
-        if guild.owner_id != actor.id and not actor_permissions.administrator and not getattr(actor_permissions, bot_permission, False):
+        if not await _actor_can(actor, bot_permission):
             pretty = {
                 "ban_members": "Bannir des membres",
                 "kick_members": "Expulser des membres",
                 "moderate_members": "Exclure temporairement des membres",
             }.get(bot_permission, bot_permission)
             return dashboard._json_error(
-                f"Vous n'avez pas la permission Discord « {pretty} » requise pour cette action.",
+                f"Vous n'avez pas la permission Discord « {pretty} » ni le rôle staff SentriX requis pour cette action.",
                 403,
             )
         me = guild.me
@@ -378,6 +534,8 @@ def register(app: web.Application, dashboard) -> None:
 
     app.router.add_get("/api/guilds/{guild_id}/moderation/members", members_get)
     app.router.add_get("/api/guilds/{guild_id}/moderation/members/{user_id}", member_get)
+    app.router.add_get("/api/guilds/{guild_id}/moderation/members/{user_id}/sanctions", member_sanctions_get)
+    app.router.add_post("/api/guilds/{guild_id}/moderation/sanctions/{case_number}/reason", sanction_reason_post)
     app.router.add_post("/api/guilds/{guild_id}/moderation/actions", action_post)
 
 
