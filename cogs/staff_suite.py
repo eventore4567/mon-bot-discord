@@ -25,7 +25,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from services import moderation as moderation_service
-from utils import checks, helpers
+from utils import checks, helpers, log_service
 from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
 
@@ -556,6 +556,10 @@ class SanctionReasonModal(discord.ui.Modal, title="Modifier la raison"):
         self.add_item(self.reason)
 
     async def on_submit(self, interaction: discord.Interaction):
+        before = await self.suite.bot.db.get_sanction_by_case(
+            self.guild_id,
+            self.case_number,
+        )
         try:
             row = await self.suite.bot.db.update_sanction_reason(
                 self.guild_id,
@@ -570,6 +574,46 @@ class SanctionReasonModal(discord.ui.Modal, title="Modifier la raison"):
                 "Cette sanction n'existe plus.",
                 ephemeral=True,
             )
+
+        try:
+            target = interaction.guild.get_member(int(row["user_id"]))
+            if target is None:
+                try:
+                    target = await interaction.guild.fetch_member(int(row["user_id"]))
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    target = await self.suite.bot.fetch_user(int(row["user_id"]))
+            embed = discord.Embed(
+                title=f"Dossier #{self.case_number} — raison modifiée",
+                description="La modification est conservée dans l'audit SentriX.",
+                colour=discord.Colour.orange(),
+            )
+            embed.add_field(name="Membre", value=f"<@{row['user_id']}>\nID: {row['user_id']}", inline=True)
+            embed.add_field(name="Modérateur", value=f"{interaction.user.mention}\nID: {interaction.user.id}", inline=True)
+            embed.add_field(
+                name="Ancienne raison",
+                value=(str(before["reason"] or "") if before else "Aucune raison") or "Aucune raison",
+                inline=False,
+            )
+            embed.add_field(name="Nouvelle raison", value=str(row["reason"] or "Aucune raison"), inline=False)
+            await log_service.send_log(
+                self.suite.bot,
+                interaction.guild,
+                "sanction_reason_edit",
+                embed,
+                event_key=log_service.make_event_key(
+                    interaction.guild.id,
+                    "sanction_reason_edit",
+                    target_id=int(row["user_id"]),
+                    executor_id=interaction.user.id,
+                    discriminator=f"{self.case_number}:{now()}",
+                ),
+                identity_name=getattr(target, "display_name", str(target)),
+                identity_id=int(row["user_id"]),
+                identity_icon=str(getattr(getattr(target, "display_avatar", None), "url", "") or ""),
+            )
+        except Exception:
+            pass
+
         await interaction.response.send_message(
             f"Raison du dossier **#{self.case_number}** modifiée. L'ancienne raison reste conservée dans l'audit.",
             ephemeral=True,
