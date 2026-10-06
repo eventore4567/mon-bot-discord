@@ -122,7 +122,7 @@ renderSanctions = async function renderModerationCenter() {
       <div class="field full" style="margin-top:12px">
         <label for="moderationSearch">Rechercher un membre</label>
         <input class="search-input" id="moderationSearch" type="search" autocomplete="off" placeholder="Pseudo, nom affiché ou ID Discord">
-        <small>La recherche utilise les membres actuellement présents sur le serveur.</small>
+        <small>Recherche sur tout le serveur : le membre n’a pas besoin d’avoir accès au salon où une commande Discord a été lancée. Un ID Discord exact fonctionne aussi.</small>
       </div>
       <div class="options hidden" id="moderationResults" style="margin-top:8px"></div>
     </section>
@@ -170,6 +170,7 @@ renderSanctions = async function renderModerationCenter() {
           ${x.current_banned ? `<button class="btn sm" type="button" data-reverse-sanction="unban" data-reverse-user="${esc(x.user_id)}">Débannir</button>` : ''}
           ${x.current_muted ? `<button class="btn sm" type="button" data-reverse-sanction="unmute" data-reverse-user="${esc(x.user_id)}">Lever le mute</button>` : ''}
           ${Number(x.warn_count || 0) > 0 ? `<button class="btn sm" type="button" data-reverse-sanction="clear-warnings" data-reverse-user="${esc(x.user_id)}">Effacer warns</button>` : ''}
+          ${x.case_number ? `<button class="btn sm ghost" type="button" data-edit-reason="${esc(x.case_number)}" data-edit-current="${esc(x.reason || '')}">Modifier raison</button>` : ''}
           <button class="btn sm" type="button" data-open-member="${esc(x.user_id)}">Dossier</button>
         </div>
       </div>`;
@@ -178,6 +179,9 @@ renderSanctions = async function renderModerationCenter() {
       state.moderationMemberId = b.dataset.openMember;
       await paintMember();
       $('moderationMemberCard').scrollIntoView({ behavior: REDUCED_MOTION() ? 'auto' : 'smooth', block: 'start' });
+    });
+    $('sanctionList').querySelectorAll('[data-edit-reason]').forEach(b => b.onclick = () => {
+      editModerationReason(b.dataset.editReason, b.dataset.editCurrent || '', () => renderSanctions());
     });
     $('sanctionList').querySelectorAll('[data-reverse-sanction]').forEach(b => b.onclick = async () => {
       const label = b.textContent;
@@ -234,7 +238,7 @@ renderSanctions = async function renderModerationCenter() {
     holder.innerHTML = `<div class="card-head">
       <div class="profile-line">
         <span class="avatar big">${m.avatar_url ? `<img src="${esc(m.avatar_url)}" alt="">` : esc((m.display_name || m.username || '?').slice(0,2).toUpperCase())}</span>
-        <div><h2>${esc(m.display_name || m.username || m.id)}</h2><p>@${esc(m.username || '')} · ${esc(m.id || '')}</p></div>
+        <div><h2>${esc(m.display_name || m.username || m.id)}</h2><p>@${esc(m.username || '')} · ${esc(m.id || '')}</p><small>${m.created_at ? 'Compte créé ' + esc(when(m.created_at)) : ''}${m.joined_at ? ' · membre depuis ' + esc(when(m.joined_at)) : ''}</small></div>
       </div>
       <button class="btn ghost" type="button" id="closeModerationMember">Fermer le dossier</button>
     </div>
