@@ -560,12 +560,18 @@ class SanctionReasonModal(discord.ui.Modal, title="Modifier la raison"):
             self.guild_id,
             self.case_number,
         )
+        new_reason = str(self.reason.value).strip()
+        if before is not None and str(before["reason"] or "") == new_reason:
+            return await interaction.response.send_message(
+                "La raison est déjà identique.",
+                ephemeral=True,
+            )
         try:
             row = await self.suite.bot.db.update_sanction_reason(
                 self.guild_id,
                 self.case_number,
                 interaction.user.id,
-                str(self.reason.value),
+                new_reason,
             )
         except ValueError as exc:
             return await interaction.response.send_message(str(exc), ephemeral=True)
