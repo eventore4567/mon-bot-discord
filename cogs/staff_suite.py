@@ -626,13 +626,67 @@ class SanctionReasonModal(discord.ui.Modal, title="Modifier la raison"):
         )
 
 
+class ReverseSanctionModal(discord.ui.Modal):
+    def __init__(self, suite: "StaffSuite", member_id: int, action: str):
+        label = "Débannir" if action == "unban" else "Lever le timeout"
+        super().__init__(title=label)
+        self.suite = suite
+        self.member_id = int(member_id)
+        self.action = action
+        self.reason = discord.ui.TextInput(
+            label="Raison",
+            placeholder="Pourquoi cette sanction est-elle levée ?",
+            default="Levée depuis ModView",
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+        )
+        self.add_item(self.reason)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, message = await self.suite.reverse_member_sanction(
+            interaction,
+            self.member_id,
+            self.action,
+            str(self.reason.value),
+        )
+        await panels.texte_court(interaction.response, message, ephemere=True)
+
+
 class SanctionDetailView(OwnedView):
-    def __init__(self, suite: "StaffSuite", owner_id: int, row):
+    def __init__(
+        self,
+        suite: "StaffSuite",
+        owner_id: int,
+        row,
+        *,
+        active: bool = False,
+    ):
         super().__init__(suite, owner_id)
         self.case_number = int(row["case_number"])
+        self.member_id = int(row["user_id"])
+        self.action = str(row["action"] or "")
         self.current_reason = str(row["reason"] or "")
+        if active and self.action in {"ban", "tempban", "mute"}:
+            reverse_action = "unban" if self.action in {"ban", "tempban"} else "unmute"
+            button = discord.ui.Button(
+                label="Débannir" if reverse_action == "unban" else "Lever le timeout",
+                style=discord.ButtonStyle.success,
+                row=1,
+            )
 
-    @discord.ui.button(label="Modifier la raison", style=discord.ButtonStyle.primary)
+            async def reverse(interaction: discord.Interaction):
+                await interaction.response.send_modal(
+                    ReverseSanctionModal(
+                        self.suite,
+                        self.member_id,
+                        reverse_action,
+                    )
+                )
+
+            button.callback = reverse
+            self.add_item(button)
+
+    @discord.ui.button(label="Modifier la raison", style=discord.ButtonStyle.primary, row=0)
     async def edit_reason(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(
             SanctionReasonModal(
@@ -715,10 +769,19 @@ class SanctionCaseSelect(discord.ui.Select):
                 "Cette sanction n'existe plus.",
                 ephemeral=True,
             )
+        active_cases = await self.owner.suite.active_sanction_cases(
+            interaction.guild,
+            int(row["user_id"]),
+        )
         embed = await self.owner.suite.sanction_detail_embed(interaction.guild, row)
         await interaction.response.send_message(
             embed=embed,
-            view=SanctionDetailView(self.owner.suite, interaction.user.id, row),
+            view=SanctionDetailView(
+                self.owner.suite,
+                interaction.user.id,
+                row,
+                active=int(row["case_number"]) in active_cases,
+            ),
             ephemeral=True,
         )
 
@@ -1890,6 +1953,109 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         if action in {"unban", "unmute"}:
             return "lifted", "✅ Levée"
         return "history", "⚪ Historique"
+
+    async def reverse_member_sanction(
+        self,
+        interaction: discord.Interaction,
+        member_id: int,
+        action: str,
+        reason: str,
+    ) -> tuple[bool, str]:
+        guild = interaction.guild
+        actor = interaction.user
+        if guild is None or not isinstance(actor, discord.Member):
+            return False, "Cette action doit être effectuée sur un serveur."
+
+        permission = "ban_members" if action == "unban" else "moderate_members"
+        if not await self._staff_can(actor, permission):
+            return False, "Permission insuffisante pour lever cette sanction."
+        me = guild.me
+        if me is None or not getattr(me.guild_permissions, permission, False):
+            return False, f"SentriX n'a pas la permission Discord requise ({permission})."
+
+        reason = str(reason or "").strip() or "Levée depuis ModView"
+        mod_cog = self.bot.get_cog("Moderation")
+        try:
+            if action == "unban":
+                template = None
+                if mod_cog is not None and hasattr(mod_cog, "_get_sanction_dm_template"):
+                    try:
+                        template = await mod_cog._get_sanction_dm_template(guild.id, "unban")
+                    except Exception:
+                        template = None
+
+                def render_dm(user):
+                    if mod_cog is None or template is None:
+                        return None
+                    try:
+                        return mod_cog._render_sanction_dm_text(
+                            template,
+                            target=user,
+                            guild=guild,
+                            reason=reason,
+                            duration_seconds=None,
+                            actor=actor,
+                            action_label=mod_cog.DM_ACTION_LABELS.get("unban", "débannissement"),
+                        )
+                    except Exception:
+                        return None
+
+                outcome = await moderation_service.unban(
+                    self.bot,
+                    guild=guild,
+                    actor=actor,
+                    user_id=int(member_id),
+                    reason=reason,
+                    fetch_user=self.bot.fetch_user,
+                    render_dm_text=render_dm,
+                )
+                target = getattr(outcome, "resolved_target", None)
+            elif action == "unmute":
+                target = guild.get_member(int(member_id))
+                if target is None:
+                    try:
+                        target = await guild.fetch_member(int(member_id))
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        return False, "Ce membre n'est plus présent sur le serveur."
+                outcome = await moderation_service.unmute(
+                    self.bot,
+                    guild=guild,
+                    actor=actor,
+                    target=target,
+                    reason=reason,
+                    dm_text=None,
+                )
+            else:
+                return False, "Action inconnue."
+        except discord.Forbidden:
+            return False, "Discord a refusé l'action : vérifiez les permissions et la hiérarchie."
+        except discord.HTTPException:
+            return False, "Discord n'a pas pu lever cette sanction. Réessayez."
+
+        if not getattr(outcome, "executed", False):
+            message = (
+                getattr(outcome, "rejection_reason", None)
+                or getattr(outcome, "validation_error", None)
+                or "La sanction n'a pas été levée."
+            )
+            return False, str(message)
+
+        if mod_cog is not None and target is not None and hasattr(mod_cog, "log_sanction"):
+            try:
+                await mod_cog.log_sanction(
+                    SimpleNamespace(guild=guild, author=actor),
+                    action,
+                    target,
+                    reason,
+                    case_number=getattr(outcome, "case_number", None),
+                )
+            except Exception:
+                pass
+
+        label = "Débannissement" if action == "unban" else "Timeout levé"
+        case_number = getattr(outcome, "case_number", None)
+        suffix = f" · dossier #{case_number}" if case_number is not None else ""
+        return True, f"{label} effectué{suffix}."
 
     async def sanction_detail_embed(self, guild: discord.Guild, row) -> discord.Embed:
         action = SANCTION_LABELS.get(str(row["action"]), str(row["action"]).title())
