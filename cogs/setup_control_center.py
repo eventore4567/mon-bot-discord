@@ -544,11 +544,22 @@ class AutomodSelect(discord.ui.Select):
 class LogSelect(discord.ui.Select):
     def __init__(self, view):
         self.owner = view
+        current = str(getattr(view, "selected_log", "") or "")
         options = [
-            discord.SelectOption(label=meta["label"][:100], value=key)
+            discord.SelectOption(
+                label=meta["label"][:100],
+                value=key,
+                default=(key == current),
+            )
             for key, meta in log_service.LOG_TYPES.items() if meta.get("emits")
         ]
-        super().__init__(placeholder="Choisir un type de log", options=options, row=2)
+        selected_meta = log_service.LOG_TYPES.get(current, {}) if current else {}
+        placeholder = (
+            f"Type : {selected_meta.get('label', current)}"
+            if current else
+            "Choisir un type de log"
+        )
+        super().__init__(placeholder=placeholder[:150], options=options, row=2)
 
     async def callback(self, interaction):
         self.owner.selected_log = self.values[0]
@@ -558,13 +569,28 @@ class LogSelect(discord.ui.Select):
 class LogChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, view):
         self.owner = view
+        setting = getattr(view, "_selected_log_setting", None) or {}
+        channel_id = setting.get("channel_id")
+        channel = view.guild.get_channel(int(channel_id)) if channel_id else None
+        placeholder = (
+            f"Salon actuel : #{channel.name}"
+            if isinstance(channel, discord.TextChannel)
+            else "Choisir le salon de ce log"
+        )
         super().__init__(
-            placeholder="Salon de ce log", min_values=0, max_values=1,
+            placeholder=placeholder[:150], min_values=0, max_values=1,
             channel_types=[discord.ChannelType.text, discord.ChannelType.news], row=3,
         )
 
     async def callback(self, interaction):
         category = self.owner.selected_log
+        if not category:
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embeds.error("Choisissez d’abord un type de log.")),
+                ephemere=True,
+            )
+
         channel_id = self.values[0].id if self.values else None
         if channel_id is not None:
             ok, reason = log_service.validate_channel(
@@ -573,24 +599,72 @@ class LogChannelSelect(discord.ui.ChannelSelect):
                 needs_file=True,
             )
             if not ok:
-                return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error(f'Ce salon ne peut pas recevoir les logs SentriX : **{reason}**.')), ephemere=True)
+                return await panels.envoyer(
+                    interaction.response,
+                    panels.depuis_embed(
+                        embeds.error(
+                            f"Ce salon ne peut pas recevoir les logs SentriX : **{reason}**."
+                        )
+                    ),
+                    ephemere=True,
+                )
 
-        await log_service.set_log_config(
-            self.owner.bot,
-            self.owner.guild.id,
-            category,
-            channel_id=channel_id,
-            enabled=channel_id is not None,
-        )
-        saved = await log_service.get_log_config(
-            self.owner.bot,
-            self.owner.guild.id,
-            category,
-        )
-        if channel_id is not None and (
-            saved is None or int(saved.get("channel_id") or 0) != int(channel_id)
-        ):
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('La configuration du salon de logs n’a pas été enregistrée correctement.')), ephemere=True)
+        try:
+            await log_service.set_log_config(
+                self.owner.bot,
+                self.owner.guild.id,
+                category,
+                channel_id=channel_id,
+                enabled=channel_id is not None,
+            )
+            saved = await log_service.get_log_config(
+                self.owner.bot,
+                self.owner.guild.id,
+                category,
+                fresh=True,
+            )
+            if channel_id is not None and (
+                saved is None or int(saved.get("channel_id") or 0) != int(channel_id)
+            ):
+                return await panels.envoyer(
+                    interaction.response,
+                    panels.depuis_embed(
+                        embeds.error(
+                            "La configuration du salon de logs n’a pas été enregistrée correctement."
+                        )
+                    ),
+                    ephemere=True,
+                )
+
+            # Premier salon configuré = module Logs utilisable immédiatement.
+            # Un module explicitement coupé reste coupé : on ne contourne pas le choix
+            # de l'administrateur, on active seulement l'état « non configuré ».
+            if channel_id is not None:
+                from cogs import setup_v2_core as core
+
+                await core.enable_module_if_unset(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    "logs",
+                    actor_id=interaction.user.id,
+                )
+        except Exception:
+            logger.exception(
+                "Configuration des logs impossible guild=%s category=%s channel=%s",
+                self.owner.guild.id,
+                category,
+                channel_id,
+            )
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(
+                    embeds.error(
+                        "Impossible d’enregistrer ce salon de logs. Vérifiez les permissions de SentriX puis réessayez."
+                    )
+                ),
+                ephemere=True,
+            )
+
         await self.owner.audit(interaction.user.id, category, channel_id)
         await self.owner.refresh(interaction)
 
@@ -766,6 +840,7 @@ class SetupView(discord.ui.LayoutView):
         super().__init__(timeout=900)
         self.bot, self.guild, self.author_id = bot, guild, int(author_id)
         self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
+        self._selected_log_setting = None
         self._commandes: list = []
         # Paramètres rares (ajoutés par les couches tierces via add_item / build_embed) :
         # cachés tant que « Paramètres avancés » n'est pas activé.
@@ -830,6 +905,25 @@ class SetupView(discord.ui.LayoutView):
         """
         self.clear_items()
         self._commandes = []
+
+        # Précharge la route sélectionnée AVANT render() : le sélecteur de salon peut
+        # ainsi afficher le salon réellement enregistré au lieu de revenir visuellement
+        # à « Salon de ce log » après chaque clic.
+        self._selected_log_setting = None
+        if self.category == "logs" and self.selected_log:
+            try:
+                self._selected_log_setting = await log_service.get_log_setting(
+                    self.bot,
+                    self.guild.id,
+                    self.selected_log,
+                )
+            except Exception:
+                logger.exception(
+                    "Lecture de la configuration logs impossible guild=%s category=%s",
+                    self.guild.id,
+                    self.selected_log,
+                )
+
         self.render()
         await self.prepare()
 
@@ -934,18 +1028,74 @@ class SetupView(discord.ui.LayoutView):
             self.ajouter(LogSelect(self))
             if self.selected_log:
                 self.ajouter(LogChannelSelect(self))
+                current_log_setting = self._selected_log_setting or {}
+                current_log_enabled = bool(
+                    current_log_setting.get("enabled")
+                    and current_log_setting.get("channel_id")
+                )
                 toggle = discord.ui.Button(
-                    label="Activer / désactiver ce log", style=discord.ButtonStyle.primary
+                    label="Désactiver ce log" if current_log_enabled else "Activer ce log",
+                    style=(
+                        discord.ButtonStyle.danger
+                        if current_log_enabled
+                        else discord.ButtonStyle.success
+                    ),
                 )
 
                 async def toggle_log(interaction):
-                    setting = await log_service.get_log_setting(self.bot, self.guild.id, self.selected_log)
+                    setting = await log_service.get_log_setting(
+                        self.bot,
+                        self.guild.id,
+                        self.selected_log,
+                    )
                     channel_id = setting.get("channel_id")
-                    if not setting.get("enabled") and not channel_id:
-                        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Choisissez d’abord un salon pour cette catégorie de logs.')), ephemere=True)
-                    await log_service.set_log_config(
-                        self.bot, self.guild.id, self.selected_log,
-                        channel_id=channel_id, enabled=not bool(setting.get("enabled")),
+                    new_enabled = not bool(setting.get("enabled"))
+                    if new_enabled and not channel_id:
+                        return await panels.envoyer(
+                            interaction.response,
+                            panels.depuis_embed(
+                                embeds.error(
+                                    "Choisissez d’abord un salon pour cette catégorie de logs."
+                                )
+                            ),
+                            ephemere=True,
+                        )
+                    try:
+                        await log_service.set_log_config(
+                            self.bot,
+                            self.guild.id,
+                            self.selected_log,
+                            channel_id=channel_id,
+                            enabled=new_enabled,
+                        )
+                        if new_enabled:
+                            from cogs import setup_v2_core as core
+
+                            await core.enable_module_if_unset(
+                                self.bot,
+                                self.guild.id,
+                                "logs",
+                                actor_id=interaction.user.id,
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Bascule du log impossible guild=%s category=%s",
+                            self.guild.id,
+                            self.selected_log,
+                        )
+                        return await panels.envoyer(
+                            interaction.response,
+                            panels.depuis_embed(
+                                embeds.error(
+                                    "Impossible de modifier ce log pour le moment. Vérifiez les permissions de SentriX puis réessayez."
+                                )
+                            ),
+                            ephemere=True,
+                        )
+                    await self.audit(
+                        interaction.user.id,
+                        f"log:{self.selected_log}",
+                        "on" if new_enabled else "off",
                     )
                     await self.refresh(interaction)
 
