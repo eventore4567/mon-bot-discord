@@ -1468,8 +1468,9 @@ async def _automation_reaction_rows(bot, guild_id: int):
 
 class AutoReactionModal(discord.ui.Modal, title="Réaction automatique"):
     emojis = discord.ui.TextInput(
-        label="Emojis",
-        placeholder="👍 👎 ou emojis du serveur",
+        label="Autres emojis (facultatif)",
+        placeholder="👍 👎 ou <:nom:123456789>",
+        required=False,
         max_length=400,
     )
     keyword = discord.ui.TextInput(
@@ -1482,12 +1483,62 @@ class AutoReactionModal(discord.ui.Modal, title="Réaction automatique"):
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
+        self.server_emoji_select = None
+
+        server_emojis = sorted(
+            (
+                emoji
+                for emoji in getattr(owner.guild, "emojis", [])
+                if getattr(emoji, "available", True)
+            ),
+            key=lambda emoji: str(getattr(emoji, "name", "")).casefold(),
+        )
+        if server_emojis:
+            visible = server_emojis[:25]
+            options = [
+                discord.SelectOption(
+                    label=f":{emoji.name}:"[:100],
+                    value=str(emoji),
+                    description=("Emoji animé" if emoji.animated else "Emoji du serveur"),
+                    emoji=emoji,
+                )
+                for emoji in visible
+            ]
+            self.server_emoji_select = discord.ui.Select(
+                placeholder="Choisir les emojis du serveur",
+                min_values=0,
+                max_values=min(8, len(options)),
+                options=options,
+                required=False,
+            )
+            description = "Sélectionne jusqu’à 8 emojis directement dans la liste."
+            if len(server_emojis) > 25:
+                description = (
+                    f"25 emojis affichés sur {len(server_emojis)}. "
+                    "Les autres peuvent être collés dans le champ ci-dessous."
+                )
+            self.add_item(
+                discord.ui.Label(
+                    text="Emojis du serveur",
+                    description=description[:100],
+                    component=self.server_emoji_select,
+                )
+            )
 
     async def on_submit(self, interaction):
         if not self.owner.channel_id:
             return await interaction.response.send_message("Choisissez d’abord un salon.", ephemeral=True)
-        raw = str(self.emojis.value or "").replace(",", " ").split()
+
         emojis = []
+        if self.server_emoji_select is not None:
+            for value in self.server_emoji_select.values:
+                token = str(value or "").strip()
+                if token and token not in emojis:
+                    emojis.append(token)
+                if len(emojis) >= 8:
+                    break
+
+        raw = str(self.emojis.value or "").replace(",", " ").split()
         for value in raw:
             token = value.strip()
             if token and token not in emojis:
@@ -1496,8 +1547,9 @@ class AutoReactionModal(discord.ui.Modal, title="Réaction automatique"):
                 emojis.append(token)
             if len(emojis) >= 8:
                 break
+
         if not emojis:
-            return await interaction.response.send_message("Ajoutez au moins un emoji.", ephemeral=True)
+            return await interaction.response.send_message("Choisissez au moins un emoji.", ephemeral=True)
         keyword = str(self.keyword.value or "").strip()
         if self.owner.mode == "keyword" and not keyword:
             return await interaction.response.send_message("Ajoutez le mot-clé à détecter.", ephemeral=True)
