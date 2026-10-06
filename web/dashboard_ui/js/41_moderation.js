@@ -252,17 +252,27 @@ renderSanctions = async function renderModerationCenter() {
       ${m.bot ? '<span class="notice warn">Les bots ne peuvent pas être sanctionnés depuis ce centre.</span>' : m.present === false ? (d.currently_banned ? '<button class="btn primary" type="button" data-member-reverse="unban">Débannir</button>' : '<span class="notice">Ce membre n’est plus présent sur le serveur.</span>') : ['warn','mute','kick','ban'].map(a => `<button class="btn ${moderationActionClass(a)}" type="button" data-mod-action="${a}">${moderationActionLabel(a)}</button>`).join('')}
       ${muted ? '<button class="btn" type="button" data-member-reverse="unmute">Lever le mute</button>' : ''}
       ${Number(d.warnings || 0) > 0 ? '<button class="btn" type="button" data-member-reverse="clear-warnings">Effacer les avertissements</button>' : ''}
+      <button class="btn ghost" type="button" id="viewAllMemberSanctions">Voir toutes les sanctions</button>
     </div>
+    ${d.latest_note ? `<div class="notice" style="margin-top:14px"><b>Dernière note staff</b><br>${esc(d.latest_note.note || '')}<br><small>par ${esc(d.latest_note.author_id || 'inconnu')}${d.latest_note.created_at ? ' · ' + esc(when(d.latest_note.created_at)) : ''}</small></div>` : ''}
+    ${(m.permissions || []).length ? `<div class="notice" style="margin-top:10px"><b>Permissions importantes</b><br>${esc((m.permissions || []).join(' · '))}</div>` : ''}
     <div style="margin-top:16px">
-      <h3>Dernières sanctions de ce membre</h3>
+      <div class="card-head"><div><h3>Dernières sanctions de ce membre</h3><p>Raison, date et modérateur.</p></div></div>
       <div class="list compact" style="margin-top:8px">
-        ${(d.recent || []).length ? d.recent.map(x => `<div class="row"><div class="row-main"><b>${esc((x.case_number ? 'Dossier #' + x.case_number + ' · ' : '') + (x.action || 'action'))}</b><small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''}</small></div></div>`).join('') : '<p class="info">Aucune sanction enregistrée.</p>'}
+        ${(d.recent || []).length ? d.recent.map(x => `<div class="row">
+          <div class="row-main"><b>${esc((x.case_number ? 'Dossier #' + x.case_number + ' · ' : '') + (x.action || 'action'))}</b><small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''}${x.moderator_id ? ' · modérateur ' + esc(x.moderator_id) : ''}</small></div>
+          <div class="row-actions">${x.case_number ? `<button class="btn sm ghost" type="button" data-member-edit-reason="${esc(x.case_number)}" data-member-edit-current="${esc(x.reason || '')}">Modifier raison</button>` : ''}</div>
+        </div>`).join('') : '<p class="info">Aucune sanction enregistrée.</p>'}
       </div>
     </div>`;
     $('closeModerationMember').onclick = () => {
       state.moderationMemberId = null;
       holder.innerHTML = emptyState('Aucun membre sélectionné', 'Recherchez un membre ci-dessus pour ouvrir son dossier et afficher les actions disponibles.');
     };
+    $('viewAllMemberSanctions').onclick = () => openModerationSanctions(m, 1);
+    holder.querySelectorAll('[data-member-edit-reason]').forEach(b => b.onclick = () => {
+      editModerationReason(b.dataset.memberEditReason, b.dataset.memberEditCurrent || '', () => renderSanctions());
+    });
     holder.querySelectorAll('[data-mod-action]').forEach(b => b.onclick = () => openModerationAction(m, b.dataset.modAction));
     holder.querySelectorAll('[data-member-reverse]').forEach(b => b.onclick = async () => {
       const label = b.textContent;
