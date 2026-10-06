@@ -277,6 +277,13 @@ def register(app: web.Application, dashboard) -> None:
         if before is None:
             return dashboard._json_error("Dossier de sanction introuvable.", 404)
         old_reason = str(before["reason"] or "")
+        if old_reason == reason:
+            return web.json_response({
+                "ok": True,
+                "case_number": case_number,
+                "reason": reason,
+                "unchanged": True,
+            })
 
         try:
             updated = await bot.db.update_sanction_reason(
