@@ -264,6 +264,7 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "protectmember": "manage_roles",
     # Suite staff premium : accès staff explicite, jamais fail-closed par oubli.
     "member": "moderate_members",
+    "modview": "moderate_members",
     "note": "moderate_members",
     "history": "moderate_members",
     "staff-proof": "moderate_members",
@@ -497,7 +498,7 @@ _MODULE_BY_PERMISSION_COMMAND = {
         "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
         "warnings", "clearwarnings", "case", "casefull", "caseproof",
         "modhistory", "modundo", "modcenter", "userhistory", "staffnote",
-        "member", "note", "history", "staff-proof", "incident", "watch", "staff",
+        "member", "modview", "note", "history", "staff-proof", "incident", "watch", "staff",
         "handover", "report", "absence", "staff-reminder", "audit", "urgence",
         "suspiciouslist", "quarantine", "unquarantine", "clear", "say",
         "slowmode", "lock", "unlock", "hide", "show", "smartlockdown",
