@@ -140,6 +140,8 @@ jobs:
               tests/test_dashboard_v60_rework.py
               tests/test_accessibility.py
               tests/test_dashboard_install_link.py
+              tests/test_finish_giveaway_infinit_dashboard.py
+              tests/test_infinite_counter_silent_invalid.py
 
           - name: Legacy + commands + release contracts
             tests: >-

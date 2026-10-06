@@ -874,7 +874,9 @@ def _install_managed_mode_command(bot) -> None:
 def install(bot) -> None:
     if getattr(bot, "_sentrix_setup_v2_completion", False): return
     setup_ui.NotificationSelect = PaginatedNotificationSelect
-    v2ui.NotificationManageView = NotificationManageViewV3
+    # Le gestionnaire moderne vit dans setup_v2_ui et reçoit aussi les lignes
+    # de sources. L'ancien V3 n'accepte que (owner, author_id) : l'écraser ici
+    # provoquait TypeError au clic sur « Gérer les sources ».
     _patch_setup_render(); _patch_setup_embed(); _replace_welcome_listeners(bot); _install_server_builder_minimal_profile(); _install_managed_mode_command(bot)
     bot._sentrix_setup_v2_completion = True
     logger.info("Setup V2 completion installé : validation, reset, pagination, bienvenue et mode géré.")

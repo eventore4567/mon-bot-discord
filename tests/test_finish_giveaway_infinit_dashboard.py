@@ -93,13 +93,17 @@ def test_invitation_setup_is_a_dedicated_category_with_required_log_permissions(
     assert "log_service.LOG_TYPES[CATEGORY]" not in source
 
 
-def test_infinite_counter_persists_and_never_resets_on_invalid_input():
+def test_infinite_counter_persists_and_invalid_input_is_silent():
     source = (ROOT / "cogs/infinite_counter.py").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS infinite_counter_config" in source
     assert "last_user_id" in source
     assert "asyncio.Lock" in source
-    assert "delete_after=10" in source
-    assert "await asyncio.sleep(2)" in source
+    assert "class InfiniteMistakeView" not in source
+    invalid_block = source[source.index("    async def _invalid("):source.index('    @commands.group(name="infinit"', source.index("    async def _invalid("))]
+    assert "await message.delete()" in invalid_block
+    assert ".channel.send(" not in invalid_block
+    assert "send_message(" not in invalid_block
+    assert "panels." not in invalid_block
     # Progress only advances in the valid branch; invalid branches return before this UPDATE.
     assert "next_number=?,last_user_id=?" in source
     assert "next_number=1" not in source

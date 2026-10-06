@@ -30,6 +30,41 @@ MODULE_BY_CATEGORY = {
     "ai": "ai",
 }
 
+_SOURCE_ACTION_COOLDOWNS: dict[tuple[int, int, str], float] = {}
+
+
+def _claim_source_cooldown(owner, user_id: int, action: str, seconds: float) -> float:
+    """Petit verrou anti double-clic pour les actions réseau / destructives du setup."""
+    now_mono = time.monotonic()
+    key = (int(owner.guild.id), int(user_id), str(action))
+    expires = _SOURCE_ACTION_COOLDOWNS.get(key, 0.0)
+    if expires > now_mono:
+        return expires - now_mono
+    _SOURCE_ACTION_COOLDOWNS[key] = now_mono + float(seconds)
+    if len(_SOURCE_ACTION_COOLDOWNS) > 4096:
+        for stale_key, stale_expiry in list(_SOURCE_ACTION_COOLDOWNS.items()):
+            if stale_expiry <= now_mono:
+                _SOURCE_ACTION_COOLDOWNS.pop(stale_key, None)
+    return 0.0
+
+
+async def _source_cooldown_blocked(
+    interaction: discord.Interaction,
+    owner,
+    *,
+    action: str,
+    seconds: float,
+) -> bool:
+    retry = _claim_source_cooldown(owner, interaction.user.id, action, seconds)
+    if retry <= 0:
+        return False
+    await interaction.response.send_message(
+        f"Réessaie dans {retry:.1f} s.",
+        ephemeral=True,
+    )
+    return True
+
+
 SCOPE_LABELS = {
     "public": "Membres / utilitaires",
     "moderation": "Modération",
@@ -96,6 +131,566 @@ async def set_ai_feature(bot, guild_id: int, key: str, value: bool, actor_id: in
         f"UPDATE ai_feature_settings_v2 SET {key}=?, updated_by=?, updated_at=? WHERE guild_id=?",
         (1 if value else 0, actor_id, int(time.time()), guild_id),
     )
+
+
+SECURITY_POLICY_FILTERS: tuple[tuple[str, str], ...] = (
+    ("antispam", "Anti-spam"),
+    ("antilink", "Anti-liens"),
+    ("antiinvite", "Anti-invitations"),
+    ("antimention", "Anti-mentions"),
+    ("anticaps", "Anti-majuscules"),
+    ("antiemoji", "Anti-émojis"),
+    ("antiscam", "Anti-scam"),
+    ("antiinsult", "Anti-insultes / mots interdits"),
+)
+_SECURITY_POLICY_LABELS = dict(SECURITY_POLICY_FILTERS)
+
+# Centre unique de sécurité, inspiré d'une UX de bot premium sans recopier une
+# interface tierce. Les filtres de messages ont en plus rôles bypass + salons
+# stricts ; les protections serveur gardent leurs réglages adaptés.
+SECURITY_CENTER_PROTECTIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("antispam", "Anti-spam", "Messages", "Flood, rafales et répétitions."),
+    ("antilink", "Anti-liens", "Messages", "Liens externes non autorisés."),
+    ("antilink_strict", "Blocage total des liens", "Messages", "Refuse tous les liens hors exceptions explicites."),
+    ("antiinvite", "Anti-invitations", "Messages", "Invitations Discord non autorisées."),
+    ("antimention", "Anti-mentions", "Messages", "Mentions et pings massifs."),
+    ("anticaps", "Anti-majuscules", "Messages", "Majuscules abusives."),
+    ("antiemoji", "Anti-émojis", "Messages", "Flood massif d'émojis."),
+    ("antiscam", "Anti-scam", "Messages", "Phishing, faux Nitro, crypto et images suspectes."),
+    ("antiinsult", "Anti-insultes / mots interdits", "Messages", "Insultes et expressions interdites."),
+    ("antiraid", "Anti-raid", "Arrivées", "Arrivées massives et mode raid."),
+    ("antibot", "Anti-bots", "Arrivées", "Bots ajoutés de manière suspecte."),
+    ("antiaccount", "Anti-comptes récents", "Arrivées", "Comptes Discord trop récents."),
+    ("join_gate", "Join Gate", "Arrivées", "Âge du compte, avatar et vitesse d'arrivée."),
+    ("risk_engine", "Moteur de risque", "Arrivées", "Score multi-signaux et alertes graduées."),
+    ("antinuke", "Anti-nuke", "Serveur", "Rôles, salons, webhooks et actions critiques."),
+    ("security_vanity", "Protection Vanity URL", "Serveur", "Surveille le lien personnalisé du serveur."),
+    ("security_prune", "Protection Prune", "Serveur", "Détecte les suppressions massives de membres."),
+    ("security_permissions", "Permissions dangereuses", "Serveur", "Bloque les élévations critiques de permissions."),
+    ("escalation", "Escalade AutoMod", "Réponse", "Augmente les sanctions lors des récidives."),
+    ("honeypot", "Honeypot anti-bot", "Avancé", "Piège les comptes suspects dans le salon prévu."),
+    ("verification", "Vérification anti-alt", "Avancé", "Score de confiance et validation humaine."),
+)
+_SECURITY_CENTER_META = {
+    key: {"label": label, "group": group, "description": description}
+    for key, label, group, description in SECURITY_CENTER_PROTECTIONS
+}
+
+
+async def _get_security_filter_policy(bot, guild_id: int, filter_name: str) -> dict:
+    if filter_name not in _SECURITY_POLICY_LABELS:
+        filter_name = "antispam"
+    reader = getattr(bot.db, "get_security_filter_policy", None)
+    if callable(reader):
+        return await reader(int(guild_id), filter_name)
+
+    role_rows = await bot.db.fetchall(
+        "SELECT role_id FROM security_filter_bypass_roles "
+        "WHERE guild_id=? AND filter_name=? ORDER BY role_id",
+        (int(guild_id), filter_name),
+    )
+    channel_rows = await bot.db.fetchall(
+        "SELECT channel_id FROM security_filter_strict_channels "
+        "WHERE guild_id=? AND filter_name=? ORDER BY channel_id",
+        (int(guild_id), filter_name),
+    )
+    return {
+        "role_ids": [int(row["role_id"]) for row in role_rows],
+        "strict_channel_ids": [int(row["channel_id"]) for row in channel_rows],
+    }
+
+
+def _invalidate_security_filter_policy(bot, guild_id: int, filter_name: str) -> None:
+    automod = bot.get_cog("Automod")
+    if automod is None:
+        return
+    invalidator = getattr(automod, "invalidate_security_filter_policy", None)
+    if callable(invalidator):
+        invalidator(int(guild_id), filter_name)
+    else:
+        getattr(automod, "antispam_policy_cache", {}).pop(int(guild_id), None)
+    getattr(automod, "automod_cache", {}).pop(int(guild_id), None)
+
+
+async def _replace_security_filter_policy(
+    bot,
+    guild_id: int,
+    filter_name: str,
+    *,
+    role_ids: list[int],
+    strict_channel_ids: list[int],
+) -> None:
+    writer = getattr(bot.db, "set_security_filter_policy", None)
+    if callable(writer):
+        await writer(
+            int(guild_id),
+            filter_name,
+            role_ids=role_ids,
+            strict_channel_ids=strict_channel_ids,
+        )
+    else:
+        await bot.db.execute(
+            "DELETE FROM security_filter_bypass_roles WHERE guild_id=? AND filter_name=?",
+            (int(guild_id), filter_name),
+        )
+        for role_id in dict.fromkeys(int(value) for value in role_ids):
+            await bot.db.execute(
+                "INSERT OR IGNORE INTO security_filter_bypass_roles "
+                "(guild_id,filter_name,role_id) VALUES (?,?,?)",
+                (int(guild_id), filter_name, role_id),
+            )
+        await bot.db.execute(
+            "DELETE FROM security_filter_strict_channels WHERE guild_id=? AND filter_name=?",
+            (int(guild_id), filter_name),
+        )
+        for channel_id in dict.fromkeys(int(value) for value in strict_channel_ids):
+            await bot.db.execute(
+                "INSERT OR IGNORE INTO security_filter_strict_channels "
+                "(guild_id,filter_name,channel_id) VALUES (?,?,?)",
+                (int(guild_id), filter_name, channel_id),
+            )
+    _invalidate_security_filter_policy(bot, guild_id, filter_name)
+
+    # Réconcilie les règles natives quand elles existent. Si Discord ne peut pas
+    # représenter "salon strict > rôle bypass", le moteur local reste autoritaire.
+    automod = bot.get_cog("Automod")
+    if automod is None:
+        return
+    guild = bot.get_guild(int(guild_id)) if hasattr(bot, "get_guild") else None
+    if guild is None:
+        return
+    try:
+        if filter_name == "antilink":
+            await automod._sync_native_antilink_rule(guild)
+            await automod._sync_native_target_links_rule(guild)
+        elif filter_name == "antiinvite":
+            await automod._sync_native_antiinvite_rule(guild)
+        elif filter_name == "antiscam":
+            await automod._sync_native_antiscam_rule(guild)
+        elif filter_name == "antimention":
+            await automod._sync_native_antimention_rule(guild)
+        elif filter_name == "antiinsult":
+            await automod._sync_native_blacklist_rule(guild)
+    except Exception:
+        logger.debug("Synchronisation native après politique sécurité impossible", exc_info=True)
+
+
+async def _security_center_state(bot, guild_id: int, filter_name: str) -> tuple[bool, dict]:
+    if filter_name in {"honeypot", "verification"}:
+        from . import security_verification_v71 as security_v71
+        cfg = await security_v71.settings(bot, guild_id)
+        enabled = bool(
+            cfg["honeypot_enabled"] if filter_name == "honeypot"
+            else cfg["verification_enabled"]
+        )
+        return enabled, cfg
+
+    conf = await bot.db.get_automod(guild_id)
+    try:
+        enabled = bool(conf and conf[filter_name])
+    except (KeyError, IndexError, TypeError):
+        enabled = False
+    return enabled, {}
+
+
+async def _security_policy_setup_panel(owner, author_id: int, filter_name: str = "antispam"):
+    """Centre de sécurité unique : toutes les protections, un seul parcours."""
+    if filter_name not in _SECURITY_CENTER_META:
+        filter_name = "antispam"
+
+    meta = _SECURITY_CENTER_META[filter_name]
+    supports_policy = filter_name in _SECURITY_POLICY_LABELS
+    policy = (
+        await _get_security_filter_policy(owner.bot, owner.guild.id, filter_name)
+        if supports_policy
+        else {"role_ids": [], "strict_channel_ids": []}
+    )
+    enabled, advanced = await _security_center_state(
+        owner.bot, owner.guild.id, filter_name
+    )
+
+    roles = [owner.guild.get_role(role_id) for role_id in policy["role_ids"]]
+    roles = [role for role in roles if role is not None]
+    strict_channels = [
+        owner.guild.get_channel(channel_id)
+        for channel_id in policy["strict_channel_ids"]
+    ]
+    strict_channels = [channel for channel in strict_channels if channel is not None]
+
+    role_text = ", ".join(role.mention for role in roles[:8]) or "Aucun"
+    if len(roles) > 8:
+        role_text += f" +{len(roles) - 8}"
+    strict_text = ", ".join(channel.mention for channel in strict_channels[:8]) or "Aucun"
+    if len(strict_channels) > 8:
+        strict_text += f" +{len(strict_channels) - 8}"
+
+    details = [
+        f"**État** · {'● ACTIF' if enabled else '○ INACTIF'}",
+        f"**Catégorie** · {meta['group']}",
+        f"**Fonction** · {meta['description']}",
+    ]
+    if supports_policy:
+        details.extend(
+            [
+                f"**Rôles bypass** · {role_text}",
+                f"**Salons stricts — bypass interdit** · {strict_text}",
+                "",
+                "**Priorité : salon strict → rôle bypass → protection normale.**",
+                "Un rôle bypass reste bloqué dans un salon strict. Les threads héritent du salon parent.",
+            ]
+        )
+    elif filter_name == "antiraid":
+        details.append(
+            f"**Intensité** · {advanced.get('raid_intensity', 'normal').replace('eleve', 'élevé').title()}"
+        )
+    elif filter_name == "honeypot":
+        details.append(
+            f"**Action** · {advanced.get('honeypot_action', 'softban')}"
+        )
+    elif filter_name == "verification":
+        details.append(
+            f"**Seuil** · {advanced.get('verification_threshold', 1888)}/2000"
+        )
+    else:
+        details.extend(
+            [
+                "",
+                "Cette protection agit globalement sur le serveur ou les arrivées : "
+                "les salons stricts ne sont pas applicables.",
+            ]
+        )
+
+    panel = embeds.info(
+        "\n".join(details),
+        title=f"Sécurité · {meta['label']}",
+    )
+    return panels.avec_composants(
+        panels.depuis_embed(panel),
+        SecurityPolicyView(owner, author_id, filter_name, policy, enabled, advanced),
+    )
+
+
+async def _antispam_setup_panel(owner, author_id: int):
+    """Alias V1 conservé pour les anciens appels internes."""
+    return await _security_policy_setup_panel(owner, author_id, "antispam")
+
+
+class SecurityPolicyView(discord.ui.View):
+    def __init__(
+        self,
+        owner,
+        author_id: int,
+        filter_name: str,
+        policy: dict,
+        enabled: bool,
+        advanced: dict | None = None,
+    ):
+        super().__init__(timeout=240)
+        self.owner = owner
+        self.author_id = int(author_id)
+        self.filter_name = filter_name
+        self.policy = policy
+        self.enabled = bool(enabled)
+        self.advanced = advanced or {}
+        self.supports_policy = filter_name in _SECURITY_POLICY_LABELS
+
+        protection_select = discord.ui.Select(
+            placeholder="Choisir une protection à configurer",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(
+                    label=label[:100],
+                    value=key,
+                    description=f"{group} · {description}"[:100],
+                    default=key == filter_name,
+                )
+                for key, label, group, description in SECURITY_CENTER_PROTECTIONS
+            ],
+            row=0,
+        )
+
+        async def protection_cb(interaction: discord.Interaction):
+            chosen = protection_select.values[0] if protection_select.values else "antispam"
+            await panels.editer(
+                interaction.response,
+                await _security_policy_setup_panel(self.owner, interaction.user.id, chosen),
+            )
+
+        protection_select.callback = protection_cb
+        self.add_item(protection_select)
+
+        if self.supports_policy:
+            role_select = discord.ui.RoleSelect(
+                placeholder=f"Rôles bypass · {_SECURITY_POLICY_LABELS[filter_name]}"[:150],
+                min_values=1,
+                max_values=25,
+                row=1,
+            )
+
+            async def role_cb(interaction: discord.Interaction):
+                valid = [
+                    role.id
+                    for role in role_select.values
+                    if isinstance(role, discord.Role)
+                    and role.guild.id == self.owner.guild.id
+                    and role != self.owner.guild.default_role
+                ]
+                await _replace_security_filter_policy(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    self.filter_name,
+                    role_ids=valid,
+                    strict_channel_ids=list(self.policy["strict_channel_ids"]),
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            role_select.callback = role_cb
+            self.add_item(role_select)
+
+            channel_select = discord.ui.ChannelSelect(
+                placeholder=f"Salons stricts · {_SECURITY_POLICY_LABELS[filter_name]}"[:150],
+                min_values=1,
+                max_values=25,
+                channel_types=[
+                    discord.ChannelType.text,
+                    discord.ChannelType.news,
+                    discord.ChannelType.forum,
+                ],
+                row=2,
+            )
+
+            async def channel_cb(interaction: discord.Interaction):
+                ids = [
+                    channel.id
+                    for channel in channel_select.values
+                    if getattr(channel, "guild", None) is not None
+                    and channel.guild.id == self.owner.guild.id
+                ]
+                await _replace_security_filter_policy(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    self.filter_name,
+                    role_ids=list(self.policy["role_ids"]),
+                    strict_channel_ids=ids,
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            channel_select.callback = channel_cb
+            self.add_item(channel_select)
+
+        elif filter_name == "antiraid":
+            from . import security_verification_v71 as security_v71
+            intensity = discord.ui.Select(
+                placeholder="Intensité anti-raid",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=security_v71.RAID_LABELS[key],
+                        value=key,
+                        default=key == self.advanced.get("raid_intensity", "normal"),
+                    )
+                    for key in ("faible", "normal", "eleve", "extreme")
+                ],
+                row=1,
+            )
+
+            async def intensity_cb(interaction: discord.Interaction):
+                await security_v71.update_setting(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    "raid_intensity",
+                    intensity.values[0],
+                    interaction.user.id,
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            intensity.callback = intensity_cb
+            self.add_item(intensity)
+
+        elif filter_name == "honeypot":
+            from . import security_verification_v71 as security_v71
+            action = discord.ui.Select(
+                placeholder="Action du honeypot",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=security_v71.ACTION_LABELS[key],
+                        value=key,
+                        default=key == self.advanced.get("honeypot_action", "softban"),
+                    )
+                    for key in ("softban", "kick", "ban", "mute")
+                ],
+                row=1,
+            )
+
+            async def action_cb(interaction: discord.Interaction):
+                await security_v71.update_setting(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    "honeypot_action",
+                    action.values[0],
+                    interaction.user.id,
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            action.callback = action_cb
+            self.add_item(action)
+
+        elif filter_name == "verification":
+            from . import security_verification_v71 as security_v71
+            threshold = discord.ui.Select(
+                placeholder="Seuil de confiance",
+                min_values=1,
+                max_values=1,
+                options=[
+                    discord.SelectOption(
+                        label=f"{value}/2000",
+                        value=str(value),
+                        default=int(self.advanced.get("verification_threshold", 1888)) == value,
+                    )
+                    for value in (1700, 1800, 1888, 1950, 1990)
+                ],
+                row=1,
+            )
+
+            async def threshold_cb(interaction: discord.Interaction):
+                await security_v71.update_setting(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    "verification_threshold",
+                    int(threshold.values[0]),
+                    interaction.user.id,
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            threshold.callback = threshold_cb
+            self.add_item(threshold)
+
+        toggle = discord.ui.Button(
+            label="Désactiver" if enabled else "Activer",
+            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
+            row=3,
+        )
+
+        async def toggle_cb(interaction: discord.Interaction):
+            if self.filter_name in {"honeypot", "verification"}:
+                from . import security_verification_v71 as security_v71
+                field = (
+                    "honeypot_enabled"
+                    if self.filter_name == "honeypot"
+                    else "verification_enabled"
+                )
+                await security_v71.update_setting(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    field,
+                    0 if self.enabled else 1,
+                    interaction.user.id,
+                )
+            else:
+                await self.owner.bot.db.set_automod(
+                    self.owner.guild.id,
+                    self.filter_name,
+                    0 if self.enabled else 1,
+                )
+                _invalidate_security_filter_policy(
+                    self.owner.bot, self.owner.guild.id, self.filter_name
+                )
+            await panels.editer(
+                interaction.response,
+                await _security_policy_setup_panel(
+                    self.owner, interaction.user.id, self.filter_name
+                ),
+            )
+
+        toggle.callback = toggle_cb
+        self.add_item(toggle)
+
+        if self.supports_policy:
+            clear_roles = discord.ui.Button(
+                label="Retirer bypass",
+                style=discord.ButtonStyle.secondary,
+                row=3,
+                disabled=not bool(policy["role_ids"]),
+            )
+            clear_strict = discord.ui.Button(
+                label="Retirer salons stricts",
+                style=discord.ButtonStyle.secondary,
+                row=3,
+                disabled=not bool(policy["strict_channel_ids"]),
+            )
+
+            async def clear_roles_cb(interaction: discord.Interaction):
+                await _replace_security_filter_policy(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    self.filter_name,
+                    role_ids=[],
+                    strict_channel_ids=list(self.policy["strict_channel_ids"]),
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            async def clear_strict_cb(interaction: discord.Interaction):
+                await _replace_security_filter_policy(
+                    self.owner.bot,
+                    self.owner.guild.id,
+                    self.filter_name,
+                    role_ids=list(self.policy["role_ids"]),
+                    strict_channel_ids=[],
+                )
+                await panels.editer(
+                    interaction.response,
+                    await _security_policy_setup_panel(
+                        self.owner, interaction.user.id, self.filter_name
+                    ),
+                )
+
+            clear_roles.callback = clear_roles_cb
+            clear_strict.callback = clear_strict_cb
+            self.add_item(clear_roles)
+            self.add_item(clear_strict)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Ce menu ne vous appartient pas.",
+                ephemeral=True,
+            )
+            return False
+        return True
 
 
 class PermissionRoleSelect(discord.ui.RoleSelect):
@@ -346,10 +941,18 @@ class NotificationSourceModal(discord.ui.Modal, title="Source de notification"):
     text = discord.ui.TextInput(label="Texte personnalisé (facultatif)", required=False, max_length=600, style=discord.TextStyle.paragraph)
     image = discord.ui.TextInput(label="URL d’image facultative", required=False, max_length=500)
 
-    def __init__(self, owner, mode: str):
+    def __init__(self, owner, mode: str, current=None):
         super().__init__()
         self.owner = owner
         self.mode = mode
+        self.current = current
+        if current is not None:
+            try:
+                self.url.default = str(current["source_url"] or "")[:500]
+                self.text.default = str(current["custom_text"] or "")[:600]
+                self.image.default = str(current["image_url"] or "")[:500]
+            except (KeyError, IndexError, TypeError):
+                pass
 
     async def on_submit(self, interaction):
         from . import notifications as notif_mod
@@ -362,18 +965,62 @@ class NotificationSourceModal(discord.ui.Modal, title="Source de notification"):
         if image and not notif_mod._valid_https_url(image):
             return await interaction.response.send_message("L’URL d’image doit être HTTPS.", ephemeral=True)
         if self.mode == "edit" and self.owner.selected_notification:
+            notification_id = int(self.owner.selected_notification)
             duplicate = await self.owner.bot.db.fetchone(
                 "SELECT id FROM social_notifications WHERE guild_id=? AND source_url=? AND id<>?",
-                (self.owner.guild.id, source_url, self.owner.selected_notification),
+                (self.owner.guild.id, source_url, notification_id),
             )
             if duplicate:
-                return await interaction.response.send_message("Cette source existe déjà sur ce serveur.", ephemeral=True)
+                return await interaction.response.send_message(
+                    "Cette source existe déjà sur ce serveur.",
+                    ephemeral=True,
+                )
+
             platform, _ = notif_mod._platform_details(source_url)
+            # Une URL modifiée doit repartir d'un point de référence cohérent :
+            # conserver l'ID de l'ancienne chaîne provoquerait une fausse alerte
+            # au premier passage du moniteur.
+            latest = None
+            try:
+                surfaces = notif_mod.social_providers.source_surfaces(source_url, platform)
+                if surfaces:
+                    _surface, poll_url, _kind = surfaces[0]
+                    latest = await notif_mod._extract_latest(poll_url)
+                    baseline_url = notif_mod._item_url(platform, poll_url, latest or {})
+                else:
+                    baseline_url = source_url
+            except Exception:
+                latest = None
+                baseline_url = source_url
+            latest_id = notif_mod._id_de_publication((latest or {}).get("id")) or None
             await self.owner.bot.db.execute(
-                "UPDATE social_notifications SET source_url=?, platform=?, custom_text=?, image_url=? WHERE guild_id=? AND id=?",
-                (source_url, platform, text, image, self.owner.guild.id, self.owner.selected_notification),
+                "UPDATE social_notifications SET source_url=?, platform=?, custom_text=?, image_url=?, "
+                "last_item_id=?, last_item_url=?, last_checked_at=? WHERE guild_id=? AND id=?",
+                (
+                    source_url,
+                    platform,
+                    text,
+                    image,
+                    latest_id,
+                    baseline_url,
+                    int(time.time()),
+                    self.owner.guild.id,
+                    notification_id,
+                ),
             )
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success('Source modifiée sans toucher aux autres notifications.')), ephemere=True)
+            await self.owner.bot.db.execute(
+                "DELETE FROM social_notification_state WHERE subscription_id=?",
+                (notification_id,),
+            )
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(
+                    embeds.success(
+                        "Source modifiée. Le salon, le rôle et les autres sources sont inchangés."
+                    )
+                ),
+                ephemere=True,
+            )
         await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.info('Choisissez maintenant le salon et le rôle. La nouvelle source sera ajoutée sans remplacer les autres.')), NotificationDraftView(self.owner, interaction.user.id, source_url, text, image)), ephemere=True)
 
 
@@ -442,54 +1089,309 @@ class NotificationDraftView(discord.ui.View):
         await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success('Nouvelle source ajoutée. Les sources précédentes sont inchangées.')), ephemere=True)
 
 
+def _notification_source_label(row) -> str:
+    platform = str(row["platform"] or "Source")
+    source_url = str(row["source_url"] or "")
+    try:
+        path = urlparse(source_url).path.rstrip("/")
+        tail = path.split("/")[-1] if path else ""
+        if tail in {"videos", "shorts", "streams", "live"} and "/" in path.strip("/"):
+            tail = path.strip("/").split("/")[-2]
+        tail = tail or (urlparse(source_url).hostname or "source")
+    except Exception:
+        tail = "source"
+    return f"{platform} · {tail}"[:100]
+
+
+async def _notification_manage_panel(owner, author_id: int):
+    rows = await owner.bot.db.fetchall(
+        "SELECT id,source_url,platform,discord_channel_id,role_id,custom_text,image_url,enabled "
+        "FROM social_notifications WHERE guild_id=? ORDER BY id ASC LIMIT 25",
+        (owner.guild.id,),
+    )
+    known_ids = {int(row["id"]) for row in rows}
+    if getattr(owner, "selected_notification", None) not in known_ids:
+        owner.selected_notification = None
+
+    selected = next(
+        (row for row in rows if int(row["id"]) == int(owner.selected_notification or 0)),
+        None,
+    )
+    if selected is None:
+        description = (
+            "**Choisis une source dans le menu ci-dessous**, ou ajoute-en une nouvelle.\n"
+            "Modifier, activer, tester et supprimer restent désactivés tant qu’aucune "
+            "source n’est sélectionnée."
+            if rows
+            else "Aucune source configurée. Utilise **Ajouter** pour créer la première."
+        )
+    else:
+        channel = owner.guild.get_channel(int(selected["discord_channel_id"]))
+        role = owner.guild.get_role(int(selected["role_id"]))
+        channel_text = channel.mention if channel else f"ID {selected['discord_channel_id']}"
+        role_text = role.mention if role else f"ID {selected['role_id']}"
+        description = (
+            f"**Source sélectionnée · #{selected['id']}**\n"
+            f"**Plateforme** · {selected['platform']}\n"
+            f"**Lien** · {selected['source_url']}\n"
+            f"**Salon** · {channel_text}\n"
+            f"**Rôle pingé** · {role_text}\n"
+            f"**État** · {'ACTIF' if selected['enabled'] else 'INACTIF'}"
+        )
+        if selected["custom_text"]:
+            description += f"\n**Texte** · {str(selected['custom_text'])[:180]}"
+
+    panel = embeds.info(description, title="Gestion des sources")
+    view = NotificationManageView(owner, author_id, rows)
+    return panels.avec_composants(panels.depuis_embed(panel), view)
+
+
 class NotificationManageView(discord.ui.View):
-    def __init__(self, owner, author_id: int):
+    """Gestion réelle des sources : sélection d'abord, action ensuite."""
+
+    def __init__(self, owner, author_id: int, rows):
         super().__init__(timeout=180)
         self.owner = owner
-        self.author_id = author_id
+        self.author_id = int(author_id)
+        self.rows = list(rows or [])
+
+        if self.rows:
+            options = [
+                discord.SelectOption(
+                    label=_notification_source_label(row),
+                    value=str(row["id"]),
+                    description=str(row["source_url"] or "")[:100],
+                    default=int(row["id"]) == int(owner.selected_notification or 0),
+                )
+                for row in self.rows[:25]
+            ]
+            selector = discord.ui.Select(
+                placeholder="Sélectionner une source à gérer",
+                min_values=1,
+                max_values=1,
+                options=options,
+                row=0,
+            )
+
+            async def select_source(interaction: discord.Interaction):
+                self.owner.selected_notification = int(selector.values[0])
+                refreshed = await _notification_manage_panel(
+                    self.owner,
+                    interaction.user.id,
+                )
+                await panels.editer(interaction.response, refreshed)
+
+            selector.callback = select_source
+            self.add_item(selector)
+
+        has_selection = any(
+            int(row["id"]) == int(owner.selected_notification or 0)
+            for row in self.rows
+        )
+
+        add = discord.ui.Button(
+            label="Ajouter",
+            style=discord.ButtonStyle.success,
+            row=1,
+        )
+        edit = discord.ui.Button(
+            label="Modifier",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=not has_selection,
+        )
+        toggle = discord.ui.Button(
+            label="Activer / Désactiver",
+            style=discord.ButtonStyle.primary,
+            row=2,
+            disabled=not has_selection,
+        )
+        test = discord.ui.Button(
+            label="Tester",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+            disabled=not has_selection,
+        )
+        delete = discord.ui.Button(
+            label="Supprimer",
+            style=discord.ButtonStyle.danger,
+            row=2,
+            disabled=not has_selection,
+        )
+
+        async def add_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="manage", seconds=3.0
+            ):
+                return
+            await interaction.response.send_modal(NotificationSourceModal(self.owner, "add"))
+
+        async def edit_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="manage", seconds=3.0
+            ):
+                return
+            row = await self._selected_row()
+            if row is None:
+                return await interaction.response.send_message(
+                    "Choisis d’abord une source dans le menu.",
+                    ephemeral=True,
+                )
+            await interaction.response.send_modal(
+                NotificationSourceModal(self.owner, "edit", current=row)
+            )
+
+        async def toggle_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="manage", seconds=3.0
+            ):
+                return
+            row = await self._selected_row()
+            if row is None:
+                return await interaction.response.send_message(
+                    "Choisis d’abord une source dans le menu.",
+                    ephemeral=True,
+                )
+            await self.owner.bot.db.execute(
+                "UPDATE social_notifications SET enabled=? WHERE guild_id=? AND id=?",
+                (
+                    0 if row["enabled"] else 1,
+                    self.owner.guild.id,
+                    int(row["id"]),
+                ),
+            )
+            refreshed = await _notification_manage_panel(
+                self.owner,
+                interaction.user.id,
+            )
+            await panels.editer(interaction.response, refreshed)
+
+        async def test_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="test", seconds=10.0
+            ):
+                return
+            row = await self._selected_row()
+            if row is None:
+                return await interaction.response.send_message(
+                    "Choisis d’abord une source dans le menu.",
+                    ephemeral=True,
+                )
+            from . import notifications as notif_mod
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            latest = None
+            kind = "post"
+            poll_url = str(row["source_url"])
+            try:
+                for _surface, candidate_url, candidate_kind in notif_mod.social_providers.source_surfaces(
+                    row["source_url"],
+                    row["platform"],
+                ):
+                    try:
+                        candidate = await notif_mod._extract_latest(candidate_url)
+                    except Exception:
+                        continue
+                    if candidate and notif_mod._id_de_publication(candidate.get("id")):
+                        latest = candidate
+                        kind = candidate_kind
+                        poll_url = candidate_url
+                        break
+            except Exception:
+                latest = None
+
+            if latest is None:
+                return await panels.texte_court(
+                    interaction,
+                    "Impossible de lire cette source pour le moment.",
+                    ephemere=True,
+                )
+
+            cog = self.owner.bot.get_cog("Notifications")
+            if cog is None:
+                return await panels.texte_court(
+                    interaction,
+                    "Le moteur de notifications n’est pas chargé.",
+                    ephemere=True,
+                )
+
+            # _item_event enrichit le titre, le créateur et la miniature exactement
+            # comme une vraie notification, sans envoyer le rôle de ping.
+            test_row = dict(row)
+            test_row["source_url"] = poll_url
+            event = await cog._item_event(
+                test_row,
+                latest,
+                kind=kind,
+                provider="setup-test",
+            )
+            preview = notif_mod.SocialNotificationPanel(
+                platform=event.platform,
+                title=event.title,
+                description=str(row["custom_text"] or ""),
+                link=event.url,
+                image_url=row["image_url"] or event.thumbnail_url,
+                creator=event.creator,
+                kind=event.kind,
+                published_at=event.published_at,
+            )
+            await interaction.followup.send(view=preview, ephemeral=True)
+
+        async def delete_cb(interaction: discord.Interaction):
+            if await _source_cooldown_blocked(
+                interaction, self.owner, action="manage", seconds=3.0
+            ):
+                return
+            row = await self._selected_row()
+            if row is None:
+                return await interaction.response.send_message(
+                    "Choisis d’abord une source dans le menu.",
+                    ephemeral=True,
+                )
+            await self.owner.bot.db.execute(
+                "DELETE FROM social_notification_state WHERE subscription_id=?",
+                (int(row["id"]),),
+            )
+            await self.owner.bot.db.execute(
+                "DELETE FROM social_notifications WHERE guild_id=? AND id=?",
+                (self.owner.guild.id, int(row["id"])),
+            )
+            self.owner.selected_notification = None
+            refreshed = await _notification_manage_panel(
+                self.owner,
+                interaction.user.id,
+            )
+            await panels.editer(interaction.response, refreshed)
+
+        add.callback = add_cb
+        edit.callback = edit_cb
+        toggle.callback = toggle_cb
+        test.callback = test_cb
+        delete.callback = delete_cb
+        self.add_item(add)
+        self.add_item(edit)
+        self.add_item(toggle)
+        self.add_item(test)
+        self.add_item(delete)
 
     async def interaction_check(self, interaction):
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("Ce menu ne vous appartient pas.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ce menu ne vous appartient pas.",
+                ephemeral=True,
+            )
             return False
         return True
 
-    @discord.ui.button(label="Ajouter", style=discord.ButtonStyle.success, row=0)
-    async def add(self, interaction, _button):
-        await interaction.response.send_modal(NotificationSourceModal(self.owner, "add"))
-
-    @discord.ui.button(label="Modifier la source sélectionnée", style=discord.ButtonStyle.secondary, row=0)
-    async def edit(self, interaction, _button):
-        if not self.owner.selected_notification:
-            return await interaction.response.send_message("Sélectionnez d’abord une notification dans +setup.", ephemeral=True)
-        await interaction.response.send_modal(NotificationSourceModal(self.owner, "edit"))
-
-    @discord.ui.button(label="Activer / Désactiver", style=discord.ButtonStyle.primary, row=1)
-    async def toggle(self, interaction, _button):
-        if not self.owner.selected_notification:
-            return await interaction.response.send_message("Sélectionnez d’abord une notification.", ephemeral=True)
-        row = await self.owner.bot.db.fetchone(
-            "SELECT enabled FROM social_notifications WHERE guild_id=? AND id=?",
-            (self.owner.guild.id, self.owner.selected_notification),
+    async def _selected_row(self):
+        notification_id = int(getattr(self.owner, "selected_notification", 0) or 0)
+        if not notification_id:
+            return None
+        return await self.owner.bot.db.fetchone(
+            "SELECT id,source_url,platform,discord_channel_id,role_id,custom_text,image_url,enabled "
+            "FROM social_notifications WHERE guild_id=? AND id=?",
+            (self.owner.guild.id, notification_id),
         )
-        if row is None:
-            return await interaction.response.send_message("Notification introuvable.", ephemeral=True)
-        await self.owner.bot.db.execute(
-            "UPDATE social_notifications SET enabled=? WHERE guild_id=? AND id=?",
-            (0 if row["enabled"] else 1, self.owner.guild.id, self.owner.selected_notification),
-        )
-        await interaction.response.send_message("État modifié. Les autres sources ne changent pas.", ephemeral=True)
-
-    @discord.ui.button(label="Supprimer", style=discord.ButtonStyle.danger, row=1)
-    async def delete(self, interaction, _button):
-        if not self.owner.selected_notification:
-            return await interaction.response.send_message("Sélectionnez d’abord une notification.", ephemeral=True)
-        await self.owner.bot.db.execute(
-            "DELETE FROM social_notifications WHERE guild_id=? AND id=?",
-            (self.owner.guild.id, self.owner.selected_notification),
-        )
-        self.owner.selected_notification = None
-        await interaction.response.send_message("Source supprimée. Les autres notifications restent intactes.", ephemeral=True)
 
 
 async def _permission_decision_for_view(view) -> str | None:
@@ -566,8 +1468,9 @@ async def _automation_reaction_rows(bot, guild_id: int):
 
 class AutoReactionModal(discord.ui.Modal, title="Réaction automatique"):
     emojis = discord.ui.TextInput(
-        label="Emojis",
-        placeholder="👍 👎 ou emojis du serveur",
+        label="Autres emojis (facultatif)",
+        placeholder="👍 👎 ou <:nom:123456789>",
+        required=False,
         max_length=400,
     )
     keyword = discord.ui.TextInput(
@@ -580,12 +1483,62 @@ class AutoReactionModal(discord.ui.Modal, title="Réaction automatique"):
     def __init__(self, owner):
         super().__init__()
         self.owner = owner
+        self.server_emoji_select = None
+
+        server_emojis = sorted(
+            (
+                emoji
+                for emoji in getattr(owner.guild, "emojis", [])
+                if getattr(emoji, "available", True)
+            ),
+            key=lambda emoji: str(getattr(emoji, "name", "")).casefold(),
+        )
+        if server_emojis:
+            visible = server_emojis[:25]
+            options = [
+                discord.SelectOption(
+                    label=f":{emoji.name}:"[:100],
+                    value=str(emoji),
+                    description=("Emoji animé" if emoji.animated else "Emoji du serveur"),
+                    emoji=emoji,
+                )
+                for emoji in visible
+            ]
+            self.server_emoji_select = discord.ui.Select(
+                placeholder="Choisir les emojis du serveur",
+                min_values=0,
+                max_values=min(8, len(options)),
+                options=options,
+                required=False,
+            )
+            description = "Sélectionne jusqu’à 8 emojis directement dans la liste."
+            if len(server_emojis) > 25:
+                description = (
+                    f"25 emojis affichés sur {len(server_emojis)}. "
+                    "Les autres peuvent être collés dans le champ ci-dessous."
+                )
+            self.add_item(
+                discord.ui.Label(
+                    text="Emojis du serveur",
+                    description=description[:100],
+                    component=self.server_emoji_select,
+                )
+            )
 
     async def on_submit(self, interaction):
         if not self.owner.channel_id:
             return await interaction.response.send_message("Choisissez d’abord un salon.", ephemeral=True)
-        raw = str(self.emojis.value or "").replace(",", " ").split()
+
         emojis = []
+        if self.server_emoji_select is not None:
+            for value in self.server_emoji_select.values:
+                token = str(value or "").strip()
+                if token and token not in emojis:
+                    emojis.append(token)
+                if len(emojis) >= 8:
+                    break
+
+        raw = str(self.emojis.value or "").replace(",", " ").split()
         for value in raw:
             token = value.strip()
             if token and token not in emojis:
@@ -594,8 +1547,9 @@ class AutoReactionModal(discord.ui.Modal, title="Réaction automatique"):
                 emojis.append(token)
             if len(emojis) >= 8:
                 break
+
         if not emojis:
-            return await interaction.response.send_message("Ajoutez au moins un emoji.", ephemeral=True)
+            return await interaction.response.send_message("Choisissez au moins un emoji.", ephemeral=True)
         keyword = str(self.keyword.value or "").strip()
         if self.owner.mode == "keyword" and not keyword:
             return await interaction.response.send_message("Ajoutez le mot-clé à détecter.", ephemeral=True)
@@ -1028,7 +1982,12 @@ def _patch_render() -> None:
                 await self.audit(interaction.user.id, f"module:{_module}", "on" if not value else "off")
                 await self.refresh(interaction)
             toggle_module.callback = toggle_module_cb
-            self.add_item(toggle_module)
+            # Les logs doivent rester configurables même sur l'écran simple : le
+            # bouton global ne doit pas disparaître derrière « Paramètres avancés ».
+            if category == "logs":
+                self.ajouter(toggle_module)
+            else:
+                self.add_item(toggle_module)
 
         if category == "permissions":
             members = discord.ui.Button(label="Cible : @everyone (membres)", style=discord.ButtonStyle.secondary, row=1)
@@ -1135,6 +2094,20 @@ def _patch_render() -> None:
             self.add_item(channel_rules_button)
 
         elif category == "security":
+            policy_button = discord.ui.Button(
+                label="Configurer les exceptions de sécurité",
+                style=discord.ButtonStyle.primary,
+                row=1,
+            )
+            async def policy_cb(interaction):
+                await panels.envoyer(
+                    interaction.response,
+                    await _security_policy_setup_panel(self, interaction.user.id, "antispam"),
+                    ephemere=True,
+                )
+            policy_button.callback = policy_cb
+            self.add_item(policy_button)
+
             self.add_item(WhitelistUserSelect(self))
             add = discord.ui.Button(label="Whitelister globalement", style=discord.ButtonStyle.success, row=4)
             remove = discord.ui.Button(label="Retirer de la whitelist", style=discord.ButtonStyle.danger, row=4)
@@ -1155,10 +2128,20 @@ def _patch_render() -> None:
         elif category == "logs" and self.selected_log:
             test = discord.ui.Button(label="Tester ce log", style=discord.ButtonStyle.secondary, row=4)
             async def test_cb(interaction):
-                ok, text = await log_service.send_test_log(self.bot, self.guild, self.selected_log, interaction.user)
-                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(text) if ok else embeds.error(text)), ephemere=True)
+                ok, text = await log_service.send_test_log(
+                    self.bot,
+                    self.guild,
+                    self.selected_log,
+                    interaction.user,
+                )
+                await panels.envoyer(
+                    interaction.response,
+                    panels.depuis_embed(embeds.success(text) if ok else embeds.error(text)),
+                    ephemere=True,
+                )
             test.callback = test_cb
-            self.add_item(test)
+            # Action essentielle : visible aussi sans activer « Paramètres avancés ».
+            self.ajouter(test)
 
         elif category == "roles":
             reward = discord.ui.Button(label="Ajouter / modifier une récompense", style=discord.ButtonStyle.secondary, row=1)
@@ -1190,9 +2173,22 @@ def _patch_render() -> None:
             self.add_item(text_button)
 
         elif category == "notifications":
-            manage = discord.ui.Button(label="Ajouter / modifier des sources", style=discord.ButtonStyle.secondary, row=1)
+            manage = discord.ui.Button(
+                label="Gérer les sources",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
             async def manage_cb(interaction):
-                await panels.envoyer(interaction.response, panels.avec_composants(panels.depuis_embed(embeds.info('Ajoutez une nouvelle source ou modifiez uniquement celle sélectionnée. Aucune autre source n’est écrasée.')), NotificationManageView(self, interaction.user.id)), ephemere=True)
+                if await _source_cooldown_blocked(
+                    interaction, self, action="open", seconds=2.0
+                ):
+                    return
+                panel = await _notification_manage_panel(self, interaction.user.id)
+                await panels.envoyer(
+                    interaction.response,
+                    panel,
+                    ephemere=True,
+                )
             manage.callback = manage_cb
             self.add_item(manage)
 
@@ -1322,6 +2318,32 @@ def _patch_build_embed() -> None:
                 value="Une personne whitelistée est ignorée par les protections automatiques SentriX concernées, notamment AutoMod, anti-raid et anti-nuke.",
                 inline=False,
             )
+            spam_policy = await _get_antispam_policy(self.bot, self.guild.id)
+            spam_roles = [
+                self.guild.get_role(role_id)
+                for role_id in spam_policy["role_ids"]
+            ]
+            spam_roles = [role for role in spam_roles if role is not None]
+            spam_channels = [
+                self.guild.get_channel(channel_id)
+                for channel_id in spam_policy["channel_ids"]
+            ]
+            spam_channels = [channel for channel in spam_channels if channel is not None]
+            panel.add_field(
+                name="Anti-spam",
+                value=(
+                    f"**Périmètre :** "
+                    + (
+                        "Tous les salons"
+                        if spam_policy["scope_mode"] == "all"
+                        else ", ".join(channel.mention for channel in spam_channels[:8])
+                        or "Aucun salon"
+                    )
+                    + "\n**Rôles bypass :** "
+                    + (", ".join(role.mention for role in spam_roles[:8]) or "Aucun")
+                ),
+                inline=False,
+            )
 
         elif self.category == "levels":
             settings = await core.economy_settings(self.bot, self.guild.id)
@@ -1375,9 +2397,18 @@ def _patch_build_embed() -> None:
 
         elif self.category == "logs" and self.selected_log:
             meta = log_service.LOG_TYPES.get(self.selected_log, {})
+            setting = getattr(self, "_selected_log_setting", None) or {}
+            channel_id = setting.get("channel_id")
+            channel = self.guild.get_channel(int(channel_id)) if channel_id else None
+            configured = bool(setting.get("enabled") and channel is not None)
             panel.add_field(
                 name="Type sélectionné",
-                value=f"**{meta.get('category', self.selected_log)}** — choisissez son salon, activez/désactivez-le puis utilisez **Tester ce log**.",
+                value=(
+                    f"**{meta.get('category', self.selected_log)}**\n"
+                    f"**Salon :** {channel.mention if channel else 'Non configuré'}\n"
+                    f"**État :** {'ACTIF' if configured else 'INACTIF'}\n"
+                    "Choisissez un salon ci-dessous, puis utilisez **Tester ce log** pour vérifier immédiatement."
+                ),
                 inline=False,
             )
         return panel

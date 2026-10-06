@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from types import SimpleNamespace
 
@@ -46,6 +47,19 @@ def _short(value: object, limit: int = 1000) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+_TICKET_SYSTEM_TOPIC_RE = re.compile(
+    r"^Opened\s+<t:\d+:[A-Za-z]>\s+by\s+<@!?\d+>"
+    r"(?:\s*[•·]\s*Claimed\s+by\s+<@!?\d+>\s+at\s+<t:\d+:[A-Za-z]>)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _is_ticket_system_topic(value: object) -> bool:
+    """Sujet technique géré par le système de tickets, déjà journalisé côté Tickets."""
+    text = str(value or "").strip()
+    return bool(text and _TICKET_SYSTEM_TOPIC_RE.fullmatch(text))
+
+
 def _active_timeout(member: discord.Member):
     """Timeout réellement en cours (None si absent ou déjà expiré). Discord conserve
     l'ancien horodatage après expiration : sans ce filtre, un simple changement de pseudo
@@ -66,6 +80,10 @@ def _role_ref(role_id: int) -> str:
 
 def _channel_ref(channel_id: int) -> str:
     return f"<#{int(channel_id)}>"
+
+
+def _discord_channel_url(guild_id: int, channel_id: int) -> str:
+    return f"https://discord.com/channels/{int(guild_id)}/{int(channel_id)}"
 
 
 def _attachment_urls(message: discord.Message) -> list[str]:
@@ -378,12 +396,16 @@ class Logs(commands.Cog, name="Logs"):
                     display_avatar=None,
                 )
         panel = self._embed("Message supprimé", identity=identity, fields=fields)
+        links = [
+            ("Accéder au salon", _discord_channel_url(guild.id, channel_id))
+        ] if channel_id else []
+        links.extend(_attachment_links(media_items))
         view = log_service.log_actions(
             ids=[
                 ("Copier l'ID de l'auteur", author_id),
                 ("Copier l'ID du message", message_id),
             ],
-            links=_attachment_links(media_items),
+            links=links,
         )
         key = log_service.make_event_key(
             guild.id,
@@ -499,7 +521,11 @@ class Logs(commands.Cog, name="Logs"):
             description="Le contenu n’était pas disponible dans le cache SentriX.",
         )
         view = log_service.log_actions(
-            ids=[("Copier l'ID du message", payload.message_id)]
+            ids=[("Copier l'ID du message", payload.message_id)],
+            links=[(
+                "Accéder au salon",
+                _discord_channel_url(guild.id, payload.channel_id),
+            )],
         )
         key = log_service.make_event_key(
             guild.id,
@@ -890,7 +916,10 @@ class Logs(commands.Cog, name="Logs"):
             channel.guild,
             "channel_create",
             panel,
-            view=log_service.log_actions(ids=ids),
+            view=log_service.log_actions(
+                ids=ids,
+                links=[("Accéder au salon", _discord_channel_url(channel.guild.id, channel.id))],
+            ),
             event_key=key,
         )
 
@@ -901,7 +930,7 @@ class Logs(commands.Cog, name="Logs"):
             discord.AuditLogAction.channel_delete,
             channel.id,
         )
-        fields = [("Salon", f"`{channel.name}`", True), ("ID", f"`{channel.id}`", True)]
+        fields = [("Salon", f"`{channel.name}`", True)]
         if actor:
             fields.append(("Responsable", _user_ref(actor.id), True))
         panel = self._embed("Salon supprimé", fields=fields)
@@ -937,14 +966,23 @@ class Logs(commands.Cog, name="Logs"):
             after_category = _channel_ref(after.category_id) if after.category_id else "Aucune"
             fields.append(("Catégorie", f"{before_category} → {after_category}", False))
         if getattr(before, "topic", None) != getattr(after, "topic", None):
-            fields.append(
-                (
-                    "Sujet",
-                    f"`{_short(getattr(before, 'topic', '') or 'Vide', 400)}` → "
-                    f"`{_short(getattr(after, 'topic', '') or 'Vide', 400)}`",
-                    False,
+            before_topic = getattr(before, "topic", None)
+            after_topic = getattr(after, "topic", None)
+            # Les tickets mettent à jour leur sujet interne ("Opened … · Claimed …").
+            # Le journal Tickets couvre déjà ces actions ; les recopier dans Salons
+            # exposait du texte technique et créait un log CH-UPD inutile.
+            if not (
+                _is_ticket_system_topic(before_topic)
+                and _is_ticket_system_topic(after_topic)
+            ):
+                fields.append(
+                    (
+                        "Sujet",
+                        f"`{_short(before_topic or 'Vide', 400)}` → "
+                        f"`{_short(after_topic or 'Vide', 400)}`",
+                        False,
+                    )
                 )
-            )
         if getattr(before, "slowmode_delay", None) != getattr(after, "slowmode_delay", None):
             fields.append(
                 (
@@ -979,7 +1017,10 @@ class Logs(commands.Cog, name="Logs"):
             after.guild,
             "channel_update",
             panel,
-            view=log_service.log_actions(ids=ids),
+            view=log_service.log_actions(
+                ids=ids,
+                links=[("Accéder au salon", _discord_channel_url(after.guild.id, after.id))],
+            ),
             event_key=key,
         )
 
@@ -1021,7 +1062,7 @@ class Logs(commands.Cog, name="Logs"):
             discord.AuditLogAction.role_delete,
             role.id,
         )
-        fields = [("Rôle", f"`{role.name}`", True), ("ID", f"`{role.id}`", True)]
+        fields = [("Rôle", f"`{role.name}`", True)]
         if actor:
             fields.append(("Responsable", _user_ref(actor.id), True))
         panel = self._embed("Rôle supprimé", fields=fields)

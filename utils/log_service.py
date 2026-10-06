@@ -25,6 +25,7 @@ from utils.log_categories import (
     category_for,
     resolve,
 )
+from utils import sentrix_emojis
 from utils import wide_logs
 from utils.wide_logs import derive_identity, send_wide_log
 
@@ -366,6 +367,7 @@ class RevealIdButton(
                 label=label[:80],
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"sxid:{self.entity_id}",
+                emoji=sentrix_emojis.partiel("info"),
                 row=row,
             )
         )
@@ -407,31 +409,44 @@ class LogActionsView(discord.ui.View):
         if jump_url:
             self.add_item(
                 discord.ui.Button(
-                    label="Voir le message",
+                    label="Accéder au message",
                     style=discord.ButtonStyle.link,
                     url=jump_url,
+                    emoji=sentrix_emojis.partiel("eye"),
                     row=next_row(),
                 )
             )
 
-        for label, entity_id in (ids or [])[:8]:
-            self.add_item(RevealIdButton(label, entity_id, row=next_row()))
-
-        if invite_code:
-            self.add_item(RevealInviteButton(invite_code, row=next_row()))
-
+        # Les actions utiles passent avant les IDs : sur mobile, l'utilisateur
+        # voit d'abord « Accéder… » / « Télécharger… », les outils techniques
+        # restent ensuite sans pousser la navigation sur une seconde ligne.
         for label, url in (links or [])[:12]:
             clean_url = str(url or "").strip()
             if not clean_url.startswith(("https://", "http://")):
                 continue
+            lower_label = str(label or "").casefold()
+            icon_name = (
+                "download"
+                if "télécharg" in lower_label or "download" in lower_label
+                else "eye"
+                if "accéder" in lower_label or "voir" in lower_label or "ouvrir" in lower_label
+                else "link"
+            )
             self.add_item(
                 discord.ui.Button(
                     label=str(label or "Ouvrir")[:80],
                     style=discord.ButtonStyle.link,
                     url=clean_url,
+                    emoji=sentrix_emojis.partiel(icon_name),
                     row=next_row(),
                 )
             )
+
+        if invite_code:
+            self.add_item(RevealInviteButton(invite_code, row=next_row()))
+
+        for label, entity_id in (ids or [])[:8]:
+            self.add_item(RevealIdButton(label, entity_id, row=next_row()))
 
 
 def log_actions(

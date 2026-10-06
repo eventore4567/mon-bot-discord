@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import time
 import unicodedata
+from types import SimpleNamespace
 from typing import Any
 
 import discord
@@ -398,7 +399,8 @@ async def _security_embed(self) -> discord.Embed:
     ]
     e = embeds.neutral(
         "SentriX • Sécurité",
-        "Préréglage rapide ou contrôle précis. Les corrections automatiques restent limitées aux actions sûres.",
+        "Préréglage rapide ou contrôle précis. Les corrections automatiques restent limitées aux actions sûres. "
+        "Le bouton « Centre de sécurité » ouvre chaque protection individuellement avec ses réglages adaptés.",
         color=_score_colour(health["security_score"]),
     )
     e.add_field(name="Protection", value=f"**{health['security_score']}/100**", inline=True)
@@ -974,6 +976,29 @@ def _render_page(self):
             await _apply_safe_security_fixes(self, interaction)
         fix_button.callback = fix_callback
         self.add_item(fix_button)
+
+        exceptions_button = discord.ui.Button(
+            label="Centre de sécurité",
+            style=discord.ButtonStyle.primary,
+            row=2,
+        )
+        async def exceptions_callback(interaction: discord.Interaction):
+            from cogs import setup_v2_ui
+            owner = SimpleNamespace(bot=self.bot, guild=self.bot.get_guild(self.guild_id))
+            if owner.guild is None:
+                return await interaction.response.send_message(
+                    "Serveur introuvable.", ephemeral=True
+                )
+            await panels.envoyer(
+                interaction.response,
+                await setup_v2_ui._security_policy_setup_panel(
+                    owner, interaction.user.id, "antispam"
+                ),
+                ephemere=True,
+            )
+        exceptions_button.callback = exceptions_callback
+        self.add_item(exceptions_button)
+
         _add_nav(self, save=False)
         return
 

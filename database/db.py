@@ -273,6 +273,44 @@ CREATE TABLE IF NOT EXISTS automod_exempt_roles (
     PRIMARY KEY (guild_id, role_id)
 );
 
+-- Périmètre dédié à l'anti-spam. Séparé des exemptions AutoMod globales :
+-- un rôle peut contourner uniquement l'anti-spam sans devenir immunisé aux
+-- liens, scams, insultes ou autres protections.
+CREATE TABLE IF NOT EXISTS antispam_policy (
+    guild_id INTEGER PRIMARY KEY,
+    scope_mode TEXT NOT NULL DEFAULT 'all',
+    updated_at INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS antispam_exempt_roles (
+    guild_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS antispam_protected_channels (
+    guild_id INTEGER NOT NULL,
+    channel_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, channel_id)
+);
+
+-- Politique de contournement PAR protection de messages.
+-- Un rôle bypass n'est exempté que du filtre choisi. Les salons stricts ont
+-- priorité sur ces rôles : dans ces salons, le filtre s'applique quand même.
+CREATE TABLE IF NOT EXISTS security_filter_bypass_roles (
+    guild_id INTEGER NOT NULL,
+    filter_name TEXT NOT NULL,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, filter_name, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS security_filter_strict_channels (
+    guild_id INTEGER NOT NULL,
+    filter_name TEXT NOT NULL,
+    channel_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, filter_name, channel_id)
+);
+
 CREATE TABLE IF NOT EXISTS user_immunity_settings (
     guild_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
@@ -1502,6 +1540,23 @@ class Database:
     async def _migrate(self):
         """Ajoute les colonnes manquantes si les tables existaient déjà avant leur
         introduction (utile si la base survit aux redéploiements, ex: volume persistant)."""
+
+        # Migration rétrocompatible du premier périmètre anti-spam (V1) vers la
+        # politique générique. Les anciens "salons protégés" correspondaient en
+        # réalité au besoin exprimé de salons STRICTS : on les conserve donc comme
+        # tels, puis l'anti-spam revient à son comportement historique sur tout le
+        # serveur. L'opération est idempotente et ne supprime aucune donnée.
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO security_filter_bypass_roles (guild_id,filter_name,role_id) "
+            "SELECT guild_id,'antispam',role_id FROM antispam_exempt_roles"
+        )
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO security_filter_strict_channels (guild_id,filter_name,channel_id) "
+            "SELECT guild_id,'antispam',channel_id FROM antispam_protected_channels"
+        )
+        await self._conn.execute(
+            "UPDATE antispam_policy SET scope_mode='all' WHERE scope_mode <> 'all'"
+        )
         cur = await self._conn.execute("PRAGMA table_info(guild_config)")
         existing = {row[1] for row in await cur.fetchall()}
         for column, col_type in GUILD_CONFIG_NEW_COLUMNS.items():
@@ -1887,6 +1942,81 @@ class Database:
 
     async def list_automod_exempt_roles(self, guild_id: int):
         return await self.fetchall("SELECT role_id FROM automod_exempt_roles WHERE guild_id = ?", (guild_id,))
+
+    # ---------- Exceptions par protection AutoMod ----------
+
+    async def get_security_filter_policy(self, guild_id: int, filter_name: str) -> dict[str, list[int]]:
+        roles = await self.fetchall(
+            "SELECT role_id FROM security_filter_bypass_roles "
+            "WHERE guild_id = ? AND filter_name = ? ORDER BY role_id",
+            (guild_id, filter_name),
+        )
+        strict_channels = await self.fetchall(
+            "SELECT channel_id FROM security_filter_strict_channels "
+            "WHERE guild_id = ? AND filter_name = ? ORDER BY channel_id",
+            (guild_id, filter_name),
+        )
+        return {
+            "role_ids": [int(row["role_id"]) for row in roles],
+            "strict_channel_ids": [int(row["channel_id"]) for row in strict_channels],
+        }
+
+    async def set_security_filter_policy(
+        self,
+        guild_id: int,
+        filter_name: str,
+        *,
+        role_ids: list[int] | tuple[int, ...] = (),
+        strict_channel_ids: list[int] | tuple[int, ...] = (),
+    ) -> None:
+        """Remplace atomiquement la politique d'un filtre.
+
+        SQLite sérialise les écritures sur la connexion unique. Les suppressions puis
+        insertions restent volontairement simples : les sélecteurs Discord/dashboard
+        sont bornés à 25 valeurs chacun.
+        """
+        await self.execute(
+            "DELETE FROM security_filter_bypass_roles WHERE guild_id = ? AND filter_name = ?",
+            (guild_id, filter_name),
+        )
+        for role_id in dict.fromkeys(int(value) for value in role_ids):
+            await self.execute(
+                "INSERT OR IGNORE INTO security_filter_bypass_roles "
+                "(guild_id,filter_name,role_id) VALUES (?,?,?)",
+                (guild_id, filter_name, role_id),
+            )
+
+        await self.execute(
+            "DELETE FROM security_filter_strict_channels WHERE guild_id = ? AND filter_name = ?",
+            (guild_id, filter_name),
+        )
+        for channel_id in dict.fromkeys(int(value) for value in strict_channel_ids):
+            await self.execute(
+                "INSERT OR IGNORE INTO security_filter_strict_channels "
+                "(guild_id,filter_name,channel_id) VALUES (?,?,?)",
+                (guild_id, filter_name, channel_id),
+            )
+
+        # Tables V1 maintenues pour les vieux runtimes pendant un rolling deploy.
+        if filter_name == "antispam":
+            await self.execute("DELETE FROM antispam_exempt_roles WHERE guild_id = ?", (guild_id,))
+            for role_id in dict.fromkeys(int(value) for value in role_ids):
+                await self.execute(
+                    "INSERT OR IGNORE INTO antispam_exempt_roles (guild_id,role_id) VALUES (?,?)",
+                    (guild_id, role_id),
+                )
+            await self.execute("DELETE FROM antispam_protected_channels WHERE guild_id = ?", (guild_id,))
+            for channel_id in dict.fromkeys(int(value) for value in strict_channel_ids):
+                await self.execute(
+                    "INSERT OR IGNORE INTO antispam_protected_channels (guild_id,channel_id) VALUES (?,?)",
+                    (guild_id, channel_id),
+                )
+            await self.execute(
+                "INSERT INTO antispam_policy (guild_id,scope_mode,updated_at) "
+                "VALUES (?,'all',?) ON CONFLICT(guild_id) DO UPDATE SET "
+                "scope_mode='all',updated_at=excluded.updated_at",
+                (guild_id, now()),
+            )
 
     # ---------- Gestionnaires du bot (membres autorisés à le configurer) ----------
 

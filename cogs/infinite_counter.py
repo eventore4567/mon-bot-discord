@@ -1,8 +1,8 @@
 """Compteur communautaire infini : +infinit.
 
-Un même membre ne peut pas valider deux nombres consécutifs. Les erreurs sont supprimées
-après un court délai, le prochain nombre est rappelé puis le rappel disparaît après 10 s.
-L'état est stocké en SQLite afin de survivre aux redémarrages.
+Un même membre ne peut pas valider deux nombres consécutifs. Tout message invalide est
+supprimé immédiatement et silencieusement : aucun avertissement, aucun ping, aucun panneau
+n'est envoyé dans le salon. L'état est stocké en SQLite afin de survivre aux redémarrages.
 """
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ class InfiniteSetupView(discord.ui.View):
         e.add_field(name="Premier nombre", value=str(self.start_number), inline=True)
         e.add_field(
             name="Erreurs",
-            value="Message invalide supprimé après quelques secondes • rappel supprimé après 10 secondes.",
+            value="Aide interactive premium • correction staff possible • nettoyage automatique.",
             inline=False,
         )
         e.set_footer(text="SentriX • Progression sauvegardée après chaque nombre valide")
@@ -181,19 +181,27 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
         )
         self._invalidate_enabled(guild_id)
 
-    async def _invalid(self, message: discord.Message, text: str):
-        async def delete_message():
-            await asyncio.sleep(2)
-            try:
-                await message.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass
+    async def _invalid(
+        self,
+        message: discord.Message,
+        _text: str,
+        *,
+        expected: int,
+        attempted: int | None = None,
+        reason: str = "invalid",
+    ):
+        """Nettoie silencieusement une entrée invalide du salon de comptage.
 
-        asyncio.create_task(delete_message())
+        Aucun message de correction, ping, embed ou panneau n'est envoyé : le salon
+        reste uniquement composé des nombres valides. Les paramètres supplémentaires
+        restent acceptés afin de conserver les appels existants et faciliter l'audit.
+        """
+        _ = (expected, attempted, reason)
         try:
-            await message.channel.send(text, delete_after=10, allowed_mentions=discord.AllowedMentions.none())
-        except (discord.Forbidden, discord.HTTPException):
+            await message.delete()
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             pass
+
 
     @commands.group(name="infinit", aliases=["infinite", "compteur-infini"], invoke_without_command=True)
     @commands.guild_only()
@@ -333,11 +341,21 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
             expected = int(row["next_number"])
             content = message.content.strip()
             if not content.isdigit() or int(content) != expected:
-                return await self._invalid(message, f"Mauvais nombre. Le prochain nombre est **{expected}**.")
+                attempted = int(content) if content.isdigit() else None
+                return await self._invalid(
+                    message,
+                    "Ce nombre ne suit pas la progression du compteur.",
+                    expected=expected,
+                    attempted=attempted,
+                    reason="wrong",
+                )
             if row["last_user_id"] and int(row["last_user_id"]) == message.author.id:
                 return await self._invalid(
                     message,
-                    f"Tu ne peux pas compter deux fois à la suite. Quelqu’un d’autre doit envoyer **{expected}**.",
+                    "Tu ne peux pas envoyer deux nombres consécutifs dans ce compteur.",
+                    expected=expected,
+                    attempted=expected,
+                    reason="consecutive",
                 )
             await self.bot.db.execute(
                 "UPDATE infinite_counter_config SET next_number=?,last_user_id=?,updated_at=? WHERE guild_id=?",

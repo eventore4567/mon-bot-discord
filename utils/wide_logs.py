@@ -176,6 +176,23 @@ def _code_block(value: object) -> str:
     return f"```\n{text[:1600]}\n```"
 
 
+def _message_quote(value: object, *, limit: int = 1500) -> str:
+    """Affiche un contenu utilisateur sans casser les vraies mentions Discord.
+
+    Les anciens blocs de code transformaient <@123> en texte brut. Ici on échappe
+    seulement le Markdown décoratif, on neutralise @everyone/@here via safe_text,
+    puis on utilise un blockquote : les <@user>, <#salon> et <@&role> restent
+    cliquables/visuels sans ping grâce à NO_PINGS au transport.
+    """
+    text = safe_text(_clean_lines(value) or "Contenu vide")
+    text = discord.utils.escape_markdown(text)
+    text = text[:limit]
+    return "\n".join(
+        f"> {line}" if line else ">"
+        for line in text.splitlines()
+    )
+
+
 def _strip_identity_prelude(description: str, identity_name: str | None, identity_id: int | None) -> str:
     if not description:
         return ""
@@ -332,7 +349,7 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
         if any(token == low for token in ignored):
             continue
         if low in {"contenu", "content", "avant", "après", "apres"}:
-            blocks.append(f"**{name}**\n{_code_block(value)}")
+            blocks.append(f"**{name}**\n{_message_quote(value)}")
         elif len(value) > 70 or "\n" in value or low in {"raison", "reason", "changements", "changes", "participants"}:
             blocks.append(f"**{name} :** {value}")
     text = "\n\n".join(blocks)
@@ -340,11 +357,8 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
 
 
 def _with_id(mention: str) -> str:
-    """Mention suivie de son ID en inline code, comme demandé par le format narratif."""
-    if not mention:
-        return ""
-    snowflake = _first_snowflake(mention)
-    return f"{mention} (`{snowflake}`)" if snowflake else mention
+    """Garde la mention lisible sans répéter le snowflake dans la phrase."""
+    return str(mention or "")
 
 
 #: Une phrase par événement de ticket. ``{membre}`` est le membre concerné,
@@ -427,17 +441,37 @@ def narrative_body(
 
     lines: list[str] = []
     if event_type == "message_delete":
-        lines.append(f"Un message de {member or 'un membre'} a été supprimé" + (f" dans {channel}" if channel else "") + ".")
         if content:
-            lines.append(_code_block(content))
+            lines.append(_message_quote(content))
+        else:
+            lines.append("Le contenu du message supprimé n’était pas disponible.")
     elif event_type == "message_edit":
-        lines.append(f"{member or 'Un membre'} a modifié un message" + (f" dans {channel}" if channel else "") + ".")
+        # Auteur + salon sont déjà dans l'en-tête compact : ne pas les répéter
+        # dans une phrase supplémentaire.
         if before:
-            lines.append(f"**Avant**\n{_code_block(before)}")
+            lines.append(f"**Avant**\n{_message_quote(before)}")
         if after:
-            lines.append(f"**Après**\n{_code_block(after)}")
+            lines.append(f"**Après**\n{_message_quote(after)}")
     elif event_type == "message_bulk":
-        lines.append((embed.description or "Plusieurs messages ont été supprimés.").strip())
+        count = _field_value_exact(
+            embed,
+            "Messages supprimés",
+            "Nombre de messages",
+            "Nombre",
+        )
+        command = _field_value_exact(embed, "Commande")
+        actor = _first_user_ref(moderator) or moderator
+        if count:
+            sentence = f"**{count} message(s)** ont été supprimé(s)"
+        else:
+            sentence = "Plusieurs messages ont été supprimés"
+        if channel:
+            sentence += f" dans {channel}"
+        if actor:
+            sentence += f" par {actor}"
+        lines.append(sentence + ".")
+        if command:
+            lines.append(f"**Commande :** {command}")
     elif event_type == "member_join":
         lines.append(f"{member or 'Un membre'} vient de rejoindre le serveur.")
         if account_created:
@@ -493,8 +527,12 @@ def narrative_body(
     elif event_type in {"channel_create", "channel_delete", "channel_update"}:
         verb = {"channel_create": "créé", "channel_delete": "supprimé", "channel_update": "modifié"}[event_type]
         entity = identity_name or channel or "Un salon"
-        id_part = f" (`{identity_id}`)" if identity_id else ""
-        lines.append(f"Le salon **{entity}**{id_part} a été {verb}" + (f" par {moderator}" if moderator else "") + ".")
+        actor = _first_user_ref(moderator) or moderator
+        lines.append(
+            f"Le salon **{entity}** a été {verb}"
+            + (f" par {actor}" if actor else "")
+            + "."
+        )
     elif event_type in {"role_create", "role_delete", "role_update"}:
         verb = {"role_create": "créé", "role_delete": "supprimé", "role_update": "modifié"}[event_type]
         # Un mention de rôle (<@&id>) reste toujours cliquable et lisible ; un
@@ -912,22 +950,37 @@ def _trace_title(event_type: str, fallback: str = "") -> str:
 
 
 def _trace_meta(event_type: str, *, emoji: str = "") -> str:
+    """En-tête utilisateur : famille lisible, jamais le code technique interne."""
     event = canonical_event_type(event_type)
     category = category_for(event)
     category_label = CATEGORIES.get(category, category.replace("_", " ").title())
-    # L'icône SentriX d'abord, l'emoji Unicode en repli : tant que la
-    # synchronisation n'a pas eu lieu, la carte reste exactement celle
-    # d'aujourd'hui.
     marker = (emoji or marqueur_evenement(event)).strip()
     prefix = f"{marker} " if marker else ""
-    return f"-# SENTRIX TRACE · {prefix}{category_label} · {_trace_code(event)}"
+    return f"-# {prefix}{category_label}"
 
 
 def _trace_footer(event_type: str, footer: str = "") -> str:
+    """Pied compact : aucune référence à Trace/CH-NEW/MSG-DEL côté utilisateur."""
+    del event_type
     clean = safe_text(footer)
-    clean = re.sub(r"^SentriX\s*•\s*", "", clean, flags=re.IGNORECASE).strip()
-    base = f"SentriX Trace · {_trace_code(event_type)}"
-    return f"{base} · {clean}" if clean else base
+    clean = re.sub(r"^SentriX\s*(?:Trace)?\s*[•·]\s*", "", clean, flags=re.IGNORECASE).strip()
+    return f"SentriX · {clean}" if clean else "SentriX"
+
+
+def _trace_identity_ref(event_type: str, identity_id: int | None) -> str:
+    if not identity_id:
+        return ""
+    event = canonical_event_type(event_type)
+    if event.startswith("role_"):
+        return f"<@&{identity_id}>"
+    if event.startswith("channel_") or event == "pins_update":
+        return f"<#{identity_id}>"
+    if (
+        event.startswith(("message_", "member_", "voice_", "ticket_", "automod_", "spam_", "raid_"))
+        or event.startswith("invite_")
+    ):
+        return f"<@{identity_id}>"
+    return ""
 
 
 def _trace_identity_label(event_type: str) -> str:
@@ -1017,14 +1070,19 @@ class WideLogView(discord.ui.LayoutView):
         meta = _trace_meta(event_type, emoji=emoji)
         identity_label = _trace_identity_label(event_type)
 
-        # 2 — en-tête compact : type d'événement + cible réunis dans la même zone.
+        # 2 — en-tête compact : vraie mention Discord, jamais un gros ID brut.
         header_lines = [meta, f"## {title}"]
-        if identity_name:
-            header_lines.append(
-                f"**{identity_label}** · {safe_text(identity_name)[:80]}"
-            )
-        if identity_id:
-            header_lines.append(f"-# ID · `{identity_id}`")
+        identity_ref = _trace_identity_ref(event_type, identity_id)
+        identity_display = identity_ref or (safe_text(identity_name)[:80] if identity_name else "")
+        context_bits: list[str] = []
+        if identity_display:
+            context_bits.append(f"**{identity_label}** · {identity_display}")
+        if event_type.startswith("message_"):
+            channel_ref = _first_channel_ref(_field_value(embed, "salon", "channel"))
+            if channel_ref:
+                context_bits.append(f"**Salon** · {channel_ref}")
+        if context_bits:
+            header_lines.append(" · ".join(context_bits))
 
         header = "\n".join(header_lines)
         placed_header = False
@@ -1057,13 +1115,17 @@ class WideLogView(discord.ui.LayoutView):
         )
         summary, details = _trace_body_parts(body)
         if summary:
-            quoted = "\n".join(
-                f"> {line}" if line.strip() else ">"
-                for line in summary.splitlines()
-            )
-            container.add_item(discord.ui.TextDisplay(quoted[:1600]))
+            # Avant/Après et contenu de message sont déjà formatés en blockquote.
+            # Les re-quoter ajouterait un deuxième niveau visuel inutile.
+            if event_type in {"message_edit", "message_delete"}:
+                container.add_item(discord.ui.TextDisplay(summary[:1600]))
+            else:
+                quoted = "\n".join(
+                    f"> {line}" if line.strip() else ">"
+                    for line in summary.splitlines()
+                )
+                container.add_item(discord.ui.TextDisplay(quoted[:1600]))
         if details:
-            container.add_item(discord.ui.TextDisplay("### Informations"))
             container.add_item(discord.ui.TextDisplay(details[:2200]))
 
         # Médias seulement après le contexte métier.
@@ -1116,6 +1178,16 @@ class WideLogView(discord.ui.LayoutView):
                 else:
                     container.add_item(discord.ui.TextDisplay(f"**{filename}**"))
 
+        # Footer discret AVANT les actions : les boutons restent réellement tout en
+        # bas de la carte, comme une barre d'actions premium, et ne sont plus coupés
+        # du contenu utile par une ligne technique.
+        footer = safe_text(getattr(embed.footer, "text", None))[:160]
+        time_text = _trace_time_text(embed)
+        footer_text = _trace_footer(event_type, footer)
+        if time_text:
+            footer_text = f"{time_text} · {footer_text}"
+        container.add_item(discord.ui.TextDisplay(f"-# {footer_text}"))
+
         rows = build_rows(old_view)
         if rows:
             try:
@@ -1124,14 +1196,6 @@ class WideLogView(discord.ui.LayoutView):
                 logger.exception("SENTRIX TRACE V7 actions separator")
             for row in rows:
                 container.add_item(row)
-
-        # Footer compact : temps relatif + trace. Aucun doublon SentriX.
-        footer = safe_text(getattr(embed.footer, "text", None))[:160]
-        time_text = _trace_time_text(embed)
-        footer_text = _trace_footer(event_type, footer)
-        if time_text:
-            footer_text = f"{time_text} · {footer_text}"
-        container.add_item(discord.ui.TextDisplay(f"-# {footer_text}"))
 
         self.add_item(container)
 

@@ -105,3 +105,20 @@ def test_clear_plus_and_slash_share_exact_same_confirmation_text():
     assert 'texte = f"{len(messages)} message(s) supprimé(s)."' in body
     assert "await panels.texte_court(ctx.channel, texte" in body
     assert "await panels.texte_court(ctx, texte" in body
+
+
+
+def test_clear_log_is_one_bulk_summary_with_exact_count():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "cogs" / "moderation.py").read_text(encoding="utf-8")
+    start = source.index("async def _send_clear_log")
+    end = source.index('@commands.hybrid_command(name="slowmode"', start)
+    block = source[start:end]
+
+    assert '("Messages supprimés", str(len(messages)), True)' in block
+    assert '("Salon", f"<#{ctx.channel.id}>", True)' in block
+    assert '("Modérateur", f"<@{ctx.author.id}>", True)' in block
+    assert '("Commande", f"`{command_name} {requested}`", True)' in block
+    assert '"message_bulk"' in block
+    assert 'log_service.send_log(' in block

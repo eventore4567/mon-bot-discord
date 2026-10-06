@@ -16,3 +16,13 @@ def test_bulk_delete_isolates_failures_per_message():
 
     assert "Journal bulk delete impossible" in source
     assert "except Exception:" in source
+
+
+
+def test_ticket_machine_topic_updates_are_not_user_facing_channel_logs():
+    source = (ROOT / "cogs" / "logs.py").read_text(encoding="utf-8")
+
+    assert "def _is_ticket_system_topic" in source
+    assert "_TICKET_SYSTEM_TOPIC_RE" in source
+    assert "_is_ticket_system_topic(before_topic)" in source
+    assert "_is_ticket_system_topic(after_topic)" in source

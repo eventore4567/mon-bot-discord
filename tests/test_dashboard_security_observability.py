@@ -14,6 +14,7 @@ def test_security_dashboard_api_registers_observability_routes():
     source = inspect.getsource(dashboard_api_security.register)
     assert '"/api/guilds/{guild_id}/security/overview"' in source
     assert '"/api/guilds/{guild_id}/security/simulate"' in source
+    assert '"/api/guilds/{guild_id}/security/filter-policies"' in source
     assert '"/api/guilds/{guild_id}/security/panic"' in source
 
 
@@ -49,3 +50,22 @@ def test_security_dashboard_does_not_poll_or_mutate_dom_periodically():
     assert "setInterval(" not in section
     assert "MutationObserver" not in section
     assert "dataset.sxTab" not in section
+
+
+def test_security_dashboard_exposes_full_center_and_per_filter_exceptions():
+    for marker in (
+        "Centre de sécurité",
+        "Messages",
+        "Arrivées",
+        "Serveur",
+        "Rôles autorisés à contourner",
+        "Salons stricts — bypass interdit",
+        "salon strict → rôle bypass → protection normale",
+        "/security/filter-policies",
+    ):
+        assert marker in UI
+
+    # L'ancien sens « protéger seulement certains salons » était une mauvaise
+    # interprétation : les salons sélectionnés sont maintenant ceux où le bypass
+    # de rôle est interdit, pas un périmètre d'activation de l'anti-spam.
+    assert "Seulement les salons choisis" not in UI

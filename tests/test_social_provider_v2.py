@@ -101,3 +101,90 @@ def test_webhook_event_key_is_deterministic_without_explicit_id():
     second = social_providers.webhook_event_key(payload, body)
     assert first == second
     assert first.startswith("phyllo:")
+
+
+def test_notification_diagnostic_commands_are_available():
+    source = inspect.getsource(notifications.Notifications)
+    assert 'name="notifs-status"' in source
+    assert 'name="notifs-test"' in source
+    assert "YouTube** · vidéos + Shorts + lives séparés" in source
+
+
+def test_phyllo_environment_config_is_non_secret_and_explicit():
+    import config
+
+    assert config.PHYLLO_ENVIRONMENT in {"sandbox", "staging", "production"}
+    assert config.PHYLLO_BASE_URL.startswith("https://")
+
+
+def test_phyllo_non_content_webhook_is_ignored():
+    payload = {
+        "event": "ACCOUNTS.UPDATED",
+        "data": {
+            "account": {
+                "id": "account-123",
+                "url": "https://www.youtube.com/@creator",
+                "username": "creator",
+            }
+        },
+    }
+    assert social_providers.parse_phyllo_webhook(payload) == []
+
+
+def test_ytdlp_capture_logger_keeps_expected_offline_errors_out_of_stderr():
+    logger = notifications._YTDLPCaptureLogger()
+    logger.error("ERROR: [twitch:stream] creator: The channel is not currently live")
+    logger.warning("warning")
+    assert logger.errors[-1].endswith("not currently live")
+    assert logger.warnings == ["warning"]
+
+
+def test_phyllo_webhook_signatures_accepts_multiple_values_during_rotation():
+    body = b'{"event":"CONTENTS_FETCH.SUCCESS"}'
+    secret = "new-secret"
+    good = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    header = f"v1=deadbeef, v1={good}"
+    assert social_providers.verify_phyllo_signature(body, header, secret)
+
+
+def test_phyllo_webhook_signatures_accepts_base64_digest():
+    import base64
+
+    body = b'{"event":"CONTENTS_FETCH.SUCCESS"}'
+    secret = "new-secret"
+    raw = hmac.new(secret.encode(), body, hashlib.sha256).digest()
+    signature = base64.b64encode(raw).decode()
+    assert social_providers.verify_phyllo_signature(
+        body, f"sha256={signature}", secret
+    )
+
+
+def test_webhook_http_handler_prefers_current_insightiq_header():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "web" / "phyllo_webhook.py").read_text(encoding="utf-8")
+    assert 'request.headers.get("Webhook-Signatures"' in source
+    assert 'request.headers.get("X-Phyllo-Signature"' in source
+
+
+def test_youtube_thumbnail_fallback_uses_video_id():
+    item = {"id": "abc123XYZ"}
+    assert notifications._best_thumbnail(
+        item,
+        platform="YouTube",
+    ) == "https://i.ytimg.com/vi/abc123XYZ/hqdefault.jpg"
+
+
+def test_notification_preview_supports_real_link_metadata():
+    source = inspect.getsource(notifications.Notifications.notifs_test.callback)
+    assert "Prévisualiser une notification avec titre et miniature réels." in inspect.getsource(notifications.Notifications)
+    assert "details.get(\"title\")" in source
+    assert "_best_thumbnail(" in source
+    assert "hqdefault.jpg" in source
+    assert "description=\"\"" in source
+
+
+def test_real_social_event_passes_platform_to_thumbnail_resolver():
+    source = inspect.getsource(notifications.Notifications._item_event)
+    assert "platform=platform" in source
+    assert "thumbnail_url=_best_thumbnail" in source

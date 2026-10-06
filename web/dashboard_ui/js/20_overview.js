@@ -11,10 +11,25 @@ const OVERVIEW_CARDS = [
   { key: 'notifications', title: 'Notifications', page: 'notifications', info: () => { const n = (state.guild?.social_notifications || []).filter(x => x.enabled !== 0).length; return n ? plural(n, 'source') : 'Aucune source suivie'; } },
 ];
 const AUTOMOD = [
-  ['antispam', 'Anti-spam', 'Bloque les rafales de messages.'], ['antilink', 'Anti-liens', 'Supprime les liens non autorisés.'], ['antiinvite', 'Anti-invitations', 'Filtre les invitations Discord.'],
-  ['antimention', 'Anti-mentions', 'Limite les mentions de masse.'], ['anticaps', 'Anti-majuscules', 'Réduit les messages tout en majuscules.'], ['antiemoji', 'Anti-emoji', 'Limite les répétitions d’emoji.'],
-  ['antiraid', 'Anti-raid', 'Réagit aux arrivées anormales.'], ['antibot', 'Anti-bot', 'Contrôle les ajouts de bots.'], ['antiaccount', 'Anti-comptes récents', 'Détecte les comptes trop récents.'],
-  ['antiscam', 'Anti-scam', 'Filtre les contenus à risque.'], ['antinuke', 'Anti-nuke', 'Protège salons et rôles.'], ['antiinsult', 'Anti-insultes', 'Filtre les insultes (timeout 10 min).'],
+  ['antispam', 'Anti-spam', 'Bloque les rafales de messages.'],
+  ['antilink', 'Anti-liens', 'Supprime les liens non autorisés.'],
+  ['antilink_strict', 'Blocage total des liens', 'Refuse tous les liens hors exceptions.'],
+  ['antiinvite', 'Anti-invitations', 'Filtre les invitations Discord.'],
+  ['antimention', 'Anti-mentions', 'Limite les mentions de masse.'],
+  ['anticaps', 'Anti-majuscules', 'Réduit les messages tout en majuscules.'],
+  ['antiemoji', 'Anti-émojis', 'Limite les répétitions d’émojis.'],
+  ['antiscam', 'Anti-scam', 'Filtre les contenus à risque.'],
+  ['antiinsult', 'Anti-insultes', 'Filtre insultes et mots interdits.'],
+  ['antiraid', 'Anti-raid', 'Réagit aux arrivées anormales.'],
+  ['antibot', 'Anti-bots', 'Contrôle les ajouts de bots.'],
+  ['antiaccount', 'Anti-comptes récents', 'Détecte les comptes trop récents.'],
+  ['join_gate', 'Join Gate', 'Évalue la confiance à l’arrivée.'],
+  ['risk_engine', 'Moteur de risque', 'Combine les signaux de sécurité.'],
+  ['antinuke', 'Anti-nuke', 'Protège salons, rôles et actions critiques.'],
+  ['security_vanity', 'Protection Vanity URL', 'Surveille le lien personnalisé.'],
+  ['security_prune', 'Protection Prune', 'Détecte les suppressions massives de membres.'],
+  ['security_permissions', 'Permissions dangereuses', 'Bloque les élévations critiques.'],
+  ['escalation', 'Escalade AutoMod', 'Augmente les sanctions en cas de récidive.'],
 ];
 const LOG_TYPES = [['Messages', 'log_messages'], ['Membres', 'log_members'], ['Vocal', 'log_voice'], ['Rôles', 'log_roles'], ['Serveur', 'log_server'], ['AutoMod', 'log_automod'], ['Modération', 'log_moderation'], ['Tickets', 'ticket_log_channel'], ['Erreurs', 'error_channel']];
 const settings = () => state.guild?.settings || {};

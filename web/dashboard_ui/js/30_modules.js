@@ -98,6 +98,63 @@ async function renderSecurity() {
   const forbiddenWords = Array.isArray(forbidden?.words) ? forbidden.words : [];
   let d = null; try { d = await diagnostics(); } catch (_) {}
   let sec = null; try { sec = await securityOverview(); } catch (_) {}
+  const securityProtectionOrder = [
+    'antispam', 'antilink', 'antilink_strict', 'antiinvite', 'antimention',
+    'anticaps', 'antiemoji', 'antiscam', 'antiinsult',
+    'antiraid', 'antibot', 'antiaccount', 'join_gate', 'risk_engine',
+    'antinuke', 'security_vanity', 'security_prune', 'security_permissions',
+    'escalation'
+  ];
+  let policyBundle = { filters: {} };
+  try { policyBundle = await gget('/security/filter-policies'); } catch (_) {}
+  const securityPolicies = policyBundle?.filters || {};
+  const requestedPolicyKey = String(state.securityPolicyFilter || 'antispam');
+  const policyKey = securityPolicies[requestedPolicyKey]
+    ? requestedPolicyKey
+    : securityProtectionOrder.find(key => securityPolicies[key]) || 'antispam';
+  state.securityPolicyFilter = policyKey;
+  const policy = securityPolicies[policyKey] || {
+    key: policyKey,
+    label: 'Protection',
+    group: 'Sécurité',
+    description: 'Protection SentriX.',
+    supports_policy: false,
+    enabled: Boolean(a[policyKey]),
+    role_ids: [],
+    strict_channel_ids: [],
+  };
+  const policyRoleIds = new Set((policy.role_ids || []).map(String));
+  const policyStrictChannelIds = new Set((policy.strict_channel_ids || []).map(String));
+  const policyFilterOptions = securityProtectionOrder
+    .filter(key => securityPolicies[key] || key === policyKey)
+    .map(key => {
+      const item = securityPolicies[key] || { label: key, group: 'Sécurité' };
+      return `<option value="${esc(key)}" ${key === policyKey ? 'selected' : ''}>${esc(item.group || 'Sécurité')} · ${esc(item.label || key)}</option>`;
+    })
+    .join('');
+  const securityCatalogGroups = ['Messages', 'Arrivées', 'Serveur', 'Réponse'];
+  const securityCatalogHtml = securityCatalogGroups.map(group => {
+    const items = securityProtectionOrder
+      .map(key => securityPolicies[key])
+      .filter(item => item && item.group === group);
+    if (!items.length) return '';
+    return `<div class="field full"><div class="label-row"><span class="label">${esc(group)}</span></div><div class="list compact">${items.map(item => `
+      <div class="row">
+        <div class="row-main">
+          <b>${esc(item.label)}</b>
+          <small>${esc(item.description || '')}</small>
+        </div>
+        <span class="badge ${item.enabled ? 'ok' : ''}">${item.enabled ? 'ACTIF' : 'INACTIF'}</span>
+        <button class="btn sm ${item.key === policyKey ? 'primary' : 'ghost'}" type="button" data-security-config="${esc(item.key)}">Configurer</button>
+      </div>`).join('')}</div></div>`;
+  }).join('');
+  const policyRoleOptions = roles()
+    .filter(r => String(r.id) !== String(state.guildId))
+    .map(r => `<option value="${esc(r.id)}" ${policyRoleIds.has(String(r.id)) ? 'selected' : ''}>@${esc(r.name)}</option>`)
+    .join('');
+  const policyChannelOptions = channels('text')
+    .map(ch => `<option value="${esc(ch.id)}" ${policyStrictChannelIds.has(String(ch.id)) ? 'selected' : ''}>#${esc(ch.name)}</option>`)
+    .join('');
   const missing = (sec?.permissions || d?.permissions || []).filter(p => !p.granted);
   const risk = sec?.risk || { score: 0, protection_score: 100, level: 'inconnu' };
   const coverage = sec?.coverage || { active: AUTOMOD.filter(([k]) => Boolean(a[k])).length, total: AUTOMOD.length };
@@ -164,7 +221,61 @@ async function renderSecurity() {
 
     ${missing.length ? `<div class="notice warn full">SentriX n’a pas toutes les permissions nécessaires : ${esc(missing.map(p => p.name).join(', '))}. Certaines protections peuvent détecter un risque sans pouvoir agir.</div>` : ''}
 
-    ${card('Protections', 'Activez uniquement les protections adaptées à votre serveur.', AUTOMOD.map(([k, l, c]) => switchRow(l, k, Boolean(a[k]), c)).join(''), 'full')}
+    <section class="card full">
+      <div class="card-head">
+        <div>
+          <h2>Centre de sécurité</h2>
+          <p>Toutes les protections SentriX sont regroupées ici. Choisissez une protection puis configurez-la sans passer par plusieurs pages.</p>
+        </div>
+        <span class="badge blue">${number(coverage.active)}/${number(coverage.total)} actives</span>
+      </div>
+      <div class="fields" style="margin-top:12px">${securityCatalogHtml}</div>
+    </section>
+
+    <section class="card full">
+      <div class="card-head">
+        <div>
+          <h2>${esc(policy.label || 'Protection')}</h2>
+          <p>${esc(policy.description || 'Configuration de la protection SentriX.')}</p>
+        </div>
+        <span class="badge ${Boolean(policy.enabled) ? 'ok' : ''}">${Boolean(policy.enabled) ? 'ACTIF' : 'INACTIF'}</span>
+      </div>
+      <div class="fields" style="margin-top:12px">
+        <div class="field full">
+          <div class="label-row"><label for="securityPolicyFilter">Protection à configurer</label></div>
+          <select id="securityPolicyFilter">${policyFilterOptions}</select>
+          <small>Centre unique : messages, arrivées, protection du serveur et réponse automatique.</small>
+        </div>
+      </div>
+      ${switchRow(`Activer ${policy.label || 'cette protection'}`, policyKey, Boolean(a[policyKey]), policy.description || '')}
+      ${policy.supports_policy ? `
+        <div class="notice" style="margin-top:12px">
+          Priorité : <b>salon strict → rôle bypass → protection normale</b>. Dans un salon strict, même un rôle bypass reste soumis à <b>${esc(policy.label)}</b>. Les threads héritent du salon parent.
+        </div>
+        <div class="fields" style="margin-top:12px">
+          <div class="field full">
+            <div class="label-row"><label for="securityPolicyBypassRoles">Rôles autorisés à contourner</label></div>
+            <select id="securityPolicyBypassRoles" multiple size="6">${policyRoleOptions || '<option disabled>Aucun rôle disponible</option>'}</select>
+            <small>Le bypass concerne uniquement <b>${esc(policy.label || policyKey)}</b>.</small>
+          </div>
+          <div class="field full">
+            <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — bypass interdit</label></div>
+            <select id="securityPolicyStrictChannels" multiple size="7">${policyChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
+            <small>Dans ces salons, même les rôles bypass sont bloqués par cette protection.</small>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button class="btn primary" type="button" id="securityPolicySave">Enregistrer les exceptions</button>
+          <button class="btn ghost" type="button" id="securityPolicyClearRoles">Retirer les rôles bypass</button>
+          <button class="btn ghost" type="button" id="securityPolicyClearStrict">Aucun salon strict</button>
+        </div>
+      ` : `
+        <div class="notice" style="margin-top:12px">
+          <b>Protection globale.</b> Cette sécurité agit sur le serveur, les arrivées, les rôles ou les permissions. Les salons stricts ne s'appliquent donc pas à ce module.
+        </div>
+      `}
+    </section>
+
     <section class="card full">
       <div class="card-head">
         <div><h2>Mots interdits</h2><p>Ajoutez les mots ou expressions que SentriX doit censurer immédiatement.</p></div>
@@ -189,6 +300,44 @@ async function renderSecurity() {
 
   bindEditable();
   bindModuleButtons();
+
+  const selectedValues = select => [...(select?.selectedOptions || [])].map(option => option.value).filter(Boolean);
+
+  content().querySelectorAll('[data-security-config]').forEach(button => {
+    button.onclick = async () => {
+      state.securityPolicyFilter = button.dataset.securityConfig || 'antispam';
+      await renderSecurity();
+    };
+  });
+
+  if ($('securityPolicyFilter')) $('securityPolicyFilter').onchange = async () => {
+    state.securityPolicyFilter = $('securityPolicyFilter').value || 'antispam';
+    await renderSecurity();
+  };
+
+  const saveSecurityPolicy = async ({ clearRoles = false, clearStrict = false } = {}) => {
+    const roleIds = clearRoles ? [] : selectedValues($('securityPolicyBypassRoles'));
+    const strictChannelIds = clearStrict ? [] : selectedValues($('securityPolicyStrictChannels'));
+    const button = $('securityPolicySave');
+    if (button) button.disabled = true;
+    try {
+      const result = await gpost('/security/filter-policies', {
+        filter_name: state.securityPolicyFilter || policyKey,
+        role_ids: roleIds,
+        strict_channel_ids: strictChannelIds,
+      });
+      toast(result.message || 'Exceptions de sécurité enregistrées.');
+      invalidate('security-overview');
+      await renderSecurity();
+    } catch (e) {
+      toast(e.message, true);
+      if (button) button.disabled = false;
+    }
+  };
+
+  if ($('securityPolicySave')) $('securityPolicySave').onclick = () => saveSecurityPolicy();
+  if ($('securityPolicyClearRoles')) $('securityPolicyClearRoles').onclick = () => saveSecurityPolicy({ clearRoles: true });
+  if ($('securityPolicyClearStrict')) $('securityPolicyClearStrict').onclick = () => saveSecurityPolicy({ clearStrict: true });
 
   if ($('forbiddenWordAdd')) $('forbiddenWordAdd').onclick = async () => {
     const input = $('forbiddenWordInput');

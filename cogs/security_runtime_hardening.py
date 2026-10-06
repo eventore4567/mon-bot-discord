@@ -318,11 +318,9 @@ class SecurityHardening(commands.Cog):
         automod = self.bot.get_cog("Automod")
         if automod is None or not message.guild:
             return None, None
-        ignored = await automod.get_ignored_channels_cached(message.guild.id)
-        if message.channel.id in ignored:
-            return automod, None
-        if await automod.is_automod_exempt(message.author):
-            return automod, None
+        # Les exemptions ne sont plus décidées globalement ici. Chaque filtre
+        # consulte sa politique afin qu'un salon strict puisse reprendre priorité
+        # sur un rôle bypass sans affaiblir les autres protections.
         conf = await automod.get_automod_cached(message.guild.id)
         return automod, conf or None
 
@@ -336,7 +334,7 @@ class SecurityHardening(commands.Cog):
             return
 
         # message.mentions ne couvre pas correctement tous les @roles/@everyone.
-        if conf.get("antimention"):
+        if conf.get("antimention") and await automod.security_filter_applies_to(message, "antimention"):
             total_targets = len(message.mentions) + len(message.role_mentions)
             if message.mention_everyone or len(message.role_mentions) >= 3 or total_targets >= 5:
                 self._remember_handled(message.id)
@@ -347,7 +345,11 @@ class SecurityHardening(commands.Cog):
                 )
 
         # Une pièce jointe exécutable échappe à l'anti-lien classique.
-        if conf.get("antiscam") and message.attachments:
+        if (
+            conf.get("antiscam")
+            and message.attachments
+            and await automod.security_filter_applies_to(message, "antiscam")
+        ):
             dangerous = []
             for attachment in message.attachments:
                 lowered = attachment.filename.casefold().strip()
@@ -368,7 +370,7 @@ class SecurityHardening(commands.Cog):
                 )
 
         # Bloque plus vite un copié-collé répété sans durcir tout l'anti-spam.
-        if conf.get("antispam"):
+        if conf.get("antispam") and await automod.security_filter_applies_to(message, "antispam"):
             normalized = " ".join(message.content.casefold().split())
             if len(normalized) >= 3:
                 key = (message.guild.id, message.author.id, normalized[:300])

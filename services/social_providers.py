@@ -8,6 +8,7 @@ verification plus a normalized event model shared by every provider.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import base64
 import hashlib
 import hmac
 import json
@@ -92,21 +93,40 @@ def source_surfaces(source_url: str, platform: str) -> list[tuple[str, str, str]
     ]
 
 
-def verify_phyllo_signature(body: bytes, signatures: str, secret: str) -> bool:
-    """Verify InsightIQ ``Webhook-Signatures`` over the raw request body.
+def verify_phyllo_signature(body: bytes, signature: str, secret: str) -> bool:
+    """Vérifie une ou plusieurs signatures HMAC-SHA256 Phyllo/InsightIQ.
 
-    InsightIQ can send several comma-separated signatures while an API secret
-    is being rotated.  Accepting any matching signature is the documented
-    behaviour.  ``sha256=`` remains tolerated for older Phyllo integrations.
+    Le fournisseur actuel utilise `Webhook-Signatures` et peut envoyer plusieurs
+    signatures pendant une rotation de secret. L'ancien header
+    `X-Phyllo-Signature` reste supporté côté HTTP pour compatibilité.
     """
-    if not body or not signatures or not secret:
+    if not body or not signature or not secret:
         return False
-    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    for candidate in str(signatures).split(","):
-        supplied = candidate.strip().strip('"')
-        if supplied.casefold().startswith("sha256="):
-            supplied = supplied.split("=", 1)[1]
-        if hmac.compare_digest(expected.casefold(), supplied.casefold()):
+
+    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256)
+    expected_hex = digest.hexdigest().casefold()
+    expected_b64 = base64.b64encode(digest.digest()).decode("ascii").rstrip("=")
+
+    # Formats tolérés sans affaiblir la vérification : valeur brute, sha256=...,
+    # v1=..., liste séparée par virgule/espace/point-virgule.
+    header = str(signature).strip()
+    candidates: list[str] = []
+    for token in re.split(r"[\s,;]+", header):
+        token = token.strip().strip('"')
+        if not token:
+            continue
+        if "=" in token:
+            _label, token = token.rsplit("=", 1)
+        elif ":" in token and not token.startswith("http"):
+            _label, token = token.rsplit(":", 1)
+        token = token.strip().strip('"')
+        if token:
+            candidates.append(token)
+
+    for supplied in candidates:
+        if hmac.compare_digest(expected_hex, supplied.casefold()):
+            return True
+        if hmac.compare_digest(expected_b64, supplied.rstrip("=")):
             return True
     return False
 
@@ -166,7 +186,21 @@ def parse_phyllo_webhook(payload: dict) -> list[SocialEvent]:
     events: list[SocialEvent] = []
     seen: set[tuple[str, str]] = set()
 
+    # Les webhooks Phyllo couvrent aussi comptes/profils/syncs. Ne jamais
+    # transformer un simple profil contenant {id,url} en "nouvelle vidéo".
+    event_is_content = "CONTENT" in event_name.upper() if event_name else False
+
     for node in _walk_dicts(payload):
+        node_is_content = any(
+            key in node
+            for key in (
+                "content_id", "post_id", "video_id", "content_type",
+                "media_type", "thumbnail_url", "post_url", "content_url",
+            )
+        )
+        if not event_is_content and not node_is_content:
+            continue
+
         item_id = _first(node, "content_id", "post_id", "video_id", "id")
         url = _first(
             node,

@@ -17,11 +17,11 @@ def test_trace_titles_are_sentrix_owned_and_event_specific():
     assert wide_logs._trace_title("automod_link", "ancien titre") == "Lien bloqué"
 
 
-def test_trace_meta_has_brand_category_and_event_code():
+def test_trace_meta_is_human_facing_without_internal_event_codes():
     meta = wide_logs._trace_meta("message_delete", emoji="")
-    assert "SENTRIX TRACE" in meta
     assert "Messages" in meta
-    assert "MSG-DEL" in meta
+    assert "SENTRIX TRACE" not in meta
+    assert "MSG-DEL" not in meta
 
 
 def test_trace_identity_labels_are_human_not_generic():
@@ -33,12 +33,14 @@ def test_trace_identity_labels_are_human_not_generic():
     assert wide_logs._trace_identity_label("invite_create") == "Créateur"
 
 
-def test_trace_footer_removes_old_brand_prefix():
+def test_trace_footer_removes_internal_trace_code():
     footer = wide_logs._trace_footer(
         "member_timeout",
         "SentriX • 02/10/2026 10:00",
     )
-    assert footer == "SentriX Trace · MBR-TO · 02/10/2026 10:00"
+    assert footer == "SentriX · 02/10/2026 10:00"
+    assert "Trace" not in footer
+    assert "MBR-TO" not in footer
 
 
 def test_every_wide_log_uses_the_trace_renderer():
@@ -49,7 +51,7 @@ def test_every_wide_log_uses_the_trace_renderer():
     assert "_trace_title(event_type" in source
     assert "_trace_identity_label(event_type)" in source
     assert "_trace_body_parts(body)" in source
-    assert 'discord.ui.TextDisplay("### Informations")' in source
+    assert 'discord.ui.TextDisplay("### Informations")' not in source
     assert "### Détails" not in source
     assert "_trace_time_text(embed)" in source
     assert "_trace_footer(event_type, footer)" in source
@@ -96,3 +98,64 @@ def test_trace_v7_layout_is_compact_and_media_stays_below_context():
     assert "summary, details = _trace_body_parts(body)" in block
     assert block.index("summary, details = _trace_body_parts(body)") < block.index("if media_items:")
     assert "📎" not in block
+
+
+
+def test_message_content_keeps_real_mentions_outside_code_blocks():
+    rendered = wide_logs._message_quote("<@1499827796560580850> salut")
+    assert "<@1499827796560580850>" in rendered
+    assert "```" not in rendered
+    assert rendered.startswith("> ")
+
+
+def test_trace_identity_uses_real_discord_references():
+    assert wide_logs._trace_identity_ref("message_edit", 1499827796560580850) == "<@1499827796560580850>"
+    assert wide_logs._trace_identity_ref("member_ban", 1499827796560580850) == "<@1499827796560580850>"
+    assert wide_logs._trace_identity_ref("channel_update", 1499827796560580850) == "<#1499827796560580850>"
+    assert wide_logs._trace_identity_ref("role_update", 1499827796560580850) == "<@&1499827796560580850>"
+
+
+def test_trace_header_does_not_show_raw_identity_id_line():
+    source = (ROOT / "utils" / "wide_logs.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("class WideLogView"):
+        source.index("def _database_path", source.index("class WideLogView"))
+    ]
+    assert '-# ID ·' not in block
+    assert "_trace_identity_ref(event_type, identity_id)" in block
+
+
+
+def test_log_actions_put_navigation_before_technical_ids():
+    service = (ROOT / "utils" / "log_service.py").read_text(encoding="utf-8")
+
+    assert 'label="Accéder au message"' in service
+    assert 'sentrix_emojis.partiel("eye")' in service
+    links_pos = service.index("for label, url in (links or [])[:12]:")
+    ids_pos = service.index("for label, entity_id in (ids or [])[:8]:", links_pos)
+    assert links_pos < ids_pos
+
+
+def test_deleted_message_logs_link_to_channel_while_edits_link_to_message():
+    logs = (ROOT / "cogs" / "logs.py").read_text(encoding="utf-8")
+
+    assert '("Accéder au salon", _discord_channel_url(guild.id, channel_id))' in logs
+    assert "jump_url=after.jump_url" in logs
+    assert "def _discord_channel_url" in logs
+
+
+def test_deleted_channel_and_role_cards_do_not_repeat_raw_id_field():
+    logs = (ROOT / "cogs" / "logs.py").read_text(encoding="utf-8")
+
+    assert 'fields = [("Salon", f"`{channel.name}`", True)]' in logs
+    assert 'fields = [("Rôle", f"`{role.name}`", True)]' in logs
+
+
+
+def test_log_footer_stays_above_bottom_action_bar():
+    source = (ROOT / "utils" / "wide_logs.py").read_text(encoding="utf-8")
+    block = source[
+        source.index("class WideLogView"):
+        source.index("def _database_path", source.index("class WideLogView"))
+    ]
+    assert block.index("footer_text = _trace_footer") < block.index("rows = build_rows(old_view)")

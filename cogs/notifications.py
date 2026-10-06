@@ -7,6 +7,8 @@ import time
 from urllib.parse import urlparse, urlunparse
 
 import discord
+
+import config
 from discord.ext import commands, tasks
 
 from services import social_providers
@@ -16,6 +18,33 @@ from utils import sentrix_panels as panels
 
 
 logger = logging.getLogger("bot.notifications")
+
+
+class _YTDLPCaptureLogger:
+    """Capture yt-dlp sans polluer stderr.
+
+    yt-dlp imprime certains états normaux (ex. Twitch hors ligne) directement
+    en ERROR même avec quiet=True. On capture donc ces lignes, puis le code
+    appelant décide si c'est une vraie panne ou un état normal.
+    """
+
+    def __init__(self):
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+
+    def debug(self, message):
+        return None
+
+    def info(self, message):
+        return None
+
+    def warning(self, message):
+        self.warnings.append(str(message))
+
+    def error(self, message):
+        self.errors.append(str(message))
+
+
 IMAGE_FLAG_RE = re.compile(r"(?:^|\s)--image\s+(https://\S+)", re.IGNORECASE)
 SUPPORTED_SOCIAL_DOMAINS = (
     "youtube.com", "youtu.be", "tiktok.com", "twitch.tv", "instagram.com",
@@ -143,6 +172,7 @@ def _extract_latest_sync(source_url: str) -> dict | None:
     """Extraction bloquante isolée dans asyncio.to_thread par l'appelant."""
     import yt_dlp
 
+    capture = _YTDLPCaptureLogger()
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -151,10 +181,13 @@ def _extract_latest_sync(source_url: str) -> dict | None:
         "playlistend": 3,
         "ignoreerrors": True,
         "socket_timeout": 12,
+        "logger": capture,
     }
     with yt_dlp.YoutubeDL(options) as downloader:
         info = downloader.extract_info(_url_a_interroger(source_url), download=False)
     if not info:
+        if capture.errors:
+            raise RuntimeError(capture.errors[-1])
         return None
     entries = info.get("entries")
     if entries:
@@ -186,24 +219,22 @@ async def _extract_latest(source_url: str) -> dict | None:
 
 
 def _extract_details_sync(item_url: str) -> dict | None:
-    """Charge les métadonnées complètes UNIQUEMENT pour une nouvelle publication.
-
-    Le scan périodique reste léger grâce à extract_flat. Quand l'identifiant change,
-    on effectue alors un second passage ciblé afin d'obtenir la vraie miniature,
-    le vrai titre et l'URL canonique. TikTok est précisément l'une des plateformes
-    dont les entrées plates omettent souvent la miniature.
-    """
+    """Charge les métadonnées complètes UNIQUEMENT pour une nouvelle publication."""
     import yt_dlp
 
+    capture = _YTDLPCaptureLogger()
     options = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
         "ignoreerrors": True,
         "socket_timeout": 12,
+        "logger": capture,
     }
     with yt_dlp.YoutubeDL(options) as downloader:
         info = downloader.extract_info(item_url, download=False)
+    if not isinstance(info, dict) and capture.errors:
+        raise RuntimeError(capture.errors[-1])
     return info if isinstance(info, dict) else None
 
 
@@ -214,20 +245,37 @@ async def _extract_details(item_url: str) -> dict | None:
     )
 
 
-def _best_thumbnail(item: dict, custom_url: str | None = None) -> str | None:
-    """Retourne une image exploitable, sans laisser une URL vide casser la carte."""
+def _best_thumbnail(
+    item: dict,
+    custom_url: str | None = None,
+    *,
+    platform: str | None = None,
+) -> str | None:
+    """Retourne la vraie miniature du contenu avec un fallback YouTube fiable."""
     candidates = [
         custom_url,
         item.get("thumbnail"),
+        item.get("cover"),
+        item.get("cover_url"),
+        item.get("image"),
+        item.get("image_url"),
     ]
     thumbnails = item.get("thumbnails") or []
     if isinstance(thumbnails, list):
         for thumb in reversed(thumbnails):
             if isinstance(thumb, dict):
                 candidates.append(thumb.get("url"))
+
     for candidate in candidates:
         if isinstance(candidate, str) and _valid_https_url(candidate):
             return candidate
+
+    # Les entrées YouTube "flat" n'incluent pas toujours thumbnails. L'ID vidéo
+    # suffit pourtant à obtenir la miniature officielle, y compris pour Shorts.
+    if platform == "YouTube":
+        item_id = _id_de_publication(item.get("id"))
+        if item_id:
+            return f"https://i.ytimg.com/vi/{item_id}/hqdefault.jpg"
     return None
 
 
@@ -419,6 +467,9 @@ class Notifications(commands.Cog, name="Notifications"):
         except (TypeError, ValueError):
             published_at = None
 
+        if platform == "Twitch" and kind == "live":
+            link = row["source_url"]
+
         return social_providers.SocialEvent(
             provider=provider,
             platform=platform,
@@ -427,7 +478,11 @@ class Notifications(commands.Cog, name="Notifications"):
             title=(item.get("title") or f"Nouvelle publication sur {platform}")[:300],
             creator=str(creator) if creator else None,
             creator_url=item.get("channel_url") or item.get("uploader_url"),
-            thumbnail_url=_best_thumbnail(item, row["image_url"]),
+            thumbnail_url=_best_thumbnail(
+                item,
+                row["image_url"],
+                platform=platform,
+            ),
             published_at=published_at,
             kind=kind,
         )
@@ -501,7 +556,20 @@ class Notifications(commands.Cog, name="Notifications"):
         for surface, poll_url, kind in surfaces:
             try:
                 item = await _extract_latest(poll_url)
-            except Exception:
+            except Exception as exc:
+                message = str(exc).casefold()
+                # Twitch hors ligne est un état normal, pas une panne. L'ancien
+                # moteur écrivait un WARNING toutes les 5 minutes pour chaque
+                # chaîne offline et noyait les vraies erreurs.
+                if (
+                    row["platform"] == "Twitch"
+                    and (
+                        "not currently live" in message
+                        or "channel is offline" in message
+                        or "offline" in message
+                    )
+                ):
+                    continue
                 logger.warning(
                     "Lecture impossible abonnement=%s plateforme=%s surface=%s url=%s",
                     row["id"],
@@ -750,6 +818,208 @@ class Notifications(commands.Cog, name="Notifications"):
                 )
             ),
         )
+
+    @commands.hybrid_command(
+        name="notifs-status",
+        description="Afficher l'état du moteur de notifications sociales.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def notifs_status(self, ctx: commands.Context):
+        if ctx.guild is None:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.error("Cette commande doit être utilisée dans un serveur.")
+                ),
+            )
+
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM social_notifications WHERE guild_id=? ORDER BY id ASC",
+            (ctx.guild.id,),
+        )
+        active = sum(1 for row in rows if row["enabled"])
+        states = 0
+        if rows:
+            placeholders = ",".join("?" for _ in rows)
+            state_row = await self.bot.db.fetchone(
+                f"SELECT COUNT(*) AS n FROM social_notification_state "
+                f"WHERE subscription_id IN ({placeholders})",
+                tuple(int(row["id"]) for row in rows),
+            )
+            states = int(state_row["n"] if state_row else 0)
+
+        provider = (
+            f"Phyllo {config.PHYLLO_ENVIRONMENT} prêt"
+            if config.PHYLLO_ENABLED
+            else "Phyllo non configuré — fallback actif"
+        )
+        webhook = (
+            "Webhook signé prêt"
+            if config.PHYLLO_WEBHOOK_ENABLED
+            else "Webhook Phyllo non configuré"
+        )
+        body = (
+            f"**Provider** · {provider}\n"
+            f"**Webhook** · {webhook}\n"
+            f"**Fallback** · yt-dlp/API toutes les 5 minutes\n"
+            f"**Surveillances** · {active}/{len(rows)} actives\n"
+            f"**États multi-format** · {states}\n"
+            f"**YouTube** · vidéos + Shorts + lives séparés"
+        )
+        await panels.envoyer(
+            ctx,
+            panels.depuis_embed(
+                embeds.info(body, title="Notifications sociales")
+            ),
+        )
+
+    @commands.hybrid_command(
+        name="notifs-test",
+        description="Prévisualiser une notification avec titre et miniature réels.",
+        with_app_command=False,
+    )
+    @checks.is_owner_or_admin_for("configuration")
+    async def notifs_test(
+        self,
+        ctx: commands.Context,
+        plateforme: str = "YouTube",
+        type_contenu: str = "video",
+        lien: str = "",
+    ):
+        platform_key = str(plateforme or "").strip().casefold()
+        platform = {
+            "youtube": "YouTube",
+            "yt": "YouTube",
+            "tiktok": "TikTok",
+            "tt": "TikTok",
+            "twitch": "Twitch",
+            "instagram": "Instagram",
+            "insta": "Instagram",
+            "x": "X",
+            "twitter": "X",
+        }.get(platform_key)
+        if platform is None:
+            return await panels.texte_court(
+                ctx,
+                "Plateforme valide : YouTube, TikTok, Twitch, Instagram ou X.",
+                ephemere=bool(ctx.interaction),
+            )
+
+        kind = str(type_contenu or "").strip().casefold()
+        if kind not in {"video", "short", "live", "post"}:
+            return await panels.texte_court(
+                ctx,
+                "Type valide : video, short, live ou post.",
+                ephemere=bool(ctx.interaction),
+            )
+
+        link = str(lien or "").strip()
+        title = "Exemple de nouvelle publication SentriX"
+        creator = "Créateur"
+        image_url = None
+        published_at = int(time.time())
+
+        # Avec un lien réel, le test affiche exactement les mêmes métadonnées que
+        # la notification automatique : titre, créateur et miniature réels.
+        if link:
+            if not _is_supported_social_url(link):
+                return await panels.texte_court(
+                    ctx,
+                    "Le lien doit être une URL publique YouTube, TikTok, Twitch, Instagram ou X.",
+                    ephemere=bool(ctx.interaction),
+                )
+            detected_platform, _ = _platform_details(link)
+            if detected_platform != "Réseau social":
+                platform = detected_platform
+
+            path = (urlparse(link).path or "").casefold()
+            if platform == "YouTube" and "/shorts/" in path:
+                kind = "short"
+            elif platform == "YouTube" and "/live/" in path:
+                kind = "live"
+            elif platform == "Twitch":
+                kind = "live"
+
+            try:
+                details = await _extract_details(link)
+            except Exception:
+                details = None
+                logger.info(
+                    "Prévisualisation sociale : métadonnées indisponibles pour %s",
+                    link,
+                    exc_info=True,
+                )
+
+            if details:
+                title = str(
+                    details.get("title")
+                    or details.get("fulltitle")
+                    or title
+                )[:300]
+                creator = str(
+                    details.get("uploader")
+                    or details.get("channel")
+                    or details.get("creator")
+                    or details.get("uploader_id")
+                    or creator
+                )[:120]
+                image_url = _best_thumbnail(
+                    details,
+                    platform=platform,
+                )
+                timestamp = (
+                    details.get("timestamp")
+                    or details.get("release_timestamp")
+                    or details.get("modified_timestamp")
+                )
+                try:
+                    published_at = int(timestamp) if timestamp else published_at
+                except (TypeError, ValueError):
+                    pass
+            elif platform == "YouTube":
+                match = re.search(
+                    r"(?:youtu\.be/|v=|/shorts/|/live/)([A-Za-z0-9_-]{6,})",
+                    link,
+                )
+                if match:
+                    image_url = f"https://i.ytimg.com/vi/{match.group(1)}/hqdefault.jpg"
+        else:
+            # Sans lien, on montre quand même le rendu complet avec une vraie
+            # miniature HTTP pour que le test ne paraisse plus vide.
+            sample_links = {
+                "YouTube": "https://www.youtube.com/watch?v=aqz-KE-bpKQ",
+                "TikTok": "https://www.tiktok.com/",
+                "Twitch": "https://www.twitch.tv/",
+                "Instagram": "https://www.instagram.com/",
+                "X": "https://x.com/",
+            }
+            link = sample_links[platform]
+            if platform == "YouTube":
+                title = (
+                    "Buddha V1 VERSUS V2 — exemple de Short"
+                    if kind == "short"
+                    else "Exemple de nouvelle vidéo YouTube"
+                )
+                image_url = "https://i.ytimg.com/vi/aqz-KE-bpKQ/hqdefault.jpg"
+            elif platform == "TikTok":
+                title = "Exemple de nouveau TikTok"
+            elif platform == "Twitch":
+                title = "Exemple de nouveau live Twitch"
+            else:
+                title = f"Exemple de nouvelle publication {platform}"
+
+        preview = SocialNotificationPanel(
+            platform=platform,
+            title=title,
+            description="",
+            link=link,
+            image_url=image_url,
+            creator=creator,
+            kind=kind,
+            published_at=published_at,
+        )
+        await ctx.send(view=preview)
 
     @commands.hybrid_command(name="notifs-list", description="Afficher les chaînes sociales surveillées.", with_app_command=False)
     @checks.is_owner_or_admin_for("configuration")

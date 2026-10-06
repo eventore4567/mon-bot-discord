@@ -57,6 +57,26 @@ _CASE_NUMBER_UNSET = object()
 #: eux au premier essai.
 _TACHES_TYPING: set[asyncio.Task] = set()
 
+# Cooldown métier explicite : le runtime SentriX supprime volontairement les
+# decorators cooldown Discord globaux. Celui-ci protège seulement clear contre
+# les doubles purges / 429 et est partagé entre +clear et /clear.
+_CLEAR_COOLDOWN_SECONDS = 5.0
+_CLEAR_COOLDOWNS: dict[tuple[int, int], float] = {}
+
+
+def _claim_clear_cooldown(guild_id: int, user_id: int) -> float:
+    now_mono = time.monotonic()
+    key = (int(guild_id), int(user_id))
+    expires = _CLEAR_COOLDOWNS.get(key, 0.0)
+    if expires > now_mono:
+        return expires - now_mono
+    _CLEAR_COOLDOWNS[key] = now_mono + _CLEAR_COOLDOWN_SECONDS
+    if len(_CLEAR_COOLDOWNS) > 4096:
+        for stale_key, stale_expiry in list(_CLEAR_COOLDOWNS.items()):
+            if stale_expiry <= now_mono:
+                _CLEAR_COOLDOWNS.pop(stale_key, None)
+    return 0.0
+
 
 class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -1143,6 +1163,17 @@ class Moderation(commands.Cog):
         pas N cartes individuelles avant le récapitulatif.
         """
         requested = max(2, min(int(nombre), 100))
+        retry_after = _claim_clear_cooldown(ctx.guild.id, ctx.author.id)
+        if retry_after > 0:
+            message = f"Réessaie dans {retry_after:.1f} s."
+            if ctx.interaction is None:
+                return await panels.texte_court(
+                    ctx.channel,
+                    message,
+                    supprimer_apres=3,
+                )
+            return await panels.texte_court(ctx, message, ephemere=True)
+
         if ctx.interaction is not None and not ctx.interaction.response.is_done():
             await ctx.interaction.response.defer(ephemeral=True)
 
@@ -1263,13 +1294,15 @@ class Moderation(commands.Cog):
     async def _send_clear_log(self, ctx: commands.Context, messages: list, *, requested: int) -> None:
         if ctx.guild is None:
             return
+        command_name = "/clear" if ctx.interaction is not None else "+clear"
         panel = embeds.canonical_log_embed(
-            "Messages supprimés avec Clear",
+            "Messages supprimés",
             fields=(
-                ("Modérateur", f"<@{ctx.author.id}>", True),
+                ("Messages supprimés", str(len(messages)), True),
                 ("Salon", f"<#{ctx.channel.id}>", True),
-                ("Nombre", str(len(messages)), True),
-                ("Messages supprimés", self._clear_preview(messages), False),
+                ("Modérateur", f"<@{ctx.author.id}>", True),
+                ("Commande", f"`{command_name} {requested}`", True),
+                ("Aperçu", self._clear_preview(messages), False),
                 (
                     "Transcription",
                     "Le fichier joint contient la totalité des messages supprimés, leurs auteurs, IDs et pièces jointes.",
@@ -1287,9 +1320,19 @@ class Moderation(commands.Cog):
                     filename=f"sentrix-clear-{ctx.channel.id}-{int(time.time())}.txt",
                 )
         event_key = log_service.make_event_key(
-            ctx.guild.id, "clear_command", executor_id=ctx.author.id, discriminator=time.time_ns(),
+            ctx.guild.id,
+            "message_bulk",
+            executor_id=ctx.author.id,
+            discriminator=f"clear:{requested}:{time.time_ns()}",
         )
-        await log_service.send_log(self.bot, ctx.guild, "messages", panel, file=file, event_key=event_key)
+        await log_service.send_log(
+            self.bot,
+            ctx.guild,
+            "message_bulk",
+            panel,
+            file=file,
+            event_key=event_key,
+        )
 
     @commands.hybrid_command(name="slowmode", description="Définir le mode lent du salon (durée libre : 5s, 1m, 10m, 1h...).", with_app_command=False)
     @app_commands.describe(duree="Ex: 5s, 30s, 1m, 10m, 1h — ou 0 / off pour désactiver (maximum 6 heures)")

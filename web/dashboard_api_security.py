@@ -20,15 +20,150 @@ from database.db import PRIMARY_CREATOR_ID
 _FILTERS = (
     "antispam",
     "antilink",
+    "antilink_strict",
     "antiinvite",
     "antimention",
     "anticaps",
     "antiemoji",
     "antiraid",
+    "antibot",
+    "antiaccount",
     "antiscam",
+    "antiinsult",
     "antinuke",
+    "security_vanity",
+    "security_prune",
+    "security_permissions",
+    "join_gate",
+    "risk_engine",
     "escalation",
 )
+
+# Catalogue unique utilisé par le dashboard. L'objectif est d'avoir un vrai
+# centre de sécurité : toutes les protections sont visibles et configurables,
+# pas uniquement l'anti-spam ou les filtres de messages.
+_PROTECTION_CATALOG = {
+    "antispam": {
+        "label": "Anti-spam",
+        "group": "Messages",
+        "description": "Bloque le flood, les rafales et les répétitions de messages.",
+        "supports_policy": True,
+    },
+    "antilink": {
+        "label": "Anti-liens",
+        "group": "Messages",
+        "description": "Bloque les liens non autorisés selon la politique du serveur.",
+        "supports_policy": True,
+    },
+    "antilink_strict": {
+        "label": "Blocage total des liens",
+        "group": "Messages",
+        "description": "Renforce l'anti-liens et refuse tout lien hors exceptions explicites.",
+        "supports_policy": False,
+    },
+    "antiinvite": {
+        "label": "Anti-invitations",
+        "group": "Messages",
+        "description": "Bloque les invitations Discord non autorisées.",
+        "supports_policy": True,
+    },
+    "antimention": {
+        "label": "Anti-mentions",
+        "group": "Messages",
+        "description": "Bloque les abus de mentions et les pings massifs.",
+        "supports_policy": True,
+    },
+    "anticaps": {
+        "label": "Anti-majuscules",
+        "group": "Messages",
+        "description": "Réduit les messages abusivement écrits en majuscules.",
+        "supports_policy": True,
+    },
+    "antiemoji": {
+        "label": "Anti-émojis",
+        "group": "Messages",
+        "description": "Bloque le flood massif d'émojis.",
+        "supports_policy": True,
+    },
+    "antiscam": {
+        "label": "Anti-scam",
+        "group": "Messages",
+        "description": "Détecte phishing, faux Nitro, crypto et pièces jointes dangereuses.",
+        "supports_policy": True,
+    },
+    "antiinsult": {
+        "label": "Anti-insultes / mots interdits",
+        "group": "Messages",
+        "description": "Bloque les insultes et les mots interdits configurés.",
+        "supports_policy": True,
+    },
+    "antiraid": {
+        "label": "Anti-raid",
+        "group": "Arrivées",
+        "description": "Détecte les arrivées massives et déclenche les protections anti-raid.",
+        "supports_policy": False,
+    },
+    "antibot": {
+        "label": "Anti-bots",
+        "group": "Arrivées",
+        "description": "Bloque ou contrôle les ajouts de bots suspects.",
+        "supports_policy": False,
+    },
+    "antiaccount": {
+        "label": "Anti-comptes récents",
+        "group": "Arrivées",
+        "description": "Filtre les comptes Discord trop récents.",
+        "supports_policy": False,
+    },
+    "join_gate": {
+        "label": "Join Gate",
+        "group": "Arrivées",
+        "description": "Combine âge du compte, avatar et vitesse d'arrivée avant d'accorder la confiance.",
+        "supports_policy": False,
+    },
+    "risk_engine": {
+        "label": "Moteur de risque",
+        "group": "Arrivées",
+        "description": "Combine plusieurs signaux de risque et déclenche des alertes graduées.",
+        "supports_policy": False,
+    },
+    "antinuke": {
+        "label": "Anti-nuke",
+        "group": "Serveur",
+        "description": "Protège les rôles, salons, webhooks et actions critiques.",
+        "supports_policy": False,
+    },
+    "security_vanity": {
+        "label": "Protection Vanity URL",
+        "group": "Serveur",
+        "description": "Détecte et restaure les changements suspects du lien personnalisé.",
+        "supports_policy": False,
+    },
+    "security_prune": {
+        "label": "Protection Prune",
+        "group": "Serveur",
+        "description": "Détecte les suppressions massives de membres via le journal d'audit.",
+        "supports_policy": False,
+    },
+    "security_permissions": {
+        "label": "Permissions dangereuses",
+        "group": "Serveur",
+        "description": "Bloque les élévations critiques de permissions sur les rôles et salons.",
+        "supports_policy": False,
+    },
+    "escalation": {
+        "label": "Escalade AutoMod",
+        "group": "Réponse",
+        "description": "Augmente progressivement les sanctions lors des récidives.",
+        "supports_policy": False,
+    },
+}
+
+_POLICY_FILTERS = {
+    key: meta["label"]
+    for key, meta in _PROTECTION_CATALOG.items()
+    if meta["supports_policy"]
+}
 
 _PERMISSION_META = (
     ("manage_messages", "Gérer les messages", 8),
@@ -229,6 +364,218 @@ def register(app: web.Application, dashboard) -> None:
             )
         )
 
+    async def _policy_payload(guild: discord.Guild, filter_name: str) -> dict:
+        meta = _PROTECTION_CATALOG[filter_name]
+        conf = await bot.db.get_automod(guild.id)
+        policy = {"role_ids": [], "strict_channel_ids": []}
+        if meta["supports_policy"]:
+            reader = getattr(bot.db, "get_security_filter_policy", None)
+            if callable(reader):
+                policy = await reader(guild.id, filter_name)
+            else:
+                role_rows = await bot.db.fetchall(
+                    "SELECT role_id FROM security_filter_bypass_roles "
+                    "WHERE guild_id=? AND filter_name=? ORDER BY role_id",
+                    (guild.id, filter_name),
+                )
+                channel_rows = await bot.db.fetchall(
+                    "SELECT channel_id FROM security_filter_strict_channels "
+                    "WHERE guild_id=? AND filter_name=? ORDER BY channel_id",
+                    (guild.id, filter_name),
+                )
+                policy = {
+                    "role_ids": [int(row["role_id"]) for row in role_rows],
+                    "strict_channel_ids": [int(row["channel_id"]) for row in channel_rows],
+                }
+        try:
+            enabled = bool(conf and conf[filter_name])
+        except (KeyError, IndexError, TypeError):
+            enabled = False
+        return {
+            "key": filter_name,
+            "label": meta["label"],
+            "group": meta["group"],
+            "description": meta["description"],
+            "supports_policy": bool(meta["supports_policy"]),
+            "enabled": enabled,
+            "role_ids": [str(value) for value in policy.get("role_ids", [])],
+            "strict_channel_ids": [
+                str(value) for value in policy.get("strict_channel_ids", [])
+            ],
+        }
+
+    async def _sync_policy_runtime(guild: discord.Guild, filter_name: str) -> None:
+        automod = bot.get_cog("Automod") if hasattr(bot, "get_cog") else None
+        if automod is None:
+            return
+        invalidate = getattr(automod, "invalidate_security_filter_policy", None)
+        if callable(invalidate):
+            invalidate(guild.id, filter_name)
+        else:
+            getattr(automod, "antispam_policy_cache", {}).pop(guild.id, None)
+
+        try:
+            if filter_name == "antilink":
+                await automod._sync_native_antilink_rule(guild)
+                await automod._sync_native_target_links_rule(guild)
+            elif filter_name == "antiinvite":
+                await automod._sync_native_antiinvite_rule(guild)
+            elif filter_name == "antiscam":
+                await automod._sync_native_antiscam_rule(guild)
+            elif filter_name == "antimention":
+                await automod._sync_native_antimention_rule(guild)
+            elif filter_name == "antiinsult":
+                await automod._sync_native_blacklist_rule(guild)
+        except Exception:
+            # Le moteur local reste autoritaire même si Discord AutoMod natif
+            # est indisponible ou n'a pas la permission Gérer le serveur.
+            pass
+
+    async def _save_policy(
+        guild: discord.Guild,
+        filter_name: str,
+        payload: dict,
+        *,
+        legacy_channel_key: bool = False,
+    ):
+        if filter_name not in _PROTECTION_CATALOG:
+            return dashboard._json_error("Protection de sécurité inconnue.", 400)
+        if not _PROTECTION_CATALOG[filter_name]["supports_policy"]:
+            return dashboard._json_error(
+                "Cette protection est globale au serveur et n'utilise pas de rôles bypass / salons stricts.",
+                400,
+            )
+
+        raw_roles = (payload or {}).get("role_ids") or []
+        raw_channels = (payload or {}).get("strict_channel_ids")
+        if raw_channels is None and legacy_channel_key:
+            raw_channels = (payload or {}).get("channel_ids") or []
+        raw_channels = raw_channels or []
+        try:
+            role_ids = list(dict.fromkeys(int(value) for value in raw_roles))[:25]
+            strict_channel_ids = list(
+                dict.fromkeys(int(value) for value in raw_channels)
+            )[:25]
+        except (TypeError, ValueError):
+            return dashboard._json_error("Rôle ou salon invalide.", 400)
+
+        valid_roles = {
+            int(role.id)
+            for role in guild.roles
+            if role != guild.default_role
+        }
+        valid_channels = {
+            int(channel.id)
+            for channel in guild.channels
+            if isinstance(channel, (discord.TextChannel, discord.ForumChannel))
+        }
+        if any(role_id not in valid_roles for role_id in role_ids):
+            return dashboard._json_error("Un rôle sélectionné n'existe plus.", 409)
+        if any(channel_id not in valid_channels for channel_id in strict_channel_ids):
+            return dashboard._json_error("Un salon sélectionné n'existe plus.", 409)
+
+        writer = getattr(bot.db, "set_security_filter_policy", None)
+        if callable(writer):
+            await writer(
+                guild.id,
+                filter_name,
+                role_ids=role_ids,
+                strict_channel_ids=strict_channel_ids,
+            )
+        else:
+            await bot.db.execute(
+                "DELETE FROM security_filter_bypass_roles "
+                "WHERE guild_id=? AND filter_name=?",
+                (guild.id, filter_name),
+            )
+            for role_id in role_ids:
+                await bot.db.execute(
+                    "INSERT OR IGNORE INTO security_filter_bypass_roles "
+                    "(guild_id,filter_name,role_id) VALUES (?,?,?)",
+                    (guild.id, filter_name, role_id),
+                )
+            await bot.db.execute(
+                "DELETE FROM security_filter_strict_channels "
+                "WHERE guild_id=? AND filter_name=?",
+                (guild.id, filter_name),
+            )
+            for channel_id in strict_channel_ids:
+                await bot.db.execute(
+                    "INSERT OR IGNORE INTO security_filter_strict_channels "
+                    "(guild_id,filter_name,channel_id) VALUES (?,?,?)",
+                    (guild.id, filter_name, channel_id),
+                )
+
+        await _sync_policy_runtime(guild, filter_name)
+        return None
+
+    async def filter_policies(request: web.Request):
+        write = request.method == "POST"
+        _session, guild, error = await _guard(request, write=write)
+        if error:
+            return error
+
+        saved_filter = None
+        if write:
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
+            saved_filter = str((payload or {}).get("filter_name") or "").strip().casefold()
+            save_error = await _save_policy(guild, saved_filter, payload or {})
+            if save_error:
+                return save_error
+
+        filters = {
+            key: await _policy_payload(guild, key)
+            for key in _PROTECTION_CATALOG
+        }
+        return web.json_response({
+            "ok": True,
+            "filters": filters,
+            "message": (
+                f"Exceptions {_POLICY_FILTERS[saved_filter]} enregistrées."
+                if saved_filter else None
+            ),
+        })
+
+    async def antispam_policy(request: web.Request):
+        """Compatibilité de l'ancien endpoint V1.
+
+        L'ancien champ channel_ids est désormais interprété comme salons STRICTS,
+        pas comme un périmètre où l'anti-spam serait le seul à s'appliquer.
+        """
+        write = request.method == "POST"
+        _session, guild, error = await _guard(request, write=write)
+        if error:
+            return error
+
+        if write:
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
+            save_error = await _save_policy(
+                guild,
+                "antispam",
+                payload or {},
+                legacy_channel_key=True,
+            )
+            if save_error:
+                return save_error
+
+        policy = await _policy_payload(guild, "antispam")
+        strict = policy["strict_channel_ids"]
+        return web.json_response({
+            "ok": True,
+            "enabled": policy["enabled"],
+            "scope_mode": "all",
+            "role_ids": policy["role_ids"],
+            "channel_ids": strict,
+            "strict_channel_ids": strict,
+            "message": "Exceptions anti-spam enregistrées." if write else None,
+        })
+
     async def simulate(request: web.Request):
         session, guild, error = await _guard(request)
         if error:
@@ -378,6 +725,10 @@ def register(app: web.Application, dashboard) -> None:
 
     app.router.add_get("/api/guilds/{guild_id}/security/overview", overview)
     app.router.add_get("/api/guilds/{guild_id}/security/simulate", simulate)
+    app.router.add_get("/api/guilds/{guild_id}/security/filter-policies", filter_policies)
+    app.router.add_post("/api/guilds/{guild_id}/security/filter-policies", filter_policies)
+    app.router.add_get("/api/guilds/{guild_id}/security/antispam-policy", antispam_policy)
+    app.router.add_post("/api/guilds/{guild_id}/security/antispam-policy", antispam_policy)
     app.router.add_post("/api/guilds/{guild_id}/security/panic", panic)
 
 

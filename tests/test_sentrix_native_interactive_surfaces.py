@@ -94,3 +94,90 @@ def test_ticket_and_role_panels_do_not_duplicate_sentrix_brand():
     assert 'titre="Ticket ouvert"' in tickets
     assert 'titre="Tickets"' in tickets
     assert 'f"SentriX — {titre}"' not in roles
+
+
+
+def test_infinite_counter_invalid_messages_are_deleted_silently():
+    source = _source("cogs/infinite_counter.py")
+    invalid = source[
+        source.index("    async def _invalid("):
+        source.index('    @commands.group(name="infinit"', source.index("    async def _invalid("))
+    ]
+
+    assert "await message.delete()" in invalid
+    assert ".channel.send(" not in invalid
+    assert "send_message(" not in invalid
+    assert "panels." not in invalid
+    assert "InfiniteMistakeView" not in source
+    assert 'content=f"<@{message.author.id}>"' not in source
+
+
+def test_infinite_counter_keeps_progression_and_same_member_guard():
+    source = _source("cogs/infinite_counter.py")
+
+    assert 'int(row["last_user_id"]) == message.author.id' in source
+    assert 'reason="consecutive"' in source
+    assert "SET next_number=?,last_user_id=?,updated_at=?" in source
+    assert "next_number=1" not in source
+
+
+def test_infinite_counter_no_longer_has_public_correction_assistant():
+    source = _source("cogs/infinite_counter.py")
+
+    for obsolete in (
+        "class InfiniteMistakeView",
+        'label="Je me suis trompé"',
+        'label="Supprimer ce message"',
+        "super().__init__(timeout=60)",
+        "Sans réponse, ton message sera supprimé automatiquement dans 1 minute.",
+        "self.accepted_override",
+        "self.responded",
+    ):
+        assert obsolete not in source
+
+
+def test_security_setup_has_full_premium_center_and_per_filter_exceptions():
+    source = _source("cogs/setup_v2_ui.py")
+
+    assert "SECURITY_POLICY_FILTERS" in source
+    assert "SECURITY_CENTER_PROTECTIONS" in source
+    assert "class SecurityPolicyView(discord.ui.View)" in source
+    for marker in (
+        '"antispam"',
+        '"antiraid"',
+        '"antinuke"',
+        '"security_permissions"',
+        '"honeypot"',
+        '"verification"',
+        "Rôles bypass ·",
+        "Salons stricts ·",
+        "set_security_filter_policy",
+        "raid_intensity",
+        "honeypot_action",
+        "verification_threshold",
+    ):
+        assert marker in source
+    block = source[
+        source.index("class SecurityPolicyView"):
+        source.index("class PermissionRoleSelect")
+    ]
+    assert "guild.create_text_channel" not in block
+
+
+def test_dashboard_security_has_full_control_center_and_per_filter_policy():
+    api = _source("web/dashboard_api_security.py")
+    ui = _source("web/dashboard_ui/js/30_modules.js")
+
+    assert '/security/filter-policies' in api
+    assert "_PROTECTION_CATALOG" in api
+    assert "security_filter_bypass_roles" in api
+    assert "security_filter_strict_channels" in api
+    assert "Centre de sécurité" in ui
+    assert "Messages" in ui
+    assert "Arrivées" in ui
+    assert "Serveur" in ui
+    assert 'data-security-config=' in ui
+    assert 'id="securityPolicyBypassRoles"' in ui
+    assert 'id="securityPolicyStrictChannels"' in ui
+    assert "salon strict → rôle bypass → protection normale" in ui
+    assert "Retirer les rôles bypass" in ui
