@@ -17,12 +17,14 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from services import moderation as moderation_service
 from utils import checks, helpers
 from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
@@ -146,6 +148,24 @@ def _trim(value: Any, limit: int = 900) -> str:
 
 def _relative(timestamp: int | None) -> str:
     return f"<t:{int(timestamp)}:R>" if timestamp else "—"
+
+
+MOD_ACTIONS = {
+    "warn": ("Avertir", "moderate_members"),
+    "mute": ("Timeout", "moderate_members"),
+    "kick": ("Expulser", "kick_members"),
+    "ban": ("Bannir", "ban_members"),
+}
+
+SANCTION_LABELS = {
+    "ban": "Bannissement",
+    "tempban": "Bannissement temporaire",
+    "kick": "Expulsion",
+    "mute": "Timeout",
+    "warn": "Avertissement",
+    "unban": "Débannissement",
+    "unmute": "Fin de timeout",
+}
 
 
 def _status_label(value: str | None) -> str:
@@ -420,12 +440,249 @@ class WatchSetupView(OwnedView):
         await interaction.response.send_modal(WatchStartModal(self))
 
 
+class ModViewLookupModal(discord.ui.Modal, title="Trouver un membre"):
+    cible = discord.ui.TextInput(
+        label="ID, mention ou pseudo",
+        placeholder="Ex. 123456789012345678 ou Jimmy",
+        max_length=100,
+    )
+
+    def __init__(self, suite: "StaffSuite"):
+        super().__init__()
+        self.suite = suite
+
+    async def on_submit(self, interaction: discord.Interaction):
+        member = await self.suite.resolve_member(interaction.guild, str(self.cible.value))
+        if member is None:
+            return await interaction.response.send_message(
+                "Aucun membre de ce serveur ne correspond à cette recherche.",
+                ephemeral=True,
+            )
+        await panels.envoyer(
+            interaction.response,
+            await self.suite.member_panel(interaction.guild, member, interaction.user.id),
+            ephemere=True,
+        )
+
+
+class ModViewMemberSelect(discord.ui.UserSelect):
+    def __init__(self, owner: "ModViewSearchView"):
+        self.owner = owner
+        super().__init__(
+            placeholder="Choisir un membre du serveur",
+            min_values=1,
+            max_values=1,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        user = self.values[0]
+        member = user if isinstance(user, discord.Member) else await self.owner.suite.resolve_member(
+            interaction.guild, str(user.id)
+        )
+        if member is None:
+            return await interaction.response.send_message(
+                "Ce compte n'est pas membre de ce serveur.",
+                ephemeral=True,
+            )
+        await panels.envoyer(
+            interaction.response,
+            await self.owner.suite.member_panel(interaction.guild, member, interaction.user.id),
+            ephemere=True,
+        )
+
+
+class ModViewSearchView(OwnedView):
+    def __init__(self, suite: "StaffSuite", owner_id: int):
+        super().__init__(suite, owner_id)
+        self.add_item(ModViewMemberSelect(self))
+
+    @discord.ui.button(label="ID / pseudo", style=discord.ButtonStyle.secondary, row=1)
+    async def lookup(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(ModViewLookupModal(self.suite))
+
+
+class MemberActionModal(discord.ui.Modal):
+    def __init__(self, suite: "StaffSuite", member_id: int, action: str):
+        label = MOD_ACTIONS.get(action, (action.title(), ""))[0]
+        super().__init__(title=f"{label} l'utilisateur")
+        self.suite = suite
+        self.member_id = int(member_id)
+        self.action = str(action)
+        self.reason = discord.ui.TextInput(
+            label="Raison",
+            placeholder="Indiquez la raison de la sanction",
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+        )
+        self.add_item(self.reason)
+        self.duration = None
+        if self.action == "mute":
+            self.duration = discord.ui.TextInput(
+                label="Durée",
+                placeholder="Ex. 10m, 1h, 1j",
+                default="10m",
+                max_length=20,
+            )
+            self.add_item(self.duration)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ok, message = await self.suite.execute_member_action(
+            interaction,
+            self.member_id,
+            self.action,
+            str(self.reason.value),
+            str(self.duration.value) if self.duration is not None else None,
+        )
+        await panels.texte_court(
+            interaction.response,
+            message,
+            ephemere=True,
+        )
+
+
+class SanctionReasonModal(discord.ui.Modal, title="Modifier la raison"):
+    def __init__(self, suite: "StaffSuite", guild_id: int, case_number: int, current_reason: str):
+        super().__init__()
+        self.suite = suite
+        self.guild_id = int(guild_id)
+        self.case_number = int(case_number)
+        self.reason = discord.ui.TextInput(
+            label=f"Raison du dossier #{case_number}",
+            default=str(current_reason or "")[:500],
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+        )
+        self.add_item(self.reason)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            row = await self.suite.bot.db.update_sanction_reason(
+                self.guild_id,
+                self.case_number,
+                interaction.user.id,
+                str(self.reason.value),
+            )
+        except ValueError as exc:
+            return await interaction.response.send_message(str(exc), ephemeral=True)
+        if row is None:
+            return await interaction.response.send_message(
+                "Cette sanction n'existe plus.",
+                ephemeral=True,
+            )
+        await interaction.response.send_message(
+            f"Raison du dossier **#{self.case_number}** modifiée. L'ancienne raison reste conservée dans l'audit.",
+            ephemeral=True,
+        )
+
+
+class SanctionDetailView(OwnedView):
+    def __init__(self, suite: "StaffSuite", owner_id: int, row):
+        super().__init__(suite, owner_id)
+        self.case_number = int(row["case_number"])
+        self.current_reason = str(row["reason"] or "")
+
+    @discord.ui.button(label="Modifier la raison", style=discord.ButtonStyle.primary)
+    async def edit_reason(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(
+            SanctionReasonModal(
+                self.suite,
+                interaction.guild.id,
+                self.case_number,
+                self.current_reason,
+            )
+        )
+
+
+class SanctionCaseSelect(discord.ui.Select):
+    def __init__(self, owner: "SanctionHistoryView", rows):
+        self.owner = owner
+        options = []
+        for row in rows:
+            action = SANCTION_LABELS.get(str(row["action"]), str(row["action"]).title())
+            options.append(
+                discord.SelectOption(
+                    label=f"#{row['case_number']} · {action}"[:100],
+                    value=str(row["case_number"]),
+                    description=_trim(row["reason"] or "Aucune raison", 95),
+                )
+            )
+        super().__init__(
+            placeholder="Ouvrir une sanction",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        case_number = int(self.values[0])
+        row = await self.owner.suite.bot.db.get_sanction_by_case(
+            interaction.guild.id,
+            case_number,
+        )
+        if row is None:
+            return await interaction.response.send_message(
+                "Cette sanction n'existe plus.",
+                ephemeral=True,
+            )
+        embed = await self.owner.suite.sanction_detail_embed(interaction.guild, row)
+        await interaction.response.send_message(
+            embed=embed,
+            view=SanctionDetailView(self.owner.suite, interaction.user.id, row),
+            ephemeral=True,
+        )
+
+
+class SanctionHistoryView(OwnedView):
+    def __init__(
+        self,
+        suite: "StaffSuite",
+        owner_id: int,
+        member_id: int,
+        rows,
+        page: int,
+        total: int,
+        page_size: int = 5,
+    ):
+        super().__init__(suite, owner_id)
+        self.member_id = int(member_id)
+        self.page = max(0, int(page))
+        self.total = max(0, int(total))
+        self.page_size = int(page_size)
+        self.max_page = max(0, (self.total - 1) // self.page_size)
+        if rows:
+            self.add_item(SanctionCaseSelect(self, rows))
+        self.previous.disabled = self.page <= 0
+        self.next.disabled = self.page >= self.max_page
+
+    @discord.ui.button(label="Précédent", style=discord.ButtonStyle.secondary, row=1)
+    async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self.suite.send_sanction_history(
+            interaction,
+            self.member_id,
+            self.owner_id,
+            self.page - 1,
+            edit=True,
+        )
+
+    @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary, row=1)
+    async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self.suite.send_sanction_history(
+            interaction,
+            self.member_id,
+            self.owner_id,
+            self.page + 1,
+            edit=True,
+        )
+
+
 class MemberPanelView(OwnedView):
     def __init__(self, suite: "StaffSuite", owner_id: int, member_id: int):
         super().__init__(suite, owner_id)
         self.member_id = member_id
 
-    @discord.ui.button(label="Historique", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("history"))
+    @discord.ui.button(label="Historique", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("history"), row=0)
     async def history(self, interaction: discord.Interaction, _button: discord.ui.Button):
         member = interaction.guild.get_member(self.member_id)
         if member is None:
@@ -436,19 +693,28 @@ class MemberPanelView(OwnedView):
             ephemere=True,
         )
 
-    @discord.ui.button(label="Note", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("note"))
+    @discord.ui.button(label="Sanctions", style=discord.ButtonStyle.secondary, row=0)
+    async def sanctions(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self.suite.send_sanction_history(
+            interaction,
+            self.member_id,
+            interaction.user.id,
+            0,
+        )
+
+    @discord.ui.button(label="Note", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("note"), row=0)
     async def note(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(
             NoteModal(self.suite, interaction.guild.id, self.member_id)
         )
 
-    @discord.ui.button(label="Dossier", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("case"))
+    @discord.ui.button(label="Dossier", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("case"), row=0)
     async def case(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await interaction.response.send_modal(
             CaseModal(self.suite, interaction.guild.id, self.member_id)
         )
 
-    @discord.ui.button(label="Surveiller", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("watch"))
+    @discord.ui.button(label="Surveiller", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("watch"), row=0)
     async def watch(self, interaction: discord.Interaction, _button: discord.ui.Button):
         active = await self.suite.active_watch(interaction.guild.id, self.member_id)
         if active:
@@ -471,6 +737,22 @@ class MemberPanelView(OwnedView):
             panels.avec_composants(panels.depuis_embed(embed), view),
             ephemere=True,
         )
+
+    @discord.ui.button(label="Avertir", style=discord.ButtonStyle.secondary, row=1)
+    async def warn(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(MemberActionModal(self.suite, self.member_id, "warn"))
+
+    @discord.ui.button(label="Timeout", style=discord.ButtonStyle.secondary, row=1)
+    async def mute(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(MemberActionModal(self.suite, self.member_id, "mute"))
+
+    @discord.ui.button(label="Expulser", style=discord.ButtonStyle.danger, row=1)
+    async def kick(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(MemberActionModal(self.suite, self.member_id, "kick"))
+
+    @discord.ui.button(label="Bannir", style=discord.ButtonStyle.danger, row=1)
+    async def ban(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.send_modal(MemberActionModal(self.suite, self.member_id, "ban"))
 
 
 class CaseStatusSelect(discord.ui.Select):
@@ -1281,6 +1563,258 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             f"Présence : {before.status} → {after.status}",
         )
 
+    async def resolve_member(self, guild: discord.Guild, raw: str) -> discord.Member | None:
+        """Recherche serveur complète, indépendante du salon où /modview est lancé."""
+        value = str(raw or "").strip()
+        if not value:
+            return None
+        digits = value.replace("<@", "").replace(">", "").replace("!", "")
+        if digits.isdigit():
+            user_id = int(digits)
+            member = guild.get_member(user_id)
+            if member is not None:
+                return member
+            try:
+                return await guild.fetch_member(user_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return None
+
+        query = value.casefold().lstrip("@")
+        for member in guild.members:
+            if query in {
+                member.name.casefold(),
+                member.display_name.casefold(),
+                str(member).casefold(),
+            } or query in member.display_name.casefold():
+                return member
+        try:
+            rows = await guild.query_members(query=value.lstrip("@"), limit=10, cache=True)
+        except (discord.Forbidden, discord.HTTPException):
+            rows = []
+        return rows[0] if rows else None
+
+    async def _staff_can(self, actor: discord.Member, permission: str) -> bool:
+        if actor.id == actor.guild.owner_id or actor.guild_permissions.administrator:
+            return True
+        if getattr(actor.guild_permissions, permission, False):
+            return True
+        try:
+            conf = await self.bot.db.get_guild_config(actor.guild.id)
+            role_id = int(conf["mod_role"] or 0) if conf and conf["mod_role"] else 0
+        except Exception:
+            role_id = 0
+        return bool(role_id and any(role.id == role_id for role in actor.roles))
+
+    async def execute_member_action(
+        self,
+        interaction: discord.Interaction,
+        member_id: int,
+        action: str,
+        reason: str,
+        duration: str | None = None,
+    ) -> tuple[bool, str]:
+        guild = interaction.guild
+        actor = interaction.user
+        if guild is None or not isinstance(actor, discord.Member):
+            return False, "Cette action doit être effectuée sur un serveur."
+        target = guild.get_member(int(member_id))
+        if target is None:
+            try:
+                target = await guild.fetch_member(int(member_id))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return False, "Ce membre n'est plus présent sur le serveur."
+
+        label, permission = MOD_ACTIONS.get(action, (action.title(), "moderate_members"))
+        if not await self._staff_can(actor, permission):
+            return False, f"Permission insuffisante pour « {label} »."
+        me = guild.me
+        if me is None or not getattr(me.guild_permissions, permission, False):
+            return False, f"SentriX n'a pas la permission Discord requise ({permission})."
+
+        reason = str(reason or "").strip()
+        if not reason:
+            return False, "Ajoutez une raison."
+        if len(reason) > 500:
+            return False, "La raison ne peut pas dépasser 500 caractères."
+
+        mod_cog = self.bot.get_cog("Moderation")
+        template = None
+        if mod_cog is not None and hasattr(mod_cog, "_get_sanction_dm_template"):
+            try:
+                template = await mod_cog._get_sanction_dm_template(guild.id, action)
+            except Exception:
+                template = None
+
+        def render_dm(seconds: int | None = None, *, action_name: str = action, text_reason: str = reason):
+            if mod_cog is None or template is None:
+                return None
+            try:
+                return mod_cog._render_sanction_dm_text(
+                    template,
+                    target=target,
+                    guild=guild,
+                    reason=text_reason,
+                    duration_seconds=seconds,
+                    actor=actor,
+                    action_label=mod_cog.DM_ACTION_LABELS.get(action_name, action_name),
+                )
+            except Exception:
+                return None
+
+        try:
+            if action == "ban":
+                outcome = await moderation_service.ban(
+                    self.bot,
+                    guild=guild,
+                    actor=actor,
+                    target=target,
+                    reason=reason,
+                    dm_text=render_dm(),
+                )
+            elif action == "kick":
+                outcome = await moderation_service.kick(
+                    self.bot,
+                    guild=guild,
+                    actor=actor,
+                    target=target,
+                    reason=reason,
+                    dm_text=render_dm(),
+                )
+            elif action == "mute":
+                outcome = await moderation_service.mute(
+                    self.bot,
+                    guild=guild,
+                    actor=actor,
+                    target=target,
+                    reason=reason,
+                    duree=str(duration or "10m"),
+                    render_dm_text=lambda seconds: render_dm(seconds),
+                )
+            elif action == "warn":
+                conf = await self.bot.db.get_guild_config(guild.id)
+                warn_role = guild.get_role(conf["warn_role"]) if conf and conf["warn_role"] else None
+                threshold = int(conf["warn_ban_threshold"] or 0) if conf else 0
+                outcome = await moderation_service.warn(
+                    self.bot,
+                    guild=guild,
+                    actor=actor,
+                    target=target,
+                    reason=reason,
+                    dm_text=render_dm(),
+                    warn_role=warn_role,
+                    ban_threshold=threshold,
+                    render_ban_dm_text=None,
+                )
+            else:
+                return False, "Action inconnue."
+        except discord.Forbidden:
+            return False, "Discord a refusé l'action : vérifiez les permissions et la hiérarchie des rôles."
+        except discord.HTTPException:
+            return False, "Discord n'a pas pu appliquer cette sanction. Réessayez."
+
+        if not getattr(outcome, "executed", False):
+            error = (
+                getattr(outcome, "hierarchy_error", None)
+                or getattr(outcome, "validation_error", None)
+                or getattr(outcome, "rejection_reason", None)
+                or "La sanction n'a pas été appliquée."
+            )
+            return False, str(error)
+
+        if mod_cog is not None and hasattr(mod_cog, "log_sanction"):
+            try:
+                extra = None
+                if action == "warn":
+                    total = getattr(outcome, "total_warnings", None)
+                    extra = {"Détails": f"Total d'avertissements : {total}"} if total is not None else None
+                await mod_cog.log_sanction(
+                    SimpleNamespace(guild=guild, author=actor),
+                    action,
+                    target,
+                    reason,
+                    duration_seconds=getattr(outcome, "duration_seconds", None),
+                    extra_fields=extra,
+                    case_number=getattr(outcome, "case_number", None),
+                )
+            except Exception:
+                pass
+
+        case_number = getattr(outcome, "case_number", None)
+        suffix = f" · dossier #{case_number}" if case_number is not None else ""
+        return True, f"{label} appliqué à {target.mention}{suffix}."
+
+    async def sanction_detail_embed(self, guild: discord.Guild, row) -> discord.Embed:
+        action = SANCTION_LABELS.get(str(row["action"]), str(row["action"]).title())
+        embed = discord.Embed(
+            title=f"Dossier #{row['case_number']} — {action}",
+            description=f"<@{row['user_id']}> · <t:{row['created_at']}:R>",
+            colour=discord.Colour.red() if row["action"] in {"ban", "tempban", "kick"} else discord.Colour.orange(),
+        )
+        embed.add_field(name="Raison", value=row["reason"] or "Aucune raison", inline=False)
+        embed.add_field(name="Modérateur", value=_mention(row["moderator_id"]), inline=True)
+        if row["duration_seconds"]:
+            embed.add_field(
+                name="Durée",
+                value=helpers.format_duration(int(row["duration_seconds"])),
+                inline=True,
+            )
+        edits = await self.bot.db.get_sanction_reason_edits(
+            guild.id,
+            int(row["case_number"]),
+            limit=3,
+        )
+        if edits:
+            audit = "\n".join(
+                f"<t:{edit['created_at']}:R> · {_mention(edit['editor_id'])} · ancienne raison : {_trim(edit['old_reason'] or 'Aucune', 120)}"
+                for edit in edits
+            )
+            embed.add_field(name="Historique des modifications", value=audit[:1024], inline=False)
+        embed.set_footer(text="SentriX • Modération")
+        return embed
+
+    async def send_sanction_history(
+        self,
+        interaction: discord.Interaction,
+        member_id: int,
+        owner_id: int,
+        page: int = 0,
+        *,
+        edit: bool = False,
+    ):
+        page_size = 5
+        total = await self.bot.db.get_sanction_count(interaction.guild.id, int(member_id))
+        max_page = max(0, (total - 1) // page_size)
+        page = max(0, min(int(page), max_page))
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM sanctions WHERE guild_id=? AND user_id=? "
+            "ORDER BY case_number DESC,id DESC LIMIT ? OFFSET ?",
+            (interaction.guild.id, int(member_id), page_size, page * page_size),
+        )
+        member = interaction.guild.get_member(int(member_id))
+        title = f"Sanctions — {member.display_name}" if member else "Sanctions du membre"
+        embed = discord.Embed(
+            title=title,
+            description=f"<@{int(member_id)}> · **{total}** sanction(s) · page **{page + 1}/{max_page + 1}**",
+            colour=discord.Colour.orange(),
+        )
+        if member is not None:
+            embed.set_thumbnail(url=member.display_avatar.url)
+        if rows:
+            for row in rows:
+                action = SANCTION_LABELS.get(str(row["action"]), str(row["action"]).title())
+                embed.add_field(
+                    name=f"#{row['case_number']} · {action} · <t:{row['created_at']}:R>",
+                    value=f"{_trim(row['reason'] or 'Aucune raison', 500)}\nPar {_mention(row['moderator_id'])}",
+                    inline=False,
+                )
+        else:
+            embed.description += "\n\nAucune sanction enregistrée."
+        embed.set_footer(text="Sélectionnez un dossier pour voir le détail ou modifier sa raison.")
+        view = SanctionHistoryView(self, owner_id, member_id, rows, page, total, page_size)
+        if edit:
+            return await interaction.response.edit_message(embed=embed, view=view)
+        return await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
     async def member_panel(self, guild: discord.Guild, member: discord.Member, owner_id: int):
         sanctions = await self._safe_count(
             "SELECT COUNT(*) AS n FROM sanctions WHERE guild_id=? AND user_id=?",
@@ -1301,6 +1835,12 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         watch = await self.active_watch(guild.id, member.id)
         incidents = await self._safe_count(
             "SELECT COUNT(*) AS n FROM staff_incidents_v1 WHERE guild_id=? AND member_id=?",
+            (guild.id, member.id),
+        )
+        recent_sanctions = await self.bot.db.get_sanction_history(guild.id, member.id, limit=3)
+        latest_note = await self.bot.db.fetchone(
+            "SELECT note,author_id,created_at FROM v17_staff_notes "
+            "WHERE guild_id=? AND user_id=? ORDER BY created_at DESC LIMIT 1",
             (guild.id, member.id),
         )
         created = int(member.created_at.timestamp())
@@ -1328,6 +1868,28 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                 aligne=True,
             ),
         ]
+        if latest_note:
+            sections.append(
+                panels.Section(
+                    "Dernière note",
+                    texte=(
+                        f"{_trim(latest_note['note'], 600)}\n"
+                        f"-# {_mention(latest_note['author_id'])} · <t:{latest_note['created_at']}:R>"
+                    ),
+                )
+            )
+        if recent_sanctions:
+            sanctions_text = "\n".join(
+                f"**#{row['case_number']} · {SANCTION_LABELS.get(str(row['action']), str(row['action']).title())}** "
+                f"· <t:{row['created_at']}:R>\n{_trim(row['reason'] or 'Aucune raison', 220)}"
+                for row in recent_sanctions
+            )
+            sections.append(
+                panels.Section(
+                    f"Dernières sanctions ({len(recent_sanctions)}/{sanctions})",
+                    texte=sanctions_text,
+                )
+            )
         timeout = getattr(member, "timed_out_until", None)
         if timeout and timeout > discord.utils.utcnow():
             sections.append(
@@ -1822,6 +2384,43 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             return int(row["n"] if row else 0)
         except Exception:
             return 0
+
+    @commands.hybrid_command(
+        name="modview",
+        description="Ouvrir la vue modération complète d'un membre du serveur.",
+    )
+    @checks.has_permission_or_modrole("moderate_members")
+    @app_commands.describe(
+        membre="Membre du serveur à consulter, quel que soit le salon où la commande est lancée"
+    )
+    async def modview(self, ctx: commands.Context, membre: discord.Member | None = None):
+        if membre is not None:
+            return await panels.envoyer(
+                ctx,
+                await self.member_panel(ctx.guild, membre, ctx.author.id),
+            )
+        panel = panels.Panneau(
+            titre="ModView — recherche membre",
+            sous_titre=(
+                "La recherche porte sur tout le serveur, pas seulement sur les membres "
+                "qui voient le salon actuel."
+            ),
+            kind="moderation",
+            sections=[
+                panels.Section(
+                    "Recherche",
+                    texte=(
+                        "Choisissez un membre dans la liste. Si Discord ne l'affiche pas, "
+                        "utilisez **ID / pseudo** pour le rechercher directement sur le serveur."
+                    ),
+                )
+            ],
+            pied="SentriX • Modération",
+        )
+        await panels.envoyer(
+            ctx,
+            panels.avec_composants(panel, ModViewSearchView(self, ctx.author.id)),
+        )
 
     @commands.hybrid_command(name="member", description="Ouvrir la fiche staff interactive d'un membre.")
     @checks.has_permission_or_modrole("moderate_members")
