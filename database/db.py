@@ -2347,57 +2347,59 @@ class Database:
     ):
         """Modifie la raison d'un dossier sans perdre l'ancienne valeur.
 
-        La modification et son audit sont écrits dans la même transaction SQLite.
-        Retourne la sanction mise à jour, ou None si le dossier n'existe pas.
+        Une connexion SQLite dédiée rend l'INSERT d'audit + l'UPDATE atomiques sans
+        ouvrir de transaction sur la connexion partagée du bot (qui sert en parallèle
+        aux tickets, logs, économie, etc.).
         """
         reason = str(new_reason or "").strip()
         if not reason:
             raise ValueError("La raison ne peut pas être vide.")
         if len(reason) > 500:
             raise ValueError("La raison ne peut pas dépasser 500 caractères.")
-        if self._conn is None:
-            raise RuntimeError("Database not connected")
 
         async with self._sanctions_lock:
-            await self._conn.execute("BEGIN IMMEDIATE")
-            try:
-                cursor = await self._conn.execute(
-                    "SELECT * FROM sanctions WHERE guild_id = ? AND case_number = ?",
-                    (int(guild_id), int(case_number)),
-                )
-                row = await cursor.fetchone()
-                if row is None:
-                    await self._conn.rollback()
-                    return None
+            async with aiosqlite.connect(self.path) as conn:
+                conn.row_factory = aiosqlite.Row
+                await conn.execute("PRAGMA foreign_keys=ON;")
+                await conn.execute("BEGIN IMMEDIATE")
+                try:
+                    cursor = await conn.execute(
+                        "SELECT * FROM sanctions WHERE guild_id = ? AND case_number = ?",
+                        (int(guild_id), int(case_number)),
+                    )
+                    row = await cursor.fetchone()
+                    if row is None:
+                        await conn.rollback()
+                        return None
 
-                old_reason = str(row["reason"] or "")
-                if old_reason == reason:
-                    await self._conn.rollback()
-                    return row
+                    old_reason = str(row["reason"] or "")
+                    if old_reason == reason:
+                        await conn.rollback()
+                        return row
 
-                await self._conn.execute(
-                    "INSERT INTO sanction_reason_edits_v1 "
-                    "(guild_id,sanction_id,case_number,user_id,editor_id,old_reason,new_reason,created_at) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
-                    (
-                        int(guild_id),
-                        int(row["id"]),
-                        int(row["case_number"]),
-                        int(row["user_id"]),
-                        int(editor_id),
-                        old_reason,
-                        reason,
-                        now(),
-                    ),
-                )
-                await self._conn.execute(
-                    "UPDATE sanctions SET reason = ? WHERE id = ? AND guild_id = ?",
-                    (reason, int(row["id"]), int(guild_id)),
-                )
-                await self._conn.commit()
-            except Exception:
-                await self._conn.rollback()
-                raise
+                    await conn.execute(
+                        "INSERT INTO sanction_reason_edits_v1 "
+                        "(guild_id,sanction_id,case_number,user_id,editor_id,old_reason,new_reason,created_at) "
+                        "VALUES (?,?,?,?,?,?,?,?)",
+                        (
+                            int(guild_id),
+                            int(row["id"]),
+                            int(row["case_number"]),
+                            int(row["user_id"]),
+                            int(editor_id),
+                            old_reason,
+                            reason,
+                            now(),
+                        ),
+                    )
+                    await conn.execute(
+                        "UPDATE sanctions SET reason = ? WHERE id = ? AND guild_id = ?",
+                        (reason, int(row["id"]), int(guild_id)),
+                    )
+                    await conn.commit()
+                except Exception:
+                    await conn.rollback()
+                    raise
 
         return await self.get_sanction_by_case(guild_id, case_number)
 
