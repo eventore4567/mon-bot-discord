@@ -55,3 +55,13 @@ def test_modview_sanction_history_has_filters_and_pagination():
     ):
         assert label in source
     assert "action_filter" in inspect.getsource(staff_suite.StaffSuite.send_sanction_history)
+
+
+def test_modview_can_lift_active_bans_and_timeouts():
+    source = inspect.getsource(staff_suite)
+    assert "class ReverseSanctionModal" in source
+    assert "reverse_member_sanction" in source
+    assert "moderation_service.unban" in source
+    assert "moderation_service.unmute" in source
+    assert "Débannir" in source
+    assert "Lever le timeout" in source
