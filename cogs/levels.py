@@ -1807,6 +1807,14 @@ class Levels(commands.Cog, name="Levels"):
 
         # Si aucune présentation n'existe encore, crée une seule configuration neutre
         # et cohérente pour arrivée/départ. Ne touche jamais à une présentation existante.
+        # `welcome_presentation_v2` est créée paresseusement : dans
+        # cogs/setup_v2_completion.py, CHAQUE accès appelle d'abord ensure_schema
+        # (_welcome_presentation ligne 82, _save_welcome_presentation ligne 129).
+        # Ce SELECT était le seul à s'en passer, et sur un serveur où aucune
+        # présentation n'a jamais été enregistrée la table n'existe pas encore :
+        # `sqlite3.OperationalError: no such table` faisait échouer la commande
+        # entière avec une erreur technique SXR-CMD-0001.
+        await setup_v2_completion.ensure_schema(self.bot)
         presentation_row = await self.bot.db.fetchone(
             "SELECT guild_id FROM welcome_presentation_v2 WHERE guild_id=?",
             (ctx.guild.id,),
