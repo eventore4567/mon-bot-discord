@@ -16,6 +16,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from utils.audit_trail import journaliser
+
 logger = logging.getLogger("bot.sentrix-regression-runtime")
 
 _ROLE_MENTION_RE = re.compile(r"^<@&(\d+)>$")
@@ -517,6 +519,12 @@ class SentriXRegressionRuntime(commands.Cog, name="SentriXRegressionFix"):
         view = ExistingDropdownPanel(ctx.guild, ids)
         message = await ctx.send(embed=_dropdown_embed(ctx.guild, ids), view=view)
         await _save_panel(self.bot, message, mode="dropdown", role_ids=ids, mappings=[], creator_id=ctx.author.id)
+        # Un panneau de rôles distribue des rôles en libre-service : savoir qui l'a
+        # publié, et avec quels rôles, compte autant que de savoir qui a donné un rôle.
+        await journaliser(self.bot, ctx, "config_update", "🎛️ Panneau de rôles publié", {
+            "🎭 Rôles": ", ".join(r.mention for r in valid)[:1024],
+            "💬 Message": f"`{message.id}`",
+        })
         self.bot.add_view(ExistingDropdownPanel(ctx.guild, ids), message_id=message.id)
 
     @rolepanel.command(name="reaction", aliases=["reactions", "emoji", "emojis"],

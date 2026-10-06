@@ -34,6 +34,7 @@ from discord.ext import commands, tasks
 
 import config
 from utils import embeds, checks, helpers, design_system, log_service
+from utils.audit_trail import journaliser
 from utils import sentrix_panels as panels
 from utils.helpers import parse_duration
 from utils.v22_rules import clean_reason
@@ -211,6 +212,26 @@ class Moderation(commands.Cog):
         # Utilise le salon "logs-moderation" dédié s'il existe (via /create-logs), sinon
         # retombe sur le salon de logs général — jamais de log perdu.
         await helpers.send_log(self.bot, guild, event_type, embed)
+
+    async def log_simple(
+        self,
+        ctx: commands.Context,
+        event_type: str,
+        titre: str,
+        champs: dict[str, str],
+    ) -> None:
+        """Journalise une action d'administration qui n'est PAS une sanction.
+
+        ``log_sanction`` ouvre un dossier numéroté contre un membre : inadapté à un
+        verrouillage de salon ou à un changement de pseudo. Ces actions changent
+        pourtant le serveur, et elles ne laissaient AUCUNE trace — mesuré sur le bot
+        booté (tools/log_trace_sweep.py). Leur seule preuve était le message dans le
+        salon, que son auteur peut supprimer.
+
+        Comme pour une sanction, l'échec du journal ne doit jamais transformer en
+        erreur une action Discord déjà réellement appliquée.
+        """
+        await journaliser(self.bot, ctx, event_type, titre, champs)
 
     # "kind" détermine seulement la couleur de la fiche (succès/avertissement/danger) —
     # l'action elle-même (ce qui a réellement été fait) reste toujours le texte exact.
@@ -1013,9 +1034,25 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
+        # Compté AVANT la suppression : après, l'information n'existe plus, et une
+        # trace qui ne dit pas combien d'avertissements ont disparu ne sert à rien.
+        try:
+            ligne = await self.bot.db.fetchone(
+                "SELECT COUNT(*) AS total FROM warnings WHERE guild_id = ? AND user_id = ?",
+                (ctx.guild.id, membre.id),
+            )
+            efface = int((ligne["total"] if ligne else 0) or 0)
+        except Exception:
+            logger.exception("Comptage des avertissements impossible guild=%s target=%s.",
+                             ctx.guild.id, membre.id)
+            efface = -1
         await self.bot.db.execute(
             "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
+        await self.log_simple(ctx, "warnings_cleared", "🧹 Avertissements effacés", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+            "🗑️ Effacés": "nombre indisponible" if efface < 0 else f"{efface} avertissement(s)",
+        })
         await self._reply(ctx, f"Tous les avertissements de {membre.mention} ont été supprimés.")
 
     # ---------------------------------------------------------------- DOSSIERS DE SANCTION
@@ -1271,7 +1308,13 @@ class Moderation(commands.Cog):
             if secondes is None:
                 return await self._reply(ctx, "Durée invalide. Exemples : `5s`, `30s`, `1m`, `10m`, `1h`, ou `0` / `off` pour désactiver.", ephemere=True)
         secondes = max(0, min(21600, secondes))
+        ancien = int(getattr(ctx.channel, "slowmode_delay", 0) or 0)
         await ctx.channel.edit(slowmode_delay=secondes)
+        await self.log_simple(ctx, "channel_slowmode", "🐢 Mode lent modifié", {
+            "📍 Salon": f"{ctx.channel.mention}\n`{ctx.channel.id}`",
+            "↩️ Avant": "désactivé" if ancien == 0 else helpers.format_duration(ancien),
+            "➡️ Après": "désactivé" if secondes == 0 else helpers.format_duration(secondes),
+        })
         if secondes == 0:
             await self._reply(ctx, f"Mode lent désactivé dans {ctx.channel.mention}.")
         else:
@@ -1289,6 +1332,10 @@ class Moderation(commands.Cog):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = False
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason=raison)
+        await self.log_simple(ctx, "channel_lock", "🔒 Salon verrouillé", {
+            "📍 Salon": f"{ctx.channel.mention}\n`{ctx.channel.id}`",
+            "📝 Raison": raison,
+        })
         await self._reply(ctx, f"{ctx.channel.mention} est verrouillé. Raison : {raison}")
 
     @commands.hybrid_command(name="unlock", description="Déverrouiller le salon.", with_app_command=False)
@@ -1303,6 +1350,9 @@ class Moderation(commands.Cog):
         overwrite = ctx.channel.overwrites_for(ctx.guild.default_role)
         overwrite.send_messages = None
         await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
+        await self.log_simple(ctx, "channel_unlock", "🔓 Salon déverrouillé", {
+            "📍 Salon": f"{ctx.channel.mention}\n`{ctx.channel.id}`",
+        })
         await self._reply(ctx, f"{ctx.channel.mention} est déverrouillé.")
 
     @commands.hybrid_command(name="hide", description="Cacher le salon aux membres (@everyone).", with_app_command=False)
@@ -1360,7 +1410,13 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
+        ancien = membre.display_name
         await membre.edit(nick=pseudo[:32])
+        await self.log_simple(ctx, "member_nickname", "✏️ Pseudo modifié", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+            "↩️ Avant": ancien,
+            "➡️ Après": pseudo[:32],
+        })
         await self._reply(ctx, f"Le pseudo de {membre.mention} est maintenant **{pseudo[:32]}**.")
 
     @commands.hybrid_command(name="resetnick", description="Réinitialiser le pseudo d'un membre.", with_app_command=False)
@@ -1372,7 +1428,12 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
+        ancien = membre.display_name
         await membre.edit(nick=None)
+        await self.log_simple(ctx, "member_nickname", "✏️ Pseudo réinitialisé", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+            "↩️ Avant": ancien,
+        })
         await self._reply(ctx, f"Le pseudo de {membre.mention} a été réinitialisé.")
 
     @commands.hybrid_command(name="move", description="Déplacer un membre vers un autre salon vocal.", with_app_command=False)

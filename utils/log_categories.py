@@ -32,6 +32,25 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "member_timeout": ("moderation", "⏱️", "warning"),
     "member_untimeout": ("moderation", "✅", "success"),
     "member_warn": ("moderation", "⚠️", "warning"),
+    # Actions de modération qui changeaient le serveur SANS laisser de trace :
+    # mesuré sur le bot booté (tools/log_trace_sweep.py). Leur seule preuve
+    # était le message dans le salon, que son auteur peut supprimer.
+    "channel_lock": ("moderation", "🔒", "warning"),
+    "channel_unlock": ("moderation", "🔓", "success"),
+    # Rangé en « moderation » et non en « channels » : c'est un geste de
+    # modération humaine, qui doit arriver là où arrivent lock et unlock.
+    # Mesuré : avec « channel_update », la fiche partait vers le journal des
+    # salons et n'apparaissait pas avec les autres actions de modération.
+    "channel_slowmode": ("moderation", "🐢", "warning"),
+    "member_nickname": ("moderation", "✏️", "info"),
+    "warnings_cleared": ("moderation", "🧹", "warning"),
+    # Domaines qui n'avaient aucun événement : les catégories valides sont
+    # limitées (CATEGORIES), d'où le rattachement à « server » / « members ».
+    "config_update": ("server", "⚙️", "info"),
+    "economy_grant": ("server", "💰", "warning"),
+    "levels_xp_set": ("members", "✨", "warning"),
+    "security_panic": ("raid", "🚨", "error"),
+    "giveaway_blacklist": ("moderation", "🚫", "warning"),
     "member_clear": ("moderation", "🧹", "warning"),
     "message_delete": ("messages", "🗑️", "error"),
     "message_edit": ("messages", "✏️", "warning"),
@@ -192,6 +211,16 @@ ICONES_EVENEMENTS: dict[str, str] = {
     "member_timeout": "timeout",
     "member_untimeout": "unmute",
     "member_warn": "warn",
+    "channel_lock": "lock",
+    "channel_unlock": "unlock",
+    "channel_slowmode": "clock",
+    "member_nickname": "user",
+    "warnings_cleared": "trash",
+    "config_update": "settings",
+    "economy_grant": "wallet",
+    "levels_xp_set": "level",
+    "security_panic": "anti_raid",
+    "giveaway_blacklist": "giveaway",
     "member_mute": "mute",
     "member_unmute": "unmute",
     "member_remove": "member_leave",

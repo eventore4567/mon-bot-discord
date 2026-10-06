@@ -24,6 +24,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, checks, helpers, stats_service, design_system, temporary_boosts
+from utils.audit_trail import journaliser
 # « panels » designe deja les panneaux de roles/boutique ici.
 from utils import sentrix_panels as sx_panels
 from database.db import now
@@ -724,6 +725,9 @@ class Economy(commands.Cog, name="Economy"):
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT(guild_id, message_id) DO NOTHING",
             (ctx.guild.id, ctx.channel.id, message.id, ctx.author.id, now()),
         )
+        await journaliser(self.bot, ctx, "config_update", "🛒 Panneau boutique publié", {
+            "💬 Message": f"`{message.id}`",
+        })
 
     async def handle_shop_selection(self, interaction: discord.Interaction, raw_item_id: str):
         if interaction.guild is None or not isinstance(interaction.user, discord.Member):
@@ -795,6 +799,9 @@ class Economy(commands.Cog, name="Economy"):
         if accepted:
             await self._refresh_shop_panels(ctx.guild)
         kind = "success" if accepted else "danger"
+        await journaliser(self.bot, ctx, "config_update", "🛒 Boutique mise à jour", {
+            "🎭 Rôles visés": ", ".join(r.mention for r in roles)[:1024] if roles else "—",
+        })
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(await self._shop_config_embed(ctx.guild.id, 'Boutique mise à jour', '\n\n'.join(description_lines), kind)))
 
     @shoprole.command(name="remove", aliases=["delete", "retirer"], description="Retirer un rôle de la boutique.")
@@ -807,6 +814,9 @@ class Economy(commands.Cog, name="Economy"):
         if cursor.rowcount < 1:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
         await self._refresh_shop_panels(ctx.guild)
+        await journaliser(self.bot, ctx, "config_update", "🛒 Rôle retiré de la boutique", {
+            "🎭 Rôle": f"{role.mention}\n`{role.id}`",
+        })
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{role.mention} a été retiré de la boutique.')))
 
     @shoprole.command(name="price", aliases=["prix"], description="Changer le prix d'un rôle en vente.")
@@ -821,6 +831,10 @@ class Economy(commands.Cog, name="Economy"):
         if cursor.rowcount < 1:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce rôle n'est pas dans la boutique.")))
         await self._refresh_shop_panels(ctx.guild)
+        await journaliser(self.bot, ctx, "config_update", "🛒 Prix de boutique modifié", {
+            "🎭 Rôle": f"{role.mention}\n`{role.id}`",
+            "🪙 Nouveau prix": stats_service.format_number(price),
+        })
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'Le prix de {role.mention} est maintenant de **{stats_service.format_number(price)} 🪙**.')))
 
     @shoprole.command(name="list", aliases=["liste"], description="Lister les rôles en vente.")
@@ -1198,6 +1212,10 @@ class Economy(commands.Cog, name="Economy"):
         await self.bot.db.ensure_economy(ctx.guild.id, membre.id)
         await self.bot.db.add_balance(ctx.guild.id, membre.id, montant)
         await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, membre.id, "admin_grant", montant, "Ajout manuel (staff)")
+        await journaliser(self.bot, ctx, "economy_grant", "💰 Monnaie créée par le staff", {
+            "👤 Bénéficiaire": f"{membre.mention}\n`{membre.id}`",
+            "🪙 Montant": stats_service.format_number(montant),
+        })
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{stats_service.format_number(montant)} 🪙 ajoutés au compte de {membre.mention}.')))
 
     @commands.hybrid_command(name="reset-economy", description="[Admin] Réinitialiser l'économie du serveur.", with_app_command=False)
@@ -1210,6 +1228,9 @@ class Economy(commands.Cog, name="Economy"):
         ):
             return
         await self.bot.db.execute("DELETE FROM economy WHERE guild_id = ?", (ctx.guild.id,))
+        await journaliser(self.bot, ctx, "economy_grant", "💣 Économie réinitialisée", {
+            "🗑️ Portée": "tous les soldes portefeuille et banque du serveur",
+        })
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success("L'économie du serveur a été réinitialisée. (L'historique des transactions est conservé pour l'audit.)")))
 
 

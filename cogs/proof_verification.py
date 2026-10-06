@@ -19,6 +19,7 @@ from discord.ext import commands
 
 from utils import embeds, proof_service
 from utils import sentrix_panels as panels
+from utils.audit_trail import journaliser
 
 logger = logging.getLogger("bot.proof")
 
@@ -462,6 +463,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         await proof_service.ensure_settings(self.bot, ctx.guild.id, actor_id=ctx.author.id)
         view = ProofSetupView(self, ctx.guild, ctx.author.id)
+        await journaliser(self.bot, ctx, "config_update", "🪪 Configuration de la vérification ouverte", {})
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await view.build_embed()), view))
 
     @commands.hybrid_command(name="proofexample", description="Ajouter une capture exemple au système de preuve")
@@ -501,6 +503,9 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
         if ctx.guild is None or not isinstance(ctx.author, discord.Member) or not ctx.author.guild_permissions.administrator:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Permission requise : Administrateur')))
         await proof_service.remove_reference(self.bot, ctx.guild.id, reference_id)
+        await journaliser(self.bot, ctx, "config_update", "🗑️ Exemple de preuve supprimé", {
+            "🔖 Référence": f"#{reference_id}",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Exemple `#{reference_id}` supprimé.')))
 
     @commands.hybrid_command(name="proofexamples", description="Lister les captures exemples enregistrées")
@@ -526,6 +531,7 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning('La vérification par preuve est désactivée sur ce serveur.')))
         vues, files = await self.build_public_panel(ctx.guild)
         await ctx.send(embeds=vues, files=files)
+        await journaliser(self.bot, ctx, "config_update", "🪪 Panneau de vérification publié", {})
 
     @commands.hybrid_command(name="proofstatus", description="Voir votre dernière vérification par preuve")
     async def proofstatus(self, ctx: commands.Context):
@@ -555,6 +561,10 @@ class ProofVerification(commands.Cog, name="ProofVerification"):
                     await membre.remove_roles(role, reason=f"Réinitialisation preuve par {ctx.author}")
                 except discord.HTTPException:
                     pass
+        await journaliser(self.bot, ctx, "config_update", "🔄 Vérification par preuve réinitialisée", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+            "🎭 Rôle retiré": "oui" if retirer_role else "non",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Vérification de {membre.mention} réinitialisée.')))
 
     async def _analyze_attachment(self, attachment: discord.Attachment, references, instructions: str, guild_id: int):

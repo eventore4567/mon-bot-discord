@@ -13,6 +13,7 @@ from discord.ext import commands
 
 from utils import checks, embeds
 from utils import sentrix_panels as panels
+from utils.audit_trail import journaliser
 from .giveaway_v2 import GiveawayV2
 from .infinite_counter import InfiniteCounter
 from .setup_invitations import install as install_invitation_setup
@@ -202,12 +203,18 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
     async def giveaway_blacklist(self, ctx: commands.Context, membre: discord.Member):
         """Empêcher un membre de participer aux concours du serveur."""
         await self._deleguer(ctx, "blacklist", membre=membre)
+        await journaliser(self.bot, ctx, "giveaway_blacklist", "🚫 Membre exclu des concours", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+        })
 
     @giveaway.command(name="unblacklist", aliases=["reautoriser", "réautoriser"])
     @checks.is_owner_or_admin()
     async def giveaway_unblacklist(self, ctx: commands.Context, membre: discord.Member):
         """Autoriser à nouveau un membre à participer aux giveaways."""
         await self._deleguer(ctx, "unblacklist", membre=membre)
+        await journaliser(self.bot, ctx, "giveaway_blacklist", "✅ Membre réautorisé aux concours", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+        })
 
 
 async def setup(bot: commands.Bot) -> None:

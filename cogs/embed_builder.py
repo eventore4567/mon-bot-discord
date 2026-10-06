@@ -39,6 +39,7 @@ from discord.ext import commands
 
 from utils import embeds, checks, design_system
 from utils import sentrix_panels as panels
+from utils.audit_trail import journaliser
 from database.db import now
 
 logger = logging.getLogger("bot.embeds")
@@ -1046,6 +1047,10 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
         draft = EmbedDraft()
         draft.template_name = nom
         draft.template_id = await self.create_template(ctx.guild.id, ctx.author.id, nom, draft)
+        await journaliser(self.bot, ctx, "config_update", "🧩 Modèle d'embed créé", {
+            "📄 Nom": nom[:200],
+            "🔖 Identifiant": f"#{draft.template_id}",
+        })
         await self.open_builder(ctx, draft)
 
     @embed_group.command(name="list", description="Lister les modèles d'embeds sauvegardés sur ce serveur.")
@@ -1234,6 +1239,9 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     @checks.is_owner_or_admin()
     async def embedconfig_addrole(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.execute("INSERT OR IGNORE INTO embed_allowed_roles (guild_id, role_id) VALUES (?, ?)", (ctx.guild.id, role.id))
+        await journaliser(self.bot, ctx, "config_update", "🧩 Accès aux embeds accordé", {
+            "🎭 Rôle": f"{role.mention}\n`{role.id}`",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{role.mention} peut désormais utiliser `+embed`.')))
 
     @embedconfig.command(name="removerole", description="Retirer l'autorisation d'utiliser +embed à un rôle.")
@@ -1241,6 +1249,9 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
     @checks.is_owner_or_admin()
     async def embedconfig_removerole(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.execute("DELETE FROM embed_allowed_roles WHERE guild_id = ? AND role_id = ?", (ctx.guild.id, role.id))
+        await journaliser(self.bot, ctx, "config_update", "🧩 Accès aux embeds retiré", {
+            "🎭 Rôle": f"{role.mention}\n`{role.id}`",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"{role.mention} ne peut plus utiliser `+embed` (sauf s'il a Gérer les messages/le serveur).")))
 
     @embedconfig.command(name="list", description="Lister les rôles autorisés à utiliser +embed.")

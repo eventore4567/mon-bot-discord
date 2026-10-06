@@ -14,6 +14,7 @@ from discord.ext import commands
 
 from utils import access_matrix, checks
 from utils import sentrix_panels as panels
+from utils.audit_trail import journaliser
 
 
 # Le registre d'accès est chargé avant les extensions. +infinit est une commande de
@@ -249,6 +250,7 @@ class InfiniteCounter(commands.Cog, name="InfiniteCounter"):
     @checks.is_owner_or_admin()
     async def infinit_stop(self, ctx: commands.Context):
         await self.bot.db.execute("UPDATE infinite_counter_config SET enabled=0,updated_at=? WHERE guild_id=?", (int(time.time()), ctx.guild.id))
+        await journaliser(self.bot, ctx, "config_update", "🔢 Compteur infini arrêté", {})
         self._invalidate_enabled(ctx.guild.id)
         prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
         await panels.envoyer(ctx, panels.Panneau(

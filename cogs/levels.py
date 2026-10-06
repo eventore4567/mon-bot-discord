@@ -20,6 +20,7 @@ from discord.ext import commands
 
 from services import levels as levels_service
 from utils import embeds, checks, helpers, stats_service, design_system, visual_v5, temporary_boosts, member_event_cards
+from utils.audit_trail import journaliser
 from utils import sentrix_panels as panels
 from database.db import now, DEFAULT_STATS_SETTINGS
 
@@ -1323,6 +1324,10 @@ class Levels(commands.Cog, name="Levels"):
             "ON CONFLICT(guild_id, level) DO UPDATE SET role_id = excluded.role_id",
             (ctx.guild.id, niveau, role.id),
         )
+        await journaliser(self.bot, ctx, "config_update", "🎖️ Rôle de niveau configuré", {
+            "🎭 Rôle": f"{role.mention}\n`{role.id}`",
+            "📈 Niveau": str(niveau),
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le rôle {role.mention} sera attribué au niveau **{niveau}**.')))
 
     @commands.hybrid_command(name="remove-level-role", description="[Admin] Retirer l'association d'un rôle de niveau.", with_app_command=False)
@@ -1330,6 +1335,9 @@ class Levels(commands.Cog, name="Levels"):
     @checks.is_owner_or_admin_for("configuration")
     async def remove_level_role(self, ctx: commands.Context, niveau: int):
         await self.bot.db.execute("DELETE FROM level_roles WHERE guild_id = ? AND level = ?", (ctx.guild.id, niveau))
+        await journaliser(self.bot, ctx, "config_update", "🎖️ Rôle de niveau retiré", {
+            "📈 Niveau": str(niveau),
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Association de rôle retirée pour le niveau **{niveau}**.')))
 
     @commands.hybrid_command(name="level-roles", description="Lister les rôles de niveau configurés.", with_app_command=False)
@@ -1359,6 +1367,10 @@ class Levels(commands.Cog, name="Levels"):
         delta = max(0, xp) - current["xp"]
         new_xp, level, leveled_up = await self._apply_xp_delta(ctx.guild.id, membre.id, delta)
         suffix = f" — passe au niveau **{level}** 🎉" if leveled_up else ""
+        await journaliser(self.bot, ctx, "levels_xp_set", "✨ XP redéfinie par le staff", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+            "➡️ XP": f"{new_xp} (niveau {level})",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'XP de {membre.mention} défini à **{new_xp}** (niveau {level}){suffix}.')))
 
     @commands.hybrid_command(name="add-xp", description="[Admin] Ajouter de l'XP à un membre.", with_app_command=False)
@@ -1369,6 +1381,11 @@ class Levels(commands.Cog, name="Levels"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Un bot ne peut pas avoir d'XP.")))
         new_xp, level, leveled_up = await self._apply_xp_delta(ctx.guild.id, membre.id, xp)
         suffix = f" — passe au niveau **{level}** 🎉" if leveled_up else ""
+        await journaliser(self.bot, ctx, "levels_xp_set", "✨ XP accordée par le staff", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+            "➕ Ajouté": str(xp),
+            "➡️ Total": f"{new_xp} (niveau {level})",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'**{xp} XP** ajoutés à {membre.mention} (XP actuelle : {new_xp}, niveau {level}){suffix}.')))
 
     @commands.hybrid_command(name="reset-levels", description="[Admin] Réinitialiser tous les niveaux du serveur.", with_app_command=False)
@@ -1382,6 +1399,9 @@ class Levels(commands.Cog, name="Levels"):
             return
         await self.bot.db.execute("DELETE FROM levels WHERE guild_id = ?", (ctx.guild.id,))
         stats_service.invalidate_rank_cache(self.bot, ctx.guild.id)
+        await journaliser(self.bot, ctx, "levels_xp_set", "💣 Niveaux réinitialisés", {
+            "🗑️ Portée": "toute la progression XP du serveur",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success('Tous les niveaux du serveur ont été réinitialisés.')))
 
     # ---------------------------------------------------------------- DIAGNOSTIC NIVEAUX

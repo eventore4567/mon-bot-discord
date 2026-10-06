@@ -58,6 +58,7 @@ from utils import (
     access_matrix,
     log_service,
 )
+from utils.audit_trail import journaliser
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.ai")
@@ -2708,6 +2709,10 @@ class Ai(commands.Cog, name="Ai"):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Cette commande doit être utilisée sur un serveur.')))
         await ai_service.update_setting(self.bot, ctx.guild.id, "enabled", int(enabled))
         label = "activée" if enabled else "désactivée"
+        # Un seul point de passage : enable et disable y arrivent tous les deux.
+        await journaliser(self.bot, ctx, "config_update", "🤖 IA " + label, {
+            "⚙️ Nouvel état": "activée" if enabled else "désactivée",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"🤖 L'IA est maintenant **{label}** sur ce serveur.")))
 
     @ai_command.command(name="reset", description="Réinitialiser votre conversation avec l'IA dans ce salon.")

@@ -23,6 +23,7 @@ from discord.ext import commands, tasks
 import config
 from database.db import now
 from utils import ai_service, stats_service, embeds
+from utils.audit_trail import journaliser
 
 logger = logging.getLogger("bot.sentrix-ultimate")
 
@@ -691,6 +692,11 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
             except Exception: pass
         await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_quarantine(guild_id,role_id,channel_id,min_account_hours) VALUES(?,?,?,?)", (guild.id, role.id, channel.id, hours))
         await self._set_module(guild.id, "anti_alt", True)
+        await journaliser(self.bot, ctx, "config_update", "🚧 Quarantaine configurée", {
+            "⏱️ Seuil": f"comptes de moins de {hours} h",
+            "📍 Salon": channel.mention,
+            "🎭 Rôle": role.mention,
+        })
         await panels.envoyer(ctx, panels.depuis_embed(_reponse('Quarantaine', f'Quarantaine prête. Comptes de moins de {hours} h -> {channel.mention}.', kind='success')))
 
     @sentrixpro.command(name="trust", description="Afficher le score de confiance d'un membre.")
@@ -785,7 +791,12 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
     async def pro_aimod(self, ctx, mode: str, action: str = "alert"):
         action = action.casefold()
         if action not in {"alert","delete","timeout"}: return await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modération par IA', 'Action : `alert`, `delete` ou `timeout`.', kind='warning')))
-        enabled = mode.casefold() in {"on","enable","1","true"}; await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_ai_mod(guild_id,enabled,action,confidence) VALUES(?,?,?,0.88)", (ctx.guild.id, int(enabled), action)); await self._set_module(ctx.guild.id, "ai_moderation", enabled); await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modération par IA', f"IA de modération {('activée' if enabled else 'désactivée')} • action : {action}.", kind='brand')))
+        enabled = mode.casefold() in {"on","enable","1","true"}; await self.bot.db.execute("INSERT OR REPLACE INTO ultimate_ai_mod(guild_id,enabled,action,confidence) VALUES(?,?,?,0.88)", (ctx.guild.id, int(enabled), action)); await self._set_module(ctx.guild.id, "ai_moderation", enabled)
+        await journaliser(self.bot, ctx, "config_update", "🤖 Modération par IA reconfigurée", {
+            "⚙️ État": "activée" if enabled else "désactivée",
+            "🔨 Action": action,
+        })
+        await panels.envoyer(ctx, panels.depuis_embed(_reponse('Modération par IA', f"IA de modération {('activée' if enabled else 'désactivée')} • action : {action}.", kind='brand')))
 
     # AUTORISATION -> utils/access_matrix.py (voir le commentaire sur pro_security).
     @sentrixpro.command(name="ticket-summary", description="Résumer un ticket à partir de son numéro.")

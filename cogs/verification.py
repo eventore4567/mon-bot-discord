@@ -16,6 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from utils import embeds, checks, design_system, visual_v5, rules_flow
+from utils.audit_trail import journaliser
 from utils import sentrix_panels as panels
 from database.db import now
 
@@ -1100,6 +1101,12 @@ class Verification(commands.Cog, name="Verification"):
             await membre.add_roles(role, reason=f"Ajouté par {ctx.author}")
         except discord.Forbidden:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description="Je n'ai pas la permission d'attribuer ce rôle.", kind='danger')))
+        # Donner un rôle peut donner des POUVOIRS. Sans trace, il ne reste que le
+        # message de confirmation, que son auteur peut supprimer.
+        await journaliser(self.bot, ctx, "role_add", "➕ Rôle attribué", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+            "🎭 Rôle": f"{role.mention}\n`{role.id}`",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle attribué', description=f'Rôle {role.mention} donné à {membre.mention}.', kind='success')))
 
     @commands.hybrid_command(name="removerole", aliases=["delrole"], description="Retirer un rôle à un membre.")
@@ -1120,6 +1127,10 @@ class Verification(commands.Cog, name="Verification"):
             await membre.remove_roles(role, reason=f"Retiré par {ctx.author}")
         except discord.Forbidden:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Permission manquante', description="Je n'ai pas la permission de retirer ce rôle.", kind='danger')))
+        await journaliser(self.bot, ctx, "role_remove", "➖ Rôle retiré", {
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
+            "🎭 Rôle": f"{role.mention}\n`{role.id}`",
+        })
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle retiré', description=f'Rôle {role.mention} retiré à {membre.mention}.', kind='success')))
 
     @commands.hybrid_command(name="roleall", description="Donner un rôle à tous les membres du serveur.", with_app_command=False)
