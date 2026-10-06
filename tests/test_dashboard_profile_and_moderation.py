@@ -24,6 +24,8 @@ def test_moderation_routes_are_registered():
     assert {
         ("GET", "/api/guilds/{guild_id}/moderation/members"),
         ("GET", "/api/guilds/{guild_id}/moderation/members/{user_id}"),
+        ("GET", "/api/guilds/{guild_id}/moderation/members/{user_id}/sanctions"),
+        ("POST", "/api/guilds/{guild_id}/moderation/sanctions/{case_number}/reason"),
         ("POST", "/api/guilds/{guild_id}/moderation/actions"),
     } <= _paths(moderation.register)
 
@@ -46,3 +48,17 @@ def test_moderation_action_contract_is_explicit():
     assert set(moderation._ACTION_META) == {"warn", "mute", "kick", "ban"}
     assert moderation._ACTION_META["ban"][2] == "ban_members"
     assert moderation._ACTION_META["mute"][2] == "moderate_members"
+
+
+def test_moderation_dashboard_supports_reason_audit_and_guild_wide_metadata():
+    import inspect
+
+    source = inspect.getsource(moderation.register)
+    assert "member_sanctions_get" in source
+    assert "sanction_reason_post" in source
+    assert "update_sanction_reason" in source
+    assert "sanction_reason_edit" in source
+    assert '"created_at"' in source
+    assert '"joined_at"' in source
+    assert '"permissions"' in source
+    assert "query_members" in source

@@ -17,7 +17,7 @@ def test_familiar_existing_names_are_preserved() -> None:
 def test_core_moderation_uses_common_direct_slash_names() -> None:
     expected = {
         "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
-        "clearwarnings", "clear", "lock", "unlock", "slowmode",
+        "clearwarnings", "clear", "lock", "unlock", "slowmode", "case", "modview",
     }
     for name in expected:
         assert surface.STANDARD_DIRECT_SLASH[name] == name

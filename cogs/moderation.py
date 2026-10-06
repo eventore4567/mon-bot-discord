@@ -632,7 +632,7 @@ class Moderation(commands.Cog):
     # ---------------------------------------------------------------- BAN
 
     @commands.hybrid_command(name="ban", description="Bannir définitivement un membre du serveur.")
-    @app_commands.describe(membre="Le membre à bannir", raison="La raison du bannissement")
+    @app_commands.describe(membre="Membre du serveur à bannir (peu importe le salon)", raison="La raison du bannissement")
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
@@ -769,7 +769,7 @@ class Moderation(commands.Cog):
     # ---------------------------------------------------------------- KICK
 
     @commands.hybrid_command(name="kick", description="Expulser un membre du serveur.")
-    @app_commands.describe(membre="Le membre à expulser", raison="La raison de l'expulsion")
+    @app_commands.describe(membre="Membre du serveur à expulser (peu importe le salon)", raison="La raison de l'expulsion")
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("kick_members",), target="member_moderation")
@@ -816,7 +816,7 @@ class Moderation(commands.Cog):
         return discord.utils.get(guild.roles, name="Muet")
 
     @commands.hybrid_command(name="mute", description="Rendre muet un membre (timeout Discord natif).")
-    @app_commands.describe(membre="Le membre à rendre muet", duree="Durée (ex: 10m, 1h)", raison="La raison")
+    @app_commands.describe(membre="Membre du serveur à timeout (peu importe le salon)", duree="Durée (ex: 10m, 1h)", raison="La raison")
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
@@ -910,7 +910,7 @@ class Moderation(commands.Cog):
     # ---------------------------------------------------------------- WARN
 
     @commands.hybrid_command(name="warn", description="Avertir un membre (enregistré en base de données).")
-    @app_commands.describe(membre="Le membre à avertir", raison="La raison de l'avertissement")
+    @app_commands.describe(membre="Membre du serveur à avertir (peu importe le salon)", raison="La raison de l'avertissement")
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")

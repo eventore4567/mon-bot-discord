@@ -4,12 +4,103 @@ SUBS.security = [['protections', 'Protections'], ['verification', 'Vérification
 
 const moderationSearch = q => gget('/moderation/members?q=' + encodeURIComponent(q));
 const moderationMember = id => gget('/moderation/members/' + encodeURIComponent(id));
+const moderationMemberSanctions = (id, page = 1) => gget('/moderation/members/' + encodeURIComponent(id) + '/sanctions?page=' + encodeURIComponent(page));
+
+async function editModerationReason(caseNumber, currentReason, afterSave) {
+  const reason = await promptDialog({
+    title: 'Modifier la raison — dossier #' + caseNumber,
+    label: 'Nouvelle raison',
+    value: currentReason || '',
+    placeholder: 'Expliquez précisément la raison de la sanction',
+    confirm: 'Enregistrer',
+    type: 'textarea',
+  });
+  if (reason == null) return;
+  const clean = reason.trim();
+  if (!clean) return toast('La raison ne peut pas être vide.', true);
+  try {
+    await gpost('/moderation/sanctions/' + encodeURIComponent(caseNumber) + '/reason', { reason: clean });
+    toast('Raison du dossier #' + caseNumber + ' modifiée. L’ancienne raison reste dans l’audit.');
+    await afterSave?.();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function openModerationSanctions(member, initialPage = 1) {
+  const title = 'Sanctions — ' + (member.display_name || member.username || member.id);
+  const paint = async (page) => {
+    const box = $('memberSanctionsBody');
+    if (!box) return;
+    box.innerHTML = '<div class="skeleton" style="min-height:180px"></div>';
+    let d;
+    try { d = await moderationMemberSanctions(member.id, page); }
+    catch (e) { box.innerHTML = emptyState('Historique indisponible', e.message || 'Impossible de charger les sanctions.'); return; }
+    const items = d.sanctions || [];
+    box.innerHTML = `
+      <div class="card-head">
+        <div><h3>${esc(title)}</h3><p>${plural(Number(d.total || 0), 'sanction')} · page ${number(d.page || 1)}/${number(d.pages || 1)}</p></div>
+      </div>
+      <div class="list compact" style="margin-top:10px">
+        ${items.length ? items.map(x => `<div class="row">
+          <div class="row-main">
+            <b>${esc('Dossier #' + x.case_number + ' · ' + (x.action || 'action'))} ${moderationStatusBadge(x)}</b>
+            <small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''} · modérateur ${esc(x.moderator_id || 'inconnu')}</small>
+          </div>
+          <div class="row-actions">
+            ${x.status === 'active' && ['ban','tempban'].includes(String(x.action || '')) ? `<button class="btn sm" type="button" data-lift-case="unban" data-lift-user="${esc(x.user_id)}">Débannir</button>` : ''}
+            ${x.status === 'active' && String(x.action || '') === 'mute' ? `<button class="btn sm" type="button" data-lift-case="unmute" data-lift-user="${esc(x.user_id)}">Lever le timeout</button>` : ''}
+            <button class="btn sm" type="button" data-edit-member-case="${esc(x.case_number)}" data-current-reason="${esc(x.reason || '')}">Modifier la raison</button>
+          </div>
+        </div>`).join('') : emptyState('Aucune sanction', 'Aucun dossier n’est enregistré pour ce membre.')}
+      </div>
+      <div class="toolbar" style="margin-top:12px;justify-content:flex-end">
+        <button class="btn sm ghost" type="button" id="memberSanctionsPrev" ${Number(d.page || 1) <= 1 ? 'disabled' : ''}>Précédent</button>
+        <span class="badge">${number(d.page || 1)}/${number(d.pages || 1)}</span>
+        <button class="btn sm ghost" type="button" id="memberSanctionsNext" ${Number(d.page || 1) >= Number(d.pages || 1) ? 'disabled' : ''}>Suivant</button>
+      </div>`;
+    const prev = $('memberSanctionsPrev'), next = $('memberSanctionsNext');
+    if (prev) prev.onclick = () => paint(Math.max(1, Number(d.page || 1) - 1));
+    if (next) next.onclick = () => paint(Math.min(Number(d.pages || 1), Number(d.page || 1) + 1));
+    box.querySelectorAll('[data-lift-case]').forEach(b => b.onclick = async () => {
+      const action = b.dataset.liftCase;
+      const label = action === 'unban' ? 'Débannir' : 'Lever le timeout';
+      const reason = await promptDialog({
+        title: label,
+        label: 'Raison',
+        value: 'Levée depuis le dashboard SentriX',
+        confirm: label,
+        type: 'textarea',
+      });
+      if (!reason) return;
+      try {
+        const r = await gpost('/sanctions/' + encodeURIComponent(b.dataset.liftUser) + '/' + encodeURIComponent(action), { reason });
+        toast(r.message || 'Sanction levée.');
+        await paint(Number(d.page || 1));
+      } catch (e) { toast(e.message, true); }
+    });
+    box.querySelectorAll('[data-edit-member-case]').forEach(b => b.onclick = () => {
+      const pageNow = Number(d.page || 1);
+      editModerationReason(b.dataset.editMemberCase, b.dataset.currentReason || '', () => paint(pageNow));
+    });
+  };
+  openModal({
+    title,
+    body: '<div id="memberSanctionsBody"><div class="skeleton" style="min-height:180px"></div></div>',
+    actions: [{ label: 'Fermer' }],
+    onOpen: () => paint(initialPage),
+  });
+}
 
 function moderationActionLabel(action) {
   return ({ warn: 'Avertir', mute: 'Mute', kick: 'Expulser', ban: 'Bannir' })[action] || action;
 }
 function moderationActionClass(action) {
   return action === 'ban' || action === 'kick' ? 'danger' : action === 'mute' ? 'primary' : '';
+}
+function moderationStatusBadge(item) {
+  const status = String(item?.status || 'history');
+  if (status === 'active') return '<span class="badge ok">Actif</span>';
+  if (status === 'lifted') return '<span class="badge blue">Levée</span>';
+  return '<span class="badge">Historique</span>';
 }
 
 async function openModerationAction(member, action) {
@@ -56,7 +147,7 @@ renderSanctions = async function renderModerationCenter() {
       <div class="field full" style="margin-top:12px">
         <label for="moderationSearch">Rechercher un membre</label>
         <input class="search-input" id="moderationSearch" type="search" autocomplete="off" placeholder="Pseudo, nom affiché ou ID Discord">
-        <small>La recherche utilise les membres actuellement présents sur le serveur.</small>
+        <small>Recherche sur tout le serveur : le membre n’a pas besoin d’avoir accès au salon où une commande Discord a été lancée. Un ID Discord exact fonctionne aussi.</small>
       </div>
       <div class="options hidden" id="moderationResults" style="margin-top:8px"></div>
     </section>
@@ -95,15 +186,17 @@ renderSanctions = async function renderModerationCenter() {
       const mod = moderator.display_name || moderator.username || x.moderator_id || 'Inconnu';
       const caseNo = x.case_number ? `Dossier #${x.case_number} · ` : '';
       const active = x.current_banned ? 'Banni actuellement' : x.current_muted ? 'Mute actuellement' : '';
+      const statusBadge = active ? '<span class="badge ok">Actif</span>' : ['unban','unmute'].includes(String(x.action || '')) ? '<span class="badge blue">Levée</span>' : '<span class="badge">Historique</span>';
       return `<div class="row">
         <div class="row-main">
-          <b>${esc(caseNo + String(x.action || 'action'))} · ${esc(who)}</b>
+          <b>${esc(caseNo + String(x.action || 'action'))} · ${esc(who)} ${statusBadge}</b>
           <small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''} · par ${esc(mod)}${active ? ' · ' + esc(active) : ''}</small>
         </div>
         <div class="row-actions">
           ${x.current_banned ? `<button class="btn sm" type="button" data-reverse-sanction="unban" data-reverse-user="${esc(x.user_id)}">Débannir</button>` : ''}
           ${x.current_muted ? `<button class="btn sm" type="button" data-reverse-sanction="unmute" data-reverse-user="${esc(x.user_id)}">Lever le mute</button>` : ''}
           ${Number(x.warn_count || 0) > 0 ? `<button class="btn sm" type="button" data-reverse-sanction="clear-warnings" data-reverse-user="${esc(x.user_id)}">Effacer warns</button>` : ''}
+          ${x.case_number ? `<button class="btn sm ghost" type="button" data-edit-reason="${esc(x.case_number)}" data-edit-current="${esc(x.reason || '')}">Modifier raison</button>` : ''}
           <button class="btn sm" type="button" data-open-member="${esc(x.user_id)}">Dossier</button>
         </div>
       </div>`;
@@ -112,6 +205,9 @@ renderSanctions = async function renderModerationCenter() {
       state.moderationMemberId = b.dataset.openMember;
       await paintMember();
       $('moderationMemberCard').scrollIntoView({ behavior: REDUCED_MOTION() ? 'auto' : 'smooth', block: 'start' });
+    });
+    $('sanctionList').querySelectorAll('[data-edit-reason]').forEach(b => b.onclick = () => {
+      editModerationReason(b.dataset.editReason, b.dataset.editCurrent || '', () => renderSanctions());
     });
     $('sanctionList').querySelectorAll('[data-reverse-sanction]').forEach(b => b.onclick = async () => {
       const label = b.textContent;
@@ -168,7 +264,7 @@ renderSanctions = async function renderModerationCenter() {
     holder.innerHTML = `<div class="card-head">
       <div class="profile-line">
         <span class="avatar big">${m.avatar_url ? `<img src="${esc(m.avatar_url)}" alt="">` : esc((m.display_name || m.username || '?').slice(0,2).toUpperCase())}</span>
-        <div><h2>${esc(m.display_name || m.username || m.id)}</h2><p>@${esc(m.username || '')} · ${esc(m.id || '')}</p></div>
+        <div><h2>${esc(m.display_name || m.username || m.id)}</h2><p>@${esc(m.username || '')} · ${esc(m.id || '')}</p><small>${m.created_at ? 'Compte créé ' + esc(when(m.created_at)) : ''}${m.joined_at ? ' · membre depuis ' + esc(when(m.joined_at)) : ''}</small></div>
       </div>
       <button class="btn ghost" type="button" id="closeModerationMember">Fermer le dossier</button>
     </div>
@@ -182,17 +278,27 @@ renderSanctions = async function renderModerationCenter() {
       ${m.bot ? '<span class="notice warn">Les bots ne peuvent pas être sanctionnés depuis ce centre.</span>' : m.present === false ? (d.currently_banned ? '<button class="btn primary" type="button" data-member-reverse="unban">Débannir</button>' : '<span class="notice">Ce membre n’est plus présent sur le serveur.</span>') : ['warn','mute','kick','ban'].map(a => `<button class="btn ${moderationActionClass(a)}" type="button" data-mod-action="${a}">${moderationActionLabel(a)}</button>`).join('')}
       ${muted ? '<button class="btn" type="button" data-member-reverse="unmute">Lever le mute</button>' : ''}
       ${Number(d.warnings || 0) > 0 ? '<button class="btn" type="button" data-member-reverse="clear-warnings">Effacer les avertissements</button>' : ''}
+      <button class="btn ghost" type="button" id="viewAllMemberSanctions">Voir toutes les sanctions</button>
     </div>
+    ${d.latest_note ? `<div class="notice" style="margin-top:14px"><b>Dernière note staff</b><br>${esc(d.latest_note.note || '')}<br><small>par ${esc(d.latest_note.author_id || 'inconnu')}${d.latest_note.created_at ? ' · ' + esc(when(d.latest_note.created_at)) : ''}</small></div>` : ''}
+    ${(m.permissions || []).length ? `<div class="notice" style="margin-top:10px"><b>Permissions importantes</b><br>${esc((m.permissions || []).join(' · '))}</div>` : ''}
     <div style="margin-top:16px">
-      <h3>Dernières sanctions de ce membre</h3>
+      <div class="card-head"><div><h3>Dernières sanctions de ce membre</h3><p>Raison, date et modérateur.</p></div></div>
       <div class="list compact" style="margin-top:8px">
-        ${(d.recent || []).length ? d.recent.map(x => `<div class="row"><div class="row-main"><b>${esc((x.case_number ? 'Dossier #' + x.case_number + ' · ' : '') + (x.action || 'action'))}</b><small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''}</small></div></div>`).join('') : '<p class="info">Aucune sanction enregistrée.</p>'}
+        ${(d.recent || []).length ? d.recent.map(x => `<div class="row">
+          <div class="row-main"><b>${esc((x.case_number ? 'Dossier #' + x.case_number + ' · ' : '') + (x.action || 'action'))} ${moderationStatusBadge(x)}</b><small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''}${x.moderator_id ? ' · modérateur ' + esc(x.moderator_id) : ''}</small></div>
+          <div class="row-actions">${x.case_number ? `<button class="btn sm ghost" type="button" data-member-edit-reason="${esc(x.case_number)}" data-member-edit-current="${esc(x.reason || '')}">Modifier raison</button>` : ''}</div>
+        </div>`).join('') : '<p class="info">Aucune sanction enregistrée.</p>'}
       </div>
     </div>`;
     $('closeModerationMember').onclick = () => {
       state.moderationMemberId = null;
       holder.innerHTML = emptyState('Aucun membre sélectionné', 'Recherchez un membre ci-dessus pour ouvrir son dossier et afficher les actions disponibles.');
     };
+    $('viewAllMemberSanctions').onclick = () => openModerationSanctions(m, 1);
+    holder.querySelectorAll('[data-member-edit-reason]').forEach(b => b.onclick = () => {
+      editModerationReason(b.dataset.memberEditReason, b.dataset.memberEditCurrent || '', () => renderSanctions());
+    });
     holder.querySelectorAll('[data-mod-action]').forEach(b => b.onclick = () => openModerationAction(m, b.dataset.modAction));
     holder.querySelectorAll('[data-member-reverse]').forEach(b => b.onclick = async () => {
       const label = b.textContent;

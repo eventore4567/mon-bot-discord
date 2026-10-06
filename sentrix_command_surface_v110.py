@@ -54,6 +54,7 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "slowmode": "slowmode",
     "nickname": "setnick",
     "case": "case",
+    "modview": "modview",
 
     # Informations — userinfo/serverinfo sont déjà des noms très répandus.
     "avatar": "avatar",

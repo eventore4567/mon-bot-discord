@@ -32,6 +32,7 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "member_timeout": ("moderation", "⏱️", "warning"),
     "member_untimeout": ("moderation", "✅", "success"),
     "member_warn": ("moderation", "⚠️", "warning"),
+    "sanction_reason_edit": ("moderation", "✏️", "warning"),
     # Actions de modération qui changeaient le serveur SANS laisser de trace :
     # mesuré sur le bot booté (tools/log_trace_sweep.py). Leur seule preuve
     # était le message dans le salon, que son auteur peut supprimer.
