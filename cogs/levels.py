@@ -1853,6 +1853,14 @@ class Levels(commands.Cog, name="Levels"):
             if auto_configured else
             " La configuration existante a été conservée."
         )
+        # Journalisée UNIQUEMENT quand quelque chose a réellement été configuré :
+        # sans auto-configuration, la commande n'envoie que des tests et ne change
+        # rien, et une fiche dirait le contraire.
+        if auto_configured:
+            await journaliser(self.bot, ctx, "config_update", "⚙️ Configuration appliquée automatiquement", {
+                "🔧 Réglages posés": ", ".join(auto_configured)[:1024],
+                "📍 Destination": getattr(fallback, "mention", "—"),
+            })
         await panels.envoyer(
             ctx,
             panels.depuis_embed(
