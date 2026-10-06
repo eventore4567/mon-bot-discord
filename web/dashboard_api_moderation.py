@@ -78,6 +78,51 @@ def register(app: web.Application, dashboard) -> None:
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             return None
 
+    async def _active_case_numbers(guild: discord.Guild, user_id: int) -> set[int]:
+        active: set[int] = set()
+        member = await _target(guild, int(user_id))
+        if member is not None:
+            timeout = getattr(member, "timed_out_until", None)
+            if timeout and timeout > discord.utils.utcnow():
+                row = await bot.db.fetchone(
+                    "SELECT case_number FROM sanctions "
+                    "WHERE guild_id=? AND user_id=? AND action='mute' "
+                    "ORDER BY case_number DESC,id DESC LIMIT 1",
+                    (guild.id, int(user_id)),
+                )
+                if row:
+                    active.add(int(row["case_number"]))
+        else:
+            try:
+                await guild.fetch_ban(discord.Object(id=int(user_id)))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+            else:
+                row = await bot.db.fetchone(
+                    "SELECT case_number FROM sanctions "
+                    "WHERE guild_id=? AND user_id=? AND action IN ('ban','tempban') "
+                    "ORDER BY case_number DESC,id DESC LIMIT 1",
+                    (guild.id, int(user_id)),
+                )
+                if row:
+                    active.add(int(row["case_number"]))
+        return active
+
+    def _sanction_json(row, active_cases: set[int]) -> dict:
+        data = dict(row)
+        case_number = int(row["case_number"])
+        action = str(row["action"] or "")
+        if case_number in active_cases:
+            data["status"] = "active"
+            data["status_label"] = "Active"
+        elif action in {"unban", "unmute"}:
+            data["status"] = "lifted"
+            data["status_label"] = "Levée"
+        else:
+            data["status"] = "history"
+            data["status_label"] = "Historique"
+        return data
+
     def _member_json(member: discord.abc.User) -> dict:
         roles = getattr(member, "roles", ())
         is_member = isinstance(member, discord.Member)
@@ -208,6 +253,7 @@ def register(app: web.Application, dashboard) -> None:
                 currently_banned = True
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 currently_banned = False
+        active_cases = await _active_case_numbers(guild, user_id)
         return web.json_response({
             "ok": True,
             "member": _member_json(member),
@@ -216,7 +262,7 @@ def register(app: web.Application, dashboard) -> None:
             "timed_out_until": timed_out_until.isoformat() if timed_out_until else None,
             "currently_banned": currently_banned,
             "latest_note": dict(latest_note) if latest_note else None,
-            "recent": [dict(row) for row in recent],
+            "recent": [_sanction_json(row, active_cases) for row in recent],
         })
 
     async def member_sanctions_get(request: web.Request):
@@ -240,6 +286,7 @@ def register(app: web.Application, dashboard) -> None:
             "ORDER BY case_number DESC,id DESC LIMIT ? OFFSET ?",
             (guild.id, user_id, page_size, (page - 1) * page_size),
         )
+        active_cases = await _active_case_numbers(guild, user_id)
         return web.json_response({
             "ok": True,
             "user_id": str(user_id),
@@ -247,7 +294,7 @@ def register(app: web.Application, dashboard) -> None:
             "pages": max_page,
             "page_size": page_size,
             "total": int(total),
-            "sanctions": [dict(row) for row in rows],
+            "sanctions": [_sanction_json(row, active_cases) for row in rows],
         })
 
     async def sanction_reason_post(request: web.Request):
