@@ -11,6 +11,7 @@ def test_staff_suite_exposes_the_premium_entry_points():
     source = inspect.getsource(staff_suite.StaffSuite)
     for name in (
         'name="member"',
+        'name="modview"',
         'name="note"',
         'name="history"',
         'name="incident"',
@@ -55,6 +56,7 @@ def test_staff_suite_never_creates_channels_or_categories():
 def test_staff_sensitive_commands_are_in_the_access_matrix():
     expected = {
         "member": "moderate_members",
+        "modview": "moderate_members",
         "note": "moderate_members",
         "history": "moderate_members",
         "incident": "moderate_members",
@@ -75,8 +77,8 @@ def test_staff_sensitive_commands_are_in_the_access_matrix():
 
 
 def test_staff_slash_roots_are_protected_by_the_global_budget():
-    assert {"staff", "member", "case", "diagnostic"} <= slash_command_budget.STAFF_SLASH_PREFERRED
-    assert {"staff", "member", "case", "diagnostic"} <= slash_command_budget._required_names()
+    assert {"staff", "member", "modview", "case", "diagnostic"} <= slash_command_budget.STAFF_SLASH_PREFERRED
+    assert {"staff", "member", "modview", "case", "diagnostic"} <= slash_command_budget._required_names()
 
 
 def test_watch_panel_is_event_driven_and_has_pause_stop_controls():
