@@ -199,6 +199,20 @@ CREATE TABLE IF NOT EXISTS sanctions (
     created_at INTEGER
 );
 
+-- Historique immuable des modifications de raison. Modifier une raison ne doit jamais
+-- effacer l'ancienne : chaque changement reste attribué au membre du staff qui l'a fait.
+CREATE TABLE IF NOT EXISTS sanction_reason_edits_v1 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    guild_id INTEGER NOT NULL,
+    sanction_id INTEGER NOT NULL,
+    case_number INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    editor_id INTEGER NOT NULL,
+    old_reason TEXT,
+    new_reason TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tempactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER,
@@ -1033,6 +1047,7 @@ CREATE INDEX IF NOT EXISTS idx_member_invites_member ON member_invites (guild_id
 CREATE INDEX IF NOT EXISTS idx_invite_bonuses_guild_user ON invite_bonuses (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_sanctions_guild_case ON sanctions (guild_id, case_number);
 CREATE INDEX IF NOT EXISTS idx_sanctions_guild_user ON sanctions (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_sanction_reason_edits_case ON sanction_reason_edits_v1 (guild_id, case_number, created_at);
 CREATE INDEX IF NOT EXISTS idx_levels_guild_rank ON levels (guild_id, level DESC, xp DESC);
 CREATE INDEX IF NOT EXISTS idx_economy_guild_total ON economy (guild_id, (cash + bank) DESC);
 CREATE INDEX IF NOT EXISTS idx_shop_role_purchases_guild_user ON shop_role_purchases (guild_id, user_id);
@@ -2322,6 +2337,77 @@ class Database:
     async def get_sanction_count(self, guild_id: int, user_id: int) -> int:
         row = await self.fetchone("SELECT COUNT(*) as c FROM sanctions WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
         return row["c"] if row else 0
+
+    async def update_sanction_reason(
+        self,
+        guild_id: int,
+        case_number: int,
+        editor_id: int,
+        new_reason: str,
+    ):
+        """Modifie la raison d'un dossier sans perdre l'ancienne valeur.
+
+        La modification et son audit sont écrits dans la même transaction SQLite.
+        Retourne la sanction mise à jour, ou None si le dossier n'existe pas.
+        """
+        reason = str(new_reason or "").strip()
+        if not reason:
+            raise ValueError("La raison ne peut pas être vide.")
+        if len(reason) > 500:
+            raise ValueError("La raison ne peut pas dépasser 500 caractères.")
+        if self._conn is None:
+            raise RuntimeError("Database not connected")
+
+        async with self._sanctions_lock:
+            await self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = await self._conn.execute(
+                    "SELECT * FROM sanctions WHERE guild_id = ? AND case_number = ?",
+                    (int(guild_id), int(case_number)),
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    await self._conn.rollback()
+                    return None
+
+                old_reason = str(row["reason"] or "")
+                if old_reason == reason:
+                    await self._conn.rollback()
+                    return row
+
+                await self._conn.execute(
+                    "INSERT INTO sanction_reason_edits_v1 "
+                    "(guild_id,sanction_id,case_number,user_id,editor_id,old_reason,new_reason,created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        int(guild_id),
+                        int(row["id"]),
+                        int(row["case_number"]),
+                        int(row["user_id"]),
+                        int(editor_id),
+                        old_reason,
+                        reason,
+                        now(),
+                    ),
+                )
+                await self._conn.execute(
+                    "UPDATE sanctions SET reason = ? WHERE id = ? AND guild_id = ?",
+                    (reason, int(row["id"]), int(guild_id)),
+                )
+                await self._conn.commit()
+            except Exception:
+                await self._conn.rollback()
+                raise
+
+        return await self.get_sanction_by_case(guild_id, case_number)
+
+    async def get_sanction_reason_edits(self, guild_id: int, case_number: int, limit: int = 10):
+        return await self.fetchall(
+            "SELECT * FROM sanction_reason_edits_v1 "
+            "WHERE guild_id = ? AND case_number = ? "
+            "ORDER BY created_at DESC, id DESC LIMIT ?",
+            (int(guild_id), int(case_number), max(1, min(int(limit), 50))),
+        )
 
     # ---------- Économie ----------
 
