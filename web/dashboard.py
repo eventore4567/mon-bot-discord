@@ -285,7 +285,7 @@ def _require_session(request: web.Request) -> tuple[dict | None, web.Response | 
     session = _session(request)
     if not session:
         return None, _json_error("Connectez-vous avec Discord pour continuer.", 401)
-    if not session.get("dashboard_verified_at"):
+    if session.get("dashboard_verification_required") and not session.get("dashboard_verified_at"):
         return None, _json_error(
             "Vérification de sécurité requise avant d’accéder au dashboard.",
             403,
@@ -518,7 +518,11 @@ async def handle_dashboard_security_complete(request: web.Request):
 async def handle_index(request: web.Request):
     if request.path == "/app":
         session = _session(request)
-        if session and not session.get("dashboard_verified_at"):
+        if (
+            session
+            and session.get("dashboard_verification_required")
+            and not session.get("dashboard_verified_at")
+        ):
             return web.Response(text=DASHBOARD_SECURITY_HTML, content_type="text/html")
     return web.Response(text=INDEX_HTML, content_type="text/html")
 
@@ -869,6 +873,7 @@ async def handle_callback(request: web.Request):
         "csrf": secrets.token_urlsafe(32),
         # Chaque nouvelle connexion Discord doit réussir une vérification humaine
         # avant que les API d'administration deviennent accessibles.
+        "dashboard_verification_required": True,
         "dashboard_verified_at": None,
         "dashboard_verify_attempts": 0,
         "expires_at": time.time() + SESSION_TTL,
