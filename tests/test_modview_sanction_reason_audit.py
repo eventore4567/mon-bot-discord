@@ -40,3 +40,18 @@ def test_sanction_reason_edits_are_audited_in_database():
     assert "new_reason TEXT NOT NULL" in source
     assert hasattr(db_module.Database, "update_sanction_reason")
     assert hasattr(db_module.Database, "get_sanction_reason_edits")
+
+
+def test_modview_sanction_history_has_filters_and_pagination():
+    source = inspect.getsource(staff_suite)
+    assert "class SanctionFilterSelect" in source
+    for label in (
+        "Toutes les sanctions",
+        "Bannissements",
+        "Timeouts",
+        "Avertissements",
+        "Expulsions",
+        "Levées de sanction",
+    ):
+        assert label in source
+    assert "action_filter" in inspect.getsource(staff_suite.StaffSuite.send_sanction_history)
