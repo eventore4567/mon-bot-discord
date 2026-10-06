@@ -1837,6 +1837,60 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         suffix = f" · dossier #{case_number}" if case_number is not None else ""
         return True, f"{label} appliqué à {target.mention}{suffix}."
 
+    async def active_sanction_cases(self, guild: discord.Guild, member_id: int) -> set[int]:
+        """Retourne les dossiers qui correspondent à une sanction encore active sur Discord.
+
+        On ne marque en vert que l'état que Discord confirme réellement maintenant :
+        le dernier bannissement si le compte est actuellement banni, et le dernier
+        timeout si le membre est encore timeout. Les anciennes sanctions restent
+        historiques, même si elles sont du même type.
+        """
+        member_id = int(member_id)
+        active: set[int] = set()
+        member = guild.get_member(member_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(member_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                member = None
+
+        if member is not None:
+            timeout = getattr(member, "timed_out_until", None)
+            if timeout and timeout > discord.utils.utcnow():
+                row = await self.bot.db.fetchone(
+                    "SELECT case_number FROM sanctions "
+                    "WHERE guild_id=? AND user_id=? AND action='mute' "
+                    "ORDER BY case_number DESC,id DESC LIMIT 1",
+                    (guild.id, member_id),
+                )
+                if row:
+                    active.add(int(row["case_number"]))
+        else:
+            try:
+                await guild.fetch_ban(discord.Object(id=member_id))
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+            else:
+                row = await self.bot.db.fetchone(
+                    "SELECT case_number FROM sanctions "
+                    "WHERE guild_id=? AND user_id=? AND action IN ('ban','tempban') "
+                    "ORDER BY case_number DESC,id DESC LIMIT 1",
+                    (guild.id, member_id),
+                )
+                if row:
+                    active.add(int(row["case_number"]))
+        return active
+
+    @staticmethod
+    def sanction_status(row, active_cases: set[int]) -> tuple[str, str]:
+        case_number = int(row["case_number"])
+        action = str(row["action"] or "")
+        if case_number in active_cases:
+            return "active", "🟢 Active"
+        if action in {"unban", "unmute"}:
+            return "lifted", "✅ Levée"
+        return "history", "⚪ Historique"
+
     async def sanction_detail_embed(self, guild: discord.Guild, row) -> discord.Embed:
         action = SANCTION_LABELS.get(str(row["action"]), str(row["action"]).title())
         embed = discord.Embed(
@@ -1844,6 +1898,9 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             description=f"<@{row['user_id']}> · <t:{row['created_at']}:R>",
             colour=discord.Colour.red() if row["action"] in {"ban", "tempban", "kick"} else discord.Colour.orange(),
         )
+        active_cases = await self.active_sanction_cases(guild, int(row["user_id"]))
+        _status_key, status_label = self.sanction_status(row, active_cases)
+        embed.add_field(name="État", value=status_label, inline=True)
         embed.add_field(name="Raison", value=row["reason"] or "Aucune raison", inline=False)
         embed.add_field(name="Modérateur", value=_mention(row["moderator_id"]), inline=True)
         if row["duration_seconds"]:
@@ -1914,10 +1971,12 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         if member is not None:
             embed.set_thumbnail(url=member.display_avatar.url)
         if rows:
+            active_cases = await self.active_sanction_cases(interaction.guild, int(member_id))
             for row in rows:
                 action = SANCTION_LABELS.get(str(row["action"]), str(row["action"]).title())
+                _status_key, status_label = self.sanction_status(row, active_cases)
                 embed.add_field(
-                    name=f"#{row['case_number']} · {action} · <t:{row['created_at']}:R>",
+                    name=f"#{row['case_number']} · {action} · {status_label} · <t:{row['created_at']}:R>",
                     value=f"{_trim(row['reason'] or 'Aucune raison', 500)}\nPar {_mention(row['moderator_id'])}",
                     inline=False,
                 )
