@@ -4,6 +4,72 @@ SUBS.security = [['protections', 'Protections'], ['verification', 'Vérification
 
 const moderationSearch = q => gget('/moderation/members?q=' + encodeURIComponent(q));
 const moderationMember = id => gget('/moderation/members/' + encodeURIComponent(id));
+const moderationMemberSanctions = (id, page = 1) => gget('/moderation/members/' + encodeURIComponent(id) + '/sanctions?page=' + encodeURIComponent(page));
+
+async function editModerationReason(caseNumber, currentReason, afterSave) {
+  const reason = await promptDialog({
+    title: 'Modifier la raison — dossier #' + caseNumber,
+    label: 'Nouvelle raison',
+    value: currentReason || '',
+    placeholder: 'Expliquez précisément la raison de la sanction',
+    confirm: 'Enregistrer',
+    type: 'textarea',
+  });
+  if (reason == null) return;
+  const clean = reason.trim();
+  if (!clean) return toast('La raison ne peut pas être vide.', true);
+  try {
+    await gpost('/moderation/sanctions/' + encodeURIComponent(caseNumber) + '/reason', { reason: clean });
+    toast('Raison du dossier #' + caseNumber + ' modifiée. L’ancienne raison reste dans l’audit.');
+    await afterSave?.();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function openModerationSanctions(member, initialPage = 1) {
+  const title = 'Sanctions — ' + (member.display_name || member.username || member.id);
+  const paint = async (page) => {
+    const box = $('memberSanctionsBody');
+    if (!box) return;
+    box.innerHTML = '<div class="skeleton" style="min-height:180px"></div>';
+    let d;
+    try { d = await moderationMemberSanctions(member.id, page); }
+    catch (e) { box.innerHTML = emptyState('Historique indisponible', e.message || 'Impossible de charger les sanctions.'); return; }
+    const items = d.sanctions || [];
+    box.innerHTML = \`
+      <div class="card-head">
+        <div><h3>\${esc(title)}</h3><p>\${plural(Number(d.total || 0), 'sanction')} · page \${number(d.page || 1)}/\${number(d.pages || 1)}</p></div>
+      </div>
+      <div class="list compact" style="margin-top:10px">
+        \${items.length ? items.map(x => \`<div class="row">
+          <div class="row-main">
+            <b>\${esc('Dossier #' + x.case_number + ' · ' + (x.action || 'action'))}</b>
+            <small>\${esc(x.reason || 'Aucune raison')}\${x.created_at ? ' · ' + esc(when(x.created_at)) : ''} · modérateur \${esc(x.moderator_id || 'inconnu')}</small>
+          </div>
+          <div class="row-actions">
+            <button class="btn sm" type="button" data-edit-member-case="\${esc(x.case_number)}" data-current-reason="\${esc(x.reason || '')}">Modifier la raison</button>
+          </div>
+        </div>\`).join('') : emptyState('Aucune sanction', 'Aucun dossier n’est enregistré pour ce membre.')}
+      </div>
+      <div class="toolbar" style="margin-top:12px;justify-content:flex-end">
+        <button class="btn sm ghost" type="button" id="memberSanctionsPrev" \${Number(d.page || 1) <= 1 ? 'disabled' : ''}>Précédent</button>
+        <span class="badge">\${number(d.page || 1)}/\${number(d.pages || 1)}</span>
+        <button class="btn sm ghost" type="button" id="memberSanctionsNext" \${Number(d.page || 1) >= Number(d.pages || 1) ? 'disabled' : ''}>Suivant</button>
+      </div>\`;
+    const prev = $('memberSanctionsPrev'), next = $('memberSanctionsNext');
+    if (prev) prev.onclick = () => paint(Math.max(1, Number(d.page || 1) - 1));
+    if (next) next.onclick = () => paint(Math.min(Number(d.pages || 1), Number(d.page || 1) + 1));
+    box.querySelectorAll('[data-edit-member-case]').forEach(b => b.onclick = () => {
+      const pageNow = Number(d.page || 1);
+      editModerationReason(b.dataset.editMemberCase, b.dataset.currentReason || '', () => openModerationSanctions(member, pageNow));
+    });
+  };
+  openModal({
+    title,
+    body: '<div id="memberSanctionsBody"><div class="skeleton" style="min-height:180px"></div></div>',
+    actions: [{ label: 'Fermer' }],
+    onOpen: () => paint(initialPage),
+  });
+}
 
 function moderationActionLabel(action) {
   return ({ warn: 'Avertir', mute: 'Mute', kick: 'Expulser', ban: 'Bannir' })[action] || action;
