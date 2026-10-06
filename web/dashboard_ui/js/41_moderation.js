@@ -167,9 +167,10 @@ renderSanctions = async function renderModerationCenter() {
       const mod = moderator.display_name || moderator.username || x.moderator_id || 'Inconnu';
       const caseNo = x.case_number ? `Dossier #${x.case_number} · ` : '';
       const active = x.current_banned ? 'Banni actuellement' : x.current_muted ? 'Mute actuellement' : '';
+      const statusBadge = active ? '<span class="badge ok">Actif</span>' : ['unban','unmute'].includes(String(x.action || '')) ? '<span class="badge blue">Levée</span>' : '<span class="badge">Historique</span>';
       return `<div class="row">
         <div class="row-main">
-          <b>${esc(caseNo + String(x.action || 'action'))} · ${esc(who)}</b>
+          <b>${esc(caseNo + String(x.action || 'action'))} · ${esc(who)} ${statusBadge}</b>
           <small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''} · par ${esc(mod)}${active ? ' · ' + esc(active) : ''}</small>
         </div>
         <div class="row-actions">
