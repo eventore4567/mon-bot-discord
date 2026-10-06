@@ -19,7 +19,7 @@ PROOF_SLASH_PREFERRED = frozenset({"proof", "proofsetup", "proofexample", "proof
 # disponibles même quand les 100 racines globales sont déjà occupées.
 # « diagnostic » reste celui de cogs/stats.py ; « staff-diagnostic » est celui de
 # la suite staff. Les deux gardent leur creneau : ce sont deux commandes.
-STAFF_SLASH_PREFERRED = frozenset({"staff", "member", "case", "diagnostic", "staff-diagnostic"})
+STAFF_SLASH_PREFERRED = frozenset({"staff", "member", "modview", "case", "diagnostic", "staff-diagnostic"})
 
 
 def _v110_public_root_names() -> set[str]:
