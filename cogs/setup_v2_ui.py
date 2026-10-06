@@ -1982,7 +1982,12 @@ def _patch_render() -> None:
                 await self.audit(interaction.user.id, f"module:{_module}", "on" if not value else "off")
                 await self.refresh(interaction)
             toggle_module.callback = toggle_module_cb
-            self.add_item(toggle_module)
+            # Les logs doivent rester configurables même sur l'écran simple : le
+            # bouton global ne doit pas disparaître derrière « Paramètres avancés ».
+            if category == "logs":
+                self.ajouter(toggle_module)
+            else:
+                self.add_item(toggle_module)
 
         if category == "permissions":
             members = discord.ui.Button(label="Cible : @everyone (membres)", style=discord.ButtonStyle.secondary, row=1)
@@ -2123,10 +2128,20 @@ def _patch_render() -> None:
         elif category == "logs" and self.selected_log:
             test = discord.ui.Button(label="Tester ce log", style=discord.ButtonStyle.secondary, row=4)
             async def test_cb(interaction):
-                ok, text = await log_service.send_test_log(self.bot, self.guild, self.selected_log, interaction.user)
-                await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(text) if ok else embeds.error(text)), ephemere=True)
+                ok, text = await log_service.send_test_log(
+                    self.bot,
+                    self.guild,
+                    self.selected_log,
+                    interaction.user,
+                )
+                await panels.envoyer(
+                    interaction.response,
+                    panels.depuis_embed(embeds.success(text) if ok else embeds.error(text)),
+                    ephemere=True,
+                )
             test.callback = test_cb
-            self.add_item(test)
+            # Action essentielle : visible aussi sans activer « Paramètres avancés ».
+            self.ajouter(test)
 
         elif category == "roles":
             reward = discord.ui.Button(label="Ajouter / modifier une récompense", style=discord.ButtonStyle.secondary, row=1)
@@ -2382,9 +2397,18 @@ def _patch_build_embed() -> None:
 
         elif self.category == "logs" and self.selected_log:
             meta = log_service.LOG_TYPES.get(self.selected_log, {})
+            setting = getattr(self, "_selected_log_setting", None) or {}
+            channel_id = setting.get("channel_id")
+            channel = self.guild.get_channel(int(channel_id)) if channel_id else None
+            configured = bool(setting.get("enabled") and channel is not None)
             panel.add_field(
                 name="Type sélectionné",
-                value=f"**{meta.get('category', self.selected_log)}** — choisissez son salon, activez/désactivez-le puis utilisez **Tester ce log**.",
+                value=(
+                    f"**{meta.get('category', self.selected_log)}**\n"
+                    f"**Salon :** {channel.mention if channel else 'Non configuré'}\n"
+                    f"**État :** {'ACTIF' if configured else 'INACTIF'}\n"
+                    "Choisissez un salon ci-dessous, puis utilisez **Tester ce log** pour vérifier immédiatement."
+                ),
                 inline=False,
             )
         return panel
