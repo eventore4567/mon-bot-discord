@@ -46,6 +46,8 @@ async function openModerationSanctions(member, initialPage = 1) {
             <small>${esc(x.reason || 'Aucune raison')}${x.created_at ? ' · ' + esc(when(x.created_at)) : ''} · modérateur ${esc(x.moderator_id || 'inconnu')}</small>
           </div>
           <div class="row-actions">
+            ${x.status === 'active' && ['ban','tempban'].includes(String(x.action || '')) ? `<button class="btn sm" type="button" data-lift-case="unban" data-lift-user="${esc(x.user_id)}">Débannir</button>` : ''}
+            ${x.status === 'active' && String(x.action || '') === 'mute' ? `<button class="btn sm" type="button" data-lift-case="unmute" data-lift-user="${esc(x.user_id)}">Lever le timeout</button>` : ''}
             <button class="btn sm" type="button" data-edit-member-case="${esc(x.case_number)}" data-current-reason="${esc(x.reason || '')}">Modifier la raison</button>
           </div>
         </div>`).join('') : emptyState('Aucune sanction', 'Aucun dossier n’est enregistré pour ce membre.')}
@@ -58,9 +60,26 @@ async function openModerationSanctions(member, initialPage = 1) {
     const prev = $('memberSanctionsPrev'), next = $('memberSanctionsNext');
     if (prev) prev.onclick = () => paint(Math.max(1, Number(d.page || 1) - 1));
     if (next) next.onclick = () => paint(Math.min(Number(d.pages || 1), Number(d.page || 1) + 1));
+    box.querySelectorAll('[data-lift-case]').forEach(b => b.onclick = async () => {
+      const action = b.dataset.liftCase;
+      const label = action === 'unban' ? 'Débannir' : 'Lever le timeout';
+      const reason = await promptDialog({
+        title: label,
+        label: 'Raison',
+        value: 'Levée depuis le dashboard SentriX',
+        confirm: label,
+        type: 'textarea',
+      });
+      if (!reason) return;
+      try {
+        const r = await gpost('/sanctions/' + encodeURIComponent(b.dataset.liftUser) + '/' + encodeURIComponent(action), { reason });
+        toast(r.message || 'Sanction levée.');
+        await paint(Number(d.page || 1));
+      } catch (e) { toast(e.message, true); }
+    });
     box.querySelectorAll('[data-edit-member-case]').forEach(b => b.onclick = () => {
       const pageNow = Number(d.page || 1);
-      editModerationReason(b.dataset.editMemberCase, b.dataset.currentReason || '', () => openModerationSanctions(member, pageNow));
+      editModerationReason(b.dataset.editMemberCase, b.dataset.currentReason || '', () => paint(pageNow));
     });
   };
   openModal({
