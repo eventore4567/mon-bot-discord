@@ -638,6 +638,45 @@ class SanctionDetailView(OwnedView):
         )
 
 
+class SanctionFilterSelect(discord.ui.Select):
+    FILTERS = {
+        "all": ("Toutes les sanctions", None),
+        "ban": ("Bannissements", ("ban", "tempban")),
+        "mute": ("Timeouts", ("mute",)),
+        "warn": ("Avertissements", ("warn",)),
+        "kick": ("Expulsions", ("kick",)),
+        "reverse": ("Levées de sanction", ("unban", "unmute")),
+    }
+
+    def __init__(self, owner: "SanctionHistoryView"):
+        self.owner = owner
+        options = [
+            discord.SelectOption(
+                label=label,
+                value=value,
+                default=(value == owner.action_filter),
+            )
+            for value, (label, _actions) in self.FILTERS.items()
+        ]
+        super().__init__(
+            placeholder="Filtrer les sanctions",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.owner.suite.send_sanction_history(
+            interaction,
+            self.owner.member_id,
+            self.owner.owner_id,
+            0,
+            action_filter=self.values[0],
+            edit=True,
+        )
+
+
 class SanctionCaseSelect(discord.ui.Select):
     def __init__(self, owner: "SanctionHistoryView", rows):
         self.owner = owner
@@ -656,7 +695,7 @@ class SanctionCaseSelect(discord.ui.Select):
             min_values=1,
             max_values=1,
             options=options,
-            row=0,
+            row=1,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -688,35 +727,40 @@ class SanctionHistoryView(OwnedView):
         page: int,
         total: int,
         page_size: int = 5,
+        action_filter: str = "all",
     ):
         super().__init__(suite, owner_id)
         self.member_id = int(member_id)
         self.page = max(0, int(page))
         self.total = max(0, int(total))
         self.page_size = int(page_size)
+        self.action_filter = action_filter if action_filter in SanctionFilterSelect.FILTERS else "all"
         self.max_page = max(0, (self.total - 1) // self.page_size)
+        self.add_item(SanctionFilterSelect(self))
         if rows:
             self.add_item(SanctionCaseSelect(self, rows))
         self.previous.disabled = self.page <= 0
         self.next.disabled = self.page >= self.max_page
 
-    @discord.ui.button(label="Précédent", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Précédent", style=discord.ButtonStyle.secondary, row=2)
     async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await self.suite.send_sanction_history(
             interaction,
             self.member_id,
             self.owner_id,
             self.page - 1,
+            action_filter=self.action_filter,
             edit=True,
         )
 
-    @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Suivant", style=discord.ButtonStyle.secondary, row=2)
     async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await self.suite.send_sanction_history(
             interaction,
             self.member_id,
             self.owner_id,
             self.page + 1,
+            action_filter=self.action_filter,
             edit=True,
         )
 
@@ -1823,22 +1867,42 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         owner_id: int,
         page: int = 0,
         *,
+        action_filter: str = "all",
         edit: bool = False,
     ):
         page_size = 5
-        total = await self.bot.db.get_sanction_count(interaction.guild.id, int(member_id))
+        filters = SanctionFilterSelect.FILTERS
+        action_filter = action_filter if action_filter in filters else "all"
+        filter_label, actions = filters[action_filter]
+
+        params: list[Any] = [interaction.guild.id, int(member_id)]
+        where = "guild_id=? AND user_id=?"
+        if actions:
+            placeholders = ",".join("?" for _ in actions)
+            where += f" AND action IN ({placeholders})"
+            params.extend(actions)
+
+        count_row = await self.bot.db.fetchone(
+            f"SELECT COUNT(*) AS n FROM sanctions WHERE {where}",
+            tuple(params),
+        )
+        total = int(count_row["n"] if count_row else 0)
         max_page = max(0, (total - 1) // page_size)
         page = max(0, min(int(page), max_page))
+
         rows = await self.bot.db.fetchall(
-            "SELECT * FROM sanctions WHERE guild_id=? AND user_id=? "
+            f"SELECT * FROM sanctions WHERE {where} "
             "ORDER BY case_number DESC,id DESC LIMIT ? OFFSET ?",
-            (interaction.guild.id, int(member_id), page_size, page * page_size),
+            tuple([*params, page_size, page * page_size]),
         )
         member = interaction.guild.get_member(int(member_id))
         title = f"Sanctions — {member.display_name}" if member else "Sanctions du membre"
         embed = discord.Embed(
             title=title,
-            description=f"<@{int(member_id)}> · **{total}** sanction(s) · page **{page + 1}/{max_page + 1}**",
+            description=(
+                f"<@{int(member_id)}> · **{total}** sanction(s) · "
+                f"**{filter_label}** · page **{page + 1}/{max_page + 1}**"
+            ),
             colour=discord.Colour.orange(),
         )
         if member is not None:
@@ -1852,12 +1916,22 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                     inline=False,
                 )
         else:
-            embed.description += "\n\nAucune sanction enregistrée."
-        embed.set_footer(text="Sélectionnez un dossier pour voir le détail ou modifier sa raison.")
-        view = SanctionHistoryView(self, owner_id, member_id, rows, page, total, page_size)
+            embed.description += "\n\nAucune sanction correspondant à ce filtre."
+        embed.set_footer(text="Filtrez, changez de page ou ouvrez un dossier pour modifier sa raison.")
+        view = SanctionHistoryView(
+            self,
+            owner_id,
+            member_id,
+            rows,
+            page,
+            total,
+            page_size,
+            action_filter,
+        )
         if edit:
             return await interaction.response.edit_message(embed=embed, view=view)
         return await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
 
     async def member_panel(self, guild: discord.Guild, member: discord.Member, owner_id: int):
         sanctions = await self._safe_count(
