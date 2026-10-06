@@ -285,6 +285,11 @@ def _require_session(request: web.Request) -> tuple[dict | None, web.Response | 
     session = _session(request)
     if not session:
         return None, _json_error("Connectez-vous avec Discord pour continuer.", 401)
+    if not session.get("dashboard_verified_at"):
+        return None, _json_error(
+            "Vérification de sécurité requise avant d’accéder au dashboard.",
+            403,
+        )
     return session, None
 
 
@@ -358,7 +363,161 @@ async def _guild_metrics(db, guild_id: int) -> dict:
     return result
 
 
+DASHBOARD_VERIFY_TTL = 5 * 60
+DASHBOARD_VERIFY_LOCK_SECONDS = 10 * 60
+DASHBOARD_VERIFY_MAX_ATTEMPTS = 5
+DASHBOARD_VERIFY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+DASHBOARD_SECURITY_HTML = r"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050607">
+<title>SentriX — Vérification de sécurité</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#050607;color:#f5f7fb;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{min-height:100vh;display:grid;place-items:center;padding:32px 20px}.gate{width:min(930px,100%);min-height:600px;display:flex;flex-direction:column;justify-content:center}.brand{display:flex;align-items:center;gap:16px;margin-bottom:18px}.mark{width:48px;height:48px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(145deg,#6672ff,#3733c7);box-shadow:0 12px 34px rgba(78,86,255,.22);font-weight:900;font-size:22px}.brand strong{font-size:36px;letter-spacing:-1.2px}.gate h1{font-size:27px;margin:0 0 10px;letter-spacing:-.6px}.lead{margin:0 0 28px;max-width:800px;color:#b4bac5;font-size:16px;line-height:1.55}.verify-box{width:min(410px,100%);border:1px solid #4b4f58;background:#202226;border-radius:5px;min-height:76px;display:flex;align-items:center;padding:14px 15px;gap:13px;transition:.18s border-color,.18s background}.verify-box.active{border-color:#6872ff;background:#1e2028}.human-button{appearance:none;border:0;background:transparent;color:#f5f7fb;display:flex;align-items:center;gap:13px;font:inherit;text-align:left;padding:0;cursor:pointer;width:100%}.check{width:30px;height:30px;border:2px solid #9da3ad;border-radius:4px;display:grid;place-items:center;flex:0 0 auto}.verify-box.loading .check:after{content:"";width:16px;height:16px;border:2px solid #777fff;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite}.verify-box.done .check{border-color:#54d99a;background:#163629}.verify-box.done .check:after{content:"✓";color:#83edb8;font-weight:900}.human-copy{display:flex;flex-direction:column;gap:2px}.human-copy b{font-size:15px}.human-copy small{font-size:12px;color:#a8adb6}.shield{margin-left:auto;width:42px;height:42px;border-radius:12px;background:#11131a;border:1px solid #383c47;display:grid;place-items:center;font-weight:900;color:#7d85ff}.challenge{width:min(510px,100%);margin-top:18px;border:1px solid #2a2e36;border-radius:12px;padding:18px;background:#0e1014}.challenge.hidden{display:none}.captcha{display:block;width:100%;max-width:380px;border:1px solid #292e39;border-radius:9px;background:#080d1f}.form-row{display:flex;gap:10px;margin-top:13px}.form-row input{min-width:0;flex:1;height:45px;border:1px solid #3a3f49;border-radius:8px;background:#090b0f;color:#fff;padding:0 13px;text-transform:uppercase;letter-spacing:4px;font-weight:800;font-size:16px}.form-row input:focus{outline:2px solid #5964f4;outline-offset:1px}.btn{height:45px;border:0;border-radius:8px;padding:0 17px;background:#5964f4;color:#fff;font-weight:800;cursor:pointer}.btn:disabled{opacity:.55;cursor:wait}.msg{min-height:19px;margin-top:10px;color:#aeb4bf;font-size:13px}.msg.bad{color:#ff8f9a}.msg.ok{color:#72e5ae}.foot{margin-top:150px;border-top:1px solid #30333a;padding-top:18px;color:#777d87;font-size:12px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}.foot b{color:#a8aeb8}@keyframes spin{to{transform:rotate(360deg)}}@media(max-width:620px){body{padding:24px 18px}.gate{min-height:auto}.brand strong{font-size:30px}.mark{width:44px;height:44px}.gate h1{font-size:23px}.lead{font-size:14px}.form-row{flex-direction:column}.btn{width:100%}.foot{margin-top:90px}}
+</style>
+</head>
+<body>
+<main class="gate">
+  <div class="brand"><div class="mark">S</div><strong>SentriX</strong></div>
+  <h1>Vérification de sécurité en cours</h1>
+  <p class="lead">Cette étape protège le dashboard contre les accès automatisés. Vérifiez que vous êtes humain pour continuer vers l’administration de votre serveur.</p>
+  <div class="verify-box" id="verifyBox">
+    <button class="human-button" id="humanButton" type="button">
+      <span class="check" aria-hidden="true"></span>
+      <span class="human-copy"><b>Vérifiez que vous êtes humain.</b><small>Contrôle SentriX Security</small></span>
+      <span class="shield" aria-hidden="true">S</span>
+    </button>
+  </div>
+  <section class="challenge hidden" id="challenge" aria-live="polite">
+    <img class="captcha" id="captchaImage" alt="Code de vérification">
+    <div class="form-row">
+      <input id="captchaInput" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Code de vérification" placeholder="CODE">
+      <button class="btn" id="verifyButton" type="button">Continuer</button>
+    </div>
+    <div class="msg" id="message">Recopiez le code affiché ci-dessus.</div>
+  </section>
+  <footer class="foot"><span>Protection du dashboard <b>SentriX Security</b></span><span id="ref">Contrôle humain · session sécurisée</span></footer>
+</main>
+<script>
+(()=>{"use strict";
+const $=id=>document.getElementById(id);
+let csrf="",challengeLoaded=false,busy=false;
+async function request(url,opt={}){const headers={Accept:"application/json",...(opt.headers||{})};if(opt.body)headers["Content-Type"]="application/json";if(csrf&&opt.method&&opt.method!=="GET")headers["X-CSRF-Token"]=csrf;const r=await fetch(url,{credentials:"same-origin",cache:"no-store",...opt,headers});let d={};try{d=await r.json()}catch(_){}if(!r.ok)throw Object.assign(new Error(d.error||"Vérification impossible."),{status:r.status});return d}
+async function loadChallenge(force=false){if(busy||(challengeLoaded&&!force))return;busy=true;$("verifyBox").classList.add("active","loading");$("message").className="msg";$("message").textContent="Préparation du contrôle…";try{const d=await request("/api/dashboard-security/challenge");csrf=d.csrf||"";$("captchaImage").src=d.captcha_image;$("challenge").classList.remove("hidden");$("captchaInput").value="";$("captchaInput").focus();challengeLoaded=true;$("ref").textContent="Référence · "+(d.reference||"SXHR");$("message").textContent="Recopiez le code affiché ci-dessus."}catch(e){$("challenge").classList.remove("hidden");$("message").className="msg bad";$("message").textContent=e.message}finally{busy=false;$("verifyBox").classList.remove("loading")}}
+async function complete(){if(busy)return;const captcha=$("captchaInput").value.trim().toUpperCase();if(captcha.length!==6){$("message").className="msg bad";$("message").textContent="Le code contient 6 caractères.";return}busy=true;$("verifyButton").disabled=true;$("message").className="msg";$("message").textContent="Vérification…";try{await request("/api/dashboard-security/complete",{method:"POST",body:JSON.stringify({captcha})});$("verifyBox").classList.add("done");$("message").className="msg ok";$("message").textContent="Vérification réussie. Ouverture du dashboard…";setTimeout(()=>location.replace("/app"),450)}catch(e){challengeLoaded=false;$("message").className="msg bad";$("message").textContent=e.message+" Nouveau code généré.";await loadChallenge(true)}finally{busy=false;$("verifyButton").disabled=false}}
+$("humanButton").addEventListener("click",()=>loadChallenge());
+$("verifyButton").addEventListener("click",complete);
+$("captchaInput").addEventListener("input",e=>{e.currentTarget.value=e.currentTarget.value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6)});
+$("captchaInput").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();complete()}});
+})();
+</script>
+</body>
+</html>"""
+
+
+async def handle_dashboard_security_challenge(request: web.Request):
+    session = _session(request)
+    if not session:
+        return _json_error("Reconnectez-vous avec Discord pour continuer.", 401)
+    if session.get("dashboard_verified_at"):
+        return web.json_response({"ok": True, "verified": True})
+
+    now_value = time.time()
+    locked_until = float(session.get("dashboard_verify_locked_until") or 0)
+    if locked_until > now_value:
+        wait = max(1, int(locked_until - now_value))
+        return _json_error(
+            f"Trop de tentatives. Réessayez dans environ {max(1, (wait + 59) // 60)} minute(s).",
+            429,
+        )
+
+    last_issued = float(session.get("dashboard_verify_issued_at") or 0)
+    if now_value - last_issued < 1.0:
+        return _json_error("Attendez une seconde avant de demander un nouveau contrôle.", 429)
+
+    code = "".join(secrets.choice(DASHBOARD_VERIFY_ALPHABET) for _ in range(6))
+    session["dashboard_verify_code"] = code
+    session["dashboard_verify_expires_at"] = now_value + DASHBOARD_VERIFY_TTL
+    session["dashboard_verify_issued_at"] = now_value
+    reference = "SXHR-" + secrets.token_hex(4).upper()
+    session["dashboard_verify_reference"] = reference
+
+    from web.public_verification_v120 import _captcha_png
+
+    return web.json_response({
+        "ok": True,
+        "captcha_image": _captcha_png(code),
+        "expires_in": DASHBOARD_VERIFY_TTL,
+        "csrf": session["csrf"],
+        "reference": reference,
+    })
+
+
+async def handle_dashboard_security_complete(request: web.Request):
+    session = _session(request)
+    if not session:
+        return _json_error("Reconnectez-vous avec Discord pour continuer.", 401)
+    if session.get("dashboard_verified_at"):
+        return web.json_response({"ok": True, "verified": True})
+
+    csrf_error = _require_csrf(request, session)
+    if csrf_error:
+        return csrf_error
+
+    now_value = time.time()
+    locked_until = float(session.get("dashboard_verify_locked_until") or 0)
+    if locked_until > now_value:
+        wait = max(1, int(locked_until - now_value))
+        return _json_error(
+            f"Trop de tentatives. Réessayez dans environ {max(1, (wait + 59) // 60)} minute(s).",
+            429,
+        )
+
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    submitted = str((payload or {}).get("captcha") or "").strip().upper()
+    expected = str(session.get("dashboard_verify_code") or "")
+    expires_at = float(session.get("dashboard_verify_expires_at") or 0)
+
+    valid = bool(
+        submitted
+        and expected
+        and expires_at > now_value
+        and secrets.compare_digest(submitted, expected)
+    )
+    if not valid:
+        attempts = int(session.get("dashboard_verify_attempts") or 0) + 1
+        session["dashboard_verify_attempts"] = attempts
+        session.pop("dashboard_verify_code", None)
+        session.pop("dashboard_verify_expires_at", None)
+        if attempts >= DASHBOARD_VERIFY_MAX_ATTEMPTS:
+            session["dashboard_verify_locked_until"] = now_value + DASHBOARD_VERIFY_LOCK_SECONDS
+            session["dashboard_verify_attempts"] = 0
+            return _json_error(
+                "Trop de codes incorrects. La vérification est temporairement verrouillée.",
+                429,
+            )
+        return _json_error("Code incorrect ou expiré.", 400)
+
+    session["dashboard_verified_at"] = now_value
+    session["dashboard_verify_attempts"] = 0
+    session.pop("dashboard_verify_code", None)
+    session.pop("dashboard_verify_expires_at", None)
+    session.pop("dashboard_verify_locked_until", None)
+    return web.json_response({"ok": True, "verified": True})
+
+
 async def handle_index(request: web.Request):
+    if request.path == "/app":
+        session = _session(request)
+        if session and not session.get("dashboard_verified_at"):
+            return web.Response(text=DASHBOARD_SECURITY_HTML, content_type="text/html")
     return web.Response(text=INDEX_HTML, content_type="text/html")
 
 
@@ -706,6 +865,10 @@ async def handle_callback(request: web.Request):
         },
         "guilds": manageable,
         "csrf": secrets.token_urlsafe(32),
+        # Chaque nouvelle connexion Discord doit réussir une vérification humaine
+        # avant que les API d'administration deviennent accessibles.
+        "dashboard_verified_at": None,
+        "dashboard_verify_attempts": 0,
         "expires_at": time.time() + SESSION_TTL,
     }
     response = web.HTTPFound("/app?installed=1" if install_flow else "/app")
@@ -1592,6 +1755,8 @@ def build_app(bot) -> web.Application:
     app.router.add_get("/oauth/callback", handle_callback)
     app.router.add_post("/logout", handle_logout)
     app.router.add_get("/api/public", handle_public)
+    app.router.add_get("/api/dashboard-security/challenge", handle_dashboard_security_challenge)
+    app.router.add_post("/api/dashboard-security/complete", handle_dashboard_security_complete)
     app.router.add_get("/api/me", handle_me)
     app.router.add_get("/api/guilds", handle_guilds)
     app.router.add_get("/api/guilds/{guild_id}", handle_guild)
