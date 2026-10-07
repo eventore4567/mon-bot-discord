@@ -6,6 +6,7 @@ from pathlib import Path
 os.environ.setdefault("DISCORD_TOKEN", "test-token")
 
 from utils import sentrix_panels as panels
+from utils import sentrix_emojis
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -178,4 +179,22 @@ def test_cross_module_stability_guards_block_resource_recreation():
     assert "SNIPE_RETENTION_SECONDS" in snipe
     assert "SNIPE_MESSAGE_CACHE_LIMIT" in snipe
     assert "log_service.is_purged" in snipe
+
+def test_core_truncation_never_exposes_half_custom_emoji():
+    markup = "<:sentrix_security:410000000000000099>"
+    source = f"Protection {markup} configuration avancée"
+
+    direct = sentrix_emojis.tronquer(source, 24)
+    panel_text = panels._texte(source, 24)
+
+    for rendered in (direct, panel_text):
+        assert len(rendered) <= 24
+        assert "<:sentrix_security:" not in rendered
+        assert rendered == "Protection…"
+
+
+def test_setup_emoji_summary_uses_safe_truncation():
+    source = (ROOT / "cogs" / "setup_v2_ui.py").read_text(encoding="utf-8")
+    assert "description=sentrix_emojis.tronquer(" in source
+    assert "emojis_json" in source
 
