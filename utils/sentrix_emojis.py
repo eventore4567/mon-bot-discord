@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import pathlib
+import re
 
 import discord
 
@@ -117,6 +118,33 @@ TEMOIN = f"sentrix_pack_v{VERSION_PACK}"
 #: nom -> marquage « <:nom:id> », rempli par synchroniser().
 _RESOLUS: dict[str, str] = {}
 _SYNCHRONISE = False
+
+# Discord custom/application emoji markup. Generic string slicing inside one
+# of these tokens exposes broken text instead of rendering an emoji.
+_EMOJI_MARKUP_RE = re.compile(r"<a?:[A-Za-z0-9_]{2,32}:[0-9]{5,}>")
+
+def tronquer(texte: object, limite: int, *, suffixe: str = "…") -> str:
+    """Truncate text without splitting a Discord custom emoji markup."""
+    valeur = str(texte if texte is not None else "")
+    limite = max(0, int(limite))
+    if len(valeur) <= limite:
+        return valeur
+    if limite <= 0:
+        return ""
+
+    suffixe = str(suffixe or "")
+    if len(suffixe) >= limite:
+        return suffixe[:limite]
+
+    cible = limite - len(suffixe)
+    coupure = cible
+    for match in _EMOJI_MARKUP_RE.finditer(valeur):
+        if match.start() < coupure < match.end():
+            coupure = match.start()
+            break
+
+    rendu = valeur[:coupure].rstrip()
+    return (rendu + suffixe)[:limite]
 
 
 # ---------------------------------------------------------------------------
@@ -397,4 +425,5 @@ __all__ = [
     "synchroniser",
     "titre",
     "traduire",
+    "tronquer",
 ]
