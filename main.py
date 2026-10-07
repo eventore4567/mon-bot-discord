@@ -851,28 +851,28 @@ class BotAllInOne(commands.Bot):
                 len(publish_audit.missing_paths),
                 len(publish_audit.unexpected_paths),
             )
-            if publish_audit.musique_paths:
+            if publish_audit.music_paths:
                 logger.info(
-                    "Discord slash /musique publié : %s",
-                    ", ".join(f"/{path}" for path in publish_audit.musique_paths),
+                    "Discord slash /music publié : %s",
+                    ", ".join(f"/{path}" for path in publish_audit.music_paths),
                 )
             else:
                 logger.error(
-                    "Audit slash Discord : /musique absent de la surface renvoyée par sync()."
+                    "Audit slash Discord : /music absent de la surface renvoyée par sync()."
                 )
             if publish_audit.legacy_music_paths:
                 logger.error(
-                    "Audit slash Discord : ancienne surface /music encore publiée : %s",
+                    "Audit slash Discord : ancienne surface française /musique encore publiée : %s",
                     ", ".join(f"/{path}" for path in publish_audit.legacy_music_paths),
                 )
-            if publish_audit.aide_paths:
+            if publish_audit.help_paths:
                 logger.info(
-                    "Discord slash /aide publié : %s",
-                    ", ".join(f"/{path}" for path in publish_audit.aide_paths),
+                    "Discord slash /help publié : %s",
+                    ", ".join(f"/{path}" for path in publish_audit.help_paths),
                 )
             else:
                 logger.error(
-                    "Audit slash Discord : /aide absent de la surface renvoyée par sync()."
+                    "Audit slash Discord : /help absent de la surface renvoyée par sync()."
                 )
             if publish_audit.legacy_help_paths:
                 logger.error(
