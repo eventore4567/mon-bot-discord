@@ -467,11 +467,12 @@ class VerifySetupView(discord.ui.View):
                         logger.warning("Impossible d'ouvrir le règlement aux non vérifiés guild=%s.", self.guild.id)
 
         try:
-            await self.bot.db.add_setup_history(
+            await self.bot.db.log_setup_history(
                 self.guild.id,
                 self.owner_id,
                 "rules",
                 "Règlement",
+                None,
                 f"salon={channel.id}; rôle={role.id}; captcha={self.captcha_enabled}",
             )
         except Exception:
