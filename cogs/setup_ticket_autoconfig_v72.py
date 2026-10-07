@@ -1,11 +1,12 @@
-"""SentriX V72 — états propres et activation Tickets réellement fonctionnelle.
+"""SentriX V72 — états propres et activation Tickets sans création automatique.
 
 V72 reste une finition ciblée au-dessus de V70/V71 :
 - aucune valeur interne ``ConfigState.*`` n'est visible ;
 - l'accueil distingue module coupé, non configuré, actif et à corriger ;
-- le bouton Tickets crée/répare une vraie configuration exploitable ;
-- les réglages existants sont réutilisés et jamais écrasés volontairement ;
-- les panels déjà publiés respectent réellement le switch ON/OFF du module.
+- le bouton Tickets active uniquement une configuration déjà existante ;
+- aucun rôle, salon, catégorie, type ou panel n'est créé automatiquement ;
+- un panel supprimé n'est jamais recréé lors d'une simple activation ;
+- les panels existants respectent le switch ON/OFF du module.
 """
 from __future__ import annotations
 
@@ -157,7 +158,7 @@ async def _home(view) -> discord.Embed:
         name="NAVIGATION",
         value=(
             "Choisissez une page dans le menu ci-dessous. Sur **Tickets**, "
-            "le bouton Activer / Désactiver crée automatiquement ce qui manque."
+            "le bouton Activer / Désactiver conserve la configuration existante sans rien créer."
         ),
         inline=False,
     )
@@ -242,6 +243,7 @@ async def ticket_configuration_ready(bot: commands.Bot, guild: discord.Guild) ->
 
 
 async def _ensure_support_role(guild: discord.Guild, conf, types: list) -> tuple[discord.Role, bool]:
+    """Résout uniquement un rôle déjà configuré/existant."""
     for ticket_type in types:
         role = _role(guild, _row_get(ticket_type, "staff_role_id"))
         if role is not None:
@@ -250,43 +252,9 @@ async def _ensure_support_role(guild: discord.Guild, conf, types: list) -> tuple
     role = _role(guild, setup_ui._get(conf, "mod_role")) or _named_support_role(guild)
     if role is not None:
         return role, False
-
-    me = guild.me
-    if me is None or not me.guild_permissions.manage_roles:
-        raise TicketBootstrapError(
-            "Aucun rôle support n'est disponible et SentriX n'a pas **Gérer les rôles**."
-        )
-    role = await guild.create_role(
-        name="Support",
-        permissions=discord.Permissions.none(),
-        mentionable=False,
-        reason="SentriX V72 : configuration automatique des tickets",
+    raise TicketBootstrapError(
+        "Aucun rôle support valide n'est configuré. Choisissez-en un dans Setup avant d'activer Tickets."
     )
-    return role, True
-
-
-def _private_overwrites(
-    guild: discord.Guild,
-    support_role: discord.Role,
-) -> dict[Any, discord.PermissionOverwrite]:
-    me = guild.me
-    if me is None:
-        raise TicketBootstrapError("SentriX est introuvable dans la liste des membres du serveur.")
-    return {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        support_role: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            read_message_history=True,
-        ),
-        me: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            manage_channels=True,
-            manage_roles=True,
-            read_message_history=True,
-        ),
-    }
 
 
 async def _ensure_category(
@@ -296,6 +264,7 @@ async def _ensure_category(
     types: list,
     support_role: discord.Role,
 ) -> tuple[discord.CategoryChannel, bool]:
+    del support_role
     for ticket_type in types:
         category = _category(guild, _row_get(ticket_type, "category_id"))
         if category is not None:
@@ -309,19 +278,9 @@ async def _ensure_category(
     if panel_channel and isinstance(panel_channel.category, discord.CategoryChannel):
         return panel_channel.category, False
 
-    marker = _channel_by_topic(guild, _PANEL_TOPIC)
-    if marker and isinstance(marker.category, discord.CategoryChannel):
-        return marker.category, False
-
-    me = guild.me
-    if me is None or not me.guild_permissions.manage_channels:
-        raise TicketBootstrapError("SentriX a besoin de **Gérer les salons** pour créer la catégorie Tickets.")
-    category = await guild.create_category(
-        "Tickets",
-        overwrites=_private_overwrites(guild, support_role),
-        reason="SentriX V72 : configuration automatique des tickets",
+    raise TicketBootstrapError(
+        "Aucune catégorie Tickets valide n'est configurée. Choisissez une catégorie existante dans Setup."
     )
-    return category, True
 
 
 async def _ensure_panel_channel(
@@ -330,31 +289,13 @@ async def _ensure_panel_channel(
     category: discord.CategoryChannel,
     support_role: discord.Role,
 ) -> tuple[discord.TextChannel, bool]:
+    del category, support_role
     channel = _text_channel(guild, _row_get(panel, "channel_id")) if panel else None
     if channel is not None:
         return channel, False
-    channel = _channel_by_topic(guild, _PANEL_TOPIC)
-    if channel is not None:
-        return channel, False
-
-    me = guild.me
-    if me is None or not me.guild_permissions.manage_channels:
-        raise TicketBootstrapError("SentriX a besoin de **Gérer les salons** pour créer le salon d'ouverture.")
-
-    overwrites = _private_overwrites(guild, support_role)
-    overwrites[guild.default_role] = discord.PermissionOverwrite(
-        view_channel=True,
-        send_messages=False,
-        read_message_history=True,
+    raise TicketBootstrapError(
+        "Le salon du panel Tickets n'est plus disponible. Sélectionnez un salon existant puis republiez le panel manuellement."
     )
-    channel = await guild.create_text_channel(
-        "ouvrir-un-ticket",
-        category=category,
-        topic=f"{_PANEL_TOPIC} • Panel public SentriX",
-        overwrites=overwrites,
-        reason="SentriX V72 : configuration automatique des tickets",
-    )
-    return channel, True
 
 
 async def _ensure_log_channel(
@@ -364,6 +305,7 @@ async def _ensure_log_channel(
     category: discord.CategoryChannel,
     support_role: discord.Role,
 ) -> tuple[discord.TextChannel, bool]:
+    del category, support_role
     for ticket_type in types:
         channel = _text_channel(guild, _row_get(ticket_type, "log_channel_id"))
         if channel is not None:
@@ -372,52 +314,33 @@ async def _ensure_log_channel(
     channel = _text_channel(guild, setup_ui._get(conf, "ticket_log_channel"))
     if channel is not None:
         return channel, False
-    channel = _channel_by_topic(guild, _LOG_TOPIC)
-    if channel is not None:
-        return channel, False
-
-    me = guild.me
-    if me is None or not me.guild_permissions.manage_channels:
-        raise TicketBootstrapError("SentriX a besoin de **Gérer les salons** pour créer les logs Tickets.")
-    channel = await guild.create_text_channel(
-        "ticket-logs",
-        category=category,
-        topic=f"{_LOG_TOPIC} • Journaux privés SentriX",
-        overwrites=_private_overwrites(guild, support_role),
-        reason="SentriX V72 : configuration automatique des tickets",
+    raise TicketBootstrapError(
+        "Aucun salon de logs Tickets valide n'est configuré. Choisissez un salon existant dans Setup."
     )
-    return channel, True
 
 
-async def _publish_panel(
-    bot: commands.Bot,
+async def _require_existing_panel_message(
     cog: Any,
-    panel_id: int,
+    panel,
     channel: discord.TextChannel,
 ) -> discord.Message:
-    ticket_runtime = _tickets_module()
-    panel = await cog.get_panel(panel_id)
-    types = await cog.get_panel_types(panel_id)
-    if panel is None or not types:
-        raise TicketBootstrapError("Le panel ou son type Support n'a pas pu être créé.")
-
-    view = ticket_runtime.TicketPanelView(panel, types)
-    message = None
-    old_message_id = _row_get(panel, "message_id")
-    if old_message_id:
-        try:
-            message = await channel.fetch_message(int(old_message_id))
-            await panels.editer(message, panels.avec_composants(panels.depuis_embed(cog.build_panel_embed(panel)), view))
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            message = None
-    if message is None:
-        message = await panels.envoyer(channel, panels.avec_composants(panels.depuis_embed(cog.build_panel_embed(panel)), view))
-
-    await bot.db.execute(
-        "UPDATE ticket_panels_v2 SET message_id=?,channel_id=?,enabled=1 WHERE id=?",
-        (message.id, channel.id, panel_id),
-    )
-    return message
+    if panel is None:
+        raise TicketBootstrapError("Aucun panel Tickets n'est configuré.")
+    message_id = _row_get(panel, "message_id")
+    if not message_id:
+        raise TicketBootstrapError(
+            "Le panel Tickets n'a pas encore été publié. Publiez-le manuellement avant d'activer le module."
+        )
+    try:
+        return await channel.fetch_message(int(message_id))
+    except discord.NotFound as exc:
+        raise TicketBootstrapError(
+            "Le panel Tickets configuré a été supprimé. SentriX ne le recrée pas automatiquement : republiez-le manuellement."
+        ) from exc
+    except discord.Forbidden as exc:
+        raise TicketBootstrapError(
+            "SentriX ne peut pas accéder au panel Tickets configuré dans ce salon."
+        ) from exc
 
 
 async def ensure_ticket_configuration(
@@ -426,98 +349,54 @@ async def ensure_ticket_configuration(
     *,
     actor_id: int,
 ) -> dict[str, Any]:
-    """Crée/répare le minimum utilisable, puis active Tickets seulement à la fin."""
+    """Valide une configuration EXISTANTE puis active Tickets, sans créer de ressource."""
     async with _lock(guild.id):
         cog = bot.get_cog("Tickets")
-        required = ("create_panel", "add_type", "get_panel", "get_panel_types", "build_panel_embed")
-        if cog is None or not all(callable(getattr(cog, name, None)) for name in required):
+        if cog is None:
             raise TicketBootstrapError("Le moteur Tickets n'est pas chargé.")
 
         conf = await bot.db.get_guild_config(guild.id)
         _panels, panel, types = await _existing_ticket_rows(bot, guild.id)
-        created_resources: list[Any] = []
-        created_panel_id: int | None = None
-        created_type_id: int | None = None
-
-        try:
-            support_role, made = await _ensure_support_role(guild, conf, types)
-            if made:
-                created_resources.append(support_role)
-
-            category, made = await _ensure_category(guild, conf, panel, types, support_role)
-            if made:
-                created_resources.append(category)
-
-            panel_channel, made = await _ensure_panel_channel(guild, panel, category, support_role)
-            if made:
-                created_resources.append(panel_channel)
-
-            log_channel, made = await _ensure_log_channel(guild, conf, types, category, support_role)
-            if made:
-                created_resources.append(log_channel)
-
-            if panel is None:
-                created_panel_id = await cog.create_panel(guild.id, "Support")
-                panel_id = created_panel_id
-            else:
-                panel_id = int(_row_get(panel, "id"))
-
-            current_types = await cog.get_panel_types(panel_id)
-            if not current_types:
-                created_type_id = await cog.add_type(guild.id, panel_id, "Support")
-                current_types = await cog.get_panel_types(panel_id)
-            if not current_types:
-                raise TicketBootstrapError("Le type Support n'a pas pu être créé.")
-
-            await bot.db.execute(
-                "UPDATE ticket_panels_v2 SET channel_id=?,enabled=1 WHERE id=?",
-                (panel_channel.id, panel_id),
+        if panel is None:
+            raise TicketBootstrapError(
+                "Aucun panel Tickets n'est configuré. Créez et publiez un panel manuellement depuis Setup."
             )
-            await bot.db.execute(
-                "UPDATE ticket_types SET "
-                "staff_role_id=COALESCE(staff_role_id,?),"
-                "category_id=COALESCE(category_id,?),"
-                "log_channel_id=COALESCE(log_channel_id,?) "
-                "WHERE panel_id=?",
-                (support_role.id, category.id, log_channel.id, panel_id),
+        if not types:
+            raise TicketBootstrapError(
+                "Aucun type de ticket n'est configuré. Ajoutez au moins un type dans Setup."
             )
 
-            await bot.db.set_guild_config(guild.id, "ticket_category", category.id)
-            await bot.db.set_guild_config(guild.id, "ticket_log_channel", log_channel.id)
-            message = await _publish_panel(bot, cog, panel_id, panel_channel)
+        support_role, _ = await _ensure_support_role(guild, conf, types)
+        category, _ = await _ensure_category(guild, conf, panel, types, support_role)
+        panel_channel, _ = await _ensure_panel_channel(guild, panel, category, support_role)
+        log_channel, _ = await _ensure_log_channel(guild, conf, types, category, support_role)
 
-            await core.set_module_enabled(
-                bot,
-                guild.id,
-                "tickets",
-                True,
-                actor_id=actor_id,
-            )
-            return {
-                "role": support_role,
-                "category": category,
-                "panel_channel": panel_channel,
-                "log_channel": log_channel,
-                "panel_id": panel_id,
-                "message": message,
-            }
-        except Exception:
-            if created_type_id is not None:
-                try:
-                    await bot.db.execute("DELETE FROM ticket_types WHERE id=?", (created_type_id,))
-                except Exception:
-                    logger.warning("Étape non critique ignorée dans ensure_ticket_configuration", exc_info=True)
-            if created_panel_id is not None:
-                try:
-                    await bot.db.execute("DELETE FROM ticket_panels_v2 WHERE id=?", (created_panel_id,))
-                except Exception:
-                    logger.warning("Étape non critique ignorée dans ensure_ticket_configuration", exc_info=True)
-            for resource in reversed(created_resources):
-                try:
-                    await resource.delete(reason="Rollback SentriX V72 : configuration Tickets incomplète")
-                except (discord.Forbidden, discord.HTTPException):
-                    pass
-            raise
+        # Tous les types doivent conserver leurs propres références valides.
+        for ticket_type in types:
+            if _role(guild, _row_get(ticket_type, "staff_role_id")) is None:
+                raise TicketBootstrapError("Un type de ticket n'a plus de rôle staff valide.")
+            if _category(guild, _row_get(ticket_type, "category_id")) is None:
+                raise TicketBootstrapError("Un type de ticket n'a plus de catégorie valide.")
+            if _text_channel(guild, _row_get(ticket_type, "log_channel_id")) is None:
+                raise TicketBootstrapError("Un type de ticket n'a plus de salon de logs valide.")
+
+        message = await _require_existing_panel_message(cog, panel, panel_channel)
+
+        await core.set_module_enabled(
+            bot,
+            guild.id,
+            "tickets",
+            True,
+            actor_id=actor_id,
+        )
+        return {
+            "role": support_role,
+            "category": category,
+            "panel_channel": panel_channel,
+            "log_channel": log_channel,
+            "panel_id": int(_row_get(panel, "id")),
+            "message": message,
+        }
 
 
 async def _ack(interaction: discord.Interaction) -> None:
@@ -553,7 +432,7 @@ class TicketModuleButton(discord.ui.Button):
             )
             await self.owner.audit(interaction.user.id, "module:tickets", "off")
             await self.owner.refresh(interaction)
-            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.warning('Le module **Tickets** est désactivé. La configuration est conservée et pourra être réactivée sans recréer les salons.')), ephemere=True)
+            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.warning('Le module **Tickets** est désactivé. La configuration existante est conservée.')), ephemere=True)
 
         try:
             result = await ensure_ticket_configuration(
@@ -564,15 +443,15 @@ class TicketModuleButton(discord.ui.Button):
         except TicketBootstrapError as exc:
             return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error(str(exc))), ephemere=True)
         except (discord.Forbidden, discord.HTTPException):
-            logger.exception("Discord a refusé la configuration automatique Tickets V72.")
-            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Discord a refusé une étape. Vérifiez **Gérer les salons**, **Gérer les rôles**, **Voir les salons** et **Envoyer des messages** pour SentriX.')), ephemere=True)
+            logger.exception("Discord a refusé la validation de la configuration Tickets V72.")
+            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('Discord a refusé l’accès à une ressource Tickets déjà configurée.')), ephemere=True)
         except Exception:
-            logger.exception("Configuration automatique Tickets V72 impossible.")
-            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('La configuration automatique des tickets a rencontré une erreur technique.')), ephemere=True)
+            logger.exception("Validation de la configuration Tickets V72 impossible.")
+            return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.error('La validation de la configuration Tickets a rencontré une erreur technique.')), ephemere=True)
 
-        await self.owner.audit(interaction.user.id, "module:tickets", "on+autoconfig")
+        await self.owner.audit(interaction.user.id, "module:tickets", "on")
         await self.owner.refresh(interaction)
-        return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(f"**Tickets configurés et activés.**\nPanel : {result['panel_channel'].mention}\nCatégorie : **{result['category'].name}**\nRôle support : {result['role'].mention}\nLogs : {result['log_channel'].mention}")), ephemere=True)
+        return await panels.envoyer(interaction.followup, panels.depuis_embed(embeds.success(f"**Tickets activés.**\nPanel : {result['panel_channel'].mention}\nCatégorie : **{result['category'].name}**\nRôle support : {result['role'].mention}\nLogs : {result['log_channel'].mention}")), ephemere=True)
 
 
 def _install_setup_render() -> None:
@@ -635,7 +514,7 @@ def install(bot: commands.Bot) -> None:
 
     bot._sentrix_setup_ticket_autoconfig_v72 = True
     logger.info(
-        "Setup V72 actif : états propres, Tickets auto-configurables et panels bloqués quand le module est OFF."
+        "Setup V72 actif : états propres, Tickets sans auto-création et panels bloqués quand le module est OFF."
     )
 
 
