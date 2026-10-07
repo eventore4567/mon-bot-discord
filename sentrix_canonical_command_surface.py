@@ -218,6 +218,44 @@ SHORT_DUPLICATES = frozenset()
 SHORT_DIRECT: dict[str, str] = {}
 
 
+_ENGLISH_NAME_TOKENS = {
+    "aide": "help", "ia": "ai", "infos": "info", "outils": "tools",
+    "pratiques": "utility", "economie": "economy", "niveaux": "levels",
+    "niveau": "level", "jeux": "games", "musique": "music",
+    "evenements": "events", "serveur": "server", "salon": "channel",
+    "salons": "channels", "securite": "security", "reglages": "settings",
+    "utilisateur": "user", "utilisateurs": "users", "membre": "member",
+    "membres": "members", "profil": "profile", "historique": "history",
+    "etat": "status", "statut": "status", "quarantaine": "quarantine",
+    "preuve": "proof", "panneau": "panel", "panneaux": "panels",
+    "liste": "list", "ajouter": "add", "retirer": "remove",
+    "supprimer": "delete", "creer": "create", "modifier": "edit",
+    "envoyer": "send", "apercu": "preview", "renommer": "rename",
+    "sauvegarder": "save", "charger": "load", "recherche": "search",
+    "modele": "model", "classement": "leaderboard", "portefeuille": "wallet",
+    "recompenses": "rewards", "boutique": "shop", "administration": "admin",
+    "rapides": "quick", "courses": "races", "aventure": "adventure",
+    "gestion": "manage", "creation": "build", "sauvegarde": "backup",
+    "divers": "general", "proprietaire": "owner", "invitations": "invites",
+    "statistiques": "stats", "ouvrir": "open", "fermer": "close",
+    "annuler": "cancel", "terminer": "end", "relancer": "reroll",
+    "rejoindre": "join", "quitter": "leave", "bienvenue": "welcome",
+    "solde": "balance", "quotidien": "daily", "hebdo": "weekly",
+    "travailler": "work", "payer": "pay", "inventaire": "inventory",
+    "banque": "bank", "avertir": "warn", "avertissements": "warnings",
+    "nettoyer": "clear", "verrouiller": "lock", "deverrouiller": "unlock",
+    "pseudo": "nickname", "debannir": "unban", "expulser": "kick",
+    "traduire": "translate", "croissance": "growth",
+}
+
+
+def _english_public_name(value: object) -> str:
+    """Normalize any legacy French token before a slash name reaches Discord."""
+    safe = v95._safe_name(value)
+    parts = [_ENGLISH_NAME_TOKENS.get(part, part) for part in safe.split("-")]
+    return v95._safe_name("-".join(parts))
+
+
 def _install_flat_bucket_support() -> None:
     """Sous-groupe "" = feuille directement sous la racine, même pour une racine
     sémantique (/securite antinuke au lieu de /securite antinuke antinuke)."""
@@ -303,7 +341,7 @@ def install() -> None:
         root = ROOTS.get(str(root).casefold(), str(root).casefold())
         if short:
             root = SHORT_ROOTS.get(root, root)
-        return root, LEAVES.get(qualified, LEAVES.get(simple, leaf))
+        return root, _english_public_name(LEAVES.get(qualified, LEAVES.get(simple, leaf)))
 
     def bucket(root_name: str, target: v95.SlashTarget) -> str:
         root = str(root_name).casefold()
@@ -316,7 +354,7 @@ def install() -> None:
             if original_name.startswith("music playlist "):
                 return "playlist"
             if simple in {"queue", "remove", "clear"}:
-                return "file"
+                return "queue"
             # Jouer/pause/reprendre/suivant/arrêter/en-cours/volume/boucle/
             # mélanger/rejoindre/quitter/position/lecture-auto restent directement
             # sous /music : pas de sous-groupe "lecture" artificiel.
@@ -337,11 +375,11 @@ def install() -> None:
         # sous-groupe par V98.
         if root == "music":
             if original_name.startswith("music playlist "):
-                return v95._safe_name(PLAYLIST_LEAVES.get(simple, simple))
+                return _english_public_name(PLAYLIST_LEAVES.get(simple, simple))
             if original_name.startswith("music "):
-                return v95._safe_name(MUSIC_LEAVES.get(simple, simple))
+                return _english_public_name(MUSIC_LEAVES.get(simple, simple))
 
-        return v95._safe_name(target.leaf_name)
+        return _english_public_name(target.leaf_name)
 
     def chunks(bucket_name: str, count: int) -> list[str]:
         base = v95._safe_name(bucket_name)
