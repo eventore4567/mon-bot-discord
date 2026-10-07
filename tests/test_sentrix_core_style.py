@@ -198,3 +198,10 @@ def test_setup_emoji_summary_uses_safe_truncation():
     assert "description=sentrix_emojis.tronquer(" in source
     assert "emojis_json" in source
 
+def test_logs_keep_actor_target_and_nonempty_fallback_contract():
+    source = (ROOT / "utils" / "wide_logs.py").read_text(encoding="utf-8")
+    assert 'event_type.startswith("soundboard_")' in source
+    assert '"modifié par", "modifie par"' in source
+    assert 'fallback_details: list[str] = []' in source
+    assert 'fallback_details.append(f"Responsable : {actor_value}")' in source
+    assert 'return "Son"' in source
