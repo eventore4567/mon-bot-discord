@@ -181,22 +181,22 @@ BUCKETS = {
     ("ticket", "panel"): "panels", ("ticket", "config"): "config",
     ("ticket", "manage"): "manage", ("ticket", "stats"): "history",
     ("moderation", "members"): "members", ("moderation", "cases"): "cases",
-    ("moderation", "emoji"): "emojis", ("moderation", "general"): "general",
+    ("moderation", "emoji"): "emojis", ("moderation", "general"): "tools",
     ("security", "lists"): "lists", ("security", "backup"): "backup",
-    ("security", "general"): "general", ("config", "commands"): "commands",
-    ("config", "general"): "general", ("utility", "general"): "general",
+    ("security", "general"): "tools", ("config", "commands"): "commands",
+    ("config", "general"): "settings", ("utility", "general"): "tools",
     ("config", "channels"): "channels", ("config", "levels"): "levels",
     ("economy", "wallet"): "wallet", ("economy", "rewards"): "rewards",
     ("economy", "shop"): "shop", ("economy", "ranking"): "ranking",
-    ("economy", "admin"): "admin", ("economy", "general"): "general",
+    ("economy", "admin"): "admin", ("economy", "general"): "tools",
     ("level", "profile"): "profile", ("level", "ranking"): "ranking",
-    ("level", "general"): "general", ("game", "quick"): "quick",
+    ("level", "general"): "community", ("game", "quick"): "quick",
     ("game", "races"): "races", ("game", "adventure"): "adventure",
-    ("game", "general"): "general", ("role", "manage"): "manage",
+    ("game", "general"): "activities", ("role", "manage"): "manage",
     ("role", "panels"): "panels", ("role", "reactions"): "reactions",
-    ("role", "general"): "general", ("server", "build"): "build",
+    ("role", "general"): "tools", ("server", "build"): "build",
     ("server", "channels"): "channels", ("server", "backup"): "backup",
-    ("server", "manage"): "manage", ("server", "general"): "general",
+    ("server", "manage"): "manage", ("server", "general"): "tools",
 }
 
 
@@ -389,8 +389,10 @@ def install() -> None:
         base = v95._safe_name(bucket_name)
         if count <= 1:
             return [base]
+        # Keep overflow groups tied to their real topic. Never publish vague
+        # "more", "extra", "general" or translated "-suite" names.
         return [base] + [
-            v95._safe_name("more" if index == 2 else f"more-{index}")
+            v95._safe_name(f"{base}-{index}")
             for index in range(2, count + 1)
         ]
 
