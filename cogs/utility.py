@@ -1862,16 +1862,6 @@ class Utility(commands.Cog, name="Utility"):
         e = await self._embed(ctx.guild.id if ctx.guild else None, title=titre, description=description)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @commands.hybrid_command(name="translate", description="Traduire un texte vers une autre langue.")
-    @app_commands.describe(langue="Code langue cible (ex: en, es, de)", texte="Le texte à traduire")
-    async def translate(self, ctx: commands.Context, langue: str, *, texte: str):
-        try:
-            from deep_translator import GoogleTranslator
-            result = GoogleTranslator(source="auto", target=langue).translate(texte)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title=f'Traduction ({langue})', description=result)))
-        except Exception:
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Traduction échouée', description='Vérifiez le code de langue.', kind='danger')))
-
     @commands.hybrid_command(name="weather", description="Afficher la météo d'une ville.")
     @app_commands.describe(ville="Le nom de la ville")
     async def weather(self, ctx: commands.Context, *, ville: str):

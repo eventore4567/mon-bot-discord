@@ -2,6 +2,7 @@
 
 Suggestions : formulaire, votes, décision du staff, langue, permissions.
 Sondages : formulaire, éditeur, sondage natif publié, forme rapide en préfixe.
+Traduction : commande native, menu contextuel, langue de l'utilisateur, pannes, mentions.
 Chaque scénario s'exécute dans son propre processus, avec sa base jetable.
 """
 import os
@@ -14,7 +15,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("scenario", ["suggestions_e2e.py", "poll_e2e.py"])
+@pytest.mark.parametrize("scenario", ["suggestions_e2e.py", "poll_e2e.py", "translation_e2e.py"])
 def test_parcours_complet(scenario):
     env = dict(os.environ, DISCORD_TOKEN="ci.fake.token", PYTHONPATH=str(ROOT))
     result = subprocess.run(

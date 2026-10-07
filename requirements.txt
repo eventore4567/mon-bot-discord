@@ -16,3 +16,6 @@ yt-dlp[default]>=2026.8.19
 # l'avaient pas. Le déclarer ici le rend disponible partout où requirements.txt est
 # installé, sans modifier chaque workflow un par un.
 pytest-asyncio>=0.23
+# Traduction (/translate, menu « Translate Message ») : Google Translate, sans IA.
+# Absent jusqu'ici : en production /translate échouait à chaque appel.
+deep-translator>=1.9.1,<2

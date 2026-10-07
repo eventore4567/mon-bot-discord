@@ -113,6 +113,7 @@ EXTENSIONS = [
     "cogs.utility",
     "cogs.suggestions",
     "cogs.poll_ui",
+    "cogs.translation",
     "cogs.guild_arrival",
     "cogs.notifications",
     "cogs.ai",

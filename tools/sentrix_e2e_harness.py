@@ -311,12 +311,17 @@ async def boot(*, quiet: bool = True):
     main.start_dashboard = lambda bot: asyncio.sleep(0)
     bot = main.BotAllInOne()
 
+    # Discord renvoie TOUJOURS une description, vide pour un menu contextuel (types
+    # USER et MESSAGE) ; renvoyer la requête telle quelle faisait échouer la synchro
+    # du harnais sur KeyError: 'description' dès le premier menu contextuel.
     async def _bulk(app_id, payload):
-        return [dict(p, id=str(i + 1), application_id=str(BOT_ID), version="1", default_member_permissions=None)
+        return [{"description": "", **p, "id": str(i + 1), "application_id": str(BOT_ID), "version": "1",
+                 "default_member_permissions": None}
                 for i, p in enumerate(payload)]
 
     async def _bulk_guild(app_id, guild_id, payload):
-        return [dict(p, id=str(i + 1), application_id=str(BOT_ID), version="1", default_member_permissions=None, guild_id=str(guild_id))
+        return [{"description": "", **p, "id": str(i + 1), "application_id": str(BOT_ID), "version": "1",
+                 "default_member_permissions": None, "guild_id": str(guild_id)}
                 for i, p in enumerate(payload)]
 
     bot.http.bulk_upsert_global_commands = _bulk
