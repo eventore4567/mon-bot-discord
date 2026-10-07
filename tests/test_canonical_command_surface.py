@@ -85,10 +85,14 @@ def test_music_leaf_rebuild_prevents_cross_bucket_suffixes():
     surface.v98.semantic_leaf = original
 
 
-def test_generic_buckets_are_short_and_english():
-    assert BUCKETS[("config", "general")] == "general"
-    assert BUCKETS[("utility", "general")] == "general"
-    assert BUCKETS[("moderation", "general")] == "general"
+def test_generic_buckets_are_replaced_by_real_english_topics():
+    assert BUCKETS[("config", "general")] == "settings"
+    assert BUCKETS[("utility", "general")] == "tools"
+    assert BUCKETS[("moderation", "general")] == "tools"
+    assert BUCKETS[("security", "general")] == "tools"
+    assert BUCKETS[("economy", "general")] == "tools"
+    assert BUCKETS[("level", "general")] == "community"
+    assert BUCKETS[("game", "general")] == "activities"
 
 
 def test_legacy_french_tokens_are_normalized_before_publish():
