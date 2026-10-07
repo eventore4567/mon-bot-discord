@@ -601,6 +601,49 @@ def narrative_body(
         utilisations = _field_value(embed, "utilisations max")
         if utilisations:
             lines.append(f"**Utilisations max :** {utilisations}")
+    elif event_type.startswith("soundboard_"):
+        sound_name = _field_value_exact(embed, "Son", "Nom du son").strip("` ").strip()
+        sound_display = f"`{sound_name}`" if sound_name else "ce son"
+        actor = _first_user_ref(_field_value(embed, *_MODERATOR_LABELS)) or moderator
+        user = _first_user_ref(_field_value(embed, "Utilisateur", "Joué par", "Joue par"))
+
+        if event_type == "soundboard_create":
+            lines.append(
+                f"Le son {sound_display} a été ajouté"
+                + (f" par {actor}" if actor else "")
+                + "."
+            )
+        elif event_type == "soundboard_update":
+            lines.append(
+                f"Le son {sound_display} a été modifié"
+                + (f" par {actor}" if actor else "")
+                + "."
+            )
+        elif event_type == "soundboard_delete":
+            lines.append(
+                f"Le son {sound_display} a été supprimé"
+                + (f" par {actor}" if actor else "")
+                + "."
+            )
+        elif event_type == "soundboard_play":
+            sound_channel = _first_channel_ref(
+                _field_value(embed, "Salon vocal", "Salon", "Channel")
+            )
+            lines.append(
+                f"{user or 'Un membre'} a joué {sound_display}"
+                + (f" dans {sound_channel}" if sound_channel else "")
+                + "."
+            )
+
+        for field_name, display_name in (
+            ("Nom", "Nom"),
+            ("Emoji", "Emoji"),
+            ("Volume", "Volume"),
+        ):
+            value = _field_value_exact(embed, field_name)
+            if value:
+                lines.append(f"**{display_name} :** {value}")
+
     elif event_type == "guild_update":
         lines.append(f"Les paramètres du serveur ont été modifiés" + (f" par {moderator}" if moderator else "") + ".")
         for label, affichage in (
@@ -727,6 +770,34 @@ def narrative_body(
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         if base:
             lines.append(base)
+
+        # New/unknown event types must never render as an empty card merely
+        # because all useful fields are short. IDs stay in copy-ID actions.
+        fallback_details: list[str] = []
+        actor_value = _first_user_ref(_field_value(embed, *_MODERATOR_LABELS))
+        if actor_value:
+            fallback_details.append(f"Responsable : {actor_value}")
+        for field_name, value in _field_map(embed):
+            normalized = _normalise_field_name(field_name)
+            if normalized in {
+                "id", "identifiant", "user id", "member id", "role id",
+                "channel id", "message id", "guild id", "audit log id",
+            }:
+                continue
+            if any(token in normalized for token in (
+                "modérateur", "moderateur", "responsable", "acteur", "actor", " par"
+            )):
+                continue
+            clean_value = safe_text(value)
+            if not clean_value or len(clean_value) > 180:
+                continue
+            detail = f"{field_name} : {clean_value}"
+            if detail not in fallback_details:
+                fallback_details.append(detail)
+            if len(fallback_details) >= 6:
+                break
+        if fallback_details:
+            lines.append(" · ".join(fallback_details))
 
     # Ajoute uniquement les blocs longs qui n'ont pas déjà été rendus. La comparaison
     # porte sur le CORPS du bloc, pas sur le bloc entier : "**Contenu**\n```texte```"
