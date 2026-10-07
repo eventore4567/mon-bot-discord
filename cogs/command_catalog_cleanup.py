@@ -254,9 +254,24 @@ def _install_short_command_names() -> None:
     common_command_names.PROTECTED_NAMES.update({"bl", "nick"})
 
 
+def _catalog_root_sources() -> frozenset[str]:
+    """Commandes racines publiées par utils/slash_catalog.py, la source unique du « / »."""
+    try:
+        from utils import slash_catalog
+    except (ImportError, ModuleNotFoundError):
+        return frozenset()
+    return frozenset(
+        entry.source.casefold() for entry in slash_catalog.CATALOG if " " not in entry.source
+    )
+
+
 def apply_surface(bot: commands.Bot) -> None:
     """Rend visibles uniquement les commandes directes, sans casser les anciennes +."""
     direct = NORMAL_DIRECT_COMMANDS | ADMIN_DIRECT_COMMANDS | PROOF_VISIBLE_COMMANDS | HELP_VISIBLE_EXTRA_COMMANDS
+    # Une commande publiée en « / » par le catalogue doit aussi être visible dans
+    # l'aide : sinon les deux surfaces se contredisent. C'est ce qui masquait
+    # +tempban et +case, alors que /tempban et /case étaient publiées.
+    direct = direct | _catalog_root_sources()
     for command in bot.commands:
         name = command.name.casefold()
         if name in EXPLICITLY_REMOVED_COMMANDS:

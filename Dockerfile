@@ -44,6 +44,7 @@ RUN python -m pytest -q \
     tests/test_short_command_names.py \
     tests/test_canonical_command_surface.py \
     tests/test_command_surface_v110.py \
+    tests/test_slash_catalog.py \
     tests/test_command_setup_prompt.py \
     tests/test_help_short_names.py \
     tests/test_command_registry_audit.py \

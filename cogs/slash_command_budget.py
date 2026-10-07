@@ -69,10 +69,25 @@ def _canonical_group_root_names() -> set[str]:
     return roots
 
 
+def _catalog_root_names() -> set[str]:
+    """Racines déclarées dans utils/slash_catalog.py, la source unique du « / ».
+
+    Sans ce lien, cette garde écartait EN SILENCE toute racine dont le nom figure
+    dans MERGED_COMMANDS : /profile, déclarée par le catalogue, disparaissait
+    sans erreur ni avertissement (mesuré au boot le 07/10/2026).
+    """
+    try:
+        from utils import slash_catalog
+    except (ImportError, ModuleNotFoundError):
+        return set()
+    return {name.casefold() for name in slash_catalog.entries_by_root()}
+
+
 def _required_names() -> set[str]:
     """Tier 1 : racines qui ne doivent jamais être sacrifiées au budget."""
     return (
-        _v110_public_root_names()
+        _catalog_root_names()
+        | _v110_public_root_names()
         | _canonical_group_root_names()
         | set(PROOF_SLASH_PREFERRED)
         | set(STAFF_SLASH_PREFERRED)
@@ -94,7 +109,7 @@ def _excluded_names() -> set[str]:
     # /profile, /shop, /weekly). Ces racines sont intentionnelles et ne doivent donc pas
     # être bloquées par le filtre legacy du budget.
     legacy_excluded = set(ADMIN_DIRECT_COMMANDS) | set(MERGED_COMMANDS)
-    return legacy_excluded - _v110_public_root_names()
+    return legacy_excluded - _v110_public_root_names() - _catalog_root_names()
 
 
 def _global_roots(tree) -> list:

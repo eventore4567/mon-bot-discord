@@ -883,6 +883,23 @@ def install_global() -> None:
             await prepare_bot(client)
             _remove_legacy_public_roots(self)
 
+            # Dernier mot sur la surface publique : utils/slash_catalog.py. Les
+            # couches précédentes construisent encore une surface intermédiaire ;
+            # le catalogue la remplace en réutilisant leurs commandes, puis
+            # l'audit ci-dessous valide CE QUI SERA RÉELLEMENT PUBLIÉ.
+            # Un défaut du catalogue ne doit JAMAIS empêcher la synchronisation :
+            # une exception ici faisait échouer tout tree.sync(), donc aucune
+            # commande publiée. En cas d'échec, la surface intermédiaire part
+            # telle quelle et l'erreur est journalisée avec sa pile.
+            try:
+                from utils import slash_catalog
+
+                slash_catalog.publish(client)
+            except Exception:
+                logger.exception(
+                    "Catalogue slash non appliqué : publication de la surface intermédiaire."
+                )
+
             # Phase 9 : prepare_bot() construit la surface canonique JUSTE avant
             # la synchronisation. L'audit doit donc vivre ici, après cette étape,
             # sinon il ne voit qu'une fraction du tree. Une anomalie critique
