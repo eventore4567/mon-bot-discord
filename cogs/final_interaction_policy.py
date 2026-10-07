@@ -411,7 +411,7 @@ async def _localize_outgoing(
         ]
     view = new_kwargs.get("view")
     if view is not None:
-        language_runtime.translate_view_in_place(view, setup=setup_surface)
+        language_runtime.translate_view_in_place(view, setup=setup_surface, protect=protection)
 
     return new_args, new_kwargs
 

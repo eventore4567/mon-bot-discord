@@ -109,3 +109,29 @@ def test_protecting_a_name_does_not_block_real_label_translation():
         "Modifications en attente", setup=True, protect=("Mon Serveur",)
     )
     assert "Unsaved changes" in rendu
+
+def test_view_translation_also_protects_the_server_name():
+    """SentriX rend presque tout en Components V2, donc le texte d'un panneau
+    passe par translate_view_in_place et non par l'embed. La protection doit
+    valoir sur ce chemin aussi : c'est lui qui abîmait « Serveur test » dans
+    +setup, et le transport n'avait pas le dernier mot — setup_experience_v74
+    retraduit sa propre vue après chaque clic.
+    """
+    import discord
+
+    vue = discord.ui.View()
+    vue.add_item(discord.ui.Button(label="Serveur de Jayden"))
+    vue.add_item(discord.ui.Button(label="Modifications en attente"))
+    language_runtime.translate_view_in_place(vue, setup=True, protect=("Serveur de Jayden",))
+    etiquettes = [item.label for item in vue.children]
+    assert "Serveur de Jayden" in etiquettes, etiquettes
+    assert "Unsaved changes" in etiquettes, etiquettes
+
+
+def test_exact_translation_never_overrides_protection():
+    """La couche exacte court-circuitait le garde : un serveur nommé exactement
+    « Serveur », ou un membre surnommé « Membre », était renommé."""
+    for nom in ("Serveur", "Membre", "Rôle"):
+        assert language_runtime.english_ui_text(nom, setup=True, protect=(nom,)) == nom
+        # Non protégée, la même étiquette doit bien se traduire.
+        assert language_runtime.english_ui_text(nom, setup=True) != nom

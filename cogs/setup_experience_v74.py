@@ -160,7 +160,17 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         # certaines pages repassaient en français après avoir choisi English.
         language = await language_runtime.get_language(self.bot, self.guild.id)
         if language == language_runtime.LANG_EN:
-            language_runtime.translate_view_in_place(self, setup=True)
+            # Le nom du serveur est protégé ICI aussi : cette passe est plus
+            # proche que le transport, donc c'est elle qui décide. Sans ça,
+            # « Serveur test » devenait « Server test » dans +setup — la
+            # traduction écrivait dans une donnée de l'utilisateur.
+            protection = tuple(
+                v for v in (
+                    getattr(self.guild, "name", None),
+                    getattr(getattr(self.guild, "me", None), "display_name", None),
+                ) if v
+            )
+            language_runtime.translate_view_in_place(self, setup=True, protect=protection)
 
     async def _effective_states(self) -> dict[str, str]:
         states = await super()._effective_states()

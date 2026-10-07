@@ -534,6 +534,64 @@ def _translate_surface_fragment(value: str, *, setup: bool = False) -> str:
     return text
 
 
+#: Traductions de CHAÎNE ENTIÈRE, par opposition à SURFACE_EN_REPLACEMENTS qui
+#: substitue des sous-chaînes. Une correspondance exacte est sûre par construction :
+#: elle ne peut pas écrire à l'intérieur d'un nom de serveur ou de membre, puisque
+#: ces valeurs varient et ne figureront jamais dans ce dictionnaire.
+#:
+#: Priorité choisie par la MESURE, non par ordre alphabétique : ces chaînes viennent
+#: des couches PARTAGÉES — utils/embeds.py pour les titres d'état et
+#: utils/error_texts.py pour les refus — donc elles s'affichent sur l'ensemble des
+#: commandes, pas sur une seule. Traduire ces quelques entrées change davantage ce
+#: que voit un membre anglophone que traduire un cog entier.
+EXACT_EN: dict[str, str] = {
+    # --- Titres d'état, sur presque chaque réponse (utils/embeds.py)
+    "Succès": "Success",
+    "Erreur": "Error",
+    "Information": "Information",
+    "Vérification nécessaire": "Check needed",
+    "État": "Status",
+    "Action impossible": "Action unavailable",
+    "Action refusée": "Action denied",
+    "Permission manquante": "Missing permission",
+    "Erreur de commande": "Command error",
+
+    # --- Refus et erreurs d'usage (utils/error_texts.py)
+    "Cette commande s'utilise dans un salon de serveur, pas en message privé.":
+        "This command works in a server channel, not in direct messages.",
+    "Cette commande s'utilise en message privé avec SentriX.":
+        "This command works in direct messages with SentriX.",
+    "Membre introuvable": "Member not found",
+    "Utilisateur introuvable": "User not found",
+    "Rôle introuvable": "Role not found",
+    "Salon introuvable": "Channel not found",
+    "Message introuvable": "Message not found",
+    "Emoji introuvable": "Emoji not found",
+    "Fil introuvable": "Thread not found",
+    "Serveur introuvable": "Server not found",
+    "Vous n'avez pas accès à cette commande.": "You do not have access to this command.",
+    "Vous n'avez pas la permission d'utiliser cette commande.":
+        "You do not have permission to use this command.",
+    "Cette commande doit être utilisée sur un serveur.":
+        "This command must be used in a server.",
+    "Aucune raison fournie": "No reason given",
+    "Permission requise : Administrateur": "Required permission: Administrator",
+
+    # --- Intitulés de champ qui reviennent partout
+    "Raison": "Reason",
+    "Durée": "Duration",
+    "Auteur": "Author",
+    "Membre": "Member",
+    "Salon": "Channel",
+    "Rôle": "Role",
+    "Serveur": "Server",
+    "Identité": "Identity",
+    "Progression": "Progress",
+    "Connexion": "Connection",
+    "Historique": "History",
+}
+
+
 def _protection_re(protect: tuple[str, ...]) -> re.Pattern[str]:
     """Le garde habituel, étendu à des littéraux à ne jamais traduire.
 
@@ -568,7 +626,19 @@ def english_ui_text(
     """
     if value is None:
         return None
-    parts = _protection_re(protect).split(str(value))
+    brut = str(value)
+    # Une chaîne entière connue est traduite d'un bloc : aucun risque d'écrire
+    # dans une donnée utilisateur, et le résultat est une vraie phrase anglaise
+    # au lieu d'un mélange des deux langues.
+    nu = brut.strip()
+    # La protection s'applique AUSSI ici. Sans ce garde, un serveur nommé
+    # « Serveur » ou un membre surnommé « Membre » était renommé par la couche
+    # exacte, qui court-circuitait le garde des sous-chaînes. Vérifié par test.
+    if nu not in {str(v).strip() for v in protect}:
+        exacte = EXACT_EN.get(nu)
+        if exacte is not None:
+            return exacte
+    parts = _protection_re(protect).split(brut)
     for index in range(0, len(parts), 2):
         parts[index] = _translate_surface_fragment(parts[index], setup=setup)
     return "".join(parts)
@@ -608,8 +678,14 @@ def translate_embed_in_place(
     return embed
 
 
-def translate_view_in_place(view, *, setup: bool = False):
-    """Translate labels and text in a discord.py View/LayoutView recursively."""
+def translate_view_in_place(view, *, setup: bool = False, protect: tuple[str, ...] = ()):
+    """Translate labels and text in a discord.py View/LayoutView recursively.
+
+    ``protect`` est indispensable ici et pas seulement sur les embeds : SentriX
+    rend désormais presque tout en Components V2, donc le texte d'un panneau — nom
+    du serveur compris — passe par cette fonction. Sans la protection, « Serveur
+    test » devenait « Server test » dans +setup. Mesuré le 07/10/2026.
+    """
     seen: set[int] = set()
 
     def walk(item):
@@ -620,29 +696,29 @@ def translate_view_in_place(view, *, setup: bool = False):
         try:
             content = getattr(item, "content", None)
             if isinstance(content, str):
-                item.content = english_ui_text(content, setup=setup)
+                item.content = english_ui_text(content, setup=setup, protect=protect)
         except Exception:
             pass
         try:
             label = getattr(item, "label", None)
             if isinstance(label, str) and label:
-                item.label = english_ui_text(label, setup=setup)
+                item.label = english_ui_text(label, setup=setup, protect=protect)
         except Exception:
             pass
         try:
             placeholder = getattr(item, "placeholder", None)
             if isinstance(placeholder, str) and placeholder:
-                item.placeholder = english_ui_text(placeholder, setup=setup)
+                item.placeholder = english_ui_text(placeholder, setup=setup, protect=protect)
         except Exception:
             pass
         for option in list(getattr(item, "options", ()) or ()):
             try:
-                option.label = english_ui_text(option.label, setup=setup) or option.label
+                option.label = english_ui_text(option.label, setup=setup, protect=protect) or option.label
             except Exception:
                 pass
             try:
                 if option.description:
-                    option.description = english_ui_text(option.description, setup=setup)
+                    option.description = english_ui_text(option.description, setup=setup, protect=protect)
             except Exception:
                 pass
         for child in list(getattr(item, "children", ()) or ()):
