@@ -213,3 +213,53 @@ def test_deplacement_vocal_mentionne_le_membre():
     corps = narrative_body(e, log_type="voice_join")
     assert "<@153201041595183925>" in corps
     assert "<#222333444555666777>" in corps
+
+def test_soundboard_update_montre_nom_acteur_et_changements():
+    e = embeds.canonical_log_embed(
+        "Son Soundboard modifié",
+        fields=[
+            ("Son", "`Airhorn 2`", True),
+            ("ID", "`123456789012345678`", True),
+            ("Nom", "`Airhorn` → `Airhorn 2`", False),
+            ("Volume", "100% → 50%", False),
+            ("Modifié par", "<@111222333444555666>", True),
+        ],
+    )
+    corps = narrative_body(e, log_type="soundboard_update")
+    assert "`Airhorn 2`" in corps
+    assert "<@111222333444555666>" in corps
+    assert "Airhorn" in corps
+    assert "100% → 50%" in corps
+
+
+def test_soundboard_play_montre_utilisateur_son_et_salon():
+    e = embeds.canonical_log_embed(
+        "Son Soundboard joué",
+        fields=[
+            ("Son", "`Airhorn`", True),
+            ("Utilisateur", "<@111222333444555666>", True),
+            ("Salon vocal", "<#222333444555666777>", True),
+            ("Volume", "75%", True),
+        ],
+    )
+    corps = narrative_body(e, log_type="soundboard_play")
+    assert "<@111222333444555666>" in corps
+    assert "`Airhorn`" in corps
+    assert "<#222333444555666777>" in corps
+    assert "75%" in corps
+
+
+def test_evenement_inconnu_ne_perd_plus_les_champs_courts():
+    e = embeds.canonical_log_embed(
+        "Événement personnalisé",
+        fields=[
+            ("Objet", "Exemple", True),
+            ("Action", "Modifié", True),
+            ("Responsable", "<@111222333444555666>", True),
+        ],
+    )
+    corps = narrative_body(e, log_type="custom_event")
+    assert "Responsable : <@111222333444555666>" in corps
+    assert "Objet : Exemple" in corps
+    assert "Action : Modifié" in corps
+    assert corps.strip()
