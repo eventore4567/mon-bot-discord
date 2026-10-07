@@ -14,7 +14,7 @@ def test_help_uses_short_prefix_name_as_primary_display():
     assert 'prefix_name = f"{prefix}{_display_name(command)}"' in source
     assert 'label = f"/{slash}  ·  {prefix_name}" if slash else prefix_name' in source
     assert 'titre=_display_name(exact)' in source
-    assert '@app_commands.command(name="aide"' in source
+    assert '@app_commands.command(name="help"' in source
 
 
 def test_help_keeps_long_command_name_as_alternate():
@@ -43,12 +43,12 @@ def test_help_resolves_real_published_slash_path_by_callback():
     published_wrapper.__wrapped__ = business_callback
 
     slash_leaf = SimpleNamespace(
-        name="jouer",
+        name="play",
         callback=published_wrapper,
         commands=[],
     )
     slash_root = SimpleNamespace(
-        name="musique",
+        name="music",
         callback=None,
         commands=[slash_leaf],
     )
@@ -61,7 +61,7 @@ def test_help_resolves_real_published_slash_path_by_callback():
         app_command=None,
     )
 
-    assert help_cog._slash_name(bot, command) == "musique jouer"
+    assert help_cog._slash_name(bot, command) == "music play"
 
 
 def test_help_keeps_music_security_and_levels_as_distinct_categories():
@@ -87,8 +87,8 @@ def test_help_exact_match_accepts_real_slash_path():
         return None
 
     published_wrapper.__wrapped__ = business_callback
-    leaf = SimpleNamespace(name="jouer", callback=published_wrapper, commands=[])
-    root = SimpleNamespace(name="musique", callback=None, commands=[leaf])
+    leaf = SimpleNamespace(name="play", callback=published_wrapper, commands=[])
+    root = SimpleNamespace(name="music", callback=None, commands=[leaf])
     bot = SimpleNamespace(
         tree=SimpleNamespace(get_commands=lambda type=None: [root]),
     )
@@ -100,7 +100,7 @@ def test_help_exact_match_accepts_real_slash_path():
         aliases=[],
     )
 
-    assert help_cog._exact_match(bot, [command], "/musique jouer") is command
+    assert help_cog._exact_match(bot, [command], "/music play") is command
 
 
 def test_help_catalog_hides_container_only_and_duplicate_business_callback():
@@ -143,28 +143,30 @@ def test_help_catalog_hides_container_only_and_duplicate_business_callback():
 
 
 
-def test_aide_root_is_preserved_by_final_slash_rebuild():
-    source = (ROOT / "sentrix_v95_runtime.py").read_text(encoding="utf-8")
-
-    assert '"aide"' in source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
-    assert '"help"' in source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
-
-
-
-def test_final_rebuild_removes_legacy_help_but_keeps_aide():
+def test_help_root_is_preserved_by_final_slash_rebuild():
     source = (ROOT / "sentrix_v95_runtime.py").read_text(encoding="utf-8")
 
     direct_line = source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
     preserved_line = source.split("PRESERVED_DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
 
     assert '"help"' in direct_line
-    assert '"aide"' in direct_line
-    assert '"aide"' in preserved_line
-    assert '"help"' not in preserved_line
+    assert '"help"' in preserved_line
+    assert '"aide"' not in direct_line
+    assert '"aide"' not in preserved_line
 
 
+def test_final_rebuild_removes_legacy_aide_but_keeps_help():
+    source = (ROOT / "sentrix_v95_runtime.py").read_text(encoding="utf-8")
 
-def test_legacy_help_is_removed_after_all_prepare_layers_before_audit():
+    direct_line = source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
+    preserved_line = source.split("PRESERVED_DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
+
+    assert '"help"' in direct_line
+    assert '"help"' in preserved_line
+    assert 'for name in ("aide",):' in source
+
+
+def test_legacy_aide_is_removed_after_all_prepare_layers_before_audit():
     source = (ROOT / "sentrix_v95_runtime.py").read_text(encoding="utf-8")
     prepare = source.index("await prepare_bot(client)")
     cleanup = source.index("_remove_legacy_public_roots(self)", prepare)

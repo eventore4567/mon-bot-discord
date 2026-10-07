@@ -1,6 +1,6 @@
 """Centre d'aide officiel SentriX.
 
-+help et /aide partagent la même logique. L'accueil reste volontairement léger :
++help et /help partagent la même logique. L'accueil reste volontairement léger :
 il sert à trouver une commande, pas à configurer le serveur.
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ PAGE_SIZE = 7
 
 CATEGORY_NAMES = {
     "Moderation": "Modération",
+    "Snipe": "Modération",
     "Automod": "Sécurité",
     "Security": "Sécurité",
     "SecurityTools": "Sécurité",
@@ -223,7 +224,12 @@ def _usage(command: commands.Command, prefix: str) -> str:
 def _command_label(bot: commands.Bot, command: commands.Command, prefix: str) -> str:
     slash = _slash_name(bot, command)
     prefix_name = f"{prefix}{_display_name(command)}"
-    label = f"/{slash}  ·  {prefix_name}" if slash else prefix_name
+    if slash and _category(command) == "Modération":
+        # En modération, Discord slash est la surface recommandée : on l'affiche
+        # en premier et le préfixe reste une alternative de compatibilité.
+        label = f"/{slash}  ·  ({prefix_name})"
+    else:
+        label = f"/{slash}  ·  {prefix_name}" if slash else prefix_name
     return label[:256]
 
 
@@ -248,7 +254,7 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
     panel.add_field(name="Catégories", value="\n".join(lines), inline=False)
     panel.add_field(
         name="Recherche rapide",
-        value="Tapez `+help ban`, `/aide commande:ban` ou utilisez **Rechercher**.",
+        value="Tapez `+help ban`, `/help command:ban` ou utilisez **Rechercher**.",
         inline=False,
     )
     panel.add_field(
@@ -264,9 +270,13 @@ def _detail(bot: commands.Bot, command: commands.Command, prefix: str) -> discor
     slash = _slash_name(bot, command)
     requirement = command_requirement(command)
     panel = embeds.help_embed(_display_name(command), _description(command))
-    panel.add_field(name="Commande", value=f"`{_usage(command, prefix)}`", inline=False)
-    if slash:
-        panel.add_field(name="Slash", value=f"`/{slash}`", inline=True)
+    if slash and _category(command) == "Modération":
+        panel.add_field(name="Commande recommandée", value=f"`/{slash}`", inline=False)
+        panel.add_field(name="Préfixe alternatif", value=f"`{_usage(command, prefix)}`", inline=True)
+    else:
+        panel.add_field(name="Commande", value=f"`{_usage(command, prefix)}`", inline=False)
+        if slash:
+            panel.add_field(name="Slash", value=f"`/{slash}`", inline=True)
     panel.add_field(name="Permission nécessaire", value=requirement, inline=True)
     panel.add_field(name="Catégorie", value=_category(command), inline=True)
     panel.add_field(name="Exemple", value=f"`{_example(command, prefix)}`", inline=False)
@@ -570,7 +580,7 @@ def _sections_accueil(bot: commands.Bot, member=None) -> list[panels.Section]:
         panels.Section(
             "Trouver une commande",
             [
-                panels.Ligne("Par son nom", "`/aide commande:ban` ou `+help ban`"),
+                panels.Ligne("Par son nom", "`/help command:ban` ou `+help ban`"),
                 panels.Ligne("Par catégorie", "Le menu déroulant ci-dessous"),
                 panels.Ligne("Par mot-clé", "Le bouton **Rechercher**"),
             ],
@@ -591,10 +601,28 @@ def _sections_accueil(bot: commands.Bot, member=None) -> list[panels.Section]:
 def _sections_detail(bot: commands.Bot, command: commands.Command, prefix: str) -> list[panels.Section]:
     """Fiche d'une commande : comment l'appeler, qui peut, un exemple."""
     slash = _slash_name(bot, command)
-    appel = [panels.Ligne("Préfixe", f"`{_usage(command, prefix)}`")]
-    if slash:
-        appel.append(panels.Ligne("Slash", f"`/{slash}`"))
-    appel.append(panels.Ligne("Exemple", f"`{_example(command, prefix)}`"))
+    moderation = _category(command) == "Modération"
+
+    if moderation and slash:
+        # Pour les actions de modération, on recommande la surface slash :
+        # autocomplétion Discord, paramètres visibles et moins d'erreurs de syntaxe.
+        exemple_prefixe = _example(command, prefix)
+        prefix_call = f"{prefix}{_display_name(command)}"
+        slash_example = (
+            f"/{slash}" + exemple_prefixe[len(prefix_call):]
+            if exemple_prefixe.startswith(prefix_call)
+            else f"/{slash}"
+        )
+        appel = [
+            panels.Ligne("Slash (recommandé)", f"`/{slash}`"),
+            panels.Ligne("Préfixe (alternatif)", f"`{_usage(command, prefix)}`"),
+            panels.Ligne("Exemple", f"`{slash_example}`"),
+        ]
+    else:
+        appel = [panels.Ligne("Préfixe", f"`{_usage(command, prefix)}`")]
+        if slash:
+            appel.append(panels.Ligne("Slash", f"`/{slash}`"))
+        appel.append(panels.Ligne("Exemple", f"`{_example(command, prefix)}`"))
 
     sections = [
         panels.Section("Comment l'utiliser", appel),
@@ -623,7 +651,6 @@ def _sections_detail(bot: commands.Bot, command: commands.Command, prefix: str) 
             )
         )
     return sections
-
 
 def _sections_liste(bot: commands.Bot, lot, prefix: str) -> list[panels.Section]:
     """Une page de resultats : une ligne par commande, avec sa permission."""
@@ -882,12 +909,12 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
     async def prefix_help(self, ctx: commands.Context, *, query: str | None = None):
         await self.send_help(ctx, query)
 
-    @app_commands.command(name="aide", description="Ouvrir le centre d’aide SentriX")
-    @app_commands.describe(commande="Nom, slash, catégorie ou mot-clé")
-    async def slash_help(self, interaction: discord.Interaction, commande: str | None = None):
-        await self.send_help(interaction, commande)
+    @app_commands.command(name="help", description="Open the SentriX help center")
+    @app_commands.describe(command="Command name, slash command, category or keyword")
+    async def slash_help(self, interaction: discord.Interaction, command: str | None = None):
+        await self.send_help(interaction, command)
 
-    @slash_help.autocomplete("commande")
+    @slash_help.autocomplete("command")
     async def slash_help_autocomplete(
         self,
         interaction: discord.Interaction,

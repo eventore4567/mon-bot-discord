@@ -17,7 +17,8 @@ def test_familiar_existing_names_are_preserved() -> None:
 def test_core_moderation_uses_common_direct_slash_names() -> None:
     expected = {
         "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
-        "clearwarnings", "clear", "lock", "unlock", "slowmode", "case", "modview",
+        "clearwarnings", "clear", "snipe", "editsnipe",
+        "lock", "unlock", "slowmode", "case", "modview",
     }
     for name in expected:
         assert surface.STANDARD_DIRECT_SLASH[name] == name
@@ -30,7 +31,7 @@ def test_info_and_level_keep_common_direct_names_but_music_stays_canonical() -> 
     assert surface.STANDARD_DIRECT_SLASH["leaderboard-levels"] == "leaderboard"
 
     # La musique n'est plus dispersée en /play, /pause, /queue, etc.
-    # La surface unique est /musique ... dans sentrix_canonical_command_surface.
+    # The canonical surface is /music ... in sentrix_canonical_command_surface.
     assert "play" not in surface.STANDARD_DIRECT_SLASH
     assert "music pause" not in surface.STANDARD_DIRECT_SLASH
     assert "music queue" not in surface.STANDARD_DIRECT_SLASH

@@ -1,7 +1,7 @@
-"""Surface slash canonique SentriX.
+"""Canonical SentriX slash-command surface.
 
-Une seule couche décide ici des noms visibles et du rangement des commandes slash.
-Les commandes préfixées ``+`` et leurs callbacks métier restent inchangés.
+Slash command names are intentionally English, short and predictable.
+Prefix commands keep their historical names and callbacks unchanged.
 """
 from __future__ import annotations
 
@@ -17,151 +17,187 @@ logger = logging.getLogger("bot.canonical-command-surface")
 _INSTALLED = False
 
 ROOTS = {
-    "ai": "ia", "info": "infos", "utility": "outils", "economy": "economie",
-    "level": "niveaux", "levels": "niveaux", "game": "jeux", "games": "jeux",
-    "music": "musique", "events": "evenements", "ticket": "tickets",
-    "sanctions": "moderation", "moderation": "moderation", "security": "securite",
-    "config": "configuration", "server": "serveur", "role": "roles", "roles": "roles",
-    "embeds": "messages", "owner": "proprietaire", "more": "outils",
-    "giveaway": "giveaway", "invites": "invitations", "notifications": "notifications",
-    "social": "social", "stats": "statistiques",
+    "ai": "ai", "info": "info", "utility": "utility", "economy": "economy",
+    "level": "levels", "levels": "levels", "game": "games", "games": "games",
+    "music": "music", "events": "events", "ticket": "tickets",
+    "sanctions": "moderation", "moderation": "moderation", "security": "security",
+    "config": "config", "server": "server", "role": "roles", "roles": "roles",
+    "embeds": "embeds", "owner": "owner", "more": "utility",
+    "giveaway": "giveaway", "invites": "invites", "notifications": "notifications",
+    "social": "social", "stats": "stats",
 }
 ROOT_BACK = {
-    "tickets": "ticket", "moderation": "moderation", "securite": "security",
-    "configuration": "config", "economie": "economy", "niveaux": "level",
-    "jeux": "game", "roles": "role", "serveur": "server", "musique": "music",
+    "tickets": "ticket", "moderation": "moderation", "security": "security",
+    "config": "config", "economy": "economy", "levels": "level",
+    "games": "game", "roles": "role", "server": "server", "music": "music",
 }
 ROOT_DESCRIPTIONS = {
-    "ia": "Assistant IA, images et outils intelligents.",
-    "infos": "Informations sur les membres, salons, serveur et bot.",
-    "outils": "Outils pratiques et commandes du quotidien.",
-    "economie": "Solde, banque, boutique et récompenses.",
-    "niveaux": "Niveaux, XP, réputation et classements.",
-    "jeux": "Mini-jeux et activités communautaires.",
-    "musique": "Lecture audio, file d'attente et playlists.",
-    "evenements": "Événements, tournois et activités.",
-    "tickets": "Tickets, support et réglages des tickets.",
-    "moderation": "Sanctions et outils de modération.",
-    "securite": "AutoMod, anti-raid, anti-nuke et sécurité.",
-    "configuration": "Configuration générale de SentriX.",
-    "serveur": "Structure et administration du serveur.",
-    "roles": "Rôles, panels et vérification.",
-    "messages": "Embeds, annonces et design des messages.",
-    "proprietaire": "Commandes réservées au propriétaire de SentriX.",
-    "giveaway": "Giveaways et tirages au sort.",
-    "invitations": "Invitations, classements et bonus.",
-    "notifications": "Notifications sociales et messages d'accueil.",
-    "social": "Fonctions sociales de SentriX.",
-    "statistiques": "Statistiques et diagnostics.",
+    "ai": "AI assistant, images and intelligent tools.",
+    "info": "Information about members, channels, the server and the bot.",
+    "utility": "Everyday utilities and practical commands.",
+    "economy": "Balance, bank, shop and rewards.",
+    "levels": "Levels, XP, reputation and leaderboards.",
+    "games": "Mini-games and community activities.",
+    "music": "Audio playback, queue and playlists.",
+    "events": "Events, tournaments and activities.",
+    "tickets": "Tickets, support and ticket settings.",
+    "moderation": "Sanctions and moderation tools.",
+    "security": "AutoMod, anti-raid, anti-nuke and security.",
+    "config": "General SentriX configuration.",
+    "server": "Server structure and administration.",
+    "roles": "Roles, panels and verification.",
+    "embeds": "Embeds, announcements and message design.",
+    "owner": "Commands reserved for the SentriX owner.",
+    "giveaway": "Giveaways and draws.",
+    "invites": "Invites, leaderboards and bonuses.",
+    "notifications": "Social notifications and welcome messages.",
+    "social": "SentriX social features.",
+    "stats": "Statistics and diagnostics.",
+    "pro": "SentriX Pro tools.",
+    "infinite": "Infinite-mode tools.",
 }
 
+# Public English aliases. Internal command names stay untouched.
 # Alias généraux. Les alias musique ont leur propre table pour éviter qu'un nom comme
 # ``clear`` change aussi la commande de modération.
 LEAVES = {
-    "userinfo": "utilisateur", "membercount": "membres", "emoji-list": "emojis",
-    "reminder-list": "rappels", "reminder-cancel": "annuler-rappel",
-    "report-bug": "signaler-bug", "fact-check": "verifier-info",
-    "image-prompt": "prompt-image", "ai-translate": "traduire", "bot-status": "statut",
-    "server-growth": "croissance", "command-stats": "stats-commandes",
-    "unban": "debannir", "kick": "expulser", "warn": "avertir",
-    "warnings": "avertissements", "unwarn": "retirer-avertissement",
-    "clearwarnings": "vider-avertissements", "clear": "nettoyer",
-    "slowmode": "mode-lent", "lock": "verrouiller", "unlock": "deverrouiller",
-    "nickname": "pseudo", "resetnick": "reset-pseudo", "giverole": "donner-role",
-    "removerole": "retirer-role", "modhistory": "historique",
-    "ticket-reopen": "rouvrir", "tickettranscript": "transcription",
-    "sanctiondm": "message-sanction", "security-check": "verification",
-    "security-level": "niveau", "permission-audit": "audit-permissions",
-    "server-backup": "sauvegarder", "server-restore": "restaurer",
-    "lockdown-server": "verrouillage-total", "unlock-server": "deverrouillage-total",
-    "blacklist-users": "utilisateurs-bloques", "blacklist-list": "liste-noire",
-    "blacklist-add": "bloquer", "blacklist-remove": "debloquer",
-    "whitelist-domain": "autoriser-domaine", "unwhitelist-domain": "retirer-domaine",
-    "syncbl": "sync-liste-noire", "unsyncbl": "desync-liste-noire",
-    "setprefix": "prefixe", "setmodrole": "role-modo", "config-view": "voir",
-    "config-reset": "reinitialiser", "create-server": "creer-structure",
-    "delete-channel": "supprimer-salon", "disablecommand": "desactiver-commande",
-    "enablecommand": "activer-commande", "ignorechannel": "ignorer-salon",
-    "unignorechannel": "reactiver-salon", "setwarnrole": "role-avertissement",
-    "setwarnbanthreshold": "limite-avertissements", "set-xp": "definir-xp",
-    "add-xp": "ajouter-xp", "reset-levels": "reset-niveaux",
-    "levelcheck": "verifier-niveau", "levelrepair": "reparer-niveau",
-    "designsetup": "design", "embedconfig": "reglages-embed",
-    "reactionrole-add": "ajouter-reaction", "reactionrole-remove": "retirer-reaction",
-    "reactionrole-list": "liste-reactions", "balance": "solde", "daily": "quotidien",
-    "weekly": "hebdo", "work": "travailler", "pay": "payer",
-    "inventory": "inventaire", "economyleaderboard": "classement",
-    "leaderboard-levels": "classement", "set-level-role": "role-niveau",
-    "remove-level-role": "retirer-role-niveau", "voice-time": "temps-vocal",
-    "set-bio": "bio", "ticket": "ouvrir", "ticketsetup": "configuration",
-    "ticketpanel": "creer-panel", "ticketpanel-toggle": "activer-panel",
-    "tickettype": "type", "ticketform": "formulaire", "ticketconfig": "reglages",
-    "ticketlogs": "logs", "ticketlimit": "limite", "ticketautoclose": "fermeture-auto",
-    "giveaway-list": "liste", "giveaway-create": "creer", "giveaway-end": "terminer",
-    "giveaway-reroll": "relancer", "giveaway-cancel": "annuler",
-    "event-join": "rejoindre", "event-leave": "quitter", "event-list": "liste",
-    "event-create": "creer", "event-cancel": "annuler",
-    "tournament-join": "rejoindre-tournoi", "tournament-list": "tournois",
-    "tournament-create": "creer-tournoi", "tournament-start": "lancer-tournoi",
-    "invite-leaderboard": "classement", "invited-by": "invite-par",
-    "addbonusinvites": "ajouter-bonus", "removebonusinvites": "retirer-bonus",
-    "invitebonushistory": "historique-bonus", "notifs-ping": "ajouter",
-    "notifs-list": "liste", "notifs-remove": "supprimer", "welcome-config": "bienvenue",
-    "rps": "pierre-feuille-ciseaux", "guess-number": "devine-nombre",
-    "trivia": "quiz", "tictactoe": "morpion", "hangman": "pendu",
-    "math-quiz": "calcul", "slots": "machine-a-sous", "coinflip": "pile-ou-face",
-    "dice": "des", "highlow": "plus-ou-moins", "memory": "memoire",
-    "scramble": "mot-melange", "wordgame": "jeu-mots", "emojiquiz": "quiz-emoji",
-    "colorquiz": "quiz-couleur", "fasttype": "vitesse", "connect4": "puissance4",
-    "numberduel": "duel-nombres", "reactionduel": "duel-reaction",
-    "quizduel": "duel-quiz", "wordrace": "course-mots",
-    "reactionevent": "course-reaction", "guessrace": "course-devinette",
-    "mathrace": "course-calcul", "emoji-race": "course-emoji", "dungeon": "donjon",
-    "mining": "minage", "fishing": "peche", "treasure": "tresor", "hunt": "chasse",
-    "explore": "explorer", "bomb": "bombes", "target": "cible", "archery": "tir", "ghost": "fantome", "sequence": "suite", "lava": "lave", "rocket": "fusee", "safe": "coffre", "dragon": "dragon", "zombie": "zombie", "ice": "ice", "potion": "potion", "race": "race", "detective": "detective", "crown": "crown", "collec": "collection", "gamehistory": "historique", "gameprofile": "profil",
-    "gamestats": "stats", "gametop": "classement", "dailygames": "jeux-du-jour",
+    "membercount": "members",
+    "emoji-list": "emojis",
+    "reminder-list": "reminders",
+    "reminder-cancel": "cancel-reminder",
+    "report-bug": "bug-report",
+    "bot-status": "status",
+    "server-growth": "growth",
+    "clearwarnings": "clear-warnings",
+    "modhistory": "history",
+    "ticket-reopen": "reopen",
+    "tickettranscript": "transcript",
+    "security-check": "check",
+    "security-level": "level",
+    "permission-audit": "permissions",
+    "server-backup": "backup",
+    "server-restore": "restore",
+    "lockdown-server": "lockdown",
+    "unlock-server": "unlock",
+    "blacklist-users": "blocked-users",
+    "blacklist-list": "blacklist",
+    "blacklist-add": "block",
+    "blacklist-remove": "unblock",
+    "whitelist-domain": "allow-domain",
+    "unwhitelist-domain": "remove-domain",
+    "setprefix": "prefix",
+    "setmodrole": "mod-role",
+    "config-view": "view",
+    "config-reset": "reset",
+    "create-server": "create",
+    "delete-channel": "delete-channel",
+    "disablecommand": "disable-command",
+    "enablecommand": "enable-command",
+    "ignorechannel": "ignore-channel",
+    "unignorechannel": "unignore-channel",
+    "setwarnrole": "warn-role",
+    "setwarnbanthreshold": "warn-threshold",
+    "set-xp": "set-xp",
+    "add-xp": "add-xp",
+    "reset-levels": "reset-levels",
+    "levelcheck": "check-level",
+    "levelrepair": "repair-level",
+    "reactionrole-add": "reaction-add",
+    "reactionrole-remove": "reaction-remove",
+    "reactionrole-list": "reaction-list",
+    "economyleaderboard": "leaderboard",
+    "leaderboard-levels": "leaderboard",
+    "set-level-role": "level-role",
+    "remove-level-role": "remove-level-role",
+    "voice-time": "voice-time",
+    "ticket": "open",
+    "ticketsetup": "setup",
+    "ticketpanel": "panel",
+    "ticketpanel-toggle": "panel-toggle",
+    "tickettype": "type",
+    "ticketform": "form",
+    "ticketconfig": "settings",
+    "ticketlogs": "logs",
+    "ticketlimit": "limit",
+    "ticketautoclose": "auto-close",
+    "giveaway-list": "list",
+    "giveaway-create": "create",
+    "giveaway-end": "end",
+    "giveaway-reroll": "reroll",
+    "giveaway-cancel": "cancel",
+    "event-join": "join",
+    "event-leave": "leave",
+    "event-list": "list",
+    "event-create": "create",
+    "event-cancel": "cancel",
+    "tournament-join": "tournament-join",
+    "tournament-list": "tournaments",
+    "tournament-create": "tournament-create",
+    "tournament-start": "tournament-start",
+    "invite-leaderboard": "leaderboard",
+    "invited-by": "invited-by",
+    "addbonusinvites": "bonus-add",
+    "removebonusinvites": "bonus-remove",
+    "invitebonushistory": "bonus-history",
+    "notifs-ping": "add",
+    "notifs-list": "list",
+    "notifs-remove": "remove",
+    "welcome-config": "welcome",
+    "guess-number": "guess",
+    "math-quiz": "math-quiz",
+    "emoji-race": "emoji-race",
+    "gamehistory": "history",
+    "gameprofile": "profile",
+    "gamestats": "stats",
+    "gametop": "leaderboard",
+    "dailygames": "daily",
+    "banque": "bank",
+    "collec": "collection",
+    "info serveur": "server",
+    "info role": "role",
 }
 MUSIC_LEAVES = {
-    "join": "rejoindre", "leave": "quitter", "play": "jouer", "pause": "pause",
-    "resume": "reprendre", "skip": "suivant", "previous": "precedent",
-    "stop": "arreter", "queue": "voir", "nowplaying": "en-cours",
-    "volume": "volume", "loop": "boucle", "shuffle": "melanger",
-    "remove": "retirer", "clear": "vider", "seek": "position",
-    "autoplay": "lecture-auto",
+    "join": "join", "leave": "leave", "play": "play", "pause": "pause",
+    "resume": "resume", "skip": "skip", "previous": "previous",
+    "stop": "stop", "queue": "queue", "nowplaying": "now-playing",
+    "volume": "volume", "loop": "loop", "shuffle": "shuffle",
+    "remove": "remove", "clear": "clear", "seek": "seek",
+    "autoplay": "autoplay",
 }
 PLAYLIST_LEAVES = {
-    "create": "sauvegarder", "import": "importer", "add": "ajouter",
-    "list": "liste", "show": "infos", "play": "charger", "remove": "retirer",
-    "clear": "vider", "rename": "renommer", "delete": "supprimer",
+    "create": "create", "import": "import", "add": "add",
+    "list": "list", "show": "show", "play": "play", "remove": "remove",
+    "clear": "clear", "rename": "rename", "delete": "delete",
 }
 DUPLICATES = frozenset({
     "leaderboard-money", "me", "rank", "buyrole", "ask", "chat", "chat-reset",
     "embed-create", "latency", "levelroles",
 })
 BUCKETS = {
-    ("ticket", "panel"): "panneaux", ("ticket", "config"): "configuration",
-    ("ticket", "manage"): "gestion", ("ticket", "stats"): "historique",
-    ("moderation", "members"): "membres", ("moderation", "cases"): "dossiers",
-    ("moderation", "emoji"): "emojis", ("moderation", "general"): "outils",
-    ("security", "lists"): "listes", ("security", "backup"): "sauvegarde",
-    ("security", "general"): "outils", ("config", "commands"): "commandes",
-    ("config", "general"): "reglages", ("utility", "general"): "pratiques",
-    ("outils", "general"): "pratiques",
-    ("config", "channels"): "salons", ("config", "levels"): "niveaux",
-    ("economy", "wallet"): "portefeuille", ("economy", "rewards"): "recompenses",
-    ("economy", "shop"): "boutique", ("economy", "ranking"): "classement",
-    ("economy", "admin"): "administration", ("economy", "general"): "outils",
-    ("level", "profile"): "profil", ("level", "ranking"): "classement",
-    ("level", "general"): "outils", ("game", "quick"): "rapides",
-    ("game", "races"): "courses", ("game", "adventure"): "aventure",
-    ("game", "general"): "divers", ("role", "manage"): "gestion",
-    ("role", "panels"): "panneaux", ("role", "reactions"): "reactions",
-    ("role", "general"): "divers", ("server", "build"): "creation",
-    ("server", "channels"): "salons", ("server", "backup"): "sauvegarde",
-    ("server", "manage"): "gestion", ("server", "general"): "divers",
+    ("ticket", "panel"): "panels", ("ticket", "config"): "config",
+    ("ticket", "manage"): "manage", ("ticket", "stats"): "history",
+    ("moderation", "members"): "members", ("moderation", "cases"): "cases",
+    ("moderation", "emoji"): "emojis", ("moderation", "general"): "general",
+    ("security", "lists"): "lists", ("security", "backup"): "backup",
+    ("security", "general"): "general", ("config", "commands"): "commands",
+    ("config", "general"): "general", ("utility", "general"): "general",
+    ("config", "channels"): "channels", ("config", "levels"): "levels",
+    ("economy", "wallet"): "wallet", ("economy", "rewards"): "rewards",
+    ("economy", "shop"): "shop", ("economy", "ranking"): "ranking",
+    ("economy", "admin"): "admin", ("economy", "general"): "general",
+    ("level", "profile"): "profile", ("level", "ranking"): "ranking",
+    ("level", "general"): "general", ("game", "quick"): "quick",
+    ("game", "races"): "races", ("game", "adventure"): "adventure",
+    ("game", "general"): "general", ("role", "manage"): "manage",
+    ("role", "panels"): "panels", ("role", "reactions"): "reactions",
+    ("role", "general"): "general", ("server", "build"): "build",
+    ("server", "channels"): "channels", ("server", "backup"): "backup",
+    ("server", "manage"): "manage", ("server", "general"): "general",
 }
 
 
+# ---------------------------------------------------------------------------
+# Legacy short-slash toggle
 # ---------------------------------------------------------------------------
 # Noms slash courts (validés le 20/09/2026). Désactivés par défaut : les commandes
 # slash sont GLOBALES à l'application Discord, donc partagées entre le service primaire
@@ -176,104 +212,48 @@ def short_slash_enabled() -> bool:
     return (os.getenv(SHORT_SLASH_ENV) or "0").strip().casefold() in {"1", "true", "yes", "on"}
 
 
-SHORT_ROOTS = {
-    "proprietaire": "owner", "notifications": "notifs", "messages": "embed", "statistiques": "stats",
+SHORT_ROOTS: dict[str, str] = {}
+SHORT_TARGETS: dict[str, tuple[str, str, str]] = {}
+SHORT_DUPLICATES = frozenset()
+SHORT_DIRECT: dict[str, str] = {}
+
+
+_ENGLISH_NAME_TOKENS = {
+    "aide": "help", "ia": "ai", "infos": "info", "outils": "tools",
+    "pratiques": "utility", "economie": "economy", "niveaux": "levels",
+    "niveau": "level", "jeux": "games", "musique": "music",
+    "evenements": "events", "serveur": "server", "salon": "channel",
+    "salons": "channels", "securite": "security", "reglages": "settings",
+    "utilisateur": "user", "utilisateurs": "users", "membre": "member",
+    "membres": "members", "profil": "profile", "historique": "history",
+    "etat": "status", "statut": "status", "quarantaine": "quarantine",
+    "preuve": "proof", "panneau": "panel", "panneaux": "panels",
+    "liste": "list", "ajouter": "add", "retirer": "remove",
+    "supprimer": "delete", "creer": "create", "modifier": "edit",
+    "envoyer": "send", "apercu": "preview", "renommer": "rename",
+    "sauvegarder": "save", "charger": "load", "recherche": "search",
+    "modele": "model", "classement": "leaderboard", "portefeuille": "wallet",
+    "recompenses": "rewards", "boutique": "shop", "administration": "admin",
+    "rapides": "quick", "courses": "races", "aventure": "adventure",
+    "gestion": "manage", "creation": "build", "sauvegarde": "backup",
+    "divers": "general", "proprietaire": "owner", "invitations": "invites",
+    "statistiques": "stats", "ouvrir": "open", "fermer": "close",
+    "annuler": "cancel", "terminer": "end", "relancer": "reroll",
+    "rejoindre": "join", "quitter": "leave", "bienvenue": "welcome",
+    "solde": "balance", "quotidien": "daily", "hebdo": "weekly",
+    "travailler": "work", "payer": "pay", "inventaire": "inventory",
+    "banque": "bank", "avertir": "warn", "avertissements": "warnings",
+    "nettoyer": "clear", "verrouiller": "lock", "deverrouiller": "unlock",
+    "pseudo": "nickname", "debannir": "unban", "expulser": "kick",
+    "traduire": "translate", "croissance": "growth",
 }
-# Origine préfixe -> (racine, sous-groupe ou "" = directement sous la racine, feuille).
-SHORT_TARGETS: dict[str, tuple[str, str, str]] = {
-    # /preuve (ex /configuration general proof…)
-    "proof": ("preuve", "", "aide"), "proofexample": ("preuve", "", "exemple"),
-    "proofexamples": ("preuve", "", "exemples"), "proofexample-remove": ("preuve", "", "retirer"),
-    "proofpanel": ("preuve", "", "panneau"), "proofreset": ("preuve", "", "reset"),
-    "proofsetup": ("preuve", "", "setup"), "proofstatus": ("preuve", "", "etat"),
-    # /economie à plat + /shoprole
-    "give-money": ("economie", "", "donner"), "reset-economy": ("economie", "", "reset"),
-    "shoppanel": ("economie", "", "panneau"), "buy": ("economie", "", "acheter"),
-    "sell": ("economie", "", "vendre"), "economyleaderboard": ("economie", "", "top"),
-    "stats": ("economie", "", "stats"), "banque": ("economie", "", "banque"),
-    "economy": ("economie", "", "resume"),
-    "shoprole": ("shoprole", "", "infos"), "shoprole add": ("shoprole", "", "ajouter"),
-    "shoprole list": ("shoprole", "", "liste"), "shoprole price": ("shoprole", "", "prix"),
-    "shoprole remove": ("shoprole", "", "retirer"),
-    # /ia sans préfixe ai-
-    "ai disable": ("ia", "", "off"), "ai enable": ("ia", "", "on"), "ai help": ("ia", "", "aide"),
-    "ai model": ("ia", "", "modele"), "ai reset": ("ia", "", "reset"), "ai search": ("ia", "", "recherche"),
-    # /infos
-    "info role": ("infos", "", "role"), "info serveur": ("infos", "", "serveur"),
-    # /jeux : sous-groupes conservés (36 jeux > 25), feuilles courtes
-    "adventure": ("jeux", "aventure", "quete"), "slots": ("jeux", "casino", "slots"),
-    "coinflip": ("jeux", "casino", "pileface"), "highlow": ("jeux", "casino", "plusmoins"),
-    "mathrace": ("jeux", "courses", "maths"), "guessrace": ("jeux", "courses", "devinette"),
-    "emoji-race": ("jeux", "courses", "emoji"), "wordrace": ("jeux", "courses", "taper"),
-    "reactionevent": ("jeux", "courses", "clic"), "lastmessage": ("jeux", "courses", "dernier"),
-    "triviastart": ("jeux", "rapides", "culture"), "numberduel": ("jeux", "duels", "nombres"),
-    "quizduel": ("jeux", "duels", "savoir"), "reactionduel": ("jeux", "duels", "reflexe"),
-    "guess-number": ("jeux", "rapides", "devine"), "wordgame": ("jeux", "rapides", "mots"),
-    "scramble": ("jeux", "rapides", "melange"), "rps": ("jeux", "rapides", "chifoumi"),
-    "colorquiz": ("jeux", "rapides", "couleurs"), "emojiquiz": ("jeux", "rapides", "emojis"),
-    "dailygames": ("jeux", "stats", "jour"),
-    # /embed (ex /messages embed-…)
-    "embed create": ("embed", "", "creer"), "embed delete": ("embed", "", "supprimer"),
-    "embed duplicate": ("embed", "", "copier"), "embed edit": ("embed", "", "modifier"),
-    "embed export": ("embed", "", "exporter"), "embed import": ("embed", "", "importer"),
-    "embed list": ("embed", "", "liste"), "embed message": ("embed", "", "message"),
-    "embed preview": ("embed", "", "apercu"), "embed rename": ("embed", "", "renommer"),
-    "embed send": ("embed", "", "envoyer"), "embedconfig addrole": ("embed", "", "addrole"),
-    "embedconfig list": ("embed", "", "roles"),
-    # modération
-    "sanctiondm off": ("sanctiondm", "", "off"), "sanctiondm reset": ("sanctiondm", "", "reset"),
-    "sanctiondm status": ("sanctiondm", "", "etat"), "addemoji": ("emoji", "", "ajouter"),
-    "deleteemoji": ("emoji", "", "supprimer"), "resetnick": ("moderation", "", "resetnick"),
-    # musique — même nomenclature canonique que la surface longue.
-    "music remove": ("musique", "file", "retirer"),
-    "music autoplay": ("musique", "", "lecture-auto"),
-    "music playlist create": ("musique", "playlist", "sauvegarder"),
-    # niveaux à plat
-    "repleaderboard": ("niveaux", "", "toprep"), "rephistory": ("niveaux", "", "rephisto"),
-    "voice-time": ("niveaux", "", "vocal"), "set-bio": ("niveaux", "", "bio"),
-    "rep": ("niveaux", "", "rep"), "reputation": ("niveaux", "", "reputation"),
-    "reset-levels": ("niveaux", "", "reset"),
-    # /notifs
-    "notifs-remove": ("notifs", "", "retirer"),
-    # /infini, /pro, /serveur (ex /outils …)
-    "infinit status": ("infini", "", "etat"), "infinit stop": ("infini", "", "stop"),
-    "sentrixpro aimod": ("pro", "", "aimod"), "sentrixpro autorole": ("pro", "", "autorole"),
-    "sentrixpro badges": ("pro", "", "badges"), "sentrixpro digest": ("pro", "", "digest"),
-    "sentrixpro goal": ("pro", "", "goal"), "sentrixpro help": ("pro", "", "aide"),
-    "sentrixpro history": ("pro", "", "histo"), "sentrixpro live": ("pro", "", "live"),
-    "sentrixpro lockdown": ("pro", "", "lockdown"), "sentrixpro module": ("pro", "", "module"),
-    "sentrixpro modules": ("pro", "", "modules"), "sentrixpro notifications": ("pro", "", "notifs"),
-    "sentrixpro quarantine-setup": ("pro", "", "quarantaine"), "sentrixpro season": ("pro", "", "saison"),
-    "sentrixpro security": ("pro", "", "securite"), "sentrixpro status": ("pro", "", "etat"),
-    "sentrixpro trust": ("pro", "", "trust"), "sentrixpro welcome": ("pro", "", "welcome"),
-    "sentrixpro ticket-summary": ("tickets", "", "resume"),
-    "server-audit": ("serveur", "", "audit"), "server-health": ("serveur", "", "sante"),
-    "server-managed": ("serveur", "", "maintenance"),
-    # /owner
-    "bot-leave": ("owner", "", "quitter"), "bot-servers": ("owner", "", "serveurs"),
-    "set-bot": ("owner", "", "bot"), "setstatus": ("owner", "", "statut"),
-    "status-rotate": ("owner", "", "rotation"),
-    # /roles à plat
-    "massrole": ("roles", "", "masse"), "roleall": ("roles", "", "tous"),
-    "rolepanel dropdown": ("roles", "", "menu"), "rolepanel reaction": ("roles", "", "emoji"),
-    "verification": ("roles", "", "verif"),
-    # /securite à plat
-    "antinuke": ("securite", "", "antinuke"), "antiraid": ("securite", "", "antiraid"),
-    "syncbl": ("securite", "", "syncbl"),
-    # /stats
-    "server-growth": ("stats", "", "croissance"), "permissions explain": ("stats", "", "perms"),
-    # /tickets
-    "ticket": ("tickets", "", "ouvrir"),
-    # /giveaway
-    "giveaway blacklist": ("giveaway", "", "exclure"), "giveaway unblacklist": ("giveaway", "", "autoriser"),
-    "giveaway create": ("giveaway", "", "creer"), "giveaway cancel": ("giveaway", "", "annuler"),
-    "giveaway end": ("giveaway", "", "terminer"), "giveaway list": ("giveaway", "", "liste"),
-    "giveaway": ("giveaway", "", "panneau"), "giveaway reroll": ("giveaway", "", "relancer"),
-}
-# Doublons slash masqués uniquement avec les noms courts (le + reste utilisable).
-SHORT_DUPLICATES = frozenset({"giveaway-reroll"})
-# Racines directes V110 raccourcies (source -> nom public).
-SHORT_DIRECT = {"clearwarnings": "clearwarns", "membercount": "membres", "channelinfo": "salon", "leaderboard-levels": "top"}
+
+
+def _english_public_name(value: object) -> str:
+    """Normalize any legacy French token before a slash name reaches Discord."""
+    safe = v95._safe_name(value)
+    parts = [_ENGLISH_NAME_TOKENS.get(part, part) for part in safe.split("-")]
+    return v95._safe_name("-".join(parts))
 
 
 def _install_flat_bucket_support() -> None:
@@ -331,9 +311,9 @@ def install() -> None:
         if getattr(command, "hidden", False) or name in DUPLICATES or simple in DUPLICATES:
             return False
         # Les groupes servent de conteneurs et ne doivent jamais devenir des
-        # fausses feuilles (/musique lecture music, /musique lecture playlist).
+        # fausses feuilles (/music lecture music, /music lecture playlist).
         # +play reste l'alias préfixé historique ; son slash est fourni une seule
-        # fois par /musique jouer via "music play".
+        # fois par /music jouer via "music play".
         if name in {"music", "music playlist", "play"}:
             return False
         if short and (name in SHORT_DUPLICATES or simple in SHORT_DUPLICATES):
@@ -345,15 +325,23 @@ def install() -> None:
         if short and qualified in SHORT_TARGETS:
             target_root, _bucket, target_leaf = SHORT_TARGETS[qualified]
             return target_root, target_leaf
+        if qualified.startswith("sentrixpro "):
+            pro_leaf = {
+                "quarantine-setup": "quarantine",
+                "ticket-summary": "ticket-summary",
+            }.get(simple, simple)
+            return "pro", pro_leaf
+        if qualified.startswith("infinit "):
+            return "infinite", simple
         if qualified.startswith("music playlist "):
-            return "musique", PLAYLIST_LEAVES.get(simple, simple)
+            return "music", PLAYLIST_LEAVES.get(simple, simple)
         if qualified.startswith("music "):
-            return "musique", MUSIC_LEAVES.get(simple, simple)
+            return "music", MUSIC_LEAVES.get(simple, simple)
         root, leaf = old_group_for(command)
         root = ROOTS.get(str(root).casefold(), str(root).casefold())
         if short:
             root = SHORT_ROOTS.get(root, root)
-        return root, LEAVES.get(qualified, LEAVES.get(simple, leaf))
+        return root, _english_public_name(LEAVES.get(qualified, LEAVES.get(simple, leaf)))
 
     def bucket(root_name: str, target: v95.SlashTarget) -> str:
         root = str(root_name).casefold()
@@ -362,14 +350,14 @@ def install() -> None:
         simple = original_name.split(" ")[-1]
         if short and original_name in SHORT_TARGETS:
             return SHORT_TARGETS[original_name][1]
-        if root == "musique" or original_root == "music":
+        if root == "music" or original_root == "music":
             if original_name.startswith("music playlist "):
                 return "playlist"
             if simple in {"queue", "remove", "clear"}:
-                return "file"
+                return "queue"
             # Jouer/pause/reprendre/suivant/arrêter/en-cours/volume/boucle/
             # mélanger/rejoindre/quitter/position/lecture-auto restent directement
-            # sous /musique : pas de sous-groupe "lecture" artificiel.
+            # sous /music : pas de sous-groupe "lecture" artificiel.
             return ""
         original_bucket = old_bucket(original_root, target)
         return BUCKETS.get((original_root, original_bucket), original_bucket)
@@ -385,18 +373,20 @@ def install() -> None:
         # dans deux sous-groupes différents. Recalcule ici le vrai nom public
         # depuis la commande métier : l'unicité est ensuite gérée dans chaque
         # sous-groupe par V98.
-        if root == "musique":
+        if root == "music":
             if original_name.startswith("music playlist "):
-                return v95._safe_name(PLAYLIST_LEAVES.get(simple, simple))
+                return _english_public_name(PLAYLIST_LEAVES.get(simple, simple))
             if original_name.startswith("music "):
-                return v95._safe_name(MUSIC_LEAVES.get(simple, simple))
+                return _english_public_name(MUSIC_LEAVES.get(simple, simple))
 
-        return v95._safe_name(target.leaf_name)
+        return _english_public_name(target.leaf_name)
 
     def chunks(bucket_name: str, count: int) -> list[str]:
         base = v95._safe_name(bucket_name)
+        if count <= 1:
+            return [base]
         return [base] + [
-            v95._safe_name(f"{base}-suite" if index == 2 else f"{base}-suite-{index}")
+            v95._safe_name("more" if index == 2 else f"more-{index}")
             for index in range(2, count + 1)
         ]
 
@@ -411,7 +401,7 @@ def install() -> None:
     v95._group_for = group_for
     v95._add_grouped_surface = surface
     v98.semantic_bucket = bucket
-    # La surface canonique utilise des feuilles directement sous /musique et
+    # La surface canonique utilise des feuilles directement sous /music et
     # d'autres racines sémantiques même lorsque le mode "short" est désactivé.
     _install_flat_bucket_support()
     if short:
@@ -423,15 +413,15 @@ def install() -> None:
     v98.semantic_leaf = leaf
     v98._chunk_group_names = chunks
     v98.FORCED_SEMANTIC_ROOTS = frozenset({
-        "tickets", "moderation", "securite", "configuration", "economie",
-        "niveaux", "jeux", "roles", "serveur", "musique",
+        "tickets", "moderation", "security", "config", "economy",
+        "levels", "games", "roles", "server", "music",
     })
     v95.GROUP_DESCRIPTIONS.update(ROOT_DESCRIPTIONS)
     v98.SUBGROUP_DESCRIPTIONS.update({
-        ("musique", "file"): "Afficher et gérer la file d'attente.",
-        ("musique", "playlist"): "Sauvegarder, importer et charger vos playlists.",
+        ("music", "queue"): "View and manage the music queue.",
+        ("music", "playlist"): "Create, import and play your playlists.",
     })
-    logger.info("Surface slash canonique active : noms français, doublons masqués, /musique structuré.")
+    logger.info("Canonical slash surface active: English names, compact groups, /music structured.")
 
 
 __all__ = ["install", "ROOTS", "LEAVES", "MUSIC_LEAVES", "PLAYLIST_LEAVES", "SHORT_TARGETS", "SHORT_ROOTS", "SHORT_DIRECT", "short_slash_enabled"]

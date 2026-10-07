@@ -17,14 +17,24 @@ class PublishAudit:
     remote_paths: tuple[str, ...]
     missing_paths: tuple[str, ...]
     unexpected_paths: tuple[str, ...]
-    musique_paths: tuple[str, ...]
+    music_paths: tuple[str, ...]
     legacy_music_paths: tuple[str, ...]
-    aide_paths: tuple[str, ...]
+    help_paths: tuple[str, ...]
     legacy_help_paths: tuple[str, ...]
 
     @property
     def matches(self) -> bool:
         return not self.missing_paths and not self.unexpected_paths
+
+    # Compatibility aliases for older diagnostics. They now point to the
+    # canonical English routes instead of the retired French routes.
+    @property
+    def musique_paths(self) -> tuple[str, ...]:
+        return self.music_paths
+
+    @property
+    def aide_paths(self) -> tuple[str, ...]:
+        return self.help_paths
 
 
 def _option_type_value(value: Any) -> int | None:
@@ -109,21 +119,21 @@ def audit_published_commands(tree: Any, synced: Iterable[Any]) -> PublishAudit:
         comparable_local = {path for path in local_set if " " not in path}
         comparable_remote = remote_set
 
-    musique = tuple(
-        path for path in remote
-        if path.casefold() == "musique" or path.casefold().startswith("musique ")
-    )
-    legacy_music = tuple(
+    music = tuple(
         path for path in remote
         if path.casefold() == "music" or path.casefold().startswith("music ")
     )
-    aide = tuple(
+    legacy_music = tuple(
         path for path in remote
-        if path.casefold() == "aide" or path.casefold().startswith("aide ")
+        if path.casefold() == "musique" or path.casefold().startswith("musique ")
+    )
+    help_paths = tuple(
+        path for path in remote
+        if path.casefold() == "help" or path.casefold().startswith("help ")
     )
     legacy_help = tuple(
         path for path in remote
-        if path.casefold() == "help" or path.casefold().startswith("help ")
+        if path.casefold() == "aide" or path.casefold().startswith("aide ")
     )
 
     return PublishAudit(
@@ -131,9 +141,9 @@ def audit_published_commands(tree: Any, synced: Iterable[Any]) -> PublishAudit:
         remote_paths=remote,
         missing_paths=tuple(sorted(comparable_local - comparable_remote, key=str.casefold)),
         unexpected_paths=tuple(sorted(comparable_remote - comparable_local, key=str.casefold)),
-        musique_paths=musique,
+        music_paths=music,
         legacy_music_paths=legacy_music,
-        aide_paths=aide,
+        help_paths=help_paths,
         legacy_help_paths=legacy_help,
     )
 

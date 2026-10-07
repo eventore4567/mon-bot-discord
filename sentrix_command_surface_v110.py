@@ -49,6 +49,8 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "warnings": "warnings",
     "clearwarnings": "clearwarnings",
     "clear": "clear",
+    "snipe": "snipe",
+    "editsnipe": "editsnipe",
     "lock": "lock",
     "unlock": "unlock",
     "slowmode": "slowmode",
