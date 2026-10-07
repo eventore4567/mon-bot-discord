@@ -156,3 +156,26 @@ def test_phase7_native_domains_do_not_repeat_sentrix_in_titles():
     assert 'titre="SentriX Music"' not in music
     assert 'titre="Lecture en cours"' in music
     assert 'titre="Ticket ouvert"' in tickets
+
+def test_cross_module_stability_guards_block_resource_recreation():
+    tickets = (ROOT / "cogs" / "setup_ticket_autoconfig_v72.py").read_text(encoding="utf-8")
+    welcome = (ROOT / "cogs" / "setup_v2_completion.py").read_text(encoding="utf-8")
+    snipe = (ROOT / "cogs" / "snipe.py").read_text(encoding="utf-8")
+
+    # Activation/configuration must never invent Discord resources behind the admin's back.
+    assert "guild.create_role(" not in tickets
+    assert "guild.create_category(" not in tickets
+    assert "guild.create_text_channel(" not in tickets
+    assert "guild.create_text_channel" not in welcome
+
+    # Welcome/departure remain separately gated and HA-deduplicated.
+    assert 'module_enabled(bot, member.guild.id, "welcome")' in welcome
+    assert 'module_enabled(bot, member.guild.id, "goodbye")' in welcome
+    assert 'join_dedup.reclamer(bot, member.guild.id, member.id, "welcome")' in welcome
+    assert 'join_dedup.reclamer(bot, member.guild.id, member.id, "goodbye")' in welcome
+
+    # Snipe stays bounded, temporary and ignores messages deleted by clear.
+    assert "SNIPE_RETENTION_SECONDS" in snipe
+    assert "SNIPE_MESSAGE_CACHE_LIMIT" in snipe
+    assert "log_service.is_purged" in snipe
+
