@@ -84,8 +84,8 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     "deposit": "deposit",
     "withdraw": "withdraw",
 
-    # Musique : la surface canonique française garde désormais TOUT sous
-    # /musique. Les commandes + historiques restent inchangées, mais V110 ne
+    # Musique : la surface canonique anglaise garde désormais TOUT sous
+    # /music. Les commandes + historiques restent inchangées, mais V110 ne
     # republie plus /play, /pause, /queue... à la racine.
 }
 
@@ -126,10 +126,38 @@ STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "embedconfig addrole": ("embeds", "allow-role"),
     "embedconfig removerole": ("embeds", "deny-role"),
     "embedconfig list": ("embeds", "allowed-roles"),
+
+    # ------------------------------------------------------------------ 07/10/2026
+    # /economy : aplati de TROIS niveaux à deux. On lisait
+    # « /economy tools shoprole-price » — 28 caractères, et « economy » comme
+    # « shoprole » y étaient répétés par la feuille. Le sous-groupe intermédiaire
+    # (admin/tools/wallet/shop/ranking) était ajouté par le regroupement
+    # sémantique ; à 15 feuilles pour une limite Discord de 25, il ne sert plus.
+    #
+    # « banque » devient « bank » : c'était le dernier nom de commande français
+    # de la surface slash.
+    #
+    # Les 15 sont déclarées, comme pour /embeds : le publieur recrée le groupe et
+    # l'`override`, donc une feuille omise disparaîtrait.
+    "banque": ("economy", "bank"),
+    "economy": ("economy", "wallet"),
+    "buy": ("economy", "buy"),
+    "sell": ("economy", "sell"),
+    "stats": ("economy", "stats"),
+    "economyleaderboard": ("economy", "leaderboard"),
+    "economy-system": ("economy", "system"),
+    "give-money": ("economy", "give"),
+    "reset-economy": ("economy", "reset"),
+    "shoppanel": ("economy", "shop-panel"),
+    "shoprole": ("economy", "shop-roles"),
+    "shoprole add": ("economy", "role-add"),
+    "shoprole list": ("economy", "role-list"),
+    "shoprole price": ("economy", "role-price"),
+    "shoprole remove": ("economy", "role-remove"),
 }
 
 # Les doublons de compatibilité musique sont filtrés par la surface canonique :
-# +play reste utilisable, tandis que /musique jouer vient de music play.
+# +play reste utilisable, tandis que /music play vient de music play.
 SUPPRESSED_SLASH_DUPLICATES = frozenset()
 
 _TOKEN_SHORTENING = {
