@@ -51,7 +51,11 @@ _TARGET_LABELS = (
 )
 _MODERATOR_LABELS = (
     "modérateur", "moderateur", "moderator", "staff", "exécuteur", "executeur",
-    "executor", "acteur", "actor", "responsable",
+    "executor", "acteur", "actor", "responsable", "créateur", "createur",
+    "ajouté par", "ajoute par", "modifié par", "modifie par",
+    "supprimé par", "supprime par", "créé par", "cree par",
+    "renommé par", "renomme par", "fermé par", "ferme par",
+    "rouvert par", "retiré par", "retire par", "déclencheur", "declencheur",
 )
 
 _LOG_SCHEMA = """
@@ -245,6 +249,18 @@ def derive_identity(
     identity_icon: str | None = None,
 ) -> tuple[str | None, int | None, str | None]:
     category, _emoji, _kind = resolve(log_type, embed.title or "", embed.description or "")
+    event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
+
+    # Soundboard targets a sound, not a Discord member/role/channel.
+    if event_type.startswith("soundboard_"):
+        if identity_name is None:
+            sound_name = _field_value_exact(embed, "Son", "Nom du son")
+            if sound_name:
+                identity_name = sound_name.strip("` ").strip()[:80] or None
+        if identity_id is None:
+            identity_id = _first_snowflake(
+                _field_value_exact(embed, "ID", "ID du son", "Sound ID")
+            )
 
     if identity_id is None:
         for label in _TARGET_LABELS:
@@ -426,9 +442,7 @@ def narrative_body(
     if not member and identity_id:
         member = f"<@{identity_id}>"
     moderator = _with_id(
-        _first_user_ref(
-            _field_value(embed, "modérateur", "moderateur", "staff", "responsable", "acteur", "créateur")
-        )
+        _first_user_ref(_field_value(embed, *_MODERATOR_LABELS))
     )
     channel = _first_channel_ref(_field_value(embed, "salon", "channel"))
     role = _first_role_ref(_field_value(embed, "rôle", "role"))
@@ -1003,6 +1017,8 @@ def _trace_identity_label(event_type: str) -> str:
         return "Serveur"
     if event.startswith("invite_"):
         return "Créateur"
+    if event.startswith("soundboard_"):
+        return "Son"
     if event.startswith(("file_", "resource_")):
         return "Élément"
     return "Élément"
