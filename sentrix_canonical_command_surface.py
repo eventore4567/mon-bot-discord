@@ -32,29 +32,29 @@ ROOT_BACK = {
     "games": "game", "roles": "role", "server": "server", "music": "music",
 }
 ROOT_DESCRIPTIONS = {
-    "ai": "AI assistant, images and intelligent tools.",
-    "info": "Information about members, channels, the server and the bot.",
-    "utility": "Everyday utilities and practical commands.",
-    "economy": "Balance, bank, shop and rewards.",
-    "levels": "Levels, XP, reputation and leaderboards.",
-    "games": "Mini-games and community activities.",
-    "music": "Audio playback, queue and playlists.",
-    "events": "Events, tournaments and activities.",
-    "tickets": "Tickets, support and ticket settings.",
-    "moderation": "Sanctions and moderation tools.",
-    "security": "AutoMod, anti-raid, anti-nuke and security.",
-    "config": "General SentriX configuration.",
-    "server": "Server structure and administration.",
-    "roles": "Roles, panels and verification.",
-    "embeds": "Embeds, announcements and message design.",
-    "owner": "Commands reserved for the SentriX owner.",
-    "giveaway": "Giveaways and draws.",
-    "invites": "Invites, leaderboards and bonuses.",
-    "notifications": "Social notifications and welcome messages.",
-    "social": "SentriX social features.",
-    "stats": "Statistics and diagnostics.",
-    "pro": "SentriX Pro tools.",
-    "infinite": "Infinite-mode tools.",
+    "ai": "AI tools",
+    "info": "Server info",
+    "utility": "Utility tools",
+    "economy": "Economy tools",
+    "levels": "Levels and XP",
+    "games": "Mini games",
+    "music": "Music controls",
+    "events": "Events",
+    "tickets": "Ticket tools",
+    "moderation": "Moderation tools",
+    "security": "Security tools",
+    "config": "Bot settings",
+    "server": "Server tools",
+    "roles": "Role tools",
+    "embeds": "Embed tools",
+    "owner": "Owner tools",
+    "giveaway": "Giveaways",
+    "invites": "Invite tools",
+    "notifications": "Notifications",
+    "social": "Social tools",
+    "stats": "Bot stats",
+    "pro": "Pro tools",
+    "infinite": "Infinite tools",
 }
 
 # Public English aliases. Internal command names stay untouched.
@@ -424,8 +424,8 @@ def install() -> None:
     })
     v95.GROUP_DESCRIPTIONS.update(ROOT_DESCRIPTIONS)
     v98.SUBGROUP_DESCRIPTIONS.update({
-        ("music", "queue"): "View and manage the music queue.",
-        ("music", "playlist"): "Create, import and play your playlists.",
+        ("music", "queue"): "Queue tools",
+        ("music", "playlist"): "Playlist tools",
     })
     logger.info("Canonical slash surface active: English names, compact groups, /music structured.")
 
