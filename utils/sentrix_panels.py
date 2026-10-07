@@ -245,7 +245,10 @@ _LIMITE_BLOC = 3800
 
 def _texte(valeur: Any, limite: int = _LIMITE_LIGNE) -> str:
     brut = str(valeur if valeur is not None else "").strip()
-    return brut[: limite - 1] + "…" if len(brut) > limite else brut
+    # Un emoji Discord custom est un token texte assez long (<:nom:id>).
+    # Le couper avec [:N] l'affiche littéralement "à moitié" au lieu de le rendre.
+    from utils.sentrix_emojis import tronquer
+    return tronquer(brut, limite)
 
 
 @dataclass
