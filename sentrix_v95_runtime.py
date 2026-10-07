@@ -32,8 +32,8 @@ from utils import embeds, log_service
 
 logger = logging.getLogger("bot.v95")
 
-DIRECT_ROOTS = frozenset({"help", "aide", "setup", "ping", "sentrix"})
-PRESERVED_DIRECT_ROOTS = frozenset({"aide", "setup", "ping", "sentrix"})
+DIRECT_ROOTS = frozenset({"help", "setup", "ping", "sentrix"})
+PRESERVED_DIRECT_ROOTS = frozenset({"help", "setup", "ping", "sentrix"})
 EXCLUDED_COMMANDS = frozenset({"logsdiag"})
 MAX_ROOT_COMMANDS = 100
 MAX_CHILDREN = 25
@@ -548,10 +548,10 @@ def _remove_legacy_public_roots(tree: app_commands.CommandTree) -> None:
     """Supprime les anciennes racines qui ne doivent plus être publiées.
 
     Cette passe est volontairement minuscule et se lance après TOUTES les couches
-    de préparation. Certaines couches historiques peuvent recréer /help après le
-    premier nettoyage ; /aide est désormais l'unique entrée publique d'aide.
+    de préparation. Les anciens slash français ne doivent plus être republiés :
+    /help est l'unique entrée publique d'aide.
     """
-    for name in ("help",):
+    for name in ("aide",):
         try:
             tree.remove_command(name, type=discord.AppCommandType.chat_input)
         except TypeError:
