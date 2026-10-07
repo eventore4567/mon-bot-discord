@@ -172,6 +172,10 @@ PLAYLIST_LEAVES = {
 DUPLICATES = frozenset({
     "leaderboard-money", "me", "rank", "buyrole", "ask", "chat", "chat-reset",
     "embed-create", "latency", "levelroles",
+    # La racine moderne /giveaway reroll remplace l'ancienne commande plate
+    # giveaway-reroll. Garder les deux produit /giveaway reroll-2 et bloque
+    # l'audit pré-sync, donc aucune commande slash (dont /snipe) n'est publiée.
+    "giveaway-reroll",
 })
 BUCKETS = {
     ("ticket", "panel"): "panels", ("ticket", "config"): "config",
