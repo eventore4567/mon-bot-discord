@@ -254,7 +254,7 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
     panel.add_field(name="Catégories", value="\n".join(lines), inline=False)
     panel.add_field(
         name="Recherche rapide",
-        value="Tapez `+help ban`, `/aide commande:ban` ou utilisez **Rechercher**.",
+        value="Tapez `+help ban`, `/help command:ban` ou utilisez **Rechercher**.",
         inline=False,
     )
     panel.add_field(
@@ -580,7 +580,7 @@ def _sections_accueil(bot: commands.Bot, member=None) -> list[panels.Section]:
         panels.Section(
             "Trouver une commande",
             [
-                panels.Ligne("Par son nom", "`/aide commande:ban` ou `+help ban`"),
+                panels.Ligne("Par son nom", "`/help command:ban` ou `+help ban`"),
                 panels.Ligne("Par catégorie", "Le menu déroulant ci-dessous"),
                 panels.Ligne("Par mot-clé", "Le bouton **Rechercher**"),
             ],
@@ -909,8 +909,8 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
     async def prefix_help(self, ctx: commands.Context, *, query: str | None = None):
         await self.send_help(ctx, query)
 
-    @app_commands.command(name="aide", description="Ouvrir le centre d’aide SentriX")
-    @app_commands.describe(commande="Nom, slash, catégorie ou mot-clé")
+    @app_commands.command(name="help", description="Open the SentriX help center")
+    @app_commands.describe(commande="Command name, slash command, category or keyword")
     async def slash_help(self, interaction: discord.Interaction, commande: str | None = None):
         await self.send_help(interaction, commande)
 
