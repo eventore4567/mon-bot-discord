@@ -505,9 +505,17 @@ class Verification(commands.Cog, name="Verification"):
         if not role_id:
             return None
         role = guild.get_role(int(role_id))
-        if role is None or role.managed or role.is_default():
+        if role is None:
             return None
-        if role.name == "Vérifié":
+        if bool(getattr(role, "managed", False)):
+            return None
+        try:
+            is_default = bool(role.is_default())
+        except (AttributeError, TypeError):
+            is_default = False
+        if is_default:
+            return None
+        if str(getattr(role, "name", "")) == "Vérifié":
             panel = await self.bot.db.fetchone(
                 "SELECT 1 FROM dashboard_verification_panels WHERE guild_id=? LIMIT 1",
                 (guild.id,),
@@ -667,6 +675,11 @@ class Verification(commands.Cog, name="Verification"):
 
         conf = await self.bot.db.get_guild_config(guild.id)
         role = await self._configured_verified_role(guild)
+        if role is None:
+            return await interaction.response.send_message(
+                "Aucun rôle final n'a été choisi dans +setup → Règlement & accès.",
+                ephemeral=True,
+            )
         problem = role_grant_problem(guild, role)
         if problem:
             return await interaction.response.send_message(f"Vérification impossible pour le moment : {problem}", ephemeral=True)
