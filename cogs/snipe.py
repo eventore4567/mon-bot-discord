@@ -398,7 +398,7 @@ class Snipe(commands.Cog):
 
     @commands.hybrid_command(
         name="snipe",
-        description="Afficher le dernier message supprimé récemment dans un salon.",
+        description="Show deleted message",
     )
     async def snipe(
         self,
@@ -460,7 +460,7 @@ class Snipe(commands.Cog):
     @commands.hybrid_command(
         name="editsnipe",
         aliases=("esnipe",),
-        description="Afficher la dernière modification récente d'un message.",
+        description="Show edited message",
     )
     async def editsnipe(
         self,
