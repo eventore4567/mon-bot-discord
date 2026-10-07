@@ -13,7 +13,7 @@ import discord
 from discord.ext import commands
 
 import config
-from . import embeds
+from . import embeds, sentrix_emojis
 from .log_banners import BANNER_DIR, BANNER_VERSION, STYLES, ensure_banners, family_for_command, nom_fichier
 
 logger = logging.getLogger("bot.command-visuals")
@@ -79,9 +79,7 @@ def _clean_text(value: object, *, limit: int = 3500) -> str:
             continue
         lines.append(raw.rstrip())
     text = "\n".join(lines).strip()
-    if len(text) > limit:
-        text = text[: max(1, limit - 1)].rstrip() + "…"
-    return text
+    return sentrix_emojis.tronquer(text, limit)
 
 
 _CORE_FAMILY_LABELS = {
