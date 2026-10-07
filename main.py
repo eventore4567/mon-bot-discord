@@ -876,7 +876,7 @@ class BotAllInOne(commands.Bot):
                 )
             if publish_audit.legacy_help_paths:
                 logger.error(
-                    "Audit slash Discord : ancienne surface /help encore publiée : %s",
+                    "Audit slash Discord : ancienne surface française /aide encore publiée : %s",
                     ", ".join(f"/{path}" for path in publish_audit.legacy_help_paths),
                 )
             if publish_audit.missing_paths or publish_audit.unexpected_paths:
