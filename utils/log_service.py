@@ -364,7 +364,7 @@ class RevealIdButton(
         self.entity_id = int(entity_id)
         super().__init__(
             discord.ui.Button(
-                label=label[:80],
+                label=sentrix_emojis.tronquer(label, 80),
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"sxid:{self.entity_id}",
                 emoji=sentrix_emojis.partiel("info"),
@@ -434,7 +434,7 @@ class LogActionsView(discord.ui.View):
             )
             self.add_item(
                 discord.ui.Button(
-                    label=str(label or "Ouvrir")[:80],
+                    label=sentrix_emojis.tronquer(str(label or "Ouvrir"), 80),
                     style=discord.ButtonStyle.link,
                     url=clean_url,
                     emoji=sentrix_emojis.partiel(icon_name),
