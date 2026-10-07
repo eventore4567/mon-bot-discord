@@ -1029,7 +1029,11 @@ class Levels(commands.Cog, name="Levels"):
         ]
 
         # La barre est un repere visuel immediat, la ou un pourcentage demande un effort.
-        barre = stats_service.progress_bar(
+        # progress_bar rend un TUPLE (barre, pourcentage). L'affecter entier
+        # faisait afficher `('▱▱▱▱▱▱...', 0)` dans +niveau : le repr Python brut,
+        # visible par tous les membres. Le pourcentage est déjà rendu plus haut
+        # via stats["progress_pct"], donc seule la barre est utile ici.
+        barre, _pourcentage = stats_service.progress_bar(
             stats["current_level_xp"], stats["required_xp"], length=18,
         )
 

@@ -516,6 +516,113 @@ SURFACE_EN_REPLACEMENTS = (
     ("Non configuré", "Not configured"),
     ("Non configurée", "Not configured"),
     ("Introuvable", "Missing"),
+
+    # ------------------------------------------------------------------ 07/10/2026
+    # Étiquettes relevées sur le texte RÉEL des panneaux Components V2, capturé en
+    # instrumentant translate_view_in_place sur le bot booté. Choisies parce que ce
+    # sont les surfaces que les membres voient le plus — +ping, +niveau, +solde,
+    # tickets, musique — et non par ordre alphabétique.
+    #
+    # La substitution respecte désormais les frontières de mot, donc les pluriels
+    # doivent être déclarés explicitement : sans ("Serveurs", "Servers"),
+    # « **Serveurs** · 1 » restait français. Mesuré.
+    ("Serveurs", "Servers"),
+    ("Membres couverts", "Members covered"),
+    ("Passerelle Discord", "Discord gateway"),
+    ("Base de données", "Database"),
+    ("Aucun palier configuré", "No tier configured"),
+    ("connexion excellente", "excellent connection"),
+    ("en reconnexion", "reconnecting"),
+    ("opérationnelle", "operational"),
+    ("Prochain rôle", "Next role"),
+    ("Non classé", "Unranked"),
+    ("Classement", "Ranking"),
+    ("Avancement", "Completion"),
+    ("Progression", "Progress"),
+    ("Activité", "Activity"),
+    ("Connexion", "Connection"),
+    ("Latence", "Latency"),
+    ("Qualité", "Quality"),
+    ("Portée", "Reach"),
+    ("Fragments", "Shards"),
+    ("Niveaux", "Levels"),
+    ("Niveau", "Level"),
+    ("Palier", "Tier"),
+    ("Restant", "Remaining"),
+
+    # --- Économie, vue par tous les membres
+    ("Portefeuille", "Wallet"),
+    ("Banque", "Bank"),
+    ("au total", "in total"),
+    ("Récompense quotidienne", "Daily reward"),
+    ("Récompense hebdomadaire", "Weekly reward"),
+    ("Déjà récupéré", "Already claimed"),
+    ("Revenez dans", "Come back in"),
+    ("Transaction", "Transaction"),
+    ("Solde insuffisant", "Not enough funds"),
+    ("Boutique", "Shop"),
+    ("Inventaire", "Inventory"),
+
+    # --- Tickets et musique
+    ("Ticket ouvert", "Ticket opened"),
+    ("Ticket fermé", "Ticket closed"),
+    ("Rouvrir", "Reopen"),
+    ("Fermer", "Close"),
+    ("Supprimer", "Delete"),
+    ("File d'attente", "Queue"),
+    ("Lecture en cours", "Now playing"),
+    ("En pause", "Paused"),
+    ("Aucune piste", "No track"),
+    ("Ajouté à la file", "Added to queue"),
+
+    # Formes adjectivales : le français accorde, l'anglais non. Déclarées après les
+    # expressions plus longues, qui sont triées en premier de toute façon.
+    ("excellente", "excellent"),
+    ("désactivée", "disabled"),
+    ("désactivés", "disabled"),
+    ("activée", "enabled"),
+    ("activés", "enabled"),
+    ("configurée", "configured"),
+    ("vérifiée", "verified"),
+    ("introuvable", "not found"),
+
+    # --- +serverinfo et +userinfo : les deux fiches que les membres consultent le plus
+    ("Informations serveur", "Server information"),
+    ("Informations membre", "Member information"),
+    ("Membre du serveur depuis", "Server member since"),
+    ("rôle le plus élevé", "highest role"),
+    ("Création du compte", "Account created"),
+    # RÈGLE : une entrée ne doit pas enjamber un littéral protégé. Le nom du bot
+    # et celui du serveur sont protégés, donc le fragment est COUPÉ autour d'eux :
+    # « Arrivée de SentriX » arrivait au traducteur comme « **Arrivée de », et
+    # l'entrée longue ne matchait jamais — on obtenait « Joined de SentriX ».
+    # On traduit donc la partie qui précède le nom, et l'ordre des mots tient.
+    ("Arrivée de", "Arrival of"),
+    ("Sur ce serveur", "In this server"),
+    ("Rôle principal", "Main role"),
+    ("Identifiant", "ID"),
+    ("Identité", "Identity"),
+    ("Propriétaire", "Owner"),
+    ("Utilisateur", "User"),
+    ("Création", "Created"),
+    ("Arrivée", "Joined"),
+    ("Catégories", "Categories"),
+    ("Textuels", "Text"),
+    ("Vocaux", "Voice"),
+    ("Humains", "Humans"),
+    ("Rôles", "Roles"),
+    ("Vérification", "Verification"),
+
+    # --- Réponses de ticket
+    ("Aucun panel de ticket n'est encore configuré sur ce serveur.",
+     "No ticket panel is configured in this server yet."),
+    ("Action effectuée", "Done"),
+
+    # --- Fragments de phrase de +niveau
+    ("avant le suivant", "to the next one"),
+    ("encore", "still"),
+    ("niveau", "level"),
+    ("Aucune", "None"),
 )
 
 _UI_PROTECTED_RE = re.compile(
@@ -524,13 +631,34 @@ _UI_PROTECTED_RE = re.compile(
 )
 
 
+def _remplacer_mot(texte: str, source: str, cible: str) -> str:
+    """Substitue en respectant les frontières de mot.
+
+    Un simple ``str.replace`` mordait à l'intérieur des mots : avec
+    ("Membre", "Member"), « **Membres couverts** » devenait « **Members
+    couverts** » — un mot anglais collé à un adjectif français. Mesuré sur
+    ``+ping`` le 07/10/2026.
+
+    La frontière n'est posée que là où le motif commence et finit par un
+    caractère de mot : une expression comme « Modifications en attente » doit
+    rester substituable telle quelle.
+    """
+    if not source:
+        return texte
+    debut = r"\b" if source[0].isalnum() else ""
+    fin = r"\b" if source[-1].isalnum() else ""
+    if not debut and not fin:
+        return texte.replace(source, cible)
+    return re.sub(debut + re.escape(source) + fin, cible.replace("\\", "\\\\"), texte)
+
+
 def _translate_surface_fragment(value: str, *, setup: bool = False) -> str:
     text = str(value or "")
     replacements = [*SURFACE_EN_REPLACEMENTS]
     if setup:
         replacements = [*SETUP_EN_REPLACEMENTS, *replacements]
     for source, target in sorted(replacements, key=lambda pair: len(pair[0]), reverse=True):
-        text = text.replace(source, target)
+        text = _remplacer_mot(text, source, target)
     return text
 
 

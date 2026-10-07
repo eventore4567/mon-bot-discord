@@ -135,3 +135,51 @@ def test_exact_translation_never_overrides_protection():
         assert language_runtime.english_ui_text(nom, setup=True, protect=(nom,)) == nom
         # Non protégée, la même étiquette doit bien se traduire.
         assert language_runtime.english_ui_text(nom, setup=True) != nom
+
+def test_substitution_respecte_les_frontieres_de_mot():
+    """Un `str.replace` nu mordait à l'intérieur des mots. Les pluriels doivent
+    donc être déclarés explicitement — sans ("Serveurs", "Servers"),
+    « **Serveurs** · 1 » restait français."""
+    rendu = language_runtime.english_ui_text("**Serveurs** · 1")
+    assert "**Servers** · 1" in rendu, rendu
+    # Et un mot plus long n'est pas amputé par une entrée plus courte.
+    assert language_runtime._remplacer_mot("Membres couverts", "Membre", "Member") == "Membres couverts"
+
+
+def test_aucune_entree_ne_traverse_un_nom_protege():
+    """Les noms protégés COUPENT le fragment : une entrée de dictionnaire qui
+    les enjambe ne peut jamais matcher. « Arrivée de SentriX » arrivait au
+    traducteur comme « **Arrivée de » et ressortait « Joined de SentriX ».
+    On traduit la partie qui précède le nom, et l'ordre des mots tient."""
+    rendu = language_runtime.english_ui_text(
+        "**Arrivée de SentriX** · test", protect=("SentriX",)
+    )
+    assert "Arrival of SentriX" in rendu, rendu
+    assert " de SentriX" not in rendu, rendu
+
+
+def test_la_barre_de_progression_de_niveau_nest_pas_un_tuple():
+    """``utils.stats_service.progress_bar`` rend un TUPLE (barre, pourcentage).
+    cogs/levels.py l'affectait entier puis l'interpolait, ce qui affichait
+    ``('▱▱▱...', 0)`` — le repr Python brut — dans +niveau, vu par tous les
+    membres. Lu sur l'AST : l'appel doit être dépaqueté."""
+    import ast
+    from pathlib import Path
+
+    arbre = ast.parse(Path("cogs/levels.py").read_text(encoding="utf-8"))
+    trouves = []
+    for noeud in ast.walk(arbre):
+        if not isinstance(noeud, ast.Assign):
+            continue
+        valeur = noeud.value
+        if not isinstance(valeur, ast.Call):
+            continue
+        if not ast.unparse(valeur.func).endswith("progress_bar"):
+            continue
+        trouves.append(noeud)
+        cible = noeud.targets[0]
+        assert isinstance(cible, ast.Tuple), (
+            "progress_bar rend un tuple : l'affecter à un nom unique affiche son "
+            f"repr brut. Trouvé : {ast.unparse(noeud)[:80]}"
+        )
+    assert trouves, "aucun appel à progress_bar trouvé dans cogs/levels.py"
