@@ -16,7 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds
+from utils import embeds, sentrix_emojis
 from utils import sentrix_panels as panels
 from utils.command_permissions import command_example, command_requirement
 
@@ -192,7 +192,7 @@ def _slash_name(bot: commands.Bot, command: commands.Command) -> str | None:
 
 def _description(command: commands.Command) -> str:
     raw = (command.description or command.help or "Aucune description.").strip()
-    return raw.split("\n", 1)[0][:220]
+    return sentrix_emojis.tronquer(raw.split("\n", 1)[0], 220)
 
 
 def _display_name(command: commands.Command) -> str:
@@ -230,7 +230,7 @@ def _command_label(bot: commands.Bot, command: commands.Command, prefix: str) ->
         label = f"/{slash}  ·  ({prefix_name})"
     else:
         label = f"/{slash}  ·  {prefix_name}" if slash else prefix_name
-    return label[:256]
+    return sentrix_emojis.tronquer(label, 256)
 
 
 def _decorate(panel: discord.Embed, bot: commands.Bot) -> discord.Embed:
@@ -926,7 +926,7 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
         for command in matches[:25]:
             slash = _slash_name(self.bot, command)
             public = f"/{slash}" if slash else f"+{_display_name(command)}"
-            label = f"{public} · {_description(command)}"[:100]
+            label = sentrix_emojis.tronquer(f"{public} · {_description(command)}", 100)
             value = (slash or _display_name(command))[:100]
             choices.append(app_commands.Choice(name=label, value=value))
         return choices
