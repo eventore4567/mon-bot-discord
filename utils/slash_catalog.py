@@ -481,6 +481,196 @@ RETIRED: dict[str, str] = {
 
 
 # --------------------------------------------------------------------------
+# Options : nom affiché et description en anglais
+# --------------------------------------------------------------------------
+# Les options héritent des paramètres Python des commandes préfixe, donc de noms
+# français (« membre » ×43, « raison », « duree »…) et de descriptions souvent
+# génériques (« Valeur à fournir pour « commande » »). Mesuré le 07/10/2026 :
+# 207 descriptions françaises sur 214 options.
+#
+# Seul l'AFFICHAGE change : discord.py rattache la valeur reçue au paramètre
+# Python d'origine, donc le code métier reçoit toujours `membre=`.
+# Les VALEURS attendues ne changent pas non plus : quand une commande attend
+# « pile » ou « face », la description le dit.
+
+OPTION_NAMES: dict[str, str] = {
+    "adversaire": "opponent",
+    "affirmation": "claim",
+    "ancien_nom": "current_name",
+    "choix": "choice",
+    "commande": "command",
+    "cote": "side",
+    "demande": "request",
+    "difficulte": "difficulty",
+    "duree": "duration",
+    "etat": "state",
+    "evenement": "event",
+    "fichier": "file",
+    "filtre": "filter",
+    "identifiant": "id",
+    "langue": "language",
+    "lien": "link",
+    "longueur": "length",
+    "membre": "member",
+    "mise": "bet",
+    "montant": "amount",
+    "niveau": "level",
+    "nom": "name",
+    "nombre": "count",
+    "nouveau_nom": "new_name",
+    "numero": "number",
+    "objet": "item",
+    "pari": "guess",
+    "prefixe": "prefix",
+    "pseudo": "nickname",
+    "raison": "reason",
+    "recherche": "query",
+    "retirer_role": "remove_role",
+    "salon": "channel",
+    "secondes": "seconds",
+    "sujet": "subject",
+    "texte": "text",
+    "ville": "city",
+}
+
+#: Description par défaut, selon le nom anglais de l'option.
+OPTION_DESCRIPTIONS: dict[str, str] = {
+    "action": "What to do.",
+    "amount": "Amount of coins, or 'all'.",
+    "bet": "Coins to bet.",
+    "channel": "The channel.",
+    "choice": "Your move.",
+    "city": "City name.",
+    "claim": "The claim to check.",
+    "command": "A command to look up.",
+    "configuration": "Panel configuration.",
+    "count": "How many.",
+    "current_name": "The template's current name.",
+    "description": "Description.",
+    "difficulty": "facile, normal or difficile.",
+    "duration": "Duration, e.g. 10m, 1h, 2d.",
+    "emoji": "The emoji.",
+    "event": "The log event.",
+    "file": "The JSON file exported by /embeds export.",
+    "filter": "Only show commands containing this text.",
+    "guess": "plus_haut or plus_bas (optional).",
+    "id": "The ID.",
+    "image": "Example screenshot.",
+    "item": "The item.",
+    "language": "Target language code, e.g. en, es, de.",
+    "length": "Number of symbols, from 3 to 6.",
+    "level": "The level.",
+    "link": "Link to the message.",
+    "listing_id": "Listing ID.",
+    "max": "Highest value, 100 by default.",
+    "member": "The member.",
+    "message_id": "Message ID.",
+    "metric": "Activity to measure.",
+    "min_account_hours": "Minimum account age in hours.",
+    "mode": "Mode.",
+    "name": "Name.",
+    "new_name": "New name.",
+    "nickname": "The new nickname.",
+    "number": "Case number (optional).",
+    "opponent": "Opponent, random if empty.",
+    "options": "Options separated by commas.",
+    "position": "Position in the queue.",
+    "prefix": "New prefix, e.g. !, ? or +.",
+    "price": "Price in coins.",
+    "quantity": "Quantity.",
+    "query": "What to search for.",
+    "question": "The question.",
+    "reason": "The reason.",
+    "reference_id": "Example ID.",
+    "remove_role": "Also remove the role they received.",
+    "request": "What the code should do.",
+    "reward_money": "Coin reward.",
+    "reward_role": "Role reward.",
+    "role": "The role.",
+    "roles": "The roles.",
+    "seconds": "Position in seconds.",
+    "side": "pile (heads) or face (tails).",
+    "state": "Enable or disable.",
+    "subject": "The subject.",
+    "target": "Where to send it.",
+    "text": "The text.",
+    "threshold": "Threshold.",
+    "ticket_id": "Ticket number.",
+    "unit_price": "Price per item.",
+    "url": "Full link starting with https://.",
+    "user_id": "The user's Discord ID.",
+    "xp": "Amount of XP.",
+}
+
+#: Description précise quand le contexte compte : un modérateur qui tape /ban doit
+#: savoir exactement ce que chaque option fait.
+OPTION_OVERRIDES: dict[tuple[str, str], str] = {
+    ("ban", "member"): "The member to ban.",
+    ("ban", "reason"): "Why they are banned. Shown in the logs.",
+    ("unban", "reason"): "Why they are unbanned. Shown in the logs.",
+    ("kick", "member"): "The member to kick.",
+    ("kick", "reason"): "Why they are kicked. Shown in the logs.",
+    ("timeout", "member"): "The member to time out.",
+    ("timeout", "duration"): "How long, e.g. 10m, 1h, 1d.",
+    ("timeout", "reason"): "Why they are timed out. Shown in the logs.",
+    ("untimeout", "member"): "The member whose timeout ends.",
+    ("warn", "member"): "The member to warn.",
+    ("warn", "reason"): "Why they are warned. Shown in the logs.",
+    ("clear", "count"): "Number of messages to delete, from 2 to 100.",
+    ("moderation tempban", "member"): "The member to ban.",
+    ("moderation tempban", "duration"): "How long, e.g. 1h, 2d.",
+    ("moderation warnings", "member"): "Whose warnings to show.",
+    ("moderation warnings-clear", "member"): "Whose warnings to delete.",
+    ("moderation nick", "member"): "Whose nickname to change.",
+    ("moderation dm-disable", "action"): "Sanction type: ban, kick, mute or warn.",
+    ("moderation dm-reset", "action"): "Sanction type: ban, kick, mute or warn.",
+    ("economy pay", "member"): "Who receives the coins.",
+    ("economy give", "member"): "Who receives the coins.",
+    ("economy rob", "member"): "Who to rob.",
+    ("suggestions submit", "text"): "Your suggestion.",
+    ("poll", "question"): "The poll question.",
+    ("translate text", "text"): "The text to translate.",
+    ("remind cancel", "id"): "Reminder ID, from /remind list.",
+    ("notifications remove", "id"): "Alert ID, from /notifications list.",
+    ("help", "command"): "A command to look up, e.g. ban.",
+    ("games activities dragon", "opponent"): "dragonnet, feu, glace or ombre. Random if empty.",
+    ("games quick rps", "choice"): "pierre, feuille or ciseaux.",
+}
+
+
+def _english_options(command: Any, path: str) -> None:
+    """Renomme l'affichage des options et leur donne une description anglaise.
+
+    Les paramètres sont REMPLACÉS par des copies : la commande intermédiaire
+    réutilisée partage ses objets paramètres, on ne la modifie jamais.
+    """
+    import dataclasses
+
+    params = getattr(command, "_params", None)
+    if not params:
+        return
+    renamed: dict[str, Any] = {}
+    used: set[str] = set()
+    for python_name, param in params.items():
+        shown = param.display_name
+        english = OPTION_NAMES.get(shown, shown)
+        if english in used:
+            # Deux options ne peuvent pas porter le même nom : on garde l'original
+            # plutôt que de publier une commande que Discord refuserait.
+            logger.warning("Option « %s » de /%s non renommée : collision.", shown, path)
+            english = shown
+        used.add(english)
+        description = OPTION_OVERRIDES.get((path, english)) or OPTION_DESCRIPTIONS.get(english)
+        changes: dict[str, Any] = {}
+        if english != shown:
+            changes["_rename"] = english
+        if description:
+            changes["description"] = description
+        renamed[python_name] = dataclasses.replace(param, **changes) if changes else param
+    command._params = renamed
+
+
+# --------------------------------------------------------------------------
 # Publication
 # --------------------------------------------------------------------------
 
@@ -597,6 +787,7 @@ def publish(bot: Any) -> dict[str, Any]:
         if leaf is None:
             missing.append(entry.source)
             continue
+        _english_options(leaf, entry.path)
         parts = entry.path.split()
         if len(parts) == 1:
             roots[parts[0]] = leaf
@@ -631,6 +822,7 @@ def publish(bot: Any) -> dict[str, Any]:
 
 
 __all__ = [
-    "CATALOG", "GROUP_DESCRIPTIONS", "RETIRED", "SlashEntry",
+    "CATALOG", "GROUP_DESCRIPTIONS", "OPTION_DESCRIPTIONS", "OPTION_NAMES",
+    "OPTION_OVERRIDES", "RETIRED", "SlashEntry",
     "direct_roots", "entries_by_root", "publish",
 ]

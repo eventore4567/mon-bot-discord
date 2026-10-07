@@ -133,7 +133,13 @@ def _catalog(bot: commands.Bot) -> list[HelpEntry]:
         )
 
     for slash_name, slash_command in _walk_slash(bot):
-        key = _normalise(slash_name)
+        # Rapprocher par la commande SOURCE d'abord : depuis utils/slash_catalog.py,
+        # « /economy balance » exécute +balance. Rapprocher par nom seulement en
+        # faisait deux commandes, et l'aide annonçait « 741 commandes uniques,
+        # 239 uniquement en / » pour 502 commandes réelles.
+        source = getattr(getattr(slash_command, "callback", None), "_sentrix_original_command", None)
+        source_key = _normalise(str(source)) if source else ""
+        key = source_key if source_key in entries else _normalise(slash_name)
         if not key:
             continue
         entry = entries.get(key)

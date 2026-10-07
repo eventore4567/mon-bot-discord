@@ -124,3 +124,29 @@ def test_les_outils_du_proprietaire_ne_sont_pas_publies():
     for source in ("bot-leave", "bot-servers", "set-bot", "setstatus", "status-rotate", "theme", "footer"):
         assert source in sc.RETIRED
         assert source not in {e.source for e in sc.CATALOG}
+
+
+def test_noms_d_options_anglais_et_valides():
+    for francais, anglais in sc.OPTION_NAMES.items():
+        assert NOM.match(anglais.replace("_", "-")), anglais
+        assert not ACCENTS.search(anglais), anglais
+
+
+def test_descriptions_d_options_anglaises():
+    for nom, d in {**sc.OPTION_DESCRIPTIONS, **{f"{p}:{o}": d for (p, o), d in sc.OPTION_OVERRIDES.items()}}.items():
+        assert d and len(d) <= 100, nom
+        assert not ACCENTS.search(d), f"{nom} : « {d} »"
+        assert not MOTS_FRANCAIS.search(d), f"{nom} : « {d} »"
+
+
+def test_chaque_override_vise_une_commande_publiee():
+    """Une précision d'option sur un chemin qui n'existe plus serait du code mort
+    silencieux : on la verrait ici, pas en production."""
+    chemins = {e.path for e in sc.CATALOG}
+    orphelins = sorted({p for p, _o in sc.OPTION_OVERRIDES} - chemins)
+    assert orphelins == [], orphelins
+
+
+def test_les_options_traduites_ont_une_description():
+    sans = sorted(a for a in sc.OPTION_NAMES.values() if a not in sc.OPTION_DESCRIPTIONS)
+    assert sans == [], sans

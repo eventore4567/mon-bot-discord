@@ -192,13 +192,16 @@ def prefix_invocation(command: commands.Command) -> tuple[str, list[str]]:
 
 def slash_option(param: app_commands.Parameter) -> dict | None:
     kind = param.type
-    name = param.name
+    # Discord envoie le nom AFFICHÉ de l'option, pas le nom du paramètre Python.
+    # Depuis utils/slash_catalog.py ils diffèrent (« membre » s'affiche « member ») :
+    # envoyer param.name ferait mesurer au balayage un monde qui n'existe pas.
+    name = getattr(param, "display_name", None) or param.name
     if param.choices:
         return {"name": name, "type": kind.value, "value": param.choices[0].value}
     if kind is discord.AppCommandOptionType.string:
         if getattr(param, "max_length", None) is not None and param.max_length < 6:
             return {"name": name, "type": 3, "value": "t" * param.max_length}
-        return {"name": name, "type": 3, "value": _text_for(name)}
+        return {"name": name, "type": 3, "value": _text_for(param.name)}
     if kind is discord.AppCommandOptionType.integer:
         value = param.max_value if param.max_value is not None else (param.min_value if param.min_value is not None else 10)
         return {"name": name, "type": 4, "value": int(value)}
