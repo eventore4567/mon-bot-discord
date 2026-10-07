@@ -93,6 +93,39 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
 STANDARD_GROUPED_SLASH: dict[str, tuple[str, str]] = {
     "giverole": ("role", "give"),
     "removerole": ("role", "remove"),
+
+    # ------------------------------------------------------------------ 07/10/2026
+    # /embeds : les 14 feuilles répétaient « embed », déjà porté par la racine.
+    # On lisait donc « /embeds embed-create » là où « /embeds create » suffit.
+    #
+    # Deux raisons de le faire ici plutôt qu'en renommant les commandes + :
+    # 1. le nom préfixe (`+embed create`) ne change pas, donc rien ne casse pour
+    #    les membres qui l'utilisent déjà ni dans les 5 tables de catalogue qui
+    #    le citent ;
+    # 2. cette table est le point d'extension prévu : le publieur en reprend la
+    #    feuille telle quelle.
+    #
+    # Les 14 sont déclarées, pas seulement celles qui gagnaient des caractères :
+    # le publieur recrée le groupe et l'`override`, donc une feuille omise
+    # disparaîtrait purement et simplement.
+    #
+    # Au passage, cela répare un nom TRONQUÉ : « embedconfig-removerole » faisait
+    # 22 caractères pour une limite de 20 et s'affichait
+    # « /embeds embedconfig-removero ».
+    "embed create": ("embeds", "create"),
+    "embed list": ("embeds", "list"),
+    "embed edit": ("embeds", "edit"),
+    "embed preview": ("embeds", "preview"),
+    "embed send": ("embeds", "send"),
+    "embed delete": ("embeds", "delete"),
+    "embed duplicate": ("embeds", "duplicate"),
+    "embed rename": ("embeds", "rename"),
+    "embed export": ("embeds", "export"),
+    "embed import": ("embeds", "import"),
+    "embed message": ("embeds", "message"),
+    "embedconfig addrole": ("embeds", "allow-role"),
+    "embedconfig removerole": ("embeds", "deny-role"),
+    "embedconfig list": ("embeds", "allowed-roles"),
 }
 
 # Les doublons de compatibilité musique sont filtrés par la surface canonique :
