@@ -2796,7 +2796,11 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         view = MemberPanelView(self, ctx.author.id, membre.id)
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
 
-    @commands.hybrid_command(name="history", aliases=["historique"], description="Afficher la timeline staff complète d'un membre.")
+    @commands.hybrid_command(
+        name="staff-history",
+        aliases=["staffhistory"],
+        description="Show staff history for a member.",
+    )
     @checks.has_permission_or_modrole("moderate_members")
     @app_commands.describe(membre="Le membre à consulter")
     async def history(self, ctx: commands.Context, membre: discord.Member):
