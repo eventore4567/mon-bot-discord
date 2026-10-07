@@ -221,3 +221,48 @@ def test_une_phrase_avec_un_mot_outil_est_traduite_en_entier():
     )
     assert rendu == "This reward is not available yet.", rendu
     assert "still" not in rendu, rendu
+
+def test_aucune_entree_ne_produit_un_melange():
+    """Une traduction doit laisser la phrase ENTIÈREMENT anglaise, ou intacte —
+    jamais à moitié.
+
+    C'est la garde qui aurait attrapé mes deux erreurs toute seule :
+    ("encore", "still") rendait « Cette récompense n'est pas still disponible »,
+    et ("Aucune", "None") + ("configurée", "configured") rendaient « None clé
+    OpenAI n'est configured sur ce bot ». Les deux fois, le mot existait aussi
+    DANS des phrases, pas seulement comme étiquette.
+
+    Le corpus est figé depuis un balayage réel du bot booté
+    (``tools/i18n_coverage_sweep.py``), donc il décrit ce que les membres voient
+    vraiment, et non des exemples inventés.
+    """
+    import json
+    import re
+    from pathlib import Path
+
+    corpus = json.loads(
+        Path("tests/fixtures/phrases_francaises_rendues.json").read_text(encoding="utf-8")
+    )
+    assert len(corpus) > 200, f"corpus trop maigre : {len(corpus)}"
+    accent = re.compile(r"[àâäéèêëîïôöùûüç]")
+
+    # Les mêmes littéraux que le transport protège en production : nom du serveur,
+    # du bot, de l'auteur. Sans eux le test accuserait la traduction d'abîmer
+    # « Serveur test », ce qui n'arrive justement pas en vrai.
+    protection = ("Serveur test", "SentriX", "admin")
+
+    melanges = []
+    for phrase in corpus:
+        rendu = language_runtime.english_ui_text(
+            phrase, setup=True, protect=protection
+        ) or phrase
+        if rendu != phrase and accent.search(rendu):
+            melanges.append((phrase[:60], rendu[:60]))
+
+    assert melanges == [], (
+        "ces phrases ressortent moitié françaises moitié anglaises ; la ou les "
+        "entrées responsables traduisent un mot qui apparaît DANS une phrase, "
+        f"pas seulement comme étiquette :\n" + "\n".join(
+            f"  {avant!r}\n    -> {apres!r}" for avant, apres in melanges[:8]
+        )
+    )

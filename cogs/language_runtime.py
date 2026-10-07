@@ -300,9 +300,11 @@ SETUP_EN_REPLACEMENTS = (
     ("Choisis ce que tu veux configurer", "Choose what you want to configure"),
     ("Selectionne une option", "Select an option"), ("Sélectionne une option", "Select an option"),
     ("Configure", "Configure"), ("configurer", "configure"), ("reglages", "settings"), ("réglages", "settings"),
-    ("salons", "channels"), ("roles", "roles"), ("rôles", "roles"), ("serveur", "server"),
-    ("membres", "members"), ("securite", "security"), ("sécurité", "security"),
-)
+    # ("serveur"/"membres"/"rôles") RETIRÉES : mots de PROSE, ils n'apparaissent
+    # qu'à l'intérieur de phrases. Elles produisaient 36 mélanges mesurés, du type
+    # « Ce server n'a aucun émoji personnalisé ». Les formes capitalisées restent :
+    # ce sont de vraies étiquettes de champ.
+    ("roles", "roles"),     )
 
 
 # Traductions de surface communes. Elles restent ciblées sur le texte d'interface
@@ -582,7 +584,6 @@ SURFACE_EN_REPLACEMENTS = (
     ("désactivés", "disabled"),
     ("activée", "enabled"),
     ("activés", "enabled"),
-    ("configurée", "configured"),
     ("vérifiée", "verified"),
     ("introuvable", "not found"),
 
@@ -625,7 +626,6 @@ SURFACE_EN_REPLACEMENTS = (
     # pas still disponible ». Les phrases qui le contiennent sont traduites en
     # entier ci-dessous. Leçon : un mot-outil ne se traduit jamais isolément.
     ("niveau", "level"),
-    ("Aucune", "None"),
 
     # ------------------------------------------------------------------ 07/10/2026
     # Deuxième passe, même méthode : balayage de 19 commandes en anglais, relevé du
@@ -680,6 +680,92 @@ SURFACE_EN_REPLACEMENTS = (
     ("Temps vocal", "Voice time"),
     ("Profil de", "Profile of"),
     ("Informations", "Information"),
+    # Ancré au tiret : « — par défaut » est un suffixe d'ÉTIQUETTE. Le « par
+    # défaut » nu a été retiré parce qu'il apparaît aussi en pleine phrase
+    # (« Modèle par défaut sur ce serveur »), où le traduire seul faisait du
+    # franglais.
+    ("— par défaut", "— by default"),
+    ("Débannissement", "Unban"),
+    ("Bannissement", "Ban"),
+
+    # ------------------------------------------------------------------ 07/10/2026
+    # PHRASES ENTIÈRES, par fréquence décroissante dans le corpus mesuré. C'est la
+    # seule unité qui gagne de la couverture sans risquer le franglais : les mots
+    # ordinaires qui composent ces phrases ne peuvent pas être traduits isolément.
+    ("Cette commande est réservée au propriétaire du serveur",
+     "This command is restricted to the server owner"),
+    ("Elle détruit des données de manière irréversible : le rôle Administrateur ne suffit pas.",
+     "It destroys data irreversibly: the Administrator role is not enough."),
+    ("Aucune clé OpenAI n'est configurée sur ce bot. Contactez un administrateur.",
+     "No OpenAI key is configured on this bot. Contact an administrator."),
+    ("SentriX n'est connecté à aucun salon vocal.",
+     "SentriX is not connected to any voice channel."),
+    ("Cette playlist n'existe pas.", "This playlist does not exist."),
+    ("Aucun giveaway actif sur ce serveur.", "No active giveaway in this server."),
+    ("Il faut 2 joueurs pour lancer.", "Two players are needed to start."),
+    ("Empreinte du tirage — publiée AVANT le résultat.",
+     "Draw fingerprint — published BEFORE the result."),
+    ("Choisissez un rôle ci-dessous. Le prix est débité automatiquement et le résultat reste privé.",
+     "Pick a role below. The price is charged automatically and the result stays private."),
+    ("Ce serveur n'a aucun émoji personnalisé.", "This server has no custom emoji."),
+    ("Anti-spam, anti-raid, vérification et protections du serveur.",
+     "Anti-spam, anti-raid, verification and server protections."),
+    ("Le bot ne pourra pas gérer les membres/rôles placés au-dessus de lui.",
+     "The bot cannot manage members or roles ranked above it."),
+    ("Les contrôles SentriX doivent alors se reposer uniquement sur les permissions Discord.",
+     "SentriX checks must then rely on Discord permissions alone."),
+    ("Déplacer au-dessus des rôles qu'il doit gérer.",
+     "Move it above the roles it must manage."),
+    ("vérifie aussi les deux hiérarchies de rôles.",
+     "check both role hierarchies as well."),
+    # La LIGNE entière, pas sa première phrase : traduire un préfixe laissait la
+    # suite en français, donc un mélange. C'est l'unité de rendu qui compte.
+    ("Un snapshot de sécurité sera créé juste avant. Aucun rôle/salon n'est supprimé par ce rollback.",
+     "A security snapshot is taken just before. No role or channel is deleted by this rollback."),
+    ("Merci, votre signalement a été enregistré.",
+     "Thank you, your report has been recorded."),
+    ("Événement inconnu. Lancez pour voir les clés.",
+     "Unknown event. Run it to list the keys."),
+    ("Créez et personnalisez votre message professionnel avec les options ci-dessous.",
+     "Create and customise your professional message with the options below."),
+    ("Ce à quoi vous pouvez jouer, maintenant, sur ce serveur",
+     "What you can play, right now, in this server"),
+    ("Premier(e) à répondre correctement dans ce salon gagne !",
+     "First to answer correctly in this channel wins!"),
+    ("Modèle par défaut sur ce serveur", "Default model in this server"),
+    ("Créateur d'embed SentriX", "SentriX embed builder"),
+    ("Préparez-vous...", "Get ready..."),
+
+    # ------------------------------------------------------------------ 07/10/2026
+    # Troisième passe, à l'échelle : tools/i18n_coverage_sweep.py a balayé les 325
+    # commandes qui rendent du texte et relevé 394 mots français restants. Ces
+    # entrées sont les ÉTIQUETTES les plus fréquentes de ce relevé.
+    #
+    # RETIRÉES après mesure (23 entrées) : « Aucune », « configurée », « clé »,
+    # « rôle », « Salon », « Raison », « accès »… Ce ne sont pas des étiquettes mais
+    # des mots ordinaires qui apparaissent DANS des phrases françaises, donc les
+    # traduire produisait un mélange : « Aucune clé OpenAI n'est configurée » devenait
+    # « None clé OpenAI n'est configured ». Mesuré contre un corpus de 339 phrases
+    # réellement rendues par le bot, et désormais interdit par
+    # test_aucune_entree_ne_produit_un_melange.
+    # Les mots-outils du haut du classement (est, sur, pas, les, des, par…) ne
+    # sont VOLONTAIREMENT pas ici : ils signalent des phrases non traduites, et
+    # les traduire isolément produit du franglais — c'est la règle que
+    # test_aucun_mot_outil_nest_traduit_isolement fait respecter.
+    ("Élément", "Item"),
+    ("Éléments", "Items"),
+    ("Référence", "Reference"),
+    ("Réussite", "Success"),
+    ("effectuée", "completed"),
+    ("enregistrée", "saved"),
+    ("configurés", "configured"),
+    ("supprimée", "deleted"),
+    ("réfléchit", "is thinking"),
+    ("résultats", "results"),
+    ("réactions", "reactions"),
+    ("Fusée", "Rocket"),
+    ("prête", "ready"),
+    ("Salons", "Channels"),
 )
 
 _UI_PROTECTED_RE = re.compile(
