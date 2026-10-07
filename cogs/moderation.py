@@ -1174,18 +1174,39 @@ class Moderation(commands.Cog):
                 )
             return await panels.texte_court(ctx, message, ephemere=True)
 
-        if ctx.interaction is not None and not ctx.interaction.response.is_done():
-            await ctx.interaction.response.defer(ephemeral=True)
-
         is_prefix = ctx.interaction is None
-        purge_limit = requested + (1 if is_prefix else 0)
-        invocation_id = getattr(getattr(ctx, "message", None), "id", None) if is_prefix else None
+        protected_ids: set[int] = set()
 
-        candidates = [message async for message in ctx.channel.history(limit=purge_limit)]
+        if ctx.interaction is not None:
+            # Les wrappers slash SentriX peuvent déjà avoir defer() avant d'entrer ici.
+            # La réponse originale devient alors un vrai message Discord. Si on la laisse
+            # dans l'historique à purger, /clear la supprime puis tente de l'éditer :
+            # Discord répond 404 Unknown Message.
+            if not ctx.interaction.response.is_done():
+                await ctx.interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                original = await ctx.interaction.original_response()
+                protected_ids.add(int(original.id))
+            except (discord.NotFound, discord.HTTPException, discord.ClientException):
+                pass
+
+        invocation_id = getattr(getattr(ctx, "message", None), "id", None) if is_prefix else None
+        history_limit = requested + (1 if is_prefix else len(protected_ids))
+        history = [message async for message in ctx.channel.history(limit=history_limit)]
+
+        candidates: list[discord.Message] = []
+        for message in history:
+            message_id = int(message.id)
+            if message_id in protected_ids:
+                continue
+            candidates.append(message)
+            if len(candidates) >= requested + (1 if is_prefix else 0):
+                break
+
         log_service.mark_purged(int(message.id) for message in candidates)
 
         try:
-            deleted = await self._purge_messages(ctx, candidates, purge_limit)
+            deleted = await self._purge_messages(ctx, candidates)
         except discord.Forbidden:
             message = (
                 "Permission manquante : `Gérer les messages` "
@@ -1193,9 +1214,19 @@ class Moderation(commands.Cog):
             )
             if is_prefix:
                 return await ctx.channel.send(message, delete_after=8)
-            if ctx.interaction.response.is_done():
+            try:
+                return await ctx.interaction.edit_original_response(content=message)
+            except (discord.NotFound, discord.HTTPException):
                 return await ctx.interaction.followup.send(message, ephemeral=True)
-            return await ctx.interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            message = "Une erreur est survenue, merci de réessayer."
+            if is_prefix:
+                return await ctx.channel.send(message, delete_after=5)
+            try:
+                return await ctx.interaction.edit_original_response(content=message)
+            except (discord.NotFound, discord.HTTPException):
+                return await ctx.interaction.followup.send(message, ephemeral=True)
+
         messages = [
             message for message in deleted
             if invocation_id is None or int(message.id) != int(invocation_id)
@@ -1213,27 +1244,44 @@ class Moderation(commands.Cog):
         asyncio.create_task(self._log_clear_safely(ctx, messages, requested))
 
     @staticmethod
-    async def _purge_messages(ctx: commands.Context, candidates: list, purge_limit: int) -> list:
-        """Supprime des messages DÉJÀ récupérés, sans relire l'historique."""
+    async def _purge_messages(ctx: commands.Context, candidates: list) -> list:
+        """Supprime uniquement les messages déjà sélectionnés.
+
+        Ne relit jamais l'historique : la réponse slash protégée ne peut donc pas
+        réentrer dans la purge pendant un fallback.
+        """
         if not candidates:
             return []
+
         limite_groupee = discord.utils.utcnow() - timedelta(days=14)
-        if any(message.created_at <= limite_groupee for message in candidates):
-            # Suppression groupée impossible au-delà de 14 jours : purge() sait le faire un par un.
-            return await ctx.channel.purge(limit=purge_limit)
-        try:
-            if len(candidates) == 1:
-                await candidates[0].delete()
-            else:
-                # Discord refuse plus de 100 messages par appel groupé : `+clear 100`
-                # produit 101 candidats (les 100 demandés + le message de commande),
-                # donc on découpe. discord.py lève ClientException (pas HTTPException)
-                # quand la limite est dépassée — c'était l'origine de SXR-CMD-0001.
-                for start in range(0, len(candidates), 100):
-                    await ctx.channel.delete_messages(candidates[start:start + 100])
-        except (discord.HTTPException, discord.ClientException):
-            # Repli intégral plutôt que de laisser le salon à moitié nettoyé.
-            return await ctx.channel.purge(limit=purge_limit)
+        recent = [message for message in candidates if message.created_at > limite_groupee]
+        old = [message for message in candidates if message.created_at <= limite_groupee]
+
+        for start in range(0, len(recent), 100):
+            batch = recent[start:start + 100]
+            if not batch:
+                continue
+            try:
+                if len(batch) == 1:
+                    await batch[0].delete()
+                else:
+                    await ctx.channel.delete_messages(batch)
+            except discord.Forbidden:
+                raise
+            except (discord.HTTPException, discord.ClientException):
+                # Repli message par message, mais toujours sur la sélection initiale.
+                for message in batch:
+                    try:
+                        await message.delete()
+                    except discord.NotFound:
+                        pass
+
+        for message in old:
+            try:
+                await message.delete()
+            except discord.NotFound:
+                pass
+
         return candidates
 
     async def _log_clear_safely(self, ctx: commands.Context, messages: list, requested: int) -> None:
