@@ -11,7 +11,7 @@ import time
 
 import discord
 
-from utils import embeds, log_service
+from utils import embeds, log_service, sentrix_emojis
 from utils import sentrix_panels as panels
 from . import permission_guard
 from . import setup_control_center as setup_ui
@@ -1628,7 +1628,10 @@ class AutoReactionSetupView(discord.ui.View):
                 options.append(discord.SelectOption(
                     label=f"#{getattr(channel_obj, 'name', row['channel_id'])}"[:100],
                     value=str(row["id"]),
-                    description=(f"{'Mot-clé' if row['mode'] == 'keyword' else 'Tous'} · {emojis}")[:100],
+                    description=sentrix_emojis.tronquer(
+                        f"{'Mot-clé' if row['mode'] == 'keyword' else 'Tous'} · {emojis}",
+                        100,
+                    ),
                 ))
             existing = discord.ui.Select(
                 placeholder="Règle existante à gérer",
