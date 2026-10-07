@@ -64,3 +64,9 @@ def test_v78_only_accepts_public_https_images():
         assert "HTTPS" in str(exc)
     else:
         raise AssertionError("Une image HTTP non sécurisée a été acceptée.")
+
+def test_v78_uses_canonical_setup_history_api():
+    source = inspect.getsource(v78)
+    assert "add_setup_history" not in source
+    assert "log_setup_history" in source
+
