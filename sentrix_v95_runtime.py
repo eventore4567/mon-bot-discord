@@ -63,29 +63,29 @@ CATEGORY_ROOTS = {
 }
 
 GROUP_DESCRIPTIONS = {
-    "ai": "Intelligence artificielle et génération de contenu.",
-    "info": "Informations sur les membres, salons, serveur et bot.",
-    "utility": "Outils pratiques et commandes quotidiennes.",
-    "economy": "Économie, banque, boutique et récompenses.",
-    "levels": "Niveaux, XP, réputation et classements.",
-    "games": "Mini-jeux et activités communautaires.",
-    "music": "Lecture audio, file d'attente et playlists.",
-    "events": "Événements et tournois.",
-    "giveaway": "Giveaways et tirages au sort.",
-    "invites": "Invitations, classements et bonus d'invitations.",
-    "notifications": "Notifications sociales et messages d'accueil.",
-    "social": "Fonctions sociales de SentriX.",
-    "ticket": "Tickets, support et configuration des tickets.",
-    "sanctions": "Sanctions, dossiers et quarantaine.",
-    "moderation": "Modération des messages, salons, membres et rôles.",
-    "security": "AutoMod, anti-raid, anti-nuke et sécurité.",
-    "config": "Configuration générale de SentriX.",
-    "server": "Structure et administration du serveur.",
-    "roles": "Rôles, panels et vérification.",
-    "embeds": "Embeds, annonces et design.",
-    "stats": "Statistiques et diagnostics.",
-    "owner": "Commandes réservées au propriétaire de SentriX.",
-    "more": "Autres fonctions actives de SentriX.",
+    "ai": "AI tools",
+    "info": "Server info",
+    "utility": "Utility tools",
+    "economy": "Economy tools",
+    "levels": "Levels and XP",
+    "games": "Mini games",
+    "music": "Music controls",
+    "events": "Events",
+    "giveaway": "Giveaways",
+    "invites": "Invite tools",
+    "notifications": "Notifications",
+    "social": "Social tools",
+    "ticket": "Ticket tools",
+    "sanctions": "Moderation cases",
+    "moderation": "Moderation tools",
+    "security": "Security tools",
+    "config": "Bot settings",
+    "server": "Server tools",
+    "roles": "Role tools",
+    "embeds": "Embed tools",
+    "stats": "Bot stats",
+    "owner": "Owner tools",
+    "more": "Utility tools",
 }
 
 
@@ -108,11 +108,74 @@ def _safe_name(value: object, *, fallback: str = "command") -> str:
     return f"{text[:25].rstrip('-')}-{digest}"[:32]
 
 
+_SHORT_SLASH_DESCRIPTIONS = {
+    "ban": "Ban a member",
+    "unban": "Unban a member",
+    "kick": "Kick a member",
+    "mute": "Mute a member",
+    "unmute": "Unmute a member",
+    "warn": "Warn a member",
+    "warnings": "Show warnings",
+    "clearwarnings": "Clear warnings",
+    "clear": "Clear messages",
+    "lock": "Lock a channel",
+    "unlock": "Unlock a channel",
+    "slowmode": "Set slowmode",
+    "nickname": "Change nickname",
+    "resetnick": "Reset nickname",
+    "case": "Show a case",
+    "modview": "Show moderation profile",
+    "snipe": "Show deleted message",
+    "editsnipe": "Show edited message",
+    "userinfo": "Show user info",
+    "serverinfo": "Show server info",
+    "avatar": "Show avatar",
+    "membercount": "Show member count",
+    "profile": "Show profile",
+    "help": "Open help",
+    "setup": "Open setup",
+    "play": "Play music",
+    "pause": "Pause music",
+    "resume": "Resume music",
+    "skip": "Skip track",
+    "previous": "Previous track",
+    "stop": "Stop music",
+    "queue": "Show queue",
+    "nowplaying": "Current track",
+    "volume": "Set volume",
+    "loop": "Set loop",
+    "shuffle": "Shuffle queue",
+    "seek": "Seek track",
+    "join": "Join voice",
+    "leave": "Leave voice",
+}
+
+_FRENCH_SLASH_TOKENS = {
+    "aide": "help", "banque": "bank", "serveur": "server", "salon": "channel",
+    "salons": "channels", "membre": "member", "membres": "members",
+    "profil": "profile", "historique": "history", "liste": "list",
+    "ajouter": "add", "retirer": "remove", "supprimer": "delete",
+    "creer": "create", "modifier": "edit", "ouvrir": "open",
+    "fermer": "close", "reglages": "settings", "securite": "security",
+    "musique": "music", "niveaux": "levels", "jeux": "games",
+}
+
+
 def _description(command: commands.Command) -> str:
-    raw = re.sub(r"\s+", " ", str(command.description or command.help or "")).strip()
-    if not raw:
-        raw = f"Exécuter {command.qualified_name}."
-    return raw[:100]
+    """Return compact English copy for Discord's slash-command picker."""
+    qualified = str(getattr(command, "qualified_name", "") or "").casefold().strip()
+    simple = str(getattr(command, "name", "") or qualified.split(" ")[-1]).casefold().strip()
+    if qualified in _SHORT_SLASH_DESCRIPTIONS:
+        return _SHORT_SLASH_DESCRIPTIONS[qualified]
+    if simple in _SHORT_SLASH_DESCRIPTIONS:
+        return _SHORT_SLASH_DESCRIPTIONS[simple]
+
+    name = _safe_name(simple or qualified or "command")
+    words = [_FRENCH_SLASH_TOKENS.get(part, part) for part in name.split("-")]
+    clean = " ".join(word for word in words if word not in {"sentrix", "pro", "suite", "advanced"}).strip()
+    if not clean:
+        clean = "command"
+    return f"Use {clean}"[:50]
 
 
 def _is_group_with_children(command: commands.Command) -> bool:

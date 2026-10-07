@@ -32,29 +32,29 @@ ROOT_BACK = {
     "games": "game", "roles": "role", "server": "server", "music": "music",
 }
 ROOT_DESCRIPTIONS = {
-    "ai": "AI assistant, images and intelligent tools.",
-    "info": "Information about members, channels, the server and the bot.",
-    "utility": "Everyday utilities and practical commands.",
-    "economy": "Balance, bank, shop and rewards.",
-    "levels": "Levels, XP, reputation and leaderboards.",
-    "games": "Mini-games and community activities.",
-    "music": "Audio playback, queue and playlists.",
-    "events": "Events, tournaments and activities.",
-    "tickets": "Tickets, support and ticket settings.",
-    "moderation": "Sanctions and moderation tools.",
-    "security": "AutoMod, anti-raid, anti-nuke and security.",
-    "config": "General SentriX configuration.",
-    "server": "Server structure and administration.",
-    "roles": "Roles, panels and verification.",
-    "embeds": "Embeds, announcements and message design.",
-    "owner": "Commands reserved for the SentriX owner.",
-    "giveaway": "Giveaways and draws.",
-    "invites": "Invites, leaderboards and bonuses.",
-    "notifications": "Social notifications and welcome messages.",
-    "social": "SentriX social features.",
-    "stats": "Statistics and diagnostics.",
-    "pro": "SentriX Pro tools.",
-    "infinite": "Infinite-mode tools.",
+    "ai": "AI tools",
+    "info": "Server info",
+    "utility": "Utility tools",
+    "economy": "Economy tools",
+    "levels": "Levels and XP",
+    "games": "Mini games",
+    "music": "Music controls",
+    "events": "Events",
+    "tickets": "Ticket tools",
+    "moderation": "Moderation tools",
+    "security": "Security tools",
+    "config": "Bot settings",
+    "server": "Server tools",
+    "roles": "Role tools",
+    "embeds": "Embed tools",
+    "owner": "Owner tools",
+    "giveaway": "Giveaways",
+    "invites": "Invite tools",
+    "notifications": "Notifications",
+    "social": "Social tools",
+    "stats": "Bot stats",
+    "pro": "Pro tools",
+    "infinite": "Infinite tools",
 }
 
 # Public English aliases. Internal command names stay untouched.
@@ -172,27 +172,31 @@ PLAYLIST_LEAVES = {
 DUPLICATES = frozenset({
     "leaderboard-money", "me", "rank", "buyrole", "ask", "chat", "chat-reset",
     "embed-create", "latency", "levelroles",
+    # La racine moderne /giveaway reroll remplace l'ancienne commande plate
+    # giveaway-reroll. Garder les deux produit /giveaway reroll-2 et bloque
+    # l'audit pré-sync, donc aucune commande slash (dont /snipe) n'est publiée.
+    "giveaway-reroll",
 })
 BUCKETS = {
     ("ticket", "panel"): "panels", ("ticket", "config"): "config",
     ("ticket", "manage"): "manage", ("ticket", "stats"): "history",
     ("moderation", "members"): "members", ("moderation", "cases"): "cases",
-    ("moderation", "emoji"): "emojis", ("moderation", "general"): "general",
+    ("moderation", "emoji"): "emojis", ("moderation", "general"): "tools",
     ("security", "lists"): "lists", ("security", "backup"): "backup",
-    ("security", "general"): "general", ("config", "commands"): "commands",
-    ("config", "general"): "general", ("utility", "general"): "general",
+    ("security", "general"): "tools", ("config", "commands"): "commands",
+    ("config", "general"): "settings", ("utility", "general"): "tools",
     ("config", "channels"): "channels", ("config", "levels"): "levels",
     ("economy", "wallet"): "wallet", ("economy", "rewards"): "rewards",
     ("economy", "shop"): "shop", ("economy", "ranking"): "ranking",
-    ("economy", "admin"): "admin", ("economy", "general"): "general",
+    ("economy", "admin"): "admin", ("economy", "general"): "tools",
     ("level", "profile"): "profile", ("level", "ranking"): "ranking",
-    ("level", "general"): "general", ("game", "quick"): "quick",
+    ("level", "general"): "community", ("game", "quick"): "quick",
     ("game", "races"): "races", ("game", "adventure"): "adventure",
-    ("game", "general"): "general", ("role", "manage"): "manage",
+    ("game", "general"): "activities", ("role", "manage"): "manage",
     ("role", "panels"): "panels", ("role", "reactions"): "reactions",
-    ("role", "general"): "general", ("server", "build"): "build",
+    ("role", "general"): "tools", ("server", "build"): "build",
     ("server", "channels"): "channels", ("server", "backup"): "backup",
-    ("server", "manage"): "manage", ("server", "general"): "general",
+    ("server", "manage"): "manage", ("server", "general"): "tools",
 }
 
 
@@ -385,8 +389,10 @@ def install() -> None:
         base = v95._safe_name(bucket_name)
         if count <= 1:
             return [base]
+        # Keep overflow groups tied to their real topic. Never publish vague
+        # "more", "extra", "general" or translated "-suite" names.
         return [base] + [
-            v95._safe_name("more" if index == 2 else f"more-{index}")
+            v95._safe_name(f"{base}-{index}")
             for index in range(2, count + 1)
         ]
 
@@ -418,8 +424,8 @@ def install() -> None:
     })
     v95.GROUP_DESCRIPTIONS.update(ROOT_DESCRIPTIONS)
     v98.SUBGROUP_DESCRIPTIONS.update({
-        ("music", "queue"): "View and manage the music queue.",
-        ("music", "playlist"): "Create, import and play your playlists.",
+        ("music", "queue"): "Queue tools",
+        ("music", "playlist"): "Playlist tools",
     })
     logger.info("Canonical slash surface active: English names, compact groups, /music structured.")
 

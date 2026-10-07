@@ -909,8 +909,8 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
     async def prefix_help(self, ctx: commands.Context, *, query: str | None = None):
         await self.send_help(ctx, query)
 
-    @app_commands.command(name="help", description="Open the SentriX help center")
-    @app_commands.describe(command="Command name, slash command, category or keyword")
+    @app_commands.command(name="help", description="Open help")
+    @app_commands.describe(command="Command name")
     async def slash_help(self, interaction: discord.Interaction, command: str | None = None):
         await self.send_help(interaction, command)
 
