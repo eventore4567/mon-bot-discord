@@ -41,6 +41,15 @@ for _var in ("POSTGRES_URL", "DATABASE_URL", "REDIS_URL", "OPENAI_API_KEY"):
 os.environ["SENTRIX_FAILOVER_ENABLED"] = "0"
 os.environ.setdefault("SENTRIX_E2E_HARNESS", "1")
 
+# sitecustomize.py importe `config` AU DÉMARRAGE de Python dès que DISCORD_TOKEN
+# est déjà dans l'environnement : DATABASE_PATH y est alors figé sur
+# database/bot.db, et chaque exécution du harnais partageait cette base au lieu
+# d'une base jetable (constaté le 07/10/2026 : des suggestions d'un passage
+# précédent répondaient aux clics du suivant). main.py lit l'attribut au moment
+# de créer la base, donc le réaffecter suffit.
+if "config" in sys.modules:
+    sys.modules["config"].DATABASE_PATH = os.environ["DATABASE_PATH"]
+
 import discord  # noqa: E402
 from discord.http import Route  # noqa: E402
 

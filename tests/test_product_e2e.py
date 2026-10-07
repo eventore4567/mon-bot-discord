@@ -1,0 +1,25 @@
+"""Parcours complets sur le bot booté comme en production (lents : ~1 min chacun).
+
+Suggestions : formulaire, votes, décision du staff, langue, permissions.
+Sondages : formulaire, éditeur, sondage natif publié, forme rapide en préfixe.
+Chaque scénario s'exécute dans son propre processus, avec sa base jetable.
+"""
+import os
+import pathlib
+import subprocess
+import sys
+
+import pytest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("scenario", ["suggestions_e2e.py", "poll_e2e.py"])
+def test_parcours_complet(scenario):
+    env = dict(os.environ, DISCORD_TOKEN="ci.fake.token", PYTHONPATH=str(ROOT))
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / scenario)],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=600,
+    )
+    echecs = [line for line in result.stdout.splitlines() if "ÉCHEC" in line]
+    assert result.returncode == 0 and not echecs, "\n".join(echecs) or result.stdout[-2000:] + result.stderr[-2000:]

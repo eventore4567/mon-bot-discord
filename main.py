@@ -111,6 +111,8 @@ EXTENSIONS = [
     "cogs.snipe",
     "cogs.soundboard_logs",
     "cogs.utility",
+    "cogs.suggestions",
+    "cogs.poll_ui",
     "cogs.guild_arrival",
     "cogs.notifications",
     "cogs.ai",

@@ -29,6 +29,38 @@ ERROR_COLOR = int(_config.COLOR_ERROR)
 WARNING_COLOR = int(_config.COLOR_WARNING)
 FOOTER = "SentriX • Réponse rapide et sécurisée"
 from utils.error_texts import CHECK_FALLBACK as _CHECK_FALLBACK  # noqa: E402
+
+
+# ``discord.Interaction`` déclare des __slots__ : y poser un attribut libre lève
+# AttributeError. Le gestionnaire d'erreur slash le faisait, donc TOUTE erreur
+# arrivant par l'arbre slash (option invalide, contrôle d'application refusé)
+# faisait planter son propre gestionnaire — l'utilisateur restait sur
+# « SentriX réfléchit… » sans explication. Constaté au boot le 07/10/2026.
+# On retient donc l'identifiant de l'interaction quand l'attribut est refusé.
+from collections import OrderedDict as _OrderedDict  # noqa: E402
+
+_FINALIZED_IDS: "_OrderedDict[int, None]" = _OrderedDict()
+_FINALIZED_MAX = 4096
+
+
+def _deja_finalisee(objet) -> bool:
+    if getattr(objet, "_sentrix_error_finalized", False):
+        return True
+    return getattr(objet, "id", None) in _FINALIZED_IDS
+
+
+def _marquer_finalisee(objet) -> None:
+    try:
+        objet._sentrix_error_finalized = True
+        return
+    except AttributeError:
+        pass
+    ident = getattr(objet, "id", None)
+    if ident is None:
+        return
+    _FINALIZED_IDS[ident] = None
+    while len(_FINALIZED_IDS) > _FINALIZED_MAX:
+        _FINALIZED_IDS.popitem(last=False)
 _ALLOWED = discord.AllowedMentions(everyone=False, users=False, roles=False, replied_user=False)
 
 # Un message d'erreur qui reste affiché indéfiniment finit par encombrer le
@@ -656,7 +688,7 @@ def install(bot: commands.Bot) -> None:
     bot.on_command_error = MethodType(prefix_error, bot)
 
     async def slash_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-        if getattr(interaction, "_sentrix_error_finalized", False):
+        if _deja_finalisee(interaction):
             return
         command = getattr(interaction, "command", None)
         texte = _texte_erreur_slash(error)
@@ -671,11 +703,11 @@ def install(bot: commands.Bot) -> None:
                 logger.debug("Explication du refus slash impossible.", exc_info=True)
         try:
             if texte is not None:
-                interaction._sentrix_error_finalized = True
+                _marquer_finalisee(interaction)
                 await _texte_slash_send(interaction, texte)
                 return
 
-            interaction._sentrix_error_finalized = True
+            _marquer_finalisee(interaction)
             await _raw_slash_send(
                 interaction,
                 _slash_error_panel(
@@ -698,9 +730,9 @@ def install(bot: commands.Bot) -> None:
 
         async def component_error(self, interaction, error, item=None):
             logger.exception("V5 : erreur dans un composant.", exc_info=error)
-            if getattr(interaction, "_sentrix_error_finalized", False):
+            if _deja_finalisee(interaction):
                 return
-            interaction._sentrix_error_finalized = True
+            _marquer_finalisee(interaction)
             try:
                 await _raw_slash_send(
                     interaction,

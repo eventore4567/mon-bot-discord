@@ -590,6 +590,47 @@ class PollUI(commands.Cog, name="PollUI"):
         )
 
 
+def _native_poll(bot: commands.Bot) -> app_commands.Command:
+    """/poll : ouvre le formulaire AVANT tout defer.
+
+    La couche slash générique diffère systématiquement l'interaction avant
+    d'exécuter la commande préfixe ; un formulaire ne peut alors plus s'ouvrir.
+    """
+
+    async def callback(interaction: discord.Interaction) -> None:
+        from utils import access_matrix
+
+        if interaction.guild is None:
+            return await _interaction_notice(interaction, "Cette commande doit être utilisée sur un serveur.")
+        decision = await access_matrix.evaluate(
+            bot, command_name="poll", author=interaction.user, guild=interaction.guild
+        )
+        if not decision.allowed:
+            return await _interaction_notice(interaction, decision.message or decision.reason)
+        await interaction.response.send_modal(
+            PollSetupModal(bot, interaction.user.id, direct_from_slash=True)
+        )
+
+    callback._sentrix_original_command = "poll"
+    return app_commands.Command(name="poll", description="Create a poll.", callback=callback)
+
+
+async def setup(bot: commands.Bot) -> None:
+    """Chargement normal, comme extension.
+
+    Ce module ne vivait que par `install_poll_ui`, appelé dans
+    `cogs.finalize_runtime` — une enveloppe d'installateurs qui ne s'exécute pas
+    au boot de production. Le créateur de sondages natifs n'avait donc jamais
+    tourné : +poll et /poll lançaient l'ancien sondage à réactions de
+    cogs/utility.py. Constaté au boot le 07/10/2026 (PollUI non chargé).
+    """
+    if bot.get_cog("PollUI") is None:
+        await bot.add_cog(PollUI(bot))
+    from utils import slash_catalog
+
+    slash_catalog.register_native("poll", _native_poll)
+
+
 async def install_poll_ui(bot: commands.Bot):
     """Remplace l'ancienne commande de réactions par le créateur interactif."""
     existing = bot.get_cog("PollUI")

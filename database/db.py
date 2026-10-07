@@ -42,6 +42,7 @@ _CONFIG_PERSISTENCE_MARKERS = (
     "starboard",
     "sticky",
     "scheduled_messages",
+    "suggestion_settings",
 )
 
 

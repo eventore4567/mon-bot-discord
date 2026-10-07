@@ -267,6 +267,11 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     # Suite staff premium : accès staff explicite, jamais fail-closed par oubli.
     "member": "moderate_members",
     "modview": "moderate_members",
+    # Suggestions : configurer = gérer le serveur ; trancher = gérer les messages
+    # (avec repli sur le rôle staff, comme toute la modération).
+    "suggestion-setup": "manage_guild",
+    "suggestion-panel": "manage_guild",
+    "suggestion-status": "manage_messages",
     "note": "moderate_members",
     "staff-history": "moderate_members",
     "staff-proof": "moderate_members",

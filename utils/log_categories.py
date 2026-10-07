@@ -52,6 +52,8 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "levels_xp_set": ("members", "✨", "warning"),
     "security_panic": ("raid", "🚨", "error"),
     "giveaway_blacklist": ("moderation", "🚫", "warning"),
+    "suggestion_created": ("server", "💡", "info"),
+    "suggestion_status": ("server", "🗳️", "info"),
     "member_clear": ("moderation", "🧹", "warning"),
     "message_delete": ("messages", "🗑️", "error"),
     "message_edit": ("messages", "✏️", "warning"),
@@ -206,6 +208,8 @@ DEFAULT_EVENT_EMOJI = "📋"
 #: Événements dont le nom ne correspond pas directement à une icône.
 #: « member_ban » doit trouver « sentrix_ban », pas « sentrix_member_ban ».
 ICONES_EVENEMENTS: dict[str, str] = {
+    "suggestion_created": "note",
+    "suggestion_status": "note",
     "member_kick": "kick",
     "member_ban": "ban",
     "member_unban": "unban",

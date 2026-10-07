@@ -1770,15 +1770,6 @@ class Utility(commands.Cog, name="Utility"):
             ),
         )
 
-    @commands.hybrid_command(name="poll", description="Créer un sondage rapide (réactions 👍/👎).")
-    @app_commands.describe(question="La question du sondage")
-    async def poll(self, ctx: commands.Context, *, question: str):
-        e = await self._embed(ctx.guild.id if ctx.guild else None, title="Sondage", description=question)
-        e.set_footer(text=f"Créé par {ctx.author}")
-        msg = await panels.envoyer(ctx, panels.depuis_embed(e))
-        await msg.add_reaction("👍")
-        await msg.add_reaction("👎")
-
     @commands.hybrid_command(name="remind", description="Définir un rappel personnel.")
     @app_commands.describe(duree="Durée (ex: 10m, 2h, 1j)", texte="Le texte du rappel")
     async def remind(self, ctx: commands.Context, duree: str, *, texte: str):
@@ -1899,23 +1890,6 @@ class Utility(commands.Cog, name="Utility"):
         e.add_field(name="Ressenti", value=f"{data['main']['feels_like']}°C", inline=True)
         e.add_field(name="Condition", value=data["weather"][0]["description"], inline=True)
         await panels.envoyer(ctx, panels.depuis_embed(e))
-
-    @commands.hybrid_command(name="suggest", description="Faire une suggestion pour le serveur.")
-    @app_commands.describe(texte="Votre suggestion")
-    async def suggest(self, ctx: commands.Context, *, texte: str):
-        conf = await self.bot.db.get_guild_config(ctx.guild.id)
-        channel = ctx.guild.get_channel(conf["suggest_channel"]) if conf and conf["suggest_channel"] else ctx.channel
-        e = await self._embed(ctx.guild.id, title="Nouvelle suggestion", description=texte)
-        e.set_footer(text=f"Proposé par {ctx.author}")
-        msg = await panels.envoyer(channel, panels.depuis_embed(e))
-        await msg.add_reaction("👍")
-        await msg.add_reaction("👎")
-        await self.bot.db.execute(
-            "INSERT INTO suggestions (guild_id, user_id, message_id, content, created_at) VALUES (?, ?, ?, ?, ?)",
-            (ctx.guild.id, ctx.author.id, msg.id, texte, now()),
-        )
-        if channel != ctx.channel:
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Suggestion envoyée', description=f'Suggestion envoyée dans {channel.mention} !', kind='success')))
 
     @commands.hybrid_command(name="report-bug", description="Signaler un bug du bot aux développeurs.", with_app_command=False)
     @app_commands.describe(texte="Description du bug")

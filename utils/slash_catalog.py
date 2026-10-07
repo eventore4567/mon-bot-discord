@@ -175,6 +175,9 @@ CATALOG: tuple[SlashEntry, ...] = (
 
     # ----------------------------------------------------------------- Communauté
     _e("suggestions submit", "suggest", "Submit a suggestion."),
+    _e("suggestions setup", "suggestion-setup", "Choose the suggestion channel and settings."),
+    _e("suggestions panel", "suggestion-panel", "Post the suggestion box in a channel."),
+    _e("suggestions status", "suggestion-status", "Change a suggestion's status."),
     _e("poll", "poll", "Create a poll."),
     _e("translate text", "translate", "Translate a text into another language."),
     _e("afk", "afk", "Set yourself as away."),
@@ -536,6 +539,11 @@ OPTION_NAMES: dict[str, str] = {
 #: Description par défaut, selon le nom anglais de l'option.
 OPTION_DESCRIPTIONS: dict[str, str] = {
     "action": "What to do.",
+    "anonymous": "Hide who posted each suggestion.",
+    "cooldown": "Minutes to wait between two uses.",
+    "response": "Public answer shown on the suggestion.",
+    "status": "pending, planned, accepted, implemented or rejected.",
+    "threads": "Open a discussion thread on each one.",
     "amount": "Amount of coins, or 'all'.",
     "bet": "Coins to bet.",
     "channel": "The channel.",
@@ -627,8 +635,10 @@ OPTION_OVERRIDES: dict[tuple[str, str], str] = {
     ("economy pay", "member"): "Who receives the coins.",
     ("economy give", "member"): "Who receives the coins.",
     ("economy rob", "member"): "Who to rob.",
-    ("suggestions submit", "text"): "Your suggestion.",
-    ("poll", "question"): "The poll question.",
+    ("suggestions setup", "channel"): "Channel where suggestions are posted.",
+    ("suggestions setup", "cooldown"): "Minutes between two suggestions from one member.",
+    ("suggestions panel", "channel"): "Where to post the box. This channel if empty.",
+    ("suggestions status", "number"): "Suggestion number, e.g. 12.",
     ("translate text", "text"): "The text to translate.",
     ("remind cancel", "id"): "Reminder ID, from /remind list.",
     ("notifications remove", "id"): "Alert ID, from /notifications list.",
@@ -686,6 +696,25 @@ def direct_roots() -> dict[str, str]:
     return {e.source: e.path for e in CATALOG if " " not in e.path}
 
 
+#: Commandes dont la version slash doit répondre AVANT tout `defer` — un modal
+#: ne peut s'ouvrir que sur une interaction encore vierge, or la couche v95
+#: diffère systématiquement avant d'exécuter la commande préfixe. Le cog
+#: concerné fournit ici une fabrique de commande slash native.
+_NATIVE: dict[str, Any] = {}
+
+
+def register_native(source: str, factory: Any) -> None:
+    """Déclare qu'une source a une implémentation slash native.
+
+    `factory(bot)` rend une `app_commands.Command` dont le callback porte
+    `_sentrix_original_command = source` : l'aide, l'audit du registre et les
+    outils de mesure la rattachent ainsi à la bonne commande. La décision de
+    permission reste celle de `access_matrix.evaluate`, que le callback DOIT
+    appeler avant d'agir.
+    """
+    _NATIVE[str(source)] = factory
+
+
 def _source_index(tree: Any) -> dict[str, Any]:
     """Commande slash déjà construite par les couches précédentes, par source.
 
@@ -719,6 +748,15 @@ def _build_leaf(bot: Any, entry: SlashEntry, existing: dict[str, Any]) -> Any | 
     from discord.app_commands import locale_str
 
     name = entry.path.split()[-1]
+    factory = _NATIVE.get(entry.source)
+    if factory is not None:
+        native = factory(bot)
+        native.name = name
+        native.description = entry.description
+        native._locale_name = locale_str(name)
+        native._locale_description = locale_str(entry.description)
+        return native
+
     current = existing.get(entry.source)
     if current is not None:
         binding = getattr(current, "binding", None)
@@ -824,5 +862,5 @@ def publish(bot: Any) -> dict[str, Any]:
 __all__ = [
     "CATALOG", "GROUP_DESCRIPTIONS", "OPTION_DESCRIPTIONS", "OPTION_NAMES",
     "OPTION_OVERRIDES", "RETIRED", "SlashEntry",
-    "direct_roots", "entries_by_root", "publish",
+    "direct_roots", "entries_by_root", "publish", "register_native",
 ]
