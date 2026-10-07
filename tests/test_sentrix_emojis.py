@@ -259,3 +259,34 @@ def test_un_marquage_malforme_ne_produit_pas_de_bouton_casse():
     Discord refuserait alors le bouton, et la cause serait introuvable."""
     se.amorcer({"sentrix_ban": "<:sentrix_ban:3>"})  # identifiant trop court
     assert se.partiel("ban") is None
+
+def test_tronquer_ne_coupe_jamais_un_emoji_custom_en_deux():
+    statique = "<:sentrix_ban:410000000000000003>"
+    anime = "<a:sentrix_loading:410000000000000004>"
+
+    for markup in (statique, anime):
+        value = f"Avant {markup} Après"
+        # La coupure tombe volontairement au milieu du token Discord.
+        rendered = se.tronquer(value, 22)
+        assert len(rendered) <= 22
+        assert not rendered.endswith("<")
+        assert "<:sentrix_ban:" not in rendered
+        assert "<a:sentrix_loading:" not in rendered
+        assert rendered == "Avant…"
+
+
+def test_tronquer_garde_un_emoji_complet_quand_il_tient():
+    markup = "<:sentrix_ban:410000000000000003>"
+    rendered = se.tronquer(f"{markup} Ban member", len(markup) + 6)
+    assert rendered.startswith(markup)
+    assert "<:sentrix_ban:" in rendered
+    assert rendered.count(">") == 1
+
+
+def test_partiel_supporte_aussi_un_emoji_anime():
+    se.amorcer({"sentrix_loading": "<a:sentrix_loading:410000000000000004>"})
+    partiel = se.partiel("loading")
+    assert isinstance(partiel, discord.PartialEmoji)
+    assert partiel.animated is True
+    assert partiel.name == "sentrix_loading"
+
