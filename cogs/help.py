@@ -1,6 +1,6 @@
 """Centre d'aide officiel SentriX.
 
-+help et /aide partagent la même logique. L'accueil reste volontairement léger :
++help et /help partagent la même logique. L'accueil reste volontairement léger :
 il sert à trouver une commande, pas à configurer le serveur.
 """
 from __future__ import annotations
@@ -910,11 +910,11 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
         await self.send_help(ctx, query)
 
     @app_commands.command(name="help", description="Open the SentriX help center")
-    @app_commands.describe(commande="Command name, slash command, category or keyword")
-    async def slash_help(self, interaction: discord.Interaction, commande: str | None = None):
-        await self.send_help(interaction, commande)
+    @app_commands.describe(command="Command name, slash command, category or keyword")
+    async def slash_help(self, interaction: discord.Interaction, command: str | None = None):
+        await self.send_help(interaction, command)
 
-    @slash_help.autocomplete("commande")
+    @slash_help.autocomplete("command")
     async def slash_help_autocomplete(
         self,
         interaction: discord.Interaction,
