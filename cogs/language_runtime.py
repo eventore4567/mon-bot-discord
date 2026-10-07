@@ -620,9 +620,66 @@ SURFACE_EN_REPLACEMENTS = (
 
     # --- Fragments de phrase de +niveau
     ("avant le suivant", "to the next one"),
-    ("encore", "still"),
+    # ("encore", "still") RETIRÉ : mot de liaison, donc il mordait au milieu des
+    # phrases. « Cette récompense n'est pas encore disponible » devenait « n'est
+    # pas still disponible ». Les phrases qui le contiennent sont traduites en
+    # entier ci-dessous. Leçon : un mot-outil ne se traduit jamais isolément.
     ("niveau", "level"),
     ("Aucune", "None"),
+
+    # ------------------------------------------------------------------ 07/10/2026
+    # Deuxième passe, même méthode : balayage de 19 commandes en anglais, relevé du
+    # français RESTANT après traduction, puis capture des LIGNES entières pour les
+    # traduire comme des phrases. Traduire « par », « les » ou « pour » isolément
+    # produirait du franglais ; ce sont des mots de liaison DANS ces phrases.
+    ("N'importe qui peut écrire immédiatement.", "Anyone can write immediately."),
+    ("Ce rôle contourne tous les réglages de salon.", "This role bypasses all channel settings."),
+    ("Toutes les statistiques de ce membre sur le serveur.", "All statistics for this member in the server."),
+    ("La boutique est vide pour l'instant.", "The shop is empty for now."),
+    ("Statistiques mises à jour à l'instant", "Statistics updated just now"),
+    ("Récompense du jour encaissée par", "Daily reward claimed by"),
+    ("Voir ce que le serveur propose", "See what the server offers"),
+    ("Acheter avec votre solde", "Buy with your balance"),
+    ("Double authentification", "Two-factor authentication"),
+    ("Toutes les permissions", "All permissions"),
+    ("Filtre des médias", "Media filter"),
+    ("analyse des médias", "media scanning"),
+    ("Exigée du staff", "Required for staff"),
+    ("Membre depuis", "Member since"),
+    ("Bonus de série", "Streak bonus"),
+    ("À renseigner", "Required"),
+    ("Mode AFK activé", "AFK mode enabled"),
+    ("demandé par", "requested by"),
+    ("Récompense", "Reward"),
+    ("Capacités", "Capabilities"),
+    ("Statistiques", "Statistics"),
+    ("Gagné", "Earned"),
+
+    # Étiquettes isolées, désormais sûres : la substitution respecte les
+    # frontières de mot, et le nom du serveur, du bot ET de l'auteur sont
+    # protégés — donc traduire « Membre » ne renomme plus personne.
+    ("Membre", "Member"),
+    ("Durée", "Duration"),
+    ("Succès", "Success"),
+    ("Erreur", "Error"),
+
+    # +infos : la phrase est COUPÉE par ses segments en code (`+info serveur`),
+    # qui sont protégés. On traduit donc chaque morceau entre les segments, et
+    # non la phrase entière — qui n'arrive jamais d'un bloc au traducteur.
+    ("pour le serveur ou", "for the server, or"),
+    ("pour un rôle", "for a role"),
+    ("Utilisez", "Use"),
+
+    # Relevé au contrôle qualité du rendu, pas au comptage de mots : ces phrases
+    # ne ressortaient pas comme « français restant » parce que la commande avait
+    # emprunté un autre chemin (cooldown, profil complet).
+    ("Cette récompense n'est pas encore disponible.", "This reward is not available yet."),
+    ("Cette récompense n'est pas encore disponible", "This reward is not available yet"),
+    ("Ces commandes existent aussi en slash", "These commands also exist as slash commands"),
+    ("encore **100 XP** avant le suivant", "still **100 XP** to the next one"),
+    ("Temps vocal", "Voice time"),
+    ("Profil de", "Profile of"),
+    ("Informations", "Information"),
 )
 
 _UI_PROTECTED_RE = re.compile(

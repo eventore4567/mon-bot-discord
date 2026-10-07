@@ -372,6 +372,14 @@ async def _localize_outgoing(
             moi = getattr(guilde, "me", None)
             if moi is not None and getattr(moi, "display_name", None):
                 proteges.append(str(moi.display_name))
+        # L'auteur aussi : son surnom peut être n'importe quoi, y compris un mot
+        # que le dictionnaire traduit. Sans ça, un membre surnommé « Membre » ou
+        # « Niveau » se faisait renommer dans la réponse qu'il venait de demander.
+        auteur = getattr(ctx, "author", None) or getattr(ctx, "user", None)
+        for champ in ("display_name", "name"):
+            valeur = getattr(auteur, champ, None)
+            if valeur:
+                proteges.append(str(valeur))
     except Exception:
         logger.debug("Nom de serveur non protégeable pour guild=%s", guild_id, exc_info=True)
     protection = tuple(proteges)

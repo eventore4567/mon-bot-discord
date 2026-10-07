@@ -183,3 +183,41 @@ def test_la_barre_de_progression_de_niveau_nest_pas_un_tuple():
             f"repr brut. Trouvé : {ast.unparse(noeud)[:80]}"
         )
     assert trouves, "aucun appel à progress_bar trouvé dans cogs/levels.py"
+
+#: Mots de liaison français. Traduits ISOLÉMENT, ils mordent au milieu des phrases
+#: et produisent du franglais. Mesuré : ("encore", "still") transformait « Cette
+#: récompense n'est pas encore disponible » en « n'est pas still disponible ».
+MOTS_OUTILS = frozenset({
+    "le", "la", "les", "un", "une", "des", "du", "de", "et", "ou", "où", "à", "au",
+    "aux", "dans", "pour", "par", "sur", "avec", "sans", "sous", "ce", "cet", "cette",
+    "ces", "son", "sa", "ses", "leur", "leurs", "est", "sont", "pas", "ne", "en",
+    "y", "il", "elle", "ils", "elles", "vous", "nous", "je", "tu", "on", "que",
+    "qui", "quoi", "dont", "encore", "déjà", "toujours", "jamais", "très", "plus",
+    "moins", "aussi", "alors", "donc", "mais", "car", "si", "comme", "tout", "tous",
+})
+
+
+def test_aucun_mot_outil_nest_traduit_isolement():
+    """Un mot de liaison ne porte pas de sens à lui seul : le traduire hors
+    contexte produit une phrase moitié française moitié anglaise. Les phrases
+    qui en contiennent doivent être déclarées en ENTIER.
+    """
+    fautifs = [
+        (source, cible)
+        for source, cible in list(language_runtime.SURFACE_EN_REPLACEMENTS)
+        + list(language_runtime.SETUP_EN_REPLACEMENTS)
+        if source.strip().casefold() in MOTS_OUTILS
+    ]
+    assert fautifs == [], (
+        "ces entrées traduisent un mot de liaison isolé, ce qui produit du "
+        f"franglais au milieu des phrases : {fautifs}"
+    )
+
+
+def test_une_phrase_avec_un_mot_outil_est_traduite_en_entier():
+    """Le cas exact qui a été mesuré sur +daily."""
+    rendu = language_runtime.english_ui_text(
+        "Cette récompense n'est pas encore disponible."
+    )
+    assert rendu == "This reward is not available yet.", rendu
+    assert "still" not in rendu, rendu
