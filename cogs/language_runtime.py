@@ -534,11 +534,41 @@ def _translate_surface_fragment(value: str, *, setup: bool = False) -> str:
     return text
 
 
-def english_ui_text(value: object | None, *, setup: bool = False) -> str | None:
-    """Translate SentriX-owned UI text while preserving code, URLs and Discord mentions."""
+def _protection_re(protect: tuple[str, ...]) -> re.Pattern[str]:
+    """Le garde habituel, étendu à des littéraux à ne jamais traduire.
+
+    Nécessaire parce que la traduction est une substitution de sous-chaînes :
+    SETUP_EN_REPLACEMENTS contient ("Serveur", "Server"), appliqué par
+    ``str.replace`` sur tout le fragment. Un serveur nommé « Serveur de Jayden »
+    devenait donc « Server de Jayden » — on abîmait la donnée de l'utilisateur,
+    pas seulement l'étiquette. Mesuré le 07/10/2026 sur ``+setup``.
+    """
+    littéraux = sorted({str(v) for v in protect if str(v or "").strip()}, key=len, reverse=True)
+    if not littéraux:
+        return _UI_PROTECTED_RE
+    # Un SEUL groupe capturant, comme _UI_PROTECTED_RE : split() doit continuer à
+    # rendre [texte, séparateur, texte, ...] pour que l'index pair reste du texte.
+    return re.compile(
+        "(" + "|".join(re.escape(v) for v in littéraux) + "|"
+        + _UI_PROTECTED_RE.pattern[1:-1] + ")",
+        re.DOTALL,
+    )
+
+
+def english_ui_text(
+    value: object | None,
+    *,
+    setup: bool = False,
+    protect: tuple[str, ...] = (),
+) -> str | None:
+    """Translate SentriX-owned UI text while preserving code, URLs and Discord mentions.
+
+    ``protect`` liste des textes qui appartiennent à l'utilisateur — nom du
+    serveur, surnom d'un membre — et que la traduction ne doit jamais toucher.
+    """
     if value is None:
         return None
-    parts = _UI_PROTECTED_RE.split(str(value))
+    parts = _protection_re(protect).split(str(value))
     for index in range(0, len(parts), 2):
         parts[index] = _translate_surface_fragment(parts[index], setup=setup)
     return "".join(parts)
@@ -549,28 +579,29 @@ def translate_embed_in_place(
     *,
     setup: bool = False,
     preserve_body: bool = False,
+    protect: tuple[str, ...] = (),
 ) -> discord.Embed:
     if embed.title:
-        embed.title = english_ui_text(embed.title, setup=setup)
+        embed.title = english_ui_text(embed.title, setup=setup, protect=protect)
     if embed.description and not preserve_body:
-        embed.description = english_ui_text(embed.description, setup=setup)
+        embed.description = english_ui_text(embed.description, setup=setup, protect=protect)
     for index, field in enumerate(list(embed.fields)):
-        name = english_ui_text(field.name, setup=setup) or field.name
+        name = english_ui_text(field.name, setup=setup, protect=protect) or field.name
         normalized = _strip_accents(str(field.name or "")).casefold()
         user_text_field = preserve_body or any(
             token in normalized
             for token in ("raison", "reason", "prompt", "contenu", "content", "bio")
         )
-        value = field.value if user_text_field else (english_ui_text(field.value, setup=setup) or field.value)
+        value = field.value if user_text_field else (english_ui_text(field.value, setup=setup, protect=protect) or field.value)
         embed.set_field_at(index, name=name, value=value, inline=field.inline)
     if embed.footer and embed.footer.text:
         embed.set_footer(
-            text=english_ui_text(embed.footer.text, setup=setup),
+            text=english_ui_text(embed.footer.text, setup=setup, protect=protect),
             icon_url=embed.footer.icon_url or None,
         )
     if embed.author and embed.author.name:
         embed.set_author(
-            name=english_ui_text(embed.author.name, setup=setup) or embed.author.name,
+            name=english_ui_text(embed.author.name, setup=setup, protect=protect) or embed.author.name,
             url=embed.author.url or None,
             icon_url=embed.author.icon_url or None,
         )

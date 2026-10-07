@@ -361,6 +361,21 @@ async def _localize_outgoing(
     if language != language_runtime.LANG_EN:
         return tuple(args), dict(kwargs)
 
+    # Le nom du serveur et celui du bot appartiennent à l'utilisateur : la
+    # traduction est une substitution de sous-chaînes, et « Serveur de Jayden »
+    # devenait « Server de Jayden ». On les protège nommément.
+    proteges: list[str] = []
+    try:
+        guilde = bot.get_guild(int(guild_id)) if hasattr(bot, "get_guild") else None
+        if guilde is not None and getattr(guilde, "name", None):
+            proteges.append(str(guilde.name))
+            moi = getattr(guilde, "me", None)
+            if moi is not None and getattr(moi, "display_name", None):
+                proteges.append(str(moi.display_name))
+    except Exception:
+        logger.debug("Nom de serveur non protégeable pour guild=%s", guild_id, exc_info=True)
+    protection = tuple(proteges)
+
     setup_surface = str(root or "").casefold() in {"setup", "configurer"}
     preserve_body = str(root or "").casefold() in panels.COMMANDES_TEXTE_LIBRE
 
@@ -368,7 +383,7 @@ async def _localize_outgoing(
     new_kwargs = dict(kwargs)
     content, positional = _content_from(new_args, new_kwargs)
     if content is not None and not preserve_body:
-        translated = language_runtime.english_ui_text(content, setup=setup_surface)
+        translated = language_runtime.english_ui_text(content, setup=setup_surface, protect=protection)
         new_args, new_kwargs = _set_content(
             new_args,
             new_kwargs,
@@ -382,6 +397,7 @@ async def _localize_outgoing(
             embed,
             setup=setup_surface,
             preserve_body=preserve_body,
+            protect=protection,
         )
     if new_kwargs.get("embeds"):
         new_kwargs["embeds"] = [
@@ -389,6 +405,7 @@ async def _localize_outgoing(
                 item,
                 setup=setup_surface,
                 preserve_body=preserve_body,
+                protect=protection,
             ) if isinstance(item, discord.Embed) else item
             for item in list(new_kwargs["embeds"])
         ]

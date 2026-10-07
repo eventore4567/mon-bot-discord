@@ -84,3 +84,28 @@ def test_final_transport_localizes_every_major_discord_surface():
 
 def test_language_confirmation_now_promises_broad_interface_coverage():
     assert "commands, panels, errors, setup, verification, security" in LANG_SOURCE
+
+def test_english_surface_never_mangles_the_server_name():
+    """La traduction est une substitution de SOUS-CHAÎNES : SETUP_EN_REPLACEMENTS
+    contient ("Serveur", "Server"), appliqué par ``str.replace`` sur tout le
+    fragment. Un serveur nommé « Serveur de Jayden » devenait donc « Server de
+    Jayden » — on abîmait la donnée de l'utilisateur, pas l'étiquette.
+
+    Mesuré en production le 07/10/2026 sur ``+setup``, qui affiche le nom du
+    serveur en gras. ``_UI_PROTECTED_RE`` protégeait le code, les URL et les
+    mentions, mais rien n'empêchait d'écrire dans un nom interpolé.
+    """
+    for nom in ("Serveur de Jayden", "Mon Serveur", "Serveur"):
+        texte = f"# Configuration de SentriX\n**{nom}** en attente"
+        assert nom in language_runtime.english_ui_text(texte, setup=True, protect=(nom,)), nom
+        # Sans protection, le défaut existe toujours : c'est bien le paramètre
+        # qui protège, pas un hasard de formulation.
+        assert nom not in language_runtime.english_ui_text(texte, setup=True)
+
+
+def test_protecting_a_name_does_not_block_real_label_translation():
+    """Protéger le nom du serveur ne doit pas geler toute la traduction."""
+    rendu = language_runtime.english_ui_text(
+        "Modifications en attente", setup=True, protect=("Mon Serveur",)
+    )
+    assert "Unsaved changes" in rendu
