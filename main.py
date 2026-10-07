@@ -108,6 +108,7 @@ EXTENSIONS = [
     "cogs.command_channel_gate",
     "cogs.server_builder",
     "cogs.logs",
+    "cogs.snipe",
     "cogs.soundboard_logs",
     "cogs.utility",
     "cogs.guild_arrival",
