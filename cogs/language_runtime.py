@@ -734,6 +734,83 @@ SURFACE_EN_REPLACEMENTS = (
      "First to answer correctly in this channel wins!"),
     ("Modèle par défaut sur ce serveur", "Default model in this server"),
     ("Créateur d'embed SentriX", "SentriX embed builder"),
+
+    # ------------------------------------------------------------------ 07/10/2026
+    # Quatrième passe : fragments MULTI-MOTS relevés sur les 307 phrases encore
+    # entièrement françaises. Multi-mots par principe — un mot seul risque de
+    # mordre dans une phrase, ce que la garde anti-mélange refuse désormais.
+
+    # --- Noms de permissions Discord, affichés tels quels dans les diagnostics
+    ("Gérer le serveur", "Manage Server"),
+    ("Gérer les messages", "Manage Messages"),
+    ("Gérer les pseudos", "Manage Nicknames"),
+    ("Gérer les rôles", "Manage Roles"),
+    ("Gérer les salons", "Manage Channels"),
+    ("Exclure temporairement des membres", "Timeout Members"),
+    ("Bannir des membres", "Ban Members"),
+    ("Expulser des membres", "Kick Members"),
+
+    # --- Confirmations d'action, préfixées « Terminé — »
+    ("Terminé — ", "Done — "),
+    ("Rôle attribué", "Role granted"),
+    ("Rôle retiré", "Role removed"),
+    ("Rappel défini", "Reminder set"),
+    ("Volume réglé sur", "Volume set to"),
+    ("Volume réglé", "Volume set"),
+    ("Queue mélangée", "Queue shuffled"),
+    ("Compteur infini arrêté", "Infinite counter stopped"),
+    ("Panneau boutique publié", "Shop panel published"),
+    ("Panneau de rôles publié", "Role panel published"),
+    ("Prix de boutique modifié", "Shop price changed"),
+    ("Accès aux embeds accordé", "Embed access granted"),
+    ("Accès aux embeds retiré", "Embed access revoked"),
+    ("Rôle de level configuré", "Level role configured"),
+    ("XP accordée par le staff", "XP granted by staff"),
+    ("Outils avancés", "Advanced tools"),
+    ("Rôle SentriX trop bas", "SentriX role too low"),
+    ("Auto-rôles intelligents", "Smart auto-roles"),
+    ("Verification nécessaire", "Check needed"),
+
+    # --- Économie et jeux
+    ("Total crédité", "Total credited"),
+    ("Total gagné", "Total earned"),
+    ("crédités · réf", "credited · ref"),
+    ("déposés en banque", "deposited to the bank"),
+    ("ajoutés au compte de", "added to the account of"),
+    ("Manches jouées", "Rounds played"),
+    ("succès débloqués", "achievements unlocked"),
+    ("débloqué(s)", "unlocked"),
+    ("Aucun historique de marché", "No market history"),
+    ("Devine le nombre", "Guess the number"),
+    ("Réactions emoji", "Emoji reactions"),
+
+    # --- Journaux et modération
+    ("Messages modifiés", "Messages edited"),
+    ("Messages supprimés", "Messages deleted"),
+    ("message(s) supprimé(s)", "message(s) deleted"),
+    ("a été averti", "was warned"),
+    ("Aucun exemple enregistré", "No example saved"),
+    ("peut désormais utiliser", "can now use"),
+    ("Vérifiez le code de langue", "Check the language code"),
+    ("rôle(s) disponible(s)", "role(s) available"),
+    ("badge(s)", "badge(s)"),
+
+    # --- Compléments exigés par la garde anti-mélange : une ligne doit devenir
+    #     ENTIÈREMENT anglaise. Traduire « Terminé — » sans « Attribution
+    #     terminée » laissait « ## Done — Attribution terminée ».
+    ("Attribution terminée", "Assignment complete"),
+    ("Signalement enregistré", "Report recorded"),
+    ("Shop mise à jour", "Shop updated"),
+    ("Boutique mise à jour", "Shop updated"),
+    ("et les gestionnaires du bot ont TOUJOURS accès",
+     "and the bot managers ALWAYS have access"),
+    ("Rôle attribué à", "Role granted to"),
+    ("Rôle retiré à", "Role removed from"),
+    ("membre(s)", "member(s)"),
+    ("· prêt", "· ready"),
+    ("classé(s) sur", "ranked in"),
+    ("Question de culture générale", "General knowledge question"),
+    ("en plus des rôles ci-dessous", "in addition to the roles below"),
     ("Préparez-vous...", "Get ready..."),
 
     # ------------------------------------------------------------------ 07/10/2026
