@@ -30,35 +30,45 @@ class SetupTicketAutoconfigV72Tests(unittest.TestCase):
                 self.assertEqual(value, rendered)
                 self.assertNotIn("ConfigState", value)
 
-        # Compatibilité avec des chaînes déjà sérialisées par une ancienne couche.
-        self.assertEqual(v72.state_text("ConfigState.ACTIVE"), "● ACTIF")
-        self.assertEqual(v72.state_text("ConfigState.INACTIVE"), "○ INACTIF")
-        self.assertEqual(v72.state_text("ConfigState.UNCONFIGURED"), "— NON CONFIGURÉ")
-        self.assertEqual(v72.state_text("ConfigState.ERROR"), "! À CORRIGER")
-
-    def test_ticket_activation_is_real_configuration_not_only_module_flag(self):
+    def test_ticket_activation_never_creates_discord_resources(self):
         source = V72_PATH.read_text(encoding="utf-8")
-        required_contracts = (
-            "create_panel(guild.id, \"Support\")",
-            "add_type(guild.id, panel_id, \"Support\")",
+        forbidden = (
             "guild.create_role(",
             "guild.create_category(",
             "guild.create_text_channel(",
-            'set_guild_config(guild.id, "ticket_category"',
-            'set_guild_config(guild.id, "ticket_log_channel"',
-            "TicketPanelView(panel, types)",
-            '"tickets",\n                True,',
         )
-        for contract in required_contracts:
-            with self.subTest(contract=contract):
-                self.assertIn(contract, source)
+        for marker in forbidden:
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, source)
 
-    def test_activation_preserves_existing_ticket_values(self):
+    def test_ticket_activation_never_creates_panel_or_type(self):
         source = V72_PATH.read_text(encoding="utf-8")
-        self.assertIn("staff_role_id=COALESCE(staff_role_id,?)", source)
-        self.assertIn("category_id=COALESCE(category_id,?)", source)
-        self.assertIn("log_channel_id=COALESCE(log_channel_id,?)", source)
-        self.assertIn("configuration est conservée", source)
+        ensure_start = source.index("async def ensure_ticket_configuration")
+        ensure_end = source.index("\n\nasync def _ack", ensure_start)
+        block = source[ensure_start:ensure_end]
+        self.assertNotIn("create_panel(", block)
+        self.assertNotIn("add_type(", block)
+        self.assertNotIn("panels.envoyer(", block)
+        self.assertIn("Aucun panel Tickets n'est configuré", block)
+        self.assertIn("Aucun type de ticket n'est configuré", block)
+
+    def test_deleted_panel_is_not_recreated(self):
+        source = V72_PATH.read_text(encoding="utf-8")
+        start = source.index("async def _require_existing_panel_message")
+        end = source.index("\n\nasync def ensure_ticket_configuration", start)
+        block = source[start:end]
+        self.assertIn("await channel.fetch_message", block)
+        self.assertIn("Le panel Tickets configuré a été supprimé", block)
+        self.assertNotIn("panels.envoyer(", block)
+
+    def test_activation_only_enables_after_existing_config_is_valid(self):
+        source = V72_PATH.read_text(encoding="utf-8")
+        start = source.index("async def ensure_ticket_configuration")
+        end = source.index("\n\nasync def _ack", start)
+        block = source[start:end]
+        self.assertIn("_require_existing_panel_message", block)
+        self.assertIn("set_module_enabled(", block)
+        self.assertIn('"tickets",\n            True,', block)
 
     def test_old_ticket_panels_obey_module_off_state(self):
         source = V72_PATH.read_text(encoding="utf-8")
@@ -80,12 +90,6 @@ class SetupTicketAutoconfigV72Tests(unittest.TestCase):
         finalized = source.index("bot._sentrix_runtime_finalized_clean = True")
         self.assertLess(security, tickets)
         self.assertLess(tickets, finalized)
-
-    def test_ticket_panel_is_persistent_and_v72_reuses_it(self):
-        ticket_source = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
-        self.assertIn("class TicketPanelView(discord.ui.View):", ticket_source)
-        self.assertIn("super().__init__(timeout=None)", ticket_source)
-        self.assertIn("custom_id=f\"ticket_open_btn:{ticket_type['id']}\"", ticket_source)
 
 
 if __name__ == "__main__":
