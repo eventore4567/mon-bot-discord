@@ -1052,10 +1052,25 @@ def _trace_footer(event_type: str, footer: str = "") -> str:
     return f"SentriX · {clean}" if clean else "SentriX"
 
 
+#: Un rôle donné à un membre ou retiré d'un membre : l'événement porte sur le
+#: MEMBRE, pas sur le rôle. Les traiter comme role_create/role_update affichait
+#: « Rôle · <@&identifiant du membre> » — l'identifiant d'un membre rendu comme
+#: une mention de rôle (constaté le 08/10/2026 sur +giverole).
+_MEMBER_ROLE_EVENTS = frozenset({
+    "role_add", "role_remove",
+    # Actions staff journalisées par utils.audit_trail.journaliser : leur sujet
+    # est un membre, mais leur nom ne commence pas par « member_ » — l'en-tête
+    # affichait « Élément · <pseudo brut> » au lieu de « Membre · <@membre> ».
+    "warnings_cleared", "levels_xp_set", "economy_grant",
+})
+
+
 def _trace_identity_ref(event_type: str, identity_id: int | None) -> str:
     if not identity_id:
         return ""
     event = canonical_event_type(event_type)
+    if event in _MEMBER_ROLE_EVENTS:
+        return f"<@{identity_id}>"
     if event.startswith("role_"):
         return f"<@&{identity_id}>"
     if event.startswith("channel_") or event == "pins_update":
@@ -1076,6 +1091,8 @@ def _trace_identity_label(event_type: str) -> str:
     l'on regarde : le panneau paraît moins générique sans ajouter de bloc.
     """
     event = canonical_event_type(event_type)
+    if event in _MEMBER_ROLE_EVENTS:
+        return "Membre"
     if event.startswith("message_"):
         return "Auteur"
     if event.startswith(("member_", "voice_", "ticket_", "automod_", "spam_", "raid_")):

@@ -1213,7 +1213,7 @@ class Economy(commands.Cog, name="Economy"):
         await self.bot.db.add_balance(ctx.guild.id, membre.id, montant)
         await self.bot.db.log_transaction(ctx.guild.id, ctx.author.id, membre.id, "admin_grant", montant, "Ajout manuel (staff)")
         await journaliser(self.bot, ctx, "economy_grant", "💰 Monnaie créée par le staff", {
-            "👤 Bénéficiaire": f"{membre.mention}\n`{membre.id}`",
+            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
             "🪙 Montant": stats_service.format_number(montant),
         })
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'{stats_service.format_number(montant)} 🪙 ajoutés au compte de {membre.mention}.')))

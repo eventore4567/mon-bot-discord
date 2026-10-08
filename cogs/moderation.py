@@ -34,7 +34,7 @@ from discord.ext import commands, tasks
 
 import config
 from utils import embeds, checks, helpers, design_system, log_service
-from utils.audit_trail import journaliser
+from utils.audit_trail import journaliser, noter_acteur
 from utils import sentrix_panels as panels
 from utils.helpers import parse_duration
 from utils.v22_rules import clean_reason
@@ -1501,13 +1501,11 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
-        ancien = membre.display_name
-        await membre.edit(nick=pseudo[:32])
-        await self.log_simple(ctx, "member_nickname", "✏️ Pseudo modifié", {
-            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
-            "↩️ Avant": ancien,
-            "➡️ Après": pseudo[:32],
-        })
+        # Pas de carte ici : Discord renvoie la mise à jour du membre, que
+        # cogs/logs.py journalise déjà (avant / après, modérateur lu dans le
+        # journal d'audit). Une carte de plus en faisait deux (mesuré le 08/10/2026).
+        noter_acteur(self.bot, ctx.guild.id, membre.id, "member_update", ctx.author.id)
+        await membre.edit(nick=pseudo[:32], reason=f"Pseudo modifié par {ctx.author}")
         await self._reply(ctx, f"Le pseudo de {membre.mention} est maintenant **{pseudo[:32]}**.")
 
     @commands.hybrid_command(name="resetnick", description="Réinitialiser le pseudo d'un membre.", with_app_command=False)
@@ -1519,12 +1517,9 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         if not await self.check_targetable(ctx, membre):
             return
-        ancien = membre.display_name
-        await membre.edit(nick=None)
-        await self.log_simple(ctx, "member_nickname", "✏️ Pseudo réinitialisé", {
-            "👤 Membre": f"{membre.mention}\n`{membre.id}`",
-            "↩️ Avant": ancien,
-        })
+        # Même raison que +nickname : l'événement Discord est déjà journalisé.
+        noter_acteur(self.bot, ctx.guild.id, membre.id, "member_update", ctx.author.id)
+        await membre.edit(nick=None, reason=f"Pseudo réinitialisé par {ctx.author}")
         await self._reply(ctx, f"Le pseudo de {membre.mention} a été réinitialisé.")
 
     @commands.hybrid_command(name="move", description="Déplacer un membre vers un autre salon vocal.", with_app_command=False)

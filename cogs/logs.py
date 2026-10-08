@@ -213,6 +213,29 @@ class Logs(commands.Cog, name="Logs"):
             panel.set_thumbnail(url=avatar)
         return panel
 
+    async def _resolve_actor(
+        self,
+        guild: discord.Guild,
+        action: discord.AuditLogAction,
+        target_id: int,
+    ) -> tuple[discord.abc.User | discord.Object | None, discord.AuditLogEntry | None]:
+        """L'auteur réel d'une modification de membre.
+
+        Le journal d'audit nomme celui qui a APPELÉ Discord. Pour une action passée
+        par une commande SentriX, c'est le bot : la commande a donc noté le vrai
+        modérateur avant l'appel (utils.audit_trail.noter_acteur), et on le
+        préfère ici. Sans permission « Voir le journal d'audit », c'est même la
+        seule source.
+        """
+        from utils import audit_trail
+
+        actor, audit = await self._audit_actor(guild, action, target_id)
+        bot_id = getattr(getattr(self.bot, "user", None), "id", None)
+        local_id = audit_trail.acteur_local(self.bot, guild.id, target_id, action.name)
+        if local_id and (actor is None or getattr(actor, "id", None) == bot_id):
+            actor = guild.get_member(local_id) or discord.Object(id=local_id)
+        return actor, audit
+
     async def _audit_actor(
         self,
         guild: discord.Guild,
@@ -671,7 +694,7 @@ class Logs(commands.Cog, name="Logs"):
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         if before.nick != after.nick:
-            actor, audit = await self._audit_actor(
+            actor, audit = await self._resolve_actor(
                 after.guild,
                 discord.AuditLogAction.member_update,
                 after.id,
@@ -709,7 +732,7 @@ class Logs(commands.Cog, name="Logs"):
         removed = [role for role_id, role in before_roles.items() if role_id not in after_roles]
         actor, audit = (None, None)
         if added or removed:
-            actor, audit = await self._audit_actor(
+            actor, audit = await self._resolve_actor(
                 after.guild,
                 discord.AuditLogAction.member_role_update,
                 after.id,
