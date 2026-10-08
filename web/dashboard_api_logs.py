@@ -5,9 +5,97 @@ ne sont jamais écrites ici. Les événements fins réutilisent v17_log_event_se
 """
 from __future__ import annotations
 
+import logging
+
 from aiohttp import web
 
 from utils import log_service
+
+logger = logging.getLogger("bot.dashboard.logs")
+
+
+def _parse_enabled(value, *, default: bool) -> bool:
+    """Évite que le bool Python considère la chaîne 'false' comme vraie."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().casefold()
+        if text in {"true", "1", "on"}:
+            return True
+        if text in {"false", "0", "off"}:
+            return False
+    raise ValueError("enabled doit être true ou false")
+
+
+async def _resolve_channel_id(bot, guild_id: int, category: str, payload: dict) -> int | None:
+    """Un ON/OFF sans channel_id préserve le salon choisi dans la configuration.
+
+    channel_id:null/0 est au contraire un effacement explicite. La validation
+    des permissions du salon se fait ensuite si enabled=True.
+    """
+    if "channel_id" not in payload:
+        previous = await log_service.get_log_setting(bot, guild_id, category)
+        return previous.get("channel_id")
+
+    raw = payload["channel_id"]
+    if isinstance(raw, bool):
+        raise ValueError("Salon invalide.")
+    if raw is None or raw == "" or raw == 0 or raw == "0":
+        return None
+    if not isinstance(raw, (str, int)):
+        raise ValueError("Salon invalide.")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Salon invalide.") from error
+    if value <= 0:
+        raise ValueError("Salon invalide.")
+    return value
+
+
+async def _save_verified_route(bot, guild, category: str, channel_id: int | None, enabled: bool):
+    """Teste une nouvelle route et restaure l'ancienne sur tout échec de validation."""
+    previous = await log_service.get_log_setting(bot, guild.id, category)
+    saved = await log_service.set_log_config(
+        bot, guild.id, category, channel_id=channel_id, enabled=enabled,
+    )
+    if not enabled:
+        return saved, None, None
+
+    try:
+        author = guild.me
+        if author is None:
+            result = False, "SentriX ne peut pas vérifier ce salon pour le moment."
+        else:
+            result = await log_service.send_test_log(bot, guild, category, author)
+    except Exception:
+        logger.exception("Test du salon logs échoué guild=%s category=%s", guild.id, category)
+        result = False, "Échec de vérification du salon."
+
+    ok, detail = result
+    if ok:
+        return saved, detail, None
+
+    # IMPORTANT : ne pas écraser une route de logs déjà fonctionnelle par
+    # « enabled=False » dans le nouveau salon lorsqu'un test Discord échoue.
+    try:
+        await log_service.set_log_config(
+            bot, guild.id, category,
+            channel_id=previous.get("channel_id"),
+            enabled=bool(previous.get("enabled") and previous.get("channel_id")),
+        )
+    except Exception:
+        logger.exception(
+            "Restauration de la route logs impossible guild=%s category=%s", guild.id, category,
+        )
+        return None, None, "Le test a échoué et l'ancienne configuration n'a pas pu être restaurée."
+    return None, None, f"Le test de logs a échoué : {detail}. L'ancienne configuration a été conservée."
+
+
 from utils.log_categories import CATEGORIES, CATEGORY_ORDER
 
 
@@ -78,66 +166,27 @@ def register(app: web.Application, dashboard) -> None:
         if key not in CATEGORIES:
             return dashboard._json_error("Catégorie de logs inconnue.", 400)
 
-        raw_channel = payload.get("channel_id")
-        channel_id = None
-        if raw_channel not in (None, "", 0, "0"):
-            try:
-                channel_id = int(raw_channel)
-            except (TypeError, ValueError):
-                return dashboard._json_error("Salon invalide.", 400)
-            ok, problem = log_service.validate_channel(guild, channel_id, needs_file=True)
-            if not ok:
-                return dashboard._json_error(f"Ce salon ne peut pas recevoir les logs : {problem}.", 409)
-
-        enabled = bool(payload.get("enabled", channel_id is not None))
+        try:
+            channel_id = await _resolve_channel_id(bot, guild.id, key, payload)
+            enabled = _parse_enabled(
+                payload.get("enabled"), default=channel_id is not None,
+            )
+        except ValueError:
+            return dashboard._json_error("Salon ou valeur enabled invalide.", 400)
         if enabled and channel_id is None:
             return dashboard._json_error("Choisissez un salon avant d’activer cette catégorie.", 409)
-
-        saved = await log_service.set_log_config(
-            bot,
-            guild.id,
-            key,
-            channel_id=channel_id,
-            enabled=enabled,
-        )
-
-        # Le dashboard doit garantir la même chose que reset-logs/+setup : une route
-        # marquée active doit avoir réellement réussi un envoi Components V2. Cela
-        # détecte immédiatement un salon sans pièce jointe, une bannière manquante,
-        # une erreur de renderer ou un refus Discord au lieu d'afficher « Actif » à tort.
-        test_detail = None
         if enabled:
-            author = guild.me
-            if author is None:
-                await log_service.set_log_config(
-                    bot,
-                    guild.id,
-                    key,
-                    channel_id=channel_id,
-                    enabled=False,
-                )
+            ok, reason = log_service.validate_channel(guild, channel_id, needs_file=True)
+            if not ok:
                 return dashboard._json_error(
-                    "Configuration enregistrée, mais SentriX ne peut pas vérifier ce salon pour le moment.",
-                    409,
+                    f"Ce salon ne peut pas recevoir les logs : {reason}.", 409,
                 )
-            test_ok, test_detail = await log_service.send_test_log(
-                bot,
-                guild,
-                key,
-                author,
-            )
-            if not test_ok:
-                await log_service.set_log_config(
-                    bot,
-                    guild.id,
-                    key,
-                    channel_id=channel_id,
-                    enabled=False,
-                )
-                return dashboard._json_error(
-                    f"Le salon a été enregistré mais le test réel a échoué : {test_detail}",
-                    409,
-                )
+
+        saved, test_detail, problem = await _save_verified_route(
+            bot, guild, key, channel_id, enabled,
+        )
+        if problem:
+            return dashboard._json_error(problem, 409)
 
         return web.json_response({
             "ok": True,
@@ -164,7 +213,12 @@ def register(app: web.Application, dashboard) -> None:
         key = str(payload.get("event_key") or "").strip()
         if key not in EVENT_LABELS:
             return dashboard._json_error("Événement de log inconnu.", 400)
-        enabled = bool(payload.get("enabled"))
+        if "enabled" not in payload:
+            return dashboard._json_error("Indiquez enabled : true ou false.", 400)
+        try:
+            enabled = _parse_enabled(payload["enabled"], default=False)
+        except ValueError:
+            return dashboard._json_error("enabled doit être true ou false.", 400)
         await bot.db.execute(
             "INSERT INTO v17_log_event_settings (guild_id,event_key,enabled) VALUES (?,?,?) "
             "ON CONFLICT(guild_id,event_key) DO UPDATE SET enabled=excluded.enabled",
