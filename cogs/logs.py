@@ -199,9 +199,12 @@ class Logs(commands.Cog, name="Logs"):
                 or getattr(identity, "name", None)
                 or str(identity)
             )
-            identity_text = f"**{identity_name}**"
+            # Nom lisible + mention cliquable + ID, même si le membre a quitté.
+            # LOG_ALLOWED_MENTIONS désactive les notifications côté transport.
+            safe_name = discord.utils.escape_markdown(str(identity_name))
+            identity_text = f"**{safe_name}**"
             if identity_id:
-                identity_text += f"\nID : `{identity_id}`"
+                identity_text += f" · {_user_ref(identity_id)}\nID : `{identity_id}`"
             asset = getattr(identity, "display_avatar", None)
             if asset is not None:
                 avatar = str(asset.url)
