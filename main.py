@@ -304,7 +304,7 @@ CATEGORY_COMMANDS = {
         "giveaway-cancel", "giveaway-blacklist", "giveaway-unblacklist",
         "event-create", "event-cancel", "tournament-create",
         "tournament-start", "announce", "notifs-ping", "notifs-list",
-        "notifs-remove", "welcome-config",
+        "notifs-remove", "notifs-status", "notifs-test", "welcome-config",
         "set-nickname", "alias", "diagnostic",
     }),
     "tickets": frozenset({

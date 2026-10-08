@@ -32,6 +32,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -49,15 +50,22 @@ SCRIPTS = [
 
 
 def _run(script: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(RACINE / "tools" / script)],
-        capture_output=True,
-        text=True,
-        cwd=str(RACINE),
-        env={**os.environ, "DISCORD_TOKEN": "ci.fake.token"},
-        timeout=60,
-    )
-
+    # sitecustomize.py peut importer config avant l'exécution du script.
+    # Fournir DATABASE_PATH avant de lancer Python empêche d'utiliser bot.db.
+    with tempfile.TemporaryDirectory(prefix="sentrix-registry-gate-") as temporary_dir:
+        env = {
+            **os.environ,
+            "DISCORD_TOKEN": "ci.fake.token",
+            "DATABASE_PATH": str(pathlib.Path(temporary_dir) / "bot.db"),
+        }
+        return subprocess.run(
+            [sys.executable, str(RACINE / "tools" / script)],
+            capture_output=True,
+            text=True,
+            cwd=str(RACINE),
+            env=env,
+            timeout=60,
+        )
 
 @pytest.mark.parametrize("script", SCRIPTS)
 def test_gate_passe(script):

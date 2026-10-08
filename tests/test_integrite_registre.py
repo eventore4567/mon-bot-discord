@@ -11,6 +11,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 
@@ -18,12 +19,14 @@ RACINE = pathlib.Path(__file__).resolve().parent.parent
 def test_le_registre_des_commandes_est_coherent():
     """Aucun doublon, aucun alias orphelin, une politique d'acces par commande,
     et les deux gardes de permissions effectivement installees."""
-    resultat = subprocess.run(
-        [sys.executable, str(RACINE / "tools" / "audit_registre.py")],
-        capture_output=True,
-        text=True,
-        cwd=str(RACINE),
-        env={**os.environ, "DISCORD_TOKEN": "x"},
-        timeout=600,
-    )
+    # L'environnement doit être fixé avant le spawn (sitecustomize est précoce).
+    with tempfile.TemporaryDirectory(prefix="sentrix-registry-integrity-") as temporary_dir:
+        resultat = subprocess.run(
+            [sys.executable, str(RACINE / "tools" / "audit_registre.py")],
+            capture_output=True,
+            text=True,
+            cwd=str(RACINE),
+            env={**os.environ, "DISCORD_TOKEN": "x", "DATABASE_PATH": str(pathlib.Path(temporary_dir) / "bot.db")},
+            timeout=600,
+        )
     assert resultat.returncode == 0, resultat.stdout[-4000:] + resultat.stderr[-2000:]

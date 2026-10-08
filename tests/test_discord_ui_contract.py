@@ -48,24 +48,23 @@ class DiscordUiContractTests(unittest.TestCase):
         ):
             self.assertFalse(panel.image.url)
 
-    def test_each_state_has_its_own_colour(self):
-        """Un succes, une erreur et un avertissement ne doivent pas se ressembler.
+    def test_each_state_is_semantically_distinct_without_colour_borders(self):
+        """La charte SentriX retire volontairement le liseré coloré Discord.
 
-        Ces trois constructeurs passaient tous colour=SENTRIX_COLOR : sur les ~290
-        commandes qui utilisent utils/embeds, rien ne distinguait visuellement une
-        reussite d'un echec. Le test precedent exigeait meme cette confusion.
+        Il faut garder un état identifiable par son titre, même sans couleur.
+        Ne pas remettre une bordure juste pour faire réussir un ancien test.
         """
-        couleurs = {
-            "success": embeds.success("ok").colour.value,
-            "danger": embeds.error("x").colour.value,
-            "warning": embeds.warning("attention").colour.value,
-            "info": embeds.info("i").colour.value,
+        panels = {
+            "success": embeds.success("ok"),
+            "danger": embeds.error("x"),
+            "warning": embeds.warning("attention"),
+            "info": embeds.info("i"),
         }
-        self.assertEqual(len(set(couleurs.values())), 4, couleurs)
-        self.assertEqual(couleurs["success"], embeds.COLOR_SUCCESS)
-        self.assertEqual(couleurs["danger"], embeds.COLOR_DANGER)
-        self.assertEqual(couleurs["warning"], embeds.COLOR_WARNING)
-        self.assertEqual(couleurs["info"], embeds.COLOR_INFO)
+        self.assertTrue(all(panel.colour is None for panel in panels.values()))
+        titles = {kind: str(panel.title) for kind, panel in panels.items()}
+        self.assertEqual(len(set(titles.values())), len(panels), titles)
+        for panel in panels.values():
+            self.assertTrue(panel.description)
 
     def test_an_explicit_success_wins_over_an_action_verb(self):
         """« Message supprimé avec succès » sortait en rouge : « supprimé » gagnait."""

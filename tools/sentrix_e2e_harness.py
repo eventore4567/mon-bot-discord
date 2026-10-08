@@ -396,6 +396,18 @@ async def setup_world(bot):
     await bot.db.set_guild_config(GID, "level_channel", CID)
     await bot.db.set_guild_config(GID, "ticket_category", CATEGORY_ID)
     await bot.db.set_guild_config(GID, "autorole", MEMBER_ROLE_ID)
+    # /suggestions submit nécessite un salon explicite. Le serveur fictif doit
+    # reproduire cette configuration pour que l'audit teste les PERMISSIONS,
+    # et non un refus métier « salon non configuré ». Aucun salon n'est créé.
+    from services import suggestions as suggestion_service
+    await suggestion_service.save_settings(
+        bot.db,
+        GID,
+        actor_id=AUTHOR_ID,
+        now=int(dt.datetime.now(dt.timezone.utc).timestamp()),
+        channel_id=CID,
+        cooldown_seconds=0,
+    )
     from utils import log_service
     for category in ("moderation", "messages", "members", "automod", "security", "tickets", "voice", "roles"):
         try:

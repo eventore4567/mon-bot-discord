@@ -66,6 +66,7 @@ jobs:
             tests/test_services_tickets.py \
             tests/test_access_matrix.py \
             tests/test_permission_audit_regressions.py \
+            tests/test_permission_sweep_modals.py \
             tests/test_giveaway_center.py \
             tests/test_ha_transition_observability.py \
             tests/test_ha_sigterm_failover.py \
@@ -80,6 +81,21 @@ jobs:
             tests/test_public_layout_interactions.py \
             tests/test_public_short_links.py \
             tests/test_public_home_runtime_route.py
+
+      # Régression ciblée des deux faux refus identifiés dans les shards 3 et 6 :
+      # /poll ouvre une Modal (réponse type 9), /suggestions submit exige une
+      # destination configurée dans le serveur fictif. Aucune sortie réseau.
+      - name: Audit slash modal et suggestions configurées
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          OPENAI_API_KEY: ""
+          POSTGRES_URL: ""
+          REDIS_URL: ""
+          SENTRIX_SHORT_SLASH_NAMES: "1"
+        run: >-
+          python tools/permission_audit_sweep.py
+          --strict --transport slash --only "poll" "suggestions submit"
+          --out reports/permission_audit_modal_regression
 
       - name: Sweep every command (strict on technical errors)
         if: github.event_name != 'push'

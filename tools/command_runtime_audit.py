@@ -15,6 +15,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _chat_input_roots(tree):
+    """Ignore les menus contextuels User/Message : ce ne sont pas des slash."""
+    import discord
+
+    return list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
+
+
 async def run() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -49,10 +56,10 @@ async def run() -> int:
         if not command_catalog_cleanup._INSTALLED:
             errors.append("politique canonique du catalogue non installée")
 
-        # La surface historique comptait 97 commandes directes après le passage de la
-        # musique en groupe /music. Une suppression produit explicitement documentée doit
-        # réduire ce nombre, sans obliger à réintroduire une commande juste pour satisfaire
-        # un compteur de CI. Au 13/09/2026, blacklist-add et blacklist-users sont retirées.
+        # Contrat du catalogue direct : les retraits explicites restent respectés.
+        # Le contrat précédent (120) était resté figé alors que trois commandes
+        # de modération désormais voulues ont été exposées : modview, snipe,
+        # editsnipe. Ne pas les masquer juste pour retrouver l'ancien compteur.
         explicit_removed = set(
             getattr(command_catalog_cleanup, "EXPLICITLY_REMOVED_COMMANDS", frozenset())
         )
@@ -60,7 +67,11 @@ async def run() -> int:
         # produit blacklist-add/blacklist-users = 95. L'ancien alias `me` est aussi
         # marqué retiré, mais n'appartenait pas à ces 97 commandes directes : sa surface
         # canonique est désormais `stats`, qui reste directe.
-        expected_normal_direct = 120
+        expected_normal_direct = 123
+        moderation_direct = {"modview", "snipe", "editsnipe"}
+        missing_moderation_direct = moderation_direct - set(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS)
+        if missing_moderation_direct:
+            errors.append("commandes modération directes manquantes: " + ", ".join(sorted(missing_moderation_direct)))
         if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
             errors.append(
                 "la surface normale doit contenir exactement "
@@ -223,7 +234,7 @@ async def run() -> int:
         except Exception as exc:
             errors.append(f"réaffirmation V110 impossible: {type(exc).__name__}: {exc}")
 
-        app_roots = list(bot.tree.get_commands())
+        app_roots = _chat_input_roots(bot.tree)
         app_root_names = {str(command.name).casefold() for command in app_roots}
 
         # V110 est l'autorité sur les racines slash publiques. L'ancien audit comparait

@@ -250,8 +250,11 @@ def _audit_registry(bot: commands.Bot) -> dict[str, Any]:
         if not (1 <= len(name) <= 32):
             critical.append(f"nom slash invalide: {qualified}")
 
-    if len(bot.tree.get_commands()) > 100:
-        critical.append(f"budget slash dépassé: {len(bot.tree.get_commands())}/100")
+    # Menus contextuels User/Message != racines slash Chat Input.
+    # Discord applique les quotas par type ; ne pas additionner des quotas distincts.
+    slash_roots = bot.tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)
+    if len(slash_roots) > 100:
+        critical.append(f"budget slash dépassé: {len(slash_roots)}/100")
 
     return {
         "text_commands": len(commands_seen),

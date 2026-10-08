@@ -69,7 +69,7 @@ async def run() -> int:
         try:
             mapping = await v95.prepare_bot(bot)
             # Même dernière passe que le wrapper CommandTree.sync de production :
-            # /aide reste, l'ancienne racine /help est supprimée avant publication.
+            # les anciennes racines /aide sont écartées ; /help reste public.
             v95._remove_legacy_public_roots(bot.tree)
         except Exception as exc:
             import traceback
@@ -100,11 +100,11 @@ async def run() -> int:
         if len(roots) > 100:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
 
-        # Surface publique actuelle : l'aide est /aide et la musique vit sous
-        # /musique. Les anciennes racines /help, /play, /pause et /queue ne doivent
-        # plus être exigées par ce gate historique.
+        # Surface publique actuelle : /help et /music sont les noms anglais.
+        # Les anciens noms /aide, /musique et les racines /play, /pause, /queue
+        # ne doivent plus être exigés par ce gate historique.
         required_roots = (
-            "aide", "setup", "ping", "sentrix",
+            "help", "setup", "ping", "sentrix",
             "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
             "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
             "clearwarnings", "clear", "lock", "unlock", "slowmode",
@@ -116,14 +116,14 @@ async def run() -> int:
                 errors.append(f"racine slash essentielle absente: /{required}")
 
         # Ce harness V95 ne charge pas toute la pile canonique de production, donc
-        # il ne peut pas exiger que /musique existe ici. En revanche, on verrouille
-        # la politique publique actuelle directement sur les deux autorités de noms.
+        # il ne peut pas exiger que /music existe ici. En revanche, on verrouille
+        # le nom anglais auprès de l'autorité de commandes canoniques.
         try:
             import sentrix_canonical_command_surface as canonical_surface
             import sentrix_command_surface_v110 as surface_v110
 
-            if canonical_surface.ROOTS.get("music") != "musique":
-                errors.append("la surface canonique ne mappe plus music vers /musique")
+            if canonical_surface.ROOTS.get("music") != "music":
+                errors.append("la surface canonique ne mappe plus music vers /music")
             forbidden_direct_music = {"play", "pause", "queue"}
             leaked = sorted(
                 public
@@ -252,7 +252,7 @@ async def run() -> int:
         )
         print(
             f"V110: slash_familiers={len(direct_mapping)} "
-            f"exemples=/ban,/userinfo,/leaderboard,/musique jouer,/role give"
+            f"exemples=/ban,/userinfo,/leaderboard,/music play,/role give"
         )
         print(f"V95: inventaire_attendu={len(expected)} manquantes={len(missing)} extras={len(extra)}")
         print(

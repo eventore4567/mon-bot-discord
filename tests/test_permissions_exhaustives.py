@@ -17,26 +17,34 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
+import tempfile
 
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 
 
 def test_aucune_permission_incoherente_sur_les_commandes_reelles():
-    resultat = subprocess.run(
-        [sys.executable, str(RACINE / "tools" / "audit_permissions.py")],
-        capture_output=True,
-        text=True,
-        cwd=str(RACINE),
-        env={**os.environ, "DISCORD_TOKEN": "x"},
-        timeout=900,
-    )
+    # L'environnement doit être fixé avant le spawn (sitecustomize est précoce).
+    with tempfile.TemporaryDirectory(prefix="sentrix-exhaustive-permissions-") as temporary_dir:
+        resultat = subprocess.run(
+            [sys.executable, str(RACINE / "tools" / "audit_permissions.py")],
+            capture_output=True,
+            text=True,
+            cwd=str(RACINE),
+            env={**os.environ, "DISCORD_TOKEN": "x", "DATABASE_PATH": str(pathlib.Path(temporary_dir) / "bot.db")},
+            timeout=900,
+        )
     sortie = resultat.stdout
     assert resultat.returncode == 0, sortie[-5000:] + resultat.stderr[-2000:]
     # Garde-fou du harnais : un audit sur un registre vide passerait sans rien
     # verifier du tout.
-    assert "commandes auditees : 5" in sortie, sortie[-2000:]
+    match = re.search(r"(?m)^commandes auditees : (\d+)\s*$", sortie)
+    assert match is not None, "L'audit n'a pas imprimé son compteur de commandes"
+    assert int(match.group(1)) >= 500, (
+        f"Inventaire anormalement réduit : {match.group(1)} commandes (minimum 500)"
+    )
     assert "aucune anomalie de permission" in sortie
     assert "aucune regle de configuration ne contourne la hierarchie" in sortie
     assert "aucune commande slash non publique visible de tous" in sortie

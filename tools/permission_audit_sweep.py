@@ -303,6 +303,27 @@ async def _run_prefix(bot, guild, command, invocation: str, persona: dict) -> tu
     return "refuse", text, bool(reports) or "SXR-CMD-" in text
 
 
+def _opened_valid_modal(calls: list[tuple[str, str, Any]]) -> bool:
+    """Une réponse Discord type=9 est une fenêtre de saisie, pas un refus.
+
+    L'audit des slash ne peut pas lire le corps de ces callbacks : un sondage
+    sans argument ouvre une Modal. Seule une vraie réponse HTTP Discord contenant
+    l'identifiant et le titre de la modal prouve que l'interaction a abouti.
+    """
+    for method, path, data in calls:
+        if (
+            method == "POST"
+            and re.fullmatch(r"/interactions/\d+/[^/]+/callback", path)
+            and isinstance(data, dict)
+            and data.get("type") == discord.InteractionResponseType.modal.value
+            and isinstance(data.get("data"), dict)
+            and data["data"].get("custom_id")
+            and data["data"].get("title")
+        ):
+            return True
+    return False
+
+
 async def _run_slash(bot, guild, root: str, options: list, persona: dict) -> tuple[str, str, bool]:
     since = len(harness.CALLS)
     _Audit.reached = False
@@ -322,8 +343,9 @@ async def _run_slash(bot, guild, root: str, options: list, persona: dict) -> tup
         pipeline.unsubscribe(reports.append)
     for _ in range(3):
         await asyncio.sleep(0)
-    text = harness.visible_text(harness.CALLS[since:])
-    if _Audit.reached:
+    calls = harness.CALLS[since:]
+    text = harness.visible_text(calls)
+    if _Audit.reached or (_opened_valid_modal(calls) and not reports):
         return "autorise", text, False
     return "refuse", text, bool(reports) or "SXR-CMD-" in text
 

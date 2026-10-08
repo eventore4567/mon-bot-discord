@@ -72,14 +72,36 @@ def main() -> int:
     # le filtre de suggestions de command_response_guard.
     canonical = ROOT / EXPECTED_OWNER
     canonical_text = canonical.read_text(encoding="utf-8") if canonical.exists() else ""
+    # Politique actuelle : CommandNotFound ne répond plus dans le salon.
+    # L'ancien test exigeait encore await _plain_send(...), abandonné pour
+    # éviter le spam. Vérifier sur l'AST que la branche est un retour silencieux.
+    canonical_tree = ast.parse(canonical_text)
+    silent_guards = []
+    for candidate in ast.walk(canonical_tree):
+        if not isinstance(candidate, ast.AsyncFunctionDef) or candidate.name != "exact_error":
+            continue
+        for condition in candidate.body:
+            if not isinstance(condition, ast.If) or not _is_command_not_found_test(condition.test):
+                continue
+            returns_none = (
+                len(condition.body) == 1
+                and isinstance(condition.body[0], ast.Return)
+                and (
+                    condition.body[0].value is None
+                    or (
+                        isinstance(condition.body[0].value, ast.Constant)
+                        and condition.body[0].value.value is None
+                    )
+                )
+            )
+            silent_guards.append(returns_none)
     canonical_owns = (
-        "isinstance(root, commands.CommandNotFound)" in canonical_text
-        and "await _plain_send(ctx, _unknown_command_text(self, ctx))" in canonical_text
+        silent_guards == [True]
         and "bot.on_command_error = MethodType(exact_error, bot)" in canonical_text
     )
     foreign = [(path, line) for path, line in responders if path != EXPECTED_OWNER]
     if not canonical_owns:
-        errors.append("error_experience_v3 ne possède pas entièrement la réponse CommandNotFound")
+        errors.append("sentrix_product_update ne garantit plus le silence de CommandNotFound")
     if foreign:
         rendered = ", ".join(f"{path}:{line}" for path, line in foreign)
         errors.append(f"répondant CommandNotFound concurrent détecté: {rendered}")

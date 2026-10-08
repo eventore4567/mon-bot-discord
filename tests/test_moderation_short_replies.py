@@ -34,6 +34,18 @@ from cogs.moderation import Moderation  # noqa: E402
 from utils import log_service, sentrix_panels as panels  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isoler_cooldown_clear():
+    """Chaque scénario doit démarrer à froid, sans désactiver la sécurité runtime.
+
+    Le compteur global de +clear persistait entre tests (guild=42, user=1),
+    provoquant deux fausses régressions de suppression dès le second test.
+    """
+    moderation_module._CLEAR_COOLDOWNS.clear()
+    yield
+    moderation_module._CLEAR_COOLDOWNS.clear()
+
+
 def _cog() -> Moderation:
     cog = Moderation.__new__(Moderation)
     cog.bot = Mock()
@@ -248,30 +260,54 @@ async def test_clear_un_message_ou_trop_vieux():
 
     vieux = [_message(2, age_jours=20), _message(3)]
     ctx = _clear_ctx(vieux)
+    # Autre modérateur : scénario indépendant du clear précédent.
+    ctx.author.id = 2
     with patch.object(panels, "texte_court", AsyncMock()):
         await Moderation.clear.callback(cog, ctx, 2)
-    ctx.channel.purge.assert_awaited_once()
+    # Pas de purge globale : les messages récents et anciens sont supprimés
+    # depuis la sélection initiale, sans relire ni purger un message protégé.
+    ctx.channel.purge.assert_not_awaited()
+    vieux[0].delete.assert_awaited_once()
+    vieux[1].delete.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
     cog = _cog()
     cog._send_clear_log = AsyncMock()
-    interaction = SimpleNamespace(response=SimpleNamespace(is_done=lambda: False, defer=AsyncMock()))
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(is_done=lambda: False, defer=AsyncMock()),
+        original_response=AsyncMock(return_value=SimpleNamespace(id=9999)),
+    )
     ctx = _clear_ctx([_message(1), _message(2)], interaction=interaction)
     with patch.object(panels, "texte_court", AsyncMock()) as court:
         await Moderation.clear.callback(cog, ctx, 2)
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
     assert court.await_args.kwargs.get("ephemere") is True
     assert court.await_args.args[1] == "2 message(s) supprimé(s)."
 
     ctx = _clear_ctx([_message(1), _message(2), _message(3)])
+    # Autre modérateur : n'utilise pas le cooldown du clear slash précédent.
+    ctx.author.id = 2
     ctx.message = SimpleNamespace(id=3)
     with patch.object(panels, "texte_court", AsyncMock()) as court:
         await Moderation.clear.callback(cog, ctx, 2)
     # Le message de commande est exclu du compte ; la confirmation est temporaire.
     assert court.await_args.args[1] == "2 message(s) supprimé(s)."
     assert court.await_args.kwargs.get("supprimer_apres") == 4
+
+
+@pytest.mark.asyncio
+async def test_clear_refuse_deux_purges_successives_pendant_le_cooldown():
+    cog = _cog()
+    cog._send_clear_log = AsyncMock()
+    ctx = _clear_ctx([_message(31), _message(32)])
+    with patch.object(panels, "texte_court", AsyncMock()) as court:
+        await Moderation.clear.callback(cog, ctx, 2)
+        await Moderation.clear.callback(cog, ctx, 2)
+    ctx.channel.delete_messages.assert_awaited_once()
+    assert court.await_count == 2
+    assert "Réessaie dans" in court.await_args.args[1]
 
 
 @pytest.mark.asyncio
