@@ -48,3 +48,15 @@ def test_accessible_chips_and_responsive_search_are_present():
     assert 'max-width:650px' in STYLES
     assert '.security-multi-popover' in STYLES
     assert '.security-multi-option-checked' in STYLES
+
+
+def test_native_multiple_select_fallback_cannot_collapse_to_36_pixels():
+    # Les anciennes listes visibles possèdent size=6/7. La règle générique
+    # .field select (36px) ne doit plus les limiter à seulement deux lignes.
+    assert ".field select[multiple]:not([hidden])" in STYLES
+    native_rule = STYLES.split(".field select[multiple]:not([hidden]){", 1)[1].split("}", 1)[0]
+    assert "height:auto;" in native_rule
+    assert "min-height:150px;" in native_rule
+    assert "overflow-y:auto;" in native_rule
+    # Le select de stockage du picker premium reste caché.
+    assert '<select id="${esc(id)}" multiple hidden' in SCRIPT
