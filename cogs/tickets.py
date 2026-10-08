@@ -1076,22 +1076,48 @@ class Tickets(commands.Cog):
             guild = self.bot.get_guild(int(panel["guild_id"]))
             channel = guild.get_channel(int(panel["channel_id"])) if guild and panel["channel_id"] else None
 
-            # Migration non destructive : un ancien message embed est remplacé par le
-            # nouveau panel Components V2 dans le même salon, puis son ID est persisté.
+            # Migration non destructive : envoyer et enregistrer le nouveau
+            # message AVANT de supprimer l'ancien. Le redémarrage ne doit jamais
+            # faire perdre un panneau si Discord ou la base sont indisponibles.
             if channel is not None:
                 try:
                     old = await channel.fetch_message(message_id)
-                    if old.embeds:
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    old = None
+                if old is not None and old.embeds:
+                    new_message = None
+                    try:
                         public = await self.build_public_panel(panel, types)
                         new_message = await sx_panels.envoyer(channel, public)
-                        await old.delete()
-                        message_id = int(new_message.id)
+                        if new_message is None or getattr(new_message, "id", None) is None:
+                            raise RuntimeError("Le panneau migré n'a pas de message Discord.")
                         await self.bot.db.execute(
                             "UPDATE ticket_panels_v2 SET message_id=? WHERE id=?",
-                            (message_id, panel["id"]),
+                            (new_message.id, panel["id"]),
                         )
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    pass
+                    except Exception:
+                        logger.exception(
+                            "Migration du panneau ticket #%s échouée ; l'ancien message est conservé.",
+                            panel["id"],
+                        )
+                        if new_message is not None:
+                            try:
+                                await new_message.delete()
+                            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                                logger.exception(
+                                    "Rollback du message de migration #%s impossible.",
+                                    getattr(new_message, "id", None),
+                                )
+                    else:
+                        message_id = int(new_message.id)
+                        try:
+                            await old.delete()
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            logger.warning(
+                                "Ancien panneau ticket #%s inaccessible après migration ; "
+                                "le nouveau #%s reste enregistré.",
+                                getattr(old, "id", None), message_id,
+                            )
 
             try:
                 self.bot.add_view(TicketPanelView(panel, types, language), message_id=message_id)
