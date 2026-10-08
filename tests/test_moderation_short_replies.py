@@ -260,6 +260,8 @@ async def test_clear_un_message_ou_trop_vieux():
 
     vieux = [_message(2, age_jours=20), _message(3)]
     ctx = _clear_ctx(vieux)
+    # Autre modérateur : scénario indépendant du clear précédent.
+    ctx.author.id = 2
     with patch.object(panels, "texte_court", AsyncMock()):
         await Moderation.clear.callback(cog, ctx, 2)
     # Pas de purge globale : les messages récents et anciens sont supprimés
@@ -285,6 +287,8 @@ async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
     assert court.await_args.args[1] == "2 message(s) supprimé(s)."
 
     ctx = _clear_ctx([_message(1), _message(2), _message(3)])
+    # Autre modérateur : n'utilise pas le cooldown du clear slash précédent.
+    ctx.author.id = 2
     ctx.message = SimpleNamespace(id=3)
     with patch.object(panels, "texte_court", AsyncMock()) as court:
         await Moderation.clear.callback(cog, ctx, 2)
