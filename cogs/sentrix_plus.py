@@ -186,7 +186,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         # et « réactions . » ne disait plus QUELLE réaction mettre.
         await panels.envoyer(ctx, _reponse("Starboard", f'Starboard activé dans {channel.mention}. Un message y apparaîtra à partir de {threshold} réactions « étoile ».', kind="success"))
 
-    @commands.command(name="starboard-off")
+    @commands.command(name="starboard-off", help="Désactiver le starboard.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def starboard_off(self, ctx: commands.Context):
@@ -343,7 +343,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         )
         await panels.envoyer(ctx, _reponse("VoiceHub", f'VoiceHub activé : rejoignez {lobby.mention} pour créer automatiquement votre propre salon vocal.', kind="success"))
 
-    @commands.command(name="voicehub-off")
+    @commands.command(name="voicehub-off", help="Désactiver les vocaux temporaires.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_guild=True)
     async def voicehub_off(self, ctx: commands.Context):
@@ -363,7 +363,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             return channel, None
         return channel, row
 
-    @commands.command(name="voice-name")
+    @commands.command(name="voice-name", help="Renommer ton vocal temporaire.")
     @commands.guild_only()
     async def voice_name(self, ctx: commands.Context, *, name: str):
         channel, row = await self._owned_voice(ctx)
@@ -375,7 +375,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         await channel.edit(name=name, reason=f"VoiceHub : renommage par {ctx.author}")
         await panels.envoyer(ctx, _reponse("Salon vocal", f"Votre vocal s'appelle maintenant « {name} ».", kind="success"))
 
-    @commands.command(name="voice-limit")
+    @commands.command(name="voice-limit", help="Limiter le nombre de membres dans ton vocal (0 = illimité).")
     @commands.guild_only()
     async def voice_limit(self, ctx: commands.Context, limit: int):
         channel, row = await self._owned_voice(ctx)
@@ -386,7 +386,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         await channel.edit(user_limit=limit, reason=f"VoiceHub : limite par {ctx.author}")
         await panels.envoyer(ctx, _reponse("Salon vocal", f"Limite du vocal : {('illimitée' if limit == 0 else limit)}.", kind="success"))
 
-    @commands.command(name="voice-lock")
+    @commands.command(name="voice-lock", help="Empêcher de nouveaux membres de rejoindre ton vocal.")
     @commands.guild_only()
     async def voice_lock(self, ctx: commands.Context):
         channel, row = await self._owned_voice(ctx)
@@ -402,7 +402,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         await channel.set_permissions(ctx.author, overwrite=owner_overwrite, reason="VoiceHub : propriétaire")
         await panels.envoyer(ctx, _reponse("Salon vocal", 'Votre vocal est maintenant verrouillé.', kind="success"))
 
-    @commands.command(name="voice-unlock")
+    @commands.command(name="voice-unlock", help="Rouvrir ton vocal aux membres.")
     @commands.guild_only()
     async def voice_unlock(self, ctx: commands.Context):
         channel, row = await self._owned_voice(ctx)
@@ -413,7 +413,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason="VoiceHub : déverrouillage")
         await panels.envoyer(ctx, _reponse("Salon vocal", 'Votre vocal est de nouveau ouvert.', kind="success"))
 
-    @commands.command(name="voice-transfer")
+    @commands.command(name="voice-transfer", help="Donner ton vocal temporaire à un autre membre.")
     @commands.guild_only()
     async def voice_transfer(self, ctx: commands.Context, member: discord.Member):
         channel, row = await self._owned_voice(ctx)
@@ -554,7 +554,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         self._no_sticky.pop(int(channel.id), None)
         await panels.envoyer(ctx, _reponse("Message sticky", f'Message sticky activé dans {channel.mention}. Il remontera automatiquement tous les 5 messages.', kind="success"))
 
-    @commands.command(name="sticky-every")
+    @commands.command(name="sticky-every", help="Choisir tous les combien de messages le sticky remonte.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def sticky_every(self, ctx: commands.Context, channel: discord.TextChannel, every: int):
@@ -568,7 +568,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         )
         await panels.envoyer(ctx, _reponse("Message sticky", f'Le sticky de {channel.mention} remontera maintenant tous les {every} messages.', kind="success"))
 
-    @commands.command(name="sticky-off")
+    @commands.command(name="sticky-off", help="Retirer le message sticky d'un salon.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def sticky_off(self, ctx: commands.Context, channel: discord.TextChannel):
@@ -647,7 +647,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
     # SCHEDULED ANNOUNCEMENTS
     # ------------------------------------------------------------------
 
-    @commands.command(name="schedule-send")
+    @commands.command(name="schedule-send", help="Programmer un message : +schedule-send 2h #salon texte.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def schedule_send(self, ctx: commands.Context, delay: str, channel: discord.TextChannel, *, message: str):
@@ -670,7 +670,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         ident = int(row["id"]) if row else 0
         await panels.envoyer(ctx, _reponse("Annonce programmée", f'Annonce #{ident} programmée dans {channel.mention} dans {_human_delay(seconds)}.', kind="success"))
 
-    @commands.command(name="schedule-list")
+    @commands.command(name="schedule-list", help="Lister les messages programmés.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def schedule_list(self, ctx: commands.Context):
@@ -689,7 +689,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             lines.append(f"#{row['id']} • {destination} • dans {_human_delay(int(row['due_at']) - now_ts)} • {preview}")
         await panels.envoyer(ctx, _reponse("Annonces programmées", 'Annonces programmées :\n' + '\n'.join(lines), kind="brand"))
 
-    @commands.command(name="schedule-cancel")
+    @commands.command(name="schedule-cancel", help="Annuler un message programmé.")
     @commands.guild_only()
     @commands.has_guild_permissions(manage_messages=True)
     async def schedule_cancel(self, ctx: commands.Context, ident: int):
