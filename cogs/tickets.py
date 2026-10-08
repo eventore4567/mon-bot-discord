@@ -1039,6 +1039,7 @@ class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._ticket_open_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
+        self._panel_publish_locks: dict[int, asyncio.Lock] = {}
         self.check_autoclose.start()
 
     def cog_unload(self):
@@ -1295,6 +1296,16 @@ class Tickets(commands.Cog):
         )
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
+        """Sérialise les republications d'un panneau dans cette instance du bot."""
+        locks = getattr(self, "_panel_publish_locks", None)
+        if locks is None:
+            # Tests et anciens chargeurs qui créent le cog sans __init__.
+            locks = self._panel_publish_locks = {}
+        lock = locks.setdefault(int(panel_id), asyncio.Lock())
+        async with lock:
+            return await self._send_panel_locked(interaction, panel_id)
+
+    async def _send_panel_locked(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
         language = await language_runtime.get_language(self.bot, interaction.guild_id)
