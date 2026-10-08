@@ -96,7 +96,7 @@ const forbiddenWordsData = (force = false) => cached('forbidden-words', () => gg
 function securityMultiPickerMarkup(id, optionsHtml, placeholder, label) {
   return `<div class="security-multi" data-security-multi="${esc(id)}">
     <select id="${esc(id)}" multiple hidden tabindex="-1" aria-hidden="true">${optionsHtml}</select>
-    <button type="button" class="security-multi-trigger" data-security-trigger aria-expanded="false" aria-haspopup="true" aria-controls="${esc(id)}Choices">
+    <button type="button" class="security-multi-trigger" data-security-trigger aria-label="${esc(label)} : ouvrir les choix" aria-expanded="false" aria-haspopup="true" aria-controls="${esc(id)}Choices">
       <span class="security-multi-trigger-text" data-security-trigger-text>${esc(placeholder)}</span>
       <span class="security-multi-chevron" aria-hidden="true">⌄</span>
     </button>
