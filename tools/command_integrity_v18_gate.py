@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import discord
 import inspect
 import os
 import pathlib
@@ -119,8 +120,9 @@ async def run() -> int:
         if dynamic_aliases is None or not getattr(dynamic_aliases, "_sentrix_v18_disabled", False):
             errors.append("generateur d'alias dynamiques V16 encore actif")
 
-        # Slash : noms uniques et budget Discord global respecté.
-        app_roots = list(bot.tree.get_commands())
+        # Slash Chat Input uniquement : un menu contextuel User/Message
+        # n'utilise pas une place dans le quota des 100 slash.
+        app_roots = list(bot.tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
         app_names = [str(item.name).casefold() for item in app_roots]
         if len(app_names) != len(set(app_names)):
             errors.append("racines slash dupliquees")
