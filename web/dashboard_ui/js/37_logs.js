@@ -83,7 +83,7 @@ const routes = (data.routes || []).map(route => ({ ...route }));
       <label class="log-route-channel">Salon de destination
         <select class="select" data-log-channel="${esc(route.key)}" aria-label="Salon des logs ${esc(route.label)}">${channelOptions(route.channel_id || '', 'text', 'Choisir un salon')}</select>
       </label>
-      <label class="log-route-toggle">${route.enabled ? 'Activé' : 'Inactif'}
+      <label class="log-route-toggle"><span data-log-toggle-label>${route.enabled ? 'Activé' : 'Inactif'}</span>
         <input class="switch" type="checkbox" data-log-enabled="${esc(route.key)}" ${route.enabled ? 'checked' : ''} aria-label="Activer les logs ${esc(route.label)}">
       </label>
     </div>
@@ -216,6 +216,7 @@ const routes = (data.routes || []).map(route => ({ ...route }));
     const previous = { ...route };
     if (enabled.checked && !channel.value) {
       enabled.checked = Boolean(previous.enabled);
+      channel.value = String(previous.channel_id || '');
       feedback.textContent = 'Sélectionnez d’abord un salon.';
       return toast('Choisissez un salon avant d’activer cette catégorie.', true);
     }
@@ -243,7 +244,7 @@ const routes = (data.routes || []).map(route => ({ ...route }));
       card.querySelector('[data-log-detail]').textContent = route.enabled && !route.valid
         ? (route.problem || 'Vérifiez le salon ou les permissions du bot.')
         : (route.channel_id ? 'Salon enregistré. Les logs utilisent cette destination.' : 'Aucun salon sélectionné pour cette catégorie.');
-      card.querySelector('.log-route-toggle').firstChild.textContent = route.enabled ? 'Activé ' : 'Inactif ';
+      card.querySelector('[data-log-toggle-label]').textContent = route.enabled ? 'Activé' : 'Inactif';
       feedback.textContent = 'Enregistré';
       refreshSummary();
       applyFilters();
