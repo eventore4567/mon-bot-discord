@@ -127,3 +127,15 @@ async def test_relance_forcee_relit_les_ids_discord():
     await se.synchroniser(app, forcer=True)
     assert se.emoji("stale") == ""
     assert not any(event.startswith("delete:") for event in app.log)
+
+
+def test_emoji_texte_refuse_les_marqueurs_malformes():
+    se.amorcer({"sentrix_loading": "<a:sentrix_loading:3>"})
+    se.amorcer({"sentrix_success": "<:sentrix_success:invalid>"})
+    assert se.emoji("loading") == se.REPLIS["sentrix_loading"]
+    assert se.emoji("success") == se.REPLIS["sentrix_success"]
+    assert not se.emoji("loading").startswith("<")
+    assert not se.emoji("success").startswith("<")
+
+    se.amorcer({"sentrix_loading": "<a:sentrix_loading:410000000000000004>"})
+    assert se.emoji("loading") == "<a:sentrix_loading:410000000000000004>"
