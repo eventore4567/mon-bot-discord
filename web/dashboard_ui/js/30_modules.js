@@ -145,7 +145,7 @@ function bindSecurityMultiPickers(root, onChange) {
     const paint = () => {
       const selected = available.filter(option => option.selected);
       text.textContent = selected.length
-        ? ${selected.length} ${selected.length > 1 ? noun[1] : noun[0]} sélectionné${selected.length > 1 ? 's' : ''}`
+        ? `${selected.length} ${selected.length > 1 ? noun[1] : noun[0]} sélectionné${selected.length > 1 ? 's' : ''}`
         : (isRole ? 'Sélectionner les rôles bypass' : 'Sélectionner les salons stricts');
       chips.replaceChildren();
       if (!selected.length) {
@@ -178,7 +178,7 @@ function bindSecurityMultiPickers(root, onChange) {
       if (!matching.length) {
         options.appendChild(create('div', 'security-multi-no-results', available.length ? 'Aucun résultat trouvé.' : 'Aucun élément disponible.'));
       }
-      counter.textContent = ${selected.length} sélectionné${selected.length > 1 ? 's' : ''} · ${matching.length} disponibles`;
+      counter.textContent = `${selected.length} sélectionné${selected.length > 1 ? 's' : ''} · ${matching.length} disponibles`;
     };
     trigger.addEventListener('click', () => {
       const wasClosed = popup.classList.contains('hidden');
