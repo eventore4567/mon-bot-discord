@@ -60,3 +60,25 @@ def test_native_multiple_select_fallback_cannot_collapse_to_36_pixels():
     assert "overflow-y:auto;" in native_rule
     # Le select de stockage du picker premium reste caché.
     assert '<select id="${esc(id)}" multiple hidden' in SCRIPT
+
+
+def test_clear_buttons_stage_only_and_require_explicit_save():
+    # Le dashboard ne doit pas écraser une politique de sécurité après un
+    # clic accidentel sur « Aucun salon strict » ou « Retirer les rôles ».
+    assert "const saveSecurityPolicy = async () =>" in SCRIPT
+    assert "clearSecurityPickerSelection($('securityPolicyBypassRoles'))" in SCRIPT
+    assert "clearSecurityPickerSelection($('securityPolicyStrictChannels'))" in SCRIPT
+    assert "saveSecurityPolicy({ clearRoles: true })" not in SCRIPT
+    assert "saveSecurityPolicy({ clearStrict: true })" not in SCRIPT
+    assert "if (changed) select.dispatchEvent(new Event('change', { bubbles: true }))" in SCRIPT
+    assert "select.addEventListener('change', () =>" in SCRIPT
+    assert "state.securityPolicyDrafts[policyDraftKey] = {" in SCRIPT
+    assert "role_ids: roleIds" in SCRIPT
+    assert "strict_channel_ids: strictChannelIds" in SCRIPT
+    assert "if (state.securityPolicyDrafts) delete state.securityPolicyDrafts[policyDraftKey]" in SCRIPT
+
+
+def test_picker_controls_are_explicitly_labelled_for_screen_readers():
+    assert 'aria-label="${esc(label)} : ouvrir les choix"' in SCRIPT
+    assert 'data-security-trigger aria-label=' in SCRIPT
+    assert "aria-checked" in SCRIPT
