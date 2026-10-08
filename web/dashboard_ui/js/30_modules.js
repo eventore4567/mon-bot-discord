@@ -89,6 +89,129 @@ function bindModeSwitch(root = content()) {
 const securityOverview = (force = false) => cached('security-overview', () => gget('/security/overview'), { force, ttl: 15000 });
 const forbiddenWordsData = (force = false) => cached('forbidden-words', () => gget('/forbidden-words'), { force, ttl: 5000 });
 
+
+/* Sélecteurs multi-éléments SentriX : n'utilisent pas les listes natives
+   avec sélection Ctrl/Cmd. La source de vérité reste le <select multiple>
+   original et les mêmes payloads API de sécurité pour CHAQUE protection. */
+function securityMultiPickerMarkup(id, optionsHtml, placeholder, label) {
+  return `<div class="security-multi" data-security-multi="${esc(id)}">
+    <select id="${esc(id)}" multiple hidden tabindex="-1" aria-hidden="true">${optionsHtml}</select>
+    <button type="button" class="security-multi-trigger" data-security-trigger aria-expanded="false" aria-haspopup="true" aria-controls="${esc(id)}Choices">
+      <span class="security-multi-trigger-text" data-security-trigger-text>${esc(placeholder)}</span>
+      <span class="security-multi-chevron" aria-hidden="true">⌄</span>
+    </button>
+    <div class="security-multi-chips" data-security-chips role="group" aria-label="${esc(label)} sélectionnés"></div>
+    <div class="security-multi-popover hidden" data-security-popover id="${esc(id)}Choices">
+      <label class="security-multi-search-label" for="${esc(id)}Search">Rechercher un élément</label>
+      <input class="security-multi-search" id="${esc(id)}Search" data-security-search type="search" placeholder="Rechercher par nom…" autocomplete="off">
+      <div class="security-multi-options" data-security-options role="group" aria-label="Choisir : ${esc(label)}"></div>
+      <div class="security-multi-footer"><small data-security-visible-count></small><button class="btn sm primary" type="button" data-security-done>Terminer</button></div>
+    </div>
+  </div>`;
+}
+
+function bindSecurityMultiPickers(root, onChange) {
+  const widgets = Array.from(root.querySelectorAll('[data-security-multi]'));
+  const close = widget => {
+    const popup = widget.querySelector('[data-security-popover]');
+    popup.classList.add('hidden');
+    widget.querySelector('[data-security-trigger]').setAttribute('aria-expanded', 'false');
+    widget.classList.remove('security-multi-open');
+  };
+  widgets.forEach(widget => {
+    const select = widget.querySelector('select[multiple]');
+    const trigger = widget.querySelector('[data-security-trigger]');
+    const text = widget.querySelector('[data-security-trigger-text]');
+    const chips = widget.querySelector('[data-security-chips]');
+    const search = widget.querySelector('[data-security-search]');
+    const options = widget.querySelector('[data-security-options]');
+    const popup = widget.querySelector('[data-security-popover]');
+    const counter = widget.querySelector('[data-security-visible-count]');
+    const available = Array.from(select.options).filter(option => !option.disabled && option.value);
+    const isRole = select.id === 'securityPolicyBypassRoles';
+    const noun = isRole ? ['rôle', 'rôles'] : ['salon strict', 'salons stricts'];
+    const create = (tag, className, label) => {
+      const element = document.createElement(tag);
+      element.className = className;
+      if (label != null) element.textContent = label;
+      return element;
+    };
+    const setSelected = (option, selected) => {
+      option.selected = selected;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      if (typeof onChange === 'function') onChange();
+      paint();
+    };
+    const paint = () => {
+      const selected = available.filter(option => option.selected);
+      text.textContent = selected.length
+        ? ${selected.length} ${selected.length > 1 ? noun[1] : noun[0]} sélectionné${selected.length > 1 ? 's' : ''}`
+        : (isRole ? 'Sélectionner les rôles bypass' : 'Sélectionner les salons stricts');
+      chips.replaceChildren();
+      if (!selected.length) {
+        chips.appendChild(create('span', 'security-multi-empty', isRole ? 'Aucun rôle bypass' : 'Aucun salon strict'));
+      }
+      for (const option of selected) {
+        const pill = create('span', 'security-multi-chip');
+        pill.appendChild(create('span', 'security-multi-chip-label', option.textContent));
+        const remove = create('button', 'security-multi-chip-remove', '×');
+        remove.type = 'button';
+        remove.setAttribute('aria-label', `Retirer ${option.textContent}`);
+        remove.addEventListener('click', () => setSelected(option, false));
+        pill.appendChild(remove);
+        chips.appendChild(pill);
+      }
+      const query = search.value.trim().toLocaleLowerCase('fr');
+      const matching = available.filter(option => !query || option.textContent.toLocaleLowerCase('fr').includes(query));
+      options.replaceChildren();
+      for (const option of matching) {
+        const choice = create('button', 'security-multi-option', null);
+        choice.type = 'button';
+        choice.setAttribute('role', 'checkbox');
+        choice.setAttribute('aria-checked', String(option.selected));
+        choice.classList.toggle('security-multi-option-checked', option.selected);
+        choice.appendChild(create('span', 'security-multi-check', option.selected ? '✓' : ''));
+        choice.appendChild(create('span', 'security-multi-option-label', option.textContent));
+        choice.addEventListener('click', () => setSelected(option, !option.selected));
+        options.appendChild(choice);
+      }
+      if (!matching.length) {
+        options.appendChild(create('div', 'security-multi-no-results', available.length ? 'Aucun résultat trouvé.' : 'Aucun élément disponible.'));
+      }
+      counter.textContent = ${selected.length} sélectionné${selected.length > 1 ? 's' : ''} · ${matching.length} disponibles`;
+    };
+    trigger.addEventListener('click', () => {
+      const wasClosed = popup.classList.contains('hidden');
+      widgets.forEach(close);
+      if (wasClosed) {
+        widget.classList.add('security-multi-open');
+        popup.classList.remove('hidden');
+        trigger.setAttribute('aria-expanded', 'true');
+        search.focus();
+      }
+    });
+    search.addEventListener('input', paint);
+    popup.addEventListener('keydown', event => {
+      if (event.key === 'Escape') { event.preventDefault(); close(widget); trigger.focus(); }
+    });
+    widget.querySelector('[data-security-done]').addEventListener('click', () => { close(widget); trigger.focus(); });
+    paint();
+  });
+  if (state.securityPickerOutsideHandler) {
+    document.removeEventListener('pointerdown', state.securityPickerOutsideHandler);
+  }
+  const outside = event => {
+    if (!root.isConnected) {
+      document.removeEventListener('pointerdown', outside);
+      if (state.securityPickerOutsideHandler === outside) state.securityPickerOutsideHandler = null;
+      return;
+    }
+    for (const widget of widgets) if (!widget.contains(event.target)) close(widget);
+  };
+  state.securityPickerOutsideHandler = outside;
+  document.addEventListener('pointerdown', outside);
+}
+
 async function renderSecurity() {
   if (state.sub === 'verification') return renderVerification();
   if (state.sub === 'sanctions') return renderSanctions();
@@ -123,8 +246,9 @@ async function renderSecurity() {
     role_ids: [],
     strict_channel_ids: [],
   };
-  const policyRoleIds = new Set((policy.role_ids || []).map(String));
-  const policyStrictChannelIds = new Set((policy.strict_channel_ids || []).map(String));
+  const policyDraft = state.securityPolicyDrafts?.[policyKey] || null;
+  const policyRoleIds = new Set((policyDraft?.role_ids ?? policy.role_ids ?? []).map(String));
+  const policyStrictChannelIds = new Set((policyDraft?.strict_channel_ids ?? policy.strict_channel_ids ?? []).map(String));
   const policyFilterOptions = securityProtectionOrder
     .filter(key => securityPolicies[key] || key === policyKey)
     .map(key => {
@@ -255,12 +379,12 @@ async function renderSecurity() {
         <div class="fields" style="margin-top:12px">
           <div class="field full">
             <div class="label-row"><label for="securityPolicyBypassRoles">Rôles autorisés à contourner</label></div>
-            <select id="securityPolicyBypassRoles" multiple size="6">${policyRoleOptions || '<option disabled>Aucun rôle disponible</option>'}</select>
+            ${securityMultiPickerMarkup('securityPolicyBypassRoles', policyRoleOptions, 'Sélectionner les rôles bypass', 'Rôles bypass')}
             <small>Le bypass concerne uniquement <b>${esc(policy.label || policyKey)}</b>.</small>
           </div>
           <div class="field full">
             <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — bypass interdit</label></div>
-            <select id="securityPolicyStrictChannels" multiple size="7">${policyChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
+            ${securityMultiPickerMarkup('securityPolicyStrictChannels', policyChannelOptions, 'Sélectionner les salons stricts', 'Salons stricts')}
             <small>Dans ces salons, même les rôles bypass sont bloqués par cette protection.</small>
           </div>
         </div>
@@ -268,6 +392,7 @@ async function renderSecurity() {
           <button class="btn primary" type="button" id="securityPolicySave">Enregistrer les exceptions</button>
           <button class="btn ghost" type="button" id="securityPolicyClearRoles">Retirer les rôles bypass</button>
           <button class="btn ghost" type="button" id="securityPolicyClearStrict">Aucun salon strict</button>
+          <span class="security-policy-draft ${policyDraft ? '' : 'hidden'}" id="securityPolicyDraftState" role="status">Modifications non enregistrées</span>
         </div>
       ` : `
         <div class="notice" style="margin-top:12px">
@@ -303,6 +428,17 @@ async function renderSecurity() {
 
   const selectedValues = select => [...(select?.selectedOptions || [])].map(option => option.value).filter(Boolean);
 
+  if (policy.supports_policy) {
+    bindSecurityMultiPickers(content(), () => {
+      state.securityPolicyDrafts = state.securityPolicyDrafts || {};
+      state.securityPolicyDrafts[policyKey] = {
+        role_ids: selectedValues($('securityPolicyBypassRoles')),
+        strict_channel_ids: selectedValues($('securityPolicyStrictChannels')),
+      };
+      $('securityPolicyDraftState')?.classList.remove('hidden');
+    });
+  }
+
   content().querySelectorAll('[data-security-config]').forEach(button => {
     button.onclick = async () => {
       state.securityPolicyFilter = button.dataset.securityConfig || 'antispam';
@@ -327,6 +463,7 @@ async function renderSecurity() {
         strict_channel_ids: strictChannelIds,
       });
       toast(result.message || 'Exceptions de sécurité enregistrées.');
+      if (state.securityPolicyDrafts) delete state.securityPolicyDrafts[policyKey];
       invalidate('security-overview');
       await renderSecurity();
     } catch (e) {
