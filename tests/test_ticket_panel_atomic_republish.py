@@ -1,6 +1,7 @@
 """Un panneau ticket ne doit jamais disparaître si son remplacement échoue."""
 from __future__ import annotations
 
+import asyncio
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -112,3 +113,55 @@ async def test_old_deja_supprime_ne_casse_pas_nouveau():
     old.delete.assert_not_awaited()
     msg.delete.assert_not_awaited()
     assert "publié" in feedback.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_deux_publications_simultanees_restent_serialisees():
+    cog, first_interaction, channel, old, first_msg, db, events = context()
+    second_msg = SimpleNamespace(id=66, delete=AsyncMock())
+    second_interaction = SimpleNamespace(
+        guild_id=1,
+        guild=first_interaction.guild,
+        response=SimpleNamespace(defer=AsyncMock()),
+    )
+    current = {"id": 44}
+    initial_message = old
+    stored_messages = {44: initial_message, 55: first_msg, 66: second_msg}
+    first_msg.delete = AsyncMock(side_effect=lambda: events.append("delete_55"))
+    second_msg.delete = AsyncMock(side_effect=lambda: events.append("delete_66"))
+
+    async def fresh_panel(_id):
+        return {"channel_id": 33, "message_id": current["id"]}
+
+    async def send(_channel, *_args, **_kwargs):
+        events.append("send")
+        # Laisser l'autre interaction se présenter au verrou.
+        await asyncio.sleep(0)
+        return first_msg if current["id"] == 44 else second_msg
+
+    async def persist(_sql, args):
+        events.append("db")
+        current["id"] = args[0]
+
+    async def fetch(mid):
+        events.append(f"fetch_{mid}")
+        return stored_messages[mid]
+
+    channel.fetch_message.side_effect = fetch
+    cog.get_panel.side_effect = fresh_panel
+    db.execute.side_effect = persist
+
+    with patch("cogs.tickets.language_runtime.get_language", AsyncMock(return_value="fr")), \
+         patch("cogs.tickets.sx_panels.envoyer", AsyncMock(side_effect=send)), \
+         patch("cogs.tickets.sx_panels.texte_court", AsyncMock()):
+        await asyncio.gather(
+            cog.send_panel(first_interaction, 77),
+            cog.send_panel(second_interaction, 77),
+        )
+
+    assert current["id"] == 66
+    assert events == [
+        "send", "db", "fetch_44", "delete_old",
+        "send", "db", "fetch_55", "delete_55",
+    ]
+    second_msg.delete.assert_not_awaited()
