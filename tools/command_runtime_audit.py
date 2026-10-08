@@ -15,6 +15,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _chat_input_roots(tree):
+    """Ignore les menus contextuels User/Message : ce ne sont pas des slash."""
+    import discord
+
+    return list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
+
+
 async def run() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -227,7 +234,7 @@ async def run() -> int:
         except Exception as exc:
             errors.append(f"réaffirmation V110 impossible: {type(exc).__name__}: {exc}")
 
-        app_roots = list(bot.tree.get_commands())
+        app_roots = _chat_input_roots(bot.tree)
         app_root_names = {str(command.name).casefold() for command in app_roots}
 
         # V110 est l'autorité sur les racines slash publiques. L'ancien audit comparait
