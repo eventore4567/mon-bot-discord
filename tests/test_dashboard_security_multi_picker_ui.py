@@ -35,7 +35,7 @@ def test_policy_scope_roles_and_strict_channels_are_unchanged():
 
 def test_accessible_chips_and_responsive_search_are_present():
     for phrase in (
-        'role="checkbox"',
+        "setAttribute('role', 'checkbox')",
         'aria-checked',
         "setAttribute('aria-expanded'",
         "event.key === 'Escape'",
