@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import discord
 from discord.ext import commands
 
-from utils import embeds, log_service
+from utils import embeds, log_service, sentrix_emojis
 
 logger = logging.getLogger("bot.logs")
 
@@ -43,8 +43,13 @@ CREATE TABLE IF NOT EXISTS message_log_cache (
 
 
 def _short(value: object, limit: int = 1000) -> str:
+    """Raccourcit les messages des logs sans couper un emoji Discord.
+
+    Un marqueur <a:nom:id> tronqué en plein milieu ne s'affiche plus comme emoji.
+    La fonction commune SentriX garantit une coupure hors des marqueurs entiers.
+    """
     text = str(value or "").strip()
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    return sentrix_emojis.tronquer(text, limit)
 
 
 _TICKET_SYSTEM_TOPIC_RE = re.compile(
@@ -199,9 +204,12 @@ class Logs(commands.Cog, name="Logs"):
                 or getattr(identity, "name", None)
                 or str(identity)
             )
-            identity_text = f"**{identity_name}**"
+            # Nom lisible + mention cliquable + ID, même si le membre a quitté.
+            # LOG_ALLOWED_MENTIONS désactive les notifications côté transport.
+            safe_name = discord.utils.escape_markdown(str(identity_name))
+            identity_text = f"**{safe_name}**"
             if identity_id:
-                identity_text += f"\nID : `{identity_id}`"
+                identity_text += f" · {_user_ref(identity_id)}\nID : `{identity_id}`"
             asset = getattr(identity, "display_avatar", None)
             if asset is not None:
                 avatar = str(asset.url)
