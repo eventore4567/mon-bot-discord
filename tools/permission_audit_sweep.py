@@ -313,7 +313,7 @@ def _opened_valid_modal(calls: list[tuple[str, str, Any]]) -> bool:
     for method, path, data in calls:
         if (
             method == "POST"
-            and re.fullmatch(r"/interactions/\\d+/[^/]+/callback", path)
+            and re.fullmatch(r"/interactions/\d+/[^/]+/callback", path)
             and isinstance(data, dict)
             and data.get("type") == discord.InteractionResponseType.modal.value
             and isinstance(data.get("data"), dict)
