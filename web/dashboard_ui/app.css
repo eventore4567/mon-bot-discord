@@ -279,6 +279,20 @@ table.table th{color:var(--muted);font-weight:600;font-size:12px}
 .field.full{grid-column:1/-1}
 .field label,.field > .label{font-size:12px;font-weight:600;color:var(--soft)}
 .field input,.field select,.field textarea,.input{width:100%;height:36px;padding:0 11px;border:1px solid var(--line2);border-radius:9px;background:var(--bg2);color:var(--text)}
+/* Le champ standard a une hauteur de 36 px, mais une liste multi-choix
+   native doit pouvoir afficher toutes ses lignes. Les nouveaux sélecteurs
+   à pastilles cachent volontairement leur select de stockage. */
+.field select[multiple]:not([hidden]){
+  height:auto;
+  min-height:150px;
+  padding:8px 11px;
+  line-height:1.55;
+  overflow-y:auto;
+}
+.field select[multiple]:not([hidden]) option{
+  padding:6px 8px;
+}
+
 .field textarea{height:auto;min-height:96px;padding:9px 11px;resize:vertical;line-height:1.45}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--blue);outline:none;box-shadow:0 0 0 3px var(--blue-bg)}
 .field input[type="color"]{padding:2px;width:52px}
