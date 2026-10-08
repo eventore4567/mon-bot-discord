@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>SentriX · Aperçu du nouveau dashboard Sécurité</title>
+<link rel="stylesheet" href="./app.css">
+<link rel="stylesheet" href="./preview.css">
+<script src="./demo.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Aller aux réglages</a>
+<header class="preview-topbar">
+  <a class="preview-brand" href="/" aria-label="SentriX, aperçu"><span class="brand-mark">S</span><strong>SentriX <small>Dashboard</small></strong></a>
+  <span class="preview-toplabel">VERSION DE TEST · DONNÉES FICTIVES</span>
+  <span class="preview-status"><i aria-hidden="true"></i> Aperçu uniquement</span>
+</header>
+<div class="preview-page">
+  <aside class="preview-sidebar" aria-label="Navigation de démonstration">
+    <div class="preview-server"><div class="preview-guild-icon">S</div><div><strong>Serveur de démonstration</strong><small>Aucune connexion Discord</small></div></div>
+    <nav>
+      <span class="preview-nav-label">GESTION DU SERVEUR</span>
+      <a href="#main" class="preview-nav-item" aria-current="page"><span>🛡️</span> Sécurité</a>
+      <span class="preview-nav-item preview-disabled"><span>🗒️</span> Journaux</span>
+      <span class="preview-nav-item preview-disabled"><span>🎫</span> Tickets</span>
+      <span class="preview-nav-item preview-disabled"><span>⚙️</span> Configuration</span>
+    </nav>
+    <p class="preview-sidebar-note">Cet aperçu sert uniquement à tester les sélecteurs de rôles et de salons. Il ne contient aucun identifiant Discord réel.</p>
+  </aside>
+  <main class="preview-workspace" id="main">
+    <div class="preview-intro">
+      <div><span class="preview-breadcrumb">Sécurité / Protections automatiques</span>
+        <h1>Exceptions de sécurité</h1>
+        <p>Définis précisément qui peut contourner une protection et dans quels salons les règles restent strictes.</p>
+      </div>
+      <span class="preview-beta">Interface en développement</span>
+    </div>
+    <div class="preview-note" role="note"><strong>Démo interactive</strong> : les rôles et salons ci-dessous sont fictifs. Tu peux essayer les menus, sans affecter ton serveur.</div>
+    <section class="preview-card" aria-labelledby="previewHeading">
+      <div class="preview-section-heading"><div><span class="preview-eyebrow">AUTOMOD</span><h2 id="previewHeading">Exceptions par protection</h2><p>Les changements doivent être confirmés avec « Enregistrer les exceptions ».</p></div><span class="preview-scope">Configuration par filtre</span></div>
+      <label class="preview-fieldlabel" for="protectionMode">Protection à configurer</label>
+      <select id="protectionMode" class="select preview-protection-select">
+        <option value="spam">Anti-spam</option>
+        <option value="links">Anti-liens</option>
+        <option value="mentions">Anti-mentions</option>
+        <option value="caps">Anti-majuscules</option>
+      </select>
+      <div class="preview-divider"></div>
+      <div class="preview-form-grid">
+        <div class="preview-field"><label class="preview-fieldlabel">Rôles autorisés à contourner</label><div id="rolePicker"></div><p class="preview-fieldhint" id="roleHelp">Les rôles choisis peuvent contourner uniquement la protection sélectionnée.</p></div>
+        <div class="preview-field"><label class="preview-fieldlabel">Salons stricts — bypass interdit</label><div id="channelPicker"></div><p class="preview-fieldhint">Dans ces salons, aucun rôle bypass ne contourne la protection.</p></div>
+      </div>
+      <div class="preview-policy"><span class="preview-policy-mark">✓</span><div><strong>Priorité de la sécurité</strong><p>Salon strict → protection appliquée à tous → autres exceptions du filtre.</p></div></div>
+      <div class="preview-toolbar">
+        <button type="button" class="btn ghost" id="clearRoles">Retirer les rôles bypass</button>
+        <button type="button" class="btn ghost" id="clearChannels">Aucun salon strict</button>
+        <span class="preview-draft hidden" id="draftState" role="status">● Modifications non enregistrées</span>
+        <button type="button" class="btn primary" id="saveDemo">Enregistrer les exceptions</button>
+      </div>
+      <p class="preview-result" id="saveResult" role="status" aria-live="polite">Aucun réglage réel ne sera enregistré.</p>
+    </section>
+    <section class="preview-explanation"><h2>Ce qui change dans SentriX</h2><div class="preview-benefits">
+      <div><strong>Recherche rapide</strong><p>Trouve un rôle ou un salon par son nom.</p></div>
+      <div><strong>Sélection multiple claire</strong><p>Ajoute ou retire un élément sans Ctrl/Cmd.</p></div>
+      <div><strong>Lisible sur mobile</strong><p>Les choix restent visibles sous forme de pastilles.</p></div>
+    </div></section>
+    <footer class="preview-footer">SentriX · Prévisualisation isolée · Aucune donnée réelle ni appel à l’API Discord</footer>
+  </main>
+</div>
+</body>
+</html>
