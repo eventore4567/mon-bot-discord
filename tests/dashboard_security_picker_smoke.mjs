@@ -60,7 +60,7 @@ const context = {
 };
 vm.createContext(context);
 vm.runInContext(
-  source.slice(start, end) + '\nglobalThis.bind = bindSecurityMultiPickers;\nglobalThis.markup = securityMultiPickerMarkup;',
+  source.slice(start, end) + '\nglobalThis.bind = bindSecurityMultiPickers;\nglobalThis.markup = securityMultiPickerMarkup;\nglobalThis.clearSelection = clearSecurityPickerSelection;',
   context
 );
 assert.ok(context.markup('roles', '<option>OK</option>', 'Chercher', 'Rôles').includes('data-security-chips'));
@@ -143,4 +143,19 @@ assert.equal(channels.trigger.focused, true);
 
 assert.equal(changed, 2);
 assert.equal(roles.select.changeEvents, 2);
-console.log('PASS Multi-sélecteurs : rôles, salons, recherche, retrait, Escape et données.');
+
+// Les raccourcis « Aucun salon strict » et « Retirer rôles » mettent à jour
+// le sélecteur et le brouillon sans déclencher une requête API immédiate.
+context.clearSelection(channels.select);
+assert.equal(channels.select.options.every(option => !option.selected), true);
+assert.equal(channels.chips.children[0].textContent, 'Aucun salon strict');
+assert.equal(channels.triggerText.textContent, 'Sélectionner les salons stricts');
+assert.equal(changed, 3);
+context.clearSelection(channels.select);
+assert.equal(changed, 3, 'Vider une sélection déjà vide ne génère pas de modification');
+context.clearSelection(roles.select);
+assert.equal(roles.select.options.every(option => !option.selected), true);
+assert.equal(roles.chips.children[0].textContent, 'Aucun rôle bypass');
+assert.equal(changed, 4);
+
+console.log('PASS Multi-sélecteurs : rôles, salons, recherche, retrait, effacement différé, Escape et données.');
