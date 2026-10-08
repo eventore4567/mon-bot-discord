@@ -314,6 +314,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         options.append(
             discord.SelectOption(
+                label="Suggestions",
+                value="suggestions",
+                emoji="💡",
+                description="Salon, délai, auteur masqué et boîte à idées publiée.",
+            )
+        )
+        options.append(
+            discord.SelectOption(
                 label="Automatisations",
                 value="automation",
                 emoji="⚙️",
@@ -429,6 +437,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             return await self._build_rules_access()
         if page == "automation":
             return await self._build_automation()
+        if page == "suggestions":
+            return await self._build_suggestions()
         if page == "security":
             return await self._build_security()
         if page == "tickets":
@@ -553,6 +563,16 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         toggle.callback = toggle_ai
         limits.callback = edit_limits
         container.add_item(discord.ui.ActionRow(toggle, limits))
+        self._add_navigation(container)
+        self.add_item(container)
+
+    async def _build_suggestions(self) -> None:
+        from cogs import suggestions
+
+        container = discord.ui.Container()
+        v73.poser_banniere(container)
+        for item in await suggestions.setup_page_items(self):
+            container.add_item(item)
         self._add_navigation(container)
         self.add_item(container)
 

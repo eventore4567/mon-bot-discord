@@ -122,6 +122,16 @@ TEXTS: dict[str, dict[str, Any]] = {
         "setup_threads": "Fil de discussion",
         "setup_next": "Ensuite",
         "setup_next_text": "Publiez la boîte à suggestions avec `/suggestions panel`.",
+        "page_intro": "Les membres proposent et votent, le staff tranche et répond.",
+        "page_pick_channel": "Salon où publier les suggestions",
+        "page_pick_cooldown": "Délai entre deux idées d'un même membre",
+        "page_publish": "Publier la boîte à suggestions",
+        "page_publish_first": "Choisissez d'abord le salon des suggestions.",
+        "page_not_configured": "Non configuré",
+        "page_saved": "Réglage enregistré.",
+        "cooldown_none": "Aucun délai",
+        "hours": "{n} h",
+        "one_day": "1 jour",
         "yes": "Oui",
         "no": "Non",
         "minutes": "{n} min",
@@ -129,7 +139,7 @@ TEXTS: dict[str, dict[str, Any]] = {
         "errors": {
             "not_configured": (
                 "Les suggestions ne sont pas encore configurées sur ce serveur. "
-                "Un administrateur peut choisir le salon avec `/suggestions setup`."
+                "Un administrateur peut choisir le salon dans `/setup` › Suggestions."
             ),
             "empty": "Votre suggestion est vide.",
             "closed": "Cette suggestion a déjà été tranchée : les votes sont fermés.",
@@ -138,7 +148,7 @@ TEXTS: dict[str, dict[str, Any]] = {
             "missing": "Cette suggestion n'existe plus.",
             "channel_gone": (
                 "Le salon des suggestions n'existe plus ou SentriX n'y a pas accès. "
-                "Un administrateur peut en choisir un autre avec `/suggestions setup`."
+                "Un administrateur peut en choisir un autre dans `/setup` › Suggestions."
             ),
         },
     },
@@ -191,6 +201,16 @@ TEXTS: dict[str, dict[str, Any]] = {
         "setup_threads": "Discussion thread",
         "setup_next": "Next",
         "setup_next_text": "Post the suggestion box with `/suggestions panel`.",
+        "page_intro": "Members suggest and vote, staff decides and answers.",
+        "page_pick_channel": "Channel where suggestions are posted",
+        "page_pick_cooldown": "Time between two ideas from the same member",
+        "page_publish": "Post the suggestion box",
+        "page_publish_first": "Choose the suggestions channel first.",
+        "page_not_configured": "Not configured",
+        "page_saved": "Setting saved.",
+        "cooldown_none": "No cooldown",
+        "hours": "{n} h",
+        "one_day": "1 day",
         "yes": "Yes",
         "no": "No",
         "minutes": "{n} min",
@@ -198,7 +218,7 @@ TEXTS: dict[str, dict[str, Any]] = {
         "errors": {
             "not_configured": (
                 "Suggestions are not set up on this server yet. "
-                "An admin can choose the channel with `/suggestions setup`."
+                "An admin can choose the channel in `/setup` › Suggestions."
             ),
             "empty": "Your suggestion is empty.",
             "closed": "This suggestion has been decided: voting is closed.",
@@ -207,7 +227,7 @@ TEXTS: dict[str, dict[str, Any]] = {
             "missing": "This suggestion no longer exists.",
             "channel_gone": (
                 "The suggestion channel is gone or SentriX can't access it. "
-                "An admin can choose another one with `/suggestions setup`."
+                "An admin can choose another one in `/setup` › Suggestions."
             ),
         },
     },
@@ -699,6 +719,124 @@ class Suggestions(commands.Cog):
             t["decided"].format(number=updated.number, status=t["status"][updated.status].lower())
             + ("" if edited else t["decided_missing"]),
         )
+
+
+COOLDOWN_CHOICES = (0, 60, 300, 900, 3600, 86_400)
+
+
+def _cooldown_label(t: dict[str, Any], seconds: int) -> str:
+    if seconds <= 0:
+        return t["cooldown_none"]
+    if seconds >= 86_400:
+        return t["one_day"]
+    if seconds >= 3600:
+        return t["hours"].format(n=seconds // 3600)
+    return t["minutes"].format(n=seconds // 60)
+
+
+async def setup_page_items(view: Any) -> list[discord.ui.Item]:
+    """Page « Suggestions » du /setup : les réglages de `/suggestions setup`, en clics.
+
+    ``view`` est le /setup servi (V74) : il fournit ``bot``, ``guild`` et
+    ``refresh``. Ce module ne connaît pas la mise en page du setup, et le setup
+    ne connaît pas les suggestions — chacun reste maître de son domaine.
+    """
+    bot, guild = view.bot, view.guild
+    t = await lang_of(bot, guild.id)
+    settings = await svc.get_settings(bot.db, guild.id)
+    channel = guild.get_channel(settings.channel_id) if settings.channel_id else None
+    colon = " :" if t is TEXTS["fr"] else ":"
+    yes_no = lambda flag: t["yes"] if flag else t["no"]  # noqa: E731
+
+    summary = discord.ui.TextDisplay(
+        f"# 💡 Suggestions\n{t['page_intro']}\n\n"
+        f"**{t['setup_channel']}{colon}** {channel.mention if channel else t['page_not_configured']}\n"
+        f"**{t['setup_cooldown']}{colon}** {_cooldown_label(t, settings.cooldown_seconds)}\n"
+        f"**{t['setup_anonymous']}{colon}** {yes_no(settings.anonymous)}\n"
+        f"**{t['setup_threads']}{colon}** {yes_no(settings.threads)}"
+    )
+
+    async def save(interaction: discord.Interaction, label: str, value: str, **changes: Any) -> None:
+        await svc.save_settings(bot.db, guild.id, actor_id=interaction.user.id, now=_now(), **changes)
+        from utils.audit_trail import journaliser
+
+        await journaliser(bot, interaction, "config_update", "⚙️ Suggestions configurées", {label: value})
+        await view.refresh(interaction)
+
+    channels = discord.ui.ChannelSelect(
+        placeholder=t["page_pick_channel"], min_values=1, max_values=1,
+        channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+    )
+
+    async def choose_channel(interaction: discord.Interaction) -> None:
+        chosen = guild.get_channel(int(channels.values[0].id))
+        perms = chosen.permissions_for(guild.me) if chosen is not None and guild.me else None
+        if perms is None or not (perms.view_channel and perms.send_messages):
+            target = chosen.mention if chosen is not None else "#?"
+            return await _say(interaction, t["cannot_write"].format(channel=target))
+        await save(interaction, "📍 Salon", chosen.mention, channel_id=chosen.id)
+
+    channels.callback = choose_channel
+
+    cooldown = discord.ui.Select(
+        placeholder=t["page_pick_cooldown"],
+        options=[
+            discord.SelectOption(
+                label=_cooldown_label(t, seconds), value=str(seconds),
+                default=seconds == settings.cooldown_seconds,
+            )
+            for seconds in COOLDOWN_CHOICES
+        ],
+    )
+
+    async def choose_cooldown(interaction: discord.Interaction) -> None:
+        seconds = int(cooldown.values[0])
+        await save(interaction, "⏱️ Délai", _cooldown_label(TEXTS["fr"], seconds), cooldown_seconds=seconds)
+
+    cooldown.callback = choose_cooldown
+
+    def toggle(label: str, flag: bool, field: str, log_label: str) -> discord.ui.Button:
+        button = discord.ui.Button(
+            label=f"{label}{colon} {yes_no(flag)}",
+            style=discord.ButtonStyle.success if flag else discord.ButtonStyle.secondary,
+        )
+
+        async def callback(interaction: discord.Interaction) -> None:
+            await save(interaction, log_label, TEXTS["fr"]["no" if flag else "yes"], **{field: not flag})
+
+        button.callback = callback
+        return button
+
+    publish = discord.ui.Button(label=t["page_publish"], style=discord.ButtonStyle.primary, emoji="📮")
+
+    async def publish_box(interaction: discord.Interaction) -> None:
+        current = await svc.get_settings(bot.db, guild.id)
+        target = guild.get_channel(current.channel_id) if current.channel_id else None
+        if target is None:
+            return await _say(interaction, t["page_publish_first"])
+        try:
+            message = await panels.envoyer(target, render_box(t))
+        except discord.HTTPException:
+            return await _say(interaction, t["cannot_write"].format(channel=target.mention))
+        from utils.audit_trail import journaliser
+
+        await journaliser(bot, interaction, "config_update", "⚙️ Boîte à suggestions publiée", {"📍 Salon": target.mention})
+        url = getattr(message, "jump_url", target.mention)
+        await _say(interaction, t["box_published"].format(url=url), kind="success")
+
+    publish.callback = publish_box
+
+    return [
+        summary,
+        discord.ui.Separator(),
+        discord.ui.ActionRow(channels),
+        discord.ui.ActionRow(cooldown),
+        discord.ui.ActionRow(
+            toggle(t["setup_anonymous"], settings.anonymous, "anonymous", "🕶️ Anonyme"),
+            toggle(t["setup_threads"], settings.threads, "threads", "🧵 Fils"),
+            publish,
+        ),
+    ]
 
 
 def _native_submit(bot: commands.Bot) -> app_commands.Command:

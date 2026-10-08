@@ -634,7 +634,25 @@ def _marge_boosts(guild) -> str:
 class Utility(commands.Cog, name="Utility"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.afk_users: dict[int, str] = {}
+        # (serveur, membre) -> (raison, début). Copie en mémoire de la table
+        # afk_status : sans elle, chaque redémarrage effaçait tous les AFK, et
+        # un AFK posé sur un serveur était retiré en parlant sur un autre.
+        self.afk_users: dict[tuple[int, int], tuple[str, int]] = {}
+        self._afk_loaded = False
+
+    async def _afk_load(self) -> None:
+        if self._afk_loaded:
+            return
+        # Mêmes colonnes que cogs/afk_nickname.py : les deux restent compatibles.
+        await self.bot.db.execute(
+            "CREATE TABLE IF NOT EXISTS afk_status (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
+            "reason TEXT, original_nick TEXT, afk_nick TEXT, renamed INTEGER NOT NULL DEFAULT 0, "
+            "started_at INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id))"
+        )
+        rows = await self.bot.db.fetchall("SELECT guild_id, user_id, reason, started_at FROM afk_status")
+        for row in rows or ():
+            self.afk_users[(int(row["guild_id"]), int(row["user_id"]))] = (str(row["reason"] or "Absent"), int(row["started_at"]))
+        self._afk_loaded = True
 
     @staticmethod
     def _panneau_avatar(nom: str, membre, url: str) -> "panels.Panneau":
@@ -1893,7 +1911,16 @@ class Utility(commands.Cog, name="Utility"):
     @commands.hybrid_command(name="afk", description="Se mettre en mode AFK (absent).")
     @app_commands.describe(raison="La raison de votre absence (optionnel)")
     async def afk(self, ctx: commands.Context, *, raison: str = "Absent"):
-        self.afk_users[ctx.author.id] = raison
+        await self._afk_load()
+        raison = (raison or "Absent").strip()[:300] or "Absent"
+        guild_id = ctx.guild.id if ctx.guild else 0
+        started = now()
+        await self.bot.db.execute(
+            "INSERT INTO afk_status (guild_id, user_id, reason, started_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET reason=excluded.reason, started_at=excluded.started_at",
+            (guild_id, ctx.author.id, raison, started),
+        )
+        self.afk_users[(guild_id, ctx.author.id)] = (raison, started)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Mode AFK activé', description=f'😴 {ctx.author.mention} est maintenant AFK : {raison}')))
 
     @commands.Cog.listener()
@@ -1901,16 +1928,23 @@ class Utility(commands.Cog, name="Utility"):
         if message.author.bot:
             return
         guild_id = message.guild.id if message.guild else None
-        if message.author.id in self.afk_users:
-            del self.afk_users[message.author.id]
+        await self._afk_load()
+        key = (guild_id or 0, message.author.id)
+        state = self.afk_users.get(key)
+        # Le message qui POSE l'AFK (+afk …) arrive aussi ici : sans comparer les
+        # dates, il pouvait retirer l'AFK qu'il venait de créer selon l'ordre des tâches.
+        if state is not None and int(message.created_at.timestamp()) > state[1]:
+            self.afk_users.pop(key, None)
+            await self.bot.db.execute("DELETE FROM afk_status WHERE guild_id = ? AND user_id = ?", key)
             try:
                 await panels.envoyer(message.channel, panels.depuis_embed(await self._embed(guild_id, title='De retour', description=f'👋 Bon retour {message.author.mention}, votre statut AFK a été retiré.')))
             except discord.HTTPException:
                 pass
         for mention in message.mentions:
-            if mention.id in self.afk_users:
+            absent = self.afk_users.get((guild_id or 0, mention.id))
+            if absent is not None:
                 try:
-                    await panels.envoyer(message.channel, panels.depuis_embed(await self._embed(guild_id, title='Membre AFK', description=f'💤 {mention.display_name} est AFK : {self.afk_users[mention.id]}')))
+                    await panels.envoyer(message.channel, panels.depuis_embed(await self._embed(guild_id, title='Membre AFK', description=f'💤 {mention.display_name} est AFK depuis <t:{absent[1]}:R> : {absent[0]}')))
                 except discord.HTTPException:
                     pass
 

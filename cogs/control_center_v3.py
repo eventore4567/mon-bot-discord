@@ -14,6 +14,7 @@ restent actifs.
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import re
 import types
@@ -109,6 +110,11 @@ def _install_semantic_renderer() -> None:
 # Canonical welcome / goodbye renderer
 # ---------------------------------------------------------------------------
 
+def _discord_date(value) -> str:
+    # Une date absente ou illisible ne doit jamais empêcher le message de partir.
+    return discord.utils.format_dt(value, "D") if isinstance(value, datetime.datetime) else "—"
+
+
 def render_member_template(text: str, member: discord.Member) -> str:
     replacements = {
         "{member}": member.mention,
@@ -123,6 +129,9 @@ def render_member_template(text: str, member: discord.Member) -> str:
         "{server}": member.guild.name,
         "{serveur}": member.guild.name,
         "{member_count}": str(member.guild.member_count or 0),
+        # Horodatages Discord : chaque lecteur voit la date dans SON fuseau.
+        "{created_at}": _discord_date(getattr(member, "created_at", None)),
+        "{joined_at}": _discord_date(getattr(member, "joined_at", None)),
     }
     value = str(text or "")
     for placeholder, replacement in replacements.items():
@@ -447,6 +456,39 @@ class RolePanelRolesSelect(discord.ui.RoleSelect):
             )
 
 
+async def _autoroles_text(bot, guild: discord.Guild) -> str:
+    from utils import welcome_autoroles
+
+    ids = await welcome_autoroles.configured_ids(bot, guild.id)
+    return " ".join(setup_ui._role(guild, role_id) for role_id in ids) if ids else setup_ui._role(guild, None)
+
+
+class WelcomeAutoRolesSelect(discord.ui.RoleSelect):
+    """Rôles donnés à l'arrivée : jusqu'à cinq, tous vérifiés avant d'enregistrer.
+
+    Tout ou rien, comme FieldRoleSelect : un seul rôle impossible à donner et
+    RIEN n'est enregistré, avec la raison. Enregistrer « les bons » en silence
+    laisserait l'administrateur croire que tout est en place.
+    """
+
+    def __init__(self, owner, label: str, row: int):
+        from utils import welcome_autoroles
+
+        self.owner = owner
+        super().__init__(placeholder=label, min_values=0, max_values=welcome_autoroles.MAX_ROLES, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        from utils import welcome_autoroles
+
+        for role in self.values:
+            problem = welcome_autoroles.role_problem(self.owner.guild, self.owner.guild.get_role(role.id))
+            if problem:
+                return await setup_ui._refuse(interaction, problem)
+        ids = await welcome_autoroles.save(self.owner.bot, self.owner.guild.id, [role.id for role in self.values])
+        await self.owner.audit(interaction.user.id, "autorole", ",".join(map(str, ids)) or None)
+        await self.owner.refresh(interaction)
+
+
 class CaptchaToggleButton(discord.ui.Button):
     """Active/désactive le CAPTCHA de vérification. Le libellé réel (ON/OFF) est corrigé
     juste avant l'envoi par _v3_refresh, comme ModuleToggle : impossible de lire la DB
@@ -703,7 +745,7 @@ async def _v3_build_embed(self) -> discord.Embed:
         panel.add_field(
             name="Rôles principaux",
             value=(
-                f"**Rôle donné à l'arrivée :** {setup_ui._role(self.guild, setup_ui._get(conf, 'autorole'))}\n"
+                f"**Rôles donnés à l'arrivée :** {await _autoroles_text(self.bot, self.guild)}\n"
                 f"**Vérifié :** {setup_ui._role(self.guild, setup_ui._get(conf, 'verify_role') or setup_ui._get(conf, 'verification_role'))}\n"
                 f"**Membre principal :** {setup_ui._role(self.guild, setup_ui._get(conf, 'member_role'))}"
             ),
@@ -712,11 +754,11 @@ async def _v3_build_embed(self) -> discord.Embed:
         panel.add_field(name="Récompenses de niveau", value="\n".join(f"Niveau **{row['level']}** → {setup_ui._role(self.guild, row['role_id'])}" for row in rewards[:15]) or "Aucune récompense configurée.", inline=False)
     elif self.category == "welcome":
         panel.add_field(name="Salon de bienvenue", value=setup_ui._channel(self.guild, setup_ui._get(conf, "welcome_channel")), inline=True)
-        panel.add_field(name="Rôle donné à l'arrivée", value=setup_ui._role(self.guild, setup_ui._get(conf, "autorole")), inline=True)
-        panel.add_field(name="Variables", value="`{mention}` `{member}` `{user}` `{username}` `{display_name}` `{server}` `{member_count}`", inline=False)
+        panel.add_field(name="Rôles donnés à l'arrivée", value=await _autoroles_text(self.bot, self.guild), inline=True)
+        panel.add_field(name="Variables", value="`{user}` `{username}` `{display_name}` `{server}` `{member_count}` `{created_at}` `{joined_at}`", inline=False)
     elif self.category == "goodbye":
         panel.add_field(name="Salon de départ", value=setup_ui._channel(self.guild, setup_ui._get(conf, "goodbye_channel")), inline=True)
-        panel.add_field(name="Variables", value="`{username}` `{display_name}` `{server}` `{member_count}`", inline=False)
+        panel.add_field(name="Variables", value="`{user}` `{username}` `{display_name}` `{server}` `{member_count}` `{joined_at}`", inline=False)
     elif self.category == "moderation":
         panel.add_field(name="Rôle staff", value=setup_ui._role(self.guild, setup_ui._get(conf, "mod_role")), inline=True)
         panel.add_field(name="Rôle mute", value=setup_ui._role(self.guild, setup_ui._get(conf, "mute_role")), inline=True)
@@ -789,7 +831,7 @@ def _v3_render(self) -> None:
         self.add_item(setup_ui.AutomodSelect(self))
     elif self.category == "welcome":
         self.add_item(setup_ui.FieldChannelSelect(self, "welcome_channel", "Salon de bienvenue", 2))
-        self.add_item(setup_ui.FieldRoleSelect(self, "autorole", "Rôle automatique", 3))
+        self.add_item(WelcomeAutoRolesSelect(self, "Rôles donnés à l'arrivée (5 max.)", 3))
     elif self.category == "goodbye":
         self.add_item(setup_ui.FieldChannelSelect(self, "goodbye_channel", "Salon de départ", 2))
     elif self.category == "roles" and subpage == "panel":
@@ -802,7 +844,7 @@ def _v3_render(self) -> None:
         self.add_item(CaptchaMaxAttemptsButton(self))
         self.add_item(SendRulesPanelButton(self))
     elif self.category == "roles":
-        self.add_item(setup_ui.FieldRoleSelect(self, "autorole", "Rôle donné à l'arrivée", 2))
+        self.add_item(WelcomeAutoRolesSelect(self, "Rôles donnés à l'arrivée (5 max.)", 2))
         self.add_item(setup_ui.FieldRoleSelect(self, "member_role", "Rôle membre principal", 3))
     elif self.category == "levels":
         self.add_item(setup_ui.FieldChannelSelect(self, "level_channel", "Salon des niveaux", 2))

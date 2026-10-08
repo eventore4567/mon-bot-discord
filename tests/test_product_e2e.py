@@ -15,7 +15,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("scenario", ["suggestions_e2e.py", "poll_e2e.py", "translation_e2e.py", "log_echo_e2e.py"])
+@pytest.mark.parametrize("scenario", ["suggestions_e2e.py", "poll_e2e.py", "translation_e2e.py", "log_echo_e2e.py", "welcome_e2e.py", "setup_suggestions_e2e.py", "afk_e2e.py"])
 def test_parcours_complet(scenario):
     env = dict(os.environ, DISCORD_TOKEN="ci.fake.token", PYTHONPATH=str(ROOT))
     result = subprocess.run(

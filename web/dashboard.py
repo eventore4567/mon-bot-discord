@@ -1005,6 +1005,14 @@ def _validate_settings(guild: discord.Guild, values: dict) -> tuple[dict, str | 
                 role = guild.get_role(role_id)
                 if role is None or role.is_default() or role.managed:
                     return {}, f"Le rôle choisi pour {field} n'existe plus ou ne peut pas être utilisé."
+                if field == "autorole":
+                    # Même règle que /setup et que l'arrivée : un rôle refusé à
+                    # chaque arrivée ne doit pas être annoncé « enregistré ».
+                    from utils import welcome_autoroles
+
+                    problem = welcome_autoroles.role_problem(guild, role)
+                    if problem:
+                        return {}, problem
             clean[field] = role_id
         elif field in CHANNEL_FIELDS or field == "ticket_category":
             try:
@@ -1874,7 +1882,7 @@ INDEX_HTML = r"""<!doctype html>
         {key:"log_channel",label:"Salon général de repli",type:"channel",group:"Repli",hint:"Utilisé seulement lorsqu’aucune route plus précise n’est configurée."}
       ]},
       welcome:{title:"Bienvenue & Départ",description:"Configure séparément les arrivées et les départs, dans une seule page cohérente.",fields:[
-        {key:"welcome_channel",label:"Salon de bienvenue",type:"channel",group:"Arrivée"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables : {member}, {username}, {server} et {member_count}.",group:"Arrivée"},{key:"welcome_image_url",label:"Fond de bienvenue",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Arrivée"},{key:"autorole",label:"Rôle automatique",type:"role",group:"Arrivée"},
+        {key:"welcome_channel",label:"Salon de bienvenue",type:"channel",group:"Arrivée"},{key:"welcome_message",label:"Message de bienvenue",type:"textarea",hint:"Variables : {user}, {username}, {display_name}, {server}, {member_count}, {created_at} et {joined_at}.",group:"Arrivée"},{key:"welcome_image_url",label:"Fond de bienvenue",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Arrivée"},{key:"autorole",label:"Rôle automatique",type:"role",group:"Arrivée"},
         {key:"goodbye_channel",label:"Salon de départ",type:"channel",group:"Départ"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}.",group:"Départ"},{key:"goodbye_image_url",label:"Fond de départ",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Départ"}
       ]},
       levels:{title:"Niveaux et expérience",description:"Configurez la progression et les annonces de niveau.",fields:[

@@ -15,7 +15,7 @@ from discord.ext import commands
 
 from utils import checks, embeds, log_service
 from utils import sentrix_panels as panels
-from utils import join_dedup
+from utils import join_dedup, welcome_autoroles
 from utils.member_event_cards import build_member_event_card, EVENT_BACKGROUND_PRESETS, read_member_avatar
 from . import bot_tracker
 from . import control_center_v3
@@ -65,6 +65,10 @@ async def ensure_schema(bot) -> None:
             await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN ping INTEGER NOT NULL DEFAULT 1")
         if "goodbye_ping" not in names:
             await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN goodbye_ping INTEGER NOT NULL DEFAULT 0")
+        # « dm » : copie de la bienvenue en message privé. Off par défaut : un
+        # MP non sollicité ressemble vite à du spam, c'est au serveur de le vouloir.
+        if "dm" not in names:
+            await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN dm INTEGER NOT NULL DEFAULT 0")
     except Exception:
         logger.debug("Colonne mode de welcome_presentation_v2 non vérifiable", exc_info=True)
     await managed_builder.ensure_managed_schema(bot)
@@ -81,7 +85,7 @@ def _conf_value(conf, key, default=None):
 async def _welcome_presentation(bot, guild_id: int) -> dict:
     await ensure_schema(bot)
     row = await bot.db.fetchone(
-        "SELECT title,show_avatar,show_member_count,mode,goodbye_mode,ping,goodbye_ping "
+        "SELECT title,show_avatar,show_member_count,mode,goodbye_mode,ping,goodbye_ping,dm "
         "FROM welcome_presentation_v2 WHERE guild_id=?",
         (guild_id,),
     )
@@ -91,7 +95,7 @@ async def _welcome_presentation(bot, guild_id: int) -> dict:
         # notifier, et pinguer le salon à chaque départ est le meilleur moyen
         # de faire couper le module.
         return {"title": WELCOME_DEFAULT_TITLE, "show_avatar": True, "show_member_count": True,
-                "mode": "embed", "goodbye_mode": "embed", "ping": True, "goodbye_ping": False}
+                "mode": "embed", "goodbye_mode": "embed", "ping": True, "goodbye_ping": False, "dm": False}
 
     def _drapeau(key: str, defaut: bool) -> bool:
         """Colonne ajoutée après coup : absente sur les bases non migrées."""
@@ -122,10 +126,11 @@ async def _welcome_presentation(bot, guild_id: int) -> dict:
         # La mention s'affiche dans les deux cas et reste cliquable : c'est
         # allowed_mentions qui décide seul de faire sonner le téléphone.
         "goodbye_ping": _drapeau("goodbye_ping", False),
+        "dm": _drapeau("dm", False),
     }
 
 
-async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, show_avatar: bool, show_member_count: bool, actor_id: int, mode: str | None = None, goodbye_mode: str | None = None, ping: bool | None = None, goodbye_ping: bool | None = None) -> None:
+async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, show_avatar: bool, show_member_count: bool, actor_id: int, mode: str | None = None, goodbye_mode: str | None = None, ping: bool | None = None, goodbye_ping: bool | None = None, dm: bool | None = None) -> None:
     await ensure_schema(bot)
     if mode is None or goodbye_mode is None or ping is None or goodbye_ping is None:
         # Appel historique (modale /setup) : les réglages déjà enregistrés sont
@@ -136,6 +141,8 @@ async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, s
         goodbye_mode = current["goodbye_mode"] if goodbye_mode is None else goodbye_mode
         ping = current["ping"] if ping is None else ping
         goodbye_ping = current["goodbye_ping"] if goodbye_ping is None else goodbye_ping
+    if dm is None:
+        dm = (await _welcome_presentation(bot, guild_id)).get("dm", False)
     mode = "text" if str(mode) == "text" else "embed"
     goodbye_mode = "text" if str(goodbye_mode) == "text" else "embed"
     # Pas de « ping = True » ici : ces deux lignes écrasaient, juste avant
@@ -144,12 +151,12 @@ async def _save_welcome_presentation(bot, guild_id: int, *, title: str | None, s
     # surprise désagréable » décrivait l'intention ; le code faisait l'inverse.
     await bot.db.execute(
         "INSERT INTO welcome_presentation_v2 "
-        "(guild_id,title,show_avatar,show_member_count,mode,goodbye_mode,ping,goodbye_ping,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) "
+        "(guild_id,title,show_avatar,show_member_count,mode,goodbye_mode,ping,goodbye_ping,dm,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(guild_id) DO UPDATE SET title=excluded.title,show_avatar=excluded.show_avatar,"
         "show_member_count=excluded.show_member_count,mode=excluded.mode,goodbye_mode=excluded.goodbye_mode,"
-        "ping=excluded.ping,goodbye_ping=excluded.goodbye_ping,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
+        "ping=excluded.ping,goodbye_ping=excluded.goodbye_ping,dm=excluded.dm,updated_by=excluded.updated_by,updated_at=excluded.updated_at",
         (guild_id, title or None, int(show_avatar), int(show_member_count), mode, goodbye_mode,
-         int(bool(ping)), int(bool(goodbye_ping)), actor_id, int(time.time())),
+         int(bool(ping)), int(bool(goodbye_ping)), int(bool(dm)), actor_id, int(time.time())),
     )
 
 
@@ -221,6 +228,31 @@ async def _goodbye_destination(bot, guild: discord.Guild, *, require_embed: bool
     )
 
 
+async def _send_welcome_dm(member: discord.Member, presentation: dict, body: str) -> bool | None:
+    """Copie privée de la bienvenue. None = non demandée ; False = MP fermés.
+
+    Un MP refusé n'est pas une erreur du module : beaucoup de membres ferment
+    leurs messages privés, le message du salon est déjà parti.
+    """
+    if not presentation.get("dm"):
+        return None
+    title = _without_duplicate_member_mention(_format_welcome(presentation["title"], member), member)
+    try:
+        await member.send(content=f"**{title}**\n{body}"[:2000], allowed_mentions=discord.AllowedMentions.none())
+    except (discord.HTTPException, AttributeError):
+        return False
+    return True
+
+
+def _welcome_result(channel, test: bool, dm: bool | None) -> str:
+    text = f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
+    if dm is True:
+        text += " Copie envoyée en message privé."
+    elif dm is False:
+        text += " Le message privé a été refusé (messages privés fermés)."
+    return text
+
+
 async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> tuple[bool, str]:
     if not test and not await core.module_enabled(bot, member.guild.id, "welcome"):
         return False, "Le module Bienvenue est désactivé."
@@ -261,13 +293,11 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
             await channel.send(content=content, allowed_mentions=mentions)
         except discord.HTTPException as exc:
             return False, f"Discord a refusé l’envoi : {exc}"
-        return True, f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
-    # Le corps GARDE son vrai @. Il était remplacé par « **Nom** » pour éviter
-    # « deux mentions identiques », mais un nom en gras n'est plus cliquable :
-    # on perdait l'accès au profil, et le message de bienvenue ne saluait plus
-    # vraiment la personne. C'est exactement ce que Jayden a signalé — « un vrai
-    # @ ». La duplication apparente n'en est pas une : celle du haut notifie,
-    # celle du corps salue.
+        return True, _welcome_result(channel, test, await _send_welcome_dm(member, presentation, body))
+    # Le vrai @ (cliquable, ouvre le profil) est le `content` posé au-dessus du
+    # panneau ; dans le titre et le corps, {user} devient le nom. Décision du
+    # 30/09 (f66f1811, « accueils propres ») : deux @ identiques l'un sous
+    # l'autre se lisaient comme un doublon. Ce commentaire disait l'inverse.
     title = _without_duplicate_member_mention(
         _format_welcome(presentation["title"], member),
         member,
@@ -305,7 +335,7 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
         )
     except discord.HTTPException as exc:
         return False, f"Discord a refusé l’envoi : {exc}"
-    return True, f"Test envoyé dans {channel.mention}." if test else "Bienvenue envoyée."
+    return True, _welcome_result(channel, test, await _send_welcome_dm(member, presentation, body))
 
 
 async def _send_goodbye(bot, member: discord.Member, *, test: bool = False) -> discord.abc.Messageable | None:
@@ -405,14 +435,10 @@ def _replace_welcome_listeners(bot) -> None:
         # sont brièvement connectés à Discord en même temps pendant une bascule de lease.
         if not control_center_v3._is_primary_sentrix_service():
             return
-        conf = await bot.db.get_guild_config(member.guild.id)
         if await core.module_enabled(bot, member.guild.id, "roles"):
-            role_id = _conf_value(conf, "autorole")
-            role = member.guild.get_role(int(role_id)) if role_id else None
-            me = member.guild.me
-            if role and not role.managed and me and me.guild_permissions.manage_roles and role < me.top_role:
-                try: await member.add_roles(role, reason="Autorole SentriX")
-                except discord.HTTPException: pass
+            # Chaque rôle est revérifié ici (hiérarchie, rôle géré, permissions
+            # dangereuses) : la configuration a pu changer depuis le réglage.
+            await welcome_autoroles.apply(bot, member)
         # Ne réserve l'événement que si le module Bienvenue est réellement actif.
         # Sinon un autre module d'onboarding pourrait être bloqué alors que SentriX
         # n'enverra finalement aucun message.
@@ -492,12 +518,13 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         # pinguer le salon à chaque départ fait couper le module.
         self.options_input = discord.ui.TextInput(
             label="Options",
-            placeholder="avatar=on; membres=on; ping=on; ping-depart=off",
+            placeholder="avatar=on; membres=on; ping=on; ping-depart=off; mp=off",
             default=(
                 f"avatar={'on' if presentation['show_avatar'] else 'off'}; "
                 f"membres={'on' if presentation['show_member_count'] else 'off'}; "
                 f"ping={'on' if presentation.get('ping', True) else 'off'}; "
-                f"ping-depart={'on' if presentation.get('goodbye_ping', False) else 'off'}"
+                f"ping-depart={'on' if presentation.get('goodbye_ping', False) else 'off'}; "
+                f"mp={'on' if presentation.get('dm', False) else 'off'}"
             ),
             max_length=120,
         )
@@ -514,6 +541,7 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         # ping pas ping ».
         ping = _option(lu, "ping", defaut=True)
         ping_depart = _option(lu, "ping-depart", "ping_depart", "pingdepart", defaut=False)
+        dm = _option(lu, "mp", "dm", defaut=False)
         await _save_welcome_presentation(
             self.owner.bot, self.owner.guild.id,
             title=str(self.title_input.value).strip() or WELCOME_DEFAULT_TITLE,
@@ -522,6 +550,7 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
             actor_id=interaction.user.id,
             ping=ping,
             goodbye_ping=ping_depart,
+            dm=dm,
         )
         # Le récapitulatif nomme les DEUX. Il disait « Bienvenue enregistrée »
         # alors que le message de départ venait aussi d'être sauvegardé : on ne
@@ -531,7 +560,8 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         # faisait croire le réglage sans effet.
         recapitulatif = (
             f"**Bienvenue** — message enregistré · "
-            f"{'notification activée' if ping else 'mention sans notification'}\n"
+            f"{'notification activée' if ping else 'mention sans notification'}"
+            f"{' · copie en message privé' if dm else ''}\n"
             f"**Départ** — message enregistré · "
             f"{'notification activée' if ping_depart else 'mention sans notification'}\n\n"
             "Les fonds se choisissent dans le dashboard parmi 3 modèles SentriX. "
@@ -719,6 +749,7 @@ async def _reset_config(bot, guild: discord.Guild, target: str) -> str:
         elif item == "roles":
             for key in ("autorole","verify_role","verification_role","member_role","booster_role"): await bot.db.set_guild_config(gid, key, None)
             await bot.db.execute("DELETE FROM level_roles WHERE guild_id=?", (gid,))
+            await welcome_autoroles.clear(bot, gid)
         elif item == "levels": await bot.db.set_guild_config(gid, "level_channel", None)
         elif item == "economy": await bot.db.execute("DELETE FROM economy_settings_v2 WHERE guild_id=?", (gid,))
         elif item == "ai": await bot.db.execute("DELETE FROM ai_feature_settings_v2 WHERE guild_id=?", (gid,))
@@ -784,6 +815,30 @@ class ResetConfigModal(discord.ui.Modal, title="Réinitialiser une configuration
         await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(f'Configuration **{libelle}** réinitialisée. Les données des membres (XP, argent, sanctions) sont conservées.', title='Réinitialisation effectuée')), ephemere=True)
 
 
+async def _preview(interaction: discord.Interaction, kind: str) -> None:
+    """Aperçu réel, sans notification : le même code que l'arrivée ou le départ."""
+    bot = interaction.client
+    if not isinstance(interaction.user, discord.Member):
+        return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Membre Discord introuvable.")), ephemere=True)
+    if kind == "welcome":
+        ok, message = await _send_welcome(bot, interaction.user, test=True)
+    else:
+        salon = await _send_goodbye(bot, interaction.user, test=True)
+        ok = salon is not None
+        message = f"Test envoyé dans {salon.mention}." if ok else "Aucun salon de départ utilisable, ou Discord a refusé l'envoi."
+    await panels.envoyer(interaction.response, panels.depuis_embed(embeds.success(message) if ok else embeds.error(message)), ephemere=True)
+
+
+def _preview_button(kind: str) -> discord.ui.Button:
+    button = discord.ui.Button(label="Aperçu", emoji="👁️", style=discord.ButtonStyle.secondary, row=1)
+
+    async def callback(interaction: discord.Interaction):
+        await _preview(interaction, kind)
+
+    button.callback = callback
+    return button
+
+
 def _patch_setup_render() -> None:
     current = setup_ui.SetupView.render
     if getattr(current, "_sentrix_v2_completion", False): return
@@ -805,13 +860,21 @@ def _patch_setup_render() -> None:
             reset = discord.ui.Button(label="Réinitialiser configuration", style=discord.ButtonStyle.danger, row=1)
             async def reset_cb(interaction): await interaction.response.send_modal(ResetConfigModal(self))
             reset.callback = reset_cb; self.add_item(reset)
+        async def welcome_settings_cb(interaction):
+            conf = await self.bot.db.get_guild_config(self.guild.id); presentation = await _welcome_presentation(self.bot, self.guild.id)
+            await interaction.response.send_modal(WelcomeSettingsModal(self, conf=conf, presentation=presentation))
         if self.category == "welcome":
             for item in self.children:
                 if isinstance(item, discord.ui.Button) and item.label == "Texte / image de bienvenue":
-                    async def welcome_settings_cb(interaction):
-                        conf = await self.bot.db.get_guild_config(self.guild.id); presentation = await _welcome_presentation(self.bot, self.guild.id)
-                        await interaction.response.send_modal(WelcomeSettingsModal(self, conf=conf, presentation=presentation))
                     item.callback = welcome_settings_cb; break
+            self.add_item(_preview_button("welcome"))
+        elif self.category == "goodbye":
+            # Le message de départ se réglait depuis la page Bienvenue seulement :
+            # sur sa propre page, rien ne permettait de le modifier ni de le voir.
+            text = discord.ui.Button(label="Texte de départ", style=discord.ButtonStyle.secondary, row=1)
+            text.callback = welcome_settings_cb
+            self.add_item(text)
+            self.add_item(_preview_button("goodbye"))
     render_completion._sentrix_v2_completion = True; render_completion._sentrix_previous = current; setup_ui.SetupView.render = render_completion
 
 
@@ -822,7 +885,7 @@ def _patch_setup_embed() -> None:
         panel = await current(self)
         if self.category == "welcome":
             p = await _welcome_presentation(self.bot, self.guild.id)
-            panel.add_field(name="Affichage de bienvenue", value=f"**Titre :** {p['title']}\n**Avatar :** {'ACTIF' if p['show_avatar'] else 'INACTIF'}\n**Nombre de membres :** {'ACTIF' if p['show_member_count'] else 'INACTIF'}\nLe bouton **Texte / image de bienvenue** permet aussi d’envoyer un test.", inline=False)
+            panel.add_field(name="Affichage de bienvenue", value=f"**Titre :** {p['title']}\n**Avatar :** {'ACTIF' if p['show_avatar'] else 'INACTIF'}\n**Nombre de membres :** {'ACTIF' if p['show_member_count'] else 'INACTIF'}\n**Notification :** {'ACTIVE' if p.get('ping', True) else 'INACTIVE'}\n**Copie en message privé :** {'ACTIVE' if p.get('dm') else 'INACTIVE'}\n**Aperçu** envoie le vrai message, sans notifier personne.", inline=False)
         elif self.category == "notifications":
             row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM social_notifications WHERE guild_id=?", (self.guild.id,)); count = int(row["n"] if row else 0)
             page = int(getattr(self, "notification_page", 0)) + 1; pages = max(1, (count + 22) // 23)

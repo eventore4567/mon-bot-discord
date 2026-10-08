@@ -22,6 +22,7 @@ _CONFIG_PERSISTENCE_MARKERS = (
     "automod_settings",
     "log_config",
     "welcome_presentation_v2",
+    "welcome_autoroles",
     "ticket_panels_v2",
     "ticket_types_v2",
     "ticket_settings",
