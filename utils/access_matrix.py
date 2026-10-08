@@ -215,6 +215,16 @@ SUBCOMMAND_TIERS: dict[str, str] = {
 }
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
+    # Vérification : elle réécrit les permissions de TOUS les salons pour le rôle
+    # Vérifié. Son code exige Administrateur (sentrix_verification_v96) ; classée
+    # « configuration », la décision centrale disait « Gérer le serveur » et un
+    # gestionnaire passait la première porte pour buter sur la seconde avec un
+    # autre message (mesuré le 08/10/2026). Une seule décision : Administrateur.
+    "verification": "administrator",
+    "verify-setup": "administrator",
+    "verify-panel": "administrator",
+    "verify-config": "administrator",
+    "verification-config": "administrator",
     "ban": "ban_members",
     "tempban": "ban_members",
     "unban": "ban_members",
@@ -306,7 +316,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "invite-label", "invite-unlabel", "reset-invites", "sync-invites",
         # Classees explicitement : elles tombaient en fail-closed, donc admin
         # par accident plutot que par declaration.
-        "server-managed", "verification", "verification-review", "verification-calibration",
+        "server-managed", "verification-review", "verification-calibration",
         "setprefix", "setmodrole", "setlogchannel", "create-logs", "logs-status",
         "logsetup", "logs", "setwelcomechannel", "setgoodbyechannel",
         "setwelcomemessage", "setgoodbyemessage", "setticketlogchannel",
@@ -314,7 +324,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
         "setlevelchannel", "setsuggestchannel", "setannouncechannel",
         "setgiveawaychannel", "config-view", "config-reset", "setup",
-        "delete-channel", "verify-setup", "verify-panel",
+        "delete-channel",
         "rolepanel", "rolepanel-refresh", "reactionrole-add",
         "reactionrole-remove", "reactionrole-list", "set-level-role",
         "remove-level-role", "set-xp", "add-xp", "reset-levels", "levelcheck",
@@ -331,7 +341,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "notifs-status", "notifs-test",
         "set-nickname", "alias", "diagnostic", "staff-diagnostic",
         # Anciennement fail-closed par oubli
-        "suivi-bot", "setup-auto", "server-audit", "healthcheck",
+        "suivi-bot", "server-audit", "healthcheck",
         "level-system", "security-repair",
         # Aperçu d'arrivée, de départ et de niveau. La commande porte DÉJÀ
         # is_owner_or_admin_for("configuration") dans cogs/levels.py : le trou

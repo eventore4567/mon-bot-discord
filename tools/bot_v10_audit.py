@@ -35,8 +35,11 @@ def main() -> None:
 
     assert "@commands.hybrid_command" not in bot
     assert "@app_commands.command" not in bot
+    # « setup-auto » n'est plus exigé : retiré le 08/10/2026, il créait salons et
+    # rôles et dépendait de PlatformV4, jamais chargé en production.
+    assert 'name="setup-auto"' not in bot
     for marker in (
-        'name="setup-auto"', 'name="server-audit"',
+        'name="server-audit"',
         'name="economy-audit"', 'name="privacy-policy"',
         "_sentrix_ai_context_v10",
         "_sentrix_restore_safety_v10", "v10_operational_signals",

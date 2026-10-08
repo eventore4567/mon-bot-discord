@@ -50,7 +50,6 @@ CREATE TABLE IF NOT EXISTS v10_custom_command_usage (
 );
 """
 
-VALID_PROFILES = {"community", "gaming", "support", "creator"}
 DEFAULT_RETENTION_DAYS = 90
 MIN_RETENTION_DAYS = 7
 MAX_RETENTION_DAYS = 365
@@ -188,24 +187,6 @@ class BotV10(commands.Cog, name="BotV10"):
   if not isinstance(root, commands.Group): return
   if root.get_command("incidents") is None: root.add_command(commands.Command(self._operational_signals, name="incidents", help="Afficher les signaux opérationnels récents."))
   if root.get_command("overview") is None: root.add_command(commands.Command(self._security_overview, name="overview", help="Vue globale de la protection du serveur."))
-
- async def run_auto_setup(self, ctx: commands.Context, profile: str = "community"):
-  profile = (profile or "community").casefold()
-  if profile not in VALID_PROFILES: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Profil inconnu: community, gaming, support ou creator.')))
-  platform = self.bot.get_cog("PlatformV4")
-  if platform is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Platform V4 se charge encore.')))
-  try:
-   result = await platform.quick_setup(ctx.guild, ctx.author.id, profile); audit = await self.server_audit_data(ctx.guild, actor_id=ctx.author.id, persist=True); missing = self.missing_bot_permissions(ctx.guild)
-   e = embeds.success(f"Configuration automatique **{profile}** terminée.\nScore serveur: **{audit['total_score']}/100**.")
-   result = result or {}; e.add_field(name="Créé", value=f"Salons: **{result.get('created_channels',0)}**\nCatégories: **{result.get('created_categories',0)}**\nRôles: **{result.get('created_roles',0)}**", inline=True)
-   e.add_field(name="Permissions", value="OK" if not missing else "Manquantes: " + ", ".join(missing[:6]), inline=True)
-   if audit["recommendations"]: e.add_field(name="À terminer", value="\n".join(f"• {item}" for item in audit["recommendations"][:5]), inline=False)
-   await panels.envoyer(ctx, panels.depuis_embed(e))
-  except (ValueError, discord.Forbidden, discord.HTTPException) as exc: await panels.envoyer(ctx, panels.depuis_embed(embeds.error(str(exc)[:900])))
-
- @commands.command(name="setup-auto", aliases=["autosetup"])
- @checks.is_owner_or_admin_for("configuration")
- async def setup_auto(self, ctx: commands.Context, profile: str = "community"): await self.run_auto_setup(ctx, profile)
 
  def missing_bot_permissions(self, guild: discord.Guild) -> list[str]:
   me = guild.me

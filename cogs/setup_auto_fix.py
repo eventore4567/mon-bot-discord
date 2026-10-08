@@ -27,7 +27,6 @@ from utils import embeds
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.setup-auto-fix")
-VALID_PROFILES = frozenset({"community", "gaming", "support", "creator"})
 
 # Même mapping que cogs.configuration.LOG_CHANNEL_DEFINITIONS, dupliqué ici afin que ce
 # garde-fou reste petit et indépendant de l'énorme UI /setup.
@@ -80,50 +79,19 @@ def parse_setup_auto_profile(content: str, prefix: str = "+", invoked_with: str 
     return parts[1].casefold() if len(parts) > 1 else "community"
 
 
-async def _fallback_auto_setup(bot: commands.Bot, ctx: commands.Context, profile: str) -> None:
-    """Exécute Platform V4 directement si BotV10 n'est pas encore disponible."""
-    platform = bot.get_cog("PlatformV4")
-    # Platform V4 est normalement prêt avant Discord sur Railway. Ce court délai couvre
-    # néanmoins un redémarrage où le dashboard termine encore son initialisation.
-    if platform is None:
-        for _ in range(12):
-            await asyncio.sleep(0.25)
-            platform = bot.get_cog("PlatformV4")
-            if platform is not None:
-                break
-    if platform is None or not hasattr(platform, "quick_setup"):
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('La configuration automatique se charge encore. Réessayez dans quelques secondes.')))
-        return
-
-    try:
-        result = await platform.quick_setup(ctx.guild, ctx.author.id, profile)
-    except Exception as exc:
-        logger.exception("Échec du setup automatique %s", profile)
-        # Les erreurs attendues de permissions sont déjà formulées clairement par
-        # PlatformV4. On n'expose jamais de trace technique dans Discord.
-        message = str(exc).strip() or "La configuration automatique a échoué."
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.error(message[:900])))
-        return
-
-    created = result.get("created_channels", []) if isinstance(result, dict) else []
-    created_count = len(created) if isinstance(created, (list, tuple, set)) else int(created or 0)
-    missing = result.get("missing_permissions", []) if isinstance(result, dict) else []
-    text = f"Configuration automatique **{profile}** terminée.\n**{created_count}** salon(s) créé(s)."
-    if missing:
-        text += "\nPermissions à vérifier : " + ", ".join(str(item) for item in missing[:6])
-    await panels.envoyer(ctx, panels.depuis_embed(embeds.success(text)))
-
-
 async def _run_auto_setup(bot: commands.Bot, ctx: commands.Context, profile: str) -> None:
-    if profile not in VALID_PROFILES:
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Profil inconnu. Utilisez `community`, `gaming`, `support` ou `creator`.')))
-        return
+    """``+setup auto <profil>`` : la création automatique est retirée.
 
-    runtime = bot.get_cog("BotV10")
-    if runtime is not None and hasattr(runtime, "run_auto_setup"):
-        await runtime.run_auto_setup(ctx, profile)
-        return
-    await _fallback_auto_setup(bot, ctx, profile)
+    Elle reposait sur le cog PlatformV4, jamais chargé au boot de production :
+    la commande répondait « se charge encore » à chaque appel. Et elle créait
+    salons, catégories et rôles, ce que SentriX ne fait plus de lui-même. On le
+    dit, et on renvoie vers /setup, qui configure avec l'existant.
+    """
+    await panels.envoyer(ctx, panels.depuis_embed(embeds.info(
+        "SentriX ne crée plus de salons ni de rôles automatiquement.\n"
+        "Ouvrez `/setup` et choisissez vos salons et rôles existants, module par module.",
+        title="Configuration automatique retirée",
+    )))
 
 
 async def _repair_log_channels(bot: commands.Bot, guild: discord.Guild) -> tuple[int, int]:

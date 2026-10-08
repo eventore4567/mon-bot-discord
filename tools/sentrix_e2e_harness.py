@@ -144,6 +144,10 @@ async def fake_request(self, route, *, files=None, form=None, **kwargs):
         return member_payload(int(m.group(2)), "cible", STATE["target_roles"], STATE["target_nick"], STATE["target_timeout"])
     if m and method == "DELETE":
         return None
+    if re.fullmatch(r"/guilds/\d+/members/@me", path) and method == "PATCH":
+        # Pseudo du bot : Discord renvoie le membre complet. Sans « user », discord.py
+        # levait KeyError et +set-nickname passait pour une commande cassée.
+        return member_payload(BOT_ID, "SentriX", [BOT_ROLE_ID], nick=(js or {}).get("nick"))
     if re.match(r"/guilds/\d+/members$", path):
         return []
     if re.match(r"/guilds/\d+/bans/\d+$", path):

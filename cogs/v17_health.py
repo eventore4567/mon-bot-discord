@@ -158,6 +158,13 @@ async def _recover_startup_tasks(bot: commands.Bot) -> list[str]:
 
 
 async def _live_incidents(bot: commands.Bot, guild_id: int, loops_failed: int):
+    # La table appartient à bot_excellence_runtime, dont l'installateur ne tourne
+    # pas au boot de production : sur une base neuve elle n'existait pas, et
+    # +diagnostic / +healthcheck plantaient (OperationalError) au lieu de rendre
+    # leur rapport. On crée le schéma de son propriétaire, sans le recopier.
+    from . import bot_excellence_runtime as excellence
+
+    await excellence._ensure_schema(bot)
     rows = await bot.db.fetchall(
         "SELECT source,detail,created_at FROM runtime_incidents "
         "WHERE (guild_id=? OR guild_id IS NULL) AND created_at>=? "
