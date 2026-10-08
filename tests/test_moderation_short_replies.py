@@ -262,18 +262,25 @@ async def test_clear_un_message_ou_trop_vieux():
     ctx = _clear_ctx(vieux)
     with patch.object(panels, "texte_court", AsyncMock()):
         await Moderation.clear.callback(cog, ctx, 2)
-    ctx.channel.purge.assert_awaited_once()
+    # Pas de purge globale : les messages récents et anciens sont supprimés
+    # depuis la sélection initiale, sans relire ni purger un message protégé.
+    ctx.channel.purge.assert_not_awaited()
+    vieux[0].delete.assert_awaited_once()
+    vieux[1].delete.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
     cog = _cog()
     cog._send_clear_log = AsyncMock()
-    interaction = SimpleNamespace(response=SimpleNamespace(is_done=lambda: False, defer=AsyncMock()))
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(is_done=lambda: False, defer=AsyncMock()),
+        original_response=AsyncMock(return_value=SimpleNamespace(id=9999)),
+    )
     ctx = _clear_ctx([_message(1), _message(2)], interaction=interaction)
     with patch.object(panels, "texte_court", AsyncMock()) as court:
         await Moderation.clear.callback(cog, ctx, 2)
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
     assert court.await_args.kwargs.get("ephemere") is True
     assert court.await_args.args[1] == "2 message(s) supprimé(s)."
 
