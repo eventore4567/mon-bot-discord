@@ -321,7 +321,11 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "giveaway-end", "giveaway-reroll", "giveaway-cancel",
         "giveaway-blacklist", "giveaway-unblacklist", "event-create",
         "event-cancel", "tournament-create", "tournament-start", "announce",
-        "notifs-ping", "notifs-list", "notifs-remove", "welcome-config",
+        "notifs-ping", "notifs-list", "notifs-remove",
+        # Diagnostics sociaux : leurs callbacks requièrent déjà
+        # is_owner_or_admin_for("configuration"). Les classer ici évite
+        # le fail-closed implicite tout en conservant la barrière admin.
+        "notifs-status", "notifs-test", "welcome-config",
         "set-nickname", "alias", "diagnostic", "staff-diagnostic",
         # Anciennement fail-closed par oubli
         "suivi-bot", "setup-auto", "server-audit", "healthcheck",
