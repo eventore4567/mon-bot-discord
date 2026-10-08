@@ -137,10 +137,9 @@ function bindSecurityMultiPickers(root, onChange) {
       return element;
     };
     const setSelected = (option, selected) => {
+      if (option.selected === selected) return;
       option.selected = selected;
       select.dispatchEvent(new Event('change', { bubbles: true }));
-      if (typeof onChange === 'function') onChange();
-      paint();
     };
     const paint = () => {
       const selected = available.filter(option => option.selected);
@@ -190,6 +189,12 @@ function bindSecurityMultiPickers(root, onChange) {
         search.focus();
       }
     });
+    // La sélection native reste la source de vérité ; une modification par
+    // bouton « Vider » met également à jour les pastilles et le brouillon.
+    select.addEventListener('change', () => {
+      paint();
+      if (typeof onChange === 'function') onChange();
+    });
     search.addEventListener('input', paint);
     popup.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.preventDefault(); close(widget); trigger.focus(); }
@@ -210,6 +215,18 @@ function bindSecurityMultiPickers(root, onChange) {
   };
   state.securityPickerOutsideHandler = outside;
   document.addEventListener('pointerdown', outside);
+}
+
+function clearSecurityPickerSelection(select) {
+  if (!select) return;
+  let changed = false;
+  for (const option of select.options) {
+    if (!option.selected) continue;
+    option.selected = false;
+    changed = true;
+  }
+  // Identique à une suppression par pastille. N'appelle aucune API.
+  if (changed) select.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 async function renderSecurity() {
@@ -452,9 +469,9 @@ async function renderSecurity() {
     await renderSecurity();
   };
 
-  const saveSecurityPolicy = async ({ clearRoles = false, clearStrict = false } = {}) => {
-    const roleIds = clearRoles ? [] : selectedValues($('securityPolicyBypassRoles'));
-    const strictChannelIds = clearStrict ? [] : selectedValues($('securityPolicyStrictChannels'));
+  const saveSecurityPolicy = async () => {
+    const roleIds = selectedValues($('securityPolicyBypassRoles'));
+    const strictChannelIds = selectedValues($('securityPolicyStrictChannels'));
     const button = $('securityPolicySave');
     if (button) button.disabled = true;
     try {
@@ -474,8 +491,12 @@ async function renderSecurity() {
   };
 
   if ($('securityPolicySave')) $('securityPolicySave').onclick = () => saveSecurityPolicy();
-  if ($('securityPolicyClearRoles')) $('securityPolicyClearRoles').onclick = () => saveSecurityPolicy({ clearRoles: true });
-  if ($('securityPolicyClearStrict')) $('securityPolicyClearStrict').onclick = () => saveSecurityPolicy({ clearStrict: true });
+  // Retirer une sélection est local jusqu'au clic explicite sur Enregistrer.
+  // Éviter qu'un clic accidentel désactive silencieusement une protection.
+  if ($('securityPolicyClearRoles')) $('securityPolicyClearRoles').onclick = () =>
+    clearSecurityPickerSelection($('securityPolicyBypassRoles'));
+  if ($('securityPolicyClearStrict')) $('securityPolicyClearStrict').onclick = () =>
+    clearSecurityPickerSelection($('securityPolicyStrictChannels'));
 
   if ($('forbiddenWordAdd')) $('forbiddenWordAdd').onclick = async () => {
     const input = $('forbiddenWordInput');
