@@ -1039,6 +1039,7 @@ class Tickets(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._ticket_open_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
+        self._panel_publish_locks: dict[int, asyncio.Lock] = {}
         self.check_autoclose.start()
 
     def cog_unload(self):
@@ -1076,22 +1077,48 @@ class Tickets(commands.Cog):
             guild = self.bot.get_guild(int(panel["guild_id"]))
             channel = guild.get_channel(int(panel["channel_id"])) if guild and panel["channel_id"] else None
 
-            # Migration non destructive : un ancien message embed est remplacé par le
-            # nouveau panel Components V2 dans le même salon, puis son ID est persisté.
+            # Migration non destructive : envoyer et enregistrer le nouveau
+            # message AVANT de supprimer l'ancien. Le redémarrage ne doit jamais
+            # faire perdre un panneau si Discord ou la base sont indisponibles.
             if channel is not None:
                 try:
                     old = await channel.fetch_message(message_id)
-                    if old.embeds:
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    old = None
+                if old is not None and old.embeds:
+                    new_message = None
+                    try:
                         public = await self.build_public_panel(panel, types)
                         new_message = await sx_panels.envoyer(channel, public)
-                        await old.delete()
-                        message_id = int(new_message.id)
+                        if new_message is None or getattr(new_message, "id", None) is None:
+                            raise RuntimeError("Le panneau migré n'a pas de message Discord.")
                         await self.bot.db.execute(
                             "UPDATE ticket_panels_v2 SET message_id=? WHERE id=?",
-                            (message_id, panel["id"]),
+                            (new_message.id, panel["id"]),
                         )
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    pass
+                    except Exception:
+                        logger.exception(
+                            "Migration du panneau ticket #%s échouée ; l'ancien message est conservé.",
+                            panel["id"],
+                        )
+                        if new_message is not None:
+                            try:
+                                await new_message.delete()
+                            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                                logger.exception(
+                                    "Rollback du message de migration #%s impossible.",
+                                    getattr(new_message, "id", None),
+                                )
+                    else:
+                        message_id = int(new_message.id)
+                        try:
+                            await old.delete()
+                        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                            logger.warning(
+                                "Ancien panneau ticket #%s inaccessible après migration ; "
+                                "le nouveau #%s reste enregistré.",
+                                getattr(old, "id", None), message_id,
+                            )
 
             try:
                 self.bot.add_view(TicketPanelView(panel, types, language), message_id=message_id)
@@ -1269,6 +1296,16 @@ class Tickets(commands.Cog):
         )
 
     async def send_panel(self, interaction: discord.Interaction, panel_id: int):
+        """Sérialise les republications d'un panneau dans cette instance du bot."""
+        locks = getattr(self, "_panel_publish_locks", None)
+        if locks is None:
+            # Tests et anciens chargeurs qui créent le cog sans __init__.
+            locks = self._panel_publish_locks = {}
+        lock = locks.setdefault(int(panel_id), asyncio.Lock())
+        async with lock:
+            return await self._send_panel_locked(interaction, panel_id)
+
+    async def _send_panel_locked(self, interaction: discord.Interaction, panel_id: int):
         panel = await self.get_panel(panel_id)
         types = await self.get_panel_types(panel_id)
         language = await language_runtime.get_language(self.bot, interaction.guild_id)
@@ -1285,17 +1322,58 @@ class Tickets(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
         old_message_id = panel["message_id"]
-        if old_message_id:
+
+        # Publication transactionnelle : ne JAMAIS supprimer l'ancien panneau
+        # avant que le nouveau soit réellement envoyé ET référencé en base.
+        # Une erreur réseau ou SQLite doit laisser l'ancien panneau intact.
+        try:
+            new_panel = await self.build_public_panel(panel, types)
+            msg = await sx_panels.envoyer(channel, new_panel)
+            if msg is None or getattr(msg, "id", None) is None:
+                raise RuntimeError("Le message du nouveau panneau est introuvable.")
+        except Exception:
+            logger.exception(
+                "Publication du panneau ticket #%s impossible dans %s ; ancien panneau conservé.",
+                panel_id, getattr(channel, "id", None),
+            )
+            return await sx_panels.texte_court(
+                interaction, "Impossible de publier le panneau. L'ancien reste disponible.",
+                ephemere=True,
+            )
+
+        try:
+            await self.bot.db.execute(
+                "UPDATE ticket_panels_v2 SET message_id=?, channel_id=? WHERE id=?",
+                (msg.id, channel.id, panel_id),
+            )
+        except Exception:
+            logger.exception(
+                "Enregistrement du panneau ticket #%s impossible ; nouveau message annulé.",
+                panel_id,
+            )
+            try:
+                await msg.delete()
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                logger.exception(
+                    "Nouveau message ticket #%s non supprimé après échec DB.",
+                    getattr(msg, "id", None),
+                )
+            return await sx_panels.texte_court(
+                interaction, "Impossible d'enregistrer le panneau. L'ancien reste disponible.",
+                ephemere=True,
+            )
+
+        if old_message_id and int(old_message_id) != int(msg.id):
             try:
                 old = await channel.fetch_message(old_message_id)
                 await old.delete()
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass
-        msg = await sx_panels.envoyer(channel, await self.build_public_panel(panel, types))
-        await self.bot.db.execute(
-            "UPDATE ticket_panels_v2 SET message_id=?, channel_id=? WHERE id=?",
-            (msg.id, channel.id, panel_id),
-        )
+                # Le nouveau panneau est déjà fonctionnel : ne pas annuler
+                # l'opération à cause d'un ancien message inaccessible.
+                logger.warning(
+                    "Ancien panneau ticket #%s non supprimé ; nouveau panneau #%s conservé.",
+                    old_message_id, msg.id,
+                )
         confirmation = (
             f"Ticket panel published in {channel.mention}."
             if language == language_runtime.LANG_EN
