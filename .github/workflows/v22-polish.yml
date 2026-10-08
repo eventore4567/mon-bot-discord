@@ -50,7 +50,7 @@ jobs:
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-ticket-publish-test.db"
-        run: python -m pytest -q tests/test_ticket_panel_atomic_republish.py
+        run: python -m pytest -q tests/test_ticket_panel_atomic_republish.py tests/test_ticket_panel_restore_atomic.py
 
       - name: SQLite pre-import isolation regressions
         env:
