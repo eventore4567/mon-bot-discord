@@ -31,6 +31,28 @@ def _parse_enabled(value, *, default: bool) -> bool:
     raise ValueError("enabled doit être true ou false")
 
 
+async def _resolve_channel_id(bot, guild_id: int, category: str, payload: dict) -> int | None:
+    """Un ON/OFF sans channel_id préserve le salon choisi dans la configuration.
+
+    channel_id:null/0 est au contraire un effacement explicite. La validation
+    des permissions du salon se fait ensuite si enabled=True.
+    """
+    if "channel_id" not in payload:
+        previous = await log_service.get_log_setting(bot, guild_id, category)
+        return previous.get("channel_id")
+
+    raw = payload["channel_id"]
+    if raw in (None, "", 0, "0"):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Salon invalide.") from error
+    if value <= 0:
+        raise ValueError("Salon invalide.")
+    return value
+
+
 async def _save_verified_route(bot, guild, category: str, channel_id: int | None, enabled: bool):
     """Teste une nouvelle route et restaure l'ancienne sur tout échec de validation."""
     previous = await log_service.get_log_setting(bot, guild.id, category)
@@ -140,25 +162,21 @@ def register(app: web.Application, dashboard) -> None:
         if key not in CATEGORIES:
             return dashboard._json_error("Catégorie de logs inconnue.", 400)
 
-        raw_channel = payload.get("channel_id")
-        channel_id = None
-        if raw_channel not in (None, "", 0, "0"):
-            try:
-                channel_id = int(raw_channel)
-            except (TypeError, ValueError):
-                return dashboard._json_error("Salon invalide.", 400)
-            ok, problem = log_service.validate_channel(guild, channel_id, needs_file=True)
-            if not ok:
-                return dashboard._json_error(f"Ce salon ne peut pas recevoir les logs : {problem}.", 409)
-
         try:
+            channel_id = await _resolve_channel_id(bot, guild.id, key, payload)
             enabled = _parse_enabled(
                 payload.get("enabled"), default=channel_id is not None,
             )
         except ValueError:
-            return dashboard._json_error("enabled doit être true ou false.", 400)
+            return dashboard._json_error("Salon ou valeur enabled invalide.", 400)
         if enabled and channel_id is None:
             return dashboard._json_error("Choisissez un salon avant d’activer cette catégorie.", 409)
+        if enabled:
+            ok, reason = log_service.validate_channel(guild, channel_id, needs_file=True)
+            if not ok:
+                return dashboard._json_error(
+                    f"Ce salon ne peut pas recevoir les logs : {reason}.", 409,
+                )
 
         saved, test_detail, problem = await _save_verified_route(
             bot, guild, key, channel_id, enabled,
