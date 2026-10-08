@@ -127,6 +127,7 @@ async def persistence_journey(path: str) -> None:
 async def runtime_journey(path: str) -> dict[str, int | float]:
     os.environ["DATABASE_PATH"] = path
 
+    import discord
     import main
     from cogs import command_catalog_cleanup, command_no_emoji_runtime, command_response_guard, help_complete
     import web
@@ -207,7 +208,8 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
             assert help_complete._category_for(command).key == "games", f"jeu +{name} hors catégorie Jeux"
         assert help_complete._category_for(bot.get_command("gamesetup")).key == "configuration"
 
-        slash_roots = list(bot.tree.get_commands())
+        # Un menu contextuel User/Message ne compte pas dans les 100 slash Chat Input.
+        slash_roots = list(bot.tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
         assert len(slash_roots) <= 100, f"budget slash dépassé: {len(slash_roots)} racines"
 
         assert command_response_guard._INSTALLED, "filet de réponse des commandes absent"
