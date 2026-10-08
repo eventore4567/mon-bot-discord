@@ -279,6 +279,20 @@ table.table th{color:var(--muted);font-weight:600;font-size:12px}
 .field.full{grid-column:1/-1}
 .field label,.field > .label{font-size:12px;font-weight:600;color:var(--soft)}
 .field input,.field select,.field textarea,.input{width:100%;height:36px;padding:0 11px;border:1px solid var(--line2);border-radius:9px;background:var(--bg2);color:var(--text)}
+/* Le champ standard a une hauteur de 36 px, mais une liste multi-choix
+   native doit pouvoir afficher toutes ses lignes. Les nouveaux sélecteurs
+   à pastilles cachent volontairement leur select de stockage. */
+.field select[multiple]:not([hidden]){
+  height:auto;
+  min-height:150px;
+  padding:8px 11px;
+  line-height:1.55;
+  overflow-y:auto;
+}
+.field select[multiple]:not([hidden]) option{
+  padding:6px 8px;
+}
+
 .field textarea{height:auto;min-height:96px;padding:9px 11px;resize:vertical;line-height:1.45}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--blue);outline:none;box-shadow:0 0 0 3px var(--blue-bg)}
 .field input[type="color"]{padding:2px;width:52px}
@@ -1276,3 +1290,44 @@ html[data-theme="oled"] body.dashboard-locked::after{
 .guidance-progress{height:8px;border-radius:999px;background:var(--panel3);overflow:hidden;margin-bottom:14px}.guidance-progress i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--blue),var(--green))}
 .guidance-step{grid-template-columns:38px minmax(0,1fr) auto}.guidance-step-num{width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--line2);border-radius:10px;background:var(--panel);font-weight:800}.guidance-step.done{border-color:#285440}.guidance-step.done .guidance-step-num{border-color:#2c634b;background:#123225;color:#8be0bd}.guidance-step h3{font-size:13px}.guidance-step p{margin-top:3px;color:var(--muted);font-size:11px}
 @media(max-width:760px){.guidance-hero-main,.guidance-diagnostic-head{align-items:flex-start;flex-direction:column}.guidance-score{width:100%;height:64px}.guidance-quick{grid-template-columns:1fr}.guidance-issue{grid-template-columns:1fr}.guidance-step{grid-template-columns:38px minmax(0,1fr)}.guidance-step .btn{grid-column:2;justify-self:start}}
+
+
+/* -------- Exceptions AutoMod : sélecteurs rôles et salons --------
+   Un seul modèle pour toutes les protections qui prennent en charge le bypass. */
+.security-multi{position:relative;min-width:0;display:grid;gap:8px}
+.security-multi-trigger{width:100%;min-height:43px;border:1px solid var(--line2);border-radius:10px;background:var(--bg2);color:var(--text);padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;cursor:pointer;font-weight:600;transition:border-color .16s,background .16s}
+.security-multi-trigger:hover,.security-multi-open .security-multi-trigger{background:var(--panel2);border-color:var(--blue)}
+.security-multi-trigger:focus-visible{outline:2px solid var(--blue2);outline-offset:2px}
+.security-multi-chevron{font-size:20px;color:var(--muted);line-height:1;transform:translateY(-2px);flex:none;transition:transform .16s}
+.security-multi-open .security-multi-chevron{transform:rotate(180deg) translateY(2px)}
+.security-multi-trigger-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.security-multi-chips{display:flex;gap:7px;flex-wrap:wrap;align-items:center;min-height:31px}
+.security-multi-empty{font-size:12px;color:var(--muted);padding:4px 0}
+.security-multi-chip{max-width:100%;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);border-radius:8px;background:var(--panel2);font-size:12px;min-height:29px;padding:3px 5px 3px 9px;color:var(--soft)}
+.security-multi-chip-label{overflow:hidden;overflow-wrap:anywhere}
+.security-multi-chip-remove{border:0;border-radius:6px;color:var(--soft);background:var(--bg2);font-size:17px;cursor:pointer;min-height:24px;min-width:26px;display:grid;place-items:center;line-height:1}
+.security-multi-chip-remove:hover,.security-multi-chip-remove:focus-visible{background:var(--red-bg);color:var(--red)}
+.security-multi-popover{position:absolute;z-index:35;top:calc(43px + 4px);left:0;right:0;display:grid;gap:9px;padding:12px;max-height:380px;border:1px solid var(--line2);border-radius:12px;background:var(--panel);box-shadow:0 18px 40px rgb(0 0 0 / .38)}
+.security-multi-popover.hidden{display:none}
+.security-multi-search-label{font-size:11px;color:var(--soft);font-weight:650}
+.security-multi-search{width:100%;min-height:36px;border:1px solid var(--line2);border-radius:8px;background:var(--bg2);color:var(--text);padding:8px 11px;font:inherit}
+.security-multi-search:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+.security-multi-options{display:grid;align-content:start;gap:3px;overflow:auto;min-height:50px;max-height:230px;overscroll-behavior:contain;padding-right:3px}
+.security-multi-option{width:100%;border:1px solid transparent;border-radius:8px;background:transparent;padding:9px 10px;display:flex;align-items:center;gap:10px;text-align:left;color:var(--soft);font:inherit;cursor:pointer;min-height:39px}
+.security-multi-option:hover,.security-multi-option:focus-visible{background:var(--panel3);border-color:var(--line2);color:var(--text)}
+.security-multi-option-checked{background:var(--blue-bg);color:var(--text)}
+.security-multi-check{display:grid;place-items:center;flex:none;width:19px;height:19px;border:1px solid var(--line2);border-radius:6px;font-weight:800;font-size:12px}
+.security-multi-option-checked .security-multi-check{border-color:var(--blue);background:var(--blue);color:var(--bg)}
+.security-multi-option-label{min-width:0;overflow-wrap:anywhere}
+.security-multi-no-results{color:var(--muted);font-size:12px;text-align:center;padding:16px 10px}
+.security-multi-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;border-top:1px solid var(--line);padding-top:8px}
+.security-multi-footer small{font-size:11px}
+.security-policy-draft{color:var(--amber);font-size:12px;white-space:normal}
+@media(max-width:650px){
+ .security-multi-trigger{min-height:45px}
+ .security-multi-popover{max-height:min(58vh,390px)}
+ .security-multi-options{max-height:33vh}
+ .security-multi-chip{max-width:100%}
+ .security-multi-footer{flex-wrap:wrap}
+}
+@media(prefers-reduced-motion:reduce){.security-multi-trigger,.security-multi-chevron{transition:none}}
