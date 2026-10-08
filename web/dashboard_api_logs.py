@@ -42,8 +42,10 @@ async def _resolve_channel_id(bot, guild_id: int, category: str, payload: dict) 
         return previous.get("channel_id")
 
     raw = payload["channel_id"]
-    if raw in (None, "", 0, "0"):
+    if raw is None or raw == "" or raw == 0 or raw == "0":
         return None
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)):
+        raise ValueError("Salon invalide.")
     try:
         value = int(raw)
     except (TypeError, ValueError) as error:
