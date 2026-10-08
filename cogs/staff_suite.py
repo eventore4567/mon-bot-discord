@@ -2923,10 +2923,9 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             panels.avec_composants(panel, EmergencyView(self, ctx.author.id, ctx.channel.id)),
         )
 
-    @commands.hybrid_command(name="audit", description="Auditer la configuration staff et les permissions SentriX.")
-    @checks.is_owner_or_admin_for("configuration")
-    async def audit(self, ctx: commands.Context):
-        await panels.envoyer(ctx, await self.audit_panel(ctx.guild))
+    # Ne pas déclarer un second /audit : cette commande appartient déjà au registre
+    # canonique et empêchait le chargement de tout ce cog (CommandRegistrationError).
+    # Le même diagnostic reste disponible via /staff-diagnostic et +staff-diagnostic.
 
     # Prefixe « staff- » : « diagnostic » est deja /diagnostic (cogs/stats.py),
     # une commande etablie et documentee. Le doublon faisait echouer add_cog,
