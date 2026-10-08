@@ -91,6 +91,10 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "events": "Community events and tournaments.",
     "notifications": "Social media alerts.",
     "counter": "The infinite counting game.",
+    "sticky": "Messages that stay at the bottom of a channel.",
+    "schedule": "Messages SentriX sends later.",
+    "starboard": "Showcase the most popular messages.",
+    "voice": "Temporary voice channels.",
     "ai": "Ask SentriX AI.",
     "bot": "About SentriX.",
     "permissions": "Understand who can run what.",
@@ -328,6 +332,27 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("counter stop", "infinit stop", "Pause the counting game."),
     _e("counter resume", "infinit resume", "Resume the counting game."),
 
+    # Fonctions de cogs/sentrix_plus.py : elles existaient, mais seulement en +,
+    # et masquées de l'aide par apply_surface faute de classement (08/10/2026).
+    _e("sticky set", "sticky-set", "Keep a message at the bottom of a channel."),
+    _e("sticky frequency", "sticky-every", "Repost the sticky message every N messages."),
+    _e("sticky off", "sticky-off", "Remove the sticky message from a channel."),
+
+    _e("schedule send", "schedule-send", "Send a message later in a channel."),
+    _e("schedule list", "schedule-list", "List the scheduled messages."),
+    _e("schedule cancel", "schedule-cancel", "Cancel a scheduled message."),
+
+    _e("starboard setup", "starboard-setup", "Repost popular messages to a showcase channel."),
+    _e("starboard off", "starboard-off", "Turn the starboard off."),
+
+    _e("voice setup", "voicehub-setup", "Create the join-to-create voice channel."),
+    _e("voice off", "voicehub-off", "Turn temporary voice channels off."),
+    _e("voice rename", "voice-name", "Rename your temporary voice channel."),
+    _e("voice limit", "voice-limit", "Set how many members can join your voice channel."),
+    _e("voice lock", "voice-lock", "Stop new members from joining your voice channel."),
+    _e("voice unlock", "voice-unlock", "Let members join your voice channel again."),
+    _e("voice transfer", "voice-transfer", "Give your voice channel to another member."),
+
     # ------------------------------------------------------------------------ IA
     _e("ai ask", "ai", "Ask SentriX AI a question."),
     _e("ai search", "ai search", "Ask with a live web search."),
@@ -511,6 +536,7 @@ OPTION_NAMES: dict[str, str] = {
     "fichier": "file",
     "filtre": "filter",
     "identifiant": "id",
+    "ident": "id",
     "langue": "language",
     "lien": "link",
     "longueur": "length",
@@ -540,6 +566,10 @@ OPTION_NAMES: dict[str, str] = {
 OPTION_DESCRIPTIONS: dict[str, str] = {
     "action": "What to do.",
     "anonymous": "Hide who posted each suggestion.",
+    "delay": "When to send it, e.g. 10m, 2h, 1d.",
+    "every": "Repost after this many messages.",
+    "limit": "Maximum members, from 0 (no limit) to 99.",
+    "message": "The message.",
     "cooldown": "Minutes to wait between two uses.",
     "response": "Public answer shown on the suggestion.",
     "source": "Source language, auto-detected if empty.",
@@ -643,6 +673,10 @@ OPTION_OVERRIDES: dict[tuple[str, str], str] = {
     ("translate text", "text"): "The text to translate.",
     ("translate text", "language"): "Target language, e.g. en, es, de.",
     ("remind cancel", "id"): "Reminder ID, from /remind list.",
+    ("schedule cancel", "id"): "Message ID, from /schedule list.",
+    ("starboard setup", "threshold"): "Reactions needed, from 2 to 25.",
+    ("starboard setup", "channel"): "Where popular messages are reposted.",
+    ("voice transfer", "member"): "The new owner of your voice channel.",
     ("notifications remove", "id"): "Alert ID, from /notifications list.",
     ("help", "command"): "A command to look up, e.g. ban.",
     ("games activities dragon", "opponent"): "dragonnet, feu, glace or ombre. Random if empty.",

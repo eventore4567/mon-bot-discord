@@ -182,7 +182,9 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             "INSERT OR REPLACE INTO sentrix_starboard_config(guild_id,channel_id,threshold) VALUES(?,?,?)",
             (ctx.guild.id, channel.id, threshold),
         )
-        await panels.envoyer(ctx, _reponse("Starboard", f'Starboard activé dans {channel.mention}. Un message y apparaîtra à partir de {threshold} réactions {STAR_EMOJI}.', kind="success"))
+        # « étoile » en toutes lettres : la couche de texte sobre retire les emojis,
+        # et « réactions . » ne disait plus QUELLE réaction mettre.
+        await panels.envoyer(ctx, _reponse("Starboard", f'Starboard activé dans {channel.mention}. Un message y apparaîtra à partir de {threshold} réactions « étoile ».', kind="success"))
 
     @commands.command(name="starboard-off")
     @commands.guild_only()
