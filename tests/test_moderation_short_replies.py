@@ -34,6 +34,18 @@ from cogs.moderation import Moderation  # noqa: E402
 from utils import log_service, sentrix_panels as panels  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isoler_cooldown_clear():
+    """Chaque scénario doit démarrer à froid, sans désactiver la sécurité runtime.
+
+    Le compteur global de +clear persistait entre tests (guild=42, user=1),
+    provoquant deux fausses régressions de suppression dès le second test.
+    """
+    moderation_module._CLEAR_COOLDOWNS.clear()
+    yield
+    moderation_module._CLEAR_COOLDOWNS.clear()
+
+
 def _cog() -> Moderation:
     cog = Moderation.__new__(Moderation)
     cog.bot = Mock()
@@ -272,6 +284,19 @@ async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
     # Le message de commande est exclu du compte ; la confirmation est temporaire.
     assert court.await_args.args[1] == "2 message(s) supprimé(s)."
     assert court.await_args.kwargs.get("supprimer_apres") == 4
+
+
+@pytest.mark.asyncio
+async def test_clear_refuse_deux_purges_successives_pendant_le_cooldown():
+    cog = _cog()
+    cog._send_clear_log = AsyncMock()
+    ctx = _clear_ctx([_message(31), _message(32)])
+    with patch.object(panels, "texte_court", AsyncMock()) as court:
+        await Moderation.clear.callback(cog, ctx, 2)
+        await Moderation.clear.callback(cog, ctx, 2)
+    ctx.channel.delete_messages.assert_awaited_once()
+    assert court.await_count == 2
+    assert "Réessaie dans" in court.await_args.args[1]
 
 
 @pytest.mark.asyncio
