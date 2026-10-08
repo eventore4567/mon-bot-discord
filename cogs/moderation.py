@@ -1303,19 +1303,43 @@ class Moderation(commands.Cog):
 
     @classmethod
     def _clear_preview(cls, messages: list, limit: int = 10) -> str:
+        """Encadre les messages supprimés dans un bloc Discord bien lisible.
+
+        Le champ « Aperçu » d'un Embed ne peut pas dépasser 1024 caractères.
+        Le contenu n'est pas interprété comme du Markdown pour éviter que les
+        pseudonymes et messages de membres cassent l'aperçu. La transcription
+        en pièce jointe reste la source complète.
+        """
+        from utils.sentrix_emojis import tronquer
+
+        opening, ending = "```text\n", "\n```"
+        budget = 1000  # garde une marge face à la limite des champs Discord
         rows: list[str] = []
-        budget = 1000
-        for message in messages[:limit]:
-            author = cls._neutralize_mentions(getattr(message.author, "display_name", str(message.author)))
-            content = cls._neutralize_mentions(message.content or "[message sans texte]")
-            content = discord.utils.escape_markdown(content).replace("\n", " ").strip()
-            if len(content) > 150:
-                content = content[:149].rstrip() + "…"
-            row = f"**{author}** — {content}"
-            if len("\n".join([*rows, row])) > budget:
+
+        def clean(value: object, length: int) -> str:
+            text = cls._neutralize_mentions(value)
+            text = " ".join(text.replace("`", "'").split())
+            return tronquer(text, length) if text else "—"
+
+        for index, message in enumerate(messages[:max(0, limit)], 1):
+            author = clean(
+                getattr(message.author, "display_name", str(message.author)), 36
+            )
+            body = clean(message.content or "[message sans texte]", 145)
+            row = f"{index:02d} │ {author}\n   └ {body}"
+            candidate = "\n".join([*rows, row])
+            if len(opening) + len(candidate) + len(ending) > budget:
                 break
             rows.append(row)
-        return "\n".join(rows) if rows else "Aucun contenu texte disponible."
+
+        hidden = len(messages) - len(rows)
+        if hidden > 0:
+            footer = f"… {hidden} autre(s) message(s) dans la transcription"
+            candidate = "\n".join([*rows, footer])
+            if len(opening) + len(candidate) + len(ending) <= budget:
+                rows.append(footer)
+
+        return opening + ("\n".join(rows) if rows else "Aucun message à prévisualiser.") + ending
 
     @staticmethod
     def _clear_transcript(ctx: commands.Context, messages: list, requested: int) -> bytes:
