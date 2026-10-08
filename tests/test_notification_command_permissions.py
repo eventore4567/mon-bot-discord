@@ -50,5 +50,13 @@ def test_callbacks_keep_admin_check_and_prefix_only():
     for method_name in ("notifs_status", "notifs_test"):
         method = methods[method_name]
         decorators = [ast.unparse(x) for x in method.decorator_list]
-        assert any('is_owner_or_admin_for("configuration")' in x for x in decorators)
+        assert any(
+            isinstance(dec, ast.Call)
+            and isinstance(dec.func, ast.Attribute)
+            and dec.func.attr == "is_owner_or_admin_for"
+            and len(dec.args) == 1
+            and isinstance(dec.args[0], ast.Constant)
+            and dec.args[0].value == "configuration"
+            for dec in method.decorator_list
+        )
         assert any("with_app_command=False" in x for x in decorators)
