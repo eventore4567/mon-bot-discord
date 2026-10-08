@@ -23,21 +23,29 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 
 
 def _run(script: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(RACINE / "tools" / script)],
-        capture_output=True,
-        text=True,
-        cwd=str(RACINE),
-        env={**os.environ, "DISCORD_TOKEN": "ci.fake.token"},
-        timeout=120,
-    )
-
+    # sitecustomize.py peut importer config avant l'exécution du script.
+    # Fournir DATABASE_PATH avant de lancer Python empêche d'utiliser bot.db.
+    with tempfile.TemporaryDirectory(prefix="sentrix-permission-gate-") as temporary_dir:
+        env = {
+            **os.environ,
+            "DISCORD_TOKEN": "ci.fake.token",
+            "DATABASE_PATH": str(pathlib.Path(temporary_dir) / "bot.db"),
+        }
+        return subprocess.run(
+            [sys.executable, str(RACINE / "tools" / script)],
+            capture_output=True,
+            text=True,
+            cwd=str(RACINE),
+            env=env,
+            timeout=120,
+        )
 
 def test_permission_coverage_gate_toutes_les_racines_sont_classees():
     resultat = _run("permission_coverage_gate.py")
