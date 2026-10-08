@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,7 +40,11 @@ def test_aucune_permission_incoherente_sur_les_commandes_reelles():
     assert resultat.returncode == 0, sortie[-5000:] + resultat.stderr[-2000:]
     # Garde-fou du harnais : un audit sur un registre vide passerait sans rien
     # verifier du tout.
-    assert "commandes auditees : 5" in sortie, sortie[-2000:]
+    match = re.search(r"(?m)^commandes auditees : (\\d+)\\s*$", sortie)
+    assert match is not None, "L'audit n'a pas imprimé son compteur de commandes"
+    assert int(match.group(1)) >= 500, (
+        f"Inventaire anormalement réduit : {match.group(1)} commandes (minimum 500)"
+    )
     assert "aucune anomalie de permission" in sortie
     assert "aucune regle de configuration ne contourne la hierarchie" in sortie
     assert "aucune commande slash non publique visible de tous" in sortie
