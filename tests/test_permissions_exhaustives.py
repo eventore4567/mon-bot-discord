@@ -40,7 +40,7 @@ def test_aucune_permission_incoherente_sur_les_commandes_reelles():
     assert resultat.returncode == 0, sortie[-5000:] + resultat.stderr[-2000:]
     # Garde-fou du harnais : un audit sur un registre vide passerait sans rien
     # verifier du tout.
-    match = re.search(r"(?m)^commandes auditees : (\\d+)\\s*$", sortie)
+    match = re.search(r"(?m)^commandes auditees : (\d+)\s*$", sortie)
     assert match is not None, "L'audit n'a pas imprimé son compteur de commandes"
     assert int(match.group(1)) >= 500, (
         f"Inventaire anormalement réduit : {match.group(1)} commandes (minimum 500)"
