@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
-from web.dashboard_api_logs import _parse_enabled, _save_verified_route
+from web.dashboard_api_logs import _parse_enabled, _save_verified_route, _resolve_channel_id
 
 
 @pytest.mark.parametrize(
@@ -128,3 +128,49 @@ async def test_disabled_route_ne_declenche_pas_d_envoi():
     assert saved["enabled"] is False
     assert detail is None and problem is None
     test_send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_desactiver_sans_rechoisir_salon_conserve_la_destination():
+    bot = SimpleNamespace()
+    with patch(
+        "web.dashboard_api_logs.log_service.get_log_setting",
+        AsyncMock(return_value={"channel_id": 987654321, "enabled": True}),
+    ) as get_settings:
+        channel_id = await _resolve_channel_id(bot, 42, "messages", {"enabled": False})
+    assert channel_id == 987654321
+    get_settings.assert_awaited_once_with(bot, 42, "messages")
+
+
+@pytest.mark.asyncio
+async def test_reactiver_sans_rechoisir_salon_utilise_la_destination_enregistree():
+    bot = SimpleNamespace()
+    with patch(
+        "web.dashboard_api_logs.log_service.get_log_setting",
+        AsyncMock(return_value={"channel_id": 987654321, "enabled": False}),
+    ):
+        channel_id = await _resolve_channel_id(bot, 42, "messages", {"enabled": True})
+    assert channel_id == 987654321
+
+
+@pytest.mark.asyncio
+async def test_effacement_explicitement_demande_ou_zero_retire_le_salon():
+    bot = SimpleNamespace()
+    with patch(
+        "web.dashboard_api_logs.log_service.get_log_setting",
+        AsyncMock(),
+    ) as read:
+        for chosen in (None, "", 0, "0"):
+            channel_id = await _resolve_channel_id(
+                bot, 42, "messages", {"channel_id": chosen, "enabled": False},
+            )
+            assert channel_id is None
+    read.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_identifiant_salon_invalide_est_refuse():
+    bot = SimpleNamespace()
+    for chosen in ("invalide", -3, "-10", [], {}, True):
+        with pytest.raises(ValueError):
+            await _resolve_channel_id(bot, 42, "messages", {"channel_id": chosen})
