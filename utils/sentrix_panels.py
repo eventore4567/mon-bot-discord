@@ -859,6 +859,11 @@ async def _envoyer_texte_brut_depuis_panneau(
     kwargs.pop("embed", None)
     kwargs.pop("embeds", None)
     kwargs["content"] = texte[:1900]
+    # Un message d'erreur recopie souvent la saisie (un nom, une commande) : il
+    # ne notifie personne. Sans cette ligne, le défaut du bot s'appliquait —
+    # « Un modèle nommé « <@&rôle> » existe déjà » faisait sonner un rôle non
+    # mentionnable (tools/mention_injection_sweep.py, 08/10/2026).
+    kwargs.setdefault("allowed_mentions", _MENTIONS_AUCUNE)
 
     if isinstance(destination, discord.InteractionResponse):
         if ephemere:
@@ -884,6 +889,7 @@ async def _envoyer_texte_brut_depuis_panneau(
                     embeds=[],
                     view=None,
                     attachments=[],
+                    allowed_mentions=kwargs["allowed_mentions"],
                 )
                 marquer_reponse_differee_finalisee(interaction)
                 return result

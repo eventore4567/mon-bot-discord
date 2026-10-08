@@ -41,6 +41,7 @@ RUN python -m pytest -q \
     tests/test_sentrix_core_style.py \
     tests/test_sentrix_native_interactive_surfaces.py \
     tests/test_plain_error_messages.py \
+    tests/test_plain_text_mentions.py \
     tests/test_short_command_names.py \
     tests/test_canonical_command_surface.py \
     tests/test_command_surface_v110.py \

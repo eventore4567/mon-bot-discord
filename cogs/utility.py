@@ -19,7 +19,7 @@ import aiohttp
 import discord
 from PIL import Image, ImageSequence, UnidentifiedImageError
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from utils import access_matrix, embeds, helpers, checks, design_system, sentrix_panels as panels, stats_service
 from database.db import now
@@ -631,6 +631,16 @@ def _marge_boosts(guild) -> str:
     return f"{actuel} · **{boosts}** boosts\nPalier {palier + 1} atteint sous peu"
 
 
+#: Textes de la livraison des rappels, choisis selon la langue du serveur : un
+#: rappel part d'une tâche de fond, sans contexte de commande, donc la
+#: traduction du transport ne s'y applique pas.
+REMINDER_TEXTS = {
+    "fr": {"title": "Rappel", "for": "{mention}, voici ton rappel.", "late": "Prévu {when} : SentriX était indisponible à cette heure-là."},
+    "en": {"title": "Reminder", "for": "{mention}, here is your reminder.", "late": "Due {when}: SentriX was unavailable at that time."},
+}
+REMINDER_BATCH = 50
+
+
 class Utility(commands.Cog, name="Utility"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -639,6 +649,74 @@ class Utility(commands.Cog, name="Utility"):
         # un AFK posé sur un serveur était retiré en parlant sur un autre.
         self.afk_users: dict[tuple[int, int], tuple[str, int]] = {}
         self._afk_loaded = False
+
+    async def cog_load(self) -> None:
+        if not self.deliver_reminders.is_running():
+            self.deliver_reminders.start()
+
+    async def cog_unload(self) -> None:
+        self.deliver_reminders.cancel()
+
+    @tasks.loop(seconds=30)
+    async def deliver_reminders(self) -> None:
+        """Envoie les rappels arrivés à échéance.
+
+        Il n'en existait pas : depuis le premier commit, /remind enregistrait le
+        rappel, annonçait « Rappel défini dans 10 min »… et rien ne partait
+        jamais (mesuré le 08/10/2026 : aucune lecture de trigger_at dans le code).
+        """
+        try:
+            rows = await self.bot.db.fetchall(
+                "SELECT id, user_id, channel_id, guild_id, text, trigger_at FROM reminders "
+                "WHERE trigger_at <= ? ORDER BY trigger_at LIMIT ?",
+                (now(), REMINDER_BATCH),
+            )
+        except Exception:
+            logger.exception("Lecture des rappels impossible.")
+            return
+        for row in rows or ():
+            # Réclamé AVANT l'envoi : une ligne déjà supprimée (annulation, autre
+            # tour de boucle) n'est jamais envoyée, et jamais deux fois.
+            claimed = await self.bot.db.execute("DELETE FROM reminders WHERE id = ?", (row["id"],))
+            if getattr(claimed, "rowcount", 1) == 0:
+                continue
+            try:
+                await self._send_reminder(row)
+            except Exception:
+                logger.exception("Rappel %s impossible à délivrer.", row["id"])
+
+    @deliver_reminders.before_loop
+    async def _before_reminders(self) -> None:
+        await self.bot.wait_until_ready()
+
+    async def _send_reminder(self, row) -> None:
+        user_id = int(row["user_id"])
+        guild_id = int(row["guild_id"]) if row["guild_id"] else None
+        try:
+            from cogs import language_runtime
+
+            code = await language_runtime.get_language(self.bot, guild_id)
+        except Exception:
+            code = "fr"
+        t = REMINDER_TEXTS.get(code, REMINDER_TEXTS["fr"])
+        sections = [panels.Section(t["title"], texte=str(row["text"] or "")[:1800])]
+        if now() - int(row["trigger_at"]) > 120:
+            sections.append(panels.Section("—", texte=t["late"].format(when=f"<t:{int(row['trigger_at'])}:R>")))
+        panneau = panels.Panneau(
+            titre=t["title"], sous_titre=t["for"].format(mention=f"<@{user_id}>"), sections=sections, kind="info",
+        )
+        # Le texte vient du membre : seule SA mention peut sonner (le transport
+        # ferme @everyone et les rôles).
+        person = discord.Object(id=user_id)
+        channel = self.bot.get_channel(int(row["channel_id"])) if row["channel_id"] else None
+        me = getattr(getattr(channel, "guild", None), "me", None)
+        if isinstance(channel, (discord.TextChannel, discord.Thread)) and me is not None:
+            perms = channel.permissions_for(me)
+            if perms.view_channel and perms.send_messages:
+                await panels.envoyer(channel, panneau, mentionner=person)
+                return
+        user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+        await panels.envoyer(user, panneau)
 
     async def _afk_load(self) -> None:
         if self._afk_loaded:
