@@ -94,25 +94,17 @@ class ModerationCatalogSurfaceTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
-    def test_normal_direct_commands_reste_exactement_a_120(self):
-        """Contrat imposé par tools/command_runtime_audit.py.
+    def test_normal_direct_commands_garde_les_123_entrees_et_la_moderation(self):
+        """Contrat 2026-10-08 : 120 commandes historiques + 3 outils utiles.
 
-        Passé de 112 à 122 : les dix bascules AutoMod qui manquaient. Mesuré sur
-        le bot booté le 2026-09-25, seules antiraid et antinuke étaient classées
-        ici, donc seules elles échappaient au « hidden = True » générique
-        d'apply_surface() et à l'éligibilité slash. Les dix autres existaient,
-        fonctionnaient, et n'apparaissaient ni dans +help ni sous
-        /securite automod — le groupe n'exposait qu'une feuille sur vingt-cinq.
-
-        +automod-status n'en fait PAS partie : elle reste dans
-        SECURITY_MERGED_COMMANDS, et user_acceptance_audit exige son masquage.
-
-        Repassé de 122 à 120 le 2026-09-26 : chat-reset et leaderboard-money
-        sont sortis. main.EXACT_DUPLICATE_COMMANDS les supprime au démarrage
-        comme doublons exacts de +ai et +economyleaderboard, et les annoncer
-        ici promettait des commandes que le boot effaçait.
+        modview, snipe et editsnipe sont des commandes de modération réellement
+        disponibles : les enlever pour faire baisser le compteur masquerait un
+        problème produit au lieu de le résoudre. La CI vérifie leur existence.
         """
-        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 120)
+        self.assertEqual(len(NORMAL_DIRECT_COMMANDS), 123)
+        for name in ("modview", "snipe", "editsnipe"):
+            with self.subTest(name=name):
+                self.assertIn(name, NORMAL_DIRECT_COMMANDS)
 
 
 if __name__ == "__main__":
