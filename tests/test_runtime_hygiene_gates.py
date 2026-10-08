@@ -73,6 +73,7 @@ from __future__ import annotations
 import os
 import pathlib
 import subprocess
+import tempfile
 import sys
 
 import pytest
@@ -82,14 +83,26 @@ RACINE = pathlib.Path(__file__).resolve().parent.parent
 
 
 def _run(script: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(RACINE / "tools" / script)],
-        capture_output=True,
-        text=True,
-        cwd=str(RACINE),
-        env={**os.environ, "DISCORD_TOKEN": "ci.fake.token"},
-        timeout=60,
-    )
+    """Isole CHAQUE audit dès la création du processus Python.
+
+    sitecustomize.py peut importer config avant même l'exécution du script.
+    DATABASE_PATH doit donc être défini dans l'environnement de lancement ;
+    modifier config.DATABASE_PATH après l'import arrive trop tard.
+    """
+    with tempfile.TemporaryDirectory(prefix="sentrix-gate-db-") as temporary_dir:
+        env = {
+            **os.environ,
+            "DISCORD_TOKEN": "ci.fake.token",
+            "DATABASE_PATH": str(pathlib.Path(temporary_dir) / "bot.db"),
+        }
+        return subprocess.run(
+            [sys.executable, str(RACINE / "tools" / script)],
+            capture_output=True,
+            text=True,
+            cwd=str(RACINE),
+            env=env,
+            timeout=60,
+        )
 
 
 def test_dead_module_gate_ne_signale_aucun_faux_positif_connu():
@@ -164,3 +177,24 @@ def test_bot_v10_audit_complet():
     """
     resultat = _run("bot_v10_audit.py")
     assert resultat.returncode == 0, resultat.stdout + resultat.stderr
+
+
+def test_chaque_audit_utilise_une_base_temporaire_distincte(monkeypatch):
+    """Le chemin est fixé AVANT le sous-processus et jamais hérité du worktree."""
+    paths = []
+
+    def fake_run(args, **kwargs):
+        path = pathlib.Path(kwargs["env"]["DATABASE_PATH"])
+        assert kwargs["env"]["DISCORD_TOKEN"] == "ci.fake.token"
+        assert path.name == "bot.db"
+        assert path.parent.is_dir()
+        paths.append(path)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setenv("DATABASE_PATH", str(RACINE / "database" / "bot.db"))
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    _run("runtime_debt_gate.py")
+    _run("bot_excellence_audit.py")
+    assert len(paths) == 2
+    assert paths[0] != paths[1]
+    assert all(not path.parent.exists() for path in paths)
