@@ -1294,7 +1294,7 @@ class Tickets(commands.Cog):
             msg = await sx_panels.envoyer(channel, new_panel)
             if msg is None or getattr(msg, "id", None) is None:
                 raise RuntimeError("Le message du nouveau panneau est introuvable.")
-        except (discord.HTTPException, RuntimeError):
+        except Exception:
             logger.exception(
                 "Publication du panneau ticket #%s impossible dans %s ; ancien panneau conservé.",
                 panel_id, getattr(channel, "id", None),
