@@ -1,0 +1,7 @@
+FROM python:3.11-alpine
+WORKDIR /preview
+COPY preview/ /preview/
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8080
+USER 65534:65534
+CMD ["python", "server.py"]
