@@ -246,7 +246,8 @@ async function renderSecurity() {
     role_ids: [],
     strict_channel_ids: [],
   };
-  const policyDraft = state.securityPolicyDrafts?.[policyKey] || null;
+  const policyDraftKey = `${state.guildId}:${policyKey}`;
+  const policyDraft = state.securityPolicyDrafts?.[policyDraftKey] || null;
   const policyRoleIds = new Set((policyDraft?.role_ids ?? policy.role_ids ?? []).map(String));
   const policyStrictChannelIds = new Set((policyDraft?.strict_channel_ids ?? policy.strict_channel_ids ?? []).map(String));
   const policyFilterOptions = securityProtectionOrder
@@ -431,7 +432,7 @@ async function renderSecurity() {
   if (policy.supports_policy) {
     bindSecurityMultiPickers(content(), () => {
       state.securityPolicyDrafts = state.securityPolicyDrafts || {};
-      state.securityPolicyDrafts[policyKey] = {
+      state.securityPolicyDrafts[policyDraftKey] = {
         role_ids: selectedValues($('securityPolicyBypassRoles')),
         strict_channel_ids: selectedValues($('securityPolicyStrictChannels')),
       };
@@ -463,7 +464,7 @@ async function renderSecurity() {
         strict_channel_ids: strictChannelIds,
       });
       toast(result.message || 'Exceptions de sécurité enregistrées.');
-      if (state.securityPolicyDrafts) delete state.securityPolicyDrafts[policyKey];
+      if (state.securityPolicyDrafts) delete state.securityPolicyDrafts[policyDraftKey];
       invalidate('security-overview');
       await renderSecurity();
     } catch (e) {
