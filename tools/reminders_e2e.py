@@ -80,7 +80,17 @@ async def main() -> int:
     check(not any("rien du tout" in h.visible_text([("POST", "x", p)]) for p in posts(since, h.CID)),
           "un rappel annulé ne part pas")
 
-    # 4 — Salon disparu : le rappel part en message privé.
+    # 4 — Rappel très en retard (créé avant que la livraison existe) : en privé, pas dans le salon.
+    await db.execute(
+        "INSERT INTO reminders (user_id, channel_id, guild_id, text, trigger_at, created_at) VALUES (?,?,?,?,?,?)",
+        (h.TARGET_ID, h.CID, h.GID, "vieux rappel d'août", 1754000000, 1754000000),
+    )
+    since = await fire()
+    check(not any("vieux rappel" in h.visible_text([("POST", "x", p)]) for p in posts(since, h.CID))
+          and any("vieux rappel" in h.visible_text([("POST", "x", p)]) for p in posts(since, DM_CHANNEL)),
+          "rappel en retard de plus de 24 h : en privé, jamais dans le salon")
+
+    # 5 — Salon disparu : le rappel part en message privé.
     await db.execute(
         "INSERT INTO reminders (user_id, channel_id, guild_id, text, trigger_at, created_at) VALUES (?,?,?,?,?,?)",
         (h.TARGET_ID, 999999999999999999, h.GID, "salon supprimé", 0, 0),

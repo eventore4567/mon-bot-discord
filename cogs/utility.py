@@ -639,6 +639,9 @@ REMINDER_TEXTS = {
     "en": {"title": "Reminder", "for": "{mention}, here is your reminder.", "late": "Due {when}: SentriX was unavailable at that time."},
 }
 REMINDER_BATCH = 50
+#: Au-delà, le rappel part en privé : les rappels créés avant que la livraison
+#: existe (depuis août) auraient tous surgi d'un coup dans leurs salons.
+REMINDER_STALE_SECONDS = 24 * 3600
 
 
 class Utility(commands.Cog, name="Utility"):
@@ -708,7 +711,8 @@ class Utility(commands.Cog, name="Utility"):
         # Le texte vient du membre : seule SA mention peut sonner (le transport
         # ferme @everyone et les rôles).
         person = discord.Object(id=user_id)
-        channel = self.bot.get_channel(int(row["channel_id"])) if row["channel_id"] else None
+        stale = now() - int(row["trigger_at"]) > REMINDER_STALE_SECONDS
+        channel = None if stale else (self.bot.get_channel(int(row["channel_id"])) if row["channel_id"] else None)
         me = getattr(getattr(channel, "guild", None), "me", None)
         if isinstance(channel, (discord.TextChannel, discord.Thread)) and me is not None:
             perms = channel.permissions_for(me)
