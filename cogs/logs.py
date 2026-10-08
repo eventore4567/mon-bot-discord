@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import discord
 from discord.ext import commands
 
-from utils import embeds, log_service
+from utils import embeds, log_service, sentrix_emojis
 
 logger = logging.getLogger("bot.logs")
 
@@ -43,8 +43,13 @@ CREATE TABLE IF NOT EXISTS message_log_cache (
 
 
 def _short(value: object, limit: int = 1000) -> str:
+    """Raccourcit les messages des logs sans couper un emoji Discord.
+
+    Un marqueur <a:nom:id> tronqué en plein milieu ne s'affiche plus comme emoji.
+    La fonction commune SentriX garantit une coupure hors des marqueurs entiers.
+    """
     text = str(value or "").strip()
-    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+    return sentrix_emojis.tronquer(text, limit)
 
 
 _TICKET_SYSTEM_TOPIC_RE = re.compile(
