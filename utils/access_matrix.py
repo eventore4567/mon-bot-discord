@@ -54,6 +54,10 @@ PUBLIC_COMMANDS = frozenset({
     "help", "aide", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
+    # Menu contextuel (clic droit > Applications) : l'audit V41 lit son nom
+    # d'arbre, « translate message ». Non classé, il était listé fail-closed en
+    # production le 08/10/2026 ; il prend la décision de /translate.
+    "translate message",
     "report-bug", "afk", "roll", "choose", "privacy-policy",
     # Preuve
     "proof", "proofstatus",
@@ -322,6 +326,9 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "giveaway-blacklist", "giveaway-unblacklist", "event-create",
         "event-cancel", "tournament-create", "tournament-start", "announce",
         "notifs-ping", "notifs-list", "notifs-remove", "welcome-config",
+        # Listées fail-closed par l'audit V41 en production le 08/10/2026 ;
+        # même niveau que leurs voisines et que leur décorateur (Administrateur).
+        "notifs-status", "notifs-test",
         "set-nickname", "alias", "diagnostic", "staff-diagnostic",
         # Anciennement fail-closed par oubli
         "suivi-bot", "setup-auto", "server-audit", "healthcheck",
