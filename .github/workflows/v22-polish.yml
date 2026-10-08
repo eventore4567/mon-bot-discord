@@ -46,6 +46,12 @@ jobs:
             tests/test_command_runtime_root_filter.py \
             tests/test_notification_command_permissions.py
 
+      - name: Application emoji sync migration and retry regressions
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-emoji-migration-test.db"
+        run: python -m pytest -q tests/test_sentrix_emojis.py tests/test_emoji_sync_resilience.py
+
       - name: SQLite pre-import isolation regressions
         env:
           DISCORD_TOKEN: "ci.fake.token"

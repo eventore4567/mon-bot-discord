@@ -216,8 +216,10 @@ def emoji(nom: str) -> str:
     """
     nom = _normaliser(nom)
     resolu = _RESOLUS.get(nom)
-    if resolu:
+    if resolu and _EMOJI_MARKUP_RE.fullmatch(resolu):
         return resolu
+    if resolu:
+        logger.warning("Icône SentriX %s invalide en cache : repli utilisé.", nom)
     return REPLIS.get(nom, "")
 
 
@@ -307,15 +309,11 @@ DELAI_ENTRE_ENVOIS = 0.6
 
 
 async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
-    """Téléverse les icônes manquantes comme emojis d'application.
+    """Synchronise le pack sans supprimer toutes les icônes en premier.
 
-    Idempotent : relit d'abord ce que l'application possède déjà et ne
-    téléverse que la différence. Un redémarrage ne renvoie donc rien.
-
-    N'interrompt JAMAIS le démarrage. Un échec réseau, un jeton sans la portée
-    nécessaire ou une limite atteinte laissent simplement les replis en place,
-    et le bot démarre normalement — un panneau sans icône reste utilisable,
-    un bot qui ne démarre pas ne l'est pas.
+    Pendant une migration, chaque ancienne icône est remplacée séparément.
+    Un échec n'empêche pas le bot de démarrer et n'invalide pas tout le pack.
+    Le témoin de version n'est posé QUE quand tous les fichiers sont présents.
     """
     global _SYNCHRONISE
     if _SYNCHRONISE and not forcer:
@@ -325,74 +323,77 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
     try:
         existants = await bot.fetch_application_emojis()
     except Exception:
-        logger.warning(
-            "Icônes SentriX : lecture impossible, les replis restent actifs.",
-            exc_info=True,
-        )
+        logger.warning("Icônes SentriX : lecture impossible, cache/replis conservés.", exc_info=True)
         return bilan
 
     deja = {str(getattr(i, "name", "") or ""): i for i in existants}
-
-    # Version précédente encore en place : on efface avant de reposer. Un
-    # emoji d'application n'est pas modifiable en place, et `create` sur un nom
-    # existant échoue — sans cette purge, les anciennes icônes resteraient
-    # pour toujours.
-    if TEMOIN not in deja:
-        a_effacer = [i for n, i in deja.items() if n.startswith(PREFIXE)]
-        if a_effacer:
-            logger.info(
-                "Pack d'icônes v%s : remplacement de %s icône(s).",
-                VERSION_PACK, len(a_effacer),
-            )
-        for item in a_effacer:
-            try:
-                await item.delete()
-                bilan["remplaces"] += 1
-            except Exception:
-                logger.warning("Icône %s non supprimée.", getattr(item, "name", "?"), exc_info=True)
-            await asyncio.sleep(DELAI_ENTRE_ENVOIS)
-        deja = {}
-
+    # Reconstruire le cache depuis Discord : une relance forcée ne doit pas
+    # conserver un ID d'emoji supprimé entretemps par un autre processus.
+    _RESOLUS.clear()
     for nom, item in deja.items():
         if nom.startswith(PREFIXE):
             _RESOLUS[nom] = str(item)
             bilan["existants"] += 1
 
-    manquants = [n for n in noms_disponibles() if n not in _RESOLUS]
-    for nom in manquants:
+    version_installee = TEMOIN in deja
+    noms = noms_disponibles()
+    for nom in noms:
         chemin = fichier(nom)
         if chemin is None:
             bilan["absents_du_pack"] += 1
             continue
+
+        ancien = deja.get(nom)
+        if ancien is not None and version_installee:
+            continue
+
+        if ancien is not None:
+            # Ne JAMAIS supprimer le pack entier avant de le reconstruire :
+            # une panne réseau après trois créations cassait les 116 autres.
+            try:
+                await ancien.delete()
+                bilan["remplaces"] += 1
+                _RESOLUS.pop(nom, None)
+            except Exception:
+                bilan["echecs"] += 1
+                logger.warning("Ancienne icône %s non remplaçable : conservée.", nom, exc_info=True)
+                continue
+            await asyncio.sleep(DELAI_ENTRE_ENVOIS)
+
         try:
-            cree = await bot.create_application_emoji(
-                name=nom, image=chemin.read_bytes()
-            )
+            cree = await bot.create_application_emoji(name=nom, image=chemin.read_bytes())
             _RESOLUS[nom] = str(cree)
             bilan["envoyes"] += 1
         except Exception:
             bilan["echecs"] += 1
-            logger.warning("Icône %s non téléversée.", nom, exc_info=True)
+            # Si l'ancien emoji a été effacé, ne pas laisser un ID périmé
+            # dans le cache : employer le repli typographique à la place.
+            _RESOLUS.pop(nom, None)
+            logger.warning("Icône %s non téléversée ; reprise au prochain essai.", nom, exc_info=True)
         await asyncio.sleep(DELAI_ENTRE_ENVOIS)
 
-    # Le témoin EN DERNIER : s'il était posé avant et qu'un téléversement
-    # échouait, le prochain démarrage croirait la migration finie et laisserait
-    # le pack incomplet.
-    if bilan["envoyes"] and TEMOIN not in _RESOLUS:
+    complete = bool(noms) and all(n in _RESOLUS for n in noms)
+    sans_erreur = bilan["echecs"] == 0 and bilan["absents_du_pack"] == 0
+
+    if not version_installee and complete and sans_erreur:
+        # Le témoin est le commit logique de la migration. Le placer à
+        # moitié du pack bloquait les tentatives de reprise après un crash.
         try:
             marque = fichier("home")
-            if marque is not None:
-                cree = await bot.create_application_emoji(
-                    name=TEMOIN, image=marque.read_bytes()
-                )
+            if marque is None:
+                bilan["absents_du_pack"] += 1
+            else:
+                cree = await bot.create_application_emoji(name=TEMOIN, image=marque.read_bytes())
                 _RESOLUS[TEMOIN] = str(cree)
         except Exception:
-            logger.debug("Témoin de version non posé.", exc_info=True)
+            bilan["echecs"] += 1
+            logger.warning("Témoin du pack v%s non posé ; reprise ultérieure.", VERSION_PACK, exc_info=True)
 
-    _SYNCHRONISE = True
+    _SYNCHRONISE = complete and sans_erreur and TEMOIN in _RESOLUS
     logger.info(
-        "Icônes SentriX v%s : %s déjà en place, %s remplacées, %s téléversées, %s échecs.",
-        VERSION_PACK, bilan["existants"], bilan["remplaces"], bilan["envoyes"], bilan["echecs"],
+        "Icônes SentriX v%s : %s déjà en place, %s remplacées, %s téléversées, %s échecs, terminé=%s.",
+        VERSION_PACK, bilan["existants"], bilan["remplaces"], bilan["envoyes"],
+        bilan["echecs"], _SYNCHRONISE,
     )
     return bilan
 

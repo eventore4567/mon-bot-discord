@@ -188,7 +188,7 @@ class _BotDejaFourni:
 
     async def fetch_application_emojis(self):
         return [
-            _Emoji(n, 1000 + i, self.supprimes)
+            _Emoji(n, 410000000000000000 + i, self.supprimes)
             for i, n in enumerate(self._noms)
         ]
 
@@ -243,7 +243,7 @@ async def test_une_version_precedente_est_remplacee(monkeypatch):
 
     async def _creer(*, name, image):
         envoyes.append(name)
-        return _Emoji(name, 2000 + len(envoyes), [])
+        return _Emoji(name, 420000000000000000 + len(envoyes), [])
 
     bot.create_application_emoji = _creer
     bilan = await se.synchroniser(bot)
