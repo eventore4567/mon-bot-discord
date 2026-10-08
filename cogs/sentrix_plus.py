@@ -26,6 +26,22 @@ MIN_SCHEDULE_SECONDS = 60
 _DELAY_RE = re.compile(r"^(\d+)(s|m|h|d|w)$", re.I)
 
 
+def _mentions_for_author(channel: discord.TextChannel, author_id: int) -> discord.AllowedMentions:
+    """Ce qu'un message envoyé AU NOM d'un membre a le droit de faire sonner.
+
+    Le bot a presque toujours « Mentionner @everyone » ; s'en servir pour un
+    texte écrit par quelqu'un qui ne l'a pas revient à lui prêter ce droit.
+    Mesuré le 08/10/2026 : un modérateur (Gérer les messages, sans ce droit)
+    programmait « @everyone » et le bot pinguait tout le serveur, ainsi qu'un
+    rôle non mentionnable. La règle est celle de Discord, évaluée à l'envoi.
+    """
+    member = channel.guild.get_member(int(author_id))
+    if member is not None and channel.permissions_for(member).mention_everyone:
+        return discord.AllowedMentions(everyone=True, roles=True, users=True)
+    mentionable = [role for role in channel.guild.roles if role.mentionable]
+    return discord.AllowedMentions(everyone=False, roles=mentionable, users=True)
+
+
 def _parse_delay(value: str) -> int | None:
     match = _DELAY_RE.fullmatch(str(value or "").strip())
     if not match:
@@ -611,7 +627,13 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
         try:
-            sticky = await message.channel.send(f"📌 **Information**\n{row['content']}")
+            # Jamais de notification : le sticky est republié tous les quelques
+            # messages, un @everyone dedans aurait repingué tout le serveur à
+            # chaque fois — et il se pose avec « Gérer les messages » seulement.
+            sticky = await message.channel.send(
+                f"📌 **Information**\n{row['content']}",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
         except (discord.Forbidden, discord.HTTPException):
             return
         await self.bot.db.execute(
@@ -710,7 +732,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             try:
                 await channel.send(
                     str(row["content"]),
-                    allowed_mentions=discord.AllowedMentions(everyone=True, roles=True, users=True),
+                    allowed_mentions=_mentions_for_author(channel, int(row["author_id"])),
                 )
             except (discord.Forbidden, discord.HTTPException):
                 await self.bot.db.execute(

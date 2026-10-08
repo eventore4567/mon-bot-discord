@@ -465,6 +465,12 @@ class BotAllInOne(commands.Bot):
             intents=INTENTS,
             help_command=None,
             case_insensitive=True,
+            # Sans défaut, tout envoi brut d'un texte écrit par un membre pouvait
+            # faire sonner @everyone avec le droit du BOT (mesuré le 08/10/2026 :
+            # messages programmés, stickies). Chaque @everyone voulu passe déjà
+            # son propre AllowedMentions(everyone=True), qui l'emporte sur ce
+            # défaut ; rôles et membres restent notifiés comme avant.
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=True, users=True, replied_user=True),
         )
         self.db = Database(config.DATABASE_PATH)
         # Le VRAI bot comme porteur des appels modules déclenchés depuis la base.
