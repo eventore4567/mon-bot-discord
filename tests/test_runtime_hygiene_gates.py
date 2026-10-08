@@ -198,3 +198,33 @@ def test_chaque_audit_utilise_une_base_temporaire_distincte(monkeypatch):
     assert len(paths) == 2
     assert paths[0] != paths[1]
     assert all(not path.parent.exists() for path in paths)
+
+
+def test_sitecustomize_honore_database_path_defini_avant_demarrage():
+    """Régression réelle (non mockée) : config est chargé après sitecustomize.
+
+    Même avec DISCORD_TOKEN défini, l'import très précoce de config doit voir
+    la SQLite jetable, pas database/bot.db appartenant au worktree.
+    """
+    with tempfile.TemporaryDirectory(prefix="sentrix-preimport-db-") as temp_dir:
+        expected = str(pathlib.Path(temp_dir) / "audit.db")
+        env = {
+            **os.environ,
+            "DISCORD_TOKEN": "ci.fake.token",
+            "DATABASE_PATH": expected,
+        }
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import config; print('SENTRIX_TEST_DB=' + config.DATABASE_PATH)",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(RACINE),
+            env=env,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr[-1500:]
+        assert f"SENTRIX_TEST_DB={expected}" in result.stdout
+        assert pathlib.Path(expected).parent.is_dir()
