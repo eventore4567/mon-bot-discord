@@ -41,4 +41,14 @@ def test_staff_diagnostic_still_displays_the_existing_audit_panel():
     method = commands["staff-diagnostic"]
     source = ast.unparse(method)
     assert "self.audit_panel(ctx.guild)" in source
-    assert 'is_owner_or_admin_for("configuration")' in source
+    # ast.unparse() utilise des guillemets simples selon Python ; vérifier
+    # les arguments AST, pas la forme textuelle des guillemets.
+    assert any(
+        isinstance(dec, ast.Call)
+        and isinstance(dec.func, ast.Attribute)
+        and dec.func.attr == "is_owner_or_admin_for"
+        and len(dec.args) == 1
+        and isinstance(dec.args[0], ast.Constant)
+        and dec.args[0].value == "configuration"
+        for dec in method.decorator_list
+    )
