@@ -216,8 +216,10 @@ def emoji(nom: str) -> str:
     """
     nom = _normaliser(nom)
     resolu = _RESOLUS.get(nom)
-    if resolu:
+    if resolu and _EMOJI_MARKUP_RE.fullmatch(resolu):
         return resolu
+    if resolu:
+        logger.warning("Icône SentriX %s invalide en cache : repli utilisé.", nom)
     return REPLIS.get(nom, "")
 
 
