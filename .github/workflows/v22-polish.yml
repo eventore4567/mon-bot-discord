@@ -34,6 +34,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Targeted slash, staff and notification permissions regression tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v22-targeted-regression.db"
+        run: |
+          python -m pytest -q \
+            tests/test_staff_audit_collision.py \
+            tests/test_v95_greedy_annotation.py \
+            tests/test_v110_intermediate_budget.py \
+            tests/test_command_runtime_root_filter.py \
+            tests/test_notification_command_permissions.py
+
+      - name: SQLite pre-import isolation regressions
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+          DATABASE_PATH: "/tmp/sentrix-v22-db-isolation.db"
+        run: >-
+          python -m pytest -q tests/test_runtime_hygiene_gates.py
+          -k "test_chaque_audit_utilise_une_base_temporaire_distincte or test_sitecustomize_honore_database_path_defini_avant_demarrage"
+
       - name: Command registry audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
