@@ -339,6 +339,13 @@ def _install_standard_slash_surface(bot) -> tuple[int, list[str]]:
     for group in groups.values():
         tree.add_command(group, override=True)
 
+    # V110 reconstruit une surface provisoire. Appliquer le budget APRÈS cette
+    # reconstruction également : le catalogue public la remplacera ensuite,
+    # mais les audits et toute synchronisation intermédiaire doivent rester
+    # à <= 100 racines. Le budget garde les racines canoniques prioritaires.
+    from cogs import slash_command_budget
+    slash_command_budget.finalize(bot)
+
     roots = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
     if len(roots) > v95.MAX_ROOT_COMMANDS:
         raise RuntimeError(f"V110 slash root budget exceeded: {len(roots)}/{v95.MAX_ROOT_COMMANDS}")
