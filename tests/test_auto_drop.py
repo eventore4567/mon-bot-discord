@@ -131,7 +131,9 @@ def test_le_drop_automatique_garde_le_symbole_monetaire():
     # Le bloc doit couvrir la CONSTRUCTION de l'embed, pas seulement l'envoi.
     assert source.index("pictogrammes_porteurs()") < source.index("create_embed")
 
-    assert strip_emojis("135 🪙 ici") != "135 🪙 ici"
+    # Depuis le 09/10/2026, une unité après un nombre est gardée partout
+    # (utils/embeds.UNIT_EMOJIS) : la pièce survit aussi hors du contexte de jeu.
+    assert strip_emojis("135 🪙 ici") == "135 🪙 ici"
     with pictogrammes_porteurs():
         assert strip_emojis("135 🪙 ici") == "135 🪙 ici"
 

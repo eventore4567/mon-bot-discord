@@ -60,6 +60,15 @@ def _is_emoji_codepoint(code: int) -> bool:
     )
 
 
+#: Les emojis qui servent d'UNITÉ (monnaie). Le symbole configuré par chaque
+#: serveur s'y ajoute dès que l'économie le lit (setup_v2_core.economy_settings).
+UNIT_EMOJIS: set[str] = {"🪙", "💰", "💎", "💵", "💶", "💷", "💴", "🎫", "🎟️", "🎟"}
+
+#: Un nombre (éventuellement en gras), une espace facultative, puis un emoji
+#: serveur ou une suite de caractères emoji : la place d'une unité de monnaie.
+_UNIT_EMOJI_RE = re.compile(r"(\d(?:\*\*)?\s?)(<a?:\w+:\d+>|[^\s\w*.,:;!?()\[\]<>/\\-]+)")
+
+
 def strip_emojis(value: Any) -> str:
     """Retire les pictogrammes décoratifs — sauf dans un mini-jeu.
 
@@ -71,8 +80,22 @@ def strip_emojis(value: Any) -> str:
 
     if commande_de_jeu():
         return text
+    # Un emoji juste après un nombre est une UNITÉ, pas une décoration :
+    # « 500 🪙 », « **+200** 🪙 ». L'effacer donnait « 500  ajoutés » et
+    # « **0 ** au total » dans toute l'économie (mesuré le 09/10/2026).
+    unites: list[str] = []
+
+    def _garder(match: re.Match) -> str:
+        jeton = match.group(2)
+        if _CUSTOM_EMOJI_RE.fullmatch(jeton) or jeton in UNIT_EMOJIS or jeton.rstrip("\ufe0f") in UNIT_EMOJIS:
+            unites.append(jeton)
+            return f"{match.group(1)}\x00{len(unites) - 1}\x00"
+        return match.group(0)
+
+    text = _UNIT_EMOJI_RE.sub(_garder, text)
     text = _CUSTOM_EMOJI_RE.sub("", text)
-    return "".join(char for char in text if not _is_emoji_codepoint(ord(char)))
+    text = "".join(char for char in text if char == "\x00" or not _is_emoji_codepoint(ord(char)))
+    return re.sub(r"\x00(\d+)\x00", lambda m: unites[int(m.group(1))], text)
 
 
 def clean_ui_text(value: Any, limit: int = 256, fallback: str = "") -> str:

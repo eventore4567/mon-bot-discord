@@ -226,6 +226,74 @@ async def ticket_memory(bot: Any, guild: Any, user_id: int, *, exclude_ticket: i
     return " · ".join(parts)
 
 
+async def economy_context(bot: Any, guild: Any, target_id: int, actor_id: int | None = None,
+                          *, now: float | None = None) -> str:
+    """Avant qu'un membre du staff crée de l'argent : le solde du membre et les ajouts
+    du staff des 30 derniers jours — et s'il se crédite lui-même."""
+    now = float(now if now is not None else time.time())
+    try:
+        from cogs import language_runtime
+
+        english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+    except Exception:  # noqa: BLE001
+        english = False
+    try:
+        from cogs.setup_v2_core import economy_settings
+
+        symbol = (await economy_settings(bot, guild.id))["currency_symbol"]
+    except Exception:  # noqa: BLE001
+        symbol = "🪙"
+
+    def nombre(value: int) -> str:
+        return f"{int(value):,}".replace(",", " ")
+
+    parts: list[str] = []
+    try:
+        row = await bot.db.fetchone(
+            "SELECT cash, bank FROM economy WHERE guild_id = ? AND user_id = ?", (int(guild.id), int(target_id)),
+        )
+        if row is not None:
+            total = int(row["cash"] or 0) + int(row["bank"] or 0)
+            parts.append(f"balance {nombre(total)} {symbol}" if english else f"solde {nombre(total)} {symbol}")
+        grants = await bot.db.fetchone(
+            "SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total FROM economy_transactions "
+            "WHERE guild_id = ? AND receiver_id = ? AND transaction_type = 'admin_grant' AND created_at >= ?",
+            (int(guild.id), int(target_id), int(now) - 30 * 86400),
+        )
+        count = int(grants["n"] or 0) if grants else 0
+        if count:
+            amount = nombre(int(grants["total"] or 0))
+            parts.append(
+                f"{count} staff grant{'s' if count > 1 else ''} in 30 d ({amount} {symbol})" if english
+                else f"{count} ajout{'s' if count > 1 else ''} du staff en 30 j ({amount} {symbol})"
+            )
+    except Exception:  # noqa: BLE001
+        pass
+    if actor_id is not None and int(actor_id) == int(target_id):
+        parts.append("to yourself" if english else "à soi-même")
+    return " · ".join(parts)
+
+
+async def memory_line(bot: Any, guild: Any) -> str:
+    """La mémoire de la commande en cours, selon sa famille (sanctions, économie)."""
+    target = current_target()
+    if not target or guild is None or bot is None:
+        return ""
+    name = current_command() or ""
+    try:
+        from utils import access_matrix
+
+        module = access_matrix.module_for_command(name)
+    except Exception:  # noqa: BLE001
+        module = None
+    trace = CURRENT.get()
+    if module == "moderation":
+        return await member_context(bot, guild, target)
+    if module == "economy":
+        return await economy_context(bot, guild, target, getattr(trace, "actor_id", None))
+    return ""
+
+
 def current_target() -> int | None:
     trace = CURRENT.get()
     return target_of(trace.ctx) if trace is not None and trace.ctx is not None else None
@@ -320,5 +388,5 @@ def target_of(ctx: Any) -> int | None:
 __all__ = [
     "ACTOR", "CURRENT", "RETENTION_SECONDS", "Trace", "classify", "ensure_schema", "is_traced", "lookup",
     "SUITES", "SUITE_PREFIX", "current_command", "current_is_moderation", "current_target", "make_ref", "member_context", "normalise_ref", "purge",
-    "parse_suite", "record", "ticket_memory", "suite_command", "suites_view", "target_of", "visible_ref",
+    "economy_context", "memory_line", "parse_suite", "record", "ticket_memory", "suite_command", "suites_view", "target_of", "visible_ref",
 ]

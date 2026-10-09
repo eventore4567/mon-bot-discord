@@ -861,6 +861,24 @@ async def _envoyer_texte_brut_depuis_panneau(
     ephemere: bool,
     extra: dict[str, Any],
 ):
+    # Le signal TEXTE_BRUT, comme texte_court : sans lui, la couche des cartes
+    # (utils/command_visuals) reconvertissait ce texte en carte titrée du nom de
+    # la commande ET perdait le corps — un membre sans assez d'argent recevait un
+    # panneau « Pay » vide (mesuré le 09/10/2026).
+    jeton = TEXTE_BRUT.set(True)
+    try:
+        return await _envoyer_texte_brut_sans_signal(destination, texte, ephemere=ephemere, extra=extra)
+    finally:
+        TEXTE_BRUT.reset(jeton)
+
+
+async def _envoyer_texte_brut_sans_signal(
+    destination: Any,
+    texte: str,
+    *,
+    ephemere: bool,
+    extra: dict[str, Any],
+):
     kwargs = dict(extra)
     kwargs.pop("file", None)
     kwargs.pop("files", None)
@@ -911,6 +929,41 @@ async def _envoyer_texte_brut_depuis_panneau(
     return await destination.send(**kwargs)
 
 
+async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
+    """La mémoire SentriX sur un panneau : ajoutée à la ligne « Réf. », au moment de l'envoi.
+
+    Le panneau se construit sans accès à la base ; l'envoi, lui, est asynchrone.
+    Même format que texte_court : « -# solde 1 200 🪙 · 2 ajouts du staff en 30 j · Réf. SX-… ».
+    """
+    from utils import sentrix_trace
+
+    reference = sentrix_trace.visible_ref()
+    if not reference:
+        return
+    parent = getattr(destination, "_parent", None)
+    guild = getattr(destination, "guild", None) or getattr(parent, "guild", None)
+    bot = getattr(destination, "bot", None) or getattr(destination, "client", None) or getattr(parent, "client", None)
+    try:
+        ligne = await sentrix_trace.memory_line(bot, guild)
+    except Exception:  # noqa: BLE001 — la mémoire ne doit jamais bloquer une réponse
+        return
+    if not ligne:
+        return
+    marque = f"Réf. {reference}"
+
+    def parcourir(item: Any) -> bool:
+        for enfant in list(getattr(item, "children", []) or []):
+            if isinstance(enfant, discord.ui.TextDisplay) and marque in str(enfant.content):
+                if ligne not in enfant.content:
+                    enfant.content = enfant.content.replace(marque, f"{ligne} · {marque}", 1)
+                return True
+            if parcourir(enfant):
+                return True
+        return False
+
+    parcourir(panneau)
+
+
 async def envoyer(
     destination: Any,
     panneau: Panneau,
@@ -939,6 +992,8 @@ async def envoyer(
             ephemere=ephemere,
             extra=extra,
         )
+
+    await _completer_par_la_memoire(destination, panneau)
 
     # Toute vue exposant fichiers() est acceptee, pas seulement Panneau : les
     # panneaux interactifs (aide, setup) sont des LayoutView batis sur mesure.
@@ -1505,11 +1560,11 @@ async def texte_court(
         bot = getattr(destination, "bot", None) or getattr(destination, "client", None) or getattr(
             getattr(destination, "_parent", None), "client", None,
         )
+        try:
+            contexte = await sentrix_trace.memory_line(bot, guild)
+        except Exception:  # noqa: BLE001 — le contexte ne doit jamais bloquer la réponse
+            contexte = ""
         if cible and guild is not None and bot is not None:
-            try:
-                contexte = await sentrix_trace.member_context(bot, guild, cible)
-            except Exception:  # noqa: BLE001 — le contexte ne doit jamais bloquer la réponse
-                contexte = ""
             # Les suites : les gestes logiques d'après, en boutons (cogs/trace.py).
             if "view" not in extra:
                 try:

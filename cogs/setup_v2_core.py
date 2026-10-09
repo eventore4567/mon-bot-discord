@@ -569,10 +569,15 @@ async def economy_settings(bot: commands.Bot, guild_id: int) -> dict[str, Any]:
     row = await bot.db.fetchone("SELECT * FROM economy_settings_v2 WHERE guild_id=?", (int(guild_id),))
     if row is None:
         return {"currency_singular": "Pièce", "currency_plural": "Pièces", "currency_symbol": "🪙"}
+    symbol = str(row["currency_symbol"] or "🪙")
+    # Le symbole du serveur est une unité : le texte sobre ne doit pas l'effacer.
+    from utils import embeds as _embeds
+
+    _embeds.UNIT_EMOJIS.add(symbol)
     return {
         "currency_singular": str(row["currency_singular"] or "Pièce"),
         "currency_plural": str(row["currency_plural"] or "Pièces"),
-        "currency_symbol": str(row["currency_symbol"] or "🪙"),
+        "currency_symbol": symbol,
     }
 
 
