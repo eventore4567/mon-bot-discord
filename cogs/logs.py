@@ -150,6 +150,12 @@ def _permission_label(name: str) -> str:
     return name.replace("_", " ").capitalize()
 
 
+def _stay_of(member) -> int | None:
+    """Le séjour d'un membre : sa date d'arrivée en millisecondes (None si inconnue)."""
+    joined = getattr(member, "joined_at", None)
+    return int(joined.timestamp() * 1000) if joined is not None else None
+
+
 class Logs(commands.Cog, name="Logs"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -631,17 +637,31 @@ class Logs(commands.Cog, name="Logs"):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        panel = self._embed(
-            "Membre arrivé",
-            identity=member,
-            fields=(
-                ("Membre", _user_ref(member.id), True),
-                ("Compte créé", discord.utils.format_dt(member.created_at, "F"), True),
-                ("Arrivée", discord.utils.format_dt(member.joined_at or discord.utils.utcnow(), "F"), True),
-            ),
-        )
+        fields = [
+            ("Membre", _user_ref(member.id), True),
+            ("Compte créé", discord.utils.format_dt(member.created_at, "F"), True),
+            ("Arrivée", discord.utils.format_dt(member.joined_at or discord.utils.utcnow(), "F"), True),
+        ]
+        if not member.bot:
+            # Ce que le serveur sait déjà de cette personne : départs passés,
+            # sanctions liées à son identifiant, compte récent.
+            from utils import sentrix_trace
+
+            try:
+                memory = await sentrix_trace.join_memory(self.bot, member.guild, member)
+            except Exception:
+                logger.exception("Mémoire d'arrivée illisible guild=%s user=%s", member.guild.id, member.id)
+                memory = ""
+            if memory:
+                fields.append(("Mémoire", memory, False))
+        panel = self._embed("Membre arrivé", identity=member, fields=fields)
         view = log_service.log_actions(ids=[("Copier l'ID du membre", member.id)])
-        key = log_service.make_event_key(member.guild.id, "member_join", target_id=member.id)
+        # Chaque séjour a sa propre date d'arrivée Discord : un même événement reçu
+        # deux fois garde la même clé, un départ suivi d'un retour en moins de 8 s
+        # (motif d'un raid) donne deux cartes au lieu d'une.
+        key = log_service.make_event_key(
+            member.guild.id, "member_join", target_id=member.id, discriminator=_stay_of(member),
+        )
         await self._send(member.guild, "member_join", panel, view=view, event_key=key)
 
     @commands.Cog.listener()
@@ -688,7 +708,9 @@ class Logs(commands.Cog, name="Logs"):
             fields.append(("Présence", f"{max(0, duration.days)} jour(s)", True))
         panel = self._embed("Membre parti", identity=member, fields=fields)
         view = log_service.log_actions(ids=[("Copier l'ID du membre", member.id)])
-        key = log_service.make_event_key(member.guild.id, "member_leave", target_id=member.id)
+        key = log_service.make_event_key(
+            member.guild.id, "member_leave", target_id=member.id, discriminator=_stay_of(member),
+        )
         await self._send(member.guild, "member_leave", panel, view=view, event_key=key)
 
     @commands.Cog.listener()

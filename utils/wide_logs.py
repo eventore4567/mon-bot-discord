@@ -360,6 +360,8 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
     }
     ignored.add("membre concerné")
     ignored.add("membre concerne")
+    # La mémoire d'arrivée est déjà narrée par narrative_body.
+    ignored |= {"mémoire", "memoire", "memory"}
     for name, value in _field_map(embed):
         low = name.casefold().strip(" :")
         if any(token == low for token in ignored):
@@ -490,6 +492,9 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} vient de rejoindre le serveur.")
         if account_created:
             lines.append(f"Son compte a été créé le **{account_created}**.")
+        memory = _field_value(embed, "mémoire", "memoire", "memory")
+        if memory:
+            lines.append(f"**Mémoire :** {memory}")
     elif event_type == "member_leave":
         lines.append(f"{member or 'Un membre'} a quitté le serveur.")
         if duration:
@@ -751,6 +756,11 @@ def narrative_body(
         lines.append(base or f"Une protection SentriX s'est déclenchée pour {member or 'un membre'}.")
         if reason:
             lines.append(f"**Raison :** {reason}")
+        # Le message supprimé lui-même : sans lui, le staff ne peut pas juger
+        # l'action (déjà cité « > … » par cogs/automod._automod_message_preview).
+        preview = _field_value_exact(embed, "Message", "Contenu")
+        if preview:
+            lines.append(preview if preview.startswith(">") else _message_quote(preview))
         # Détails courts de l'incident (compact_fields ignore les valeurs brèves).
         details = []
         if channel:
@@ -758,7 +768,9 @@ def narrative_body(
         supprimes = _field_value(embed, "messages")
         if supprimes:
             details.append(f"Messages supprimés : **{supprimes}**")
-        action = _field_value(embed, "action")
+        # Libellé exact : « action » en sous-chaîne attrapait « Infr·actions (1h) »
+        # et ne trouvait jamais « Sanction ».
+        action = _field_value_exact(embed, "Sanction", "Action prise", "Action")
         if action:
             details.append(f"Sanction : **{action}**")
         infractions = _field_value(embed, "infractions")
@@ -766,6 +778,9 @@ def narrative_body(
             details.append(f"Infractions (1h) : {infractions}")
         if details:
             lines.append(" · ".join(details))
+        memory = _field_value(embed, "mémoire", "memoire", "memory")
+        if memory:
+            lines.append(f"**Mémoire :** {memory}")
     else:
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         if base:
@@ -812,6 +827,11 @@ def narrative_body(
             body = block.split("\n", 1)[1] if block.startswith("**") and "\n" in block else block
             if body.strip() and body.strip() in existing:
                 continue
+            # « **Nom :** valeur » sur une ligne : la valeur déjà narrée ne sort pas deux fois.
+            if block.startswith("**") and ":** " in block:
+                tail = block.split(":** ", 1)[1].strip()
+                if tail and tail in existing:
+                    continue
             if block in existing:
                 continue
             lines.append(block)

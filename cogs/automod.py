@@ -724,21 +724,28 @@ def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
         if str(field.value or "").strip()
     ]
 
-    def take(*tokens: str):
+    def take(*tokens: str, whole: bool = False):
+        # Un libellé commence par le mot cherché ; en sous-chaîne, « action »
+        # attrapait « Infr·actions (1h) » et « message » attrapait « Messages
+        # supprimés » — la carte affichait « Sanction : 3 » et perdait le
+        # message supprimé (mesuré le 09/10/2026 sur le bot booté).
+        end = r"(?!\w)" if whole else ""
         for index, (name, value, inline) in enumerate(fields):
             low = name.casefold()
-            if any(token in low for token in tokens):
+            if index not in used and any(re.search(rf"(?<!\w){re.escape(token)}{end}", low) for token in tokens):
                 return index, name, value, inline
         return None
 
     used: set[int] = set()
 
     identity = take("membre", "bot expuls", "membre expuls", "auteur suspect", "auteur", "acteur", "cible", "utilisateur")
+    if identity:
+        used.add(identity[0])
     protection = take("protection")
     sanction = take("sanction", "action prise", "action")
     reason = take("raison", "reason")
     channel = take("salon", "channel")
-    message = take("message", "contenu", "content")
+    message = take("message", "contenu", "content", whole=True)
 
     ordered: list[tuple[str, str, bool]] = []
 
@@ -3165,6 +3172,15 @@ class AutoMod(commands.Cog, name="Automod"):
 
     async def _flush_incident_log(self, guild: discord.Guild, member: discord.abc.User, key: tuple[int, int], incident: _Incident) -> None:
         """Une seule carte de log par incident, compacte, avec le nombre réel de messages."""
+        # La mémoire est lue AVANT l'attente : l'incident vient d'être écrit en base,
+        # son rang est exact ; lu après, un incident suivant pourrait le décaler.
+        try:
+            from utils import sentrix_trace
+
+            memory = await sentrix_trace.automod_memory(self.bot, guild, member.id)
+        except Exception:
+            logger.exception("Mémoire AutoMod illisible guild=%s user=%s", guild.id, getattr(member, "id", None))
+            memory = ""
         try:
             await asyncio.sleep(INCIDENT_LOG_DELAY_SECONDS)
             title = "🛡️ Action AutoMod"
@@ -3190,6 +3206,8 @@ class AutoMod(commands.Cog, name="Automod"):
                 extra["Niveau anti-spam"] = str(incident.spam_stage)
             if incident.infractions:
                 extra["Infractions (1h)"] = str(incident.infractions)
+            if memory:
+                extra["Mémoire"] = memory
             e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
             event_type = {
                 "antiscam": "automod_scam",

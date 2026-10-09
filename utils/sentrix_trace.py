@@ -166,7 +166,8 @@ async def member_context(bot: Any, guild: Any, target_id: int, *, now: float | N
     parts: list[str] = []
     try:
         row = await bot.db.fetchone(
-            "SELECT COUNT(*) AS n FROM sanctions WHERE guild_id = ? AND user_id = ? AND created_at >= ?",
+            "SELECT COUNT(*) AS n FROM sanctions WHERE guild_id = ? AND user_id = ? AND created_at >= ? "
+            "AND action NOT LIKE 'un%' AND action NOT LIKE 'clear%'",  # une levée n'est pas une sanction
             (int(guild.id), int(target_id), int(now) - 30 * 86400),
         )
         count = int(row["n"] if row else 0)
@@ -221,6 +222,161 @@ async def ticket_memory(bot: Any, guild: Any, user_id: int, *, exclude_ticket: i
     else:
         parts.append("first ticket" if english else "premier ticket")
     context = await member_context(bot, guild, int(user_id), now=now)
+    if context:
+        parts.append(context)
+    return " · ".join(parts)
+
+
+# Libellés des sanctions dans la mémoire d'arrivée : (singulier, pluriel) FR puis EN.
+# Une levée (unban, unmute…) n'est pas une sanction : elle n'est jamais comptée.
+_SANCTION_WORDS = {
+    "warn": ("avertissement", "avertissements", "warning", "warnings"),
+    "mute": ("mute", "mutes", "mute", "mutes"),
+    "timeout": ("mute", "mutes", "mute", "mutes"),
+    "kick": ("expulsion", "expulsions", "kick", "kicks"),
+    "ban": ("ban", "bans", "ban", "bans"),
+    "tempban": ("ban temporaire", "bans temporaires", "temporary ban", "temporary bans"),
+}
+
+
+def _is_reversal(action: str) -> bool:
+    return action.startswith("un") or action.startswith("clear")
+
+
+async def join_memory(bot: Any, guild: Any, member: Any, *, now: float | None = None) -> str:
+    """À l'arrivée d'un membre : ce que le serveur sait déjà de cette personne.
+
+    Les départs viennent du journal de conservation (``member_data_retention_events``,
+    écrit à chaque départ), les sanctions du journal unifié — tous deux liés à
+    l'identifiant, donc conservés après le départ. Une source illisible ne produit
+    aucune affirmation : jamais « première venue » sans journal des départs.
+    """
+    now = float(now if now is not None else time.time())
+    try:
+        from cogs import language_runtime
+
+        english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+    except Exception:  # noqa: BLE001
+        english = False
+    guild_id, user_id = int(guild.id), int(member.id)
+    parts: list[str] = []
+    try:
+        row = await bot.db.fetchone(
+            "SELECT COUNT(*) AS n, MAX(created_at) AS last FROM member_data_retention_events "
+            "WHERE guild_id = ? AND user_id = ? AND event_type = 'member_remove'",
+            (guild_id, user_id),
+        )
+        left = int(row["n"] or 0) if row else 0
+        if left:
+            age = _duree(now - int(row["last"] or now), english)
+            parts.append(
+                f"returning: left {left} time{'s' if left > 1 else ''}, last {age} ago" if english
+                else f"revient : parti {left} fois, dernier départ il y a {age}"
+            )
+        else:
+            parts.append("first known visit" if english else "première venue connue")
+    except Exception:  # noqa: BLE001 — journal absent : on n'affirme rien
+        pass
+    try:
+        rows = await bot.db.fetchall(
+            "SELECT action, created_at FROM sanctions WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC",
+            (guild_id, user_id),
+        )
+    except Exception:  # noqa: BLE001
+        rows = []
+    counts: dict[str, int] = {}
+    last_at = None
+    for sanction in rows:
+        action = str(sanction["action"] or "").lower()
+        if not action or _is_reversal(action):
+            continue
+        counts[action] = counts.get(action, 0) + 1
+        last_at = last_at or int(sanction["created_at"] or now)
+    if counts:
+        total = sum(counts.values())
+        detail = []
+        for action, n in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+            words = _SANCTION_WORDS.get(action, (action, action, action, action))
+            word = words[2:] if english else words[:2]
+            detail.append(f"{n} {word[1] if n > 1 else word[0]}")
+        age = _duree(now - last_at, english)
+        plural = "s" if total > 1 else ""
+        parts.append(
+            f"{total} past sanction{plural} here ({', '.join(detail)}), last {age} ago" if english
+            else f"{total} sanction{plural} passée{plural} ici ({', '.join(detail)}), la dernière il y a {age}"
+        )
+    created = getattr(member, "created_at", None)
+    if created is not None and now - created.timestamp() < 30 * 86400:
+        age = _duree(now - created.timestamp(), english)
+        parts.append(f"account {age} old" if english else f"compte créé il y a {age}")
+    return " · ".join(parts)
+
+
+# Familles de filtres AutoMod, pour résumer l'historique d'un membre en mots.
+_AUTOMOD_FAMILIES = {
+    "antilink": "link", "blacklist_link": "link", "blacklist_word_link": "link",
+    "antiinvite": "invite", "antiscam": "scam",
+    "blacklist_word": "word", "antiinsult": "word",
+    "antimention": "mention",
+    "antispam": "spam", "antispam_duplicate": "spam", "antiemoji": "spam",
+}
+_AUTOMOD_WORDS = {
+    "link": ("lien", "liens", "link", "links"),
+    "invite": ("invitation", "invitations", "invite", "invites"),
+    "scam": ("arnaque", "arnaques", "scam", "scams"),
+    "word": ("mot interdit", "mots interdits", "blocked word", "blocked words"),
+    "mention": ("mentions en masse", "mentions en masse", "mass mention", "mass mentions"),
+    "spam": ("spam", "spams", "spam", "spam"),
+    "other": ("autre", "autres", "other", "other"),
+}
+
+
+def _ordinal(n: int, english: bool) -> str:
+    if not english:
+        return "1er" if n == 1 else f"{n}e"
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+async def automod_memory(bot: Any, guild: Any, member_id: int, *, now: float | None = None) -> str:
+    """Sur une carte AutoMod : le rang de cet incident sur 30 jours, par type, puis
+    ``member_context`` (sanctions du staff, ancienneté, compte récent).
+
+    Un incident = une ligne ``suppression`` dans ``automod_logs`` (une par incident,
+    pas par message supprimé) ; celui de la carte y est déjà écrit.
+    """
+    now = float(now if now is not None else time.time())
+    try:
+        from cogs import language_runtime
+
+        english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+    except Exception:  # noqa: BLE001
+        english = False
+    parts: list[str] = []
+    try:
+        rows = await bot.db.fetchall(
+            "SELECT filter_name FROM automod_logs WHERE guild_id = ? AND user_id = ? "
+            "AND action = 'suppression' AND timestamp >= ?",
+            (int(guild.id), int(member_id), int(now) - 30 * 86400),
+        )
+    except Exception:  # noqa: BLE001
+        rows = []
+    if rows:
+        families: dict[str, int] = {}
+        for row in rows:
+            family = _AUTOMOD_FAMILIES.get(str(row["filter_name"] or ""), "other")
+            families[family] = families.get(family, 0) + 1
+        text = (f"{_ordinal(len(rows), True)} AutoMod incident in 30 d" if english
+                else f"{_ordinal(len(rows), False)} incident AutoMod en 30 j")
+        if len(rows) > 1:
+            detail = []
+            for family, n in sorted(families.items(), key=lambda item: (-item[1], item[0])):
+                words = _AUTOMOD_WORDS[family]
+                word = words[2:] if english else words[:2]
+                detail.append(f"{n} {word[1] if n > 1 else word[0]}")
+            text += f" ({', '.join(detail)})"
+        parts.append(text)
+    context = await member_context(bot, guild, int(member_id), now=now)
     if context:
         parts.append(context)
     return " · ".join(parts)
