@@ -15,7 +15,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("scenario", ["suggestions_e2e.py", "poll_e2e.py", "translation_e2e.py", "log_echo_e2e.py", "welcome_e2e.py", "setup_suggestions_e2e.py", "afk_e2e.py", "security_policy_e2e.py", "mentions_e2e.py", "sentrix_plus_slash_e2e.py", "reminders_e2e.py", "trace_e2e.py", "suites_e2e.py", "config_journal_e2e.py", "ticket_memory_e2e.py", "economy_memory_e2e.py", "join_memory_e2e.py", "automod_memory_e2e.py"])
+@pytest.mark.parametrize("scenario", ["suggestions_e2e.py", "poll_e2e.py", "translation_e2e.py", "log_echo_e2e.py", "welcome_e2e.py", "setup_suggestions_e2e.py", "afk_e2e.py", "security_policy_e2e.py", "mentions_e2e.py", "sentrix_plus_slash_e2e.py", "reminders_e2e.py", "trace_e2e.py", "suites_e2e.py", "config_journal_e2e.py", "ticket_memory_e2e.py", "economy_memory_e2e.py", "join_memory_e2e.py", "automod_memory_e2e.py", "levels_memory_e2e.py"])
 def test_parcours_complet(scenario):
     env = dict(os.environ, DISCORD_TOKEN="ci.fake.token", PYTHONPATH=str(ROOT))
     result = subprocess.run(

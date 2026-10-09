@@ -430,6 +430,62 @@ async def economy_context(bot: Any, guild: Any, target_id: int, actor_id: int | 
     return " · ".join(parts)
 
 
+#: Les commandes par lesquelles le staff crée de l'XP (nom legacy et slash du catalogue).
+XP_COMMANDS = ("add-xp", "set-xp", "levels xp-add", "levels xp-set")
+
+
+async def levels_context(bot: Any, guild: Any, target_id: int, actor_id: int | None = None,
+                         *, now: float | None = None) -> str:
+    """Quand le staff crée de l'XP : le niveau et le rang du membre APRÈS le
+    changement, et les ajouts d'XP du staff sur 30 jours — lus dans le fil des
+    commandes (``sentrix_traces``), où chaque +add-xp / +set-xp réussi est écrit."""
+    now = float(now if now is not None else time.time())
+    try:
+        from cogs import language_runtime
+
+        english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+    except Exception:  # noqa: BLE001
+        english = False
+    guild_id = int(guild.id)
+    parts: list[str] = []
+    try:
+        row = await bot.db.fetchone(
+            "SELECT level, xp FROM levels WHERE guild_id = ? AND user_id = ?", (guild_id, int(target_id)),
+        )
+        if row is not None:
+            level, xp = int(row["level"] or 0), int(row["xp"] or 0)
+            # Même classement que /rank (utils/stats_service.get_rank), sans son cache.
+            above = await bot.db.fetchone(
+                "SELECT COUNT(*) AS n FROM levels WHERE guild_id = ? AND (level > ? OR (level = ? AND xp > ?))",
+                (guild_id, level, level, xp),
+            )
+            rank = int(above["n"] or 0) + 1 if above else 1
+            parts.append(f"level {level} · #{rank} on the server" if english
+                         else f"niveau {level} · {_ordinal(rank, False)} du serveur")
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        await ensure_schema(bot.db)
+        marks = ",".join("?" for _ in XP_COMMANDS)
+        row = await bot.db.fetchone(
+            f"SELECT COUNT(*) AS n FROM sentrix_traces WHERE guild_id = ? AND target_id = ? AND outcome = 'ok' "
+            f"AND command IN ({marks}) AND created_at >= ?",
+            (guild_id, int(target_id), *XP_COMMANDS, int(now) - 30 * 86400),
+        )
+        count = int(row["n"] or 0) if row else 0
+    except Exception:  # noqa: BLE001
+        count = 0
+    # La commande en cours n'est écrite dans le fil qu'à sa fin : la compter ici.
+    if (current_command() or "") in XP_COMMANDS:
+        count += 1
+    if count:
+        parts.append(f"{count} staff XP grant{'s' if count > 1 else ''} in 30 d" if english
+                     else f"{count} ajout{'s' if count > 1 else ''} d'XP du staff en 30 j")
+    if actor_id is not None and int(actor_id) == int(target_id):
+        parts.append("to yourself" if english else "à soi-même")
+    return " · ".join(parts)
+
+
 async def memory_line(bot: Any, guild: Any) -> str:
     """La mémoire de la commande en cours, selon sa famille (sanctions, économie)."""
     target = current_target()
@@ -447,6 +503,8 @@ async def memory_line(bot: Any, guild: Any) -> str:
         return await member_context(bot, guild, target)
     if module == "economy":
         return await economy_context(bot, guild, target, getattr(trace, "actor_id", None))
+    if name in XP_COMMANDS:
+        return await levels_context(bot, guild, target, getattr(trace, "actor_id", None))
     return ""
 
 
@@ -545,4 +603,5 @@ __all__ = [
     "ACTOR", "CURRENT", "RETENTION_SECONDS", "Trace", "classify", "ensure_schema", "is_traced", "lookup",
     "SUITES", "SUITE_PREFIX", "current_command", "current_is_moderation", "current_target", "make_ref", "member_context", "normalise_ref", "purge",
     "economy_context", "memory_line", "parse_suite", "record", "ticket_memory", "suite_command", "suites_view", "target_of", "visible_ref",
+    "automod_memory", "join_memory", "levels_context", "XP_COMMANDS",
 ]
