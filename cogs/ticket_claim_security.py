@@ -629,6 +629,27 @@ def install(bot: commands.Bot) -> None:
                 )
             ),
         )
+        # La mémoire SentriX, pour le seul membre du staff qui prend le ticket :
+        # les tickets d'avant du membre et son contexte. Jamais dans le salon —
+        # le membre n'a pas à lire son propre dossier au milieu de sa demande.
+        try:
+            from utils import sentrix_trace
+
+            memoire = await sentrix_trace.ticket_memory(
+                self.bot, guild, int(ticket["user_id"]), exclude_ticket=int(ticket["id"]),
+            )
+            if memoire:
+                await panels.envoyer(
+                    interaction.followup,
+                    panels.Panneau(
+                        titre="Avant de répondre",
+                        sous_titre=f"<@{int(ticket['user_id'])}> · {memoire}",
+                        kind="info",
+                    ),
+                    ephemere=True,
+                )
+        except Exception:
+            logger.debug("Mémoire du ticket indisponible.", exc_info=True)
 
     async def secure_unclaim(self, interaction: discord.Interaction, ticket):
         guild = interaction.guild

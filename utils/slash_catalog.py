@@ -291,6 +291,7 @@ CATALOG: tuple[SlashEntry, ...] = (
 
     _e("config mod-role", "setmodrole", "Set the staff role."),
     _e("config prefix", "setprefix", "Change the text command prefix."),
+    _e("config history", "config-history", "See recent setting changes and undo them."),
 
     # -------------------------------------------------------------------- Embeds
     _e("embeds create", "embed create", "Create a new embed template."),

@@ -16,6 +16,7 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
+from utils import config_journal
 from utils import sentrix_panels as panels
 from utils import sentrix_trace as trace
 
@@ -38,6 +39,11 @@ async def _traced(ctx, name: str, run):
     invocation = getattr(interaction, "id", None) or getattr(message, "id", None)
     if trace.CURRENT.get() is not None or guild is None or invocation is None:
         return await run()
+    actor_token = trace.ACTOR.set((
+        int(getattr(ctx.author, "id", 0) or 0),
+        "prefix" if interaction is None
+        else "bouton" if interaction.type is discord.InteractionType.component else "slash",
+    ))
     current = trace.Trace(
         ref=trace.make_ref(guild.id, invocation),
         guild_id=guild.id,
@@ -60,7 +66,39 @@ async def _traced(ctx, name: str, run):
         raise
     finally:
         trace.CURRENT.reset(token)
+        trace.ACTOR.reset(actor_token)
         await _finish(ctx, current, error)
+
+
+def _install_actor_on_components() -> None:
+    """Un menu ou un formulaire (/setup) agit au nom de celui qui clique.
+
+    Tous les clics de vues (classiques et Components V2) passent par
+    ``_scheduled_task`` ; toutes les modales aussi. Le journal des réglages y lit
+    l'auteur d'un changement fait depuis /setup.
+    """
+    from discord.ui import view as view_module
+
+    targets = [(getattr(view_module, "BaseView", discord.ui.View), "menu"), (discord.ui.Modal, "formulaire")]
+    for cls, source in targets:
+        original = cls.__dict__.get("_scheduled_task")
+        if original is None or getattr(original, "_sentrix_actor", False):
+            continue
+
+        async def scheduled(self, *args, _original=original, _source=source):
+            interaction = next((a for a in args if isinstance(a, discord.Interaction)), None)
+            user = getattr(interaction, "user", None)
+            if user is None or trace.ACTOR.get() is not None:
+                return await _original(self, *args)
+            token = trace.ACTOR.set((int(user.id), _source))
+            try:
+                return await _original(self, *args)
+            finally:
+                trace.ACTOR.reset(token)
+
+        scheduled._sentrix_actor = True
+        scheduled._sentrix_original = original
+        cls._scheduled_task = scheduled
 
 
 def _install_invoke_wrapper() -> None:
@@ -181,7 +219,10 @@ class Trace(commands.Cog):
         if interaction.type is not discord.InteractionType.component or interaction.guild is None:
             return
         data = interaction.data if isinstance(interaction.data, dict) else {}
-        parsed = trace.parse_suite(str(data.get("custom_id") or ""))
+        custom_id = str(data.get("custom_id") or "")
+        if custom_id.startswith(config_journal.UNDO_PREFIX) and not interaction.response.is_done():
+            return await self._undo_click(interaction, custom_id)
+        parsed = trace.parse_suite(custom_id)
         if parsed is None or interaction.response.is_done():
             return
         sanction, action, target_id, ref = parsed
@@ -213,6 +254,82 @@ class Trace(commands.Cog):
         finally:
             for target in forced:
                 target.__dict__.pop("_parse_arguments", None)
+
+    async def _undo_click(self, interaction: discord.Interaction, custom_id: str) -> None:
+        from utils import access_matrix
+        from utils.audit_trail import journaliser
+
+        decision = await access_matrix.evaluate(
+            self.bot, command_name="config-history", author=interaction.user, guild=interaction.guild,
+        )
+        if not decision.allowed:
+            return await interaction.response.send_message(
+                decision.message or "Vous n'avez pas accès à cette action.", ephemeral=True,
+            )
+        raw = custom_id[len(config_journal.UNDO_PREFIX):]
+        if not raw.isdigit():
+            return await interaction.response.send_message("Changement introuvable.", ephemeral=True)
+        token = trace.ACTOR.set((int(interaction.user.id), "annulation"))
+        try:
+            done, reason, entry = await config_journal.undo(self.bot.db, interaction.guild.id, int(raw))
+        finally:
+            trace.ACTOR.reset(token)
+        if not done:
+            messages = {
+                "missing": "Ce changement n'existe plus dans le journal.",
+                "already": "Ce changement a déjà été annulé.",
+                "changed": "Ce réglage a été modifié depuis : annulez d'abord le changement le plus récent.",
+            }
+            return await interaction.response.send_message(messages.get(reason, "Annulation impossible."), ephemeral=True)
+        field = entry["field"]
+        avant = config_journal.render(interaction.guild, field, entry["new_value"])
+        apres = config_journal.render(interaction.guild, field, entry["old_value"])
+        await journaliser(self.bot, interaction, "config_update", "↩️ Réglage annulé", {
+            "⚙️ Réglage": config_journal.label(field), "Avant": avant, "Après": apres, "N° annulé": f"#{entry['id']}",
+        })
+        await interaction.response.send_message(
+            f"↩️ **{config_journal.label(field)}** : {avant} → {apres} (changement n°{entry['id']} annulé).",
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @commands.command(name="config-history", help="Les derniers changements de réglages, avec annulation.")
+    @commands.guild_only()
+    async def config_history(self, ctx: commands.Context) -> None:
+        entries = await config_journal.recent(self.bot.db, ctx.guild.id, limit=10)
+        try:
+            from cogs import language_runtime
+
+            english = await language_runtime.get_language(self.bot, ctx.guild.id) == language_runtime.LANG_EN
+        except Exception:
+            english = False
+        sources = config_journal.SOURCES_EN if english else config_journal.SOURCES
+        if not entries:
+            return await panels.envoyer(ctx, panels.Panneau(
+                titre="Config history" if english else "Historique des réglages",
+                sous_titre="No setting has changed yet." if english else "Aucun réglage n'a encore changé.",
+                kind="info",
+            ))
+        lignes = []
+        for entry in entries:
+            par = f"<@{entry['actor_id']}>" if entry["actor_id"] else ("system" if english else "système")
+            via = sources.get(str(entry["source"] or ""), str(entry["source"] or ""))
+            etat = ("undone" if english else "annulé") if entry["undone_by"] else ""
+            indice = " · ".join(x for x in (par, via, f"<t:{int(entry['created_at'])}:R>", etat) if x)
+            lignes.append(panels.Ligne(
+                f"n°{entry['id']} · {config_journal.label(entry['field'])}",
+                f"{config_journal.render(ctx.guild, entry['field'], entry['old_value'])} → "
+                f"{config_journal.render(ctx.guild, entry['field'], entry['new_value'])}",
+                indice=indice,
+            ))
+        await panels.envoyer(ctx, panels.Panneau(
+            titre="Config history" if english else "Historique des réglages",
+            sous_titre=("Every change, wherever it came from. A change is only undone if nothing changed since."
+                        if english else
+                        "Chaque changement, d'où qu'il vienne. On n'annule que si rien n'a changé depuis."),
+            sections=[panels.Section("Changes" if english else "Changements", lignes)],
+            kind="info",
+            boutons=config_journal.undo_buttons(list(entries), english=english),
+        ))
 
     @commands.command(name="trace", help="Retrouver une action du staff par sa référence (SX-…).")
     @commands.guild_only()
@@ -248,4 +365,5 @@ class Trace(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     _install_invoke_wrapper()
+    _install_actor_on_components()
     await bot.add_cog(Trace(bot))

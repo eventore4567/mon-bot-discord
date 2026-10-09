@@ -1632,8 +1632,35 @@ async def json_snowflakes(request: web.Request, handler):
     return response
 
 
+@web.middleware
+async def config_actor(request: web.Request, handler):
+    """Un réglage changé depuis le dashboard porte le nom de la personne connectée.
+
+    Le journal des réglages (utils/config_journal.py) lit l'auteur dans
+    sentrix_trace.ACTOR. Posé ici, en middleware, il vaut quelle que soit la
+    couche qui a remplacé _manageable_guild (trois le font).
+    """
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.path.startswith("/api/"):
+        try:
+            session, error = _require_session(request)
+        except Exception:
+            session, error = None, True
+        user_id = ((session or {}).get("user") or {}).get("id") if not error else None
+        if user_id:
+            from utils import sentrix_trace
+
+            token = sentrix_trace.ACTOR.set((int(user_id), "dashboard"))
+            try:
+                return await handler(request)
+            finally:
+                sentrix_trace.ACTOR.reset(token)
+    return await handler(request)
+
+
 def build_app(bot) -> web.Application:
-    app = web.Application(middlewares=[canonical_host, security_headers, json_snowflakes], client_max_size=64 * 1024)
+    app = web.Application(
+        middlewares=[canonical_host, security_headers, json_snowflakes, config_actor], client_max_size=64 * 1024,
+    )
     app["bot"] = bot
     app["sessions"] = {}
     app["oauth_states"] = {}

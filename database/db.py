@@ -1843,11 +1843,24 @@ class Database:
 
     async def set_guild_config(self, guild_id: int, field: str, value):
         await self.ensure_guild(guild_id)
+        # Valeur d'AVANT, pour le journal des réglages (utils/config_journal.py) :
+        # toutes les écritures — /setup, dashboard, commandes — passent ici.
+        try:
+            before_row = await self.get_guild_config(guild_id)
+            before = before_row[field] if before_row is not None else None
+        except (KeyError, IndexError, TypeError):
+            before = None
         await self.execute(
             f"UPDATE guild_config SET {field} = ? WHERE guild_id = ?", (value, guild_id)
         )
         # Invalide le cache : la prochaine lecture ira chercher la ligne à jour.
         self._guild_config_cache.pop(guild_id, None)
+        try:
+            from utils import config_journal
+
+            await config_journal.record(self, int(guild_id), field, before, value)
+        except Exception:
+            logging.getLogger("bot.database").warning("Journal des réglages indisponible pour %s", field, exc_info=True)
         # Poser une ressource (salon de bienvenue, autorôle...) active le module
         # correspondant s'il n'était pas encore configuré — même règle pour /setup, le
         # Dashboard et les commandes. Import paresseux : database ne dépend pas de cogs.

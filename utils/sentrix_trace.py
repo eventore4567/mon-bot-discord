@@ -51,6 +51,13 @@ class Trace:
 
 CURRENT: contextvars.ContextVar[Trace | None] = contextvars.ContextVar("sentrix_trace", default=None)
 
+#: Qui agit, et par quel canal, pendant l'écriture en cours : (identifiant, source).
+#: Posé par les commandes (cogs/trace.py), les menus et formulaires (/setup) et le
+#: dashboard ; lu par le journal des réglages (utils/config_journal.py).
+ACTOR: contextvars.ContextVar[tuple[int | None, str] | None] = contextvars.ContextVar(
+    "sentrix_actor", default=None,
+)
+
 
 def make_ref(guild_id: int, invocation_id: int) -> str:
     """7 caractères (35 bits) dérivés de l'invocation : stable et sans collision pratique."""
@@ -181,6 +188,44 @@ async def member_context(bot: Any, guild: Any, target_id: int, *, now: float | N
     return " · ".join(parts)
 
 
+async def ticket_memory(bot: Any, guild: Any, user_id: int, *, exclude_ticket: int | None = None,
+                        now: float | None = None) -> str:
+    """Ce qu'un membre du staff doit savoir en prenant un ticket : les tickets d'avant
+    du membre, puis son contexte de modération (``member_context``)."""
+    now = float(now if now is not None else time.time())
+    try:
+        from cogs import language_runtime
+
+        english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+    except Exception:  # noqa: BLE001
+        english = False
+    parts: list[str] = []
+    try:
+        rows = await bot.db.fetchall(
+            "SELECT id, status, created_at FROM tickets WHERE guild_id = ? AND user_id = ? AND id != ? "
+            "ORDER BY created_at DESC",
+            (int(guild.id), int(user_id), int(exclude_ticket or 0)),
+        )
+    except Exception:  # noqa: BLE001
+        rows = []
+    if rows:
+        last = rows[0]
+        age = _duree(now - int(last["created_at"] or now), english)
+        state = str(last["status"] or "")
+        if english:
+            state = {"ouvert": "still open", "ferme": "closed", "supprime": "closed and deleted"}.get(state, state)
+            parts.append(f"{len(rows)} earlier ticket{'s' if len(rows) > 1 else ''} (last {age} ago, {state})")
+        else:
+            state = {"ouvert": "encore ouvert", "ferme": "fermé", "supprime": "fermé et supprimé"}.get(state, state)
+            parts.append(f"{len(rows)} ticket{'s' if len(rows) > 1 else ''} avant celui-ci (dernier il y a {age}, {state})")
+    else:
+        parts.append("first ticket" if english else "premier ticket")
+    context = await member_context(bot, guild, int(user_id), now=now)
+    if context:
+        parts.append(context)
+    return " · ".join(parts)
+
+
 def current_target() -> int | None:
     trace = CURRENT.get()
     return target_of(trace.ctx) if trace is not None and trace.ctx is not None else None
@@ -273,7 +318,7 @@ def target_of(ctx: Any) -> int | None:
 
 
 __all__ = [
-    "CURRENT", "RETENTION_SECONDS", "Trace", "classify", "ensure_schema", "is_traced", "lookup",
+    "ACTOR", "CURRENT", "RETENTION_SECONDS", "Trace", "classify", "ensure_schema", "is_traced", "lookup",
     "SUITES", "SUITE_PREFIX", "current_command", "current_is_moderation", "current_target", "make_ref", "member_context", "normalise_ref", "purge",
-    "parse_suite", "record", "suite_command", "suites_view", "target_of", "visible_ref",
+    "parse_suite", "record", "ticket_memory", "suite_command", "suites_view", "target_of", "visible_ref",
 ]

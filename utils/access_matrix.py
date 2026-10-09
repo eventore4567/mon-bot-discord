@@ -342,6 +342,8 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         # Listées fail-closed par l'audit V41 en production le 08/10/2026 ;
         # même niveau que leurs voisines et que leur décorateur (Administrateur).
         "notifs-status", "notifs-test",
+        # Journal des réglages et annulation (cogs/trace.py) : même niveau que /setup.
+        "config-history",
         "set-nickname", "alias", "diagnostic", "staff-diagnostic",
         # Anciennement fail-closed par oubli
         "suivi-bot", "server-audit", "healthcheck",
