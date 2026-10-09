@@ -114,6 +114,7 @@ EXTENSIONS = [
     "cogs.suggestions",
     "cogs.poll_ui",
     "cogs.translation",
+    "cogs.trace",
     "cogs.guild_arrival",
     "cogs.notifications",
     "cogs.ai",

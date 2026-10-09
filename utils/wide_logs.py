@@ -1290,6 +1290,11 @@ class WideLogView(discord.ui.LayoutView):
         footer_text = _trace_footer(event_type, footer)
         if time_text:
             footer_text = f"{time_text} · {footer_text}"
+        from utils.sentrix_trace import visible_ref
+
+        reference = visible_ref()
+        if reference:
+            footer_text = f"{footer_text} · Réf. {reference}"
         container.add_item(discord.ui.TextDisplay(f"-# {footer_text}"))
 
         rows = build_rows(old_view)

@@ -677,7 +677,16 @@ class Panneau(discord.ui.LayoutView):
             pied_net,
             flags=_re.IGNORECASE,
         ).strip()
-        if pied_net and pied_net.casefold() not in {"sentrix", "sentrix core"}:
+        if pied_net.casefold() in {"sentrix", "sentrix core"}:
+            pied_net = ""
+        # Le fil SentriX : une action du staff porte sa référence, la même que
+        # sur sa carte de log (utils/sentrix_trace.py).
+        from utils.sentrix_trace import visible_ref
+
+        reference = visible_ref()
+        if reference:
+            pied_net = f"{pied_net} · Réf. {reference}" if pied_net else f"Réf. {reference}"
+        if pied_net:
             conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(pied_net, 240)}"))
 
         # 5 — navigation, DANS le conteneur pour rester sous l'accent de couleur.
@@ -1481,7 +1490,40 @@ async def texte_court(
     aucune mention n'est jamais notifiée — la mention reste lisible sans réveiller
     personne.
     """
-    kwargs: dict[str, Any] = {"content": str(message), "allowed_mentions": _MENTIONS_AUCUNE}
+    texte = str(message)
+    # Le fil SentriX : la confirmation d'une action du staff porte sa référence,
+    # la même que sur la carte de log (utils/sentrix_trace.py).
+    from utils import sentrix_trace
+
+    reference = sentrix_trace.visible_ref()
+    if reference and "Réf. SX-" not in texte:
+        # La mémoire SentriX : une sanction rappelle ce que le serveur sait déjà
+        # du membre visé (sanctions récentes, ancienneté, compte récent).
+        contexte = ""
+        cible = sentrix_trace.current_target() if sentrix_trace.current_is_moderation() else None
+        guild = getattr(destination, "guild", None) or getattr(getattr(destination, "_parent", None), "guild", None)
+        bot = getattr(destination, "bot", None) or getattr(destination, "client", None) or getattr(
+            getattr(destination, "_parent", None), "client", None,
+        )
+        if cible and guild is not None and bot is not None:
+            try:
+                contexte = await sentrix_trace.member_context(bot, guild, cible)
+            except Exception:  # noqa: BLE001 — le contexte ne doit jamais bloquer la réponse
+                contexte = ""
+            # Les suites : les gestes logiques d'après, en boutons (cogs/trace.py).
+            if "view" not in extra:
+                try:
+                    from cogs import language_runtime
+
+                    english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+                except Exception:  # noqa: BLE001
+                    english = False
+                suites = sentrix_trace.suites_view(sentrix_trace.current_command() or "", cible, reference,
+                                                   english=english)
+                if suites is not None:
+                    extra = {**extra, "view": suites}
+        texte = f"{texte}\n-# {contexte + ' · ' if contexte else ''}Réf. {reference}"
+    kwargs: dict[str, Any] = {"content": texte, "allowed_mentions": _MENTIONS_AUCUNE}
     kwargs.update(extra)
 
     jeton = TEXTE_BRUT.set(True)

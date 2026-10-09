@@ -332,6 +332,8 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("counter stop", "infinit stop", "Pause the counting game."),
     _e("counter resume", "infinit resume", "Resume the counting game."),
 
+    _e("logs trace", "trace", "Find a staff action by its reference."),
+
     # Fonctions de cogs/sentrix_plus.py : elles existaient, mais seulement en +,
     # et masquées de l'aide par apply_surface faute de classement (08/10/2026).
     _e("sticky set", "sticky-set", "Keep a message at the bottom of a channel."),
@@ -673,6 +675,7 @@ OPTION_OVERRIDES: dict[tuple[str, str], str] = {
     ("translate text", "text"): "The text to translate.",
     ("translate text", "language"): "Target language, e.g. en, es, de.",
     ("remind cancel", "id"): "Reminder ID, from /remind list.",
+    ("logs trace", "reference"): "The reference shown on the response, e.g. SX-7K4QF2M.",
     ("schedule cancel", "id"): "Message ID, from /schedule list.",
     ("starboard setup", "threshold"): "Reactions needed, from 2 to 25.",
     ("starboard setup", "channel"): "Where popular messages are reposted.",

@@ -228,13 +228,18 @@ def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> st
     )
     target = _first_snowflake(sample)
 
+    # Ces sanctions ont un ÉCHO Discord (on_member_ban, journal d'audit…) qui
+    # produit sa propre carte : la clé (événement, cible) fusionne la carte de la
+    # commande et celle de l'écho. Pas l'avertissement : il n'existe que dans
+    # SentriX, sans écho — deux avertissements réels du même membre en moins de
+    # 8 s n'en faisaient qu'une carte (mesuré le 09/10/2026 : 3 avertissements,
+    # 3 dossiers en base, 1 seule carte).
     if event_type in {
         "member_ban",
         "member_unban",
         "member_kick",
         "member_timeout",
         "member_untimeout",
-        "member_warn",
     }:
         return f"semantic:{guild_id}:{event_type}:{target}" if target else None
 

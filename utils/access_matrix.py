@@ -215,6 +215,9 @@ SUBCOMMAND_TIERS: dict[str, str] = {
 }
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
+    # Le fil SentriX (cogs/trace.py) : relire une action du staff, comme on lit
+    # le journal d'audit de Discord.
+    "trace": "view_audit_log",
     # Vérification : elle réécrit les permissions de TOUS les salons pour le rôle
     # Vérifié. Son code exige Administrateur (sentrix_verification_v96) ; classée
     # « configuration », la décision centrale disait « Gérer le serveur » et un
