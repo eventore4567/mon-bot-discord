@@ -17,6 +17,7 @@ Aucun token utilisateur, token du bot ou secret OAuth n'est envoyé au navigateu
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 import os
 import secrets
@@ -1586,8 +1587,53 @@ async def security_headers(request: web.Request, handler):
     return response
 
 
+_JS_SAFE_INTEGER = 2 ** 53 - 1
+
+
+def _js_safe(value):
+    """Les identifiants Discord en texte : au-delà de 2^53, JavaScript les arrondit."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and abs(value) > _JS_SAFE_INTEGER:
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _js_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_js_safe(item) for item in value]
+    return value
+
+
+@web.middleware
+async def json_snowflakes(request: web.Request, handler):
+    """Toute réponse JSON de l'API sort avec ses identifiants Discord en texte.
+
+    guild_config part tel quel (des entiers) ; JSON.parse lisait le salon
+    1419685149431566447 comme 1419685149431566300 (mesuré au moteur Node le
+    08/10/2026). Le dashboard comparait ensuite String(valeur) aux identifiants
+    des salons et rôles — aucun ne correspondait, et chaque réglage configuré
+    s'affichait « Aucun salon » / « Aucun rôle ». Corrigé ici, en un point,
+    plutôt que dans chacune des fabriques de réponses.
+    """
+    response = await handler(request)
+    if (
+        request.path.startswith("/api/")
+        and isinstance(response, web.Response)
+        and response.content_type == "application/json"
+        and isinstance(response.body, (bytes, bytearray))
+        and response.body
+    ):
+        try:
+            data = json.loads(response.body)
+        except ValueError:
+            return response
+        safe = _js_safe(data)
+        if safe != data:
+            response.body = json.dumps(safe).encode("utf-8")
+    return response
+
+
 def build_app(bot) -> web.Application:
-    app = web.Application(middlewares=[canonical_host, security_headers], client_max_size=64 * 1024)
+    app = web.Application(middlewares=[canonical_host, security_headers, json_snowflakes], client_max_size=64 * 1024)
     app["bot"] = bot
     app["sessions"] = {}
     app["oauth_states"] = {}

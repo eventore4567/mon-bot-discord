@@ -52,6 +52,7 @@ RUN python -m pytest -q \
     tests/test_command_registry_audit.py \
     tests/test_discord_command_publish_audit.py \
     tests/test_dashboard_feedback_reports.py \
+    tests/test_dashboard_json_snowflakes.py \
     tests/test_guild_departure_notify.py \
     tests/test_ai_disable_guard_loading.py \
     tests/test_ai_actions_permissions.py \
