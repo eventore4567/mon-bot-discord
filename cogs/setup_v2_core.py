@@ -310,6 +310,12 @@ async def note_guild_config_change(bot: commands.Bot, guild_id: int, field: str,
         return
     try:
         await enable_module_if_unset(bot, guild_id, module)
+    except ModuleSetupRequired as exc:
+        # Attendu : la ressource posée ne suffit pas encore (ex. salon des logs de
+        # tickets choisi avant la catégorie). Le module reste non activé, à juste
+        # titre — ce n'est pas une erreur, et la trace complète polluait les logs
+        # de production (plusieurs fois par réglage).
+        logger.info("Module %s pas encore activable guild=%s : %s", module, guild_id, exc)
     except Exception:
         logger.exception("Activation implicite du module %s impossible guild=%s", module, guild_id)
 

@@ -152,8 +152,6 @@ async def _publish_verification(bot, guild: discord.Guild, *, channel: discord.T
 
 
 async def _ticket_panel_send(bot, guild: discord.Guild, panel_id: int):
-    from cogs.tickets import TicketPanelView
-
     cog = bot.get_cog("Tickets")
     if cog is None:
         raise RuntimeError("Le module Tickets n'est pas disponible.")
@@ -167,19 +165,25 @@ async def _ticket_panel_send(bot, guild: discord.Guild, panel_id: int):
     ticket_types = await cog.get_panel_types(panel_id)
     if not ticket_types:
         raise ValueError("Ajoutez au moins un type de ticket avant de publier le panel.")
-    embed = cog.build_panel_embed(panel)
-    view = TicketPanelView(panel, ticket_types)
-    message_id = panel["message_id"]
-    if message_id:
+    # Même publication que le bouton Discord (Tickets.send_panel) : le rendu
+    # actuel du panneau, l'ancien message remplacé. L'ancien appel
+    # cog.build_panel_embed n'existait plus — chaque « Publier » du dashboard
+    # finissait en erreur 500 (production, 10/10/2026, 6 essais d'un admin).
+    from utils import sentrix_panels as panels
+
+    built = await cog.build_public_panel(panel, ticket_types)
+    old_message_id = panel["message_id"]
+    if old_message_id:
         try:
-            message = await channel.fetch_message(int(message_id))
-            await message.edit(embed=embed, view=view)
-            return message.id, "mis à jour"
+            old = await channel.fetch_message(int(old_message_id))
+            await old.delete()
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             pass
-    message = await channel.send(embed=embed, view=view)
-    await bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ? WHERE id = ?", (message.id, panel_id))
-    return message.id, "publié"
+    message = await panels.envoyer(channel, built)
+    await bot.db.execute(
+        "UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?", (message.id, channel.id, panel_id),
+    )
+    return message.id, "mis à jour" if old_message_id else "publié"
 
 
 async def handle_v62_post(request: web.Request) -> web.Response:
