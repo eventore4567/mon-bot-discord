@@ -21,9 +21,12 @@ def test_une_unite_apres_un_nombre_est_gardee():
 
 
 def test_une_decoration_reste_retiree():
-    assert embeds.strip_emojis("🎉 Bravo") == " Bravo"
-    assert embeds.strip_emojis("Niveau 5 ✅") == "Niveau 5 "
-    assert embeds.strip_emojis("Il a 20 ans 😀 ok") == "Il a 20 ans  ok"
+    # …et son espace part avec elle : plus de « ##  Titre » ni d'espace pendant.
+    assert embeds.strip_emojis("🎉 Bravo") == "Bravo"
+    assert embeds.strip_emojis("Niveau 5 ✅") == "Niveau 5"
+    assert embeds.strip_emojis("Il a 20 ans 😀 ok") == "Il a 20 ans ok"
+    assert embeds.strip_emojis("## 👤 Profil de Jayden") == "## Profil de Jayden"
+    assert embeds.strip_emojis("Banque : 0 🏦\nTotal : 5 🪙") == "Banque : 0\nTotal : 5 🪙"
 
 
 def test_le_symbole_configure_par_un_serveur_devient_une_unite():

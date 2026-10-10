@@ -69,6 +69,30 @@ UNIT_EMOJIS: set[str] = {"🪙", "💰", "💎", "💵", "💶", "💷", "💴",
 _UNIT_EMOJI_RE = re.compile(r"(\d(?:\*\*)?\s?)(<a?:\w+:\d+>|[^\s\w*.,:;!?()\[\]<>/\\-]+)")
 
 
+# « 3 message(s) supprimé(s) », « 1 salon(s) » : 193 tournures « {n} mot(s) » dans
+# le bot. Accordées ici, au rendu, où passent tous les textes : le nombre est
+# connu, le ou les mots qui suivent prennent le pluriel français (à partir de 2).
+_PLURIEL_RE = re.compile(
+    r"(?<![\w/.,])(\d[\d\u00a0\u202f ]*(?:[.,]\d+)?)(\*\*)?(\s+)"
+    r"((?:[A-Za-zÀ-ÿ'’-]+\(s\)(?:\s+|(?=[.,;:!?)»…*])|$))+)"
+)
+
+
+def accorder_pluriels(text: str) -> str:
+    """« 1 salon(s) » → « 1 salon », « 3 message(s) supprimé(s) » → « 3 messages supprimés »."""
+
+    def _accord(match: re.Match) -> str:
+        brut = re.sub(r"[\u00a0\u202f ]", "", match.group(1)).replace(",", ".")
+        try:
+            pluriel = abs(float(brut)) >= 2
+        except ValueError:
+            return match.group(0)
+        mots = match.group(4).replace("(s)", "s" if pluriel else "")
+        return f"{match.group(1)}{match.group(2) or ''}{match.group(3)}{mots}"
+
+    return _PLURIEL_RE.sub(_accord, text) if "(s)" in text else text
+
+
 def strip_emojis(value: Any) -> str:
     """Retire les pictogrammes décoratifs — sauf dans un mini-jeu.
 
@@ -93,8 +117,19 @@ def strip_emojis(value: Any) -> str:
         return match.group(0)
 
     text = _UNIT_EMOJI_RE.sub(_garder, text)
-    text = _CUSTOM_EMOJI_RE.sub("", text)
-    text = "".join(char for char in text if char == "\x00" or not _is_emoji_codepoint(ord(char)))
+    # L'emoji retiré laisse une marque (\x01) : son espace part avec lui. Avant,
+    # « ## 👤 Profil » devenait « ##  Profil » et « Banque : 0 🏦 » gardait un
+    # espace pendant — des phrases visiblement « trouées » partout.
+    text = _CUSTOM_EMOJI_RE.sub("\x01", text)
+    text = "".join(
+        char if char == "\x00" or not _is_emoji_codepoint(ord(char)) else "\x01" for char in text
+    )
+    text = re.sub(r"\x01+", "\x01", text)
+    text = re.sub(r" \x01 ", " ", text)
+    text = re.sub(r"(?m)^\x01 ", "", text)
+    text = re.sub(r"(?m) \x01$", "", text)
+    text = text.replace("\x01", "")
+    text = accorder_pluriels(text)
     return re.sub(r"\x00(\d+)\x00", lambda m: unites[int(m.group(1))], text)
 
 

@@ -85,6 +85,15 @@ async def main() -> int:
     check(f"+50 XP" in shown and "+25 🪙" in shown and MARK in shown,
           "+stats après de l'XP et de l'argent : « +50 XP, +25 🪙 … depuis votre dernier coup d'œil »", shown[-300:])
 
+    # +stats est le profil général : il marche même sans le module Niveaux (plainte
+    # du 10/10/2026 — « +stats ne marche plus » sur un serveur sans niveaux configurés).
+    core = sys.modules["cogs.setup_v2_core"]
+    await core.set_module_enabled(bot, h.GID, "levels", False)
+    shown = await run("+stats", MEMBER)
+    check("Profil" in shown and "désactivé" not in shown, "+stats marche sans le module Niveaux", shown[:160])
+    shown = await run("+level", MEMBER)
+    check("désactivé" in shown, "+level, lui, reste réservé aux serveurs avec niveaux", shown[:160])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

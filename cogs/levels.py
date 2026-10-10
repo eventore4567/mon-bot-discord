@@ -657,6 +657,12 @@ class _LevelRepairConfirmView(discord.ui.View):
         self.stop()
 
 
+def _points(value) -> str:
+    """« 0 point », « 1 point », « 12 points » — plus de « point(s) »."""
+    number = int(value or 0)
+    return f"{stats_service.format_number(number)} point{'s' if abs(number) > 1 else ''}"
+
+
 class Levels(commands.Cog, name="Levels"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -964,7 +970,7 @@ class Levels(commands.Cog, name="Levels"):
         )
         e.set_thumbnail(url=member.display_avatar.url)
         if levels_enabled:
-            e.add_field(name="📈 Niveau", value=f"Niveau {stats['current_level']}", inline=True)
+            e.add_field(name="📈 Niveau", value=str(stats['current_level']), inline=True)
             e.add_field(
                 name="🏆 Classement",
                 value=(f"#{stats['rank']}" if stats["is_ranked"] else "Non classé"),
@@ -991,7 +997,7 @@ class Levels(commands.Cog, name="Levels"):
                 inline=True,
             )
         if settings.get("show_reputation", True):
-            e.add_field(name="⭐ Réputation", value=f"{stats_service.format_number(stats['reputation'])} point(s)", inline=True)
+            e.add_field(name="⭐ Réputation", value=_points(stats['reputation']), inline=True)
         if settings.get("show_join_date", True):
             e.add_field(
                 name="📅 Membre depuis",
@@ -1646,7 +1652,7 @@ class Levels(commands.Cog, name="Levels"):
                 inline=True,
             )
         if settings.get("show_reputation", True):
-            e.add_field(name="⭐ Réputation", value=f"{stats_service.format_number(stats['reputation'])} point(s)", inline=True)
+            e.add_field(name="⭐ Réputation", value=_points(stats['reputation']), inline=True)
         e.add_field(name="📝 Bio", value=(bio_row["bio"] if bio_row and bio_row["bio"] else "Aucune bio définie."), inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
@@ -1689,7 +1695,7 @@ class Levels(commands.Cog, name="Levels"):
         settings = await self.bot.db.get_stats_settings(ctx.guild.id)
         total = await self.bot.db.get_reputation(ctx.guild.id, membre.id)
         remaining = await self.bot.db.get_reputation_cooldown_remaining(ctx.guild.id, ctx.author.id, settings.get("reputation_cooldown", 86400))
-        e = embeds.neutral(f"⭐ Réputation de {membre.display_name}", f"{stats_service.format_number(total)} point(s)")
+        e = embeds.neutral(f"⭐ Réputation de {membre.display_name}", _points(total))
         if remaining > 0:
             h, m = remaining // 3600, (remaining % 3600) // 60
             e.add_field(name="Votre prochain +rep disponible dans", value=f"{h}h{m:02d}m", inline=False)
@@ -1716,7 +1722,7 @@ class Levels(commands.Cog, name="Levels"):
             rank += 1
             if rank > 10:
                 break
-            lines.append(f"**{rank}.** {name} — {stats_service.format_number(r['reputation'])} point(s)")
+            lines.append(f"**{rank}.** {name} — {_points(r['reputation'])}")
         if not lines:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.info("Aucune donnée de réputation pour l'instant.")))
         await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral('⭐ Classement de réputation', '\n'.join(lines))))

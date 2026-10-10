@@ -54,7 +54,7 @@ ECONOMY_COMMANDS = frozenset({
     "sell", "gamble", "deposit", "withdraw", "banque", "slots", "blackjack",
     "coinflip", "dice", "luckyroll", "highlow",
 })
-LEVEL_COMMANDS = frozenset({"level", "rank", "leaderboard-levels", "voice-time", "stats", "me"})
+LEVEL_COMMANDS = frozenset({"level", "rank", "leaderboard-levels", "voice-time", "me"})  # +stats : profil général
 AI_COMMANDS = frozenset({
     "sentrix", "ask", "chat", "chat-reset", "summarize", "image-prompt", "image",
     "explain", "rewrite", "fact-check", "ai", "improve", "correct", "ai-translate", "code",

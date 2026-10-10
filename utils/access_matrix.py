@@ -612,7 +612,11 @@ def module_for_command(name: str) -> str | None:
                     "market-cancel", "market-find", "market-history",
                     "market-my", "transactions", "shopwindow"}:
             return "economy"
-        if name in {"stats", "me", "level", "rank", "leaderboard-levels",
+        # « stats » n'y est plus : c'est le profil GÉNÉRAL (messages, vocal, économie,
+        # réputation) ; la fiche cache elle-même la partie niveaux quand le module est
+        # coupé. Rattaché aux niveaux, +stats était refusé sur tout serveur sans
+        # niveaux configurés (« absent = non configuré = inactif »).
+        if name in {"me", "level", "rank", "leaderboard-levels",
                     "level-roles", "profile", "set-bio", "rep", "reputation",
                     "repleaderboard", "voice-time", "progress", "achievements", "achievements-v21",
                     "profilecard"}:
