@@ -790,6 +790,16 @@ async def send_log(
     event_type = _event_from_key(event_key) or canonical_event_type(
         log_type, embed.title or "", embed.description or ""
     )
+    # Certains producteurs historiques indiquent seulement « resources » au
+    # lieu de « invite_create ». Le titre dit pourtant bien « Invitation créée » :
+    # sans reclassement, le renderer affiche « Item · Toxic » et la déduplication
+    # ne rencontre jamais le log gateway de la même invitation.
+    if event_type == "resources":
+        detected = canonical_event_type(
+            "", embed.title or "", embed.description or ""
+        )
+        if detected in {"invite_create", "invite_delete"}:
+            event_type = detected
     category = category_for(event_type, embed.title or "", embed.description or "")
 
     from utils import embeds as embeds_mod
