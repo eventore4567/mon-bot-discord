@@ -86,8 +86,10 @@ def _hierarchy_refusal_panel(message: str) -> panels.Panneau | None:
     """
     texte = str(message or "").casefold()
     if "ne peut pas sanctionner ce membre" in texte:
-        titre = "Sanction impossible"
-        explication = "Le rôle du membre est égal ou supérieur au rôle de SentriX."
+        # Nickname, move et ban partagent ce contrôle : ce n'est pas toujours
+        # une « sanction ». Garder un titre exact pour chaque opération.
+        titre = "Action impossible"
+        explication = "Le rôle du membre est égal ou supérieur à celui de SentriX."
     elif "ne peut pas gérer ce rôle" in texte:
         titre = "Rôle inaccessible"
         explication = "Ce rôle est égal ou supérieur au rôle de SentriX."
@@ -101,9 +103,8 @@ def _hierarchy_refusal_panel(message: str) -> panels.Panneau | None:
             panels.Section(
                 "Comment corriger",
                 texte=(
-                    "Ouvrez **Paramètres du serveur → Rôles**, puis placez "
-                    "**SentriX** au-dessus du rôle concerné. Vérifiez aussi "
-                    "que le bot dispose de la permission nécessaire."
+                    "Dans **Paramètres du serveur → Rôles**, placez le rôle "
+                    "**SentriX** au-dessus de celui du membre concerné."
                 ),
             ),
         ],
