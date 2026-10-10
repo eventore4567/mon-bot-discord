@@ -364,9 +364,12 @@ class ModuleToggle(discord.ui.Button):
                 self.owner.bot, self.owner.guild.id, self.module, not enabled, actor_id=interaction.user.id
             )
         except setup_v2_core.ModuleSetupRequired as exc:
-            return await panels.envoyer(
+            # sx_panels : « panels » n'existe pas dans ce module — le bouton
+            # « Désactiver » des notifications plantait (NameError, mesuré par
+            # tools/setup_sweep.py) au lieu d'expliquer ce qui manque.
+            return await sx_panels.envoyer(
                 interaction.response,
-                panels.depuis_embed(embeds.warning(str(exc))),
+                sx_panels.depuis_embed(embeds.warning(str(exc))),
                 ephemere=True,
             )
         await self.owner.refresh(interaction)

@@ -392,25 +392,34 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             )
         )
 
-        for index, key in enumerate(CATEGORY_ORDER):
+        # Une section + texte + bouton par catégorie coûtait 33 composants pour 11
+        # catégories : l'écran dépassait la limite Discord de 40 et le bouton
+        # « Paramètres avancés » échouait (« Échec de l'interaction », mesuré par
+        # tools/setup_sweep.py). La liste tient en un texte, l'accès en un menu.
+        lignes = []
+        for key in CATEGORY_ORDER:
             emoji, label, description = CATEGORY_META[key]
             state = v73._short_state(states.get(key, "—"))
-            button = discord.ui.Button(label="Configurer", style=discord.ButtonStyle.secondary)
+            lignes.append(f"{emoji} **{label}** · {state}\n-# {description}")
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay("\n".join(lignes)[:3900]))
 
-            async def open_page(interaction: discord.Interaction, category=key):
-                self.page = category
-                self.backend = self._new_backend(category)
-                await self.refresh(interaction)
+        menu = discord.ui.Select(
+            placeholder="Ouvrir une catégorie…",
+            options=[
+                discord.SelectOption(label=CATEGORY_META[key][1][:100], value=key, emoji=CATEGORY_META[key][0])
+                for key in CATEGORY_ORDER
+            ][:25],
+        )
 
-            button.callback = open_page
-            container.add_item(
-                discord.ui.Section(
-                    discord.ui.TextDisplay(f"## {emoji} {label}\n{description}\n**{state}**"),
-                    accessory=button,
-                )
-            )
-            if index in {1, 4}:
-                container.add_item(discord.ui.Separator())
+        async def open_page(interaction: discord.Interaction):
+            category = menu.values[0]
+            self.page = category
+            self.backend = self._new_backend(category)
+            await self.refresh(interaction)
+
+        menu.callback = open_page
+        container.add_item(discord.ui.ActionRow(menu))
 
         simple = discord.ui.Button(label="Écran simple", style=discord.ButtonStyle.primary)
         refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, emoji="🔄")
