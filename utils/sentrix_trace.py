@@ -47,6 +47,8 @@ class Trace:
     #: La commande en cours : son nom définitif n'est connu qu'une fois la
     #: sous-commande résolue (Group.invoke met ctx.command à jour).
     ctx: Any = field(default=None, repr=False, compare=False)
+    #: Référence de l'action dont celle-ci est la suite (bouton de suite), ou "".
+    origin: str = ""
 
 
 CURRENT: contextvars.ContextVar[Trace | None] = contextvars.ContextVar("sentrix_trace", default=None)
@@ -61,6 +63,29 @@ ACTOR: contextvars.ContextVar[tuple[int | None, str] | None] = contextvars.Conte
 
 #: Transport d'une trace qu'aucune personne n'a lancée : SentriX agit seul (AutoMod).
 AUTOMATIC = "automatique"
+
+#: Pendant l'exécution d'un bouton de suite : la référence de l'action d'origine.
+#: La trace de la suite la garde dans son détail (« suite de SX-… ») — le fil se
+#: lit alors dans les deux sens, sans colonne supplémentaire.
+ORIGIN: contextvars.ContextVar[str | None] = contextvars.ContextVar("sentrix_origin", default=None)
+SUITE_MARK = "suite de "
+
+
+def origin_of(detail: str | None) -> str:
+    """« suite de SX-ABC1234 · CheckFailure » -> « SX-ABC1234 »."""
+    text = str(detail or "")
+    if not text.startswith(SUITE_MARK):
+        return ""
+    return text[len(SUITE_MARK):].split(" ", 1)[0]
+
+
+async def follow_ups(db: Any, guild_id: int, ref: str, limit: int = 5) -> list[Any]:
+    """Les actions lancées depuis les boutons de suite de ``ref``, les plus récentes d'abord."""
+    await ensure_schema(db)
+    return list(await db.fetchall(
+        "SELECT * FROM sentrix_traces WHERE guild_id = ? AND detail LIKE ? ORDER BY created_at DESC LIMIT ?",
+        (int(guild_id), f"{SUITE_MARK}{normalise_ref(ref)}%", int(limit)),
+    ))
 
 
 def make_ref(guild_id: int, invocation_id: int) -> str:
@@ -618,5 +643,6 @@ __all__ = [
     "ACTOR", "CURRENT", "RETENTION_SECONDS", "Trace", "classify", "ensure_schema", "is_traced", "lookup",
     "SUITES", "SUITE_PREFIX", "current_command", "current_is_moderation", "current_target", "make_ref", "member_context", "normalise_ref", "purge",
     "economy_context", "memory_line", "parse_suite", "record", "ticket_memory", "suite_command", "suites_view", "target_of", "visible_ref",
-    "automod_memory", "join_memory", "levels_context", "XP_COMMANDS", "AUTOMATIC",
+    "automod_memory", "join_memory", "levels_context", "XP_COMMANDS", "AUTOMATIC", "ORIGIN", "follow_ups",
+    "origin_of",
 ]

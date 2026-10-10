@@ -56,6 +56,7 @@ async def _traced(ctx, name: str, run):
         actor_id=int(getattr(ctx.author, "id", 0) or 0),
         channel_id=getattr(getattr(ctx, "channel", None), "id", None),
         ctx=ctx,
+        origin=trace.ORIGIN.get() or "",
     )
     token = trace.CURRENT.set(current)
     error: BaseException | None = None
@@ -144,6 +145,8 @@ async def _finish(ctx, current: trace.Trace, error: BaseException | None) -> Non
     outcome, detail = trace.classify(error if isinstance(error, Exception) else None)
     if outcome == "ok" and getattr(ctx, "command_failed", False):
         outcome = "échec"
+    if current.origin:
+        detail = f"{trace.SUITE_MARK}{current.origin}" + (f" · {detail}" if detail else "")
     current.outcome, current.detail = outcome, detail
     current.target_id = trace.target_of(ctx)
     db = getattr(getattr(ctx, "bot", None), "db", None)
@@ -243,6 +246,7 @@ class Trace(commands.Cog):
         import sentrix_grouped_slash_fix as grouped
 
         forced = grouped._force_text_parser((command,))
+        origin = trace.ORIGIN.set(trace.normalise_ref(ref) or None)
         try:
             await command.invoke(ctx)
         except commands.CommandError as exc:
@@ -252,6 +256,7 @@ class Trace(commands.Cog):
             if not ctx.command_failed:
                 self.bot.dispatch("command_completion", ctx)
         finally:
+            trace.ORIGIN.reset(origin)
             for target in forced:
                 target.__dict__.pop("_parse_arguments", None)
 
@@ -356,12 +361,32 @@ class Trace(commands.Cog):
         ]
         if row["target_id"]:
             lignes.insert(2, panels.Ligne("Visait", f"<@{row['target_id']}>"))
-        if row["detail"]:
-            lignes.append(panels.Ligne("Détail", f"`{row['detail']}`"))
+        detail = str(row["detail"] or "")
+        origine = trace.origin_of(detail)
+        if origine:
+            # Le fil vers l'amont : l'action dont celle-ci est la suite.
+            lignes.append(panels.Ligne("Suite de", f"**{origine}**"))
+            detail = detail[len(trace.SUITE_MARK) + len(origine):].lstrip(" ·")
+        if detail:
+            lignes.append(panels.Ligne("Détail", f"`{detail}`"))
+        sections = [panels.Section("Action", lignes)]
+        # Le fil vers l'aval : ce que le staff a fait depuis les boutons de suite.
+        suites = await trace.follow_ups(self.bot.db, ctx.guild.id, row["ref"])
+        if suites:
+            prefixe = {"slash": "/", "prefix": "+"}
+            sections.append(panels.Section("Suites données", [
+                panels.Ligne(
+                    f"`{prefixe.get(str(s['transport']), '')}{s['command']}`"
+                    + (" (bouton)" if s["transport"] == "bouton" else ""),
+                    f"par <@{s['actor_id']}> · **{s['ref']}** · <t:{int(s['created_at'])}:R>"
+                    + ("" if s["outcome"] == "ok" else f" · {OUTCOME_LABELS.get(str(s['outcome']), s['outcome'])}"),
+                )
+                for s in suites
+            ]))
         await panels.envoyer(ctx, panels.Panneau(
             titre=f"Trace {row['ref']}",
             sous_titre="La même référence figure sur la réponse et sur la carte de log.",
-            sections=[panels.Section("Action", lignes)],
+            sections=sections,
             kind="info",
         ))
 

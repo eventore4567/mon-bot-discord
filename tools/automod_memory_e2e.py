@@ -98,10 +98,12 @@ async def main() -> int:
     rows = await warns()
     check(len(rows) == 1 and rows[0]["moderator_id"] == h.MOD_ID and ref in str(rows[0]["reason"]),
           "le modérateur qui clique avertit le membre, la raison cite l'incident", str(rows))
-    trace = await db.fetchone("SELECT command, transport, actor_id FROM sentrix_traces "
+    trace = await db.fetchone("SELECT ref, command, transport, actor_id, detail FROM sentrix_traces "
                               "ORDER BY created_at DESC, rowid DESC LIMIT 1")
     check(trace is not None and trace["command"] == "warn" and trace["transport"] == "bouton"
-          and trace["actor_id"] == h.MOD_ID, "l'avertissement par bouton a sa propre trace", str(dict(trace) if trace else None))
+          and trace["actor_id"] == h.MOD_ID and trace["detail"] == f"suite de {ref}",
+          "l'avertissement par bouton a sa propre trace, qui note l'incident d'origine",
+          str(dict(trace) if trace else None))
 
     since = len(h.CALLS)
     # +trace demande « Voir les logs du serveur » : l'administrateur, pas le modérateur.
@@ -110,6 +112,15 @@ async def main() -> int:
     shown = h.visible_text(h.CALLS[since:])
     check("AutoMod (action automatique de SentriX)" in shown and "antilink" in shown,
           "+trace retrouve l'incident AutoMod par sa référence", shown[:300])
+    check("Suites données" in shown and "`warn` (bouton)" in shown and f"<@{h.MOD_ID}>" in shown
+          and str(trace["ref"]) in shown, "+trace de l'incident montre la suite donnée par le modérateur", shown[-300:])
+
+    since = len(h.CALLS)
+    await asyncio.wait_for(h.run_prefix(bot, guild, f"+trace {trace['ref']}", **ADMIN), 15)
+    await h.settle(idle=0.4, maximum=3)
+    shown = h.visible_text(h.CALLS[since:])
+    check("Suite de" in shown and ref in shown and "Détail" not in shown,
+          "+trace de l'avertissement remonte à l'incident d'origine", shown[-300:])
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

@@ -72,11 +72,14 @@ async def main() -> int:
     since = await click(bot, timeout or "", h.next_id(), "admin")
     await h.settle(idle=0.6, maximum=4)
     check(any(timeouts(since, h.SECOND_ID)), "l'administrateur qui clique exclut le membre 10 min", str(timeouts(since, h.SECOND_ID)))
-    row = await bot.db.fetchone("SELECT command, transport, outcome, actor_id, target_id FROM sentrix_traces "
+    row = await bot.db.fetchone("SELECT command, transport, outcome, actor_id, target_id, detail FROM sentrix_traces "
                                 "ORDER BY created_at DESC, rowid DESC LIMIT 1")
     check(row is not None and row["command"] == "mute" and row["transport"] == "bouton" and row["outcome"] == "ok"
           and row["actor_id"] == h.ADMIN_ID and row["target_id"] == h.SECOND_ID,
           "trace : mute, par bouton, par l'administrateur, sur le membre", str(dict(row) if row else None))
+    origin = (timeout or "").rsplit(":", 1)[-1]
+    check(row is not None and row["detail"] == f"suite de {origin}",
+          "la trace de l'exclusion note l'avertissement dont elle est la suite", str(dict(row) if row else None))
     logs = [c for c in h.CALLS[since:] if c[1] == f"/channels/{h.LOGCID}/messages"]
     check(len(logs) == 1, "l'exclusion par bouton a sa carte de log", f"{len(logs)} carte(s)")
     flags = [((js or {}).get("data") or {}).get("flags") for m, p, js in h.CALLS[since:] if p.endswith("/callback")]
