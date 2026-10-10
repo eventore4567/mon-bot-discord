@@ -500,7 +500,12 @@ class BotAllInOne(commands.Bot):
             operation_timeout_seconds=MODULE_LOAD_TIMEOUT_SECONDS,
         )
         self.module_supervisor = ModuleSupervisor(
-            set(EXTENSIONS) - set(RUNTIME_LOCKED_EXTENSIONS)
+            set(EXTENSIONS) - set(RUNTIME_LOCKED_EXTENSIONS),
+            # Une commande qui attend un clic (menu, confirmation, assistant) reste
+            # « en cours » jusqu'au délai de sa vue — jusqu'à 300 s dans le bot. À
+            # 120 s, ces attentes normales levaient « appel bloqué » en production
+            # (utility, verification, ai : 132-142 s mesurés les 09-10/10/2026).
+            stuck_call_seconds=330,
         )
         self._module_supervisor_task: asyncio.Task | None = None
         self.tree.on_error = self.on_app_command_error
