@@ -1945,15 +1945,50 @@ class Utility(commands.Cog, name="Utility"):
         await self.bot.db.execute("DELETE FROM reminders WHERE id = ?", (id,))
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Rappel annulé', kind='success')))
 
-    @commands.hybrid_command(name="say", description="Faire répéter un message par le bot.", with_app_command=False)
-    @app_commands.describe(texte="Le texte à faire répéter")
+    @commands.hybrid_command(
+        name="say",
+        description="Publier un texte dans un vrai cadre SentriX (ou --brut pour le texte simple).",
+        with_app_command=False,
+    )
+    @app_commands.describe(texte="Votre publication ; commencez par --brut pour conserver l'ancien format.")
     @commands.has_permissions(manage_messages=True)
     async def say(self, ctx: commands.Context, *, texte: str):
-        if ctx.interaction:
-            await ctx.interaction.response.send_message("Message envoyé.", ephemeral=True)
+        """Carte V2 pour les messages de l'équipe, sans toucher aux messages des membres.
+
+        Le mode --brut garde l'ancien comportement de +say pour les intégrations
+        qui attendent un texte exact. Les deux modes interdisent les mentions
+        automatiques ; une publication ne doit jamais ping tout un serveur.
+        """
+        from utils.free_text_publications import PublicationCard
+
+        original = str(texte or "").strip()
+        raw = original == "--brut" or original.startswith("--brut ")
+        contenu = original[6:].strip() if raw else original
+        if not contenu:
+            return await panels.texte_court(ctx, "Ajoutez le texte de votre publication.")
+        if raw and len(contenu) > 2000:
+            return await panels.texte_court(ctx, "En mode brut, le texte ne peut pas dépasser 2 000 caractères.")
+
+        try:
+            card = None if raw else PublicationCard(contenu)
+        except ValueError as error:
+            return await panels.texte_court(ctx, str(error))
+
+        safe_mentions = discord.AllowedMentions.none()
+        if card is not None:
+            await ctx.channel.send(view=card, allowed_mentions=safe_mentions)
         else:
-            await ctx.message.delete()
-        await ctx.channel.send(texte)
+            await ctx.channel.send(contenu, allowed_mentions=safe_mentions)
+
+        # N'accuser réception qu'une fois le message réellement publié.
+        if ctx.interaction:
+            if not ctx.interaction.response.is_done():
+                await ctx.interaction.response.send_message("Publication envoyée.", ephemeral=True)
+        elif ctx.message is not None:
+            try:
+                await ctx.message.delete()
+            except discord.HTTPException:
+                logger.debug("Impossible de supprimer le message +say après publication.", exc_info=True)
 
     @commands.hybrid_command(name="embed-create", description="Créer un embed personnalisé.", with_app_command=False)
     @app_commands.describe(titre="Titre de l'embed", description="Contenu de l'embed")
