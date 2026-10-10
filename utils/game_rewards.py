@@ -345,14 +345,20 @@ async def _emit_game_log(bot, guild_id: int, reward: GameReward):
         )
         embed = discord.Embed(
             title=f"{libelle} — {issue}",
-            description=(
-                f"**Joueur :** {who}\n"
-                f"**Récompense :** {reward.amount} 🪙\n"
-                f"**Référence :** `{reward.display_id}`"
-            ),
             colour=design_system.COLORS.games,
         )
-        await log_service.send_log(bot, guild, "games", embed)
+        # Des champs métier (et non trois phrases collées dans la description) :
+        # le renderer Trace distingue le joueur, la récompense et la transaction.
+        embed.add_field(name="Joueur", value=who, inline=False)
+        embed.add_field(name="Récompense", value=f"{reward.amount} 🪙", inline=False)
+        if reward.display_id:
+            embed.add_field(name="Référence", value=f"`{reward.display_id}`", inline=False)
+        await log_service.send_log(
+            bot, guild, "game_reward", embed,
+            identity_id=reward.user_id,
+            identity_name=member.display_name if member else None,
+            identity_icon=str(member.display_avatar.url) if member else None,
+        )
     except Exception:
         # Le jeu doit toujours fonctionner même si le log échoue (salon supprimé,
         # permissions manquantes, guilde introuvable en cache...).
