@@ -4,6 +4,9 @@ from __future__ import annotations
 import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from aiohttp import web
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
@@ -74,6 +77,57 @@ class AdminGuildFilterTests(unittest.IsolatedAsyncioTestCase):
         guild = Guild(401, "Serveur", admin=False)
         guild.owner_id = 614
         self.assertEqual(dashboard._dashboard_access_level(guild, guild.get_member(614), 614), "owner")
+
+
+class DiscordOauthPaginationTests(unittest.IsolatedAsyncioTestCase):
+    @patch("web.dashboard._discord_api_json", new_callable=AsyncMock)
+    async def test_all_pages_are_loaded_and_deduplicated(self, api):
+        first = [{"id": str(i), "name": f"Guild {i}", "permissions": "8"} for i in range(1, 201)]
+        second = [{"id": "201", "name": "Guild 201", "permissions": "8"},
+                  {"id": "201", "name": "Guild 201", "permissions": "8"}]
+        api.side_effect = [(200, first), (200, second)]
+        guilds = await dashboard._oauth_fetch_all_guilds(None, {"Authorization": "Bearer mock"})
+        self.assertEqual(len(guilds), 201)
+        self.assertEqual(api.await_count, 2)
+        self.assertEqual(api.await_args_list[1].kwargs["params"]["after"], "200")
+        self.assertEqual(api.await_args_list[1].kwargs["params"]["limit"], "200")
+
+    @patch("web.dashboard._discord_api_json", new_callable=AsyncMock)
+    async def test_failed_second_page_is_not_silently_accepted(self, api):
+        first = [{"id": str(i)} for i in range(1, 201)]
+        api.side_effect = [(200, first), (503, {"message": "unavailable"})]
+        with self.assertRaises(web.HTTPFound):
+            await dashboard._oauth_fetch_all_guilds(None, {"Authorization": "Bearer mock"})
+
+
+class LivePermissionRefreshTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        access._ADMIN_MEMBER_CACHE.clear()
+
+    async def test_explicit_refresh_rechecks_and_removes_revoked_admin_access(self):
+        guild = Guild(701, "Administrable")
+        bot = Bot([guild])
+        session = {"user": {"id": "614"}, "guilds": [{"id": "701", "name": "Administrable"}]}
+        request = SimpleNamespace(app={"bot": bot}, query={})
+        gate = SimpleNamespace(_administrator_member=access._administrator_member_cached)
+        self.assertTrue(await access._refresh_admin_guilds(request, gate, session))
+        self.assertEqual(session["guilds"][0]["access_level"], "administrator")
+        guild.member.guild_permissions.administrator = False
+        guild.member.guild_permissions.manage_guild = True
+        request.query = {"refresh": "1"}
+        self.assertFalse(await access._refresh_admin_guilds(request, gate, session))
+        self.assertEqual(session["guilds"], [])
+
+    def test_stale_oauth_metadata_cannot_override_verified_permissions(self):
+        guild = Guild(702, "Administrable")
+        candidate = access._installed_item(
+            guild, 614, {"access_level": "manage_guild", "installed": False,
+                         "permission_verified": False, "invite_url": "https://invalid.example"}
+        )
+        self.assertEqual(candidate["access_level"], "administrator")
+        self.assertTrue(candidate["installed"])
+        self.assertTrue(candidate["permission_verified"])
+        self.assertIsNone(candidate["invite_url"])
 
 
 if __name__ == "__main__":
