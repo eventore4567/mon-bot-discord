@@ -145,6 +145,28 @@ async def main() -> int:
     check(ids == [h.MEMBER_ROLE_ID, h.PING_ROLE_ID], "deux rôles enregistrés, dans l'ordre", str(ids))
     conf = await bot.db.get_guild_config(h.GID)
     check(conf["autorole"] == h.MEMBER_ROLE_ID, "le premier reste dans guild_config.autorole (dashboard, +setautorole)")
+    from web import dashboard
+
+    # Le VRAI gestionnaire servi (dashboard_oxyde_hotfix remplace handle_guild en prod).
+    from aiohttp.test_utils import make_mocked_request
+
+    async def fake_manageable(request, guild_id):
+        return {}, guild, None
+
+    real_manageable = dashboard._manageable_guild
+    dashboard._manageable_guild = fake_manageable
+    try:
+        request = make_mocked_request("GET", f"/api/guilds/{h.GID}", match_info={"guild_id": str(h.GID)},
+                                      app={"bot": bot})
+        response = await dashboard.handle_guild(request)
+    finally:
+        dashboard._manageable_guild = real_manageable
+    import json as _json
+
+    extra = _json.loads(response.body).get("autorole_extra")
+    check(getattr(dashboard.handle_guild, "_sentrix_oxyde_hotfix", False)
+          and extra == [{"id": str(h.PING_ROLE_ID), "name": guild.get_role(h.PING_ROLE_ID).name}],
+          "l'API servie au dashboard donne aussi le second rôle d'arrivée (plus seulement le premier)", str(extra))
 
     uid, since = await join(bot, "duo")
     check(sorted(role_puts(since, uid)) == sorted([h.MEMBER_ROLE_ID, h.PING_ROLE_ID]),

@@ -807,6 +807,30 @@ def _channel_items(guild: discord.Guild) -> list[dict]:
     return channels
 
 
+async def _autorole_extra(db, guild: discord.Guild) -> list[dict]:
+    """Les rôles d'arrivée au-delà du premier (utils/welcome_autoroles).
+
+    Le dashboard n'éditait que le premier et taisait les autres : un admin
+    pouvait croire n'en donner qu'un seul. Lu par les deux assemblages du
+    serveur (celui-ci et web/dashboard_oxyde_hotfix, qui le remplace en prod).
+    """
+    try:
+        from utils import welcome_autoroles
+
+        await welcome_autoroles.ensure_schema(db)
+        rows = await db.fetchall(
+            "SELECT role_id FROM welcome_autoroles WHERE guild_id = ? ORDER BY position, role_id", (guild.id,),
+        )
+    except Exception:
+        logger.exception("Rôles d'arrivée supplémentaires illisibles guild=%s", guild.id)
+        return []
+    extra = []
+    for row in rows or ():
+        role = guild.get_role(int(row["role_id"]))
+        extra.append({"id": str(row["role_id"]), "name": role.name if role else None})
+    return extra
+
+
 async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
     guild_id = guild.id
     conf = await db.get_guild_config(guild_id)
@@ -833,6 +857,7 @@ async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
         for role in sorted(guild.roles, key=lambda role: role.position, reverse=True)
         if not role.is_default() and not role.managed
     ]
+    autorole_extra = await _autorole_extra(db, guild)
     channels = _channel_items(guild)
     emojis = [
         {
@@ -859,6 +884,7 @@ async def _assemble_guild_payload(db, guild: discord.Guild) -> dict:
         "automod": dict(automod) if automod else {},
         "ai": dict(ai_settings) if ai_settings else {},
         "social_notifications": social_notifications,
+        "autorole_extra": autorole_extra,
         "roles": roles,
         "channels": channels,
         "emojis": emojis,

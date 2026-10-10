@@ -253,6 +253,7 @@ def patch_dashboard_runtime(dashboard=None) -> None:
             "automod": dict(automod) if automod else {},
             "ai": dict(ai_settings) if ai_settings else {},
             "social_notifications": social_notifications,
+            "autorole_extra": await dashboard._autorole_extra(db, guild),
             "roles": roles,
             "channels": channels,
             "emojis": emojis,
