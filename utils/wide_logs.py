@@ -311,7 +311,7 @@ def derive_identity(
                 candidat = valeur if valeur and not valeur.startswith("<") else ""
             identity_name = candidat[:80] or None
 
-    if not identity_name:
+    if not identity_name and event_type not in {"invite_create", "invite_delete"}:
         for label in _TARGET_LABELS:
             value = _field_value(embed, label)
             if not value:
