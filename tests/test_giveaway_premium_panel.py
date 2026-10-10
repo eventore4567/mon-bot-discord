@@ -51,7 +51,7 @@ def test_giveaway_bonus_multiplier_is_per_role():
     source = inspect.getsource(giveaway_v2.GiveawayV2.publish)
     assert "state.bonus_multipliers.get(role_id, state.bonus_multiplier)" in source
     assert "embed=" not in source
-    assert "panels.envoyer(channel, panel)" in source
+    assert "panels.envoyer(channel, panel" in source  # (+ file= pour une image jointe)
 
 
 def test_role_setup_updates_existing_panel_instead_of_spamming_success_cards():

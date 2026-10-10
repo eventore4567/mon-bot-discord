@@ -12,6 +12,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 from urllib.parse import urlparse, urlunparse
 from typing import Any, Iterable
 
@@ -115,8 +116,12 @@ def verify_phyllo_signature(body: bytes, signature: str, secret: str) -> bool:
         token = token.strip().strip('"')
         if not token:
             continue
-        if "=" in token:
-            _label, token = token.rsplit("=", 1)
+        label, sep, rest = token.partition("=")
+        if sep and rest.strip("=") and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,15}", label):
+            # « sha256=… » / « v1=… » : l'étiquette s'arrête au PREMIER « = ». Couper
+            # au dernier vidait une signature base64, qui finit par du remplissage
+            # « = » — une signature valide était refusée.
+            token = rest
         elif ":" in token and not token.startswith("http"):
             _label, token = token.rsplit(":", 1)
         token = token.strip().strip('"')

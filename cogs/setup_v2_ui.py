@@ -6,8 +6,10 @@ manquants sans créer un deuxième setup concurrent.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
+from urllib.parse import urlparse
 
 import discord
 
@@ -17,6 +19,21 @@ from . import permission_guard
 from . import setup_control_center as setup_ui
 from . import setup_v2_core as core
 from . import channel_message_rules
+
+logger = logging.getLogger("bot.setup-v2-ui")
+
+
+async def _get_antispam_policy(bot, guild_id: int) -> dict:
+    """La politique anti-spam (rôles et salons exemptés), lue par le cog AutoMod.
+
+    Trois noms (logger, urlparse et cette fonction) étaient utilisés sans être
+    définis dans ce module : NameError à l'exécution (tests/test_noms_non_resolus).
+    """
+    automod = bot.get_cog("Automod") if hasattr(bot, "get_cog") else None
+    getter = getattr(automod, "get_antispam_policy_cached", None)
+    if getter is not None:
+        return await getter(int(guild_id))
+    return {"scope_mode": "all", "role_ids": set(), "channel_ids": set(), "strict_channel_ids": set()}
 
 MODULE_BY_CATEGORY = {
     "moderation": "moderation",
