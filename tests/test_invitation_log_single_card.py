@@ -194,3 +194,110 @@ async def test_gateway_producer_sends_known_inviter_and_readable_expiry():
     assert send.await_args.kwargs["identity_name"] == "Toxic"
     assert "SmeMEFNH" in send.await_args.kwargs["event_key"]
     assert resource_events._expiration(invite) == "Dans 7 jours"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_first", [False, True])
+async def test_real_1955_duplicate_dossiers_and_invite_create_single_card(legacy_first):
+    """Reproduit les DEUX lignes Railway du 10/10 19:55:54, pas « resources ».
+
+    L'ordre peut changer selon la cadence des listeners. Les deux ordres doivent
+    émettre une seule carte, avec le renderer canonique invite_create.
+    """
+    guild = SimpleNamespace(
+        id=42,
+        get_channel=lambda cid: SimpleNamespace(id=cid),
+        get_member=lambda uid: None,
+    )
+    bot = SimpleNamespace(get_user=lambda uid: None, fetch_user=AsyncMock(return_value=None))
+    config = {"enabled": True, "channel_id": 99, "updated_at": 0}
+    sender = AsyncMock(return_value=True)
+    gateway = (
+        "resources", _gateway_embed("UExgvBgF", inviter_id=111111111111111111),
+        log_service.make_event_key(42, "invite_create", discriminator="UExgvBgF"),
+    )
+    legacy = (
+        "dossiers", _audit_embed("UExgvBgF"),
+        log_service.make_event_key(42, "dossiers", discriminator="audit-legacy-777"),
+    )
+    first, second = (legacy, gateway) if legacy_first else (gateway, legacy)
+    log_service._recent_event_keys.clear()
+    try:
+        with (
+            patch.object(log_service, "get_log_config", AsyncMock(return_value=config)),
+            patch.object(log_service, "validate_channel", return_value=(True, "ok")),
+            patch.object(log_service.wide_logs, "salon_inaccessible", return_value=False),
+            patch.object(log_service, "send_wide_log", sender),
+        ):
+            r1 = await log_service.send_log(bot, guild, first[0], first[1], event_key=first[2])
+            r2 = await log_service.send_log(bot, guild, second[0], second[1], event_key=second[2])
+            # Deux VRAIES invitations différentes ne doivent pas disparaître.
+            r3 = await log_service.send_log(
+                bot, guild, "dossiers", _audit_embed("DIFFERENT"),
+                event_key=log_service.make_event_key(42, "dossiers", discriminator="audit-legacy-778"),
+            )
+        assert (r1, r2, r3) == (True, False, True)
+        assert sender.await_count == 2
+        assert all(call.kwargs["log_type"] == "invite_create" for call in sender.await_args_list)
+    finally:
+        log_service._recent_event_keys.clear()
+
+
+@pytest.mark.asyncio
+async def test_dossiers_member_arrival_remains_untouched():
+    """Les journaux d'arrivée routés via dossiers doivent continuer à partir."""
+    guild = SimpleNamespace(
+        id=42, get_channel=lambda cid: SimpleNamespace(id=cid),
+        get_member=lambda uid: None,
+    )
+    bot = SimpleNamespace(get_user=lambda uid: None, fetch_user=AsyncMock(return_value=None))
+    embed = discord.Embed(title="Nouvelle arrivée")
+    embed.add_field(name="Membre", value="<@111111111111111111>")
+    sender = AsyncMock(return_value=True)
+    log_service._recent_event_keys.clear()
+    try:
+        with (
+            patch.object(log_service, "get_log_config", AsyncMock(return_value={
+                "enabled": True, "channel_id": 99, "updated_at": 0
+            })),
+            patch.object(log_service, "validate_channel", return_value=(True, "ok")),
+            patch.object(log_service.wide_logs, "salon_inaccessible", return_value=False),
+            patch.object(log_service, "send_wide_log", sender),
+        ):
+            result = await log_service.send_log(
+                bot, guild, "dossiers", embed, event_key="invite-join:42:111111111111111111"
+            )
+        assert result is True
+        sender.assert_awaited_once()
+        assert sender.await_args.kwargs["log_type"] != "invite_create"
+    finally:
+        log_service._recent_event_keys.clear()
+
+
+@pytest.mark.asyncio
+async def test_dossiers_invite_delete_keeps_correct_event_type():
+    guild = SimpleNamespace(
+        id=42, get_channel=lambda cid: SimpleNamespace(id=cid),
+        get_member=lambda uid: None,
+    )
+    bot = SimpleNamespace(get_user=lambda uid: None, fetch_user=AsyncMock(return_value=None))
+    embed = _audit_embed("ANOTHER")
+    embed.title = "Invitation supprimée"
+    sender = AsyncMock(return_value=True)
+    log_service._recent_event_keys.clear()
+    try:
+        with (
+            patch.object(log_service, "get_log_config", AsyncMock(return_value={
+                "enabled": True, "channel_id": 99, "updated_at": 0
+            })),
+            patch.object(log_service, "validate_channel", return_value=(True, "ok")),
+            patch.object(log_service.wide_logs, "salon_inaccessible", return_value=False),
+            patch.object(log_service, "send_wide_log", sender),
+        ):
+            await log_service.send_log(
+                bot, guild, "dossiers", embed,
+                event_key=log_service.make_event_key(42, "dossiers", discriminator="legacy-del"),
+            )
+        assert sender.await_args.kwargs["log_type"] == "invite_delete"
+    finally:
+        log_service._recent_event_keys.clear()
