@@ -537,11 +537,15 @@ def get_client():
         return None
     if _TEXT_CLIENT is None:
         from openai import AsyncOpenAI
-        _TEXT_CLIENT = AsyncOpenAI(
-            api_key=config.OPENAI_API_KEY,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-            max_retries=0,
-        )
+        client_kwargs = {
+            "api_key": config.OPENAI_API_KEY,
+            "timeout": REQUEST_TIMEOUT_SECONDS,
+            "max_retries": 0,
+        }
+        text_base_url = (getattr(config, "OPENAI_TEXT_BASE_URL", "") or "").strip()
+        if text_base_url:
+            client_kwargs["base_url"] = text_base_url
+        _TEXT_CLIENT = AsyncOpenAI(**client_kwargs)
     return _TEXT_CLIENT
 
 

@@ -23,6 +23,11 @@ if any(ord(ch) < 32 or ord(ch) == 127 for ch in DISCORD_TOKEN):
 
 # --- Optionnel (fonctionnalités IA / utilitaires) ---
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")          # /ask, /ai, /sentrix, etc.
+# Adresse optionnelle du fournisseur IA TEXTE. Vide en production par défaut : le SDK
+# utilise alors l'API OpenAI habituelle. En développement local, elle peut pointer vers
+# l'API compatible OpenAI de LM Studio (ex. http://127.0.0.1:1234/v1).
+# Le client de génération d'images n'utilise volontairement jamais cette adresse.
+OPENAI_TEXT_BASE_URL = (os.getenv("OPENAI_TEXT_BASE_URL") or "").strip()
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")         # /weather (sinon fallback wttr.in gratuit)
 
 # Moteur musique multi-provider (utils/music/) : Spotify Client Credentials Flow —
