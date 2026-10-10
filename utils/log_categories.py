@@ -49,6 +49,8 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     # limitées (CATEGORIES), d'où le rattachement à « server » / « members ».
     "config_update": ("server", "⚙️", "info"),
     "economy_grant": ("server", "💰", "warning"),
+    # La catégorie configurable reste Serveur : pas de migration de salons de logs.
+    "game_reward": ("server", "🎮", "info"),
     "levels_xp_set": ("members", "✨", "warning"),
     "security_panic": ("raid", "🚨", "error"),
     "giveaway_blacklist": ("moderation", "🚫", "warning"),

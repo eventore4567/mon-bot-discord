@@ -47,7 +47,7 @@ _DECORATIVE_LINE_RE = re.compile(r"^[\s━─═—–_\-•·┄┈┉┅┇]{4
 _TARGET_LABELS = (
     "auteur", "author", "cible", "target", "membre", "member", "utilisateur",
     "user", "victime", "créateur", "createur", "creator", "rôle", "role",
-    "salon", "channel",
+    "salon", "channel", "joueur",
 )
 _MODERATOR_LABELS = (
     "modérateur", "moderateur", "moderator", "staff", "exécuteur", "executeur",
@@ -456,7 +456,16 @@ def narrative_body(
     duration = _field_value(embed, "durée", "duree", "présence", "presence")
 
     lines: list[str] = []
-    if event_type == "message_delete":
+    if event_type == "game_reward":
+        # Titre et en-tête : jeu, issue et joueur. Corps : gain et transaction,
+        # chacun sur sa propre ligne, jamais la même identité répétée.
+        recompense = _field_value_exact(embed, "Récompense")
+        reference = _field_value_exact(embed, "Référence")
+        if recompense:
+            lines.append(f"**Récompense :** {recompense}")
+        if reference:
+            lines.append(f"**Référence :** {reference}")
+    elif event_type == "message_delete":
         if content:
             lines.append(_message_quote(content))
         else:
@@ -1061,6 +1070,8 @@ def _trace_meta(event_type: str, *, emoji: str = "") -> str:
     category_label = CATEGORIES.get(category, category.replace("_", " ").title())
     marker = (emoji or marqueur_evenement(event)).strip()
     prefix = f"{marker} " if marker else ""
+    if event == "game_reward":
+        category_label = "Jeux"
     return f"-# {prefix}{category_label}"
 
 
@@ -1089,7 +1100,7 @@ def _trace_identity_ref(event_type: str, identity_id: int | None) -> str:
     if not identity_id:
         return ""
     event = canonical_event_type(event_type)
-    if event in _MEMBER_ROLE_EVENTS:
+    if event in _MEMBER_ROLE_EVENTS or event == "game_reward":
         return f"<@{identity_id}>"
     if event.startswith("role_"):
         return f"<@&{identity_id}>"
@@ -1111,6 +1122,8 @@ def _trace_identity_label(event_type: str) -> str:
     l'on regarde : le panneau paraît moins générique sans ajouter de bloc.
     """
     event = canonical_event_type(event_type)
+    if event == "game_reward":
+        return "Joueur"
     if event in _MEMBER_ROLE_EVENTS:
         return "Membre"
     if event.startswith("message_"):
