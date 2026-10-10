@@ -61,7 +61,7 @@ class DashboardGuildLoadingRecoveryTests(unittest.IsolatedAsyncioTestCase):
     def _request(bot):
         return SimpleNamespace(app={"bot": bot})
 
-    async def test_passive_ha_returns_oauth_guilds_as_unknown_not_uninstalled(self):
+    async def test_passive_ha_hides_unverified_guilds_until_ready(self):
         dashboard = self._dashboard()
         _install_guild_loading_recovery(dashboard)
 
@@ -70,9 +70,7 @@ class DashboardGuildLoadingRecoveryTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(payload["discord_ready"])
         self.assertEqual(payload["retry_after_ms"], 2000)
-        self.assertEqual([g["name"] for g in payload["guilds"]], ["Alpha", "Beta"])
-        self.assertTrue(all(g["installed"] is None for g in payload["guilds"]))
-        self.assertTrue(all(g["invite_url"] is None for g in payload["guilds"]))
+        self.assertEqual(payload["guilds"], [])
 
     async def test_ready_gateway_returns_real_install_state(self):
         dashboard = self._dashboard()
@@ -88,11 +86,9 @@ class DashboardGuildLoadingRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(payload["retry_after_ms"])
         self.assertEqual(payload["guilds"][0]["id"], "1")
         self.assertTrue(payload["guilds"][0]["installed"])
-        self.assertFalse(payload["guilds"][1]["installed"])
-        self.assertEqual(
-            payload["guilds"][1]["invite_url"],
-            "https://discord.test/invite/2",
-        )
+        self.assertEqual(len(payload["guilds"]), 1)
+        self.assertTrue(payload["guilds"][0]["permission_verified"])
+        self.assertIsNone(payload["guilds"][0]["invite_url"])
 
     async def test_manageable_route_returns_503_while_gateway_is_not_ready(self):
         dashboard = self._dashboard()
