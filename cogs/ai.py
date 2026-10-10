@@ -343,8 +343,27 @@ class _LogConfigConfirmView(discord.ui.View):
                 pass
 
 
+def _natural_action_card(title: str, detail: str) -> discord.Embed:
+    """Un seul style pour l'attente, la confirmation et l'annulation."""
+    return discord.Embed(title=title, description=detail)
+
+
+async def _remove_natural_prompt(message: discord.Message | None, *, delay: float) -> None:
+    """Supprime uniquement le panneau temporaire du bot, jamais la demande ni les logs.
+
+    discord.py programme le delete quand 'delay' est fourni : l'interaction ne
+    reste pas bloquée pendant la période d'affichage.
+    """
+    if message is None:
+        return
+    try:
+        await message.delete(delay=delay)
+    except discord.HTTPException:
+        logger.debug("Nettoyage du panneau d'action impossible.", exc_info=True)
+
+
 class _NaturalActionConfirmView(discord.ui.View):
-    """Confirmation minimale pour les actions naturelles à risque élevé."""
+    """Confirmation d'une commande à risque ; aucun message orphelin après le clic."""
 
     def __init__(self, cog: "Ai", *, message: discord.Message, command_line: str, author_id: int):
         super().__init__(timeout=45)
@@ -358,8 +377,7 @@ class _NaturalActionConfirmView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if int(interaction.user.id) != self.author_id:
             await interaction.response.send_message(
-                "Cette confirmation appartient à une autre personne.",
-                ephemeral=True,
+                "Cette confirmation appartient à une autre personne.", ephemeral=True
             )
             return False
         return True
@@ -369,32 +387,47 @@ class _NaturalActionConfirmView(discord.ui.View):
         if self.done:
             return await interaction.response.send_message("Cette action a déjà été traitée.", ephemeral=True)
         self.done = True
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(content="Action confirmée. Exécution en cours…", view=self)
-        await self.cog._invoke_command_line(self.source_message, self.command_line)
+        self.stop()
+        await interaction.response.edit_message(
+            content=None,
+            embed=_natural_action_card("Action en cours", "Vérification des permissions et exécution…"),
+            view=None,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        try:
+            handled = await self.cog._invoke_command_line(self.source_message, self.command_line)
+            if not handled:
+                await self.source_message.reply(
+                    "Action impossible : la commande demandée n'est plus disponible.",
+                    mention_author=False,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+        finally:
+            await _remove_natural_prompt(self.message, delay=4)
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.done:
+            return await interaction.response.send_message("Cette action a déjà été traitée.", ephemeral=True)
         self.done = True
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(content="Action annulée.", view=self)
+        self.stop()
+        await interaction.response.edit_message(
+            content=None,
+            embed=_natural_action_card("Action annulée", "Aucune action n'a été exécutée."),
+            view=None,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        await _remove_natural_prompt(self.message, delay=5)
 
     async def on_timeout(self):
-        if self.done:
-            return
-        for item in self.children:
-            item.disabled = True
-        if self.message is not None:
-            try:
-                await self.message.edit(content="Confirmation expirée.", view=self)
-            except discord.HTTPException:
-                pass
+        if not self.done:
+            self.done = True
+            self.stop()
+            await _remove_natural_prompt(self.message, delay=0)
 
 
 class _NaturalPlanConfirmView(discord.ui.View):
-    """Confirmation unique pour une demande contenant plusieurs actions."""
+    """Confirmation unique, et temporaire, d'un plan d'actions sensible."""
 
     def __init__(
         self,
@@ -427,36 +460,47 @@ class _NaturalPlanConfirmView(discord.ui.View):
         if self.done:
             return await interaction.response.send_message("Ce plan a déjà été traité.", ephemeral=True)
         self.done = True
-        for item in self.children:
-            item.disabled = True
+        self.stop()
         await interaction.response.edit_message(
-            content=f"Plan confirmé — exécution de **{len(self.actions)}** étape(s)…",
-            view=self,
+            content=None,
+            embed=_natural_action_card(
+                "Plan en cours",
+                f"Exécution de {len(self.actions)} étape(s) avec vérification des permissions…",
+            ),
+            view=None,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
-        await self.cog._execute_action_plan(
-            self.source_message,
-            self.actions,
-            self.prefix,
-            status_message=self.message,
-        )
+        try:
+            await self.cog._execute_action_plan(
+                self.source_message,
+                self.actions,
+                self.prefix,
+                status_message=self.message,
+            )
+        finally:
+            # Les vraies réponses et les audits partent du moteur métier. Le message
+            # « Plan confirmé/traité » n'apporte rien et disparaît automatiquement.
+            await _remove_natural_prompt(self.message, delay=4)
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.done:
+            return await interaction.response.send_message("Ce plan a déjà été traité.", ephemeral=True)
         self.done = True
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(content="Plan annulé.", view=self)
+        self.stop()
+        await interaction.response.edit_message(
+            content=None,
+            embed=_natural_action_card("Plan annulé", "Aucune modification n'a été effectuée."),
+            view=None,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        await _remove_natural_prompt(self.message, delay=5)
 
     async def on_timeout(self):
-        if self.done:
-            return
-        for item in self.children:
-            item.disabled = True
-        if self.message is not None:
-            try:
-                await self.message.edit(content="Plan expiré sans exécution.", view=self)
-            except discord.HTTPException:
-                pass
+        if not self.done:
+            self.done = True
+            self.stop()
+            await _remove_natural_prompt(self.message, delay=0)
 
 
 # ---------------------------------------------------------------- VUE : +aisetup
@@ -1759,9 +1803,11 @@ class Ai(commands.Cog, name="Ai"):
                 author_id=message.author.id,
             )
             sent = await message.reply(
-                "Cette action est sensible :\n\n"
-                f"**1.** {ai_actions.describe_action(action)}\n\n"
-                "Voulez-vous vraiment l’exécuter ?",
+                embed=_natural_action_card(
+                    "Confirmation requise",
+                    f"**Action prévue**\n{ai_actions.describe_action(action)}\n\n"
+                    "Voulez-vous exécuter cette action ?",
+                ),
                 view=view,
                 mention_author=False,
                 allowed_mentions=discord.AllowedMentions.none(),
@@ -1984,8 +2030,11 @@ class Ai(commands.Cog, name="Ai"):
                 author_id=message.author.id,
             )
             sent = await message.reply(
-                f"Cette action supprimera jusqu’à **{int(action.slots['count'])} messages** "
-                "dans ce salon. Voulez-vous continuer ?",
+                embed=_natural_action_card(
+                    "Confirmation requise",
+                    f"Jusqu'à **{int(action.slots['count'])} messages** seront supprimés "
+                    "dans ce salon. Continuer ?",
+                ),
                 view=view,
                 mention_author=False,
                 allowed_mentions=discord.AllowedMentions.none(),
@@ -2032,19 +2081,10 @@ class Ai(commands.Cog, name="Ai"):
                 break
             completed += 1
 
-        if status_message is not None:
-            try:
-                await status_message.edit(
-                    content=(
-                        f"Plan traité : **{completed}/{len(actions)}** étape(s) ont été "
-                        "transmises aux moteurs SentriX. Les messages ci-dessous indiquent "
-                        "précisément les réussites ou refus Discord."
-                    ),
-                    view=None,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-            except discord.HTTPException:
-                pass
+        # Ne PAS rééditer le message interactif avec « Plan traité 1/1 ».
+        # _NaturalPlanConfirmView supprime le panneau transitoire après l'action.
+        # Les réponses métier (succès, refus et audits) sont conservées intactes.
+        return None
 
     def _command_candidates(self, question: str) -> list[commands.Command]:
         """Fast prefilter of loaded commands, delegated to the dedicated router module."""

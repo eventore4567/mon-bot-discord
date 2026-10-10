@@ -52,6 +52,12 @@ jobs:
               tests/test_structured_game_logs_and_hierarchy.py
               tests/test_hierarchy_footer_layout.py
 
+          - name: Natural plan UI lifecycle
+            tests: >-
+              tests/test_natural_plan_ephemeral_ux.py
+              tests/test_ai_actions_router.py
+              tests/test_ai_risk_levels.py
+
           - name: Music + playlists + voice
             tests: >-
               tests/test_music_audio_buffer.py
