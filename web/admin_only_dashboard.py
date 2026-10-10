@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -49,8 +50,16 @@ def _installed_item(guild, user_id: int, previous: dict | None = None) -> dict:
         "id": str(guild.id),
         "name": guild.name,
         "icon_url": icon_url,
+        **({
+            k: v for k, v in (previous or {}).items()
+            if k not in {"id", "name", "icon_url", "owner", "access_level",
+                         "installed", "invite_url", "permission_verified"}
+        }),
         "owner": guild.owner_id == user_id,
-        **({k: v for k, v in (previous or {}).items() if k not in {"id", "name", "icon_url", "owner"}}),
+        "access_level": "owner" if guild.owner_id == user_id else "administrator",
+        "installed": True,
+        "permission_verified": True,
+        "invite_url": None,
     }
 
 
@@ -91,7 +100,9 @@ async def _administrator_member_cached(guild: discord.Guild, user_id: int) -> di
 
     member = guild.get_member(user_id)
     if member is not None:
-        result = member if member.guild_permissions.administrator else None
+        result = member if (
+            guild.owner_id == user_id or member.guild_permissions.administrator
+        ) else None
         ttl = ADMIN_REFRESH_TTL_SECONDS if result is not None else ADMIN_MEMBER_NEGATIVE_TTL_SECONDS
         _ADMIN_MEMBER_CACHE[key] = (now_mono + ttl, result)
         return result
@@ -117,7 +128,9 @@ async def _administrator_member_cached(guild: discord.Guild, user_id: int) -> di
         )
         return None
 
-    result = member if member.guild_permissions.administrator else None
+    result = member if (
+        guild.owner_id == user_id or member.guild_permissions.administrator
+    ) else None
     ttl = ADMIN_REFRESH_TTL_SECONDS if result is not None else ADMIN_MEMBER_NEGATIVE_TTL_SECONDS
     _ADMIN_MEMBER_CACHE[key] = (now_mono + ttl, result)
     return result
@@ -138,7 +151,8 @@ async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) 
         return False
 
     verified_at = session.get(_REFRESH_STAMP_KEY)
-    if isinstance(verified_at, (int, float)) and 0 <= time.time() - float(verified_at) < ADMIN_REFRESH_TTL_SECONDS:
+    force = getattr(request, "query", {}).get("refresh") == "1"
+    if not force and isinstance(verified_at, (int, float)) and 0 <= time.time() - float(verified_at) < ADMIN_REFRESH_TTL_SECONDS:
         return bool(session.get("guilds"))
 
     oauth_candidates = _oauth_admin_candidates(session)
@@ -157,23 +171,36 @@ async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) 
     # sonde aucun serveur arbitraire : seuls les membres déjà présents en cache sont ajoutés.
     for guild in list(bot.guilds):
         member = guild.get_member(user_id)
-        if member is not None and member.guild_permissions.administrator:
+        if member is not None and (guild.owner_id == user_id or member.guild_permissions.administrator):
             previous_by_id.setdefault(guild.id, _installed_item(guild, user_id))
             if guild.id not in ordered_ids:
                 ordered_ids.append(guild.id)
 
-    verified: list[dict] = []
-    for guild_id in ordered_ids:
-        previous = previous_by_id[guild_id]
+    # Vérifier plusieurs serveurs en parallèle, avec un plafond pour ne pas
+    # saturer Discord (un fetch_member ciblé peut être nécessaire par serveur).
+    semaphore = asyncio.Semaphore(6)
+
+    async def validate(guild_id: int) -> dict | None:
         guild = bot.get_guild(guild_id)
-        # La liste du dashboard ne représente que les serveurs réellement
-        # présents dans le cache Discord de SentriX et administrés par l'utilisateur.
-        # L'installation d'un bot ne se déduit jamais des seuls droits OAuth.
+        # Un ID OAuth seul ne prouve jamais l'installation du bot.
         if guild is None:
-            continue
-        if await dashboard._administrator_member(guild, user_id) is None:
-            continue
-        verified.append(_installed_item(guild, user_id, previous))
+            return None
+        async with semaphore:
+            member = await dashboard._administrator_member(guild, user_id)
+        if member is None:
+            return None
+        return _installed_item(guild, user_id, previous_by_id[guild_id])
+
+    results = await asyncio.gather(
+        *(validate(guild_id) for guild_id in ordered_ids),
+        return_exceptions=True,
+    )
+    verified = []
+    for guild_id, result in zip(ordered_ids, results):
+        if isinstance(result, Exception):
+            logger.warning("Dashboard : validation Administrateur impossible guild=%s (%s).", guild_id, type(result).__name__)
+        elif result is not None:
+            verified.append(result)
 
     session["guilds"] = verified
     session[_REFRESH_STAMP_KEY] = time.time()
