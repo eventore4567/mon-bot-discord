@@ -460,6 +460,10 @@ def install(dashboard) -> bool:
                     member = await _member_for_user(guild, user_id)
                     if member is None:
                         continue
+                    # Le dashboard est réservé aux Administrateurs (web/admin_only_dashboard) :
+                    # un rôle délégué n'ajoute pas un serveur où l'on n'est pas admin.
+                    if guild.owner_id != user_id and not member.guild_permissions.administrator:
+                        continue
                     scopes = await _scopes_for(request.app["bot"].db, guild, member)
                     if not scopes:
                         continue

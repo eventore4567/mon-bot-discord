@@ -13,6 +13,7 @@ import os
 import time
 from urllib.parse import urlencode
 
+import discord
 from aiohttp import ClientSession, ClientTimeout, web
 
 logger = logging.getLogger("bot.dashboard.ops-suite-plus")
@@ -187,31 +188,58 @@ def install(dashboard, ops) -> bool:
         return session, guild, None
 
     async def guilds_with_roles(request: web.Request):
+        """Les serveurs du dashboard : SentriX présent ET l'utilisateur propriétaire ou
+        Administrateur — la règle du verrou web/admin_only_dashboard, rien d'autre.
+
+        Mesuré (10/10/2026, plainte d'un admin) : la liste ajoutait les serveurs de
+        son compte Discord SANS SentriX (lien d'invitation) et ceux où il n'avait
+        qu'un rôle délégué, et faisait disparaître un serveur dès qu'un fetch_member
+        échouait (un appel REST par serveur, en série). Désormais : cache membres
+        d'abord, appels REST en parallèle bornés, et si Discord ne répond pas, la
+        connexion OAuth (admin/propriétaire au login) fait foi plutôt que de cacher
+        le serveur.
+        """
         session, error = dashboard._require_session(request)
         if error:
             return error
         bot = request.app["bot"]
         user_id = int(session["user"]["id"])
-        result = []
-        seen = set()
-        for guild in bot.guilds:
-            tier = await _effective_tier(bot, guild, user_id)
-            if tier is None:
-                continue
-            seen.add(guild.id)
-            result.append({
+        oauth = {str(item.get("id")): item for item in session.get("guilds", [])}
+        gate = asyncio.Semaphore(5)
+
+        def item(guild, owner: bool) -> dict:
+            return {
                 "id": str(guild.id), "name": guild.name,
                 "icon_url": str(guild.icon.url) if guild.icon else None,
-                "owner": guild.owner_id == user_id, "installed": True,
-                "invite_url": None, "dashboard_tier": tier,
-            })
-        for item in session.get("guilds", []):
-            gid = int(item["id"])
-            if gid in seen or bot.get_guild(gid) is not None:
-                continue
-            result.append({**item, "installed": False, "invite_url": dashboard._invite_url(bot, gid), "dashboard_tier": "admin"})
-        result.sort(key=lambda item: (not item["installed"], item["name"].casefold()))
-        return web.json_response({"guilds": result})
+                "owner": owner, "installed": True, "invite_url": None,
+                "access_level": "owner" if owner else "administrator", "dashboard_tier": "admin",
+            }
+
+        async def entry(guild):
+            if guild.owner_id == user_id:
+                return item(guild, True)
+            member = guild.get_member(user_id)
+            if member is None and not getattr(guild, "chunked", False):
+                async with gate:
+                    try:
+                        member = await guild.fetch_member(user_id)
+                    except discord.NotFound:
+                        return None
+                    except (discord.Forbidden, discord.HTTPException):
+                        known = oauth.get(str(guild.id)) or {}
+                        if known.get("access_level") in {"owner", "administrator"} or known.get("owner"):
+                            return item(guild, bool(known.get("owner")))
+                        return None
+            if member is None or not member.guild_permissions.administrator:
+                return None
+            return item(guild, False)
+
+        results = await asyncio.gather(*(entry(guild) for guild in list(bot.guilds)), return_exceptions=True)
+        result = [r for r in results if isinstance(r, dict)]
+        result.sort(key=lambda entry_: entry_["name"].casefold())
+        # Le lien d'installation officiel (aucun serveur présélectionné) : le bouton
+        # « + » du dashboard reste disponible sans lister les serveurs sans SentriX.
+        return web.json_response({"guilds": result, "invite_url": dashboard._invite_url(bot)})
 
     dashboard._manageable_guild = manageable_with_roles
     dashboard.handle_guilds = guilds_with_roles
