@@ -59,6 +59,10 @@ ACTOR: contextvars.ContextVar[tuple[int | None, str] | None] = contextvars.Conte
 )
 
 
+#: Transport d'une trace qu'aucune personne n'a lancée : SentriX agit seul (AutoMod).
+AUTOMATIC = "automatique"
+
+
 def make_ref(guild_id: int, invocation_id: int) -> str:
     """7 caractères (35 bits) dérivés de l'invocation : stable et sans collision pratique."""
     digest = int.from_bytes(hashlib.sha1(f"{guild_id}:{invocation_id}".encode()).digest()[:8], "big")
@@ -93,6 +97,8 @@ def visible_ref() -> str | None:
     trace = CURRENT.get()
     if trace is None:
         return None
+    if trace.transport == AUTOMATIC:
+        return trace.ref  # une action de SentriX lui-même (AutoMod) : toujours signée
     name = getattr(getattr(trace.ctx, "command", None), "qualified_name", None) or trace.command
     return trace.ref if is_traced(name) else None
 
@@ -538,10 +544,19 @@ SUITES: dict[str, tuple[tuple[str, str, str], ...]] = {
     "kick": (("history", "modhistory", "{target}"),),
     "unmute": (("history", "modhistory", "{target}"),),
     "unban": (("history", "modhistory", "{target}"),),
+    # Sous une carte d'incident AutoMod (salon de logs) : le geste du staff qui suit
+    # un filtre. La raison cite la référence de l'incident : le fil relie les deux.
+    "automod": (
+        ("history", "modhistory", "{target}"),
+        ("warn", "warn", "{target} Suite de l'incident AutoMod {ref}"),
+        ("timeout", "mute", "{target} 10m Suite de l'incident AutoMod {ref}"),
+    ),
 }
 SUITE_LABELS = {
-    "fr": {"history": "Historique", "timeout": "Exclure 10 min", "untimeout": "Lever l'exclusion", "unban": "Débannir"},
-    "en": {"history": "History", "timeout": "Time out 10 min", "untimeout": "Remove timeout", "unban": "Unban"},
+    "fr": {"history": "Historique", "timeout": "Exclure 10 min", "untimeout": "Lever l'exclusion", "unban": "Débannir",
+           "warn": "Avertir"},
+    "en": {"history": "History", "timeout": "Time out 10 min", "untimeout": "Remove timeout", "unban": "Unban",
+           "warn": "Warn"},
 }
 
 
@@ -567,7 +582,7 @@ def suites_view(command_name: str, target_id: int, ref: str, *, english: bool = 
             label=labels[key],
             custom_id=f"{SUITE_PREFIX}{command_name}:{key}:{int(target_id)}:{ref}",
             style=discord.ButtonStyle.secondary if key == "history" else discord.ButtonStyle.danger
-            if key == "timeout" else discord.ButtonStyle.success,
+            if key in {"timeout", "warn"} else discord.ButtonStyle.success,
         ))
     return view
 
@@ -603,5 +618,5 @@ __all__ = [
     "ACTOR", "CURRENT", "RETENTION_SECONDS", "Trace", "classify", "ensure_schema", "is_traced", "lookup",
     "SUITES", "SUITE_PREFIX", "current_command", "current_is_moderation", "current_target", "make_ref", "member_context", "normalise_ref", "purge",
     "economy_context", "memory_line", "parse_suite", "record", "ticket_memory", "suite_command", "suites_view", "target_of", "visible_ref",
-    "automod_memory", "join_memory", "levels_context", "XP_COMMANDS",
+    "automod_memory", "join_memory", "levels_context", "XP_COMMANDS", "AUTOMATIC",
 ]

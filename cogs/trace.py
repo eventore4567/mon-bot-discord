@@ -344,9 +344,12 @@ class Trace(commands.Cog):
             ))
         transport = {"slash": "/", "prefix": "+"}.get(str(row["transport"]), "")
         commande = f"`{transport}{row['command']}`" + (" (bouton)" if row["transport"] == "bouton" else "")
+        automatique = row["transport"] == trace.AUTOMATIC
+        if automatique:
+            commande = "AutoMod (action automatique de SentriX)"
         lignes = [
             panels.Ligne("Commande", commande),
-            panels.Ligne("Par", f"<@{row['actor_id']}>"),
+            panels.Ligne("Par", "SentriX" if automatique else f"<@{row['actor_id']}>"),
             panels.Ligne("Quand", f"<t:{int(row['created_at'])}:F> · <t:{int(row['created_at'])}:R>"),
             panels.Ligne("Où", f"<#{row['channel_id']}>" if row["channel_id"] else "—"),
             panels.Ligne("Résultat", OUTCOME_LABELS.get(str(row["outcome"]), str(row["outcome"]))),

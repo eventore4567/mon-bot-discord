@@ -404,6 +404,10 @@ class _Incident:
     action_label: str | None = None
     infractions: int = 0
     spam_stage: int = 0
+    #: Référence SX- de l'incident (fil SentriX) : sur la carte, dans +trace, et
+    #: citée par les suites du staff (« Suite de l'incident AutoMod SX-… »).
+    ref: str = ""
+    author_id: int = 0
 
 
 def _normalize_blocked_link_rule(value: str) -> str:
@@ -1455,12 +1459,20 @@ class AutoMod(commands.Cog, name="Automod"):
         guild: discord.Guild,
         embed: discord.Embed,
         log_type: str = "automod",
+        *,
+        suites: discord.ui.View | None = None,
     ):
         # Point unique : TOUS les événements AutoMod utilisent le même rendu
         # AutoMod Manage. helpers.send_log -> log_service -> send_wide_log ajoute
         # ensuite systématiquement la bannière de sécurité au-dessus de la carte.
         styled = _style_automod_log(embed, log_type)
-        await helpers.send_log(self.bot, guild, log_type, styled)
+        view = None
+        if suites is not None:
+            # Les boutons d'identifiants habituels d'abord, les suites ensuite.
+            view = helpers._derive_log_view(styled) or discord.ui.View(timeout=None)
+            for item in list(suites.children):
+                view.add_item(item)
+        await helpers.send_log(self.bot, guild, log_type, styled, view=view)
 
     # ---------------------------------------------------------------- CACHES
 
@@ -3035,6 +3047,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 if item.started < cutoff:
                     self.incidents.pop(candidate, None)
 
+        await self._record_incident_trace(message, incident)
         try:
             await self.bot.db.log_automod_action(
                 message.guild.id,
@@ -3170,6 +3183,27 @@ class AutoMod(commands.Cog, name="Automod"):
             return None
         return "mute"
 
+    async def _record_incident_trace(self, message: discord.Message, incident: _Incident) -> None:
+        """Une référence SX- par incident, écrite dans le fil comme une action du staff."""
+        from utils import sentrix_trace
+
+        try:
+            ref = sentrix_trace.make_ref(message.guild.id, message.id)
+            await sentrix_trace.record(self.bot.db, sentrix_trace.Trace(
+                ref=ref, guild_id=message.guild.id, command="automod", transport=sentrix_trace.AUTOMATIC,
+                actor_id=self._bot_user_id(), channel_id=message.channel.id,
+                target_id=int(message.author.id), detail=f"{incident.filter_name} · {incident.reason}",
+            ))
+        except Exception:
+            logger.exception("Référence d'incident AutoMod non enregistrée guild=%s", message.guild.id)
+            return
+        # Seulement une fois écrite : une référence affichée doit pouvoir se retrouver.
+        incident.ref = ref
+        incident.author_id = int(message.author.id)
+
+    def _bot_user_id(self) -> int:
+        return int(getattr(getattr(self.bot, "user", None), "id", 0) or 0)
+
     async def _flush_incident_log(self, guild: discord.Guild, member: discord.abc.User, key: tuple[int, int], incident: _Incident) -> None:
         """Une seule carte de log par incident, compacte, avec le nombre réel de messages."""
         # La mémoire est lue AVANT l'attente : l'incident vient d'être écrit en base,
@@ -3222,7 +3256,32 @@ class AutoMod(commands.Cog, name="Automod"):
                 "antispam_duplicate": "automod_spam",
                 "antiemoji": "automod_spam",
             }.get(incident.filter_name, "automod")
-            await self.log_action(guild, e, event_type)
+            if not incident.ref:
+                await self.log_action(guild, e, event_type)
+                return
+            from utils import sentrix_trace
+
+            # La carte porte la référence de l'incident et les suites du staff ;
+            # chaque bouton exécute la vraie commande au nom de celui qui clique.
+            english = False
+            try:
+                from cogs import language_runtime
+
+                english = await language_runtime.get_language(self.bot, guild.id) == language_runtime.LANG_EN
+            except Exception:
+                pass
+            token = sentrix_trace.CURRENT.set(sentrix_trace.Trace(
+                ref=incident.ref, guild_id=guild.id, command="automod", transport=sentrix_trace.AUTOMATIC,
+                actor_id=self._bot_user_id(), channel_id=incident.channel_id,
+                target_id=int(member.id),
+            ))
+            try:
+                await self.log_action(
+                    guild, e, event_type,
+                    suites=sentrix_trace.suites_view("automod", member.id, incident.ref, english=english),
+                )
+            finally:
+                sentrix_trace.CURRENT.reset(token)
         except Exception:
             logger.exception(
                 "Journal AutoMod impossible guild=%s user=%s filtre=%s",
