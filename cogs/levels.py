@@ -1010,7 +1010,8 @@ class Levels(commands.Cog, name="Levels"):
         e.set_footer(text=settings.get("footer", DEFAULT_STATS_SETTINGS["footer"]))
         return e
 
-    async def build_level_panneau(self, guild: discord.Guild, member: discord.Member) -> panels.Panneau:
+    async def build_level_panneau(self, guild: discord.Guild, member: discord.Member,
+                                  *, consultant_id: int | None = None) -> panels.Panneau:
         """Fiche de niveau composée.
 
         build_level_embed reste : une vue qui rafraichit son message ne peut pas
@@ -1070,15 +1071,40 @@ class Levels(commands.Cog, name="Levels"):
             panels.Section("Prochain rôle", [panels.Ligne("Palier", self._next_role_text(stats))]),
         ]
 
+        sous_titre = (f"{member.mention} · niveau **{stats['current_level']}**, "
+                      f"encore **{nombre(restant)} XP** avant le suivant")
+        if consultant_id == member.id:
+            # Sa propre fiche : ce qui a bougé depuis la dernière fois qu'il l'a vue.
+            depuis = await self._depuis_dernier_coup_doeil(guild, member, stats)
+            if depuis:
+                sous_titre += f"\n-# {depuis}"
+
         return panels.Panneau(
             titre="SentriX — Niveau",
-            sous_titre=f"{member.mention} · niveau **{stats['current_level']}**, "
-                       f"encore **{nombre(restant)} XP** avant le suivant",
+            sous_titre=sous_titre,
             kind="brand",
             vignette=member.display_avatar.url,
             sections=sections,
             pied="SentriX • Niveaux",
         )
+
+    async def _depuis_dernier_coup_doeil(self, guild: discord.Guild, member: discord.Member, stats: dict) -> str:
+        from utils import last_seen
+
+        snapshot = {"xp": int(stats.get("total_xp") or 0), "level": int(stats.get("current_level") or 0)}
+        if stats.get("is_ranked"):
+            snapshot["rank"] = int(stats.get("rank") or 0)
+        seen = await last_seen.remember(self.bot.db, guild.id, member.id, "level", snapshot)
+        if seen is None:
+            return ""
+        try:
+            from cogs import language_runtime
+
+            english = await language_runtime.get_language(self.bot, guild.id) == language_runtime.LANG_EN
+        except Exception:
+            english = False
+        deltas, seconds = seen
+        return last_seen.sentence(last_seen.level_parts(deltas, english=english), seconds, english=english)
 
     async def build_economy_embed(self, guild: discord.Guild, member: discord.Member) -> discord.Embed:
         settings = await self.bot.db.get_stats_settings(guild.id)
@@ -1190,7 +1216,7 @@ class Levels(commands.Cog, name="Levels"):
         try:
             if not await self._can_view(ctx, membre, settings):
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("La consultation des statistiques d'un autre membre est désactivée sur ce serveur.")))
-            panneau = await self.build_level_panneau(ctx.guild, membre)
+            panneau = await self.build_level_panneau(ctx.guild, membre, consultant_id=ctx.author.id)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Impossible de récupérer le niveau pour le moment (erreur Discord).')))
         except Exception:

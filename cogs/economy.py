@@ -331,9 +331,28 @@ class Economy(commands.Cog, name="Economy"):
             ),
         ]
 
+        sous_titre = f"{membre.mention} · **{nombre(stats['total_money'])} {emoji}** au total"
+        if membre.id == ctx.author.id:
+            # Son propre solde : ce qui a bougé depuis la dernière fois qu'il l'a vu.
+            from utils import last_seen
+
+            seen = await last_seen.remember(
+                self.bot.db, ctx.guild.id, membre.id, "money", {"money": int(stats["total_money"])},
+            )
+            if seen is not None:
+                try:
+                    from cogs import language_runtime
+
+                    english = await language_runtime.get_language(self.bot, ctx.guild.id) == language_runtime.LANG_EN
+                except Exception:
+                    english = False
+                depuis = last_seen.sentence(last_seen.money_parts(seen[0], emoji), seen[1], english=english)
+                if depuis:
+                    sous_titre += f"\n-# {depuis}"
+
         panneau = sx_panels.Panneau(
             titre="Économie",
-            sous_titre=f"{membre.mention} · **{nombre(stats['total_money'])} {emoji}** au total",
+            sous_titre=sous_titre,
             kind="warning" if stats["total_money"] == 0 else "success",
             vignette=membre.display_avatar.url,
             sections=sections,
