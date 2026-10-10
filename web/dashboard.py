@@ -302,21 +302,17 @@ def _dashboard_access_level(guild: discord.Guild, member: discord.Member, user_i
     permissions = member.guild_permissions
     if permissions.administrator:
         return "administrator"
-    if permissions.manage_guild:
-        return "manage_guild"
     return None
 
 
 async def _administrator_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
-    """Vérifie en direct l'accès dashboard : propriétaire, Administrateur ou Gérer le serveur.
+    """Vérifie en direct l'accès dashboard : propriétaire ou Administrateur.
 
     Le nom historique de la fonction est conservé car les modules du dashboard l'utilisent
     déjà, mais aucun accès n'est accordé à partir d'une simple session OAuth obsolète.
     """
     member = guild.get_member(user_id)
     if member is None:
-        if getattr(guild, "chunked", False):
-            return None
         try:
             member = await guild.fetch_member(user_id)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -667,7 +663,7 @@ async def handle_callback(request: web.Request):
     for guild in oauth_guilds:
         permissions = int(guild.get("permissions", "0"))
         owner = bool(guild.get("owner"))
-        access_level = "owner" if owner else "administrator" if permissions & ADMINISTRATOR else "manage_guild" if permissions & MANAGE_GUILD else None
+        access_level = "owner" if owner else "administrator" if permissions & ADMINISTRATOR else None
         if access_level:
             manageable.append({
                 "id": str(guild["id"]),
@@ -759,21 +755,19 @@ async def handle_guilds(request: web.Request):
     for item in session["guilds"]:
         guild_id = int(item["id"])
         installed_guild = bot.get_guild(guild_id)
-        installed = installed_guild is not None
-        access_level = item.get("access_level") or ("owner" if item.get("owner") else "administrator")
-        if installed:
-            member = await _administrator_member(installed_guild, user_id)
-            if member is None:
-                continue
-            access_level = _dashboard_access_level(installed_guild, member, user_id)
+        if installed_guild is None:
+            continue
+        member = await _administrator_member(installed_guild, user_id)
+        if member is None:
+            continue
         guilds.append({
             **item,
-            "installed": installed,
-            "access_level": access_level,
-            "permission_verified": bool(installed),
-            "invite_url": None if installed else _invite_url(bot, guild_id),
+            "installed": True,
+            "access_level": _dashboard_access_level(installed_guild, member, user_id),
+            "permission_verified": True,
+            "invite_url": None,
         })
-    guilds.sort(key=lambda item: (not item["installed"], item["name"].casefold()))
+    guilds.sort(key=lambda item: item["name"].casefold())
     return web.json_response({"guilds": guilds})
 
 
