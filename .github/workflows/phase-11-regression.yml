@@ -107,6 +107,7 @@ jobs:
               tests/test_economy_race_conditions.py
               tests/test_services_levels.py
               tests/test_services_profile.py
+              tests/test_stats_panel_labels.py
               tests/test_setxp_level_recalc.py
               tests/test_levels_niveaux_actifs_gaps.py
               tests/test_niveaux_desactives.py
