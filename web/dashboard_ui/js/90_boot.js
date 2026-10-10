@@ -183,7 +183,7 @@ function isHardReloadNavigation() {
 
 async function fetchVerifiedGuilds(refresh = false) {
   for (let attempt = 0; attempt < 6; attempt++) {
-    const payload = await api(refresh ? '/api/guilds?refresh=1' : '/api/guilds');
+    const payload = refresh ? await api('/api/guilds?refresh=1') : await api('/api/guilds');
     if (payload.discord_ready !== false) return payload;
     await new Promise(resolve => setTimeout(resolve, Math.max(1500, Number(payload.retry_after_ms) || 2000)));
   }
