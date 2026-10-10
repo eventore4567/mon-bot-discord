@@ -44,5 +44,10 @@ jobs:
         run: |
           node --check web/dashboard_ui/js/90_boot.js
           node --check web/dashboard_ui/js/20_overview.js
-      - name: Verify Discord guild permissions and HA fallback
-        run: python -m pytest -q tests/test_dashboard_admin_installed_filter.py tests/test_dashboard_guild_loading_recovery.py
+      - name: Verify guild access and rendered /app browser program
+        run: |
+          python -m pytest -q \
+            tests/test_dashboard_admin_installed_filter.py \
+            tests/test_dashboard_guild_loading_recovery.py \
+            tests/test_dashboard_unified_v2.py \
+            tests/test_dashboard_browser_program_v56.py
