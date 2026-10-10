@@ -78,6 +78,40 @@ def _claim_clear_cooldown(guild_id: int, user_id: int) -> float:
     return 0.0
 
 
+def _hierarchy_refusal_panel(message: str) -> panels.Panneau | None:
+    """Une hiérarchie Discord bloquante mérite une explication structurée.
+
+    Les confirmations de sanctions réussies restent des réponses courtes.
+    Seuls les refus donnant une action concrète passent dans ce panneau.
+    """
+    texte = str(message or "").casefold()
+    if "ne peut pas sanctionner ce membre" in texte:
+        # Nickname, move et ban partagent ce contrôle : ce n'est pas toujours
+        # une « sanction ». Garder un titre exact pour chaque opération.
+        titre = "Action impossible"
+        explication = "Le rôle du membre est égal ou supérieur à celui de SentriX."
+    elif "ne peut pas gérer ce rôle" in texte:
+        titre = "Rôle inaccessible"
+        explication = "Ce rôle est égal ou supérieur au rôle de SentriX."
+    else:
+        return None
+    return panels.Panneau(
+        titre=titre,
+        sous_titre=explication,
+        kind="warning",
+        sections=[
+            panels.Section(
+                "Comment corriger",
+                texte=(
+                    "Dans **Paramètres du serveur → Rôles**, placez le rôle "
+                    "**SentriX** au-dessus de celui du membre concerné."
+                ),
+            ),
+        ],
+        pied="Modération · Hiérarchie des rôles",
+    )
+
+
 class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -426,7 +460,10 @@ class Moderation(commands.Cog):
         return candidate, rest[0] if rest else "Aucune raison"
 
     async def _reply(self, ctx: commands.Context, message: str, *, ephemere: bool = False):
-        """Confirmation courte dans le salon de la commande (texte brut, sans ping)."""
+        """Confirmations courtes, mais refus de hiérarchie expliqués en panneau."""
+        panneau = _hierarchy_refusal_panel(message)
+        if panneau is not None:
+            return await panels.envoyer(ctx, panneau, ephemere=ephemere)
         return await panels.texte_court(ctx, message, ephemere=ephemere)
 
     async def _ack(self, ctx: commands.Context):

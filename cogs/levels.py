@@ -759,10 +759,35 @@ class Levels(commands.Cog, name="Levels"):
 
     # -------------------------------------------------------------- XP
 
+    async def _record_message(self, message: discord.Message) -> None:
+        """Compte l'activité réelle indépendamment des règles de gain d'XP.
+
+        Un message humain est compté une fois même lorsque le module Niveaux
+        est désactivé, qu'un cooldown XP s'applique ou que le message est une
+        commande. La base conserve ce cumul après redémarrage.
+        """
+        try:
+            await self.bot.db.execute(
+                "INSERT INTO message_counts (guild_id, user_id, count) VALUES (?, ?, 1) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + 1",
+                (message.guild.id, message.author.id),
+            )
+        except Exception:
+            # Un compteur indisponible ne doit jamais bloquer les autres cogs,
+            # la modération ou les gains d'XP.
+            logger.exception(
+                "Comptage de message impossible guild=%s user=%s",
+                message.guild.id, message.author.id,
+            )
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
+
+        # Suivi d'activité TOUJOURS actif. Les filtres ci-dessous concernent
+        # seulement l'XP, et ne doivent pas diminuer le nombre de messages.
+        await self._record_message(message)
         skip_ids = getattr(self.bot, "_xp_skip_ids", None)
         if skip_ids and message.id in skip_ids:
             return
@@ -802,11 +827,8 @@ class Levels(commands.Cog, name="Levels"):
 
     async def _process_xp(self, message: discord.Message, settings: dict, conf):
         try:
-            await self.bot.db.execute(
-                "INSERT INTO message_counts (guild_id, user_id, count) VALUES (?, ?, 1) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + 1",
-                (message.guild.id, message.author.id),
-            )
+            # Les messages ont déjà été comptés dans on_message. Le cooldown
+            # et les exclusions ci-dessous s'appliquent UNIQUEMENT à l'XP.
             xp_min = settings.get("xp_min", XP_MIN_FALLBACK)
             xp_max = settings.get("xp_max", XP_MAX_FALLBACK)
             if xp_min > xp_max:

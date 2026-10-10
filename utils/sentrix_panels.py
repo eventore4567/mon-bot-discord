@@ -297,7 +297,7 @@ def _libelle_valeur(lignes: Iterable[Ligne]) -> str:
     rendu: list[str] = []
     for ligne in lignes:
         valeur = _texte(ligne.valeur) or "—"
-        rendu.append(f"**{_texte(ligne.label, 40)}** · {valeur}")
+        rendu.append(f"**{_texte(ligne.label, 100)}** · {valeur}")
         if ligne.indice:
             rendu.append(f"-# {_texte(ligne.indice, 120)}")
     return "\n".join(rendu)
@@ -825,6 +825,16 @@ def _panneau_est_erreur_simple(panneau: Any) -> bool:
         return False
     if getattr(panneau, "boutons_source", ()):
         return False
+    # Une carte qui fournit une procédure concrète n'est PAS une « erreur simple ».
+    # La convertir en texte brut effaçait toute sa section de résolution, exactement
+    # comme le refus de hiérarchie de la modération.
+    if any(
+        str(getattr(section, "titre", "")).casefold().strip() in {
+            "comment corriger", "comment résoudre", "solution"
+        }
+        for section in getattr(panneau, "sections_source", ())
+    ):
+        return False
     if getattr(panneau, "kind", "") not in {"danger", "warning"}:
         return False
     nom, _ = _commande_en_cours()
@@ -929,11 +939,28 @@ async def _envoyer_texte_brut_sans_signal(
     return await destination.send(**kwargs)
 
 
+def _pied_avec_memoire_separee(contenu: str, marque: str, contexte: str) -> str:
+    """Place contexte et référence sur deux lignes discrètes, sans séparateur pendant.
+
+    L'ancienne interpolation « sur le serveur depuis 18 j · Réf. SX-... »
+    apparaissait accolée à la réponse principale, même dans les panneaux.
+    La signature existante reste en tête si elle porte une information utile.
+    """
+    if not contexte or marque not in contenu or contexte in contenu:
+        return contenu
+    avant, _sep, apres = contenu.partition(marque)
+    avant = avant.rstrip().rstrip("·•|—-").rstrip()
+    # « -# » tout seul n'est pas une signature utile.
+    morceaux = [avant] if avant.strip() != "-#" else []
+    morceaux.extend((f"-# {contexte}", f"-# {marque}{apres}"))
+    return "\n".join(morceaux)
+
+
 async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
-    """La mémoire SentriX sur un panneau : ajoutée à la ligne « Réf. », au moment de l'envoi.
+    """Sépare proprement le contexte membre et la référence dans le pied du panneau.
 
     Le panneau se construit sans accès à la base ; l'envoi, lui, est asynchrone.
-    Même format que texte_court : « -# solde 1 200 🪙 · 2 ajouts du staff en 30 j · Réf. SX-… ».
+    Contexte et référence restent sous le contenu, discrets et sans ping.
     """
     from utils import sentrix_trace
 
@@ -955,7 +982,9 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
         for enfant in list(getattr(item, "children", []) or []):
             if isinstance(enfant, discord.ui.TextDisplay) and marque in str(enfant.content):
                 if ligne not in enfant.content:
-                    enfant.content = enfant.content.replace(marque, f"{ligne} · {marque}", 1)
+                    enfant.content = _pied_avec_memoire_separee(
+                        str(enfant.content), marque, ligne
+                    )
                 return True
             if parcourir(enfant):
                 return True
