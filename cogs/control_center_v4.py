@@ -289,7 +289,7 @@ class EconomyModal(discord.ui.Modal, title="SentriX • Monnaie du serveur"):
         self.owner = owner
         self.singular = discord.ui.TextInput(label="Nom au singulier", default=settings["currency_singular"], max_length=32)
         self.plural = discord.ui.TextInput(label="Nom au pluriel", default=settings["currency_plural"], max_length=32)
-        self.symbol = discord.ui.TextInput(label="Symbole / emoji", default=settings["currency_symbol"], max_length=16)
+        self.symbol = discord.ui.TextInput(label="Symbole / emoji", default=settings["currency_symbol"], max_length=64)
         self.add_item(self.singular)
         self.add_item(self.plural)
         self.add_item(self.symbol)

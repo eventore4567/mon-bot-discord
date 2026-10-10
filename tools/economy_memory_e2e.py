@@ -47,6 +47,18 @@ async def main() -> int:
     shown = await run(f"+pay <@{h.TARGET_ID}> 10", MEMBER)
     check("pas assez d'argent" in shown, "+pay sans fonds : le message d'erreur est lisible (plus de carte vide)", shown[:160])
 
+    # Symbole de monnaie = emoji personnalisé supprimé depuis du serveur : enregistré
+    # entier (plus tronqué à 16 caractères), affiché comme la pièce par défaut.
+    from cogs import setup_v2_core as core
+
+    await core.set_currency(bot, h.GID, "Pièce", "Pièces", "<:piece:123456789012345678>")
+    row = await bot.db.fetchone("SELECT currency_symbol FROM economy_settings_v2 WHERE guild_id = ?", (h.GID,))
+    check(row["currency_symbol"] == "<:piece:123456789012345678>", "un emoji personnalisé est enregistré entier",
+          str(row["currency_symbol"]))
+    shown = await run("+balance", MEMBER)
+    check("<:piece:" not in shown and "🪙" in shown, "emoji supprimé : +balance montre la pièce, jamais le marquage brut",
+          shown[:200])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

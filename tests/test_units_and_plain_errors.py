@@ -46,3 +46,30 @@ def test_une_erreur_en_texte_brut_porte_le_signal_pendant_l_envoi():
     ))
     assert vus == [("Vous n'avez pas assez d'argent liquide.", True)]
     assert panels.TEXTE_BRUT.get() is False
+
+
+def test_un_emoji_personnalise_comme_monnaie_n_est_plus_tronque():
+    """« <:piece:123…> » fait plus de 16 caractères : tronqué, il s'affichait cassé."""
+    from cogs.setup_v2_core import clean_currency_symbol
+
+    marquage = "<:piece:123456789012345678>"
+    assert clean_currency_symbol(marquage) == marquage
+    assert clean_currency_symbol("<a:piece:123456789012345678>") == "<a:piece:123456789012345678>"
+    assert clean_currency_symbol("x" * 40) == "x" * 16
+    assert clean_currency_symbol("") == "🪙"
+
+
+def test_un_emoji_supprime_du_serveur_redevient_la_piece_a_l_affichage():
+    from cogs.setup_v2_core import displayable_currency_symbol
+
+    class Bot:
+        def __init__(self, connus):
+            self.connus = connus
+
+        def get_emoji(self, emoji_id):
+            return object() if emoji_id in self.connus else None
+
+    marquage = "<:piece:123456789012345678>"
+    assert displayable_currency_symbol(Bot(set()), marquage) == "🪙"
+    assert displayable_currency_symbol(Bot({123456789012345678}), marquage) == marquage
+    assert displayable_currency_symbol(Bot(set()), "💎") == "💎"

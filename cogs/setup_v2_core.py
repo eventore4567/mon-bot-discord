@@ -564,12 +564,35 @@ async def set_module_enabled(
         )
 
 
+# Un emoji personnalisé comme symbole de monnaie : « <:piece:123…> » dépasse
+# les 16 caractères d'un symbole ordinaire — tronqué, il s'affichait cassé.
+_CUSTOM_EMOJI_SYMBOL = re.compile(r"^<a?:[A-Za-z0-9_]{2,32}:(\d{15,22})>$")
+
+
+def clean_currency_symbol(symbol: object) -> str:
+    """Le symbole tel qu'il sera enregistré : un emoji personnalisé entier, ou 16 caractères."""
+    text = str(symbol or "🪙").strip()
+    if _CUSTOM_EMOJI_SYMBOL.match(text):
+        return text
+    return text[:16] or "🪙"
+
+
+def displayable_currency_symbol(bot: Any, symbol: str) -> str:
+    """Un emoji personnalisé que le bot ne voit plus (supprimé du serveur) s'afficherait
+    en texte brut dans toute l'économie : la pièce par défaut le remplace à l'affichage,
+    le réglage enregistré reste intact."""
+    match = _CUSTOM_EMOJI_SYMBOL.match(symbol)
+    if match and callable(getattr(bot, "get_emoji", None)) and bot.get_emoji(int(match.group(1))) is None:
+        return "🪙"
+    return symbol
+
+
 async def economy_settings(bot: commands.Bot, guild_id: int) -> dict[str, Any]:
     await ensure_schema(bot)
     row = await bot.db.fetchone("SELECT * FROM economy_settings_v2 WHERE guild_id=?", (int(guild_id),))
     if row is None:
         return {"currency_singular": "Pièce", "currency_plural": "Pièces", "currency_symbol": "🪙"}
-    symbol = str(row["currency_symbol"] or "🪙")
+    symbol = displayable_currency_symbol(bot, str(row["currency_symbol"] or "🪙"))
     # Le symbole du serveur est une unité : le texte sobre ne doit pas l'effacer.
     from utils import embeds as _embeds
 
@@ -593,7 +616,7 @@ async def set_currency(
     await ensure_schema(bot)
     singular = str(singular or "Pièce").strip()[:32] or "Pièce"
     plural = str(plural or singular).strip()[:32] or singular
-    symbol = str(symbol or "🪙").strip()[:16] or "🪙"
+    symbol = clean_currency_symbol(symbol)
     await bot.db.execute(
         "INSERT INTO economy_settings_v2 "
         "(guild_id,currency_singular,currency_plural,currency_symbol,updated_by,updated_at) "

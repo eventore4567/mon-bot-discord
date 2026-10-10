@@ -765,7 +765,7 @@ class WhitelistUserSelect(discord.ui.UserSelect):
 class CurrencyModal(discord.ui.Modal, title="Nom de la monnaie"):
     singular = discord.ui.TextInput(label="Singulier", placeholder="Coin", max_length=32)
     plural = discord.ui.TextInput(label="Pluriel", placeholder="Coins", max_length=32)
-    symbol = discord.ui.TextInput(label="Symbole / emoji", placeholder="🪙", max_length=16)
+    symbol = discord.ui.TextInput(label="Symbole / emoji", placeholder="🪙 ou <:piece:123…>", max_length=64)
 
     def __init__(self, owner):
         super().__init__()
