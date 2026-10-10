@@ -31,7 +31,7 @@ def test_refus_hierarchie_saffiche_dans_un_vrai_panneau():
     assert isinstance(panel, sentrix_panels.Panneau)
     assert panel.kind == "warning"
     rendu = sentrix_panels.texte_complet(panel)
-    assert "Sanction impossible" in rendu
+    assert "Action impossible" in rendu
     assert "Comment corriger" in rendu
     assert "Paramètres du serveur" in rendu
     assert "SentriX" in rendu
