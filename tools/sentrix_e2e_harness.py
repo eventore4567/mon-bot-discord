@@ -85,7 +85,20 @@ CALLS: list[tuple[str, str, Any]] = []
 STATE: dict[str, Any] = {
     "target_timeout": None, "target_nick": None, "target_roles": [MEMBER_ROLE_ID],
     "msg_seq": 5000, "cmd_seq": 800000000000000000, "last_cmd_id": None, "last_cmd_content": "",
+    # Bannissements connus. La cible historique est bannie au départ (comportement
+    # d'avant, sur lequel des scénarios s'appuient) ; un compte jamais banni répond
+    # 404 « Unknown Ban », comme Discord.
+    "bans": {TARGET_ID},
 }
+
+
+class _Response:
+    def __init__(self, status: int, reason: str) -> None:
+        self.status, self.reason = status, reason
+
+
+def _unknown_ban() -> discord.NotFound:
+    return discord.NotFound(_Response(404, "Not Found"), {"code": 10026, "message": "Unknown Ban"})
 
 
 def _now() -> str:
@@ -150,9 +163,19 @@ async def fake_request(self, route, *, files=None, form=None, **kwargs):
         return member_payload(BOT_ID, "SentriX", [BOT_ROLE_ID], nick=(js or {}).get("nick"))
     if re.match(r"/guilds/\d+/members$", path):
         return []
-    if re.match(r"/guilds/\d+/bans/\d+$", path):
-        if method == "GET":
-            return {"reason": None, "user": user(TARGET_ID, "cible")}
+    m_ban = re.match(r"/guilds/\d+/bans/(\d+)$", path)
+    if m_ban:
+        banned = int(m_ban.group(1))
+        if method == "PUT":
+            STATE["bans"].add(banned)
+        elif method == "DELETE":
+            if banned not in STATE["bans"]:
+                raise _unknown_ban()
+            STATE["bans"].discard(banned)
+        elif method == "GET":
+            if banned not in STATE["bans"]:
+                raise _unknown_ban()
+            return {"reason": None, "user": user(banned, "cible" if banned == TARGET_ID else "compte")}
         return None
     if re.match(r"/guilds/\d+/bans$", path):
         return []

@@ -29,7 +29,7 @@ const AUTOMOD = [
   ['security_vanity', 'Protection Vanity URL', 'Surveille le lien personnalisé.'],
   ['security_prune', 'Protection Prune', 'Détecte les suppressions massives de membres.'],
   ['security_permissions', 'Permissions dangereuses', 'Bloque les élévations critiques.'],
-  ['escalation', 'Escalade AutoMod', 'Augmente les sanctions en cas de récidive.'],
+  ['escalation', 'Escalade AutoMod', 'Compte les récidives (Infractions 1 h). Les filtres de contenu suppriment sans jamais exclure, expulser ni bannir seuls.'],
 ];
 const LOG_TYPES = [['Messages', 'log_messages'], ['Membres', 'log_members'], ['Vocal', 'log_voice'], ['Rôles', 'log_roles'], ['Serveur', 'log_server'], ['AutoMod', 'log_automod'], ['Modération', 'log_moderation'], ['Tickets', 'ticket_log_channel'], ['Erreurs', 'error_channel']];
 const settings = () => state.guild?.settings || {};

@@ -1923,7 +1923,13 @@ class AutoMod(commands.Cog, name="Automod"):
         label = "L'escalade automatique" if field == "escalation" else f"Le filtre **{AUTOMOD_TOGGLE_LABELS.get(field, field)}**"
         if field in {"antilink", "antilink_strict"} and value:
             label = "Le filtre **Anti-liens (blocage total + Discord AutoMod)**"
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{label} est maintenant {state_text}.')))
+        message = f'{label} est maintenant {state_text}.'
+        if field == "escalation":
+            # Politique de cogs/content_filter_policy : les filtres de contenu ne
+            # sanctionnent jamais seuls. Le réglage ne doit pas promettre l'inverse.
+            message += ("\nLes récidives sont comptées sur les cartes AutoMod ; les filtres de contenu "
+                        "suppriment le message sans jamais exclure, expulser ni bannir automatiquement.")
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(message)))
 
     # ---------------------------------------------------------------- TOGGLES (10 commandes explicites)
 
@@ -2199,7 +2205,7 @@ class AutoMod(commands.Cog, name="Automod"):
             "État de l'AutoMod",
             f"**{total_24h}** action(s) déclenchée(s) sur les dernières 24h. "
             f"Escalade automatique : {'ACTIVE' if (conf and conf['escalation']) else 'INACTIVE'} "
-            f"(`/automod-escalation`).",
+            f"(`/automod-escalation`) — les filtres de contenu ne sanctionnent jamais seuls.",
         )
         lines = []
         for field, label in AUTOMOD_TOGGLE_LABELS.items():

@@ -766,6 +766,58 @@ class Moderation(commands.Cog):
         await self.log_sanction(ctx, "unban", outcome.resolved_target, raison, case_number=outcome.case_number)
         await self._reply(ctx, f"{outcome.resolved_target} a été débanni.")
 
+    # ---------------------------------------------------------------- HACKBAN
+
+    @commands.command(name="hackban", help="Bannir par identifiant quelqu'un qui n'est PAS sur le serveur (ex. un raideur connu).")
+    # AUTORISATION -> utils/access_matrix.py (même décision que +ban : Bannir des membres).
+    # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
+    @checks.action_validation(bot_permissions=("ban_members",), target="external_user")
+    async def hackban(self, ctx: commands.Context, user_id: str, *, raison: str = "Aucune raison fournie"):
+        """Bannissement préventif d'un compte absent du serveur.
+
+        Une commande séparée plutôt qu'un +ban qui accepterait tout identifiant :
+        une faute de frappe dans +ban ne doit jamais bannir un inconnu. Une
+        personne PRÉSENTE est renvoyée vers +ban, où la hiérarchie s'applique.
+        """
+        raison = clean_reason(raison)
+        digits = user_id.strip().removeprefix("<@").removeprefix("!").removesuffix(">")
+        if not digits.isdigit() or not 15 <= len(digits) <= 22:
+            return await self._reply(ctx, "Identifiant Discord invalide : donnez l'identifiant (17 à 20 chiffres) du compte.", ephemere=True)
+        uid = int(digits)
+        if uid == ctx.author.id:
+            return await self._reply(ctx, "Vous ne pouvez pas vous bannir vous-même.", ephemere=True)
+        if uid == getattr(self.bot.user, "id", None) or uid == ctx.guild.owner_id:
+            return await self._reply(ctx, "Ce compte ne peut pas être banni.", ephemere=True)
+        if ctx.guild.get_member(uid) is not None:
+            return await self._reply(ctx, f"<@{uid}> est sur le serveur : utilisez `+ban`, qui vérifie la hiérarchie des rôles.", ephemere=True)
+        try:
+            row = await self.bot.db.fetchone(
+                "SELECT enabled FROM user_immunity_settings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, uid),
+            )
+        except Exception:
+            row = None
+        if row is not None and int(row["enabled"] or 0):
+            return await self._reply(ctx, "Ce compte a activé son immunité SentriX.", ephemere=True)
+        try:
+            user = await self.bot.fetch_user(uid)
+        except discord.NotFound:
+            return await self._reply(ctx, "Aucun compte Discord ne porte cet identifiant.", ephemere=True)
+        try:
+            await ctx.guild.fetch_ban(user)
+            return await self._reply(ctx, f"{user.mention} est déjà banni de ce serveur.", ephemere=True)
+        except discord.NotFound:
+            pass
+        if self._sanction_duplicate(ctx, "ban", uid):
+            return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce compte.", ephemere=True)
+        await self._ack(ctx)
+        log_service.mark_sanction(ctx.guild.id, uid, "ban")
+        await ctx.guild.ban(user, reason=f"{ctx.author} : {raison} (hors serveur)", delete_message_seconds=0)
+        case_number, _error = await moderation_service.persist_sanction(
+            self.bot, guild_id=ctx.guild.id, target_id=uid, actor_id=ctx.author.id, action="ban", reason=raison,
+        )
+        await self.log_sanction(ctx, "ban", user, raison, case_number=case_number)
+        await self._reply(ctx, f"{user.mention} a été banni par identifiant (absent du serveur).")
+
     # ---------------------------------------------------------------- KICK
 
     @commands.hybrid_command(name="kick", description="Expulser un membre du serveur.")

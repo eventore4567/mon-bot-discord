@@ -67,7 +67,7 @@ NORMAL_DIRECT_COMMANDS = frozenset({
 # dans +help : elles ne doivent pas apparaître dans la surface administrative publique.
 ADMIN_DIRECT_COMMANDS = frozenset({
     "setstatus", "status-rotate", "footer", "theme", "set-bot",
-    "bot-servers", "bot-leave", "roleall", "massrole",
+    "bot-servers", "bot-leave", "roleall", "massrole", "hackban",
 })
 
 PRIVATE_OWNER_COMMANDS = frozenset({

@@ -17,6 +17,8 @@ Ce module ne dépend d'aucune couche runtime : ``cogs/final_error_embed_v5.py``
 """
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 import discord
@@ -100,7 +102,12 @@ def argument_error_text(error: BaseException, *, usage: str | None, param_name: 
         if isinstance(error, kind):
             argument = getattr(error, "argument", None)
             precision = f" : « {str(argument)[:60]} »" if argument else ""
-            return f"{label}{precision}. Indiquez une mention, un nom ou un identifiant."
+            texte = f"{label}{precision}. Indiquez une mention, un nom ou un identifiant."
+            # +ban sur l'identifiant de quelqu'un d'absent : la commande prévue existe.
+            if (kind is commands.MemberNotFound and re.match(r"[+/]?ban\s", usage or "")
+                    and str(argument or "").strip("<@!>").isdigit()):
+                texte += f" Pour bannir un compte qui n'est pas sur le serveur : `+hackban {str(argument).strip('<@!>')} [raison]`."
+            return texte
     if isinstance(error, commands.RangeError):
         minimum, maximum = getattr(error, "minimum", None), getattr(error, "maximum", None)
         nom = f" « {param_name} »" if param_name else ""

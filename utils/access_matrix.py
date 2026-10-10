@@ -229,6 +229,7 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     "verify-config": "administrator",
     "verification-config": "administrator",
     "ban": "ban_members",
+    "hackban": "ban_members",
     "tempban": "ban_members",
     "unban": "ban_members",
     "kick": "kick_members",
@@ -524,7 +525,7 @@ for _cat, _names in CATEGORY_COMMANDS.items():
 # rattachement, couper « Modération » ne coupait ni +ban ni +mute.
 _MODULE_BY_PERMISSION_COMMAND = {
     "moderation": {
-        "ban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
+        "ban", "hackban", "tempban", "unban", "kick", "mute", "unmute", "warn", "unwarn",
         "warnings", "clearwarnings", "case", "casefull", "caseproof",
         "modhistory", "modundo", "modcenter", "userhistory", "staffnote",
         "member", "modview", "note", "staff-history", "staff-proof", "incident", "watch", "staff",
