@@ -57,34 +57,50 @@ async function render({ navigation = false } = {}) {
 
 /* ---------- serveurs ---------- */
 function renderServerRail() {
-  const installed = state.guilds.filter(g => g.installed), missing = state.guilds.filter(g => !g.installed);
+  const rail = $('serverRail');
+  const previousScroll = rail.scrollTop;
+  const installed = state.guilds.filter(g => g.installed);
   const user = state.user || {};
   const avatar = user.avatar_url
     ? `<img src="${esc(user.avatar_url)}" alt="">`
     : esc(String(user.global_name || user.username || 'ME').slice(0, 2).toUpperCase());
-  $('serverRail').innerHTML =
+  rail.innerHTML =
     `<button class="guild-btn account ${state.guildId ? '' : 'active'}" type="button" id="globalHomeRail" title="Mon espace SentriX" aria-label="Mon espace SentriX">${avatar}</button>
      <span class="rail-separator" aria-hidden="true"></span>` +
-    installed.map(g => `<button class="guild-btn ${String(g.id) === String(state.guildId) ? 'active' : ''}" type="button" data-guild="${esc(g.id)}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : esc((g.name || 'S').slice(0, 2).toUpperCase())}</button>`).join('') +
-    (missing[0] ? `<a class="guild-btn add" href="${esc(missing[0].invite_url || '#')}" title="Ajouter SentriX à un autre serveur">+</a>` : '');
+    installed.map(g => `<button class="guild-btn ${String(g.id) === String(state.guildId) ? 'active' : ''}" type="button" data-guild="${esc(g.id)}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : esc((g.name || 'S').slice(0, 2).toUpperCase())}</button>`).join('');
+  rail.scrollTop = previousScroll;
   $('globalHomeRail').onclick = () => exitGuildToGlobal('profile');
   $('serverRail').querySelectorAll('[data-guild]').forEach(b => b.onclick = () => selectGuild(b.dataset.guild));
 }
 function openServerPicker() {
-  const installed = state.guilds.filter(g => g.installed), missing = state.guilds.filter(g => !g.installed);
   openModal({
     title: 'Choisir un serveur',
-    body: `<input class="input" id="pickSearch" type="search" placeholder="Rechercher un serveur…" autocomplete="off"><div class="options" id="pickOptions"></div>`,
+    body: `<input class="input" id="pickSearch" type="search" placeholder="Rechercher un serveur…" autocomplete="off"><div class="options" id="pickOptions"></div><p class="info"><a href="/login">Un serveur manque ? Réactualiser avec Discord</a></p>`,
     actions: [{ label: 'Fermer' }],
     onOpen: () => {
       const paint = q => {
+        const installed = state.guilds.filter(g => g.installed);
         const n = String(q || '').toLocaleLowerCase('fr');
         const rows = g => g.filter(x => !n || x.name.toLocaleLowerCase('fr').includes(n));
-        const item = (g, add) => `<${add ? 'a' : 'button'} ${add ? `href="${esc(g.invite_url || '#')}"` : `type="button" data-pick-guild="${esc(g.id)}"`}><span class="server-icon">${g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : esc((g.name || 'S').slice(0, 2).toUpperCase())}</span><span class="row-main"><b>${esc(g.name)}</b><small>${add ? 'SentriX n’est pas encore sur ce serveur — inviter' : (String(g.id) === String(state.guildId) ? 'Serveur actuel' : 'Configurer')}</small></span></${add ? 'a' : 'button'}>`;
-        $('pickOptions').innerHTML = `<div class="nav-group">Vos serveurs avec SentriX</div>${rows(installed).map(g => item(g)).join('') || '<div class="empty">Aucun serveur.</div>'}${rows(missing).length ? `<div class="nav-group">Ajouter SentriX</div>${rows(missing).map(g => item(g, true)).join('')}` : ''}`;
+        const item = g => `<button type="button" data-pick-guild="${esc(g.id)}"><span class="server-icon">${g.icon_url ? `<img src="${esc(g.icon_url)}" alt="">` : esc((g.name || 'S').slice(0, 2).toUpperCase())}</span><span class="row-main"><b>${esc(g.name)}</b><small>${String(g.id) === String(state.guildId) ? 'Serveur actuel' : 'Configurer'}</small></span></button>`;
+        $('pickOptions').innerHTML = `<div class="nav-group">Serveurs administrables avec SentriX</div>${rows(installed).map(item).join('') || '<div class="empty">Aucun serveur disponible.</div>'}`;
         $('pickOptions').querySelectorAll('[data-pick-guild]').forEach(b => b.onclick = () => { closeModal(); selectGuild(b.dataset.pickGuild); });
       };
       paint(''); $('pickSearch').oninput = () => paint($('pickSearch').value);
+      const search = $('pickSearch');
+      search.setAttribute('aria-label', 'Rechercher dans mes serveurs administrables');
+      fetchVerifiedGuilds(true).then(payload => {
+        state.guilds = payload.guilds || [];
+        renderServerRail();
+        if (document.getElementById('pickOptions') && document.getElementById('pickSearch') === search) {
+          paint(search.value);
+        }
+      }).catch(error => {
+        if (document.getElementById('pickOptions') && document.getElementById('pickSearch') === search) {
+          $('pickOptions').insertAdjacentHTML('beforeend',
+            `<p class="info" role="status">Actualisation impossible : ${esc(error.message || 'Erreur réseau')}</p>`);
+        }
+      });
     },
   });
 }
@@ -136,7 +152,22 @@ async function selectGuild(value) {
     if (e?.name === 'AbortError' || controller !== state.guildAbort) return;
     if (e.status === 503) errorView({ message: 'Reconnexion Discord en cours. Réessayez dans quelques secondes.' }, () => selectGuild(requested));
     else if (e.status === 401) errorView({ message: 'Votre session Discord a expiré. Reconnectez-vous.' }, () => location.reload());
-    else errorView(e, () => selectGuild(requested));
+    else if (e.status === 403 || e.status === 404) {
+      toast('Ce serveur n’est plus accessible avec vos droits Administrateur.', true);
+      state.guildId = '';
+      state.guild = null;
+      state.guildOwner = false;
+      state.page = 'servers';
+      state.sub = '';
+      state.cache.clear();
+      try {
+        const payload = await fetchVerifiedGuilds(true);
+        state.guilds = payload.guilds || [];
+      } catch (_) {}
+      renderServerRail();
+      updateChrome();
+      await render({ navigation: true });
+    } else errorView(e, () => selectGuild(requested));
   } finally { if (controller === state.guildAbort) state.guildAbort = null; }
 }
 function isHardReloadNavigation() {
@@ -150,8 +181,16 @@ function isHardReloadNavigation() {
   }
 }
 
+async function fetchVerifiedGuilds(refresh = false) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const payload = refresh ? await api('/api/guilds?refresh=1') : await api('/api/guilds');
+    if (payload.discord_ready !== false) return payload;
+    await new Promise(resolve => setTimeout(resolve, Math.max(1500, Number(payload.retry_after_ms) || 2000)));
+  }
+  throw new Error('SentriX est encore en cours de connexion à Discord. Réessayez dans quelques instants.');
+}
 async function loadGuilds() {
-  const payload = await api('/api/guilds');
+  const payload = await fetchVerifiedGuilds();
   state.guilds = payload.guilds || [];
   showOnly('dashboard');
   const installed = state.guilds.filter(g => g.installed);
@@ -414,7 +453,7 @@ $('refreshButton').onclick = async () => {
     state.cache.clear();
     if (!state.guildId) {
       try {
-        const payload = await api('/api/guilds');
+        const payload = await fetchVerifiedGuilds(true);
         state.guilds = payload.guilds || [];
         renderServerRail();
         await render();

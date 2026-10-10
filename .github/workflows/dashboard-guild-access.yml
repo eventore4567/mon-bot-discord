@@ -1,0 +1,53 @@
+name: SentriX Dashboard Guild Access
+
+on:
+  push:
+    branches:
+      - fix/dashboard-admin-installed-guilds-20261010
+    paths:
+      - 'web/dashboard.py'
+      - 'web/admin_only_dashboard.py'
+      - 'web/dashboard_recovery_v54.py'
+      - 'web/dashboard_ui/**'
+      - 'tests/test_dashboard_admin_installed_filter.py'
+      - 'tests/test_dashboard_guild_loading_recovery.py'
+      - '.github/workflows/dashboard-guild-access.yml'
+  pull_request:
+    paths:
+      - 'web/dashboard.py'
+      - 'web/admin_only_dashboard.py'
+      - 'web/dashboard_recovery_v54.py'
+      - 'web/dashboard_ui/**'
+      - 'tests/test_dashboard_admin_installed_filter.py'
+      - 'tests/test_dashboard_guild_loading_recovery.py'
+      - '.github/workflows/dashboard-guild-access.yml'
+
+jobs:
+  guild-access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DISCORD_TOKEN: ci.fake.token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Python dependencies
+        run: python -m pip install --disable-pip-version-check pytest -r requirements.txt
+      - name: Check backend Python syntax
+        run: python -m compileall -q web/dashboard.py web/admin_only_dashboard.py web/dashboard_recovery_v54.py tests/test_dashboard_admin_installed_filter.py tests/test_dashboard_guild_loading_recovery.py
+      - name: Check native dashboard JavaScript syntax
+        run: |
+          node --check web/dashboard_ui/js/90_boot.js
+          node --check web/dashboard_ui/js/20_overview.js
+      - name: Verify guild access and rendered /app browser program
+        run: |
+          python -m pytest -q \
+            tests/test_dashboard_admin_installed_filter.py \
+            tests/test_dashboard_guild_loading_recovery.py \
+            tests/test_dashboard_unified_v2.py \
+            tests/test_dashboard_browser_program_v56.py

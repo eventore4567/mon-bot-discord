@@ -204,31 +204,26 @@ def _install_guild_loading_recovery(dashboard) -> None:
         session_guilds = list(session.get("guilds", []))
 
         if not ready:
-            guilds = [
-                {
-                    **item,
-                    "installed": None,
-                    "invite_url": None,
-                }
-                for item in session_guilds
-            ]
-            guilds.sort(key=lambda item: item["name"].casefold())
+            # Ne pas exposer des serveurs non vérifiés pendant une reconnexion HA :
+            # le navigateur doit patienter puis recharger la liste installée.
+            guilds = []
         else:
             permission_gate = asyncio.Semaphore(6)
 
             async def validated_item(item: dict):
                 guild_id = int(item["id"])
                 installed_guild = bot.get_guild(guild_id)
-                installed = installed_guild is not None
-                if installed:
-                    async with permission_gate:
-                        member = await dashboard._administrator_member(installed_guild, user_id)
-                    if member is None:
-                        return None
+                if installed_guild is None:
+                    return None
+                async with permission_gate:
+                    member = await dashboard._administrator_member(installed_guild, user_id)
+                if member is None:
+                    return None
                 return {
                     **item,
-                    "installed": installed,
-                    "invite_url": None if installed else dashboard._invite_url(bot, guild_id),
+                    "installed": True,
+                    "permission_verified": True,
+                    "invite_url": None,
                 }
 
             results = await asyncio.gather(
@@ -246,7 +241,7 @@ def _install_guild_loading_recovery(dashboard) -> None:
                     continue
                 if result is not None:
                     guilds.append(result)
-            guilds.sort(key=lambda item: (not bool(item["installed"]), item["name"].casefold()))
+            guilds.sort(key=lambda item: item["name"].casefold())
 
         elapsed_ms = (time.perf_counter() - started) * 1000
         if elapsed_ms >= 1000:

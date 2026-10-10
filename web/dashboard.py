@@ -91,6 +91,46 @@ async def _discord_api_json(session: ClientSession, method: str, url: str, **kwa
     return last_status, last_payload
 
 
+async def _oauth_fetch_all_guilds(client: ClientSession, headers: dict) -> list[dict]:
+    """Récupère toutes les pages OAuth Discord, sans tronquer à 200 serveurs.
+
+    Un échec d'une page invalide toute la connexion plutôt que de masquer des
+    serveurs autorisés. Discord accepte 'limit' et 'after' pour ce point d'entrée.
+    """
+    collected: list[dict] = []
+    seen: set[str] = set()
+    cursor: str | None = None
+    for _page in range(30):
+        params = {"limit": "200"}
+        if cursor is not None:
+            params["after"] = cursor
+        status, page = await _discord_api_json(
+            client, "GET", f"{DISCORD_API}/users/@me/guilds",
+            headers=headers, params=params,
+        )
+        if status != 200 or not isinstance(page, list):
+            logger.warning("Lecture paginée des serveurs OAuth Discord refusée (%s).", status)
+            raise web.HTTPFound("/?auth=failed")
+
+        for guild in page:
+            if not isinstance(guild, dict):
+                continue
+            guild_id = str(guild.get("id") or "")
+            if guild_id.isdecimal() and guild_id not in seen:
+                collected.append(guild)
+                seen.add(guild_id)
+        if len(page) < 200:
+            return collected
+        last_id = str(page[-1].get("id") or "") if isinstance(page[-1], dict) else ""
+        if not last_id.isdecimal() or last_id == cursor:
+            logger.error("Pagination des serveurs OAuth Discord interrompue : curseur invalide.")
+            raise web.HTTPFound("/?auth=failed")
+        cursor = last_id
+
+    logger.error("Pagination OAuth Discord : nombre maximal de pages dépassé.")
+    raise web.HTTPFound("/?auth=failed")
+
+
 BOT_INSTALL_URL = "https://discord.com/oauth2/authorize?client_id=1532010415951839252"
 SESSION_COOKIE = "sentrix_session"
 OAUTH_STATE_COOKIE = "sentrix_oauth_state"
@@ -302,21 +342,17 @@ def _dashboard_access_level(guild: discord.Guild, member: discord.Member, user_i
     permissions = member.guild_permissions
     if permissions.administrator:
         return "administrator"
-    if permissions.manage_guild:
-        return "manage_guild"
     return None
 
 
 async def _administrator_member(guild: discord.Guild, user_id: int) -> discord.Member | None:
-    """Vérifie en direct l'accès dashboard : propriétaire, Administrateur ou Gérer le serveur.
+    """Vérifie en direct l'accès dashboard : propriétaire ou Administrateur.
 
     Le nom historique de la fonction est conservé car les modules du dashboard l'utilisent
     déjà, mais aucun accès n'est accordé à partir d'une simple session OAuth obsolète.
     """
     member = guild.get_member(user_id)
     if member is None:
-        if getattr(guild, "chunked", False):
-            return None
         try:
             member = await guild.fetch_member(user_id)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -650,13 +686,7 @@ async def handle_callback(request: web.Request):
             # la liste des serveurs Discord de l'utilisateur n'est nécessaire.
             oauth_guilds = []
             if pending_verify is None:
-                guild_status, guild_payload = await _discord_api_json(
-                    client, "GET", f"{DISCORD_API}/users/@me/guilds", headers=headers
-                )
-                if guild_status != 200 or not isinstance(guild_payload, list):
-                    logger.warning("Lecture des serveurs OAuth Discord refusée (%s).", guild_status)
-                    raise web.HTTPFound("/?auth=failed")
-                oauth_guilds = guild_payload
+                oauth_guilds = await _oauth_fetch_all_guilds(client, headers)
     except web.HTTPException:
         raise
     except Exception:
@@ -665,13 +695,16 @@ async def handle_callback(request: web.Request):
 
     manageable = []
     for guild in oauth_guilds:
-        permissions = int(guild.get("permissions", "0"))
+        try:
+            permissions = int(guild.get("permissions") or 0)
+        except (ValueError, TypeError):
+            continue
         owner = bool(guild.get("owner"))
-        access_level = "owner" if owner else "administrator" if permissions & ADMINISTRATOR else "manage_guild" if permissions & MANAGE_GUILD else None
-        if access_level:
+        access_level = "owner" if owner else "administrator" if permissions & ADMINISTRATOR else None
+        if access_level and guild.get("id"):
             manageable.append({
                 "id": str(guild["id"]),
-                "name": guild["name"],
+                "name": str(guild.get("name") or "Serveur Discord"),
                 "icon_url": _guild_icon_url(guild),
                 "owner": owner,
                 "access_level": access_level,
@@ -759,21 +792,19 @@ async def handle_guilds(request: web.Request):
     for item in session["guilds"]:
         guild_id = int(item["id"])
         installed_guild = bot.get_guild(guild_id)
-        installed = installed_guild is not None
-        access_level = item.get("access_level") or ("owner" if item.get("owner") else "administrator")
-        if installed:
-            member = await _administrator_member(installed_guild, user_id)
-            if member is None:
-                continue
-            access_level = _dashboard_access_level(installed_guild, member, user_id)
+        if installed_guild is None:
+            continue
+        member = await _administrator_member(installed_guild, user_id)
+        if member is None:
+            continue
         guilds.append({
             **item,
-            "installed": installed,
-            "access_level": access_level,
-            "permission_verified": bool(installed),
-            "invite_url": None if installed else _invite_url(bot, guild_id),
+            "installed": True,
+            "access_level": _dashboard_access_level(installed_guild, member, user_id),
+            "permission_verified": True,
+            "invite_url": None,
         })
-    guilds.sort(key=lambda item: (not item["installed"], item["name"].casefold()))
+    guilds.sort(key=lambda item: item["name"].casefold())
     return web.json_response({"guilds": guilds})
 
 
