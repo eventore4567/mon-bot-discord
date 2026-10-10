@@ -94,10 +94,12 @@ async def test_real_send_log_routes_generic_resources_as_invite_and_suppresses_e
     sender = AsyncMock(return_value=True)
     config = {"channel_id": 99, "enabled": True, "updated_at": 0}
     try:
-        with patch.object(log_service, "get_log_config", AsyncMock(return_value=config)), \\
-             patch.object(log_service, "validate_channel", return_value=(True, "ok")), \\
-             patch.object(log_service.wide_logs, "salon_inaccessible", return_value=False), \\
-             patch.object(log_service, "send_wide_log", sender):
+        with (
+            patch.object(log_service, "get_log_config", AsyncMock(return_value=config)),
+            patch.object(log_service, "validate_channel", return_value=(True, "ok")),
+            patch.object(log_service.wide_logs, "salon_inaccessible", return_value=False),
+            patch.object(log_service, "send_wide_log", sender),
+        ):
             # La passerelle précise le type dans sa clé.
             first = await log_service.send_log(
                 bot, guild, "resources", _gateway_embed(),
@@ -162,7 +164,7 @@ def test_formatted_log_is_a_readable_card_without_quoted_bar_or_repeated_identit
     assert "## Invitation créée" in combined
     assert "Item" not in combined
     assert "> " not in combined
-    assert combined.count("SmeMEFNH") == 1
+    assert combined.count("https://discord.gg/SmeMEFNH") == 1
 
 
 @pytest.mark.asyncio
