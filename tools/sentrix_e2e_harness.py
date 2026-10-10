@@ -344,6 +344,12 @@ async def boot(*, quiet: bool = True):
 
     _commands.MemberConverter.query_member_by_id = _query_member_by_id
 
+    async def _query_member_named(self, guild, argument):
+        # Même comparaison exacte que discord.py sur ce que la passerelle renverrait.
+        return guild.get_member_named(argument)
+
+    _commands.MemberConverter.query_member_named = _query_member_named
+
     main.start_dashboard = lambda bot: asyncio.sleep(0)
     bot = main.BotAllInOne()
 

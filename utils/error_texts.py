@@ -107,6 +107,8 @@ def argument_error_text(error: BaseException, *, usage: str | None, param_name: 
             if kind is commands.MemberNotFound and raison == "absent":
                 # La mention était bonne : c'est la personne qui n'est pas là.
                 texte = f"{str(argument)[:60]} n'est pas membre de ce serveur (ou l'a quitté)."
+            elif kind is commands.MemberNotFound and raison == "ambigu":
+                texte = f"Plusieurs membres s'appellent « {str(argument)[:60]} » : mentionnez la bonne personne."
             elif kind is commands.MemberNotFound and raison == "discord":
                 texte = f"Discord n'a pas répondu en cherchant {str(argument)[:60]}. Réessayez dans un instant."
             # +ban sur l'identifiant de quelqu'un d'absent : la commande prévue existe.

@@ -142,7 +142,24 @@ def _install_member_converter(bot: commands.Bot) -> None:
             text = str(argument or "").strip()
             match = re.fullmatch(r"<@!?(\d{15,25})>", text) or re.fullmatch(r"(\d{15,25})", text)
             if not match:
-                raise
+                # Un nom tapé à la main : « @Vortex » (sans l'autocomplétion de
+                # Discord) ou « vortex » (casse différente) échouaient, Discord
+                # comparant les noms à l'identique. Un seul membre correspondant :
+                # c'est lui ; plusieurs : on demande une mention, sans deviner.
+                wanted = text[1:].strip() if text.startswith("@") else text
+                folded = wanted.casefold()
+                found = [
+                    member for member in getattr(guild, "members", [])
+                    if folded and folded in {
+                        str(member.name or "").casefold(), str(getattr(member, "global_name", "") or "").casefold(),
+                        str(member.nick or "").casefold(), str(member.display_name or "").casefold(),
+                    }
+                ]
+                if len(found) == 1:
+                    return found[0]
+                if len(found) > 1:
+                    original.sentrix_reason = "ambigu"
+                raise original
             user_id = int(match.group(1))
             cached = guild.get_member(user_id)
             if cached is not None:
