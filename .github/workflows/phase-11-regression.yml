@@ -108,6 +108,7 @@ jobs:
               tests/test_services_levels.py
               tests/test_services_profile.py
               tests/test_setxp_level_recalc.py
+              tests/test_stats_message_count_independent.py
               tests/test_levels_niveaux_actifs_gaps.py
               tests/test_niveaux_desactives.py
               tests/test_profile_niveaux_actifs.py
