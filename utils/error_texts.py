@@ -103,6 +103,12 @@ def argument_error_text(error: BaseException, *, usage: str | None, param_name: 
             argument = getattr(error, "argument", None)
             precision = f" : « {str(argument)[:60]} »" if argument else ""
             texte = f"{label}{precision}. Indiquez une mention, un nom ou un identifiant."
+            raison = getattr(error, "sentrix_reason", None)
+            if kind is commands.MemberNotFound and raison == "absent":
+                # La mention était bonne : c'est la personne qui n'est pas là.
+                texte = f"{str(argument)[:60]} n'est pas membre de ce serveur (ou l'a quitté)."
+            elif kind is commands.MemberNotFound and raison == "discord":
+                texte = f"Discord n'a pas répondu en cherchant {str(argument)[:60]}. Réessayez dans un instant."
             # +ban sur l'identifiant de quelqu'un d'absent : la commande prévue existe.
             if (kind is commands.MemberNotFound and re.match(r"[+/]?ban\s", usage or "")
                     and str(argument or "").strip("<@!>").isdigit()):

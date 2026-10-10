@@ -149,7 +149,13 @@ def _install_member_converter(bot: commands.Bot) -> None:
                 return cached
             try:
                 return await guild.fetch_member(user_id)
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            except discord.NotFound:
+                # Une vraie mention, mais la personne n'est pas (ou plus) sur ce
+                # serveur : le message doit le dire, pas redemander une mention.
+                original.sentrix_reason = "absent"
+                raise original
+            except (discord.Forbidden, discord.HTTPException):
+                original.sentrix_reason = "discord"
                 raise original
 
     member_convert_v16._sentrix_v16_fetch_member = True

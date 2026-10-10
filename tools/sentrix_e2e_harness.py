@@ -334,6 +334,15 @@ async def boot(*, quiet: bool = True):
         logging.disable(logging.WARNING)
     import sentrix_v98_ha_product_boot_v8  # noqa: F401  (chaîne d'installs identique à la prod)
     import main
+    from discord.ext import commands as _commands
+
+    # La recherche d'un membre par la passerelle Discord (REQUEST_GUILD_MEMBERS) n'existe
+    # pas ici : sans shard connecté, discord.py levait KeyError. Le harnais a tous ses
+    # membres en cache — la passerelle répondrait la même chose que le cache.
+    async def _query_member_by_id(self, bot, guild, user_id):
+        return guild.get_member(user_id)
+
+    _commands.MemberConverter.query_member_by_id = _query_member_by_id
 
     main.start_dashboard = lambda bot: asyncio.sleep(0)
     bot = main.BotAllInOne()
@@ -469,7 +478,14 @@ def build_message(bot, guild, content: str, *, author_id: int = AUTHOR_ID, autho
     data = message_payload(mid, CID, content, author_id, author_name)
     STATE["last_cmd_id"] = mid
     STATE["last_cmd_content"] = content
-    data["mentions"] = [dict(u, member=member_payload(int(u["id"]), u["username"], [MEMBER_ROLE_ID])) for u in mentions]
+    # Comme Discord : la fiche « member » n'accompagne une mention que si la personne
+    # est sur le serveur. Avant, toute mention devenait un membre — un compte absent
+    # passait pour présent (+ban « réussissait » sur lui).
+    data["mentions"] = [
+        dict(u, member=member_payload(int(u["id"]), u["username"], [MEMBER_ROLE_ID]))
+        if guild.get_member(int(u["id"])) is not None else u
+        for u in mentions
+    ]
     data["mention_roles"] = re.findall(r"<@&(\d+)>", content)
     if author_roles is None:
         # Un persona inconnu n'hérite de rien : sans cette règle, un identifiant

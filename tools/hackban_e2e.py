@@ -61,7 +61,32 @@ async def main() -> int:
     check(len(logs) == 1 and "Réf. SX-" in shown, "une carte de log, et la réponse porte sa référence",
           f"{len(logs)} carte(s) | {shown[-120:]}")
 
+    # Une VRAIE mention d'un compte absent du serveur (capture d'un admin, 10/10/2026 :
+    # « Membre introuvable : « @VortexV1 ». Indiquez une mention… » alors qu'il avait
+    # mentionné). Discord répond 404 pour ce membre ; la recherche par la passerelle
+    # (absente du harnais) ne trouve rien.
+    import discord
     from discord.ext import commands
+    from discord.http import HTTPClient, Route
+
+    real_request = HTTPClient.request
+
+    async def absent(self, route, *args, **kwargs):
+        if route.url.replace(Route.BASE, "") == f"/guilds/{h.GID}/members/{ABSENT}":
+            raise discord.NotFound(type("R", (), {"status": 404, "reason": "Not Found"})(),
+                                   {"code": 10007, "message": "Unknown Member"})
+        return await real_request(self, route, *args, **kwargs)
+
+    HTTPClient.request = absent
+    shown, bans = await run(f"+ban <@{ABSENT}> raid", MOD)
+    check(not bans and "n'est pas membre de ce serveur" in shown and f"+hackban {ABSENT}" in shown
+          and "Indiquez une mention" not in shown,
+          "+ban sur la mention d'un absent : « n'est pas membre de ce serveur » + « +hackban »", shown[:200])
+    shown, _ = await run(f"+warn <@{ABSENT}> spam", MOD)
+    check("n'est pas membre de ce serveur" in shown and "hackban" not in shown,
+          "+warn sur la mention d'un absent : la vraie raison, sans proposer +hackban", shown[:200])
+    HTTPClient.request = real_request
+
     from utils import error_texts
 
     hint = error_texts.argument_error_text(commands.MemberNotFound(str(ABSENT)), usage="+ban <membre> [raison]")
