@@ -243,10 +243,14 @@ def semantic_event_key(guild_id: int, log_type: str, embed: discord.Embed) -> st
     }:
         return f"semantic:{guild_id}:{event_type}:{target}" if target else None
 
-    # Les événements d'invitation peuvent être produits par deux anciennes couches
-    # (gateway et audit). Une clé sémantique courte supprime le doublon visible.
+    # Les événements d'invitation sont parfois produits à la fois par la
+    # passerelle et par le journal d'audit. Leurs auteurs/cibles peuvent être
+    # différents (voire absents), mais le CODE identifie la même invitation.
+    # Dédoublonner par créateur supprimait aussi deux vraies invitations
+    # distinctes créées à quelques secondes d'intervalle.
     if event_type in {"invite_create", "invite_delete"}:
-        return f"semantic:{guild_id}:{event_type}:{target or 0}"
+        code = _invite_code_from_embed(embed)
+        return f"semantic:{guild_id}:{event_type}:code:{code.casefold()}" if code else None
 
     return None
 
@@ -268,6 +272,13 @@ def _invite_code_from_embed(embed: discord.Embed) -> str | None:
             code = value.strip(" <>`")
             if re.fullmatch(r"[A-Za-z0-9_-]{2,32}", code):
                 return code
+    # Des sources plus anciennes (audit Discord, runtime hérité) mettent
+    # « Lien » dans une description ou une phrase libre, sans champ Embed.
+    # Chercher le lien aussi dans les autres champs pour réunir ces sources.
+    for field in embed.fields:
+        match = _INVITE_CODE_RE.search(str(field.value or ""))
+        if match:
+            return match.group(1)
     match = _INVITE_CODE_RE.search(str(embed.description or ""))
     return match.group(1) if match else None
 
@@ -779,6 +790,16 @@ async def send_log(
     event_type = _event_from_key(event_key) or canonical_event_type(
         log_type, embed.title or "", embed.description or ""
     )
+    # Certains producteurs historiques indiquent seulement « resources » au
+    # lieu de « invite_create ». Le titre dit pourtant bien « Invitation créée » :
+    # sans reclassement, le renderer affiche « Item · Toxic » et la déduplication
+    # ne rencontre jamais le log gateway de la même invitation.
+    if event_type == "resources":
+        detected = canonical_event_type(
+            "", embed.title or "", embed.description or ""
+        )
+        if detected in {"invite_create", "invite_delete"}:
+            event_type = detected
     category = category_for(event_type, embed.title or "", embed.description or "")
 
     from utils import embeds as embeds_mod

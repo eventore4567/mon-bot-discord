@@ -262,14 +262,27 @@ def derive_identity(
                 _field_value_exact(embed, "ID", "ID du son", "Sound ID")
             )
 
-    if identity_id is None:
-        for label in _TARGET_LABELS:
-            value = _field_value(embed, label)
-            identity_id = _first_snowflake(value)
-            if identity_id:
-                break
-    if identity_id is None:
-        identity_id = _first_snowflake(embed.description)
+    if event_type in {"invite_create", "invite_delete"}:
+        # L'identité est le CRÉATEUR de l'invitation, jamais son salon.
+        # Sans ce garde, « Salon : <#...> » devenait une mention utilisateur
+        # @utilisateur-inconnu dans l'en-tête du journal.
+        actor_value = _field_value_exact(
+            embed, "Créateur", "Créée par", "Créé par", "Responsable",
+            "Invitateur", "Created by", "Creator",
+        )
+        if identity_id is None:
+            identity_id = _first_snowflake(actor_value)
+        if not identity_name and actor_value:
+            identity_name = _first_user_ref(actor_value) or safe_text(actor_value)[:80]
+    else:
+        if identity_id is None:
+            for label in _TARGET_LABELS:
+                value = _field_value(embed, label)
+                identity_id = _first_snowflake(value)
+                if identity_id:
+                    break
+        if identity_id is None:
+            identity_id = _first_snowflake(embed.description)
 
     looked_name, looked_icon = _display_entity_from_guild(guild, category, identity_id)
     if not identity_name:
@@ -298,7 +311,7 @@ def derive_identity(
                 candidat = valeur if valeur and not valeur.startswith("<") else ""
             identity_name = candidat[:80] or None
 
-    if not identity_name:
+    if not identity_name and event_type not in {"invite_create", "invite_delete"}:
         for label in _TARGET_LABELS:
             value = _field_value(embed, label)
             if not value:
@@ -598,23 +611,30 @@ def narrative_body(
         else:
             lines.append(f"{member or 'Un membre'} a été modifié" + (f" par {moderator}" if moderator else "") + ".")
     elif event_type in {"invite_create", "invite_delete"}:
-        verb = "créée" if event_type == "invite_create" else "supprimée"
-        lines.append(
-            f"Une invitation a été {verb}" + (f" par {moderator}" if moderator else "")
-            + (f" pour {channel}" if channel else "") + "."
+        # Une seule identité (Créateur) est déjà affichée dans l'en-tête.
+        # Les attributs de l'invitation méritent des lignes aérées plutôt que
+        # « Responsable · Créateur · Salon · Lien · Expire · Utilisations ».
+        code = _field_value_exact(embed, "Code")
+        lien = _field_value_exact(embed, "Lien", "URL", "Lien d'invitation")
+        expire = _field_value_exact(embed, "Expiration", "Expire", "Expires")
+        utilisations = _field_value_exact(
+            embed, "Utilisations max", "Utilisations maximum", "Max uses"
         )
-        lien = _field_value(embed, "lien")
-        if lien:
-            lines.append(f"**Lien :** {lien}")
-        code = _field_value(embed, "code")
+        if channel:
+            lines.append(f"**Salon**\n{channel}")
         if code:
-            lines.append(f"**Code :** {code}")
-        expire = _field_value(embed, "expire")
+            lines.append(f"**Code**\n{code}")
+        if lien:
+            lines.append(f"**Lien**\n{lien}")
         if expire:
-            lines.append(f"**Expire :** {expire}")
-        utilisations = _field_value(embed, "utilisations max")
+            lines.append(f"**Expiration** · {expire}")
         if utilisations:
-            lines.append(f"**Utilisations max :** {utilisations}")
+            lines.append(f"**Utilisations maximum** · {utilisations}")
+        if not lines:
+            lines.append(
+                "L'invitation a été créée." if event_type == "invite_create"
+                else "L'invitation a été supprimée."
+            )
     elif event_type.startswith("soundboard_"):
         sound_name = _field_value_exact(embed, "Son", "Nom du son").strip("` ").strip()
         sound_display = f"`{sound_name}`" if sound_name else "ce son"
@@ -1072,6 +1092,10 @@ def _trace_meta(event_type: str, *, emoji: str = "") -> str:
     prefix = f"{marker} " if marker else ""
     if event == "game_reward":
         category_label = "Jeux"
+    if event in {"invite_create", "invite_delete"}:
+        # Icône explicite : un lien d'invitation ne doit pas hériter de
+        # l'icône « Paramètres » utilisée pour les autres Ressources.
+        prefix = "🔗 "
     return f"-# {prefix}{category_label}"
 
 
@@ -1124,6 +1148,8 @@ def _trace_identity_label(event_type: str) -> str:
     event = canonical_event_type(event_type)
     if event == "game_reward":
         return "Joueur"
+    if event in {"invite_create", "invite_delete"}:
+        return "Créateur"
     if event in _MEMBER_ROLE_EVENTS:
         return "Membre"
     if event.startswith("message_"):
@@ -1211,6 +1237,8 @@ class WideLogView(discord.ui.LayoutView):
         header_lines = [meta, f"## {title}"]
         identity_ref = _trace_identity_ref(event_type, identity_id)
         identity_display = identity_ref or (safe_text(identity_name)[:80] if identity_name else "")
+        if not identity_display and event_type in {"invite_create", "invite_delete"}:
+            identity_display = "Non renseigné par Discord"
         context_bits: list[str] = []
         if identity_display:
             context_bits.append(f"**{identity_label}** · {identity_display}")
@@ -1254,7 +1282,11 @@ class WideLogView(discord.ui.LayoutView):
         if summary:
             # Avant/Après et contenu de message sont déjà formatés en blockquote.
             # Les re-quoter ajouterait un deuxième niveau visuel inutile.
-            if event_type in {"message_edit", "message_delete"}:
+            if event_type in {
+                "message_edit", "message_delete", "invite_create", "invite_delete"
+            }:
+                # Le conteneur V2 crée déjà le cadre. Une citation « > »
+                # supplémentaire ajoutait une barre grise sans intérêt.
                 container.add_item(discord.ui.TextDisplay(summary[:1600]))
             else:
                 quoted = "\n".join(
