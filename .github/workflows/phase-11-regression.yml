@@ -169,6 +169,7 @@ jobs:
               tests/test_simple_setup_command_channels_roles.py
               tests/test_double_confirmation_safety.py
               tests/test_plain_error_messages.py
+              tests/test_free_text_publications.py
               tests/test_unknown_command_expiry.py
 
     env:
