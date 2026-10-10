@@ -47,6 +47,11 @@ jobs:
               tests/test_hybrid_callback_resync.py
               tests/test_hybrid_group_native_v105.py
 
+          - name: Logs + hierarchy UI regressions
+            tests: >-
+              tests/test_structured_game_logs_and_hierarchy.py
+              tests/test_hierarchy_footer_layout.py
+
           - name: Music + playlists + voice
             tests: >-
               tests/test_music_audio_buffer.py
