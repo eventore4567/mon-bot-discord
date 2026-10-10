@@ -297,7 +297,11 @@ def _libelle_valeur(lignes: Iterable[Ligne]) -> str:
     rendu: list[str] = []
     for ligne in lignes:
         valeur = _texte(ligne.valeur) or "—"
-        rendu.append(f"**{_texte(ligne.label, 40)}** · {valeur}")
+        # Un emoji Discord personnalisé occupe ~30 caractères dans le code
+        # (<:sentrix_voice:ID>) mais une seule icône à l’écran. Une limite de 40
+        # coupait « Temps vocal » en « Te… » et « Réputation » en « Ré… ».
+        # Garder une marge pour le marquage complet sans tronquer le libellé.
+        rendu.append(f"**{_texte(ligne.label, 100)}** · {valeur}")
         if ligne.indice:
             rendu.append(f"-# {_texte(ligne.indice, 120)}")
     return "\n".join(rendu)
