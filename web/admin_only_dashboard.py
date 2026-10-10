@@ -166,11 +166,10 @@ async def _refresh_admin_guilds(request: web.Request, dashboard, session: dict) 
     for guild_id in ordered_ids:
         previous = previous_by_id[guild_id]
         guild = bot.get_guild(guild_id)
+        # La liste du dashboard ne représente que les serveurs réellement
+        # présents dans le cache Discord de SentriX et administrés par l'utilisateur.
+        # L'installation d'un bot ne se déduit jamais des seuls droits OAuth.
         if guild is None:
-            # SentriX n'est pas installé sur ce serveur OAuth : on le garde pour le bouton
-            # d'invitation, exactement comme le dashboard historique.
-            if any(str(item.get("id")) == str(guild_id) for item in oauth_candidates):
-                verified.append(previous)
             continue
         if await dashboard._administrator_member(guild, user_id) is None:
             continue
@@ -270,6 +269,13 @@ def install(dashboard) -> None:
             if path in _PRIVATE_PAGE_PATHS:
                 raise web.HTTPFound("/login")
             return dashboard._json_error("Connectez-vous avec Discord pour continuer.", 401)
+
+        # L'interface peut s'afficher pendant la reconnexion Discord ; seule la
+        # liste vide avec discord_ready=false est servie tant que le gateway n'est
+        # pas prêt. Aucune API de configuration n'est exemptée de contrôle.
+        bot = request.app["bot"]
+        if (path in _PRIVATE_PAGE_PATHS or path == "/api/guilds") and not bot.is_ready():
+            return await handler(request)
 
         # Le propriétaire du bot peut toujours ouvrir l'interface principale. Les routes
         # de configuration d'un serveur restent ensuite protégées par _manageable_guild,
