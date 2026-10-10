@@ -363,6 +363,15 @@ def _slash_error_panel(
     )
 
 
+def module_setup_message(error: BaseException | None) -> str | None:
+    """Le message d'un refus d'activation de module (setup_v2_core.ModuleSetupRequired),
+    éventuellement enveloppé par discord.py ; None pour toute autre erreur."""
+    for candidate in (error, getattr(error, "original", None), getattr(error, "__cause__", None)):
+        if candidate is not None and type(candidate).__name__ == "ModuleSetupRequired":
+            return str(candidate)
+    return None
+
+
 def _component_error_panel(item: object | None) -> panels.Panneau:
     """Panneau affiche quand un bouton, un menu ou un formulaire echoue.
 
@@ -729,14 +738,19 @@ def install(bot: commands.Bot) -> None:
     if not getattr(discord.ui.View.on_error, "_sentrix_final_error_embed_v5", False):
 
         async def component_error(self, interaction, error, item=None):
-            logger.exception("V5 : erreur dans un composant.", exc_info=error)
+            refus = module_setup_message(error)
+            if refus is None:
+                logger.exception("V5 : erreur dans un composant.", exc_info=error)
             if _deja_finalisee(interaction):
                 return
             _marquer_finalisee(interaction)
             try:
                 await _raw_slash_send(
                     interaction,
-                    _component_error_panel(item),
+                    # Un module encore incomplet qui refuse de s'activer n'est pas
+                    # une panne : on dit quoi configurer, pas « erreur ».
+                    panels.Panneau(titre="Configuration à compléter", sous_titre=refus, kind="warning")
+                    if refus is not None else _component_error_panel(item),
                 )
             except (
                 discord.NotFound,
@@ -762,6 +776,7 @@ def install(bot: commands.Bot) -> None:
 
 __all__ = [
     "install",
+    "module_setup_message",
     "_panel",
     "_prefix_error_panel",
     "_slash_error_panel",

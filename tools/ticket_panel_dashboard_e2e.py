@@ -76,6 +76,60 @@ async def main() -> int:
     deletes = [p for m, p, _ in calls if m == "DELETE" and p.startswith(f"/channels/{h.CID}/messages/")]
     check(status == 200 and deletes, "republier remplace l'ancien message (comme le bouton Discord)", f"{status} {deletes}")
 
+    # Activer un module incomplet depuis le dashboard : un refus expliqué, pas
+    # une erreur 500 (production, 10/10/2026 — accueil et rôles automatiques).
+    web_app = dashboard.build_app(bot)
+    handler = next(
+        route.handler for route in web_app.router.routes()
+        if route.method == "POST" and getattr(route.resource, "canonical", "") == "/api/guilds/{guild_id}/modules"
+    )
+    from cogs import setup_v2_core as core
+
+    await bot.db.set_guild_config(h.GID, "welcome_channel", None)
+    await bot.db.execute("DELETE FROM module_settings WHERE guild_id = ? AND module = 'welcome'", (h.GID,))
+
+    async def toggle(module: str, action: str):
+        app["write_limits"].clear()
+        body = json.dumps({"module": module, "action": action}).encode()
+        request = make_mocked_request(
+            "POST", f"/api/guilds/{h.GID}/modules", match_info={"guild_id": str(h.GID)},
+            app={**app, **{k: v for k, v in web_app.items() if isinstance(k, str)}},
+            headers={"Content-Type": "application/json"},
+        )
+
+        async def read_json():
+            return json.loads(body)
+
+        request.json = read_json
+        response = await handler(request)
+        return response.status, json.loads(response.body)
+
+    status, data = await toggle("welcome", "enable")
+    check(status == 400 and "salon de bienvenue" in json.dumps(data, ensure_ascii=False),
+          "activer Bienvenue sans salon : refus expliqué (400), plus d'erreur 500", f"{status} {data}")
+    await bot.db.set_guild_config(h.GID, "welcome_channel", h.CID)
+    status, data = await toggle("welcome", "enable")
+    check(status == 200 and await core.module_enabled(bot, h.GID, "welcome"),
+          "une fois le salon choisi, le module s'active", f"{status} {data}")
+
+    # /setup → Tickets → « Activer » sur un serveur sans catégorie ni panneau : le
+    # refus doit dire quoi configurer (avant : « Une erreur est survenue… »).
+    import discord
+    from setup_sweep import build, controls, interaction
+
+    await bot.db.set_guild_config(h.GID, "ticket_category", None)
+    await bot.db.execute("DELETE FROM ticket_panels_v2 WHERE guild_id = ?", (h.GID,))
+    await bot.db.execute("DELETE FROM module_settings WHERE guild_id = ? AND module = 'tickets'", (h.GID,))
+    page = await build(bot, guild, "tickets")
+    activer = next((i for i in controls(page) if isinstance(i, discord.ui.Button) and str(i.label) == "Activer"), None)
+    since = len(h.CALLS)
+    await page._scheduled_task(activer, interaction(bot))
+    await h.settle(idle=0.4, maximum=3)
+    shown = h.visible_text(h.CALLS[since:])
+    check(activer is not None and "Configurez d’abord une catégorie" in shown and "Une erreur est survenue" not in shown
+          and not await core.module_enabled(bot, h.GID, "tickets"),
+          "/setup : activer les tickets sans catégorie explique quoi configurer", shown[:200])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

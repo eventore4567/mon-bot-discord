@@ -465,14 +465,20 @@ def install(dashboard) -> bool:
             return dashboard._json_error("Module inconnu.", 400)
         actor_id = int(session.get("user", {}).get("id") or 0) or None
         bot = request.app["bot"]
-        if action == "enable":
-            await core.set_module_enabled(bot, guild.id, module, True, actor_id=actor_id)
-        elif action == "disable":
-            await core.set_module_enabled(bot, guild.id, module, False, actor_id=actor_id)
-        elif action == "reset":
-            await core.reset_module(bot, guild.id, module)
-        else:
-            return dashboard._json_error("Action inconnue (enable, disable ou reset).", 400)
+        try:
+            if action == "enable":
+                await core.set_module_enabled(bot, guild.id, module, True, actor_id=actor_id)
+            elif action == "disable":
+                await core.set_module_enabled(bot, guild.id, module, False, actor_id=actor_id)
+            elif action == "reset":
+                await core.reset_module(bot, guild.id, module)
+            else:
+                return dashboard._json_error("Action inconnue (enable, disable ou reset).", 400)
+        except core.ModuleSetupRequired as exc:
+            # Un module incomplet (ex. Bienvenue sans salon) refuse de s'activer :
+            # le dashboard doit afficher POURQUOI, pas une erreur 500 générique
+            # (production, 10/10/2026, accueil et page des rôles automatiques).
+            return dashboard._json_error(str(exc), 400)
         return web.json_response({"ok": True, "module": module, "state": await core.module_state(bot, guild.id, module)})
 
     original_build_app = dashboard.build_app

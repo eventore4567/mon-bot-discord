@@ -154,9 +154,9 @@ def test_module_activation_requires_real_resources():
 
     assert "class ModuleSetupRequired(ValueError)" in core
     assert "async def module_activation_issue(" in core
-    assert "Choisis d’abord le salon de bienvenue." in core
-    assert "Choisis d’abord le salon de départ." in core
-    assert "Choisis d’abord le salon des montées de niveau." in core
+    assert "Choisissez d’abord le salon de bienvenue." in core
+    assert "Choisissez d’abord le salon de départ." in core
+    assert "Choisissez d’abord le salon des montées de niveau." in core
     assert '"welcome_message": "welcome"' not in core
     assert '"welcome_image_url": "welcome"' not in core
     assert '"goodbye_message": "goodbye"' not in core

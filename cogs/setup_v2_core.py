@@ -460,11 +460,11 @@ async def module_activation_issue(
         return isinstance(guild.get_channel(int(channel_id)), (discord.TextChannel, discord.Thread))
 
     if module == "welcome" and not configured_channel("welcome_channel"):
-        return "Choisis d’abord le salon de bienvenue."
+        return "Choisissez d’abord le salon de bienvenue."
     if module == "goodbye" and not configured_channel("goodbye_channel"):
-        return "Choisis d’abord le salon de départ."
+        return "Choisissez d’abord le salon de départ."
     if module == "levels" and not configured_channel("level_channel"):
-        return "Choisis d’abord le salon des montées de niveau."
+        return "Choisissez d’abord le salon des montées de niveau."
 
     if module == "logs":
         if configured_channel("log_channel"):
@@ -477,7 +477,7 @@ async def module_activation_issue(
             channel_id = setting.get("channel_id")
             if channel_id and isinstance(guild.get_channel(int(channel_id)), discord.TextChannel):
                 return None
-        return "Choisis d’abord au moins un salon de logs."
+        return "Choisissez d’abord au moins un salon de logs."
 
     if module == "tickets":
         try:
@@ -495,7 +495,7 @@ async def module_activation_issue(
             panel = None
         if panel and isinstance(guild.get_channel(int(panel["channel_id"])), discord.TextChannel):
             return None
-        return "Configure d’abord une catégorie ou un panneau de tickets."
+        return "Configurez d’abord une catégorie ou un panneau de tickets."
 
     if module == "notifications":
         try:
@@ -511,7 +511,7 @@ async def module_activation_issue(
             for row in rows
         ):
             return None
-        return "Configure d’abord au moins une notification avec son salon."
+        return "Configurez d’abord au moins une notification avec son salon."
 
     if module == "roles":
         for field in ("autorole", "verify_role", "verification_role", "member_role", "booster_role"):
@@ -530,7 +530,7 @@ async def module_activation_issue(
             panel = None
         if panel and isinstance(guild.get_channel(int(panel["channel_id"])), discord.TextChannel):
             return None
-        return "Configure d’abord au moins un rôle automatique ou un panneau de rôles."
+        return "Configurez d’abord au moins un rôle automatique ou un panneau de rôles."
 
     return None
 

@@ -676,6 +676,20 @@ class SentriXSetupV73(discord.ui.LayoutView):
         self.stop()
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
+        from cogs.final_error_embed_v5 import module_setup_message
+
+        refus = module_setup_message(error)
+        if refus is not None:
+            # « Activer les tickets » sans catégorie, etc. : dire quoi configurer.
+            panel = embeds.warning(refus)
+            try:
+                if interaction.response.is_done():
+                    await panels.envoyer(interaction.followup, panels.depuis_embed(panel), ephemere=True)
+                else:
+                    await panels.envoyer(interaction.response, panels.depuis_embed(panel), ephemere=True)
+            except discord.HTTPException:
+                pass
+            return
         logger.error("Erreur SentriX Setup V73", exc_info=(type(error), error, error.__traceback__))
         try:
             panel = embeds.error("Une erreur est survenue dans le panneau de configuration SentriX.")
