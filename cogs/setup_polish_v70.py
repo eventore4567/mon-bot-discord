@@ -334,7 +334,7 @@ async def _home(self) -> discord.Embed:
 
     panel.add_field(
         name="NAVIGATION",
-        value="Choisis une page dans le menu ci-dessous. Chaque modification est enregistrée après ton action.",
+        value="Choisissez une page dans le menu ci-dessous. Chaque modification est enregistrée après votre action.",
         inline=False,
     )
     return _footer(panel)
@@ -364,7 +364,7 @@ async def _security(self) -> discord.Embed:
     active = enabled_count > 0
     panel = _panel(
         "Sécurité",
-        "Choisis les protections adaptées à ton serveur, une par une.",
+        "Choisissez les protections adaptées à votre serveur, une par une.",
         context=self.guild.name,
     )
     panel.add_field(name="ÉTAT", value="● ACTIF" if active else "○ INACTIF", inline=True)

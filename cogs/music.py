@@ -283,7 +283,7 @@ class MusicVoicePanel(discord.ui.View):
         channel = getattr(voice, "channel", None)
         if interaction.guild_id != self.guild_id or channel is None or channel.id != self.voice_channel_id:
             await interaction.response.send_message(
-                "Rejoins ce salon vocal pour utiliser son lecteur musique.",
+                "Rejoignez ce salon vocal pour utiliser son lecteur musique.",
                 ephemeral=True,
             )
             return False
@@ -614,7 +614,7 @@ class Music(commands.Cog, name="Music"):
             or int(member_channel.id) != int(bot_channel.id)
         ):
             await interaction.response.send_message(
-                "Rejoins le vocal de SentriX pour utiliser ce lecteur.",
+                "Rejoignez le vocal de SentriX pour utiliser ce lecteur.",
                 ephemeral=True,
             )
             return None
@@ -793,7 +793,7 @@ class Music(commands.Cog, name="Music"):
             if channel is None or not hasattr(channel, "connect"):
                 await panels.texte_court(
                     ctx,
-                    "Rejoins un salon vocal avant d'utiliser la musique.",
+                    "Rejoignez un salon vocal avant d'utiliser la musique.",
                     ephemere=bool(ctx.interaction),
                 )
                 return None
@@ -932,14 +932,14 @@ class Music(commands.Cog, name="Music"):
         if member_channel is None:
             await panels.texte_court(
                 ctx,
-                "Rejoins le vocal de SentriX pour contrôler la musique.",
+                "Rejoignez le vocal de SentriX pour contrôler la musique.",
                 ephemere=bool(ctx.interaction),
             )
             return None
         if bot_channel is not None and getattr(member_channel, "id", None) != getattr(bot_channel, "id", None):
             await panels.texte_court(
                 ctx,
-                f"Rejoins **{getattr(bot_channel, 'name', 'le vocal de SentriX')}** pour contrôler la musique.",
+                f"Rejoignez **{getattr(bot_channel, 'name', 'le vocal de SentriX')}** pour contrôler la musique.",
                 ephemere=bool(ctx.interaction),
             )
             return None
@@ -1501,7 +1501,7 @@ class Music(commands.Cog, name="Music"):
                 title="Lecteur musique",
                 description=(
                     "Bienvenue dans le vocal musique.\n"
-                    "Choisis un titre avec le lecteur ci-dessous."
+                    "Choisissez un titre avec le lecteur ci-dessous."
                 ),
                 kind="primary",
             )

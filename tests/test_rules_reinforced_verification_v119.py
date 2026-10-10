@@ -26,7 +26,7 @@ def test_reinforced_verification_requires_current_rules_version_twice():
     # Check before starting and again immediately before the final role grant.
     assert HONEYPOT.count("has_accepted_current_rules") >= 2
     assert "Le règlement a changé" in HONEYPOT
-    assert "Lis et accepte d'abord le règlement" in HONEYPOT
+    assert "Lisez et acceptez d'abord le règlement" in HONEYPOT
 
 
 def test_reinforced_verification_reuses_setup_verified_role():

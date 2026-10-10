@@ -76,7 +76,7 @@ async def _source_cooldown_blocked(
     if retry <= 0:
         return False
     await interaction.response.send_message(
-        f"Réessaie dans {retry:.1f} s.",
+        f"Réessayez dans {retry:.1f} s.",
         ephemeral=True,
     )
     return True
@@ -1251,7 +1251,7 @@ class NotificationManageView(discord.ui.View):
             row = await self._selected_row()
             if row is None:
                 return await interaction.response.send_message(
-                    "Choisis d’abord une source dans le menu.",
+                    "Choisissez d’abord une source dans le menu.",
                     ephemeral=True,
                 )
             await interaction.response.send_modal(
@@ -1266,7 +1266,7 @@ class NotificationManageView(discord.ui.View):
             row = await self._selected_row()
             if row is None:
                 return await interaction.response.send_message(
-                    "Choisis d’abord une source dans le menu.",
+                    "Choisissez d’abord une source dans le menu.",
                     ephemeral=True,
                 )
             await self.owner.bot.db.execute(
@@ -1291,7 +1291,7 @@ class NotificationManageView(discord.ui.View):
             row = await self._selected_row()
             if row is None:
                 return await interaction.response.send_message(
-                    "Choisis d’abord une source dans le menu.",
+                    "Choisissez d’abord une source dans le menu.",
                     ephemeral=True,
                 )
             from . import notifications as notif_mod
@@ -1362,7 +1362,7 @@ class NotificationManageView(discord.ui.View):
             row = await self._selected_row()
             if row is None:
                 return await interaction.response.send_message(
-                    "Choisis d’abord une source dans le menu.",
+                    "Choisissez d’abord une source dans le menu.",
                     ephemeral=True,
                 )
             await self.owner.bot.db.execute(

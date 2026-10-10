@@ -163,32 +163,32 @@ async def _handle_user_error(bot: commands.Bot, ctx: commands.Context, error: co
             )
 
         label = _param_label(getattr(base, "param", None))
-        await _send_plain(ctx, f"Il manque `{label}`. Utilise `{_safe_usage(ctx)}`.")
+        await _send_plain(ctx, f"Il manque `{label}`. Utilisez `{_safe_usage(ctx)}`.")
         return True
 
     if isinstance(base, commands.TooManyArguments):
-        await _send_plain(ctx, f"Trop d'arguments. Utilise `{_safe_usage(ctx)}`.")
+        await _send_plain(ctx, f"Trop d'arguments. Utilisez `{_safe_usage(ctx)}`.")
         return True
 
     if isinstance(base, (commands.MemberNotFound, commands.UserNotFound)):
-        await _send_plain(ctx, "Utilisateur introuvable. Vérifie la mention, le nom ou l'ID.")
+        await _send_plain(ctx, "Utilisateur introuvable. Vérifiez la mention, le nom ou l'ID.")
         return True
     if isinstance(base, commands.RoleNotFound):
-        await _send_plain(ctx, "Rôle introuvable. Vérifie la mention, le nom ou l'ID.")
+        await _send_plain(ctx, "Rôle introuvable. Vérifiez la mention, le nom ou l'ID.")
         return True
     if isinstance(base, commands.ChannelNotFound):
-        await _send_plain(ctx, "Salon introuvable. Vérifie la mention, le nom ou l'ID.")
+        await _send_plain(ctx, "Salon introuvable. Vérifiez la mention, le nom ou l'ID.")
         return True
     if isinstance(base, commands.MessageNotFound):
-        await _send_plain(ctx, "Message introuvable. Vérifie l'ID ou le lien.")
+        await _send_plain(ctx, "Message introuvable. Vérifiez l'ID ou le lien.")
         return True
 
     if isinstance(base, (commands.BadUnionArgument, commands.BadArgument, commands.ConversionError)):
-        await _send_plain(ctx, f"Valeur invalide. Utilise `{_safe_usage(ctx)}`.")
+        await _send_plain(ctx, f"Valeur invalide. Utilisez `{_safe_usage(ctx)}`.")
         return True
 
     if isinstance(base, commands.CommandOnCooldown):
-        await _send_plain(ctx, f"Réessaie dans `{base.retry_after:.1f}s`.")
+        await _send_plain(ctx, f"Réessayez dans `{base.retry_after:.1f}s`.")
         return True
 
     if isinstance(base, commands.MissingPermissions):

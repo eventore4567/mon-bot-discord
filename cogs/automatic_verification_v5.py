@@ -493,7 +493,7 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             title="Vérification web SentriX",
             description=(
                 "Le challenge ne se fait plus dans Discord. "
-                "Ouvre le site SentriX pour continuer."
+                "Ouvrez le site SentriX pour continuer."
             ),
             colour=discord.Colour.blurple(),
         )

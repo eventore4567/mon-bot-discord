@@ -88,9 +88,9 @@ async def _web_panel(bot: commands.Bot, guild: discord.Guild):
             if english
             else
             "La vérification se fait maintenant sur le site sécurisé SentriX.\n\n"
-            "Le site contrôle ton identité Discord, ton appartenance au serveur, "
+            "Le site contrôle votre identité Discord, votre appartenance au serveur, "
             "l'ancienneté du compte, le règlement actuel et un CAPTCHA humain. "
-            "Une fois validé, SentriX débloque ton rôle et t'envoie un MP de confirmation."
+            "Une fois validé, SentriX débloque votre rôle et vous envoie un MP de confirmation."
         ),
         colour=discord.Color.blurple(),
     )
@@ -115,7 +115,7 @@ def _trap_embed(verify_channel: discord.TextChannel, sanction: str) -> discord.E
         description=(
             "Ce salon est le honeypot SentriX réservé aux comptes non vérifiés.\n"
             f"Écrire ici peut entraîner un **{sanction_label}**.\n\n"
-            f"Utilise {verify_channel.mention} pour ouvrir le site de vérification."
+            f"Utilisez {verify_channel.mention} pour ouvrir le site de vérification."
         ),
         colour=discord.Color.red(),
     )
@@ -850,7 +850,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             rules_channel = interaction.guild.get_channel(rules_channel_id) if rules_channel_id else None
             destination = rules_channel.mention if isinstance(rules_channel, discord.TextChannel) else "le salon du règlement"
             return await interaction.response.send_message(
-                f"Lis et accepte d'abord le règlement dans {destination}, puis recommence la vérification.",
+                f"Lisez et acceptez d'abord le règlement dans {destination}, puis recommencez la vérification.",
                 ephemeral=True,
             )
 

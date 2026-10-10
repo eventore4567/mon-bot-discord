@@ -363,7 +363,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
             return channel, None
         return channel, row
 
-    @commands.command(name="voice-name", help="Renommer ton vocal temporaire.")
+    @commands.command(name="voice-name", help="Renommer votre vocal temporaire.")
     @commands.guild_only()
     async def voice_name(self, ctx: commands.Context, *, name: str):
         channel, row = await self._owned_voice(ctx)
@@ -375,7 +375,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         await channel.edit(name=name, reason=f"VoiceHub : renommage par {ctx.author}")
         await panels.envoyer(ctx, _reponse("Salon vocal", f"Votre vocal s'appelle maintenant « {name} ».", kind="success"))
 
-    @commands.command(name="voice-limit", help="Limiter le nombre de membres dans ton vocal (0 = illimité).")
+    @commands.command(name="voice-limit", help="Limiter le nombre de membres dans votre vocal (0 = illimité).")
     @commands.guild_only()
     async def voice_limit(self, ctx: commands.Context, limit: int):
         channel, row = await self._owned_voice(ctx)
@@ -386,7 +386,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         await channel.edit(user_limit=limit, reason=f"VoiceHub : limite par {ctx.author}")
         await panels.envoyer(ctx, _reponse("Salon vocal", f"Limite du vocal : {('illimitée' if limit == 0 else limit)}.", kind="success"))
 
-    @commands.command(name="voice-lock", help="Empêcher de nouveaux membres de rejoindre ton vocal.")
+    @commands.command(name="voice-lock", help="Empêcher de nouveaux membres de rejoindre votre vocal.")
     @commands.guild_only()
     async def voice_lock(self, ctx: commands.Context):
         channel, row = await self._owned_voice(ctx)
@@ -402,7 +402,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         await channel.set_permissions(ctx.author, overwrite=owner_overwrite, reason="VoiceHub : propriétaire")
         await panels.envoyer(ctx, _reponse("Salon vocal", 'Votre vocal est maintenant verrouillé.', kind="success"))
 
-    @commands.command(name="voice-unlock", help="Rouvrir ton vocal aux membres.")
+    @commands.command(name="voice-unlock", help="Rouvrir votre vocal aux membres.")
     @commands.guild_only()
     async def voice_unlock(self, ctx: commands.Context):
         channel, row = await self._owned_voice(ctx)
@@ -413,7 +413,7 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
         await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite, reason="VoiceHub : déverrouillage")
         await panels.envoyer(ctx, _reponse("Salon vocal", 'Votre vocal est de nouveau ouvert.', kind="success"))
 
-    @commands.command(name="voice-transfer", help="Donner ton vocal temporaire à un autre membre.")
+    @commands.command(name="voice-transfer", help="Donner votre vocal temporaire à un autre membre.")
     @commands.guild_only()
     async def voice_transfer(self, ctx: commands.Context, member: discord.Member):
         channel, row = await self._owned_voice(ctx)

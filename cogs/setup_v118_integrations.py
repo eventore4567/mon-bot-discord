@@ -89,7 +89,7 @@ class InviteTrackerSetupView(discord.ui.View):
             channel_id = current.get("feed_channel_id")
             if not channel_id:
                 return await interaction.response.send_message(
-                    "Choisis d'abord le salon public des invitations.", ephemeral=True
+                    "Choisissez d'abord le salon public des invitations.", ephemeral=True
                 )
             await tracker.set_feed_setting(
                 self.bot,
@@ -300,7 +300,7 @@ def _extend_guided_catalogue() -> None:
         guided._s(
             "tracker",
             "Tracker public",
-            "Choisis le salon où SentriX affichera qui a invité chaque nouveau membre.",
+            "Choisissez le salon où SentriX affichera qui a invité chaque nouveau membre.",
             "internal:invitations",
         ),
     )
@@ -314,7 +314,7 @@ def _extend_guided_catalogue() -> None:
         guided._s(
             "role",
             "Rôle vérifié",
-            "Choisis le rôle reçu après la validation.",
+            "Choisissez le rôle reçu après la validation.",
             "config:verify_role",
         ),
     )
@@ -323,7 +323,7 @@ def _extend_guided_catalogue() -> None:
         guided._s(
             "panel",
             "Panneau du règlement",
-            "Écris les règles, choisis le salon et publie le panneau d'acceptation.",
+            "Écrivez les règles, choisissez le salon et publiez le panneau d'acceptation.",
             "internal:rules",
         ),
     )

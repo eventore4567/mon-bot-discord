@@ -477,7 +477,7 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(voice)
         self.assertEqual(short.await_count, 1)
-        self.assertIn("Rejoins", short.await_args.args[1])
+        self.assertIn("Rejoignez", short.await_args.args[1])
 
 
 if __name__ == "__main__":

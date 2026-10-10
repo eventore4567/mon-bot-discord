@@ -187,7 +187,7 @@ class SecurityToggleButton(discord.ui.Button):
         # La sécurité se règle protection par protection dans les couches Setup
         # suivantes. Ce bouton historique ne modifie volontairement aucune valeur.
         await interaction.response.send_message(
-            "Choisis les protections individuellement dans la page Sécurité.",
+            "Choisissez les protections individuellement dans la page Sécurité.",
             ephemeral=True,
         )
 
@@ -278,7 +278,7 @@ async def _build_home(self, original: discord.Embed) -> discord.Embed:
     active = sum(state == setup_ui.ConfigState.ACTIVE for state, _, _ in statuses.values())
     panel = _panel(
         "SentriX Setup",
-        "Configure le serveur depuis un seul panneau. Chaque changement vient de ton choix.",
+        "Configurez le serveur depuis un seul panneau. Chaque changement vient de votre choix.",
     )
     panel.add_field(name="Serveur", value=f"**{self.guild.name}**", inline=True)
     panel.add_field(name="Modules actifs", value=f"**{active} / {len(statuses)}**", inline=True)
@@ -332,7 +332,7 @@ async def _build_security(self) -> discord.Embed:
     active = enabled_count > 0
     panel = _panel(
         "Sécurité",
-        "Choisis uniquement les protections dont ton serveur a besoin.",
+        "Choisissez uniquement les protections dont votre serveur a besoin.",
     )
     panel.add_field(name="État du module", value="● ACTIF" if active else "○ INACTIF", inline=True)
     panel.add_field(name="Mode", value="**MANUEL**", inline=True)
@@ -343,7 +343,7 @@ async def _build_security(self) -> discord.Embed:
     )
     panel.add_field(
         name="Important",
-        value="SentriX n'active aucune protection à ta place. Chaque protection est choisie séparément.",
+        value="SentriX n'active aucune protection à votre place. Chaque protection est choisie séparément.",
         inline=False,
     )
     return _footer(panel, page="security")

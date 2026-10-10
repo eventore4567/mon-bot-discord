@@ -544,7 +544,7 @@ async def set_module_enabled(
         issue = await module_activation_issue(bot, guild_id, module)
         if issue:
             raise ModuleSetupRequired(
-                f"{issue} Le module n’a pas été activé. Configure-le dans +setup ou le dashboard puis réessaie."
+                f"{issue} Le module n’a pas été activé. Configurez-le dans +setup ou le dashboard puis réessayez."
             )
     now_ts = int(time.time())
     await bot.db.execute(
