@@ -90,24 +90,31 @@ def _hierarchy_refusal_panel(message: str) -> panels.Panneau | None:
         # une « sanction ». Garder un titre exact pour chaque opération.
         titre = "Action impossible"
         explication = "Le rôle du membre est égal ou supérieur à celui de SentriX."
+        solution = (
+            "Dans **Paramètres du serveur → Rôles**, placez le rôle "
+            "**SentriX** au-dessus de celui du membre concerné."
+        )
     elif "ne peut pas gérer ce rôle" in texte:
         titre = "Rôle inaccessible"
         explication = "Ce rôle est égal ou supérieur au rôle de SentriX."
+        solution = (
+            "Dans **Paramètres du serveur → Rôles**, placez le rôle "
+            "**SentriX** au-dessus de ce rôle."
+        )
+    elif "vous ne pouvez pas sanctionner un membre ayant un rôle supérieur ou égal" in texte:
+        titre = "Action impossible"
+        explication = "Ce membre possède un rôle supérieur ou égal au vôtre."
+        solution = (
+            "Cette action doit être réalisée par un responsable dont le rôle "
+            "est supérieur à celui du membre, ou par le propriétaire du serveur."
+        )
     else:
         return None
     return panels.Panneau(
         titre=titre,
         sous_titre=explication,
         kind="warning",
-        sections=[
-            panels.Section(
-                "Comment corriger",
-                texte=(
-                    "Dans **Paramètres du serveur → Rôles**, placez le rôle "
-                    "**SentriX** au-dessus de celui du membre concerné."
-                ),
-            ),
-        ],
+        sections=[panels.Section("Comment corriger", texte=solution)],
         pied="Modération · Hiérarchie des rôles",
     )
 
