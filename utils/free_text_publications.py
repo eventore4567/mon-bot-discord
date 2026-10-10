@@ -54,11 +54,11 @@ def publication_parts(content: str) -> tuple[str, str, str]:
         if not body:
             raise ValueError("Ajoutez un texte après le numéro de la règle.")
         if len(body) > MAX_PUBLICATION_TEXT:
-            raise ValueError(f"Le texte dépasse {MAX_PUBLICATION_TEXT} caractères.")
+            raise ValueError(f"Le texte dépasse {MAX_PUBLICATION_TEXT:,} caractères.".replace(",", " "))
         return f"{heading} n°{rule_no}", body, "Règlement"
 
     if len(text) > MAX_PUBLICATION_TEXT:
-        raise ValueError(f"Le texte dépasse {MAX_PUBLICATION_TEXT} caractères.")
+        raise ValueError(f"Le texte dépasse {MAX_PUBLICATION_TEXT:,} caractères.".replace(",", " "))
     return "Message du serveur", text, "Publication"
 
 
