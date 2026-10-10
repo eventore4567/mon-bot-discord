@@ -125,12 +125,15 @@ def test_levels_messages_and_economy_are_database_backed():
 
 def test_destructive_reset_commands_require_confirmation_layer():
     source = (ROOT / "cogs" / "member_data_retention_v17.py").read_text(encoding="utf-8")
-    for command in ("reset-levels", "reset-economy", "represet"):
+    # +represet ne vise plus qu'UN membre (cogs/levels.py, historisé) : ce n'est
+    # plus une réinitialisation de masse, elle ne relève pas de cette couche.
+    for command in ("reset-levels", "reset-economy"):
         assert f'"{command}"' in source
     assert "ResetConfirmationView" in source
     assert "Confirmer le reset" in source
     assert "explicit_data_reset" in source
-    assert "Un ban ne déclenche jamais cette suppression" in source
+    # La garantie, telle que le module l'écrit aujourd'hui (docstring) :
+    assert "Aucun listener de départ/ban ne" in source and "réinitialise XP" in source
 
 
 def test_durable_storage_is_hardened_beyond_graceful_shutdown():

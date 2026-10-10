@@ -152,7 +152,7 @@ GUILD_OWNER_COMMANDS = frozenset({
     "config-reset",         # efface toute la configuration SentriX
     "reset-economy",        # remet a zero les soldes de TOUS les membres
     "reset-levels",         # remet a zero l'XP de TOUS les membres
-    "represet",             # remet a zero la reputation de TOUS les membres
+    "represet",             # remet a zero la reputation d'UN membre (historisee) ; garde ici par prudence
     "proofreset",           # efface toutes les preuves de verification
     "immunity",              # propriétaire du serveur (owner global bypass plus haut)
     # Diffusion privee a l'ensemble du serveur
