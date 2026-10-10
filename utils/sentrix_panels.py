@@ -825,6 +825,16 @@ def _panneau_est_erreur_simple(panneau: Any) -> bool:
         return False
     if getattr(panneau, "boutons_source", ()):
         return False
+    # Une carte qui fournit une procédure concrète n'est PAS une « erreur simple ».
+    # La convertir en texte brut effaçait toute sa section de résolution, exactement
+    # comme le refus de hiérarchie de la modération.
+    if any(
+        str(getattr(section, "titre", "")).casefold().strip() in {
+            "comment corriger", "comment résoudre", "solution"
+        }
+        for section in getattr(panneau, "sections_source", ())
+    ):
+        return False
     if getattr(panneau, "kind", "") not in {"danger", "warning"}:
         return False
     nom, _ = _commande_en_cours()
