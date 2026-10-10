@@ -24,7 +24,7 @@ from utils import command_visuals, sentrix_panels as panels, unified_command_pan
 
 
 def test_une_seule_regle_plain_root():
-    assert policy.PLAIN_ROOTS == frozenset({"verification"})
+    assert policy.PLAIN_ROOTS == frozenset({"verification", "clear"})  # clear : 1ebd31a6
     assert policy._plain_root("verification") is True
     assert policy._plain_root("ban") is False
     assert policy._plain_root("sentrix") is False

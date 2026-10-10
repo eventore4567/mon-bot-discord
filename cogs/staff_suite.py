@@ -1044,10 +1044,11 @@ class IncidentModal(discord.ui.Modal, title="Nouvel incident"):
         default="moyenne",
         max_length=20,
     )
-    member_id = discord.ui.TextInput(
-        label="ID du membre concerné (facultatif)",
-        required=False,
-        max_length=22,
+    # Un vrai sélecteur de membre plutôt qu'un identifiant à recopier
+    # (tests/test_selecteurs_natifs) : plus de faute de frappe possible.
+    member = discord.ui.Label(
+        text="Membre concerné (facultatif)",
+        component=discord.ui.UserSelect(placeholder="Choisir un membre", required=False, min_values=0, max_values=1),
     )
     description = discord.ui.TextInput(
         label="Description",
@@ -1061,16 +1062,8 @@ class IncidentModal(discord.ui.Modal, title="Nouvel incident"):
         self.guild_id = guild_id
 
     async def on_submit(self, interaction: discord.Interaction):
-        target = None
-        raw = str(self.member_id.value or "").strip()
-        if raw:
-            try:
-                target = int(raw)
-            except ValueError:
-                return await interaction.response.send_message(
-                    "L’identifiant du membre doit être numérique.",
-                    ephemeral=True,
-                )
+        chosen = list(getattr(self.member.component, "values", []) or [])
+        target = int(chosen[0].id) if chosen else None
         severity = str(self.severity.value or "moyenne").strip().casefold()
         if severity not in {"faible", "moyenne", "élevée", "elevee", "critique"}:
             return await interaction.response.send_message(
