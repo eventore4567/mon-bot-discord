@@ -790,15 +790,22 @@ async def send_log(
     event_type = _event_from_key(event_key) or canonical_event_type(
         log_type, embed.title or "", embed.description or ""
     )
-    # Certains producteurs historiques indiquent seulement « resources » au
-    # lieu de « invite_create ». Le titre dit pourtant bien « Invitation créée » :
-    # sans reclassement, le renderer affiche « Item · Toxic » et la déduplication
-    # ne rencontre jamais le log gateway de la même invitation.
-    if event_type == "resources":
+    # Le même on_invite_create arrive par deux chemins : la couche officielle
+    # annonce invite_create ; l'ancien moteur (preuve Railway 2026-10-10 19:55:54)
+    # annonce « dossiers », alias de catégorie Ressources. Avant cette correction,
+    # on ne normalisait que « resources » : deux clés sémantiques différentes,
+    # deux panneaux dans le même salon et « Item · Tomioka » côté legacy.
+    # On requalifie UNIQUEMENT un titre réellement reconnu comme invitation :
+    # le journal des arrivées « dossiers / Nouvelle arrivée » reste inchangé.
+    if event_type in {"resources", "dossiers", "log_dossiers", "log_resources"}:
         detected = canonical_event_type(
             "", embed.title or "", embed.description or ""
         )
         if detected in {"invite_create", "invite_delete"}:
+            logger.info(
+                "SENTRIX INVITE legacy normalized guild=%s source=%s event=%s",
+                guild.id, event_type, detected,
+            )
             event_type = detected
     category = category_for(event_type, embed.title or "", embed.description or "")
 
