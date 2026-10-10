@@ -35,11 +35,21 @@ CREATE TABLE IF NOT EXISTS sentrix_channel_message_rules (
 
 
 async def ensure_schema(bot) -> None:
+    # Appelée à CHAQUE message (via _rule_for) : deux requêtes CREATE … IF NOT
+    # EXISTS par message du serveur, mesuré par tools/message_cost_probe.py.
+    # Une fois par connexion suffit — le drapeau vit sur l'objet base, une base
+    # remplacée (restauration) est donc revérifiée.
+    if getattr(bot.db, "_sentrix_channel_rules_schema", False):
+        return
     await bot.db.execute(SCHEMA)
     await bot.db.execute(
         "CREATE INDEX IF NOT EXISTS idx_sentrix_channel_message_rules_guild "
         "ON sentrix_channel_message_rules(guild_id, enabled, channel_id)"
     )
+    try:
+        bot.db._sentrix_channel_rules_schema = True
+    except Exception:  # noqa: BLE001 — une base sans attributs libres : on revérifiera
+        pass
 
 
 def _row_dict(row: Any) -> dict:
