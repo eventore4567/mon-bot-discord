@@ -76,6 +76,15 @@ async def main() -> int:
     shown = await run("+balance", MEMBER)
     check(f"−100 🪙 {MARK}" in shown, "+balance après un paiement : « −100 🪙 … »", shown[:300])
 
+    # +stats : sa propre fiche complète, avec sa propre mémoire.
+    shown = await run("+stats", MEMBER)
+    check("Rien de neuf" not in shown and MARK not in shown, "+stats, première fois : rien", shown[-200:])
+    await run(f"+add-xp <@{h.SECOND_ID}> 50", ADMIN)
+    await run(f"+give-money <@{h.SECOND_ID}> 25", ADMIN)
+    shown = await run("+stats", MEMBER)
+    check(f"+50 XP" in shown and "+25 🪙" in shown and MARK in shown,
+          "+stats après de l'XP et de l'argent : « +50 XP, +25 🪙 … depuis votre dernier coup d'œil »", shown[-300:])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()

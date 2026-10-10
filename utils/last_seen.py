@@ -97,4 +97,19 @@ def money_parts(deltas: dict[str, int], unit: str) -> list[str]:
     return [_signed(deltas["money"], unit)] if deltas.get("money") else []
 
 
-__all__ = ["QUIET_SECONDS", "SCHEMA", "level_parts", "money_parts", "remember", "sentence"]
+def stats_parts(deltas: dict[str, int], unit: str, *, english: bool = False) -> list[str]:
+    """Pour +stats : messages, XP/niveau, argent, vocal (minutes), réputation."""
+    parts = []
+    if deltas.get("messages"):
+        parts.append(_signed(deltas["messages"], "messages" if english else "messages"))
+    parts += level_parts({k: v for k, v in deltas.items() if k in {"xp", "level"}}, english=english)
+    parts += money_parts(deltas, unit)
+    minutes = deltas.get("voice", 0) // 60
+    if minutes:
+        parts.append(_signed(minutes, "min in voice" if english else "min en vocal"))
+    if deltas.get("rep"):
+        parts.append(_signed(deltas["rep"], "reputation" if english else "réputation"))
+    return parts
+
+
+__all__ = ["QUIET_SECONDS", "SCHEMA", "level_parts", "money_parts", "remember", "sentence", "stats_parts"]

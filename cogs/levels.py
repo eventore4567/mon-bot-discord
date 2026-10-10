@@ -1106,6 +1106,27 @@ class Levels(commands.Cog, name="Levels"):
         deltas, seconds = seen
         return last_seen.sentence(last_seen.level_parts(deltas, english=english), seconds, english=english)
 
+    async def _depuis_stats(self, guild: discord.Guild, member: discord.Member, settings: dict) -> str:
+        from utils import last_seen
+
+        stats = await stats_service.get_member_statistics(self.bot, guild, member)
+        snapshot = {
+            "messages": int(stats.get("message_count") or 0), "xp": int(stats.get("total_xp") or 0),
+            "level": int(stats.get("current_level") or 0), "money": int(stats.get("total_money") or 0),
+            "voice": int(stats.get("voice_time") or 0), "rep": int(stats.get("reputation") or 0),
+        }
+        seen = await last_seen.remember(self.bot.db, guild.id, member.id, "stats", snapshot)
+        if seen is None:
+            return ""
+        try:
+            from cogs import language_runtime
+
+            english = await language_runtime.get_language(self.bot, guild.id) == language_runtime.LANG_EN
+        except Exception:
+            english = False
+        unit = settings.get("economy_emoji", "🪙")
+        return last_seen.sentence(last_seen.stats_parts(seen[0], unit, english=english), seen[1], english=english)
+
     async def build_economy_embed(self, guild: discord.Guild, member: discord.Member) -> discord.Embed:
         settings = await self.bot.db.get_stats_settings(guild.id)
         if not await self._economie_active(guild.id):
@@ -1179,6 +1200,11 @@ class Levels(commands.Cog, name="Levels"):
             if not await self._can_view(ctx, membre, settings):
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("La consultation des statistiques d'un autre membre est désactivée sur ce serveur.")))
             embed = await self.build_stats_embed(ctx.guild, membre)
+            if membre.id == ctx.author.id:
+                # Sa propre fiche : ce qui a bougé depuis la dernière fois qu'il l'a vue.
+                depuis = await self._depuis_stats(ctx.guild, membre, settings)
+                if depuis:
+                    embed.description = f"{embed.description or ''}\n-# {depuis}".strip()
         except (discord.Forbidden, discord.NotFound, discord.HTTPException):
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Impossible de récupérer les statistiques pour le moment (erreur Discord).')))
         except Exception:
