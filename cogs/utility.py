@@ -2076,7 +2076,9 @@ class Utility(commands.Cog, name="Utility"):
     @app_commands.describe(options="Options séparées par des virgules")
     async def choose(self, ctx: commands.Context, *, options: str):
         import random
-        choices = [c.strip() for c in options.split(",") if c.strip()]
+        # « oui, non », « oui|non », « oui / non », « oui ou non » : les séparateurs
+        # que les gens tapent vraiment (avant, seule la virgule était comprise).
+        choices = [c.strip() for c in re.split(r"\s*(?:,|\||;|/|\bou\b|\bor\b)\s*", options) if c.strip()]
         if len(choices) < 2:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Options manquantes', description='Donnez au moins deux options séparées par des virgules.', kind='danger')))
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Choix du bot', description=f'🤔 Je choisis : **{random.choice(choices)}**')))

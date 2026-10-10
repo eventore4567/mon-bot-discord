@@ -554,9 +554,15 @@ def slash_options_from_spec(bot, spec: str) -> tuple[str, list]:
             return [{"name": remaining[0], "type": kind, "options": build(child, remaining[1:])}]
         out = []
         for param in command.parameters:
-            if param.name not in opts:
+            # Discord envoie l'option sous son nom AFFICHÉ (display_name, ex. « member »
+            # pour le paramètre Python « membre ») : l'envoyer sous le nom interne la
+            # faisait ignorer par discord.py — les options renommées n'étaient jamais
+            # réellement testées en « / ».
+            shown = getattr(param, "display_name", None) or param.name
+            key = shown if shown in opts else param.name if param.name in opts else None
+            if key is None:
                 continue
-            raw = opts[param.name]
+            raw = opts[key]
             kind = param.type.value
             if kind == 4:
                 value = int(raw)
@@ -566,7 +572,7 @@ def slash_options_from_spec(bot, spec: str) -> tuple[str, list]:
                 value = float(raw)
             else:
                 value = raw
-            out.append({"name": param.name, "type": kind, "value": value})
+            out.append({"name": shown, "type": kind, "value": value})
         return out
 
     return names[0], build(root, names[1:])

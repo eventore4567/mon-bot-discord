@@ -782,10 +782,12 @@ class Moderation(commands.Cog):
         n'était protégé par aucun try/except alors que le débannissement
         Discord avait déjà réellement réussi."""
         raison = clean_reason(raison)
+        # Une mention collée (« <@123…> ») est acceptée autant que l'identifiant brut.
+        brut = str(user_id).strip().removeprefix("<@").removeprefix("!").removesuffix(">")
         try:
-            uid = int(user_id)
+            uid = int(brut)
         except ValueError:
-            return await self._reply(ctx, "Identifiant Discord invalide.", ephemere=True)
+            return await self._reply(ctx, "Identifiant Discord invalide : donnez l'identifiant (ou la mention) du compte banni.", ephemere=True)
         if self._sanction_duplicate(ctx, "unban", uid):
             return await self._reply(ctx, "Ce débannissement vient déjà d'être lancé.", ephemere=True)
         await self._ack(ctx)
