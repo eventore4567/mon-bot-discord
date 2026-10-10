@@ -52,6 +52,12 @@ jobs:
               tests/test_structured_game_logs_and_hierarchy.py
               tests/test_hierarchy_footer_layout.py
 
+          - name: Invitation logs dedup + layout
+            tests: >-
+              tests/test_invitation_log_single_card.py
+              tests/test_invites_journal.py
+              tests/test_invite_detection_fix_v77.py
+
           - name: Natural plan UI lifecycle
             tests: >-
               tests/test_natural_plan_ephemeral_ux.py
