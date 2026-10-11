@@ -42,3 +42,27 @@ def test_image_result_requires_very_high_confidence():
 def test_image_result_rejects_unknown_category_and_uncertain():
     assert automod_module._parse_scam_image_result("SCAM|100|other|Quelque chose de suspect") is None
     assert automod_module._parse_scam_image_result("UNCERTAIN|100|fake_nitro|Pas certain") is None
+
+
+def test_phishing_url_cannot_hide_real_domain_after_at_sign():
+    assert "fausse adresse officielle" in (
+        automod_module._scam_hit("Connecte-toi sur https://discord.com@steal-login.example/verification") or ""
+    )
+    assert automod_module._scam_hit(
+        "https://steamcommunity.com@fake-prize.example/login"
+    ) is not None
+    assert automod_module._scam_hit(
+        "https://paypal.com@account-check.example"
+    ) is not None
+
+
+def test_userinfo_detector_does_not_flag_safe_urls_or_normal_usernames():
+    for message in (
+        "https://discord.com/developers",
+        "https://discord.gift/AbCdEf123",
+        "https://alice@example.com/login",
+        "https://alice@discord.com/help",
+        "Discussion sur l'arobase @ dans les mails.",
+        "C'est un lien sur discord.com, pas une URL piegee.",
+    ):
+        assert automod_module._scam_hit(message) is None, message

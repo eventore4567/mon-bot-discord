@@ -37,6 +37,7 @@ import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 import discord
 from discord import app_commands
@@ -225,6 +226,14 @@ _SCAM_TRUSTED_DOMAINS = (
     "steamcommunity.com", "steampowered.com",
     "epicgames.com",
 )
+# Liens frauduleux comme https://discord.com@site-piege.example :
+# la partie avant @ est un NOM D'UTILISATEUR, pas le domaine réel.
+# On ne bloque cette forme que lorsqu'elle usurpe une vraie marque connue.
+_SCAM_SPOOFED_AUTHORITIES = frozenset({
+    "discord.com", "discord.gift", "roblox.com", "steamcommunity.com",
+    "steampowered.com", "epicgames.com", "paypal.com", "metamask.io",
+})
+_SCAM_URL_RE = re.compile(r"\b(?:https?|hxxps?)://[^\s<>()]+", re.IGNORECASE)
 _SCAM_BRANDS = ("discord", "nitro", "roblox", "robux", "steam", "vbucks", "crypto", "wallet")
 _SCAM_LURES = ("free", "gift", "claim", "bonus", "verify", "airdrop", "giveaway", "reward")
 _SCAM_CTA = (
@@ -263,6 +272,27 @@ def _trusted_scam_host(host: str) -> bool:
 
 def _scam_hit(content: str) -> str | None:
     """Détection à haute précision : domaine suspect d'abord, texte ambigu ensuite."""
+    # URL avec userinfo trompeur : l'interface montre souvent le nom de marque
+    # au début, alors que seul le domaine APRES @ reçoit les identifiants.
+    # N'interpréter que les URL explicites et les marques officielles connues.
+    for found in _SCAM_URL_RE.finditer(_normalize_link_text(content)):
+        try:
+            url = urlsplit(found.group(0))
+            username = (url.username or "").casefold().strip(".")
+            actual_host = (url.hostname or "").casefold().strip(".")
+        except ValueError:
+            continue
+        if (
+            username
+            and actual_host
+            and any(
+                username == brand or username.endswith("." + brand)
+                for brand in _SCAM_SPOOFED_AUTHORITIES
+            )
+            and not lookalike_domains.est_de_confiance(actual_host)
+        ):
+            return f"domaine suspect: fausse adresse officielle avant @ ({actual_host[:90]})"
+
     hosts = list(_iter_link_hosts(content))
     suspicious_hosts: list[str] = []
     for host in hosts:
@@ -833,6 +863,13 @@ DANGEROUS_PERMS = [
 ]
 SPAM_WINDOW = 6  # secondes observées pour le comptage anti-spam
 SPAM_THRESHOLD = 5  # messages dans la fenêtre avant sanction
+# Flood lent réparti sur plusieurs salons : 20 messages SIGNIFICATIFS dans 60 s
+# et au moins 4 salons distincts. Cette double condition évite de sanctionner
+# une discussion active dans un seul salon ou des réponses brèves (« ok », « +1 »).
+SPAM_CROSS_CHANNEL_WINDOW = 60
+SPAM_CROSS_CHANNEL_THRESHOLD = 20
+SPAM_CROSS_CHANNEL_MIN_CHANNELS = 4
+SPAM_CROSS_CHANNEL_MIN_LENGTH = 12
 
 # Le comptage par débit ne voit QUE la vitesse : quatre messages toutes les six
 # secondes — quarante par minute, indéfiniment — restaient invisibles, et cent
@@ -893,6 +930,9 @@ class AutoMod(commands.Cog, name="Automod"):
         # départ. Mesuré à 12,4 Mo pour 50 000 membres sur le seul spam_tracker,
         # et rien ne redescendait. FenetreGlissante oublie les clés inactives.
         self.spam_tracker = FenetreGlissante(fenetre=SPAM_WINDOW)
+        self.cross_channel_spam_tracker = FenetreGlissante(
+            fenetre=SPAM_CROSS_CHANNEL_WINDOW,
+        )
         self.join_tracker = FenetreGlissante(fenetre=RAID_JOIN_WINDOW, purge_toutes=100)
         self.slow_join_tracker = FenetreGlissante(fenetre=RAID_SLOW_WINDOW, purge_toutes=100)
         self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
@@ -2879,6 +2919,23 @@ class AutoMod(commands.Cog, name="Automod"):
             if self.spam_tracker.ajouter(key) >= SPAM_THRESHOLD:
                 self.spam_tracker.reinitialiser(key)
                 return await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
+
+            # Une promotion envoyée toutes les quelques secondes dans de
+            # nombreux salons contourne le seuil de rafale courte. Suivi par
+            # serveur+membre, jamais global à tout le serveur.
+            if len(text_normalization.normaliser(message.content)) >= SPAM_CROSS_CHANNEL_MIN_LENGTH:
+                self.cross_channel_spam_tracker.ajouter(key, message.channel.id)
+                channel_history = self.cross_channel_spam_tracker.valeurs(key)
+                if (
+                    len(channel_history) >= SPAM_CROSS_CHANNEL_THRESHOLD
+                    and len(set(channel_history)) >= SPAM_CROSS_CHANNEL_MIN_CHANNELS
+                ):
+                    self.cross_channel_spam_tracker.reinitialiser(key)
+                    return await self._delete_and_warn(
+                        message,
+                        "Publications trop nombreuses dans plusieurs salons.",
+                        "antispam",
+                    )
 
             motif_repete = self._detecter_repetition(message, key)
             if motif_repete:
