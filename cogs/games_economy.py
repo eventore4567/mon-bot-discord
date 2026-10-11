@@ -2136,23 +2136,66 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         duree = max(30, min(duree, 120))
         started, err, sid = await self._start_community(ctx, "lastmessage", cooldown=90)
         if not started:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=err, kind='warning')))
-        if ctx.channel.id in self._lastmessage_state:
-            await self._finish_community(guild_id, ctx.author.id, "lastmessage")
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description='⚠️ Un défi est déjà en cours dans ce salon.', kind='warning')))
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Dernier message gagne", description=err, kind="warning",
+            )))
 
-        self._lastmessage_state[ctx.channel.id] = {"last_author": None}
+        channel_id = ctx.channel.id
+        if channel_id in self._lastmessage_state:
+            # Une partie refusée ne doit pas coûter le cooldown du lanceur.
+            game_rewards.release_play_lock(guild_id, ctx.author.id, "lastmessage")
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Dernier message gagne",
+                description="⚠️ Un défi est déjà en cours dans ce salon.", kind="warning",
+            )))
+
+        state = {"last_author": None}
+        self._lastmessage_state[channel_id] = state
         try:
-            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=f"💬 Le dernier membre à écrire dans ce salon d'ici **{duree}s** remporte la récompense !")))
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Dernier message gagne",
+                description=(
+                    f"💬 Le dernier membre à écrire dans ce salon d'ici **{duree}s** gagne !\n"
+                    "✍️ Écrivez un message normal dans ce salon, sans commande."
+                ),
+            )))
+            task = asyncio.create_task(
+                self._resolve_lastmessage_round(ctx, duree, sid, state),
+                name=f"sentrix:lastmessage:{guild_id}:{channel_id}",
+            )
+            self._track_community_task(task)
+        except BaseException:
+            if self._lastmessage_state.get(channel_id) is state:
+                self._lastmessage_state.pop(channel_id, None)
+            game_rewards.release_play_lock(guild_id, ctx.author.id, "lastmessage")
+            raise
+
+    async def _resolve_lastmessage_round(
+        self, ctx: commands.Context, duree: int, sid: str, state: dict,
+    ) -> None:
+        guild_id = ctx.guild.id if ctx.guild else None
+        channel_id = ctx.channel.id
+        try:
             await asyncio.sleep(duree)
-            state = self._lastmessage_state.pop(ctx.channel.id, {})
             winner = state.get("last_author")
             if winner is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description="⏱️ Personne n'a écrit — pas de gagnant.")))
-            reward = await game_rewards.reward_game_winner(self.bot, guild_id, winner.id, "lastmessage", 25, sid, result="win")
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Dernier message gagne', description=f'🏆 {winner.mention} a écrit le dernier message !' + _reward_line(reward), kind='success')))
+                await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                    self.bot, guild_id, title="Dernier message gagne",
+                    description="⏱️ Personne n'a écrit — pas de gagnant.",
+                )))
+                return
+            reward = await game_rewards.reward_game_winner(
+                self.bot, guild_id, winner.id, "lastmessage", 25, sid, result="win",
+            )
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Dernier message gagne",
+                description=f"🏆 {winner.mention} a écrit le dernier message !" + _reward_line(reward),
+                kind="success",
+            )))
         finally:
-            self._lastmessage_state.pop(ctx.channel.id, None)
+            # Ne jamais supprimer la manche d'un éventuel nouveau lanceur.
+            if self._lastmessage_state.get(channel_id) is state:
+                self._lastmessage_state.pop(channel_id, None)
             await self._finish_community(guild_id, ctx.author.id, "lastmessage")
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
