@@ -367,7 +367,7 @@ def register(app: web.Application, dashboard) -> None:
     async def _policy_payload(guild: discord.Guild, filter_name: str) -> dict:
         meta = _PROTECTION_CATALOG[filter_name]
         conf = await bot.db.get_automod(guild.id)
-        policy = {"role_ids": [], "strict_channel_ids": []}
+        policy = {"role_ids": [], "member_ids": [], "strict_channel_ids": []}
         if meta["supports_policy"]:
             reader = getattr(bot.db, "get_security_filter_policy", None)
             if callable(reader):
@@ -378,6 +378,11 @@ def register(app: web.Application, dashboard) -> None:
                     "WHERE guild_id=? AND filter_name=? ORDER BY role_id",
                     (guild.id, filter_name),
                 )
+                member_rows = await bot.db.fetchall(
+                    "SELECT user_id FROM security_filter_bypass_members "
+                    "WHERE guild_id=? AND filter_name=? ORDER BY user_id",
+                    (guild.id, filter_name),
+                )
                 channel_rows = await bot.db.fetchall(
                     "SELECT channel_id FROM security_filter_strict_channels "
                     "WHERE guild_id=? AND filter_name=? ORDER BY channel_id",
@@ -385,6 +390,7 @@ def register(app: web.Application, dashboard) -> None:
                 )
                 policy = {
                     "role_ids": [int(row["role_id"]) for row in role_rows],
+                    "member_ids": [int(row["user_id"]) for row in member_rows],
                     "strict_channel_ids": [int(row["channel_id"]) for row in channel_rows],
                 }
         try:
@@ -399,6 +405,15 @@ def register(app: web.Application, dashboard) -> None:
             "supports_policy": bool(meta["supports_policy"]),
             "enabled": enabled,
             "role_ids": [str(value) for value in policy.get("role_ids", [])],
+            "member_ids": [str(value) for value in policy.get("member_ids", [])],
+            "member_labels": {
+                str(value): (
+                    str(member.display_name)
+                    if (member := guild.get_member(int(value))) is not None
+                    else f"Membre {value}"
+                )
+                for value in policy.get("member_ids", [])
+            },
             "strict_channel_ids": [
                 str(value) for value in policy.get("strict_channel_ids", [])
             ],
@@ -426,6 +441,7 @@ def register(app: web.Application, dashboard) -> None:
                 await automod._sync_native_antimention_rule(guild)
             elif filter_name == "antiinsult":
                 await automod._sync_native_blacklist_rule(guild)
+                await automod._sync_native_harmful_rule(guild)
         except Exception:
             # Le moteur local reste autoritaire même si Discord AutoMod natif
             # est indisponible ou n'a pas la permission Gérer le serveur.
@@ -442,22 +458,34 @@ def register(app: web.Application, dashboard) -> None:
             return dashboard._json_error("Protection de sécurité inconnue.", 400)
         if not _PROTECTION_CATALOG[filter_name]["supports_policy"]:
             return dashboard._json_error(
-                "Cette protection est globale au serveur et n'utilise pas de rôles bypass / salons stricts.",
+                "Cette protection globale ne propose pas d'exemptions par membre, rôle ou salon.",
                 400,
             )
 
         raw_roles = (payload or {}).get("role_ids") or []
+        # None préserve les exemptions individuelles des anciens clients V1.
+        raw_members = (payload or {}).get("member_ids")
         raw_channels = (payload or {}).get("strict_channel_ids")
         if raw_channels is None and legacy_channel_key:
             raw_channels = (payload or {}).get("channel_ids") or []
         raw_channels = raw_channels or []
+        if not isinstance(raw_roles, list) or not isinstance(raw_channels, list):
+            return dashboard._json_error("Liste de rôles ou salons invalide.", 400)
+        if raw_members is not None and not isinstance(raw_members, list):
+            return dashboard._json_error("Liste de membres invalide.", 400)
         try:
             role_ids = list(dict.fromkeys(int(value) for value in raw_roles))[:25]
+            member_ids = (
+                list(dict.fromkeys(int(value) for value in raw_members))[:25]
+                if raw_members is not None else None
+            )
             strict_channel_ids = list(
                 dict.fromkeys(int(value) for value in raw_channels)
             )[:25]
         except (TypeError, ValueError):
-            return dashboard._json_error("Rôle ou salon invalide.", 400)
+            return dashboard._json_error("Membre, rôle ou salon invalide.", 400)
+        if member_ids is not None and any(value <= 0 for value in member_ids):
+            return dashboard._json_error("Identifiant de membre invalide.", 400)
 
         valid_roles = {
             int(role.id)
@@ -473,6 +501,18 @@ def register(app: web.Application, dashboard) -> None:
             return dashboard._json_error("Un rôle sélectionné n'existe plus.", 409)
         if any(channel_id not in valid_channels for channel_id in strict_channel_ids):
             return dashboard._json_error("Un salon sélectionné n'existe plus.", 409)
+        # Une exemption ne doit jamais cibler un utilisateur étranger au serveur.
+        # Sur de gros serveurs le cache des membres peut être incomplet : le
+        # fetch Discord complète uniquement les IDs sélectionnés (maximum 25).
+        for user_id in member_ids or []:
+            if guild.get_member(user_id) is not None:
+                continue
+            try:
+                await guild.fetch_member(user_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return dashboard._json_error(
+                    "Un membre sélectionné n'est plus accessible sur ce serveur.", 409
+                )
 
         writer = getattr(bot.db, "set_security_filter_policy", None)
         if callable(writer):
@@ -480,6 +520,7 @@ def register(app: web.Application, dashboard) -> None:
                 guild.id,
                 filter_name,
                 role_ids=role_ids,
+                member_ids=member_ids,
                 strict_channel_ids=strict_channel_ids,
             )
         else:
@@ -494,6 +535,18 @@ def register(app: web.Application, dashboard) -> None:
                     "(guild_id,filter_name,role_id) VALUES (?,?,?)",
                     (guild.id, filter_name, role_id),
                 )
+            if member_ids is not None:
+                await bot.db.execute(
+                    "DELETE FROM security_filter_bypass_members "
+                    "WHERE guild_id=? AND filter_name=?",
+                    (guild.id, filter_name),
+                )
+                for user_id in member_ids:
+                    await bot.db.execute(
+                        "INSERT OR IGNORE INTO security_filter_bypass_members "
+                        "(guild_id,filter_name,user_id) VALUES (?,?,?)",
+                        (guild.id, filter_name, user_id),
+                    )
             await bot.db.execute(
                 "DELETE FROM security_filter_strict_channels "
                 "WHERE guild_id=? AND filter_name=?",
