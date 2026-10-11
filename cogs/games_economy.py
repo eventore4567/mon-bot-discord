@@ -2854,3 +2854,9 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(GamesPlayerCommands(bot))
     from cogs.games_setup import GamesSetup
     await bot.add_cog(GamesSetup(bot))
+    # Diagnostic non bloquant : les images sont testées en arrière-plan.
+    # Pas de création de salons, pas de dépendance aux GIFs pour jouer.
+    if not getattr(bot, "_sentrix_games_media_preflight_task", None):
+        bot._sentrix_games_media_preflight_task = asyncio.create_task(
+            game_visuals.preflight_assets(), name="sentrix-game-gifs"
+        )
