@@ -117,7 +117,12 @@ def _frame(player: list[tuple[str, int]], dealer: list[tuple[str, int]],
     is_win = phase in {"blackjack", "win"}
     is_loss = phase in {"loss", "bust", "timeout"}
     badge = (29, 127, 83) if is_win else (146, 51, 56) if is_loss else (22, 86, 75)
+    # La lumière bouge même sur les résultats sans carte distribuée.
+    pulse = (frame_index % 4) * 6
+    badge = tuple(min(255, channel + pulse) for channel in badge)
     _rounded(d, (260, 446, 640, 482), badge, radius=12)
+    d.rectangle((264 + 26 * frame_index, 451, 282 + 26 * frame_index, 454),
+                fill=(192, 212, 179))
     d.text((450, 464), labels.get(phase, "BLACKJACK"),
            font=_font(19, True), fill=(255, 255, 255), anchor="mm")
     if is_win:
