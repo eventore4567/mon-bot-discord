@@ -121,8 +121,16 @@ async function renderSecurity() {
     supports_policy: false,
     enabled: Boolean(a[policyKey]),
     role_ids: [],
+    member_ids: [],
+    member_labels: {},
     strict_channel_ids: [],
   };
+  const selectedSecurityMembers = new Map(
+    (policy.member_ids || []).map(id => [
+      String(id),
+      String((policy.member_labels || {})[String(id)] || ('Membre ' + id))
+    ])
+  );
   const policyRoleIds = new Set((policy.role_ids || []).map(String));
   const policyStrictChannelIds = new Set((policy.strict_channel_ids || []).map(String));
   const policyFilterOptions = securityProtectionOrder
@@ -259,22 +267,30 @@ async function renderSecurity() {
       ${switchRow(`Activer ${policy.label || 'cette protection'}`, policyKey, Boolean(a[policyKey]), policy.description || '')}
       ${policy.supports_policy ? `
         <div class="notice" style="margin-top:12px">
-          Priorité : <b>salon strict → rôle bypass → protection normale</b>. Dans un salon strict, même un rôle bypass reste soumis à <b>${esc(policy.label)}</b>. Les threads héritent du salon parent.
+          Priorité : <b>salon strict → membre ou rôle exempté → protection normale</b>. Dans un salon strict, les exemptions individuelles et par rôle ne s'appliquent pas. Les threads héritent du salon parent.
         </div>
         <div class="fields" style="margin-top:12px">
           <div class="field full">
-            <div class="label-row"><label for="securityPolicyBypassRoles">Rôles autorisés à contourner</label></div>
+            <div class="label-row"><label for="securityPolicyMemberSearch">Membres autorisés à contourner</label></div>
+            <input id="securityPolicyMemberSearch" type="search" autocomplete="off" maxlength="80" placeholder="Rechercher un pseudo ou un identifiant Discord">
+            <small>Choisissez directement les personnes à exempter de <b>${esc(policy.label || policyKey)}</b>. Aucun rôle à créer.</small>
+            <div id="securityPolicyMemberResults" class="list compact" style="margin-top:8px"></div>
+            <div id="securityPolicySelectedMembers" class="list compact" style="margin-top:8px"></div>
+          </div>
+          <div class="field full">
+            <div class="label-row"><label for="securityPolicyBypassRoles">Rôles autorisés à contourner (facultatif)</label></div>
             <select id="securityPolicyBypassRoles" multiple size="6">${policyRoleOptions || '<option disabled>Aucun rôle disponible</option>'}</select>
             <small>Le bypass concerne uniquement <b>${esc(policy.label || policyKey)}</b>.</small>
           </div>
           <div class="field full">
             <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — bypass interdit</label></div>
             <select id="securityPolicyStrictChannels" multiple size="7">${policyChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
-            <small>Dans ces salons, même les rôles bypass sont bloqués par cette protection.</small>
+            <small>Dans ces salons, les membres et rôles exemptés sont aussi contrôlés par cette protection.</small>
           </div>
         </div>
         <div class="toolbar">
           <button class="btn primary" type="button" id="securityPolicySave">Enregistrer les exceptions</button>
+          <button class="btn ghost" type="button" id="securityPolicyClearMembers">Retirer les membres exemptés</button>
           <button class="btn ghost" type="button" id="securityPolicyClearRoles">Retirer les rôles bypass</button>
           <button class="btn ghost" type="button" id="securityPolicyClearStrict">Aucun salon strict</button>
         </div>
@@ -312,6 +328,76 @@ async function renderSecurity() {
 
   const selectedValues = select => [...(select?.selectedOptions || [])].map(option => option.value).filter(Boolean);
 
+  const paintSecurityMembers = () => {
+    const holder = $('securityPolicySelectedMembers');
+    if (!holder) return;
+    holder.innerHTML = selectedSecurityMembers.size
+      ? [...selectedSecurityMembers.entries()].map(([id, name]) => `
+          <div class="row">
+            <div class="row-main"><b>${esc(name)}</b><small>ID : ${esc(id)}</small></div>
+            <button class="btn sm ghost" type="button" data-security-remove-member="${esc(id)}">Retirer</button>
+          </div>`).join('')
+      : '<div class="notice">Aucun membre exempté pour cette protection.</div>';
+    holder.querySelectorAll('[data-security-remove-member]').forEach(button => {
+      button.onclick = () => {
+        selectedSecurityMembers.delete(button.dataset.securityRemoveMember);
+        paintSecurityMembers();
+      };
+    });
+  };
+  paintSecurityMembers();
+
+  const memberSearch = $('securityPolicyMemberSearch');
+  if (memberSearch) {
+    let timer = null;
+    let searchVersion = 0;
+    memberSearch.oninput = () => {
+      clearTimeout(timer);
+      const query = memberSearch.value.trim();
+      const version = ++searchVersion;
+      const results = $('securityPolicyMemberResults');
+      if (!results) return;
+      if (query.length < 2) {
+        results.innerHTML = '';
+        return;
+      }
+      results.innerHTML = '<div class="notice">Recherche en cours…</div>';
+      timer = setTimeout(async () => {
+        let members;
+        try {
+          const data = await gget('/moderation/members?q=' + encodeURIComponent(query));
+          members = data.members || [];
+        } catch (error) {
+          if (version === searchVersion) results.innerHTML = '<div class="notice">Recherche indisponible.</div>';
+          return;
+        }
+        if (version !== searchVersion) return;
+        results.innerHTML = members.length
+          ? members.map(m => `
+            <div class="row">
+              <div class="row-main"><b>${esc(m.display_name || m.username || m.id)}</b>
+                <small>@${esc(m.username || '')} · ${esc(m.id)}</small></div>
+              <button class="btn sm ghost" type="button"
+                data-security-add-member="${esc(m.id)}"
+                data-security-member-name="${esc(m.display_name || m.username || String(m.id))}">Ajouter</button>
+            </div>`).join('')
+          : '<div class="notice">Aucun membre trouvé.</div>';
+        results.querySelectorAll('[data-security-add-member]').forEach(button => {
+          button.onclick = () => {
+            selectedSecurityMembers.set(
+              String(button.dataset.securityAddMember),
+              String(button.dataset.securityMemberName)
+            );
+            paintSecurityMembers();
+            memberSearch.value = '';
+            results.innerHTML = '';
+            ++searchVersion;
+          };
+        });
+      }, 200);
+    };
+  }
+
   content().querySelectorAll('[data-security-config]').forEach(button => {
     button.onclick = async () => {
       state.securityPolicyFilter = button.dataset.securityConfig || 'antispam';
@@ -324,8 +410,9 @@ async function renderSecurity() {
     await renderSecurity();
   };
 
-  const saveSecurityPolicy = async ({ clearRoles = false, clearStrict = false } = {}) => {
+  const saveSecurityPolicy = async ({ clearRoles = false, clearMembers = false, clearStrict = false } = {}) => {
     const roleIds = clearRoles ? [] : selectedValues($('securityPolicyBypassRoles'));
+    const memberIds = clearMembers ? [] : [...selectedSecurityMembers.keys()];
     const strictChannelIds = clearStrict ? [] : selectedValues($('securityPolicyStrictChannels'));
     const button = $('securityPolicySave');
     if (button) button.disabled = true;
@@ -333,6 +420,7 @@ async function renderSecurity() {
       const result = await gpost('/security/filter-policies', {
         filter_name: state.securityPolicyFilter || policyKey,
         role_ids: roleIds,
+        member_ids: memberIds,
         strict_channel_ids: strictChannelIds,
       });
       toast(result.message || 'Exceptions de sécurité enregistrées.');
@@ -345,6 +433,7 @@ async function renderSecurity() {
   };
 
   if ($('securityPolicySave')) $('securityPolicySave').onclick = () => saveSecurityPolicy();
+  if ($('securityPolicyClearMembers')) $('securityPolicyClearMembers').onclick = () => saveSecurityPolicy({ clearMembers: true });
   if ($('securityPolicyClearRoles')) $('securityPolicyClearRoles').onclick = () => saveSecurityPolicy({ clearRoles: true });
   if ($('securityPolicyClearStrict')) $('securityPolicyClearStrict').onclick = () => saveSecurityPolicy({ clearStrict: true });
 
