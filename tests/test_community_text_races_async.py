@@ -109,3 +109,60 @@ def test_publishing_failure_releases_lock_without_cooldown(monkeypatch):
         assert not cog._community_tasks
 
     asyncio.run(scenario())
+
+
+def test_lastmessage_command_does_not_wait_120_seconds(monkeypatch):
+    async def scenario():
+        cog, bot, ctx, send = _prepare(monkeypatch)
+        await asyncio.wait_for(
+            cog.lastmessage.callback(cog, ctx, duree=120),
+            timeout=1,
+        )
+        assert send.await_count == 1
+        assert ctx.channel.id in cog._lastmessage_state
+        assert len(cog._community_tasks) == 1
+
+        # Le runner doit pouvoir libérer son état même si le bot s'arrête.
+        await asyncio.sleep(0)
+        task = next(iter(cog._community_tasks))
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert ctx.channel.id not in cog._lastmessage_state
+        cog._finish_community.assert_awaited_once_with(123, 789, "lastmessage")
+
+    asyncio.run(scenario())
+
+
+def test_lastmessage_awards_latest_writer_and_cleans_state(monkeypatch):
+    async def scenario():
+        cog, bot, ctx, send = _prepare(monkeypatch)
+        winner = SimpleNamespace(id=51, mention="<@51>", bot=False)
+        state = {"last_author": winner}
+        cog._lastmessage_state[ctx.channel.id] = state
+        reward = AsyncMock(return_value=object())
+        monkeypatch.setattr(games_economy.game_rewards, "reward_game_winner", reward)
+
+        await cog._resolve_lastmessage_round(ctx, 0, "session-1", state)
+        reward.assert_awaited_once()
+        assert reward.await_args.args[2] == winner.id
+        assert send.await_count == 1
+        assert ctx.channel.id not in cog._lastmessage_state
+        cog._finish_community.assert_awaited_once_with(123, 789, "lastmessage")
+
+    asyncio.run(scenario())
+
+
+def test_lastmessage_duplicate_round_is_refused_without_cooldown(monkeypatch):
+    async def scenario():
+        cog, bot, ctx, send = _prepare(monkeypatch)
+        cog._lastmessage_state[ctx.channel.id] = {"last_author": None}
+        release = Mock()
+        monkeypatch.setattr(games_economy.game_rewards, "release_play_lock", release)
+
+        await cog.lastmessage.callback(cog, ctx, duree=45)
+        assert send.await_count == 1
+        assert not cog._community_tasks
+        release.assert_called_once_with(123, 789, "lastmessage")
+        cog._finish_community.assert_not_awaited()
+
+    asyncio.run(scenario())
