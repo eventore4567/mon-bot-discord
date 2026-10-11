@@ -234,25 +234,95 @@ def test_obfuscated_and_concatenated_links_are_normalized():
 
 
 @pytest.mark.asyncio
-async def test_native_rule_is_recreated_after_manual_deletion():
-    conf = _base_conf(antilink=1, antilink_strict=1)
-    bot = SimpleNamespace(
-        db=SimpleNamespace(get_automod=AsyncMock(return_value=conf))
-    )
+async def test_native_link_rule_is_never_recreated():
+    # La règle native ne peut pas appliquer les bypass membres/administrateurs.
+    bot = SimpleNamespace(user=SimpleNamespace(id=123))
     cog = AutoMod(bot)
     guild = SimpleNamespace(
         id=1,
-        me=SimpleNamespace(
-            guild_permissions=SimpleNamespace(manage_guild=True)
-        ),
+        me=SimpleNamespace(id=123, guild_permissions=SimpleNamespace(manage_guild=True)),
         fetch_automod_rules=AsyncMock(return_value=[]),
         create_automod_rule=AsyncMock(),
     )
+    assert await cog._sync_native_antilink_rule(guild) is True
+    guild.create_automod_rule.assert_not_awaited()
 
-    ok = await cog._sync_native_antilink_rule(guild)
 
-    assert ok is True
-    guild.create_automod_rule.assert_awaited_once()
+@pytest.mark.asyncio
+async def test_owned_native_rules_removed_without_touching_other_creators():
+    bot = SimpleNamespace(user=SimpleNamespace(id=123))
+    cog = AutoMod(bot)
+    owned = SimpleNamespace(
+        id=10, name=automod_module.NATIVE_ANTILINK_RULE_NAME,
+        creator_id=123, delete=AsyncMock(),
+    )
+    foreign = SimpleNamespace(
+        id=11, name=automod_module.NATIVE_ANTILINK_RULE_NAME,
+        creator_id=987, delete=AsyncMock(),
+    )
+    unknown = SimpleNamespace(
+        id=12, name=automod_module.NATIVE_ANTILINK_RULE_NAME,
+        creator_id=None, delete=AsyncMock(),
+    )
+    unrelated = SimpleNamespace(
+        id=13, name="Discord Moderation Manual",
+        creator_id=123, delete=AsyncMock(),
+    )
+    guild = SimpleNamespace(
+        id=1,
+        me=SimpleNamespace(id=123, guild_permissions=SimpleNamespace(manage_guild=True)),
+        fetch_automod_rules=AsyncMock(return_value=[owned, foreign, unknown, unrelated]),
+        create_automod_rule=AsyncMock(),
+    )
+    assert await cog._sync_native_antilink_rule(guild) is True
+    owned.delete.assert_awaited_once()
+    foreign.delete.assert_not_awaited()
+    unknown.delete.assert_not_awaited()
+    unrelated.delete.assert_not_awaited()
+    guild.create_automod_rule.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_all_old_sentrix_content_rules_are_retired_on_bootstrap_sync():
+    bot = SimpleNamespace(user=SimpleNamespace(id=123))
+    cog = AutoMod(bot)
+    names = [
+        automod_module.NATIVE_ANTILINK_RULE_NAME,
+        automod_module.NATIVE_TARGET_LINKS_RULE_NAME,
+        automod_module.NATIVE_ANTIINVITE_RULE_NAME,
+        automod_module.NATIVE_ANTISCAM_RULE_NAME,
+        automod_module.NATIVE_ANTIMENTION_RULE_NAME,
+        automod_module.NATIVE_BLACKLIST_RULE_NAME,
+        automod_module.NATIVE_HARMFUL_RULE_NAME,
+    ]
+    rules = [SimpleNamespace(id=i, name=name, creator_id=123, delete=AsyncMock()) for i, name in enumerate(names, 1)]
+    guild = SimpleNamespace(
+        id=1,
+        me=SimpleNamespace(id=123, guild_permissions=SimpleNamespace(manage_guild=True)),
+        fetch_automod_rules=AsyncMock(return_value=rules),
+        create_automod_rule=AsyncMock(),
+    )
+    bot.db = SimpleNamespace(fetchall=AsyncMock(return_value=[]), get_automod=AsyncMock(return_value=_base_conf(antilink=1, antiscam=1)))
+    await cog._sync_native_suite(guild)
+    for rule in rules:
+        rule.delete.assert_awaited_once()
+    guild.create_automod_rule.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_native_permission_failure_keeps_local_filter_available_disabled_cleanup():
+    conf = _base_conf(antilink=1)
+    cog = _cog(conf)
+    guild = SimpleNamespace(
+        id=1,
+        me=SimpleNamespace(id=123, guild_permissions=SimpleNamespace(manage_guild=False)),
+        fetch_automod_rules=AsyncMock(),
+    )
+    assert await cog._sync_native_antilink_rule(guild) is False
+    guild.fetch_automod_rules.assert_not_awaited()
+    msg = _message(_member(), "https://example.com")
+    await cog.on_message(msg)
+    cog._delete_and_warn.assert_awaited_once()
 
 
 @pytest.mark.asyncio
