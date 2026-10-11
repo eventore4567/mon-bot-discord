@@ -48,6 +48,7 @@ from utils import embeds, checks, helpers, log_service, text_normalization, ai_s
 from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
 from utils.raid_join_deduplicator import RaidJoinDeduplicator
+from utils.automod_message_claims import AutomodMessageClaims
 from utils.raid_verification_recovery import RaidVerificationRecovery
 from utils.security_member_bypass import can_bypass_message_filters
 from utils import sentrix_panels as panels
@@ -1008,6 +1009,11 @@ class AutoMod(commands.Cog, name="Automod"):
         self.repeat_tracker = FenetreGlissante(fenetre=REPEAT_WINDOW)
         self.risk_scores: dict[tuple[int, int], tuple[float, float]] = {}
         self.incidents: dict[tuple[int, int], _Incident] = {}
+        # Plusieurs cogs traitent on_message en parallèle. La réservation est
+        # synchrone, avant toute suppression/sanction, et commune aux filtres.
+        self._sanctioned_messages = AutomodMessageClaims(
+            ttl_seconds=120, max_entries=16384,
+        )
         self.moderation_dataset = MultilingualModerationDataset()
         # Caches mémoire : évitent des allers-retours en base de données à CHAQUE
         # message (ce qui ralentissait le bot sur un salon actif). Invalidés dès
@@ -3166,6 +3172,12 @@ class AutoMod(commands.Cog, name="Automod"):
         # appelleraient cette méthode directement, sans passer par le filtre.
         if _is_discord_administrator(message.author):
             return
+        if not self._sanctioned_messages.claim(message.guild.id, message.id):
+            logger.debug(
+                "AutoMod : détection concurrente ignorée guild=%s message=%s filtre=%s",
+                message.guild.id, message.id, filter_name,
+            )
+            return
         if filter_name in {
             "antilink", "antiinvite", "antiscam", "blacklist_link", "blacklist_word_link",
         }:
@@ -3477,7 +3489,19 @@ class AutoMod(commands.Cog, name="Automod"):
         *,
         detection_kind: str,
     ):
-        """Supprime le message et applique immédiatement un timeout de 10 minutes."""
+        """Supprime le message et applique immédiatement un timeout de 10 minutes.
+
+        Même verrou d'idempotence que _delete_and_warn : jamais deux sanctions
+        sur un message détecté par plusieurs cogs simultanément.
+        """
+        if _is_discord_administrator(message.author):
+            return
+        if not self._sanctioned_messages.claim(message.guild.id, message.id):
+            logger.debug(
+                "AutoMod : timeout concurrent ignoré guild=%s message=%s",
+                message.guild.id, message.id,
+            )
+            return
         self._mark_xp_skip(message.id)
         try:
             await message.delete()
