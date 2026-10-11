@@ -1360,7 +1360,8 @@ class _BossFightButton(discord.ui.Button):
             await view._phase(
                 f"🐲 Le boss prépare une riposte !\n"
                 f"{'🛡️ Votre bouclier absorbe une partie du coup.' if self.action == 'guard' else '💥 Esquivez son attaque !'}",
-                scene="boss-counter", buttons=False,
+                scene="boss-counter" if view.turn % 2 else "boss-counter-alt",
+                buttons=False,
             )
             await asyncio.sleep(0.9)
             view.hp -= retaliation
