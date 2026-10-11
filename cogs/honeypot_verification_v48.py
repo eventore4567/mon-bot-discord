@@ -12,6 +12,7 @@ from discord.ext import commands
 
 from utils import helpers
 from utils import sentrix_panels as panels, rules_flow
+from utils.security_member_bypass import can_bypass_message_filters
 
 logger = logging.getLogger("bot.security.honeypot-v50")
 _COG_NAME = "HoneypotVerification"
@@ -1098,7 +1099,7 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
-        if member.bot:
+        if member.bot or member.id == member.guild.owner_id or can_bypass_message_filters(member):
             return
         conf = await self.config(member.guild.id)
         if not conf:
@@ -1199,6 +1200,13 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
             message.guild is None
             or message.author.bot
             or not isinstance(message.author, discord.Member)
+        ):
+            return
+        # Une incohérence de rôle (Non vérifié conservé) ne doit jamais
+        # provoquer un kick/softban d'un responsable du serveur.
+        if (
+            message.author.id == message.guild.owner_id
+            or can_bypass_message_filters(message.author)
         ):
             return
 

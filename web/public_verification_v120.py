@@ -24,6 +24,7 @@ from aiohttp import web
 
 import config
 from utils import rules_flow
+from utils.security_member_bypass import can_bypass_message_filters
 
 logger = logging.getLogger("bot.web-verification-v120")
 
@@ -37,6 +38,33 @@ WEB_FAILURE_WINDOW = 10 * 60
 WEB_LOCK_SECONDS = 10 * 60
 SECURITY_SCAN_PASSES = 5
 SECURITY_SCAN_INTERVAL_SECONDS = 0.75
+CHALLENGE_ISSUE_COOLDOWN_SECONDS = 3.0
+_MAX_CHALLENGE_RATE_KEYS = 4096
+_challenge_issued: dict[tuple[int, int], float] = {}
+
+
+def _challenge_retry_after(guild_id: int, user_id: int, *, now: float | None = None) -> int:
+    """Limitation légère contre l'épuisement CPU par créations d'images CAPTCHA.
+
+    La validation du challenge reste protégée par ses limites d'échecs
+    persistantes ; cette protection concerne seulement le coût des PNG.
+    """
+    moment = time.monotonic() if now is None else float(now)
+    key = (int(guild_id), int(user_id))
+    previous = _challenge_issued.get(key)
+    if previous is not None and moment - previous < CHALLENGE_ISSUE_COOLDOWN_SECONDS:
+        return max(1, int(CHALLENGE_ISSUE_COOLDOWN_SECONDS - (moment - previous) + 0.999))
+    if len(_challenge_issued) >= _MAX_CHALLENGE_RATE_KEYS:
+        # Nettoyer les sessions périmées avant d'éjecter les entrées les plus
+        # anciennes, afin de ne pas laisser croître la mémoire sans limite.
+        cutoff = moment - CHALLENGE_ISSUE_COOLDOWN_SECONDS
+        for pending in tuple(_challenge_issued):
+            if _challenge_issued[pending] < cutoff:
+                _challenge_issued.pop(pending, None)
+    while len(_challenge_issued) >= _MAX_CHALLENGE_RATE_KEYS:
+        _challenge_issued.pop(next(iter(_challenge_issued)))
+    _challenge_issued[key] = moment
+    return 0
 
 _WEB_ATTEMPT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS web_verification_attempts (
@@ -422,6 +450,15 @@ async def _ensure_pending_enrollment(
 
     if verified in member.roles:
         return True, None
+
+    # Les responsables qui gèrent le serveur ne doivent pas recevoir
+    # automatiquement « Non vérifié » à partir d'une simple page web.
+    if can_bypass_message_filters(member):
+        return False, _json_error(
+            "Les responsables du serveur sont exemptés de cette inscription automatique.",
+            409,
+            code="staff_exempt",
+        )
 
     pending_lookup = getattr(cog, "_pending", None)
     pending_row = await pending_lookup(guild.id, member.id) if callable(pending_lookup) else None
@@ -1219,6 +1256,16 @@ async def handle_challenge(request: web.Request) -> web.Response:
             409,
             code="discord_screening_pending",
         )
+
+    retry_after = _challenge_retry_after(guild.id, member.id)
+    if retry_after:
+        response = _json_error(
+            "Un CAPTCHA vient d'être créé. Réessaie dans quelques secondes.",
+            429,
+            code="challenge_rate_limited",
+        )
+        response.headers["Retry-After"] = str(retry_after)
+        return response
 
     rng = secrets.SystemRandom()
     code = "".join(rng.choice(CAPTCHA_ALPHABET) for _ in range(6))
