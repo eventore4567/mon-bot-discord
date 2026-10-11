@@ -53,6 +53,7 @@ jobs:
             tests/test_games_runtime_core.py \
             tests/test_ai_command_router.py \
             tests/test_automod_live_matrix.py \
+            tests/test_automod_idempotent_sanctions_v131.py \
             tests/test_automod_cross_channel_spam_v125.py \
             tests/test_automod_scam_spam_notice_v126.py \
             tests/test_antiscam_precision_v78.py \
