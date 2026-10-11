@@ -576,6 +576,13 @@ class Panneau(discord.ui.LayoutView):
         self.sections_source = tuple(sections)
         self.boutons_source = tuple(boutons)
         self.pied_source = str(pied or "") if pied else ""
+        # Le média du jeu est un GIF vérifié envoyé en pièce jointe Discord,
+        # pas une URL GIPHY distante susceptible d'afficher un cadre vide.
+        self._game_gif_attachment = (
+            str(image)
+            if str(image or "").startswith("attachment://sentrix_game_")
+            else None
+        )
         # Direction produit : aucune bannière décorative, même si un ancien
         # appelant passe encore banniere=True. On garde l'argument uniquement pour
         # compatibilité API, mais le rendu et les pièces jointes restent désactivés.
@@ -704,8 +711,13 @@ class Panneau(discord.ui.LayoutView):
         famille est celle figée à la construction : les deux côtés ne peuvent
         pas diverger.
         """
-        # Les bandeaux décoratifs sont définitivement désactivés : aucune
-        # pièce jointe de famille ne doit quitter le bot.
+        # Pas de bandeau décoratif. Exception métier : GIF du mini-jeu
+        # VALIDÉ et joint au même message que sa MediaGallery. Un fichier neuf
+        # est construit à chaque édition (les discord.File sont consommés).
+        if self._game_gif_attachment:
+            from utils.game_visuals import attachment_file_for
+            gif = attachment_file_for(self._game_gif_attachment)
+            return [gif] if gif is not None else []
         return []
 
 
