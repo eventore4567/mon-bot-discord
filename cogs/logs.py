@@ -170,7 +170,7 @@ def _permission_badge_fields(
     for name in names:
         label = _permission_label(name).replace("`", "")[:120]
         badge = f"`{label}`"
-        separator = ("\\n" if on_line and on_line % 4 == 0 else "  ") if current else ""
+        separator = (chr(10) if on_line and on_line % 4 == 0 else "  ") if current else ""
         if current and len(current) + len(separator) + len(badge) > limit:
             chunks.append(current)
             current = badge
