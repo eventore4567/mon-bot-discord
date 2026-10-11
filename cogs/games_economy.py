@@ -1873,6 +1873,23 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         self.bot = bot
         # Parties "dernier message gagne" actives, par salon — voir on_message ci-dessous.
         self._lastmessage_state: dict[int, dict] = {}
+        # Conserver une référence forte aux manches asynchrones, sinon asyncio
+        # peut collecter une tâche non référencée avant sa fin.
+        self._community_tasks: set[asyncio.Task] = set()
+
+    def _track_community_task(self, task: asyncio.Task) -> None:
+        self._community_tasks.add(task)
+
+        def _finished(done: asyncio.Task) -> None:
+            self._community_tasks.discard(done)
+            if done.cancelled():
+                return
+            try:
+                done.result()
+            except Exception:
+                logger.exception("Manche communautaire échouée : %s", done.get_name())
+
+        task.add_done_callback(_finished)
 
     async def _start_community(self, ctx: commands.Context, game_name: str, cooldown: int = 60) -> tuple[bool, str, str | None]:
         return await _precheck(self.bot, ctx, game_name, cooldown)
@@ -1883,29 +1900,85 @@ class GamesCommunity(commands.Cog, name="GamesCommunity"):
         await game_rewards.touch_cooldown(self.bot, guild_id, user_id, game_name)
 
     async def _run_text_race(self, ctx: commands.Context, game_name: str, title: str, prompt: str, answer, window: int, reward: int, *, difficulty: str = "normal"):
+        """Publier la manche immédiatement ; l'attente ne bloque PAS la commande.
+
+        Les 15–25 secondes appartiennent à la partie, pas au temps d'exécution
+        de la commande. Cela évite les fausses alertes « commande lente ».
+        """
         guild_id = ctx.guild.id if ctx.guild else None
         started, err, sid = await self._start_community(ctx, game_name)
         if not started:
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=err, kind='warning')))
+            return await panels.envoyer(ctx, panels.depuis_embed(
+                await _embed(self.bot, guild_id, title=title, description=err, kind="warning")
+            ))
 
         try:
-            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f'{prompt}\n🏁 Premier(e) à répondre correctement dans ce salon gagne ! ({window}s)')))
-
-            def check(m):
-                return m.channel.id == ctx.channel.id and not m.author.bot and game_rewards.answer_matches(m.content, answer)
-
-            try:
-                msg = await self.bot.wait_for("message", check=check, timeout=window)
-            except asyncio.TimeoutError:
-                return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f"⏱️ Personne n'a trouvé. La réponse était **{_primary_answer(answer)}**.", kind='warning')))
-
-            reward_amount = game_rewards.skill_reward(reward, difficulty=difficulty)
-            game_reward = await game_rewards.reward_game_winner(
-                self.bot, guild_id, msg.author.id, game_name, reward_amount, sid, result="win"
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title=title,
+                description=(
+                    f"{prompt}\n"
+                    "✍️ Écrivez directement votre réponse dans ce salon (sans commande).\n"
+                    f"🏁 Le premier message correct gagne ! Vous avez **{window}s**."
+                ),
+            )))
+            task = asyncio.create_task(
+                self._resolve_text_race(
+                    ctx, game_name, title, answer, window, reward, sid, difficulty,
+                ),
+                name=f"sentrix:race:{game_name}:{guild_id}:{ctx.channel.id}",
             )
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title=title, description=f'🏆 {msg.author.mention} a trouvé en premier !\nDifficulté : **{difficulty}**' + _reward_line(game_reward), kind='success')))
+            self._track_community_task(task)
+        except BaseException:
+            # La partie n'a pas été prise en charge : ne pas laisser le verrou
+            # de _precheck bloquer le joueur en cas d'envoi impossible.
+            game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
+            raise
+
+    async def _resolve_text_race(
+        self, ctx: commands.Context, game_name: str, title: str,
+        answer, window: int, reward: int, sid: str, difficulty: str,
+    ) -> None:
+        """Terminer la manche et libérer le verrou même en cas d'erreur."""
+        guild_id = ctx.guild.id if ctx.guild else None
+        channel_id = ctx.channel.id
+
+        def check(message: discord.Message) -> bool:
+            return (
+                message.channel.id == channel_id
+                and not message.author.bot
+                and game_rewards.answer_matches(message.content, answer)
+            )
+
+        try:
+            try:
+                winner_message = await self.bot.wait_for(
+                    "message", check=check, timeout=window,
+                )
+            except asyncio.TimeoutError:
+                await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                    self.bot, guild_id, title=title,
+                    description=f"⏱️ Personne n'a trouvé. La réponse était **{_primary_answer(answer)}**.",
+                    kind="warning",
+                )))
+                return
+
+            amount = game_rewards.skill_reward(reward, difficulty=difficulty)
+            game_reward = await game_rewards.reward_game_winner(
+                self.bot, guild_id, winner_message.author.id,
+                game_name, amount, sid, result="win",
+            )
+            await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title=title,
+                description=(
+                    f"🏆 {winner_message.author.mention} a trouvé en premier !\n"
+                    f"Difficulté : **{difficulty}**"
+                    + _reward_line(game_reward)
+                ),
+                kind="success",
+            )))
         finally:
             await self._finish_community(guild_id, ctx.author.id, game_name)
+
     @commands.hybrid_command(name="triviastart", description="Lancer une question de culture générale communautaire.", with_app_command=False)
     async def triviastart(self, ctx: commands.Context):
         question, answer, difficulty = game_rewards.secure_pick(COMMUNITY_TRIVIA)
