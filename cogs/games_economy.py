@@ -1039,39 +1039,6 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
             ),
         )
 
-async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cooldown: int, mode: str):
-    guild_id = ctx.guild.id if ctx.guild else None
-    started, err, sid = await _precheck(bot, ctx, game_name, cooldown)
-    if not started:
-        return await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Devine le mot', description=err, kind='warning')))
-    if mode == "scramble":
-        word = game_rewards.secure_pick(pool)
-        # L'anagramme est le seul obstacle entre le joueur et la récompense.
-        scrambled = "".join(game_rewards.secure_shuffle(word))
-        prompt = f"🔤 Remettez les lettres dans l'ordre : **{scrambled.upper()}**"
-        answer = word
-    else:
-        clue, answer, difficulty = game_rewards.secure_pick(pool)
-        prompt = f"📖 {clue}"
-    await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Devine le mot', description=f'{prompt}\nVous avez 20 secondes.')))
-
-    def check(m):
-        return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
-
-    try:
-        msg = await bot.wait_for("message", check=check, timeout=20)
-    except asyncio.TimeoutError:
-        await _finish(bot, ctx, game_name, sid, "loss", 0)
-        return await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{_primary_answer(answer)}**.', kind='warning')))
-    if game_rewards.answer_matches(msg.content, answer):
-        amount = 20 if mode == "scramble" else game_rewards.skill_reward(20, difficulty=difficulty, attempts=1, max_attempts=1)
-        reward = await _finish(bot, ctx, game_name, sid, "win", amount)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Bonne réponse !', description='✅' + _reward_line(reward), kind='success')))
-    else:
-        await _finish(bot, ctx, game_name, sid, "loss", 0)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Mauvaise réponse', description=f'❌ La réponse était **{_primary_answer(answer)}**.', kind='danger')))
-
-
     # Trois nouveaux jeux animés, sans mise ni monnaie parallèle.
     @commands.hybrid_command(
         name="doors", description="Choisir une des trois portes mystères et découvrir le trésor.",
@@ -1156,6 +1123,40 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
                          description=view.summary("⚔️ Le boss apparaît ! Choisissez votre premier coup."))
         ), view))
         view.message = msg
+
+
+
+async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cooldown: int, mode: str):
+    guild_id = ctx.guild.id if ctx.guild else None
+    started, err, sid = await _precheck(bot, ctx, game_name, cooldown)
+    if not started:
+        return await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Devine le mot', description=err, kind='warning')))
+    if mode == "scramble":
+        word = game_rewards.secure_pick(pool)
+        # L'anagramme est le seul obstacle entre le joueur et la récompense.
+        scrambled = "".join(game_rewards.secure_shuffle(word))
+        prompt = f"🔤 Remettez les lettres dans l'ordre : **{scrambled.upper()}**"
+        answer = word
+    else:
+        clue, answer, difficulty = game_rewards.secure_pick(pool)
+        prompt = f"📖 {clue}"
+    await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Devine le mot', description=f'{prompt}\nVous avez 20 secondes.')))
+
+    def check(m):
+        return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
+
+    try:
+        msg = await bot.wait_for("message", check=check, timeout=20)
+    except asyncio.TimeoutError:
+        await _finish(bot, ctx, game_name, sid, "loss", 0)
+        return await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{_primary_answer(answer)}**.', kind='warning')))
+    if game_rewards.answer_matches(msg.content, answer):
+        amount = 20 if mode == "scramble" else game_rewards.skill_reward(20, difficulty=difficulty, attempts=1, max_attempts=1)
+        reward = await _finish(bot, ctx, game_name, sid, "win", amount)
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Bonne réponse !', description='✅' + _reward_line(reward), kind='success')))
+    else:
+        await _finish(bot, ctx, game_name, sid, "loss", 0)
+        await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Mauvaise réponse', description=f'❌ La réponse était **{_primary_answer(answer)}**.', kind='danger')))
 
 
 class _DoorsView(discord.ui.View):
