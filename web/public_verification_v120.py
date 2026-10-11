@@ -24,6 +24,7 @@ from aiohttp import web
 
 import config
 from utils import rules_flow
+from utils.security_member_bypass import can_bypass_message_filters
 
 logger = logging.getLogger("bot.web-verification-v120")
 
@@ -422,6 +423,15 @@ async def _ensure_pending_enrollment(
 
     if verified in member.roles:
         return True, None
+
+    # Les responsables qui gèrent le serveur ne doivent pas recevoir
+    # automatiquement « Non vérifié » à partir d'une simple page web.
+    if can_bypass_message_filters(member):
+        return False, _json_error(
+            "Les responsables du serveur sont exemptés de cette inscription automatique.",
+            409,
+            code="staff_exempt",
+        )
 
     pending_lookup = getattr(cog, "_pending", None)
     pending_row = await pending_lookup(guild.id, member.id) if callable(pending_lookup) else None
