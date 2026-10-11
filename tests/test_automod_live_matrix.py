@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -555,3 +556,111 @@ async def test_anti_links_blocks_mixed_allowed_and_disallowed_urls():
 
     cog._delete_and_warn.assert_awaited_once()
     assert cog._delete_and_warn.await_args.args[2] == "antilink"
+
+
+def _joining_member(*, manage_guild=False, user_id=7, owner_id=999, age_days=1):
+    member = _member(user_id=user_id, owner_id=owner_id, manage_guild=manage_guild)
+    member.created_at = discord.utils.utcnow() - timedelta(days=age_days)
+    member.avatar = None
+    member.kick = AsyncMock()
+    member.timeout = AsyncMock()
+    member.guild.edit = AsyncMock()
+    member.guild.verification_level = discord.VerificationLevel.medium
+    return member
+
+
+def test_raid_join_guard_expires_and_limits_memory():
+    from utils.raid_join_deduplicator import RaidJoinDeduplicator
+
+    gate = RaidJoinDeduplicator(ttl_seconds=20, max_entries=4)
+    assert gate.first_join(1, 5, now=10) is True
+    assert gate.first_join(1, 5, now=11) is False
+    assert gate.first_join(2, 5, now=11) is True
+    assert gate.first_join(1, 5, now=31) is True
+    for i in range(30):
+        assert gate.first_join(1, i+100, now=31) is True
+        assert len(gate) <= 4
+
+
+@pytest.mark.asyncio
+async def test_raid_gate_does_not_punish_owner_or_manage_server_staff():
+    conf = _base_conf(antiaccount=1, join_gate=1, antiraid=1, risk_engine=1)
+    for member in (
+        _joining_member(manage_guild=True),
+        _joining_member(user_id=999, owner_id=999),
+    ):
+        cog = _cog(conf)
+        cog.add_risk_signal = AsyncMock(return_value=150)
+        await cog.on_member_join(member)
+        member.kick.assert_not_awaited()
+        member.timeout.assert_not_awaited()
+        member.guild.edit.assert_not_awaited()
+        cog.add_risk_signal.assert_not_awaited()
+        assert cog.join_tracker.compter(member.guild.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_antiaccount_kicks_non_exempt_recent_account_once_if_gateway_replays_join():
+    cog = _cog(_base_conf(antiaccount=1))
+    cog.log_action = AsyncMock()
+    cog.add_risk_signal = AsyncMock(return_value=0)
+    member = _joining_member(age_days=1)
+
+    await cog.on_member_join(member)
+    await cog.on_member_join(member)
+
+    member.kick.assert_awaited_once()
+    cog.log_action.assert_awaited_once()
+    cog.add_risk_signal.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_join_gate_passive_age_avatar_velocity_cannot_timeout_ordinary_joiner():
+    cog = _cog(_base_conf(join_gate=1, risk_engine=1))
+    member = _joining_member(age_days=1)
+    cog.add_risk_signal = AsyncMock(return_value=140)
+    for _ in range(7):
+        cog.join_tracker.ajouter(member.guild.id)
+    for _ in range(31):
+        cog.slow_join_tracker.ajouter(member.guild.id)
+
+    await cog.on_member_join(member)
+
+    cog.add_risk_signal.assert_awaited_once()
+    assert "join_gate" == cog.add_risk_signal.await_args.args[2]
+    member.timeout.assert_not_awaited()
+    member.kick.assert_not_awaited()
+    member.guild.edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_slow_raid_alert_does_not_permanently_change_verification_level():
+    cog = _cog(_base_conf(antiraid=1))
+    member = _joining_member(age_days=70)
+    cog.add_risk_signal = AsyncMock(return_value=35)
+    cog.log_action = AsyncMock()
+    for _ in range(automod_module.RAID_SLOW_THRESHOLD - 1):
+        cog.slow_join_tracker.ajouter(member.guild.id)
+
+    await cog.on_member_join(member)
+
+    cog.log_action.assert_awaited_once()
+    cog.add_risk_signal.assert_awaited_once()
+    member.guild.edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fast_raid_still_raises_verification_level_and_logs():
+    cog = _cog(_base_conf(antiraid=1))
+    member = _joining_member(age_days=70)
+    cog.add_risk_signal = AsyncMock(return_value=35)
+    cog.log_action = AsyncMock()
+    for _ in range(automod_module.RAID_JOIN_THRESHOLD - 1):
+        cog.join_tracker.ajouter(member.guild.id)
+
+    await cog.on_member_join(member)
+
+    member.guild.edit.assert_awaited_once()
+    assert member.guild.edit.await_args.kwargs["verification_level"] == discord.VerificationLevel.highest
+    cog.log_action.assert_awaited()
+    cog.add_risk_signal.assert_awaited_once()
