@@ -765,6 +765,42 @@ class Verification(commands.Cog, name="Verification"):
     @commands.hybrid_command(name="verify-panel", description="Poster le panneau de vérification dans ce salon.")
     @checks.is_owner_or_admin()
     async def verify_panel(self, ctx: commands.Context):
+        if ctx.guild is None:
+            return await ctx.send("Cette commande fonctionne uniquement dans un serveur.")
+        honeypot = self.bot.get_cog("HoneypotVerification")
+        if honeypot is not None:
+            try:
+                active = await honeypot.config(ctx.guild.id, enabled_only=True)
+            except Exception:
+                logger.exception("Chargement du portail web impossible guild=%s", ctx.guild.id)
+                return await ctx.send("Le portail web est temporairement indisponible. Réessayez.")
+            if active:
+                # Ne jamais publier le vieux panneau simple lorsque le serveur
+                # attend la vérification web + honeypot.
+                try:
+                    result, error = await honeypot.refresh_existing_panels(ctx.guild)
+                except (discord.Forbidden, discord.HTTPException):
+                    logger.warning("Publication portail refusée guild=%s", ctx.guild.id, exc_info=True)
+                    return await ctx.send(
+                        "Discord refuse de publier le panneau web. "
+                        "Vérifiez les permissions de SentriX puis utilisez +verify-repair."
+                    )
+                except Exception:
+                    logger.exception("Publication portail impossible guild=%s", ctx.guild.id)
+                    return await ctx.send(
+                        "Le portail web n'a pas pu être restauré. "
+                        "Essayez +verify-repair pour identifier le problème."
+                    )
+                if error or not result:
+                    return await ctx.send(
+                        f"Portail non restauré : {error or 'aucun panneau publié'}. "
+                        "Utilisez +verify-repair pour le diagnostic."
+                    )
+                return await ctx.send(
+                    f"✅ Panneau web restauré dans {result['verify'].mention}."
+                )
+        # La vérification simple reste disponible lorsqu'aucun portail web
+        # renforcé n'est configuré dans ce serveur.
         e = await self._embed(ctx.guild.id, title="Vérification", description="Cliquez sur le bouton ci-dessous après avoir lu les règles du serveur pour obtenir l'accès complet.")
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), VerifyView()))
 
