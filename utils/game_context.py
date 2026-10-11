@@ -90,6 +90,20 @@ _MOTS_RESULTAT = (
 )
 
 _MOTS_CLES = (
+    # Identité par jeu : les panneaux + et / reconnaissent le TITRE du jeu,
+    # même lorsque le contexte slash est perdu après une interaction.
+    (("combat de boss", "bossfight"), "🐲"),
+    (("portes mystères", "portes mysteres", "doors"), "🚪"),
+    (("chaîne d'emojis", "chaine d'emojis", "emojiorder"), "🧠"),
+    (("bouclier", "shield"), "🛡️"),
+    (("fusée", "fusee", "rocket"), "🚀"),
+    (("lave", "lava"), "🌋"),
+    (("zombie",), "🧟"),
+    (("fantôme", "fantome", "ghost"), "👻"),
+    (("potion", "alchimie"), "⚗️"),
+    (("épreuve", "defi", "énigme", "enigme"), "🧩"),
+    (("démineur", "demineur", "bombes"), "💣"),
+    (("machine à sous", "machine a sous", "slots"), "🎰"),
     (("réaction", "reaction", "clic"), "⚡"),
     (("vitesse", "retape", "fast"), "⌨️"),
     (("mémoire", "memory"), "🧠"),
