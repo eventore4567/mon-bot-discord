@@ -365,10 +365,20 @@ def test_community_games_keep_lock_until_finally_cleanup():
     assert "finally:" in text_race
     assert "_finish_community" in text_race
 
-    # The old bug released the lock immediately after _start_community(),
-    # allowing one launcher to start many concurrent events before cooldown.
-    assert 'release_play_lock(guild_id, ctx.author.id, "reactionevent")' not in community
-    assert 'release_play_lock(guild_id, ctx.author.id, "emoji-race")' not in community
+    # Seul un échec de publication AVANT le lancement de la tâche libère
+    # directement le verrou. Sinon, la tâche du jeu le conserve jusqu'au
+    # finally de sa résolution (voir tests/test_community_text_races_async.py).
+    for command_name, game_name in (
+        ("reactionevent", "reactionevent"),
+        ("emoji_race", "emoji-race"),
+    ):
+        command = community.split(f"async def {command_name}", 1)[1].split(
+            "    async def _resolve_", 1
+        )[0]
+        release = f'release_play_lock(guild_id, ctx.author.id, "{game_name}")'
+        assert "self._track_community_task(task)" in command
+        assert command.count(release) == 1
+        assert command.index(release) > command.index("except BaseException:")
 
 def test_play_lock_registry_recovers_stale_lock(monkeypatch):
     registry = game_rewards.PlayLockRegistry(ttl=10)
