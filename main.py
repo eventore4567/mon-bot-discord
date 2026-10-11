@@ -201,7 +201,15 @@ EXACT_DUPLICATE_COMMANDS = frozenset({
     "chat-reset", "embed-create", "latency",
 })
 
-PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS
+# Ces cinq réglages ont désormais de vrais contrôles interactifs dans
+# /setup > Modération > Paramètres avancés ; les anciennes commandes + isolées
+# sont donc retirées du registre (pas seulement cachées dans l'aide).
+# Les tables et la logique de contrôle des accès restent identiques.
+MOVED_TO_SETUP = frozenset({
+    "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
+    "setwarnbanthreshold",
+})
+PRUNED_COMMANDS = COMMANDS_REPLACED_BY_SETUP | EXACT_DUPLICATE_COMMANDS | MOVED_TO_SETUP
 
 
 # Politique de sécurité centrale. Une commande absente de cette liste est considérée
