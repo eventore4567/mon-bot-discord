@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 import unicodedata
 
 import discord
@@ -293,6 +293,10 @@ class SecurityHardening(commands.Cog):
         )
         self._handled_messages: set[int] = set()
         self._panic_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+        # Discord déclenche parfois plusieurs événements on_webhooks_update pour
+        # UNE même entrée d'audit. Ne jamais compter plusieurs fois ce même acte.
+        self._webhook_audit_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._seen_webhook_audit: OrderedDict[tuple[int, int], float] = OrderedDict()
 
     def _remember_handled(self, message_id: int):
         if len(self._handled_messages) >= 8192:
@@ -481,8 +485,32 @@ class SecurityHardening(commands.Cog):
             "Création massive de rôles",
         )
 
+    @staticmethod
+    def _webhook_audit_matches_channel(entry: discord.AuditLogEntry, channel_id: int) -> bool:
+        """Ne pas attribuer au mauvais salon une action de webhook récente.
+
+        Les informations d'audit Discord ne sont pas toujours complètes.
+        Une entrée sans channel_id confirmé ne justifie PAS de bannir
+        quelqu'un : on privilégie l'absence de sanction à une fausse accusation.
+        """
+        target = getattr(entry, "target", None)
+        audit_channel = getattr(target, "channel_id", None)
+        if audit_channel is None:
+            audit_channel = getattr(getattr(entry, "extra", None), "channel_id", None)
+        try:
+            return int(audit_channel) == int(channel_id)
+        except (ValueError, TypeError):
+            return False
+
     @commands.Cog.listener()
     async def on_webhooks_update(self, channel: discord.abc.GuildChannel):
+        """Un ID d'audit Discord = UNE action anti-nuke, même après des doublons Gateway.
+
+        L'ancienne implémentation retrouvait un auteur récent par type, sans
+        vérifier le salon ni l'ID de l'entrée d'audit, et pouvait le recompter
+        à chaque on_webhooks_update. Les sanctions étant destructrices, on
+        ne compte que les entrées réellement associées au salon notifié.
+        """
         guild = channel.guild
         automod = self.bot.get_cog("Automod")
         if automod is None:
@@ -491,19 +519,54 @@ class SecurityHardening(commands.Cog):
         if not conf or not conf.get("antinuke"):
             return
 
-        actor = None
-        for action in (
-            discord.AuditLogAction.webhook_create,
-            discord.AuditLogAction.webhook_delete,
-            discord.AuditLogAction.webhook_update,
-        ):
-            actor = await automod.get_audit_actor(guild, action)
-            if actor is not None:
-                break
-        if await automod.is_antinuke_exempt(guild, actor):
-            return
-        if actor is not None and await automod.record_nuke_action(guild, actor.id):
-            await automod.punish_nuker(guild, actor.id, "Modifications massives de webhooks")
+        async with self._webhook_audit_locks[guild.id]:
+            now = discord.utils.utcnow()
+            tick = time.monotonic()
+            for key in tuple(self._seen_webhook_audit):
+                if tick - self._seen_webhook_audit[key] > 90:
+                    self._seen_webhook_audit.pop(key, None)
+
+            for action in (
+                discord.AuditLogAction.webhook_create,
+                discord.AuditLogAction.webhook_delete,
+                discord.AuditLogAction.webhook_update,
+            ):
+                try:
+                    async for entry in guild.audit_logs(limit=10, action=action):
+                        age = (now - entry.created_at).total_seconds()
+                        if age > 20:
+                            break
+                        if age < -2:
+                            continue
+                        if not self._webhook_audit_matches_channel(entry, channel.id):
+                            continue
+                        entry_id = getattr(entry, "id", None)
+                        actor = getattr(entry, "user", None)
+                        if entry_id is None or actor is None:
+                            continue
+                        key = (int(guild.id), int(entry_id))
+                        if key in self._seen_webhook_audit:
+                            continue
+                        # Protection bornée et marquée avant la sanction : deux
+                        # événements simultanés ne comptent jamais deux fois.
+                        self._seen_webhook_audit[key] = tick
+                        if len(self._seen_webhook_audit) > 4096:
+                            self._seen_webhook_audit.popitem(last=False)
+                        if await automod.is_antinuke_exempt(guild, actor):
+                            continue
+                        logger.info(
+                            "Anti-nuke webhook vérifié guild=%s channel=%s audit=%s actor=%s action=%s",
+                            guild.id, channel.id, entry_id, actor.id, action.name,
+                        )
+                        if await automod.record_nuke_action(guild, actor.id):
+                            await automod.punish_nuker(
+                                guild, actor.id, "Modifications massives de webhooks"
+                            )
+                except (discord.Forbidden, discord.HTTPException):
+                    logger.warning(
+                        "Anti-nuke : journal des webhooks indisponible guild=%s action=%s",
+                        guild.id, action.name,
+                    )
 
     async def _activate_panic(self, ctx: commands.Context) -> None:
         guild = ctx.guild
