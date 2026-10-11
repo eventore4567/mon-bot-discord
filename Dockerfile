@@ -56,6 +56,7 @@ RUN python -m pytest -q \
     tests/test_slash_catalog_prefix_migration.py \
     tests/test_welcome_autoroles.py \
     tests/test_command_setup_prompt.py \
+    tests/test_setup_advanced_moderation_ui.py \
     tests/test_help_short_names.py \
     tests/test_command_registry_audit.py \
     tests/test_discord_command_publish_audit.py \
