@@ -163,6 +163,29 @@ async def test_full_permissions_staff_bypasses_every_message_filter(filter_name)
 
 
 @pytest.mark.asyncio
+async def test_manage_server_staff_message_is_never_deleted_by_any_content_filter():
+    cog = _cog()
+    member = _member(manage_guild=True)
+    member.bot = False
+    message = _message(member)
+    message.id = 10042
+    message.content = "Invitation de notre équipe https://discord.gg/example"
+    message.delete = AsyncMock()
+    cog._delete_and_warn = AsyncMock()
+    cog.automod_cache[1] = {
+        "antilink": 1, "antiinvite": 1, "antiscam": 1,
+        "antispam": 1, "antilink_strict": 1,
+    }
+    cog.immunity_overrides_cache[(1, member.id)] = False
+
+    await cog.on_message(message)
+    cog._delete_and_warn.assert_not_awaited()
+
+    await AutoMod._delete_and_warn(cog, message, "Invitation interdite", "antiinvite")
+    message.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_full_permissions_staff_skips_message_and_deletion_synchronously():
     cog = _cog()
     member = _member(full_staff=True)
@@ -178,12 +201,13 @@ async def test_full_permissions_staff_skips_message_and_deletion_synchronously()
     msg.delete.assert_not_awaited()
 
 
-def test_permission_helper_does_not_exempt_partial_staff_or_role_names():
+def test_permission_helper_exempts_manage_server_but_not_partial_staff_or_role_names():
     from utils.security_member_bypass import can_bypass_message_filters
 
     assert can_bypass_message_filters(_member(full_staff=True)) is True
     assert can_bypass_message_filters(_member(administrator=True)) is True
-    assert can_bypass_message_filters(_member(manage_guild=True)) is False
+    assert can_bypass_message_filters(_member(manage_guild=True)) is True
+    assert can_bypass_message_filters(_member()) is False
     mock_staff = _member()
     mock_staff.roles = [SimpleNamespace(id=123, name="Administrateur")]
     assert can_bypass_message_filters(mock_staff) is False
@@ -215,15 +239,17 @@ async def test_antigif_runtime_skips_full_permission_staff_but_not_regular_users
 
 
 @pytest.mark.asyncio
-async def test_manage_server_without_administrator_is_not_all_perms():
+async def test_manage_server_permission_bypasses_content_filters_even_in_strict_channels():
     cog = _cog()
     member = _member(manage_guild=True)
     cog.immunity_overrides_cache[(1, member.id)] = None
     _policy(cog, "antilink", strict=(77,))
     _policy(cog, "antiinvite", strict=(77,))
 
-    assert await cog.security_filter_applies_to(_message(member), "antilink") is True
-    assert await cog.security_filter_applies_to(_message(member, channel_id=77), "antiinvite") is True
+    assert await cog.security_filter_applies_to(_message(member), "antilink") is False
+    assert await cog.security_filter_applies_to(_message(member, channel_id=77), "antiinvite") is False
+    assert await cog.security_filter_applies_to(_message(member), "antiscam") is False
+    assert await cog.security_filter_applies_to(_message(member), "antispam") is False
 
 
 @pytest.mark.asyncio
