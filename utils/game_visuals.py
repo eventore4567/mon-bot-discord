@@ -23,16 +23,17 @@ import discord
 
 # Liens d'images GIF (Content-Type: image/gif vérifié sur les liens source GIPHY).
 # Utiliser les liens directs du CDN, PAS les pages giphy.com/gifs ou tenor.com/view.
-# Les identifiants ci-dessous proviennent de pages officielles GIPHY.
+# Identifiants tirés de pages GIPHY existantes (Pokémon, Cyberpunk,
+# iQiyi, Apple TV, animations de jeu). Pas de liens de tracking signés/expirables.
 GIFS: dict[str, str] = {
-    "win": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExc2RwMzRpdnlqaWdtNGNiYXJnaWFubW54eDA1cnNoOWFxbTVpeHFwMyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/f8Wil9jWfDhTbnw87P/giphy.gif",
-    "loss": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExcnE5dDE0Nm93eWVucXhoYTlua2xvdTVhN2ppcGptZ3V5YnpxZGlqdSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/U7v0GF9c8GcyA/giphy.gif",
-    "fight": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExNzVuMXB4dHdzbmxkdnQzdGFraHYwNmhlbm5nMTNmdTd2dHk2Nms2cCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/So4Yp61bm4pO1wYo1W/giphy.gif",
-    "think": "https://media3.giphy.com/media/v1.Y2lkPTc5MGI3NjExZjJ1YTdwbDlkMmswZG92aXVuejZtMTQ3MHUwcjBkc3JjdTN5MXlkYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/5kLcdlFiZbv8l2hf5Y/giphy.gif",
-    "coin": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExN296bHl5N3R6aW4yMjB0emFkcnRucHVmYmo5MHoyZ3R1c3I0dnMwcyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3oKIP65Q76D5KnUG6Q/giphy.gif",
-    "race": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExaTdhazc1NmN3dnJvY2szeXo1dTlvZmF3Y29naDg4Ym1qNTZ4MGQ3ZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xMqYlDtLEIO2nMoF3Z/giphy.gif",
-    "arcade": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExNTk1eDU2MXM5ZXB1ZmRrcW5wYmlwMWpvOWp4ajBvejE1bnY2bXhleiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/YtO5eHWu6hSGArNcxb/giphy.gif",
-    "slap": "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExdWZxNW51ajZkNGhqcmdjMzU2NDZmNHhld2w0eWI1Nndka2M5djg5dSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/90cAvw5mBQHa1QNFG9/giphy.gif",
+    "win": "https://media.giphy.com/media/f8Wil9jWfDhTbnw87P/giphy.gif",
+    "loss": "https://media.giphy.com/media/j8HIpI6nyLkNUwxP3w/giphy.gif",
+    "fight": "https://media.giphy.com/media/NY3tXwOBUwQYq7lbXx/giphy.gif",
+    "think": "https://media.giphy.com/media/5kLcdlFiZbv8l2hf5Y/giphy.gif",
+    "coin": "https://media.giphy.com/media/WFvnujC1Tz6VoyPDka/giphy.gif",
+    "race": "https://media.giphy.com/media/xMqYlDtLEIO2nMoF3Z/giphy.gif",
+    "arcade": "https://media.giphy.com/media/7AvMktcyuw9TEpKDvF/giphy.gif",
+    "slap": "https://media.giphy.com/media/90cAvw5mBQHa1QNFG9/giphy.gif",
 }
 
 logger = logging.getLogger("bot.game-visuals")
