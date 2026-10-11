@@ -34,6 +34,14 @@ GIFS: dict[str, str] = {
     "race": "https://media.giphy.com/media/xMqYlDtLEIO2nMoF3Z/giphy.gif",
     "arcade": "https://media.giphy.com/media/7AvMktcyuw9TEpKDvF/giphy.gif",
     "slap": "https://media.giphy.com/media/90cAvw5mBQHa1QNFG9/giphy.gif",
+    # Vraies scènes de combat : chaque action garde sa propre animation.
+    # Les octets sont vérifiés par _fetch_gif_bytes avant tout envoi Discord.
+    "boss-attack": "https://media.giphy.com/media/rMWtjgMUUwEnsKR9n2/giphy.gif",
+    "boss-power": "https://media.giphy.com/media/j9oeNL144oaZQq2tJO/giphy.gif",
+    "boss-guard": "https://media.giphy.com/media/WDRyxPW1BSpHIDH5Cg/giphy.gif",
+    "boss-counter": "https://media.giphy.com/media/qJyZZ9B6Za6Yjsp69O/giphy.gif",
+    "boss-victory": "https://media.giphy.com/media/f8Wil9jWfDhTbnw87P/giphy.gif",
+    "boss-defeat": "https://media.giphy.com/media/j8HIpI6nyLkNUwxP3w/giphy.gif",
 }
 
 logger = logging.getLogger("bot.game-visuals")
@@ -125,7 +133,8 @@ def attachment_file_for(image_url: str) -> discord.File | None:
 
 
 async def verified_image_for(
-    title: str, description: str | None = None, kind: str = "primary"
+    title: str, description: str | None = None, kind: str = "primary",
+    *, scene: str | None = None,
 ) -> str | None:
     """Renvoie une référence à une pièce jointe locale, jamais un hotlink.
 
@@ -133,7 +142,9 @@ async def verified_image_for(
     La seule méthode fiable est l'upload des octets GIF dans le MÊME message
     Components V2. Sans octets locaux, aucune MediaGallery n'est ajoutée.
     """
-    scene = scene_for(title, description, kind)
+    # Un combat multi-phases sélectionne EXPLICITEMENT son action.
+    # Le moteur général garde sa résolution par titre pour les autres jeux.
+    scene = scene if scene in GIFS else scene_for(title, description, kind)
     url = GIFS.get(scene) if scene else None
     if not url:
         return None
@@ -195,10 +206,10 @@ async def preflight_assets() -> dict[str, bool]:
 
 async def decorate_embed_checked(
     embed: discord.Embed, *, title: str, description: str | None = None,
-    kind: str = "primary",
+    kind: str = "primary", scene: str | None = None,
 ) -> discord.Embed:
     """Pour les commandes de jeu : aucun cadre vide si un GIF ne charge pas."""
-    url = await verified_image_for(title, description, kind)
+    url = await verified_image_for(title, description, kind, scene=scene)
     if url:
         embed.set_image(url=url)
     return embed
