@@ -46,6 +46,7 @@ def _base_conf(**updates):
 def _cog(conf):
     bot = SimpleNamespace(
         db=SimpleNamespace(
+            execute=AsyncMock(),
             fetchone=AsyncMock(return_value=None),
             fetchall=AsyncMock(return_value=[]),
             get_automod=AsyncMock(return_value=conf),
