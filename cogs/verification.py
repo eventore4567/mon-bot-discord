@@ -309,6 +309,11 @@ class Verification(commands.Cog, name="Verification"):
         if not getattr(self.bot, "_sentrix_self_role_view_registered", False):
             self.bot.add_view(SelfRolePublicView(handler=True))
             self.bot._sentrix_self_role_view_registered = True
+        # Les panneaux simples +verify-panel doivent rester cliquables après
+        # redémarrage : leur bouton a un custom_id et un timeout=None.
+        if not getattr(self.bot, "_sentrix_verify_view_registered", False):
+            self.bot.add_view(VerifyView())
+            self.bot._sentrix_verify_view_registered = True
         self._self_role_refresh_task = asyncio.create_task(self._refresh_self_role_panels_after_ready())
 
     async def cog_unload(self):
@@ -762,6 +767,77 @@ class Verification(commands.Cog, name="Verification"):
     async def verify_panel(self, ctx: commands.Context):
         e = await self._embed(ctx.guild.id, title="Vérification", description="Cliquez sur le bouton ci-dessous après avoir lu les règles du serveur pour obtenir l'accès complet.")
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), VerifyView()))
+
+    @commands.command(name="verify-repair", aliases=["verification-repair"])
+    @checks.is_owner_or_admin()
+    async def verify_repair(self, ctx: commands.Context):
+        """Répare les panneaux web existants sans créer de salon ou de rôle.
+
+        Commande de secours du staff quand #verification apparaît vide.
+        La vérification simple conserve +verify-panel dans le salon voulu.
+        """
+        guild = ctx.guild
+        if guild is None:
+            return await ctx.send("Cette commande fonctionne uniquement dans un serveur.")
+        honeypot = self.bot.get_cog("HoneypotVerification")
+        if honeypot is None:
+            return await ctx.send(
+                "Le module de vérification renforcée n'est pas chargé. Consultez les logs de SentriX."
+            )
+        try:
+            conf = await honeypot.config(guild.id, enabled_only=True)
+        except Exception:
+            logger.exception("Diagnostic du portail impossible guild=%s", guild.id)
+            return await ctx.send("Impossible de lire les réglages du portail. Réessayez dans un instant.")
+        if not conf:
+            return await ctx.send(
+                "La vérification web renforcée n'est pas activée ici. "
+                "Configurez-la dans +setup > Sécurité, ou utilisez +verify-panel "
+                "pour la vérification simple dans le salon de votre choix."
+            )
+        verify = guild.get_channel(int(conf["verify_channel_id"] or 0))
+        trap = guild.get_channel(int(conf["trap_channel_id"] or 0))
+        if not isinstance(verify, discord.TextChannel) or not isinstance(trap, discord.TextChannel):
+            return await ctx.send(
+                "Le portail référence un salon supprimé ou inaccessible. "
+                "Reconfigurez les salons existants dans +setup > Sécurité."
+            )
+        me = guild.me
+        if me is None:
+            return await ctx.send("Impossible de vérifier les permissions de SentriX sur ce serveur.")
+        for target in (verify, trap):
+            perms = target.permissions_for(me)
+            missing = [
+                label for allowed, label in (
+                    (perms.view_channel, "Voir le salon"),
+                    (perms.send_messages, "Envoyer des messages"),
+                    (perms.read_message_history, "Lire l'historique des messages"),
+                ) if not allowed
+            ]
+            if missing:
+                return await ctx.send(
+                    f"SentriX ne peut pas publier dans {target.mention}. "
+                    f"Permissions manquantes : **{', '.join(missing)}**."
+                )
+        try:
+            result, error = await honeypot.refresh_existing_panels(guild)
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Portail refusé par Discord guild=%s", guild.id, exc_info=True)
+            return await ctx.send(
+                "Discord a refusé de publier le panneau. Vérifiez les permissions "
+                "de SentriX puis réessayez."
+            )
+        except Exception:
+            logger.exception("Réparation du portail impossible guild=%s", guild.id)
+            return await ctx.send(
+                "La restauration du portail a échoué. L'erreur est enregistrée dans les logs SentriX."
+            )
+        if error or not result:
+            return await ctx.send(f"Le portail n'a pas pu être restauré : {error or 'résultat vide'}.")
+        await ctx.send(
+            f"✅ Panneau de vérification restauré dans {verify.mention}. "
+            "Les membres peuvent ouvrir la vérification depuis ce salon."
+        )
 
     async def _panel_and_message(self, guild: discord.Guild, message_id: int):
         panel = await self.bot.db.fetchone(
