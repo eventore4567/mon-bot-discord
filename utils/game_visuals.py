@@ -268,7 +268,7 @@ def scene_for(title: str, description: str | None = None, kind: str = "primary")
     if any(phrase in title_normal for phrase in _NOT_A_GAME):
         return None
     # Le blackjack fabrique son propre GIF depuis les vraies cartes distribuées.
-    if re.search(r"(?<!\\w)blackjack(?!\\w)", title_normal):
+    if re.search(r"(?<!\w)blackjack(?!\w)", title_normal):
         return None
     if kind == "warning" or (kind == "danger" and _BAD_INPUT.search(description_normal)):
         return None
