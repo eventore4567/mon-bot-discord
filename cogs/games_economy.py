@@ -1383,8 +1383,8 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
             embed = await _embed(
                 self.bot, guild_id, title=title,
                 description=(
-                    f"⚔️ {ctx.author.mention} défie {opponent.mention} !\\n"
-                    f"✅ {opponent.mention} doit accepter pour jouer.\\n"
+                    f"⚔️ {ctx.author.mention} défie {opponent.mention} !\n"
+                    f"✅ {opponent.mention} doit accepter pour jouer.\n"
                     "⏱️ 45 secondes · Refus sans pénalité."
                 ),
             )
@@ -1410,7 +1410,7 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
             view = _RPSDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
             await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(
                 self.bot, guild_id, title="Duel — Pierre-feuille-ciseaux",
-                description=f"⚔️ {ctx.author.mention} vs {adversaire.mention}\\n"
+                description=f"⚔️ {ctx.author.mention} vs {adversaire.mention}\n"
                             "✅ Défi accepté. Faites vos choix EN PRIVÉ !"
             )), view))
             view.message = msg
@@ -1454,7 +1454,7 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
                                  p2=adversaire, session_id=sid, answer=answer)
             await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(
                 self.bot, guild_id, title="Duel de quiz",
-                description=f"❓ {question}\\nDifficulté : {difficulty}\\n"
+                description=f"❓ {question}\nDifficulté : {difficulty}\n"
                             "✅ Défi accepté ! Répondez EN PRIVÉ."
             )), view))
             view.message = msg
