@@ -37,6 +37,7 @@ RUN python -m pytest -q \
     tests/test_logs_bulk_delete_resilience.py \
     tests/test_moderation_logging_resilience.py \
     tests/test_automod_enforcement_resilience.py \
+    tests/test_automod_idempotent_sanctions_v131.py \
     tests/test_raid_verification_recovery_v130.py \
     tests/test_automod_log_manage_style.py \
     tests/test_sentrix_trace_style.py \
