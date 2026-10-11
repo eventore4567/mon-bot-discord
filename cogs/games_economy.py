@@ -101,7 +101,7 @@ async def _embed(bot, guild_id: int | None, *, title: str, description: str = No
     embed.title = f"{_game_icon(title)} {resolved_title}"
     if description:
         embed.description = str(description)
-    return game_visuals.decorate_embed(embed, title=title, description=description, kind=kind)
+    return await game_visuals.decorate_embed_checked(embed, title=title, description=description, kind=kind)
 
 
 # Plus haut ou plus bas : la valeur reste un nombre de 1 a 13 pour la comparaison,
