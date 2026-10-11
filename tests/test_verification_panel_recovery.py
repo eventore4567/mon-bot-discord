@@ -143,3 +143,60 @@ def test_verify_repair_reports_missing_permissions_without_publishing(monkeypatc
         cog.refresh_existing_panels.assert_not_awaited()
 
     asyncio.run(run())
+
+
+def test_verify_panel_routes_to_active_web_gateway(monkeypatch):
+    async def run():
+        guild = SimpleNamespace(id=14)
+        destination = SimpleNamespace(mention="<#42>")
+        portal = SimpleNamespace(
+            config=AsyncMock(return_value={"enabled": 1}),
+            refresh_existing_panels=AsyncMock(return_value=(
+                {"verify": destination}, None,
+            )),
+        )
+        bot = SimpleNamespace(get_cog=lambda name: portal if name == "HoneypotVerification" else None)
+        cog = verification.Verification(bot)
+        ctx = SimpleNamespace(guild=guild, send=AsyncMock())
+
+        # Une vérification web active doit primer sur le bouton simple.
+        send_simple = AsyncMock()
+        monkeypatch.setattr(verification.panels, "envoyer", send_simple)
+        await cog.verify_panel.callback(cog, ctx)
+        portal.refresh_existing_panels.assert_awaited_once_with(guild)
+        send_simple.assert_not_awaited()
+        assert "<#42>" in ctx.send.await_args.args[0]
+
+    asyncio.run(run())
+
+
+def test_legacy_portal_does_not_erase_messages_before_send(monkeypatch):
+    async def run():
+        class FakeTextChannel:
+            def __init__(self, id):
+                self.id = id
+
+        monkeypatch.setattr(honeypot.discord, "TextChannel", FakeTextChannel)
+        channels = {7: FakeTextChannel(7), 8: FakeTextChannel(8)}
+        guild = SimpleNamespace(id=14, get_channel=lambda id: channels.get(id))
+        portal = honeypot.HoneypotVerification(SimpleNamespace())
+        portal.config = AsyncMock(return_value={
+            "verify_channel_id": 7, "trap_channel_id": 8,
+            "sanction": "softban",
+        })
+        portal.ensure_verified_panel_hidden = AsyncMock()
+        monkeypatch.setattr(honeypot, "_web_panel", AsyncMock(return_value="webpanel"))
+        monkeypatch.setattr(honeypot, "_purge_bot_messages", AsyncMock())
+        sender = AsyncMock(side_effect=RuntimeError("Discord a refusé l'envoi"))
+        monkeypatch.setattr(honeypot.panels, "envoyer", sender)
+
+        try:
+            await portal.refresh_existing_panels(guild)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("L'échec d'envoi devait être visible")
+        honeypot._purge_bot_messages.assert_not_awaited()
+        sender.assert_awaited_once()
+
+    asyncio.run(run())
