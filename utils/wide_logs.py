@@ -1171,6 +1171,32 @@ def _trace_identity_label(event_type: str) -> str:
     return "Élément"
 
 
+_INLINE_BOLD_RE = re.compile(r"\\*\\*([^*\\n\\`]{1,72})\\*\\*")
+_EXISTING_CODE_RE = re.compile(r"(```[\\s\\S]*?```|`[^`\\n]*`)")
+
+
+def _bold_log_labels_as_badges(content: str) -> str:
+    """Affiche les mots courts en gras comme des pastilles grises Discord.
+
+    Les titres restent des titres. Les vraies mentions Discord, liens et textes
+    déjà en code restent intacts ; convertir une mention en code la rendrait
+    non cliquable. Cette fonction est réservée au RENDU, jamais aux données
+    conservées dans l'historique.
+    """
+    parts = _EXISTING_CODE_RE.split(str(content or ""))
+    for index in range(0, len(parts), 2):
+        def _to_chip(match):
+            label = match.group(1).strip()
+            if not label or any(char in label for char in ("<", ">", "[", "]", "\\n")):
+                return match.group(0)
+            if "://" in label or label.startswith(("#", "@")):
+                return match.group(0)
+            return f"`{label}`"
+
+        parts[index] = _INLINE_BOLD_RE.sub(_to_chip, parts[index])
+    return "".join(parts)
+
+
 def _trace_body_parts(body: str) -> tuple[str, str]:
     """Sépare le résumé immédiat des détails longs.
 
@@ -1249,7 +1275,7 @@ class WideLogView(discord.ui.LayoutView):
         if context_bits:
             header_lines.append(" · ".join(context_bits))
 
-        header = "\n".join(header_lines)
+        header = _bold_log_labels_as_badges("\n".join(header_lines))
         placed_header = False
         if identity_icon:
             try:
@@ -1279,6 +1305,12 @@ class WideLogView(discord.ui.LayoutView):
             identity_id=identity_id,
         )
         summary, details = _trace_body_parts(body)
+        # Tous les journaux métiers utilisent les mêmes pastilles que les
+        # permissions. Ne pas réécrire le Markdown de messages d'utilisateurs
+        # supprimés/édités : leur contenu doit rester fidèle à l'original.
+        if not event_type.startswith("message_"):
+            summary = _bold_log_labels_as_badges(summary)
+            details = _bold_log_labels_as_badges(details)
         if summary:
             # Avant/Après et contenu de message sont déjà formatés en blockquote.
             # Les re-quoter ajouterait un deuxième niveau visuel inutile.
