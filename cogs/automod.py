@@ -274,7 +274,10 @@ def _iter_link_hosts(content: str):
     for match in LINK_RE.finditer(normalized):
         raw = str(match.group(0) or "").strip("<>()[]{}.,;!?").casefold()
         raw = re.sub(r"^(?:https?|hxxps?)://", "", raw, flags=re.IGNORECASE)
-        raw = raw.split("/", 1)[0]
+        # Un hôte ne contient ni chemin, ni query, ni fragment. Avant,
+        # https://google.com?lang=fr était considéré comme un hôte différent,
+        # tandis que les paramètres pouvaient masquer un domaine dangereux.
+        raw = re.split(r"[/?#]", raw, maxsplit=1)[0]
         raw = raw.rsplit("@", 1)[-1]
         raw = raw.split(":", 1)[0].strip(".")
         if raw.startswith("www."):
