@@ -16,6 +16,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+import unicodedata
 
 import discord
 
@@ -27,6 +28,7 @@ from discord.ext import commands
 import config
 from database.db import PRIMARY_CREATOR_ID
 from utils import checks, helpers
+from utils.security_duplicate_window import DuplicateMessageWindow
 
 logger = logging.getLogger("bot.security.hardening")
 _COG_NAME = "SecurityHardening"
@@ -286,11 +288,15 @@ def _embed_securite(titre: str, description: str = "", *, kind: str = "securite"
 class SecurityHardening(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.duplicate_messages: dict[tuple[int, int, str], list[float]] = defaultdict(list)
+        self.duplicate_messages = DuplicateMessageWindow(
+            window_seconds=12, threshold=3, max_fingerprints=4096,
+        )
         self._handled_messages: set[int] = set()
         self._panic_locks: dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def _remember_handled(self, message_id: int):
+        if len(self._handled_messages) >= 8192:
+            self._handled_messages.clear()
         self._handled_messages.add(message_id)
         try:
             self.bot.loop.call_later(15, self._handled_messages.discard, message_id)
@@ -352,7 +358,12 @@ class SecurityHardening(commands.Cog):
         ):
             dangerous = []
             for attachment in message.attachments:
-                lowered = attachment.filename.casefold().strip()
+                # Une extension ne doit pas être dissimulée par les points
+                # finaux, caractères invisibles ou typographies Unicode.
+                lowered = unicodedata.normalize("NFKC", str(attachment.filename))
+                lowered = "".join(
+                    char for char in lowered if unicodedata.category(char) != "Cf"
+                ).casefold().strip().rstrip(" .")
                 if any(lowered.endswith(ext) for ext in DANGEROUS_ATTACHMENT_EXTENSIONS):
                     dangerous.append(attachment.filename)
             if dangerous:
@@ -371,21 +382,17 @@ class SecurityHardening(commands.Cog):
 
         # Bloque plus vite un copié-collé répété sans durcir tout l'anti-spam.
         if conf.get("antispam") and await automod.security_filter_applies_to(message, "antispam"):
-            normalized = " ".join(message.content.casefold().split())
-            if len(normalized) >= 3:
-                key = (message.guild.id, message.author.id, normalized[:300])
-                now_ts = time.time()
-                hits = self.duplicate_messages[key]
-                hits.append(now_ts)
-                hits[:] = [stamp for stamp in hits if now_ts - stamp <= 12]
-                if len(hits) >= 3:
-                    self.duplicate_messages[key] = []
-                    self._remember_handled(message.id)
-                    return await automod._delete_and_warn(
-                        message,
-                        "Flood de messages identiques détecté.",
-                        "antispam_duplicate",
-                    )
+            if self.duplicate_messages.add(
+                message.guild.id,
+                message.author.id,
+                message.content,
+            ):
+                self._remember_handled(message.id)
+                return await automod._delete_and_warn(
+                    message,
+                    "Flood de messages identiques détecté.",
+                    "antispam_duplicate",
+                )
 
     async def _antinuke_actor(
         self,
