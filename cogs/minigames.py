@@ -78,7 +78,9 @@ class Minigames(commands.Cog, name="Minigames"):
         design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
         from utils.game_context import pictogramme_de_titre
 
-        resolu = design_system.kind_title(title, kind=kind, category_emoji=style["emoji"])
+        # /games quick et + utilisent exactement le même panneau : même titre
+        # « Combat — Défaite », jamais le préfixe d'erreur « Action impossible ».
+        resolu = str(title)
         embed = design_system.create_embed(
             title=resolu,
             description=description,
@@ -101,9 +103,9 @@ class Minigames(commands.Cog, name="Minigames"):
 
     @staticmethod
     def _reward_line(reward: "game_rewards.GameReward | None") -> str:
-        """Ligne à ajouter à la description d'un embed de résultat quand une récompense a
-        été accordée. Retourne une chaîne vide si aucune récompense (perdu, ou déjà
-        récompensé, ou jeu désactivé) — jamais de fausse promesse de gain."""
+        """Récompense avec la même économie pour + et /, et explication si OFF."""
+        if reward and reward.reason == "economy_disabled":
+            return "\n\n🪙 Économie désactivée : activez-la dans `/setup` pour gagner des pièces."
         if reward and reward.success and reward.amount > 0:
             return f"\n\n🪙 **+{reward.amount}** crédités ! (réf. `{reward.display_id}`)"
         return ""
