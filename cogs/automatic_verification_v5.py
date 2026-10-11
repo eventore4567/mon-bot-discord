@@ -575,27 +575,65 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
 
         self._tasks[key] = asyncio.create_task(runner())
 
+    @staticmethod
+    def _looks_like_own_panel(message: discord.Message, kind: str) -> bool:
+        """Ne jamais réutiliser un message SentriX quelconque dans un portail.
+
+        Les panneaux Components V2 portent le texte dans les composants, pas dans
+        message.content / embeds. Une absence de preuve fait publier un nouveau
+        panneau plutôt que d'écraser un message (ticket, log, autre annonce).
+        """
+        tokens = (
+            ("vérification web sentrix", "sentrix web verification",
+             "se vérifier sur sentrix", "verify on sentrix")
+            if kind == "verify" else
+            ("honeypot sentrix", "ne pas envoyer de message dans ce salon",
+             "stay-muted")
+        )
+        parts: list[str] = [str(getattr(message, "content", "") or "")]
+        for embed in (getattr(message, "embeds", None) or ()):
+            parts.extend((str(getattr(embed, "title", "") or ""),
+                          str(getattr(embed, "description", "") or "")))
+
+        def collect(nodes, depth: int = 0) -> None:
+            if depth > 8:
+                return
+            for item in (nodes or ()):
+                for key in ("content", "text", "label"):
+                    value = getattr(item, key, None)
+                    if value:
+                        parts.append(str(value))
+                collect(getattr(item, "children", None), depth + 1)
+                collect(getattr(item, "components", None), depth + 1)
+
+        collect(getattr(message, "components", None))
+        contents = "\n".join(parts).casefold()
+        return any(token in contents for token in tokens)
+
     async def _remembered_panel_message(
         self,
         channel: discord.TextChannel,
         message_id: int | None,
+        *,
+        kind: str,
     ) -> discord.Message | None:
+        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
+        if bot_user_id is None:
+            return None
         if message_id:
             try:
                 message = await channel.fetch_message(int(message_id))
-                if self.bot.user is None or message.author.id == self.bot.user.id:
+                if message.author.id == bot_user_id and self._looks_like_own_panel(message, kind):
                     return message
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
 
-        # Migration depuis l'ancien comportement : réutilise le dernier panneau
-        # SentriX présent au lieu de le supprimer puis d'en créer un autre.
-        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
-        if bot_user_id is None:
-            return None
+        # Un ancien panneau est réutilisé uniquement si sa signature correspond.
+        # Le premier message du bot dans le canal pourrait être une annonce
+        # parfaitement différente : l'éditer détruirait son contenu.
         try:
             async for message in channel.history(limit=30):
-                if message.author.id == bot_user_id:
+                if message.author.id == bot_user_id and self._looks_like_own_panel(message, kind):
                     return message
         except (discord.Forbidden, discord.HTTPException):
             pass
@@ -606,8 +644,10 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
         channel: discord.TextChannel,
         panel,
         message_id: int | None,
+        *,
+        kind: str,
     ) -> discord.Message:
-        existing = await self._remembered_panel_message(channel, message_id)
+        existing = await self._remembered_panel_message(channel, message_id, kind=kind)
         if existing is not None:
             try:
                 await panels.editer(existing, panel)
@@ -662,11 +702,13 @@ class AutomaticVerificationV5(v4.AutomaticVerification, name=_COG_NAME):
             verify,
             await _web_panel(self.bot, guild),
             verify_message_id,
+            kind="verify",
         )
         trap_message = await self._update_or_send_panel(
             trap,
             panels.depuis_embed(_trap_embed(verify, str(conf["sanction"] or "softban"))),
             trap_message_id,
+            kind="trap",
         )
         await self.bot.db.execute(
             "INSERT INTO automatic_verification_panel_messages_v5 "
