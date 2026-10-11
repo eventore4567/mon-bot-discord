@@ -48,6 +48,7 @@ from utils import embeds, checks, helpers, log_service, text_normalization, ai_s
 from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
 from utils.raid_join_deduplicator import RaidJoinDeduplicator
+from utils.raid_verification_recovery import RaidVerificationRecovery
 from utils.security_member_bypass import can_bypass_message_filters
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
@@ -1000,6 +1001,8 @@ class AutoMod(commands.Cog, name="Automod"):
         self.slow_join_tracker = FenetreGlissante(fenetre=RAID_SLOW_WINDOW, purge_toutes=100)
         self._recent_raid_joins = RaidJoinDeduplicator(ttl_seconds=20, max_entries=8192)
         self._raid_alert_last: dict[int, float] = {}
+        self._raid_recovery = RaidVerificationRecovery(bot)
+        self._raid_recovery_task: asyncio.Task | None = None
         self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
         self.infraction_tracker = FenetreGlissante(fenetre=ESCALATION_WINDOW)
         self.repeat_tracker = FenetreGlissante(fenetre=REPEAT_WINDOW)
@@ -1087,12 +1090,20 @@ class AutoMod(commands.Cog, name="Automod"):
         return row is not None
 
     async def cog_load(self) -> None:
+        await self._raid_recovery.ensure_schema()
+        self._raid_recovery_task = asyncio.create_task(
+            self._run_raid_recovery(),
+            name="sentrix-raid-verification-recovery",
+        )
         self._native_automod_bootstrap_task = asyncio.create_task(
             self._bootstrap_native_automod(),
             name="sentrix-native-automod-bootstrap",
         )
 
     def cog_unload(self) -> None:
+        raid_task = self._raid_recovery_task
+        if raid_task is not None:
+            raid_task.cancel()
         task = self._native_automod_bootstrap_task
         if task is not None:
             task.cancel()
@@ -1103,6 +1114,28 @@ class AutoMod(commands.Cog, name="Automod"):
                 delattr(db, "_sentrix_automod_change_hook")
             except AttributeError:
                 pass
+
+    async def _run_raid_recovery(self) -> None:
+        """Restauration des niveaux de vérification après un raid, même après reboot.
+
+        En cas de logs d'audit indisponibles, la vérification maximale
+        reste intacte pour ne jamais écraser un choix manuel d'administrateur.
+        """
+        try:
+            await self.bot.wait_until_ready()
+            while True:
+                try:
+                    result = await self._raid_recovery.restore_due()
+                    if any(result.values()):
+                        logger.info(
+                            "Anti-raid restauration : restaurés=%s annulés=%s reportés=%s",
+                            result["restored"], result["cancelled"], result["deferred"],
+                        )
+                except Exception:
+                    logger.exception("Vérification des restaurations anti-raid impossible")
+                await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
 
     async def _bootstrap_native_automod(self) -> None:
         """Vérifie toutes les guilds et résume ce qui est réellement nettoyé."""
@@ -3644,22 +3677,28 @@ class AutoMod(commands.Cog, name="Automod"):
                 # Réponse automatique : relever le niveau de vérification du serveur
                 # freine immédiatement les faux comptes fraîchement créés, sans avoir
                 # à verrouiller manuellement tous les salons.
-                try:
-                    if raid_rapide and member.guild.verification_level != discord.VerificationLevel.highest:
-                        await member.guild.edit(
-                            verification_level=discord.VerificationLevel.highest,
-                            reason="AutoMod : raid détecté, niveau de vérification relevé automatiquement",
+                if raid_rapide:
+                    # Sauvegarde du niveau précédent avant édition et expiration
+                    # 15 minutes après le dernier afflux rapide. En cas de
+                    # modification manuelle, le snapshot est invalidé.
+                    try:
+                        elevated = await self._raid_recovery.protect(member.guild)
+                    except Exception:
+                        elevated = False
+                        logger.exception(
+                            "Anti-raid : sauvegarde/hausse du niveau impossible guild=%s",
+                            member.guild.id,
                         )
-                        if should_log:
-                            await self.log_action(
-                                member.guild,
-                                embeds.log_entry(
-                                    "🔒 Niveau de vérification relevé", config.COLOR_WARNING,
-                                    raison="Relevé automatiquement après afflux rapide confirmé",
-                                ),
-                            )
-                except discord.Forbidden:
-                    pass
+                    if elevated and should_log:
+                        await self.log_action(
+                            member.guild,
+                            embeds.log_entry(
+                                "🔒 Niveau de vérification provisoirement relevé",
+                                config.COLOR_WARNING,
+                                raison="Afflux rapide : niveau maximal pendant au moins 15 minutes. "
+                                       "Restauration seulement si aucune modification manuelle n'est détectée.",
+                            ),
+                        )
                 # Évite de redéclencher la même alerte à chaque nouvel arrivant tant que le raid dure.
                 self.join_tracker.reinitialiser(member.guild.id)
                 if raid_lent:
@@ -3773,6 +3812,10 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+        before_level = getattr(before, "verification_level", None)
+        after_level = getattr(after, "verification_level", None)
+        if before_level is not None and after_level is not None and before_level != after_level:
+            await self._raid_recovery.on_guild_level_change(before, after)
         before_code = getattr(before, "vanity_url_code", None)
         after_code = getattr(after, "vanity_url_code", None)
         if before_code == after_code:
