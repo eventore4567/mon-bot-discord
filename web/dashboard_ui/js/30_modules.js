@@ -267,7 +267,7 @@ async function renderSecurity() {
       ${switchRow(`Activer ${policy.label || 'cette protection'}`, policyKey, Boolean(a[policyKey]), policy.description || '')}
       ${policy.supports_policy ? `
         <div class="notice" style="margin-top:12px">
-          <b>Équipe de direction :</b> les membres ayant la permission Discord Administrateur <b>ou toutes les permissions sensibles de gestion</b> contournent les filtres de messages SentriX (anti-spam, anti-arnaque, liens, mots interdits), même en salon strict. L’anti-nuke et les protections du serveur restent actifs. Un simple nom de rôle « Admin » ne suffit pas.
+          <b>Équipe de direction :</b> les membres ayant la permission Discord <b>Administrateur</b> ou <b>Gérer le serveur</b> contournent les filtres de messages SentriX (anti-spam, anti-arnaque, liens, mots interdits), même en salon strict. L’anti-nuke et les protections du serveur restent actifs. Un simple nom de rôle « Admin » ne suffit pas.
           <p>Pour les autres membres : <b>salon strict → membre ou rôle exempté → protection normale</b>. Dans un salon strict, les exemptions individuelles et par rôle ne s'appliquent pas. Les threads héritent du salon parent.</p>
         </div>
         <div class="fields" style="margin-top:12px">
