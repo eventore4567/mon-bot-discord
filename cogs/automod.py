@@ -274,7 +274,10 @@ def _iter_link_hosts(content: str):
     for match in LINK_RE.finditer(normalized):
         raw = str(match.group(0) or "").strip("<>()[]{}.,;!?").casefold()
         raw = re.sub(r"^(?:https?|hxxps?)://", "", raw, flags=re.IGNORECASE)
-        raw = raw.split("/", 1)[0]
+        # Un hôte ne contient ni chemin, ni query, ni fragment. Avant,
+        # https://google.com?lang=fr était considéré comme un hôte différent,
+        # tandis que les paramètres pouvaient masquer un domaine dangereux.
+        raw = re.split(r"[/?#]", raw, maxsplit=1)[0]
         raw = raw.rsplit("@", 1)[-1]
         raw = raw.split(":", 1)[0].strip(".")
         if raw.startswith("www."):
@@ -625,14 +628,45 @@ def _compose_censored_content(
     return result
 
 
+_WHITELIST_DOMAIN_RE = re.compile(
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z",
+    re.IGNORECASE,
+)
+
+
+def _canonical_whitelist_domain(value: str) -> str | None:
+    """Accepte uniquement un nom d'hôte, jamais un motif ou une URL libre.
+
+    Les anciennes entrées « . », « * », chemins et schémas sont rejetées à
+    l'utilisation pour qu'une mauvaise valeur en base ne désactive pas la sécurité.
+    """
+    host = str(value or "").strip().casefold().strip(".")
+    if host.startswith("www."):
+        host = host[4:]
+    if not _WHITELIST_DOMAIN_RE.fullmatch(host):
+        return None
+    return host
+
+
 def _domain_allowed(content_lower: str, allowed_domains: list[str]) -> bool:
-    """Vérifie qu'un domaine autorisé apparaît vraiment comme domaine dans le message,
-    pas juste comme sous-chaîne. Avant, whitelister "yt.com" aurait aussi laissé passer
-    "evil-yt.com.ru" puisque la vérification était un simple `in` sur la chaîne complète."""
-    for domain in allowed_domains:
-        if re.search(rf"(?<![\w.-]){re.escape(domain)}(?![\w-])", content_lower):
-            return True
-    return False
+    """Autorise un message SEULEMENT si TOUS ses liens ont un hôte autorisé.
+
+    L'ancien contrôle cherchait le texte « google.com » n'importe où, même
+    dans le chemin d'un site frauduleux ou à côté d'un autre lien. Dorénavant
+    on valide le véritable hôte de chaque URL, y compris après userinfo @.
+    """
+    whitelist = {
+        host
+        for item in allowed_domains
+        if (host := _canonical_whitelist_domain(item)) is not None
+    }
+    if not whitelist:
+        return False
+    hosts = list(_iter_link_hosts(content_lower))
+    return bool(hosts) and all(
+        any(host == domain or host.endswith("." + domain) for domain in whitelist)
+        for host in hosts
+    )
 
 
 TOGGLE_FIELDS = [
@@ -2619,22 +2653,36 @@ class AutoMod(commands.Cog, name="Automod"):
     @app_commands.describe(domaine="Le domaine à autoriser (ex: youtube.com)")
     @checks.is_owner_or_admin_for("securite")
     async def whitelist_domain(self, ctx: commands.Context, domaine: str):
+        domain = _canonical_whitelist_domain(domaine)
+        if domain is None:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.warning("Domaine invalide. Entre uniquement un nom d'hôte, par exemple `youtube.com`, sans https://, chemin ni caractère *.")
+                ),
+            )
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO whitelist_domains (guild_id, domain) VALUES (?, ?)",
-            (ctx.guild.id, domaine.lower()),
+            (ctx.guild.id, domain),
         )
         self.whitelist_domains_cache.pop(ctx.guild.id, None)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le domaine `{domaine}` est maintenant autorisé.')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le domaine `{domain}` est maintenant autorisé.')))
 
     @commands.hybrid_command(name="unwhitelist-domain", description="Retirer un domaine de la liste blanche.", with_app_command=False)
     @app_commands.describe(domaine="Le domaine à retirer")
     @checks.is_owner_or_admin_for("securite")
     async def unwhitelist_domain(self, ctx: commands.Context, domaine: str):
+        domain = _canonical_whitelist_domain(domaine)
+        if domain is None:
+            return await panels.envoyer(
+                ctx, panels.depuis_embed(embeds.warning("Indique le nom du domaine à retirer (ex : `youtube.com`)."))
+            )
         await self.bot.db.execute(
-            "DELETE FROM whitelist_domains WHERE guild_id = ? AND domain = ?", (ctx.guild.id, domaine.lower())
+            "DELETE FROM whitelist_domains WHERE guild_id = ? AND domain = ?",
+            (ctx.guild.id, domain),
         )
         self.whitelist_domains_cache.pop(ctx.guild.id, None)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le domaine `{domaine}` a été retiré de la liste blanche.')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Le domaine `{domain}` a été retiré de la liste blanche.')))
 
     # ---------------------------------------------------------------- ÉCOUTEURS
 
