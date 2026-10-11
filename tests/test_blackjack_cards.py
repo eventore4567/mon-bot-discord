@@ -60,3 +60,8 @@ def test_blackjack_aces_and_valid_deck():
     assert len({code for code, _ in paquet}) == 52
     assert Minigames._total([("A♠", 11), ("A♥", 11), ("9♣", 9)]) == 21
     assert Minigames._total([("10♣", 10), ("8♥", 8), ("5♠", 5)]) == 23
+
+def test_blackjack_is_never_classed_as_a_coinflip_gif():
+    from utils import game_visuals
+    assert game_visuals.scene_for("Blackjack", "Commence !") is None
+    assert game_visuals.scene_for("Blackjack", "Gagné !", "success") is None
