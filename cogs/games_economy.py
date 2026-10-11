@@ -125,6 +125,8 @@ def _carte_lisible(valeur: int, enseigne: str) -> str:
 
 
 def _reward_line(reward: "game_rewards.GameReward | None") -> str:
+    if reward and reward.reason == "economy_disabled":
+        return "\n\n🪙 Économie désactivée : activez-la dans `/setup` pour gagner des pièces."
     if reward and reward.success and reward.amount > 0:
         boost = float((reward.metadata or {}).get("money_boost", 1.0) or 1.0)
         suffix = f" · 🚀 boost x{boost:g}" if boost > 1.0 else ""
