@@ -53,6 +53,19 @@ from services import moderation as moderation_service
 
 logger = logging.getLogger("bot")
 
+
+def _is_discord_administrator(member: discord.abc.User) -> bool:
+    """Exemption AutoMod fondée sur la permission réelle, jamais le nom d'un rôle.
+
+    Il s'agit seulement des filtres de *messages*, pas des gardes anti-nuke,
+    anti-raid ou de la protection du serveur. Vérification légère, sans DB.
+    """
+    return (
+        isinstance(member, discord.Member)
+        and getattr(getattr(member, "guild_permissions", None), "administrator", False) is True
+    )
+
+
 # Redirecteurs d'invitation aussi courants que discord.gg lui-même : les
 # ignorer laissait passer un lien d'invitation sur quatre.
 # « discord . gg/abc » : un espace de part et d'autre du point suffisait à passer.
@@ -1729,7 +1742,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
         Priorité :
         1. immunité personnelle explicitement activée / propriétaire par défaut ;
-        2. Administrateur Discord => liens et invitations permis, même en salon strict ;
+        2. Administrateur Discord => aucun filtre de messages, même en salon strict ;
         3. salon strict => le filtre s'applique même à un membre/rôle bypass ;
         4. salon ignoré => filtre ignoré ;
         5. membre ou rôle bypass de ce filtre / rôle AutoMod global => ignoré ;
@@ -1741,6 +1754,12 @@ class AutoMod(commands.Cog, name="Automod"):
         canonical = self._canonical_security_filter(filter_name)
         if canonical not in SECURITY_FILTER_POLICY_KEYS:
             return True
+
+        # Exemption prioritaire et uniforme pour TOUS les filtres de messages.
+        # Le cache, les salons stricts et les overrides personnels ne doivent
+        # jamais forcer une sanction AutoMod sur un vrai administrateur.
+        if _is_discord_administrator(message.author):
+            return False
 
         policy = await self.get_security_filter_policy_cached(message.guild.id, canonical)
         scope_ids = self._message_scope_ids(message)
@@ -1757,16 +1776,6 @@ class AutoMod(commands.Cog, name="Automod"):
             member.id == member.guild.owner_id or member.id in config.OWNER_IDS
         ):
             return False
-
-        # « All perms » signifie la permission Discord Administrateur.
-        # Elle autorise les liens ordinaires ET les invitations, y compris
-        # dans les salons stricts. Les autres filtres (arnaques, spam,
-        # insultes) continuent d'agir : aucune immunité générale n'est créée.
-        # Lire la permission effective plutôt que le nom du rôle.
-        if canonical in {"antilink", "antiinvite"}:
-            permissions = getattr(member, "guild_permissions", None)
-            if getattr(permissions, "administrator", False) is True:
-                return False
 
         # Les salons stricts reprennent la priorité sur le bypass individuel,
         # les rôles ciblés et les exemptions globales héritées.
@@ -1811,6 +1820,8 @@ class AutoMod(commands.Cog, name="Automod"):
         """Détermine l'immunité AutoMod avec un override personnel explicite."""
         if not isinstance(member, discord.Member):
             return False
+        if _is_discord_administrator(member):
+            return True
 
         override = await self.get_immunity_override_cached(member.guild.id, member.id)
         if override is not None:
@@ -2719,6 +2730,10 @@ class AutoMod(commands.Cog, name="Automod"):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
+        # Le bypass admin s'applique AVANT la blacklist, le spam, l'anti-arnaque,
+        # les insultes et toute détection qui pourrait supprimer un message.
+        if _is_discord_administrator(message.author):
+            return
 
         content_lower = message.content.lower()
         link_content = _normalize_link_text(message.content)
@@ -3105,6 +3120,10 @@ class AutoMod(commands.Cog, name="Automod"):
         pour inclure le nombre réel de messages supprimés). Détections suivantes dans la
         fenêtre : suppression silencieuse, compteur incrémenté.
         """
+        # Protection de dernier recours pour les autres listeners AutoMod qui
+        # appelleraient cette méthode directement, sans passer par le filtre.
+        if _is_discord_administrator(message.author):
+            return
         self._mark_xp_skip(message.id)
         deleted = False
         try:

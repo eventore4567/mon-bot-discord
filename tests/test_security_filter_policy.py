@@ -96,14 +96,45 @@ async def test_administrator_can_post_links_and_invites_even_in_strict_channels(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("filter_name", ["antiscam", "antiinsult", "antispam", "antimention"])
-async def test_administrator_link_exemption_does_not_disable_other_protections(filter_name):
+@pytest.mark.parametrize(
+    "filter_name",
+    [
+        "antispam", "antilink", "antiinvite", "antimention",
+        "anticaps", "antiemoji", "antiscam", "antiinsult",
+        "antispam_duplicate", "blacklist_link", "blacklist_word",
+        "multilingual_toxicity",
+    ],
+)
+@pytest.mark.parametrize("override", [None, False])
+async def test_admin_bypasses_all_message_filters_even_strict_and_override_off(filter_name, override):
     cog = _cog()
     member = _member(administrator=True)
-    cog.immunity_overrides_cache[(1, member.id)] = None
-    _policy(cog, filter_name)
+    cog.immunity_overrides_cache[(1, member.id)] = override
+    _policy(cog, "antilink", strict=(77,))
+    _policy(cog, "antispam", strict=(77,))
+    _policy(cog, "antiinvite", strict=(77,))
+    _policy(cog, "antiscam", strict=(77,))
+    _policy(cog, "antiinsult", strict=(77,))
+    _policy(cog, filter_name, strict=(77,))
+    assert await cog.security_filter_applies_to(_message(member, channel_id=77), filter_name) is False
+    assert await cog.security_filter_applies_to(
+        _message(member, channel_id=555, parent_id=77), filter_name
+    ) is False
 
-    assert await cog.security_filter_applies_to(_message(member), filter_name) is True
+
+@pytest.mark.asyncio
+async def test_anti_nuke_server_guard_is_not_bypassed_by_message_filter_policy():
+    cog = _cog()
+    member = _member(administrator=True)
+    assert await cog.security_filter_applies_to(_message(member), "antinuke") is True
+
+
+@pytest.mark.asyncio
+async def test_administrator_is_exempt_in_legacy_automod_access_check():
+    cog = _cog()
+    member = _member(administrator=True)
+    cog.immunity_overrides_cache[(1, member.id)] = False
+    assert await cog.is_automod_exempt(member) is True
 
 
 @pytest.mark.asyncio
@@ -298,3 +329,51 @@ def test_dashboard_has_searchable_member_bypass_and_save_transport():
     assert "data-security-add-member" in source
     assert "data-security-remove-member" in source
     assert "member_ids: memberIds" in source
+
+
+@pytest.mark.asyncio
+async def test_admin_is_not_blocked_by_early_message_blacklist_or_spam_or_scam():
+    from unittest.mock import patch
+
+    cog = _cog()
+    member = _member(administrator=True)
+    member.bot = False
+    message = _message(member)
+    message.content = "free nitro claim https://discord.com@fake-nitro.example"
+    message.id = 123456
+    message.delete = AsyncMock()
+    # Même les listes noires et l'escalade ne doivent pas toucher un admin.
+    cog.blacklist_users_cache[1] = {member.id}
+    cog.blacklist_links_cache[1] = ["fake-nitro.example"]
+    cog.blacklist_words_cache[1] = ["nitro"]
+    cog.automod_cache[1] = {
+        "antispam": 1, "antilink": 1, "antilink_strict": 1,
+        "antiinvite": 1, "antiscam": 1, "antiinsult": 1,
+    }
+    cog._delete_and_warn = AsyncMock()
+    with patch.object(cog, "get_immunity_override_cached", AsyncMock(side_effect=AssertionError("bypass avant DB"))):
+        await cog.on_message(message)
+    cog._delete_and_warn.assert_not_awaited()
+    message.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_direct_automod_deletion_guard_never_removes_admin_message():
+    cog = _cog()
+    member = _member(administrator=True)
+    message = _message(member)
+    message.id = 222
+    message.delete = AsyncMock()
+    await cog._delete_and_warn(message, "Lien suspect", "antiscam")
+    message.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_regular_members_still_subject_to_spam_and_scam():
+    cog = _cog()
+    member = _member(administrator=False, manage_guild=False)
+    cog.immunity_overrides_cache[(1, member.id)] = None
+    _policy(cog, "antispam")
+    _policy(cog, "antiscam")
+    assert await cog.security_filter_applies_to(_message(member), "antispam") is True
+    assert await cog.security_filter_applies_to(_message(member), "antiscam") is True
