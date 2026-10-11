@@ -39,6 +39,9 @@ jobs:
       - name: Compile sweep tooling
         run: python -m py_compile tools/command_sweep.py tools/sentrix_e2e_harness.py tools/permission_audit_sweep.py cogs/command_health.py
 
+      - name: Validate security dashboard JavaScript syntax
+        run: node --check web/dashboard_ui/js/30_modules.js
+
       - name: Critical runtime regression tests
         env:
           DISCORD_TOKEN: "ci.fake.token"
@@ -51,6 +54,7 @@ jobs:
             tests/test_ai_command_router.py \
             tests/test_automod_live_matrix.py \
             tests/test_security_defaults_voice_audit_ai.py \
+            tests/test_security_filter_policy.py \
             tests/test_i18n_english_surface.py \
             tests/test_web_verification_v120.py \
             tests/test_double_confirmation_safety.py \
