@@ -41,6 +41,8 @@ GIFS: dict[str, str] = {
     "boss-guard": "https://media.giphy.com/media/WDRyxPW1BSpHIDH5Cg/giphy.gif",
     "boss-counter": "https://media.giphy.com/media/qJyZZ9B6Za6Yjsp69O/giphy.gif",
     "boss-counter-alt": "https://media.giphy.com/media/CLPSFbwMqpsvf5cRe8/giphy.gif",
+    "doors": "https://media.giphy.com/media/rbpgvZ17l67oKfOODU/giphy.gif",
+    "emojiorder": "https://media.giphy.com/media/LlIrosc9s0AsGEVXtU/giphy.gif",
 }
 
 logger = logging.getLogger("bot.game-visuals")
@@ -238,6 +240,8 @@ _BAD_INPUT = re.compile(
     r"aucune partie|doit etre|doivent etre|autorise|erreur)"
 )
 _FAMILIES = (
+    ("doors", ("portes mysteres", "porte mystere", "doors")),
+    ("emojiorder", ("chaine d'emojis", "emojiorder")),
     ("slap", ("gifle", "slap")),
     ("coin", ("pile ou face", "coinflip", "roulette", "roulette russe", "blackjack", "casino", "lancer", "dice", "slot", "machine a sous", "highlow")),
     ("race", ("course", "race", "vitesse", "reflex", "reaction", "fasttype", "rapidite")),
