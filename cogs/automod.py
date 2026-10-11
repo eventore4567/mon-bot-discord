@@ -245,6 +245,13 @@ _SCAM_SPOOFED_AUTHORITIES = frozenset({
     "steampowered.com", "epicgames.com", "paypal.com", "metamask.io",
 })
 _SCAM_URL_RE = re.compile(r"\b(?:https?|hxxps?)://[^\s<>()]+", re.IGNORECASE)
+# Hôtes sans https:// et avec homoglyphes (ex. « discοrd.gg »). Le matcher
+# ASCII LINK_RE ne reconnaissait pas ces imitations si aucun schéma n'était
+# écrit ; ne sanctionner que les hôtes confirmés par l'analyse des sosies.
+_SCAM_BARE_HOST_RE = re.compile(
+    r"(?<![\w@])(?:[\w-]+\.)+(?:com|gg|net|org|io|gift|app|xyz|ru|info|co|site|online|dev)\b",
+    re.IGNORECASE,
+)
 _SCAM_BRANDS = ("discord", "nitro", "roblox", "robux", "steam", "vbucks", "crypto", "wallet")
 _SCAM_LURES = ("free", "gift", "claim", "bonus", "verify", "airdrop", "giveaway", "reward")
 _SCAM_CTA = (
@@ -335,6 +342,17 @@ def _scam_hit(content: str) -> str | None:
 
     if suspicious_hosts:
         return f"domaine suspect: {suspicious_hosts[0][:120]}"
+
+    # Un lien sans préfixe https:// écrit avec une lettre grecque/cyrillique
+    # ressemble visuellement à une marque officielle. On ne généralise PAS le
+    # filtre de domaines Unicode à un bloqueur de mots ou d'URLs ordinaires :
+    # seul un sosie de marque confirmé est sanctionné.
+    for match in _SCAM_BARE_HOST_RE.finditer(str(content or "")):
+        host = match.group(0)
+        result = lookalike_domains.examiner(host)
+        if result is not None:
+            brand, _ = result
+            return f"domaine suspect: {host[:85]} (imite {brand})"
 
     normalized = text_normalization.normaliser(content)
     if any(text_normalization.normaliser(marker) in normalized for marker in _SCAM_DISCUSSION_MARKERS):
@@ -874,11 +892,11 @@ DANGEROUS_PERMS = [
 ]
 SPAM_WINDOW = 6  # secondes observées pour le comptage anti-spam
 SPAM_THRESHOLD = 5  # messages dans la fenêtre avant sanction
-# Flood lent réparti sur plusieurs salons : 20 messages SIGNIFICATIFS dans 60 s
+# Flood lent réparti sur plusieurs salons : 14 messages SIGNIFICATIFS dans 60 s
 # et au moins 4 salons distincts. Cette double condition évite de sanctionner
 # une discussion active dans un seul salon ou des réponses brèves (« ok », « +1 »).
 SPAM_CROSS_CHANNEL_WINDOW = 60
-SPAM_CROSS_CHANNEL_THRESHOLD = 20
+SPAM_CROSS_CHANNEL_THRESHOLD = 14
 SPAM_CROSS_CHANNEL_MIN_CHANNELS = 4
 SPAM_CROSS_CHANNEL_MIN_LENGTH = 12
 
@@ -2747,6 +2765,19 @@ class AutoMod(commands.Cog, name="Automod"):
         # Les exemptions de rôles ne sont plus court-circuitées globalement ici :
         # chaque filtre les évalue afin qu'un salon strict puisse reprendre priorité.
 
+        # Un lien de phishing passe AVANT l'anti-liens générique. Sinon le
+        # message est supprimé comme simple lien, la protection anti-arnaque
+        # ne voit jamais l'URL et le modérateur perd la vraie cause.
+        if conf and conf.get("antiscam") and await self.security_filter_applies_to(message, "antiscam"):
+            early_scam_reason = _scam_hit(message.content)
+            if early_scam_reason:
+                return await self._delete_and_warn(
+                    message,
+                    f"Message d'arnaque potentiel détecté ({early_scam_reason}).",
+                    "antiscam",
+                    censored_content=_compose_censored_content(message.content, scam=True),
+                )
+
         # Détections prioritaires pouvant être combinées dans un seul avertissement.
         # Chaque détection consulte sa propre politique de rôles bypass / salons stricts.
         words = await self.get_blacklist_words_cached(message.guild.id)
@@ -2826,13 +2857,14 @@ class AutoMod(commands.Cog, name="Automod"):
                     allow_escalation=False,
                 )
 
-        # Incident de spam en cours pour ce membre : tout ce qu'il envoie encore pendant
-        # la fenêtre est supprimé sans nouvel avertissement ni nouvelle carte de log.
+        # Incident de spam : suppression silencieuse sur une courte fenêtre
+        # de 8 secondes seulement. L'ancien code utilisait 30 secondes et
+        # empêchait un membre de reparler longtemps après la rafale.
         incident = self.incidents.get((message.guild.id, message.author.id))
         if (
             incident is not None
             and incident.filter_name in SPAM_FILTERS
-            and time.monotonic() - incident.started < INCIDENT_WINDOW_SECONDS
+            and time.monotonic() - incident.started < SPAM_INCIDENT_WINDOW_SECONDS
             and await self.security_filter_applies_to(message, incident.filter_name)
         ):
             return await self._delete_and_warn(message, incident.reason, incident.filter_name)
@@ -2851,15 +2883,6 @@ class AutoMod(commands.Cog, name="Automod"):
         antiscam_applies = bool(conf["antiscam"]) and await self.security_filter_applies_to(
             message, "antiscam"
         )
-        motif_scam = _scam_hit(message.content) if antiscam_applies else None
-        if motif_scam:
-            return await self._delete_and_warn(
-                message,
-                f"Message d'arnaque potentiel détecté ({motif_scam}).",
-                "antiscam",
-                censored_content=_compose_censored_content(message.content, scam=True),
-            )
-
         if antiscam_applies and message.attachments:
             candidates = [
                 attachment for attachment in message.attachments[:2]
@@ -3101,6 +3124,34 @@ class AutoMod(commands.Cog, name="Automod"):
         }
         return labels.get(filter_name, f"votre message a été supprimé : {reason}")
 
+    @staticmethod
+    def _content_notice_view(member_mention: str, filter_name: str) -> discord.ui.LayoutView:
+        """Avertissement AutoMod compact, sans bannière blanche ni embed générique.
+
+        Components V2 est dessiné dans un seul conteneur avec un accent coloré.
+        Aucun lien suspect n'y est réaffiché ; le contenu a déjà été supprimé.
+        """
+        titles = {
+            "antilink": ("🔗 Lien supprimé", "Les liens ne sont pas autorisés ici."),
+            "blacklist_link": ("🔗 Lien bloqué", "Ce lien figure parmi les liens interdits."),
+            "antiinvite": ("📨 Invitation bloquée", "Les invitations ne sont pas autorisées ici."),
+            "blacklist_word": ("🛡️ Message modéré", "Un mot interdit a été détecté."),
+            "blacklist_word_link": ("🛡️ Message modéré", "Un mot et un lien interdits ont été détectés."),
+            "antiscam": ("🛡️ Arnaque suspectée", "Un lien ou un contenu suspect a été détecté."),
+        }
+        title, explanation = titles.get(filter_name, ("🛡️ Message modéré", "Un filtre de sécurité a été appliqué."))
+        view = discord.ui.LayoutView(timeout=15)
+        box = discord.ui.Container(accent_colour=discord.Colour(0xE6A64C))
+        box.add_item(
+            discord.ui.TextDisplay(
+                f"### {title}\n"
+                f"{member_mention} · {explanation}\n"
+                "-# **SentriX · Sécurité** · Avertissement temporaire (8 s)"
+            )
+        )
+        view.add_item(box)
+        return view
+
     async def _delete_and_warn(
         self,
         message: discord.Message,
@@ -3262,13 +3313,23 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         try:
             if filter_name in {"blacklist_word", "blacklist_link", "blacklist_word_link", "antilink", "antiinvite", "antiscam"}:
-                note = await panels.envoyer(
-                    message.channel,
-                    panels.depuis_embed(
-                        embeds.warning(f"{message.author.mention}, {public_text}")
-                    ),
-                )
-                await note.delete(delay=8)
+                # Une carte courte avec liseré ambre, sans image/bannière ni
+                # enveloppe d'embed blanche. Discord supprime automatiquement
+                # l'avertissement au bout de huit secondes.
+                try:
+                    await message.channel.send(
+                        view=self._content_notice_view(message.author.mention, filter_name),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=8,
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    # Composants indisponibles ou salon restreint : la
+                    # suppression du message reste acquise, repli discret.
+                    await panels.texte_court(
+                        message.channel,
+                        f"{message.author.mention}, {public_text}",
+                        supprimer_apres=6,
+                    )
             else:
                 await panels.texte_court(
                     message.channel,
