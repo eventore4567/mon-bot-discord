@@ -988,6 +988,11 @@ class AutoMod(commands.Cog, name="Automod"):
         self.immunity_overrides_cache: dict[tuple[int, int], bool | None] = {}
         self._native_antilink_locks: dict[int, asyncio.Lock] = {}
         self._native_automod_bootstrap_task: asyncio.Task | None = None
+        # Diagnostic des blocages Discord natifs, sans stocker le contenu privé.
+        self._native_block_last_seen: dict[tuple[int, int, int], float] = {}
+        self._local_block_last_seen: dict[tuple[int, int, str], float] = {}
+        self._admin_link_last_seen: dict[tuple[int, int], float] = {}
+        self._native_rule_details: dict[tuple[int, int], tuple[str, int | None]] = {}
 
         # Toute écriture AutoMod venant des commandes, du Dashboard ou de l'IA passe
         # par Database.set_automod et arrive ici pour invalider le cache + synchroniser
@@ -1063,30 +1068,84 @@ class AutoMod(commands.Cog, name="Automod"):
                 pass
 
     async def _bootstrap_native_automod(self) -> None:
-        """Réconcilie une fois les règles Discord natives après connexion du bot."""
+        """Vérifie toutes les guilds et résume ce qui est réellement nettoyé."""
         try:
             await self.bot.wait_until_ready()
-            total_sentrix_rules = 0
+            totals = {"removed": 0, "protected": 0, "external": 0, "failed": 0}
+            checked = 0
             for guild in list(self.bot.guilds):
-                await self._sync_native_suite(guild)
-                try:
-                    rules = await guild.fetch_automod_rules()
-                    total_sentrix_rules += sum(
-                        1 for rule in rules if str(getattr(rule, "name", "")).startswith("SentriX • ")
-                    )
-                except (discord.Forbidden, discord.HTTPException):
-                    pass
-                # Petit étalement pour éviter une rafale de requêtes au démarrage.
+                result = await self._sync_native_suite(guild)
+                if result is not None:
+                    checked += 1
+                    for name in totals:
+                        totals[name] += result[name]
                 await asyncio.sleep(0.15)
             logger.info(
-                "Suite Discord AutoMod native synchronisée : guilds=%s règles_sentrix=%s",
-                len(self.bot.guilds),
-                total_sentrix_rules,
+                "AutoMod nettoyage terminé guilds=%s checked=%s removed=%s protected=%s external=%s failed=%s",
+                len(self.bot.guilds), checked,
+                totals["removed"], totals["protected"], totals["external"], totals["failed"],
             )
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Bootstrap Discord AutoMod natif impossible")
+            logger.exception("Bootstrap de nettoyage AutoMod interrompu")
+
+    @commands.Cog.listener()
+    async def on_automod_action(self, execution: discord.AutoModAction) -> None:
+        """Identifier les blocages exécutés par Discord AVANT le moteur Python.
+
+        Ce signal est émis par l'intent auto_moderation_execution. Le contenu du
+        message, les mots correspondants et les pièces jointes ne sont jamais
+        journalisés. Une limitation réduit le bruit en cas de raid.
+        """
+        action = getattr(execution, "action", None)
+        if getattr(action, "type", None) != discord.AutoModRuleActionType.block_message:
+            return
+        guild_id = int(getattr(execution, "guild_id", 0) or 0)
+        rule_id = int(getattr(execution, "rule_id", 0) or 0)
+        user_id = int(getattr(execution, "user_id", 0) or 0)
+        if not guild_id or not rule_id or not user_id:
+            return
+        seen_key = (guild_id, rule_id, user_id)
+        now = time.monotonic()
+        if now - self._native_block_last_seen.get(seen_key, -9999.0) < 30:
+            return
+        if len(self._native_block_last_seen) > 2000:
+            self._native_block_last_seen.clear()
+        self._native_block_last_seen[seen_key] = now
+
+        guild = self.bot.get_guild(guild_id)
+        member = guild.get_member(user_id) if guild is not None else None
+        privileged = (
+            can_bypass_message_filters(member) if member is not None else None
+        )
+        details = self._native_rule_details.get((guild_id, rule_id))
+        if details is None:
+            details = ("inconnue", None)
+            if guild is not None and getattr(
+                getattr(getattr(guild, "me", None), "guild_permissions", None),
+                "manage_guild", False,
+            ):
+                try:
+                    rule = await guild.fetch_automod_rule(rule_id)
+                except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                    pass
+                else:
+                    details = (
+                        str(getattr(rule, "name", "inconnue"))[:90],
+                        getattr(rule, "creator_id", None),
+                    )
+            if len(self._native_rule_details) > 1000:
+                self._native_rule_details.clear()
+            self._native_rule_details[(guild_id, rule_id)] = details
+        level = logging.WARNING if privileged else logging.INFO
+        logger.log(
+            level,
+            "SENTRIX_BLOCK_SOURCE=discord_native guild=%s user=%s channel=%s rule=%s "
+            "rule_name=%s creator=%s privileged=%s (aucun contenu enregistré)",
+            guild_id, user_id, getattr(execution, "channel_id", None), rule_id,
+            details[0], details[1], privileged,
+        )
 
     async def _on_automod_setting_changed(self, guild_id: int, field: str, value: int) -> None:
         self.automod_cache.pop(int(guild_id), None)
@@ -1143,52 +1202,84 @@ class AutoMod(commands.Cog, name="Automod"):
                 channels.append(channel)
         return roles, channels
 
+    async def _remove_owned_native_rules(
+        self,
+        guild: discord.Guild,
+        names: frozenset[str] | set[str],
+    ) -> dict[str, int] | None:
+        """En une seule lecture, migrer les vieilles règles de SentriX.
+
+        Les règles étrangères, homonymes ou appartenant à Discord sont
+        conservées. Les protections « anti-mentions » imposées aux serveurs
+        communautaires (erreur 200006) ne sont pas supprimables ; elles
+        restent intactes et ne doivent pas empêcher le nettoyage des autres.
+        """
+        me = getattr(guild, "me", None)
+        perms = getattr(me, "guild_permissions", None)
+        if me is None or not getattr(perms, "manage_guild", False):
+            logger.warning(
+                "AutoMod nettoyage non vérifié guild=%s : Gérer le serveur manquant",
+                guild.id,
+            )
+            return None
+        own_id = getattr(getattr(self.bot, "user", None), "id", None) or getattr(me, "id", None)
+        if own_id is None:
+            logger.warning("AutoMod nettoyage impossible guild=%s : ID bot inconnu", guild.id)
+            return None
+
+        try:
+            rules = await guild.fetch_automod_rules()
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("AutoMod règles inaccessibles guild=%s", guild.id, exc_info=True)
+            return None
+
+        results = {"removed": 0, "protected": 0, "external": 0, "failed": 0}
+        for rule in rules:
+            if getattr(rule, "name", None) not in names:
+                continue
+            creator_id = getattr(rule, "creator_id", None)
+            if creator_id is None or int(creator_id) != int(own_id):
+                results["external"] += 1
+                continue
+            try:
+                await rule.delete(
+                    reason="SentriX : migration vers filtres locaux avec exemptions staff",
+                )
+            except discord.Forbidden as exc:
+                if getattr(exc, "code", None) == 200006:
+                    # Règle anti-mentions requise par la communauté Discord.
+                    results["protected"] += 1
+                    continue
+                results["failed"] += 1
+                logger.warning(
+                    "AutoMod suppression refusée guild=%s rule=%s status=403 code=%s",
+                    guild.id, rule.id, getattr(exc, "code", None),
+                )
+            except discord.HTTPException as exc:
+                results["failed"] += 1
+                logger.warning(
+                    "AutoMod suppression échouée guild=%s rule=%s error=%s",
+                    guild.id, rule.id, type(exc).__name__,
+                )
+            else:
+                results["removed"] += 1
+                logger.info(
+                    "AutoMod règle SentriX retirée guild=%s rule=%s name=%s",
+                    guild.id, rule.id, rule.name,
+                )
+        logger.info(
+            "AutoMod migration guild=%s removed=%s protected=%s external=%s failed=%s",
+            guild.id, *(results[key] for key in ("removed", "protected", "external", "failed")),
+        )
+        return results
+
     async def _remove_owned_native_rule(
         self,
         guild: discord.Guild,
         name: str,
     ) -> bool:
-        """Retire uniquement une ancienne règle Discord AutoMod créée par SentriX.
-
-        Discord bloque avant l'événement on_message, donc ne peut pas connaître
-        les exemptions individuelles / « all perms » du moteur SentriX. La
-        modération des messages reste active dans le listener local. Ne jamais
-        toucher aux règles créées par les administrateurs ou d'autres bots,
-        même si elles portent le même nom.
-        """
-        me = getattr(guild, "me", None)
-        if me is None or not getattr(me.guild_permissions, "manage_guild", False):
-            logger.warning(
-                "Nettoyage règle SentriX %s impossible guild=%s : permission Gérer le serveur absente.",
-                name, guild.id,
-            )
-            return False
-        own_id = getattr(getattr(self.bot, "user", None), "id", None) or getattr(me, "id", None)
-        if own_id is None:
-            logger.warning("Nettoyage AutoMod %s impossible guild=%s : identité bot inconnue.", name, guild.id)
-            return False
-        try:
-            rules = await guild.fetch_automod_rules()
-        except (discord.Forbidden, discord.HTTPException):
-            logger.warning("Liste AutoMod inaccessible guild=%s", guild.id, exc_info=True)
-            return False
-        for rule in rules:
-            if getattr(rule, "name", None) != name:
-                continue
-            creator_id = getattr(rule, "creator_id", None)
-            if creator_id is None or int(creator_id) != int(own_id):
-                logger.warning(
-                    "Règle AutoMod homonyme conservée guild=%s name=%s creator=%s (pas attribuée à SentriX).",
-                    guild.id, name, creator_id,
-                )
-                continue
-            try:
-                await rule.delete(reason="SentriX : filtres locaux pour respecter les exemptions admin et membre")
-            except (discord.Forbidden, discord.HTTPException):
-                logger.warning("Suppression de la règle SentriX impossible guild=%s rule=%s", guild.id, rule.id, exc_info=True)
-                return False
-            logger.info("Ancienne règle native SentriX retirée guild=%s rule=%s name=%s", guild.id, rule.id, name)
-        return True
+        result = await self._remove_owned_native_rules(guild, frozenset({name}))
+        return result is not None and not result["failed"]
 
     async def _sync_native_antilink_rule(self, guild: discord.Guild) -> bool:
         """Anti-liens LOCAL : plus de blocage natif avant le contrôle des admins."""
@@ -1300,20 +1391,23 @@ class AutoMod(commands.Cog, name="Automod"):
             custom_message=NATIVE_HARMFUL_CUSTOM_MESSAGE,
         )
 
-    async def _sync_native_suite(self, guild: discord.Guild) -> None:
-        """Migration des anciennes règles natives SentriX vers les filtres locaux.
+    async def _sync_native_suite(self, guild: discord.Guild) -> dict[str, int] | None:
+        """Nettoyage groupé : 1 appel HTTP par serveur au lieu de 7.
 
-        Le bot garde les règles d'autres créateurs intactes. La migration se
-        produit au démarrage, à l'arrivée sur un serveur et aux changements de
-        réglages. Les règles natives ne sont plus recréées.
+        Les vérifications Discord ne bloquent plus pendant plusieurs minutes
+        une série de serveurs. Le moteur local continue de modérer les membres
+        ordinaires ; seuls les filtres de messages sont concernés.
         """
-        await self._sync_native_antilink_rule(guild)
-        await self._sync_native_blacklist_rule(guild)
-        await self._sync_native_target_links_rule(guild)
-        await self._sync_native_antiinvite_rule(guild)
-        await self._sync_native_antiscam_rule(guild)
-        await self._sync_native_antimention_rule(guild)
-        await self._sync_native_harmful_rule(guild)
+        names = frozenset({
+            NATIVE_ANTILINK_RULE_NAME,
+            NATIVE_BLACKLIST_RULE_NAME,
+            NATIVE_TARGET_LINKS_RULE_NAME,
+            NATIVE_ANTIINVITE_RULE_NAME,
+            NATIVE_ANTISCAM_RULE_NAME,
+            NATIVE_ANTIMENTION_RULE_NAME,
+            NATIVE_HARMFUL_RULE_NAME,
+        })
+        return await self._remove_owned_native_rules(guild, names)
 
     async def _sync_native_blacklist_rule(self, guild: discord.Guild) -> bool:
         """Les mots interdits restent filtrés localement avec bypass administrateur."""
@@ -2547,6 +2641,19 @@ class AutoMod(commands.Cog, name="Automod"):
         # Le bypass admin s'applique AVANT la blacklist, le spam, l'anti-arnaque,
         # les insultes et toute détection qui pourrait supprimer un message.
         if _is_discord_administrator(message.author):
+            # Prouve que le message de l'administrateur est bien arrivé au bot.
+            # Si Discord l'intercepte auparavant, seul on_automod_action apparaît.
+            if LINK_RE.search(_normalize_link_text(message.content)):
+                key = (message.guild.id, message.author.id)
+                now = time.monotonic()
+                if now - self._admin_link_last_seen.get(key, -9999.0) >= 60:
+                    if len(self._admin_link_last_seen) > 2000:
+                        self._admin_link_last_seen.clear()
+                    self._admin_link_last_seen[key] = now
+                    logger.info(
+                        "SENTRIX_LINK_BYPASS=staff guild=%s user=%s channel=%s",
+                        message.guild.id, message.author.id, message.channel.id,
+                    )
             return
 
         content_lower = message.content.lower()
@@ -2971,6 +3078,19 @@ class AutoMod(commands.Cog, name="Automod"):
         # appelleraient cette méthode directement, sans passer par le filtre.
         if _is_discord_administrator(message.author):
             return
+        if filter_name in {
+            "antilink", "antiinvite", "antiscam", "blacklist_link", "blacklist_word_link",
+        }:
+            key = (message.guild.id, message.author.id, str(filter_name))
+            now = time.monotonic()
+            if now - self._local_block_last_seen.get(key, -9999.0) >= 30:
+                if len(self._local_block_last_seen) > 2000:
+                    self._local_block_last_seen.clear()
+                self._local_block_last_seen[key] = now
+                logger.info(
+                    "SENTRIX_BLOCK_SOURCE=local guild=%s user=%s channel=%s filter=%s",
+                    message.guild.id, message.author.id, message.channel.id, filter_name,
+                )
         self._mark_xp_skip(message.id)
         deleted = False
         try:

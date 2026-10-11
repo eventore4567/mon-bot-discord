@@ -392,3 +392,89 @@ def test_composed_invite_censor_uses_safe_visible_placeholder():
     assert value.startswith("https://discord.gg/æ@#/")
     assert value.endswith("(invitation censurée)")
     assert "real-code" not in value
+
+
+@pytest.mark.asyncio
+async def test_native_suite_reads_rules_once_per_guild_and_skips_required_community_rule():
+    """Un 403 200006 sur anti-mentions ne doit pas empêcher l'anti-liens."""
+    response = SimpleNamespace(status=403, reason="Forbidden")
+    protected_error = discord.Forbidden(
+        response,
+        {"code": 200006, "message": "Mention Spam AutoMod rule cannot be deleted"},
+    )
+    protected = SimpleNamespace(
+        id=11, name=automod_module.NATIVE_ANTIMENTION_RULE_NAME,
+        creator_id=123, delete=AsyncMock(side_effect=protected_error),
+    )
+    antilink = SimpleNamespace(
+        id=12, name=automod_module.NATIVE_ANTILINK_RULE_NAME,
+        creator_id=123, delete=AsyncMock(),
+    )
+    external = SimpleNamespace(
+        id=13, name=automod_module.NATIVE_ANTISCAM_RULE_NAME,
+        creator_id=987, delete=AsyncMock(),
+    )
+    bot = SimpleNamespace(user=SimpleNamespace(id=123))
+    cog = AutoMod(bot)
+    guild = SimpleNamespace(
+        id=1,
+        me=SimpleNamespace(id=123, guild_permissions=SimpleNamespace(manage_guild=True)),
+        fetch_automod_rules=AsyncMock(return_value=[protected, antilink, external]),
+        create_automod_rule=AsyncMock(),
+    )
+
+    result = await cog._sync_native_suite(guild)
+    assert result == {"removed": 1, "protected": 1, "external": 1, "failed": 0}
+    guild.fetch_automod_rules.assert_awaited_once()
+    antilink.delete.assert_awaited_once()
+    protected.delete.assert_awaited_once()
+    external.delete.assert_not_awaited()
+    guild.create_automod_rule.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_native_block_diagnostic_identifies_rule_and_user_without_message_content(caplog):
+    import logging
+
+    member = _member()
+    member.guild_permissions = SimpleNamespace(administrator=True)
+    member.guild.me.guild_permissions.manage_guild = True
+    member.guild.get_member = Mock(return_value=member)
+    foreign_rule = SimpleNamespace(name="Règle manuelle du serveur", creator_id=444)
+    member.guild.fetch_automod_rule = AsyncMock(return_value=foreign_rule)
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=123),
+        get_guild=Mock(return_value=member.guild),
+    )
+    cog = AutoMod(bot)
+    execution = SimpleNamespace(
+        guild_id=1, user_id=member.id, rule_id=55, channel_id=66,
+        content="mot de passe qui ne doit pas apparaître dans les logs",
+        action=SimpleNamespace(type=discord.AutoModRuleActionType.block_message),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="bot"):
+        await cog.on_automod_action(execution)
+        await cog.on_automod_action(execution)
+
+    member.guild.fetch_automod_rule.assert_awaited_once()
+    assert "SENTRIX_BLOCK_SOURCE=discord_native" in caplog.text
+    assert "rule_name=Règle manuelle du serveur" in caplog.text
+    assert "privileged=True" in caplog.text
+    assert "mot de passe" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_admin_link_never_reaches_local_deletion_and_is_traced(caplog):
+    import logging
+
+    conf = _base_conf(antilink=1, antiscam=1, antispam=1)
+    cog = _cog(conf)
+    member = _member()
+    member.guild_permissions = SimpleNamespace(administrator=True)
+    msg = _message(member, "https://example.com/hello")
+    with caplog.at_level(logging.INFO, logger="bot"):
+        await cog.on_message(msg)
+
+    cog._delete_and_warn.assert_not_awaited()
+    assert "SENTRIX_LINK_BYPASS=staff" in caplog.text
