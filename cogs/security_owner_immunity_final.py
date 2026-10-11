@@ -2,7 +2,7 @@
 
 Garantit deux règles globales :
 1. seul le propriétaire RÉEL du serveur Discord peut modifier une whitelist/exemption ;
-2. le propriétaire du serveur est aussi immunisé contre le runtime Anti-GIF.
+2. le propriétaire, les administrateurs et les rôles all-perms sont aussi immunisés contre le runtime Anti-GIF.
 
 Les checks s'ajoutent aux checks existants : ils ne les élargissent jamais.
 """
@@ -15,6 +15,7 @@ from types import MethodType
 from discord.ext import commands
 
 from utils import checks
+from utils.security_member_bypass import can_bypass_message_filters
 
 logger = logging.getLogger("bot.security.owner-final")
 
@@ -64,13 +65,16 @@ def _patch_antigif(bot: commands.Bot) -> None:
         return
 
     async def owner_safe_antigif(_self, message):
-        if message.guild is not None and message.author.id == message.guild.owner_id:
+        if message.guild is not None and (
+            message.author.id == message.guild.owner_id
+            or can_bypass_message_filters(message.author)
+        ):
             return None
         return await current(message)
 
     owner_safe_antigif._sentrix_owner_antigif_immunity = True
     runtime.handle_message = MethodType(owner_safe_antigif, runtime)
-    logger.info("Immunité Anti-GIF du propriétaire réel activée.")
+    logger.info("Anti-GIF : bypass propriétaire, administrateurs et rôles all-perms actif.")
 
 
 async def _late_reapply(bot: commands.Bot) -> None:
