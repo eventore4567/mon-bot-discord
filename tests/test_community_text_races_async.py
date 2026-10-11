@@ -5,8 +5,12 @@ la main dès la publication du défi. Les gains et les verrous restent gérés
 par la tâche de fond, y compris en cas de timeout ou d'erreur d'envoi.
 """
 import asyncio
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
+
+# Le runtime charge config pendant les imports, même en tests isolés.
+os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from cogs import games_economy
 
