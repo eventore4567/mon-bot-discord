@@ -48,9 +48,10 @@ def _message(member: discord.Member, *, channel_id: int = 55, parent_id: int = 0
     return message
 
 
-def _policy(cog: AutoMod, name: str, *, roles=(), strict=()) -> None:
+def _policy(cog: AutoMod, name: str, *, roles=(), members=(), strict=()) -> None:
     cog.security_filter_policy_cache[(1, name)] = {
         "role_ids": set(roles),
+        "member_ids": set(members),
         "strict_channel_ids": set(strict),
     }
 
@@ -66,6 +67,43 @@ async def test_role_bypass_applies_only_to_its_filter_outside_strict_channel():
 
     assert await cog.security_filter_applies_to(message, "antispam") is False
     assert await cog.security_filter_applies_to(message, "antilink") is True
+
+
+@pytest.mark.asyncio
+async def test_member_bypass_is_per_filter_and_does_not_require_a_role():
+    cog = _cog()
+    member = _member(user_id=7)
+    message = _message(member)
+    cog.immunity_overrides_cache[(1, member.id)] = None
+    _policy(cog, "antiinsult", members=(7,))
+    _policy(cog, "antilink")
+
+    assert await cog.security_filter_applies_to(message, "antiinsult") is False
+    assert await cog.security_filter_applies_to(message, "antilink") is True
+
+
+@pytest.mark.asyncio
+async def test_strict_channel_and_its_threads_override_individual_bypass():
+    cog = _cog()
+    member = _member(user_id=7)
+    cog.immunity_overrides_cache[(1, member.id)] = None
+    _policy(cog, "antiscam", members=(7,), strict=(77,))
+
+    assert await cog.security_filter_applies_to(_message(member, channel_id=77), "antiscam") is True
+    assert await cog.security_filter_applies_to(
+        _message(member, channel_id=999, parent_id=77), "antiscam"
+    ) is True
+    assert await cog.security_filter_applies_to(_message(member, channel_id=78), "antiscam") is False
+
+
+@pytest.mark.asyncio
+async def test_member_bypass_disables_unrepresentable_native_discord_rule():
+    cog = _cog()
+    guild = Mock(spec=discord.Guild)
+    guild.id = 1
+    _policy(cog, "antilink", members=(7,))
+
+    assert await cog._native_policy_exemptions(guild, "antilink") is None
 
 
 @pytest.mark.asyncio
@@ -158,12 +196,14 @@ async def test_database_policy_roundtrip_and_antispam_legacy_bridge(tmp_path):
             123,
             "antispam",
             role_ids=[11, 22, 11],
+            member_ids=[901, 902, 901],
             strict_channel_ids=[77, 88, 77],
         )
 
         policy = await db.get_security_filter_policy(123, "antispam")
         assert policy == {
             "role_ids": [11, 22],
+            "member_ids": [901, 902],
             "strict_channel_ids": [77, 88],
         }
 
@@ -184,5 +224,28 @@ async def test_database_policy_roundtrip_and_antispam_legacy_bridge(tmp_path):
         assert [int(row["role_id"]) for row in legacy_roles] == [11, 22]
         assert [int(row["channel_id"]) for row in legacy_channels] == [77, 88]
         assert legacy_policy["scope_mode"] == "all"
+
+        # Les anciens clients V1 qui ne transmettent aucun membre ne doivent
+        # pas effacer les exemptions ajoutées par le nouveau dashboard.
+        await db.set_security_filter_policy(
+            123, "antispam", role_ids=[11], strict_channel_ids=[77],
+        )
+        assert (await db.get_security_filter_policy(123, "antispam"))["member_ids"] == [901, 902]
+        # Une liste vide envoyée volontairement retire ces membres.
+        await db.set_security_filter_policy(
+            123, "antispam", role_ids=[11], member_ids=[], strict_channel_ids=[77],
+        )
+        assert (await db.get_security_filter_policy(123, "antispam"))["member_ids"] == []
     finally:
         await db.close()
+
+
+def test_dashboard_has_searchable_member_bypass_and_save_transport():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "web/dashboard_ui/js/30_modules.js").read_text(encoding="utf-8")
+    assert "securityPolicyMemberSearch" in source
+    assert "data-security-add-member" in source
+    assert "data-security-remove-member" in source
+    assert "member_ids: memberIds" in source
