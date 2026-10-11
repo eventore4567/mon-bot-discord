@@ -819,23 +819,33 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz emoji', description=err, kind='warning')))
         emojis, answer, difficulty = game_rewards.secure_pick(EMOJI_QUIZ)
-        await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz emoji', description=f'🧩 {emojis}\nVous avez 20 secondes.')))
-
-        def check(m):
-            return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
-
-        try:
-            msg = await self.bot.wait_for("message", check=check, timeout=20)
-        except asyncio.TimeoutError:
+        correct = _primary_answer(answer)
+        wrong = []
+        for _emojis, option, _difficulty in EMOJI_QUIZ:
+            candidate = _primary_answer(option)
+            if candidate != correct and candidate not in wrong:
+                wrong.append(candidate)
+        options = game_rewards.secure_shuffle([correct, *game_rewards.secure_shuffle(wrong)[:3]])
+        view = _EmojiAnswerView(ctx.author.id, options)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(
+            await _embed(self.bot, guild_id, title="Quiz emoji",
+                         description=f"🧩 {emojis}\n⏱️ 20 secondes · Choisissez une réponse !")
+        ), view))
+        await view.wait()
+        if view.answer is None:
             await _finish(self.bot, ctx, "emojiquiz", sid, "loss", 0)
-            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{_primary_answer(answer)}**.', kind='warning')))
-        if game_rewards.answer_matches(msg.content, answer):
+            desc, kind = f"⏱️ Temps écoulé ! Réponse : **{correct}**.", "warning"
+        elif game_rewards.answer_matches(view.answer, answer):
             amount = game_rewards.skill_reward(20, difficulty=difficulty)
             reward = await _finish(self.bot, ctx, "emojiquiz", sid, "win", amount)
-            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Bonne réponse !', description=f'✅ Difficulté **{difficulty}**.' + _reward_line(reward), kind='success')))
+            desc, kind = f"🏆 Bravo, c'était **{correct}** !" + _reward_line(reward), "success"
         else:
             await _finish(self.bot, ctx, "emojiquiz", sid, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mauvaise réponse', description=f'❌ La réponse était **{_primary_answer(answer)}**.', kind='danger')))
+            desc, kind = f"💥 Raté ! Réponse : **{correct}**.", "danger"
+        await panels.editer(msg, panels.depuis_embed(
+            await _embed(self.bot, guild_id, title="Quiz emoji — Résultat",
+                         description=desc, kind=kind)
+        ))
 
     @commands.hybrid_command(name="colorquiz", description="Cliquez sur la bonne couleur.", with_app_command=False)
     async def colorquiz(self, ctx: commands.Context):
@@ -848,16 +858,23 @@ class GamesRapides(commands.Cog, name="GamesRapides"):
         options = game_rewards.secure_shuffle(COLOR_EMOJIS.items())[:4]
         target_name, target_emoji = game_rewards.secure_pick(options)
         view = _ColorQuizView(author_id=ctx.author.id, options=options, target=target_name)
-        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description=f'🎨 Cliquez sur **{target_name.upper()}**')), view))
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(
+            await _embed(self.bot, guild_id, title="Quiz couleur",
+                         description=f"🎨 Cliquez sur **{target_name.upper()}**")
+        ), view))
         await view.wait()
         if view.correct is None:
             await _finish(self.bot, ctx, "colorquiz", sid, "loss", 0)
+            desc, kind = "⏱️ Temps écoulé !", "warning"
         elif view.correct:
             reward = await _finish(self.bot, ctx, "colorquiz", sid, "win", 15)
-            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description='✅ Bonne couleur !' + _reward_line(reward), kind='success')))
+            desc, kind = "🏆 Bonne couleur !" + _reward_line(reward), "success"
         else:
             await _finish(self.bot, ctx, "colorquiz", sid, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Quiz couleur', description='❌ Mauvaise couleur.', kind='danger')))
+            desc, kind = f"💥 Mauvaise couleur ! C'était {target_emoji}.", "danger"
+        await panels.editer(msg, panels.depuis_embed(
+            await _embed(self.bot, guild_id, title="Quiz couleur — Résultat", description=desc, kind=kind)
+        ))
 
     @commands.hybrid_command(
         name="minesweeper",
@@ -1053,6 +1070,40 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
     else:
         await _finish(bot, ctx, game_name, sid, "loss", 0)
         await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Mauvaise réponse', description=f'❌ La réponse était **{_primary_answer(answer)}**.', kind='danger')))
+
+
+class _EmojiAnswerView(discord.ui.View):
+    """Le quiz emoji se joue en boutons, sans messages de réponse publics."""
+    def __init__(self, user_id: int, options: list[str]):
+        super().__init__(timeout=20)
+        self.user_id = user_id
+        self.answer: str | None = None
+        self._lock = asyncio.Lock()
+        for option in options[:4]:
+            self.add_item(_EmojiAnswerButton(option))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Ce quiz appartient à un autre joueur.", ephemeral=True)
+            return False
+        return True
+
+
+class _EmojiAnswerButton(discord.ui.Button):
+    def __init__(self, answer: str):
+        super().__init__(label=answer[:75], style=discord.ButtonStyle.secondary)
+        self.answer = answer
+
+    async def callback(self, interaction: discord.Interaction):
+        view: _EmojiAnswerView = panels.vue_source(self)
+        async with view._lock:
+            if view.answer is not None:
+                return await interaction.response.send_message("Vous avez déjà répondu.", ephemeral=True)
+            view.answer = self.answer
+            await interaction.response.defer()
+            for child in view.children:
+                child.disabled = True
+            panels.terminer_vue(self)
 
 
 class _PreviewTokensView(discord.ui.View):
