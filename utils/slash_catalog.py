@@ -205,7 +205,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("security tools status", "automod-status", "Show AutoMod protection status."),
     _e("security tools history", "automod-history", "Show AutoMod enforcement history."),
     _e("security tools scan", "security-check", "Check active server protections."),
-    _e("security tools repair", "security-repair", "Repair security configuration."),
+    _e("security tools fix", "security-repair", "Repair security configuration."),
     _e("security tools permissions", "permission-audit", "Inspect dangerous permissions."),
     _e("security tools backup", "server-backup", "Back up server configuration."),
     _e("security tools recover", "server-restore", "Restore a server backup."),
@@ -351,7 +351,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("verification example-add", "proofexample", "Add an example screenshot."),
     _e("verification example-remove", "proofexample-remove", "Remove an example screenshot."),
     _e("verification examples", "proofexamples", "List the example screenshots."),
-    _e("verification repair", "verify-repair", "Restore a missing verification panel."),
+    _e("verification restore", "verify-repair", "Restore a missing verification panel."),
 
     _e("config mod-role", "setmodrole", "Set the staff role."),
     _e("config prefix", "setprefix", "Change the text command prefix."),
