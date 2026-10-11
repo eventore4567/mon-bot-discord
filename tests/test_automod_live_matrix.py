@@ -479,3 +479,79 @@ async def test_admin_link_never_reaches_local_deletion_and_is_traced(caplog):
 
     cog._delete_and_warn.assert_not_awaited()
     assert "SENTRIX_LINK_BYPASS=staff" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "https://google.com",
+        "https://www.google.com/search?q=sentrix",
+        "https://accounts.google.com/login",
+        "https://google.com?hl=fr",
+        "https://google.com#section",
+        "google.com",
+    ],
+)
+def test_whitelist_domain_allows_real_host_and_subdomains(content):
+    assert automod_module._domain_allowed(content, ["google.com"]) is True
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "https://evil.example/path/google.com",
+        "https://google.com.evil.example/",
+        "https://google.com@evil.example/login",
+        "https://evil.example/?redirect=https://google.com",
+        "google.com https://evil.example/login",
+        "https://google.com/page https://evil.example/login",
+        "hello google.com here is https://evil.example/login",
+    ],
+)
+def test_whitelist_domain_does_not_bypass_other_or_disguised_links(content):
+    assert automod_module._domain_allowed(content, ["google.com"]) is False
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [".", "*", ".*", "https://google.com", "google.com/path",
+     "google.com.evil.example/path", "google.com:443", "@google.com", "", "   "],
+)
+def test_whitelist_rejects_invalid_stored_entries(entry):
+    assert automod_module._canonical_whitelist_domain(entry) is None
+    assert automod_module._domain_allowed("https://evil.example", [entry]) is False
+
+
+@pytest.mark.asyncio
+async def test_anti_links_cannot_be_bypassed_by_adding_allowed_domain_to_message():
+    cog = _cog(_base_conf(antilink=1))
+    cog.whitelist_domains_cache[1] = ["google.com"]
+    msg = _message(_member(), "https://evil.example/path google.com")
+
+    await cog.on_message(msg)
+
+    cog._delete_and_warn.assert_awaited_once()
+    assert cog._delete_and_warn.await_args.args[2] == "antilink"
+
+
+@pytest.mark.asyncio
+async def test_anti_links_allows_real_whitelisted_url_even_with_query():
+    cog = _cog(_base_conf(antilink=1))
+    cog.whitelist_domains_cache[1] = ["google.com"]
+    msg = _message(_member(), "https://google.com?hl=fr")
+
+    await cog.on_message(msg)
+
+    cog._delete_and_warn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_anti_links_blocks_mixed_allowed_and_disallowed_urls():
+    cog = _cog(_base_conf(antilink=1))
+    cog.whitelist_domains_cache[1] = ["google.com"]
+    msg = _message(_member(), "https://google.com/news https://evil.example/phishing")
+
+    await cog.on_message(msg)
+
+    cog._delete_and_warn.assert_awaited_once()
+    assert cog._delete_and_warn.await_args.args[2] == "antilink"
