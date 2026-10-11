@@ -1072,6 +1072,253 @@ async def _run_word_guess(bot, ctx: commands.Context, game_name: str, pool, cool
         await panels.envoyer(ctx, panels.depuis_embed(await _embed(bot, guild_id, title='Mauvaise réponse', description=f'❌ La réponse était **{_primary_answer(answer)}**.', kind='danger')))
 
 
+    # Trois nouveaux jeux animés, sans mise ni monnaie parallèle.
+    @commands.hybrid_command(
+        name="doors", description="Choisir une des trois portes mystères et découvrir le trésor.",
+        with_app_command=False,
+    )
+    async def doors(self, ctx: commands.Context):
+        gid = ctx.guild.id if ctx.guild else None
+        ok, reason, sid = await _precheck(self.bot, ctx, "doors", 15)
+        if not ok:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, gid, title="Portes mystères", description=reason, kind="warning"
+            )))
+        prize = game_rewards.secure_randint(1, 3)
+        view = _DoorsView(ctx.author.id)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(
+            await _embed(self.bot, gid, title="Portes mystères",
+                         description="🚪 Trois portes. Une cache un trésor !\n"
+                                     "🎯 Choisissez votre porte avant la fin du temps.")
+        ), view))
+        await view.wait()
+        if view.choice == prize:
+            reward = await _finish(self.bot, ctx, "doors", sid, "win", 30)
+            desc, kind = f"🏆 Porte {prize} : 💎 TRÉSOR ! Vous avez choisi la bonne !" + _reward_line(reward), "success"
+        else:
+            await _finish(self.bot, ctx, "doors", sid, "loss", 0)
+            desc, kind = (f"⏱️ Trop tard ! Le trésor était derrière la porte {prize}."
+                          if view.choice is None else
+                          f"💥 Porte {view.choice} : rien ! Le trésor était derrière la porte {prize}."), "danger"
+        await panels.editer(msg, panels.depuis_embed(await _embed(
+            self.bot, gid, title="Portes mystères — Résultat", description=desc, kind=kind
+        )))
+
+    @commands.hybrid_command(
+        name="emojiorder", description="Mémoriser trois symboles puis les retoucher dans le bon ordre.",
+        with_app_command=False,
+    )
+    async def emojiorder(self, ctx: commands.Context):
+        gid = ctx.guild.id if ctx.guild else None
+        ok, reason, sid = await _precheck(self.bot, ctx, "emojiorder", 15)
+        if not ok:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, gid, title="Chaîne d'emojis", description=reason, kind="warning"
+            )))
+        sequence = game_rewards.secure_sample(MEMORY_TOKENS, 3)
+        msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+            self.bot, gid, title="Chaîne d'emojis — Mémorisez",
+            description=f"🧠 Observez cette séquence pendant 3 secondes :\n"
+                        f"**{'  ➜  '.join(sequence)}**"
+        )))
+        await asyncio.sleep(3.0)
+        view = _EmojiOrderView(ctx.author.id, sequence)
+        await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(
+            self.bot, gid, title="Chaîne d'emojis — À vous !",
+            description="🎯 Reconstituez les 3 symboles dans l'ordre de mémoire.\n"
+                        "⏱️ Vous avez 20 secondes."
+        )), view))
+        await view.wait()
+        if view.picks == sequence:
+            reward = await _finish(self.bot, ctx, "emojiorder", sid, "win", 35)
+            desc, kind = "🏆 Mémoire parfaite ! " + " ➜ ".join(sequence) + _reward_line(reward), "success"
+        else:
+            await _finish(self.bot, ctx, "emojiorder", sid, "loss", 0)
+            desc, kind = f"💥 Ordre incorrect. Il fallait : **{' ➜ '.join(sequence)}**.", "danger"
+        await panels.editer(msg, panels.depuis_embed(await _embed(
+            self.bot, gid, title="Chaîne d'emojis — Résultat", description=desc, kind=kind
+        )))
+
+    @commands.hybrid_command(
+        name="bossfight", description="Affronter un boss en plusieurs tours : attaque, pouvoir ou bouclier.",
+        with_app_command=False,
+    )
+    async def bossfight(self, ctx: commands.Context):
+        gid = ctx.guild.id if ctx.guild else None
+        ok, reason, sid = await _precheck(self.bot, ctx, "bossfight", 25)
+        if not ok:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
+                self.bot, gid, title="Combat de boss", description=reason, kind="warning"
+            )))
+        view = _BossFightView(self, ctx, sid)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(
+            await _embed(self.bot, gid, title="Combat de boss",
+                         description=view.summary("⚔️ Le boss apparaît ! Choisissez votre premier coup."))
+        ), view))
+        view.message = msg
+
+
+class _DoorsView(discord.ui.View):
+    def __init__(self, user_id: int):
+        super().__init__(timeout=25)
+        self.user_id = user_id
+        self.choice: int | None = None
+        self._lock = asyncio.Lock()
+        for i in range(1, 4):
+            self.add_item(_DoorButton(i))
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Cette partie n'est pas la vôtre.", ephemeral=True)
+            return False
+        return True
+
+
+class _DoorButton(discord.ui.Button):
+    def __init__(self, number: int):
+        super().__init__(label=f"Porte {number}", emoji="🚪", style=discord.ButtonStyle.primary)
+        self.number = number
+
+    async def callback(self, interaction):
+        view: _DoorsView = panels.vue_source(self)
+        async with view._lock:
+            if view.choice is not None:
+                return await interaction.response.send_message("Porte déjà choisie.", ephemeral=True)
+            view.choice = self.number
+            for child in view.children:
+                child.disabled = True
+            await interaction.response.defer()
+            panels.terminer_vue(self)
+
+
+class _EmojiOrderView(discord.ui.View):
+    def __init__(self, user_id: int, sequence: list[str]):
+        super().__init__(timeout=20)
+        self.user_id = user_id
+        self.sequence = list(sequence)
+        self.picks: list[str] = []
+        self._lock = asyncio.Lock()
+        for token in game_rewards.secure_shuffle(list(sequence)):
+            self.add_item(_EmojiOrderButton(token))
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Seul le joueur peut toucher les symboles.", ephemeral=True)
+            return False
+        return True
+
+
+class _EmojiOrderButton(discord.ui.Button):
+    def __init__(self, token: str):
+        # Un symbole numérique ne peut pas devenir un emoji Discord.
+        super().__init__(label=str(token), style=discord.ButtonStyle.secondary)
+        self.token = token
+
+    async def callback(self, interaction):
+        view: _EmojiOrderView = panels.vue_source(self)
+        async with view._lock:
+            if self.token in view.picks or len(view.picks) >= len(view.sequence):
+                return await interaction.response.send_message("Ce symbole est déjà sélectionné.", ephemeral=True)
+            view.picks.append(self.token)
+            self.disabled = True
+            if len(view.picks) == len(view.sequence) or view.picks != view.sequence[:len(view.picks)]:
+                for child in view.children:
+                    child.disabled = True
+                await interaction.response.defer()
+                panels.terminer_vue(self)
+            else:
+                await interaction.response.edit_message(view=panels.vue_panneau(self))
+
+
+class _BossFightView(discord.ui.View):
+    def __init__(self, cog: GamesRapides, ctx: commands.Context, session_id: str):
+        super().__init__(timeout=85)
+        self.cog = cog
+        self.ctx = ctx
+        self.session_id = session_id
+        self.hp, self.boss_hp, self.turn = 14, 18, 0
+        self._settled = False
+        self._lock = asyncio.Lock()
+        self.message = None
+        for label, emoji, action, style in (
+            ("Attaque", "⚔️", "attack", discord.ButtonStyle.primary),
+            ("Pouvoir", "🔥", "power", discord.ButtonStyle.danger),
+            ("Bouclier", "🛡️", "guard", discord.ButtonStyle.success),
+        ):
+            self.add_item(_BossFightButton(label, emoji, action, style))
+
+    def summary(self, status: str) -> str:
+        return (
+            f"👤 Vos PV : **{max(0, self.hp)}/14**  ·  🐲 Boss : **{max(0, self.boss_hp)}/18**\n"
+            f"🔄 Tour **{self.turn}/7**\n\n{status}"
+        )
+
+    async def finish(self, *, won: bool, status: str):
+        if self._settled:
+            return
+        self._settled = True
+        self.stop()
+        reward = await _finish(
+            self.cog.bot, self.ctx, "bossfight", self.session_id,
+            "win" if won else "loss", 70 if won else 0,
+        )
+        for child in self.children:
+            child.disabled = True
+        desc = self.summary(status)
+        if won:
+            desc += _reward_line(reward)
+        if self.message:
+            await panels.editer(self.message, panels.depuis_embed(await _embed(
+                self.cog.bot, self.ctx.guild.id, title="Combat de boss — " + ("Victoire" if won else "Défaite"),
+                description=desc, kind="success" if won else "danger",
+            )))
+
+    async def on_timeout(self):
+        async with self._lock:
+            if not self._settled:
+                try:
+                    await self.finish(won=False, status="⏱️ Vous avez quitté l'arène.")
+                except Exception:
+                    logger.exception("Expiration du combat de boss")
+
+
+class _BossFightButton(discord.ui.Button):
+    def __init__(self, label, emoji, action, style):
+        super().__init__(label=label, emoji=emoji, style=style)
+        self.action = action
+
+    async def callback(self, interaction):
+        view: _BossFightView = panels.vue_source(self)
+        if interaction.user.id != view.ctx.author.id:
+            return await interaction.response.send_message("Ce boss appartient à un autre joueur.", ephemeral=True)
+        await interaction.response.defer()
+        async with view._lock:
+            if view._settled:
+                return
+            view.turn += 1
+            if self.action == "guard":
+                damage, text, defense = 1, "🛡️ Bouclier levé !", 3
+            elif self.action == "power":
+                hit = game_rewards.secure_chance(0.65)
+                damage = game_rewards.secure_randint(5, 8) if hit else 0
+                text, defense = ("🔥 Coup puissant !" if hit else "💨 Pouvoir esquivé !"), 0
+            else:
+                damage = game_rewards.secure_randint(2, 5)
+                text, defense = "⚔️ Vous attaquez !", 0
+            view.boss_hp -= damage
+            if view.boss_hp <= 0:
+                return await view.finish(won=True, status=f"{text} 🏆 Boss vaincu !")
+            retaliation = max(0, game_rewards.secure_randint(2, 5) - defense)
+            view.hp -= retaliation
+            status = f"{text} -{damage} PV au boss · 💥 Riposte : -{retaliation} PV."
+            if view.hp <= 0 or view.turn >= 7:
+                return await view.finish(won=False, status=status + " 💀 Vous êtes vaincu.")
+            await panels.editer(interaction.message, panels.avec_composants(panels.depuis_embed(
+                await _embed(view.cog.bot, view.ctx.guild.id, title="Combat de boss",
+                             description=view.summary(status))
+            ), view))
+
+
 class _EmojiAnswerView(discord.ui.View):
     """Le quiz emoji se joue en boutons, sans messages de réponse publics."""
     def __init__(self, user_id: int, options: list[str]):
