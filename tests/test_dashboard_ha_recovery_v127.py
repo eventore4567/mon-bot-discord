@@ -53,4 +53,4 @@ def test_dockerfile_uses_static_ffmpeg_without_apt_disk_exhaustion():
     assert "mwader/static-ffmpeg:8.1.2" in dockerfile
     assert "COPY --from=ffmpeg_static /ffmpeg /usr/local/bin/ffmpeg" in dockerfile
     assert "COPY --from=ffmpeg_static /ffprobe /usr/local/bin/ffprobe" in dockerfile
-    assert "apt-get install" not in dockerfile
+    assert "RUN apt-get" not in dockerfile
