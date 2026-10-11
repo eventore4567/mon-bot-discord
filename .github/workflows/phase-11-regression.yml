@@ -136,6 +136,8 @@ jobs:
               tests/test_game_stakes.py
               tests/test_games_runtime_core.py
               tests/test_games_loot_and_emojis.py
+              tests/test_blackjack_cards.py
+              tests/test_game_visuals.py
               tests/test_party_games.py
               tests/test_pve_engine.py
 
