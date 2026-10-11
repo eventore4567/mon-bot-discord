@@ -171,13 +171,14 @@ async def test_permission_guard_restores_role_escalation():
 
 
 @pytest.mark.asyncio
-async def test_admin_is_still_filtered_when_not_explicitly_exempt():
-    cog = _cog(_base_conf(antilink=1, antilink_strict=1))
+async def test_manage_server_staff_is_not_blocked_by_strict_antilink():
+    # « Gérer le serveur » est désormais harmonisé avec les règles de salons.
+    cog = _cog(_base_conf(antilink=1, antilink_strict=1, antiscam=1))
     message = _message(_member(manage_guild=True), "https://example.com")
 
     await cog.on_message(message)
 
-    cog._delete_and_warn.assert_awaited_once()
+    cog._delete_and_warn.assert_not_awaited()
 
 
 @pytest.mark.asyncio

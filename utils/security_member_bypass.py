@@ -1,38 +1,31 @@
-"""Exemption des filtres de messages pour l'équipe ayant de vrais pouvoirs d'administration.
+"""Permissions de bypass des filtres de messages SentriX.
 
-Deux configurations Discord sont admises :
-- permission native Administrateur ;
-- rôle de direction avec TOUS les pouvoirs sensibles de gestion, même sans bit
-  Administrateur. Une seule permission comme Gérer le serveur ne suffit jamais.
+Les membres disposant de la permission Discord « Administrateur » OU « Gérer
+le serveur » peuvent contourner les filtres de messages SentriX, y compris
+anti-liens et anti-invitations. Cela correspond aux autres règles de salon
+SentriX et évite d'exiger une combinaison arbitraire de six permissions.
 
-Ne pas réutiliser ce prédicat pour l'anti-nuke, l'anti-raid, les journaux d'audit
-ou les protections des permissions : un compte staff compromis reste dangereux.
+Une permission partielle (Gérer les messages, Bannir, Gérer les rôles, etc.)
+ou un rôle simplement nommé « Admin » ne suffit jamais.
+
+Cette fonction ne doit pas être utilisée pour désactiver les protections
+globales anti-nuke, anti-raid ni le journal d'audit.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-# Cette conjonction est volontairement stricte : un modérateur ordinaire qui
-# peut bannir ou gérer les messages ne devient pas immunisé par inadvertance.
-_FULL_STAFF_PERMISSIONS = (
-    "manage_guild",
-    "manage_channels",
-    "manage_roles",
-    "manage_messages",
-    "kick_members",
-    "ban_members",
-)
-
 
 def can_bypass_message_filters(member: Any) -> bool:
-    """Vrai pour les administrateurs et les rôles réellement « all perms »."""
+    """Exempter les véritables responsables du serveur, pas un nom de rôle."""
     permissions = getattr(member, "guild_permissions", None)
     if permissions is None:
         return False
-    if getattr(permissions, "administrator", False) is True:
-        return True
-    return all(getattr(permissions, name, False) is True for name in _FULL_STAFF_PERMISSIONS)
+    return (
+        getattr(permissions, "administrator", False) is True
+        or getattr(permissions, "manage_guild", False) is True
+    )
 
 
 __all__ = ["can_bypass_message_filters"]
