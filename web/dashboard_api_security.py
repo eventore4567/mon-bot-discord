@@ -46,7 +46,7 @@ _PROTECTION_CATALOG = {
     "antispam": {
         "label": "Anti-spam",
         "group": "Messages",
-        "description": "Bloque le flood, les rafales et les répétitions de messages.",
+        "description": "Détecte les rafales, les copies répétées et le spam lent réparti entre plusieurs salons.",
         "supports_policy": True,
     },
     "antilink": {
@@ -88,7 +88,7 @@ _PROTECTION_CATALOG = {
     "antiscam": {
         "label": "Anti-arnaques",
         "group": "Messages",
-        "description": "Détecte le hameçonnage, les faux Nitro, les arnaques crypto et les pièces jointes dangereuses.",
+        "description": "Détecte les faux cadeaux, les domaines usurpés, les liens de connexion piégés et les pièces jointes dangereuses.",
         "supports_policy": True,
     },
     "antiinsult": {
