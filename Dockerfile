@@ -37,6 +37,7 @@ RUN python -m pytest -q \
     tests/test_logs_bulk_delete_resilience.py \
     tests/test_moderation_logging_resilience.py \
     tests/test_automod_enforcement_resilience.py \
+    tests/test_security_message_bypass_regression.py \
     tests/test_automod_idempotent_sanctions_v131.py \
     tests/test_raid_verification_recovery_v130.py \
     tests/test_automod_log_manage_style.py \
@@ -68,6 +69,7 @@ RUN python -m pytest -q \
     tests/test_music_playlists_v108.py \
     tests/test_music_playlist_persistence.py \
     tests/test_games_runtime_core.py \
+    tests/test_community_text_races_async.py \
     tests/test_game_stakes.py \
     tests/test_services_economy.py \
     tests/test_economy_race_conditions.py \
