@@ -29,6 +29,7 @@ def test_each_game_family_chooses_relevant_anime_scene():
         "Zombie": "fight",
         "Course à l'emoji": "race",
         "Quiz de culture": "think",
+        "Question de culture générale": "think",
         "Memory": "think",
         "Pile ou face": "coin",
         "Coinflip": "coin",
