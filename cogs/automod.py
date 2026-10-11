@@ -584,9 +584,9 @@ TOGGLE_FIELDS = [
     "escalation",
 ]
 
-# Protections qui inspectent un message et pour lesquelles un rôle peut être
-# autorisé à contourner le filtre. Un salon strict reprend toujours la priorité
-# sur les rôles bypass. Les protections serveur (anti-nuke, anti-raid, etc.)
+# Protections qui inspectent un message et permettent le bypass par rôle
+# OU par membre individuel. Un salon strict reprend toujours la priorité
+# sur les deux types de bypass. Les protections serveur (anti-nuke, anti-raid, etc.)
 # restent gérées par leurs garde-fous dédiés car elles ne possèdent pas de
 # notion de salon de message.
 SECURITY_FILTER_POLICY_KEYS = frozenset({
@@ -1054,7 +1054,10 @@ class AutoMod(commands.Cog, name="Automod"):
         bypass_role_ids.update(await self.get_exempt_roles_cached(guild.id))
         strict_channel_ids = set(policy["strict_channel_ids"])
 
-        if strict_channel_ids and bypass_role_ids:
+        # Les règles natives Discord n'acceptent pas les exemptions par utilisateur.
+        # Ne pas laisser une règle native sanctionner un membre exempté : dans ce
+        # cas, SentriX applique lui-même ce filtre sur les messages.
+        if policy["member_ids"] or (strict_channel_ids and bypass_role_ids):
             return None
 
         roles = [
@@ -1625,7 +1628,7 @@ class AutoMod(commands.Cog, name="Automod"):
     ) -> dict[str, set[int]]:
         canonical = self._canonical_security_filter(filter_name)
         if canonical not in SECURITY_FILTER_POLICY_KEYS:
-            return {"role_ids": set(), "strict_channel_ids": set()}
+            return {"role_ids": set(), "member_ids": set(), "strict_channel_ids": set()}
 
         key = (int(guild_id), canonical)
         cached = self.security_filter_policy_cache.get(key)
@@ -1636,6 +1639,7 @@ class AutoMod(commands.Cog, name="Automod"):
         if callable(reader):
             raw = await reader(int(guild_id), canonical)
             role_ids = {int(value) for value in (raw.get("role_ids") or [])}
+            member_ids = {int(value) for value in (raw.get("member_ids") or [])}
             strict_channel_ids = {
                 int(value) for value in (raw.get("strict_channel_ids") or [])
             }
@@ -1650,19 +1654,27 @@ class AutoMod(commands.Cog, name="Automod"):
                     "WHERE guild_id=? AND filter_name=?",
                     (int(guild_id), canonical),
                 )
+                member_rows = await fetchall(
+                    "SELECT user_id FROM security_filter_bypass_members "
+                    "WHERE guild_id=? AND filter_name=?",
+                    (int(guild_id), canonical),
+                )
                 channel_rows = await fetchall(
                     "SELECT channel_id FROM security_filter_strict_channels "
                     "WHERE guild_id=? AND filter_name=?",
                     (int(guild_id), canonical),
                 )
                 role_ids = {int(row["role_id"]) for row in role_rows}
+                member_ids = {int(row["user_id"]) for row in member_rows}
                 strict_channel_ids = {int(row["channel_id"]) for row in channel_rows}
             else:
                 role_ids = set()
+                member_ids = set()
                 strict_channel_ids = set()
 
         policy = {
             "role_ids": role_ids,
+            "member_ids": member_ids,
             "strict_channel_ids": strict_channel_ids,
         }
         self.security_filter_policy_cache[key] = policy
@@ -1677,9 +1689,9 @@ class AutoMod(commands.Cog, name="Automod"):
 
         Priorité :
         1. immunité personnelle explicitement activée / propriétaire par défaut ;
-        2. salon strict => le filtre s'applique même à un rôle bypass ;
+        2. salon strict => le filtre s'applique même à un membre/rôle bypass ;
         3. salon ignoré => filtre ignoré ;
-        4. rôle bypass de ce filtre ou rôle AutoMod global => filtre ignoré ;
+        4. membre ou rôle bypass de ce filtre / rôle AutoMod global => ignoré ;
         5. comportement normal.
 
         Un override personnel OFF transforme le propriétaire en membre normal, comme
@@ -1705,10 +1717,13 @@ class AutoMod(commands.Cog, name="Automod"):
         ):
             return False
 
-        # C'est le point essentiel demandé : dans un salon strict, les rôles
-        # bypass (spécifiques ou globaux) ne court-circuitent PAS le filtre.
+        # Les salons stricts reprennent la priorité sur le bypass individuel,
+        # les rôles ciblés et les exemptions globales héritées.
         if strict:
             return True
+
+        if member.id in policy.get("member_ids", set()):
+            return False
 
         ignored = await self.get_ignored_channels_cached(member.guild.id)
         if scope_ids & ignored:
