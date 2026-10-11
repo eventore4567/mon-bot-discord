@@ -6,6 +6,7 @@ conservés ; les données ne survivent pas au redémarrage.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 import unicodedata
 from collections import OrderedDict
@@ -30,7 +31,7 @@ class DuplicateMessageWindow:
     def _fingerprint(content: str) -> str:
         value = unicodedata.normalize("NFKC", str(content or ""))
         value = "".join(c for c in value if unicodedata.category(c) != "Cf")
-        return " ".join(value.casefold().split())[:300]
+        return " ".join(value.casefold().split())
 
     def add(
         self, guild_id: int, user_id: int, content: str, *, now: float | None = None
@@ -48,10 +49,17 @@ class DuplicateMessageWindow:
                 break
             self._hits.popitem(last=False)
 
-        if len(value) < 3:
+        # Trois réponses courtes (« mdr », « oui », « lol », « ok ») ne
+        # constituent pas un spam à elles seules. Le compteur de débit
+        # général continue de détecter un véritable flood de ces messages.
+        if len(value) < 12:
             return False
 
-        key = (int(guild_id), int(user_id), value)
+        # La troncature aux 300 premiers caractères fusionnait des textes
+        # longs pourtant différents. Une empreinte bornée du texte ENTIER
+        # évite les faux positifs sans conserver les messages des utilisateurs.
+        fingerprint = hashlib.blake2b(value.encode("utf-8"), digest_size=16).hexdigest()
+        key = (int(guild_id), int(user_id), fingerprint)
         past = self._hits.pop(key, [])
         hits = [stamp for stamp in past if stamp >= cutoff]
         hits.append(moment)
