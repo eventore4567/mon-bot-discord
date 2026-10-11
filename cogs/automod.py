@@ -626,7 +626,7 @@ def _compose_censored_content(
 
 
 _WHITELIST_DOMAIN_RE = re.compile(
-    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}\\Z",
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\Z",
     re.IGNORECASE,
 )
 
