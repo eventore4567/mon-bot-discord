@@ -4,7 +4,11 @@ Les permissions Discord de gestion doivent rester exemptées de l'anti-lien,
 anti-invitation, anti-spam et anti-scam locaux. Une simple permission
 de modération ou un nom de rôle ne donne aucun passe-droit.
 """
+import os
 from types import SimpleNamespace
+
+# L'import de config exige un token, sans utiliser de véritable secret en CI.
+os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from utils.security_member_bypass import can_bypass_message_filters
 
