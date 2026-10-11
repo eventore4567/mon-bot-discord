@@ -75,6 +75,7 @@ RUN python -m pytest -q \
     tests/test_music_playlist_persistence.py \
     tests/test_games_runtime_core.py \
     tests/test_duel_invitation_games.py \
+    tests/test_bossfight_economy_animation.py \
     tests/test_game_visuals.py \
     tests/test_community_text_races_async.py \
     tests/test_game_stakes.py \
