@@ -16,7 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import embeds, sentrix_emojis
+from utils import access_matrix, embeds, sentrix_emojis
 from utils import sentrix_panels as panels
 from utils.command_permissions import command_example, command_requirement
 
@@ -120,6 +120,14 @@ def _visible(bot: commands.Bot, _member=None) -> list[commands.Command]:
             continue
         name_key = command.qualified_name.casefold().strip()
         if not name_key or name_key in seen_names:
+            continue
+        # Les commandes globales du propriétaire sont des outils internes.
+        # Elles restent exécutables par l'owner pour la maintenance, mais ne
+        # polluent ni / ni les pages publiques de +help.
+        root_name = name_key.split(" ", 1)[0]
+        if root_name in access_matrix.OWNER_ONLY_COMMANDS or root_name in {
+            "unsyncbl", "alias", "set-nickname",
+        }:
             continue
 
         callback = _callback_key(getattr(command, "callback", None))
