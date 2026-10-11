@@ -63,7 +63,7 @@ from cogs.games_catalog import (
     valeur_objet,
 )
 from services import game_stakes
-from utils import checks, design_system, game_rewards, stats_service, temporary_boosts
+from utils import checks, design_system, game_rewards, game_visuals, stats_service, temporary_boosts
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.games-economy")
@@ -101,7 +101,7 @@ async def _embed(bot, guild_id: int | None, *, title: str, description: str = No
     embed.title = f"{_game_icon(title)} {resolved_title}"
     if description:
         embed.description = str(description)
-    return embed
+    return game_visuals.decorate_embed(embed, title=title, description=description, kind=kind)
 
 
 # Plus haut ou plus bas : la valeur reste un nombre de 1 a 13 pour la comparaison,
