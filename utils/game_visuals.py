@@ -97,6 +97,37 @@ async def verified_image_for(
         return url if ok else None
 
 
+async def preflight_assets() -> dict[str, bool]:
+    """Vérifie les huit GIFs dès le chargement du module (en tâche de fond).
+
+    Le diagnostic de disponibilité devient observable dans les logs Railway.
+    Une panne du fournisseur ne fait pas échouer le démarrage du bot.
+    """
+    sample = {
+        "win": ("Duel", "Victoire", "success"),
+        "loss": ("Duel", "Vous avez perdu.", "danger"),
+        "fight": ("Duel", "Début du combat", "primary"),
+        "think": ("Quiz", "Choisissez une réponse", "primary"),
+        "coin": ("Pile ou face", "Lancez la pièce", "primary"),
+        "race": ("Course", "La course commence", "primary"),
+        "arcade": ("Puissance 4", "C'est votre tour", "primary"),
+        "slap": ("Slap", "Prêt à gifler", "primary"),
+    }
+    results = {}
+    for scene, args in sample.items():
+        try:
+            results[scene] = bool(await verified_image_for(*args))
+        except Exception:
+            results[scene] = False
+            logger.exception("Vérification GIF %s échouée.", scene)
+    logger.info(
+        "Animations des jeux : %d/%d GIFs disponibles, scenes=%s.",
+        sum(results.values()), len(results),
+        ",".join(scene for scene, ok in results.items() if ok) or "aucune",
+    )
+    return results
+
+
 async def decorate_embed_checked(
     embed: discord.Embed, *, title: str, description: str | None = None,
     kind: str = "primary",
@@ -197,4 +228,4 @@ def result_icon(title: str, description: str | None = None, kind: str = "primary
     return ICONS.get(scene_for(title, description, kind) or "", "")
 
 
-__all__ = ["GIFS", "ICONS", "scene_for", "image_for", "verified_image_for", "decorate_embed", "decorate_embed_checked", "result_icon"]
+__all__ = ["GIFS", "ICONS", "scene_for", "image_for", "verified_image_for", "decorate_embed", "decorate_embed_checked", "preflight_assets", "result_icon"]
