@@ -87,7 +87,7 @@ class Minigames(commands.Cog, name="Minigames"):
         # Le titre d'un mini-jeu porte le pictogramme de CE jeu, comme dans
         # cogs/games_economy : « Question de culture générale » arrivait nu.
         embed.title = f"{pictogramme_de_titre(title)} {resolu}"
-        return game_visuals.decorate_embed(embed, title=title, description=description, kind=kind)
+        return await game_visuals.decorate_embed_checked(embed, title=title, description=description, kind=kind)
 
     @staticmethod
     def _coeurs(restants: int, total: int = ESSAIS_PENDU) -> str:
