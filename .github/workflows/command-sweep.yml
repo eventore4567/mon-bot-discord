@@ -58,6 +58,7 @@ jobs:
             tests/test_antiscam_precision_v78.py \
             tests/test_security_defaults_voice_audit_ai.py \
             tests/test_security_layer_hardening_v128.py \
+            tests/test_antinuke_webhook_audit_dedup_v129.py \
             tests/test_dashboard_ha_recovery_v127.py \
             tests/test_security_filter_policy.py \
             tests/test_i18n_english_surface.py \
