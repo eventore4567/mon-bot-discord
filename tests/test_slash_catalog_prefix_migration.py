@@ -62,3 +62,22 @@ def test_new_menu_is_compact_and_within_discord_limits():
         for root, entries in roots.items()
         if all(len(e.path.split()) > 1 for e in entries)
     )
+
+
+
+def test_member_staff_details_have_one_slash_entry():
+    """The interactive moderation view already opens the same member_panel.
+
+    Keep +member for legacy users but avoid a second public slash route.
+    """
+    sources = {entry.source: entry.path for entry in catalog.CATALOG}
+    assert sources["modview"] == "moderation view"
+    assert "member" not in sources
+    assert "staff member" not in {entry.path for entry in catalog.CATALOG}
+
+
+def test_no_duplicate_slash_sources_or_paths():
+    from collections import Counter
+
+    assert not [name for name, count in Counter(e.source for e in catalog.CATALOG).items() if count > 1]
+    assert not [name for name, count in Counter(e.path for e in catalog.CATALOG).items() if count > 1]
