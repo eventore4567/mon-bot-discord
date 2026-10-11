@@ -740,15 +740,18 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
 
         await self.ensure_verified_panel_hidden(guild)
 
-        bot_user_id = getattr(getattr(self.bot, "user", None), "id", None)
-        removed_verify = await _purge_bot_messages(verify_channel, bot_user_id)
-        removed_trap = await _purge_bot_messages(trap_channel, bot_user_id)
-
+        # Ne jamais supprimer l'ancien panneau AVANT de savoir si Discord
+        # accepte la publication du nouveau. Une permission manquante ou une
+        # erreur réseau laissait autrefois le salon totalement vide.
+        # L'autorité V5 édite et mémorise les vrais IDs : cette implémentation
+        # historique est un repli conservateur, elle ne purge aucun message.
         await panels.envoyer(verify_channel, await _web_panel(self.bot, guild))
         await panels.envoyer(
             trap_channel,
             panels.depuis_embed(_trap_embed(verify_channel, str(conf["sanction"] or "softban"))),
         )
+        removed_verify = 0
+        removed_trap = 0
         return {
             "verify": verify_channel,
             "trap": trap_channel,
