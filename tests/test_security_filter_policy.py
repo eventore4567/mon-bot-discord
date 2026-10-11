@@ -201,7 +201,7 @@ async def test_antigif_runtime_skips_full_permission_staff_but_not_regular_users
     regular = _member()
     assert await runtime.handle_message(_message(admin)) is None
     assert await runtime.handle_message(_message(regular)) == "filtered"
-    runtime.handle_message.__func__._sentrix_owner_antigif_immunity is True
+    assert runtime.handle_message.__func__._sentrix_owner_antigif_immunity is True
 
 
 @pytest.mark.asyncio
