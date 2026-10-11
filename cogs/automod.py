@@ -3106,6 +3106,34 @@ class AutoMod(commands.Cog, name="Automod"):
         }
         return labels.get(filter_name, f"votre message a été supprimé : {reason}")
 
+    @staticmethod
+    def _content_notice_view(member_mention: str, filter_name: str) -> discord.ui.LayoutView:
+        """Avertissement AutoMod compact, sans bannière blanche ni embed générique.
+
+        Components V2 est dessiné dans un seul conteneur avec un accent coloré.
+        Aucun lien suspect n'y est réaffiché ; le contenu a déjà été supprimé.
+        """
+        titles = {
+            "antilink": ("🔗 Lien supprimé", "Les liens ne sont pas autorisés ici."),
+            "blacklist_link": ("🔗 Lien bloqué", "Ce lien figure parmi les liens interdits."),
+            "antiinvite": ("📨 Invitation bloquée", "Les invitations ne sont pas autorisées ici."),
+            "blacklist_word": ("🛡️ Message modéré", "Un mot interdit a été détecté."),
+            "blacklist_word_link": ("🛡️ Message modéré", "Un mot et un lien interdits ont été détectés."),
+            "antiscam": ("🛡️ Arnaque suspectée", "Un lien ou un contenu suspect a été détecté."),
+        }
+        title, explanation = titles.get(filter_name, ("🛡️ Message modéré", "Un filtre de sécurité a été appliqué."))
+        view = discord.ui.LayoutView(timeout=15)
+        box = discord.ui.Container(accent_colour=discord.Colour(0xE6A64C))
+        box.add_item(
+            discord.ui.TextDisplay(
+                f"### {title}\n"
+                f"{member_mention} · {explanation}\n"
+                "-# **SentriX · Sécurité** · Avertissement temporaire (8 s)"
+            )
+        )
+        view.add_item(box)
+        return view
+
     async def _delete_and_warn(
         self,
         message: discord.Message,
@@ -3267,13 +3295,23 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         try:
             if filter_name in {"blacklist_word", "blacklist_link", "blacklist_word_link", "antilink", "antiinvite", "antiscam"}:
-                note = await panels.envoyer(
-                    message.channel,
-                    panels.depuis_embed(
-                        embeds.warning(f"{message.author.mention}, {public_text}")
-                    ),
-                )
-                await note.delete(delay=8)
+                # Une carte courte avec liseré ambre, sans image/bannière ni
+                # enveloppe d'embed blanche. Discord supprime automatiquement
+                # l'avertissement au bout de huit secondes.
+                try:
+                    await message.channel.send(
+                        view=self._content_notice_view(message.author.mention, filter_name),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=8,
+                    )
+                except (discord.Forbidden, discord.HTTPException):
+                    # Composants indisponibles ou salon restreint : la
+                    # suppression du message reste acquise, repli discret.
+                    await panels.texte_court(
+                        message.channel,
+                        f"{message.author.mention}, {public_text}",
+                        supprimer_apres=6,
+                    )
             else:
                 await panels.texte_court(
                     message.channel,
