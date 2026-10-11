@@ -3812,7 +3812,9 @@ class AutoMod(commands.Cog, name="Automod"):
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
-        if before.verification_level != after.verification_level:
+        before_level = getattr(before, "verification_level", None)
+        after_level = getattr(after, "verification_level", None)
+        if before_level is not None and after_level is not None and before_level != after_level:
             await self._raid_recovery.on_guild_level_change(before, after)
         before_code = getattr(before, "vanity_url_code", None)
         after_code = getattr(after, "vanity_url_code", None)
