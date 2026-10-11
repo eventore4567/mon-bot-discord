@@ -1649,15 +1649,18 @@ class AutoMod(commands.Cog, name="Automod"):
         """Décide si UN filtre doit s'appliquer à ce message.
 
         Priorité :
-        1. immunité personnelle explicitement activée / propriétaire par défaut ;
-        2. Admin Discord ou rôle all-perms => aucun filtre de messages, même en salon strict ;
-        3. salon strict => le filtre s'applique même à un membre/rôle bypass ;
-        4. salon ignoré => filtre ignoré ;
-        5. membre ou rôle bypass de ce filtre / rôle AutoMod global => ignoré ;
-        6. comportement normal.
+        1. Administrateur / Gérer le serveur => bypass de tous les filtres de messages ;
+        2. immunité personnelle ON / propriétaire par défaut ;
+        3. bypass explicite de ce filtre (membre ou rôle) ;
+        4. rôle AutoMod global exempté (sauf immunité personnelle OFF) ;
+        5. salon strict : protection appliquée à tous les autres membres ;
+        6. salon ignoré : protection ignorée, hors salon strict ;
+        7. comportement normal.
 
-        Un override personnel OFF transforme le propriétaire en membre normal, comme
-        avant cette politique. Les threads héritent du salon parent.
+        Un salon strict renforce la modération des membres ordinaires, sans annuler
+        les exceptions configurées par l'administrateur. Les threads héritent du
+        salon parent. Un override personnel OFF neutralise l'immunité historique
+        mais pas un bypass de filtre enregistré explicitement.
         """
         canonical = self._canonical_security_filter(filter_name)
         if canonical not in SECURITY_FILTER_POLICY_KEYS:
@@ -1685,30 +1688,31 @@ class AutoMod(commands.Cog, name="Automod"):
         ):
             return False
 
-        # Les salons stricts reprennent la priorité sur le bypass individuel,
-        # les rôles ciblés et les exemptions globales héritées.
-        if strict:
-            return True
-
+        # Les exemptions choisies dans le Dashboard priment TOUJOURS sur le
+        # salon strict. Sinon « membre/rôle autorisé à contourner » était trompeur
+        # et un modérateur pouvait encore être sanctionné dans #modo-chat.
         if member.id in policy.get("member_ids", set()):
             return False
-
-        ignored = await self.get_ignored_channels_cached(member.guild.id)
-        if scope_ids & ignored:
-            return False
-
         if policy["role_ids"] and any(
             role.id in policy["role_ids"] for role in member.roles
         ):
             return False
 
-        # L'override personnel OFF désactive volontairement les immunités
-        # historiques. Sinon, les anciens rôles AutoMod globaux restent compatibles.
+        # Les rôles AutoMod globalement exemptés sont aussi de vraies
+        # exceptions, sauf si le membre a désactivé son immunité via override OFF.
         if override is None:
             exempt_ids = await self.get_exempt_roles_cached(member.guild.id)
             if exempt_ids and any(role.id in exempt_ids for role in member.roles):
                 return False
 
+        # Le mode strict conserve sa priorité sur « ignorer ce salon » pour
+        # les membres NON exemptés, y compris dans les threads du salon parent.
+        if strict:
+            return True
+
+        ignored = await self.get_ignored_channels_cached(member.guild.id)
+        if scope_ids & ignored:
+            return False
         return True
 
     async def get_antispam_policy_cached(self, guild_id: int) -> dict[str, object]:

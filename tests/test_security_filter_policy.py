@@ -266,16 +266,16 @@ async def test_member_bypass_is_per_filter_and_does_not_require_a_role():
 
 
 @pytest.mark.asyncio
-async def test_strict_channel_and_its_threads_override_individual_bypass():
+async def test_strict_channel_and_its_threads_respect_individual_bypass():
     cog = _cog()
     member = _member(user_id=7)
     cog.immunity_overrides_cache[(1, member.id)] = None
     _policy(cog, "antiscam", members=(7,), strict=(77,))
 
-    assert await cog.security_filter_applies_to(_message(member, channel_id=77), "antiscam") is True
+    assert await cog.security_filter_applies_to(_message(member, channel_id=77), "antiscam") is False
     assert await cog.security_filter_applies_to(
         _message(member, channel_id=999, parent_id=77), "antiscam"
-    ) is True
+    ) is False
     assert await cog.security_filter_applies_to(_message(member, channel_id=78), "antiscam") is False
 
 
@@ -290,18 +290,18 @@ async def test_member_bypass_disables_unrepresentable_native_discord_rule():
 
 
 @pytest.mark.asyncio
-async def test_strict_channel_overrides_filter_role_bypass():
+async def test_strict_channel_respects_filter_role_bypass():
     cog = _cog()
     member = _member(role_ids=(123,))
     message = _message(member, channel_id=77)
     cog.immunity_overrides_cache[(1, member.id)] = None
     _policy(cog, "antispam", roles=(123,), strict=(77,))
 
-    assert await cog.security_filter_applies_to(message, "antispam") is True
+    assert await cog.security_filter_applies_to(message, "antispam") is False
 
 
 @pytest.mark.asyncio
-async def test_strict_channel_overrides_legacy_global_exempt_role():
+async def test_strict_channel_respects_legacy_global_exempt_role():
     cog = _cog()
     member = _member(role_ids=(456,))
     message = _message(member, channel_id=88)
@@ -309,7 +309,7 @@ async def test_strict_channel_overrides_legacy_global_exempt_role():
     cog.exempt_roles_cache[1] = {456}
     _policy(cog, "antilink", strict=(88,))
 
-    assert await cog.security_filter_applies_to(message, "antilink") is True
+    assert await cog.security_filter_applies_to(message, "antilink") is False
 
 
 @pytest.mark.asyncio
@@ -325,13 +325,60 @@ async def test_global_exempt_role_still_bypasses_outside_strict_channel():
 
 
 @pytest.mark.asyncio
-async def test_thread_inherits_strict_parent_channel():
+async def test_thread_inherits_strict_parent_channel_with_role_bypass():
     cog = _cog()
     member = _member(role_ids=(123,))
     message = _message(member, channel_id=500, parent_id=77)
     cog.immunity_overrides_cache[(1, member.id)] = None
     _policy(cog, "antiscam", roles=(123,), strict=(77,))
 
+    assert await cog.security_filter_applies_to(message, "antiscam") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filter_name", ["antilink", "antiinvite", "antiscam", "antispam"])
+async def test_explicit_bypass_honored_in_strict_channels_for_every_filter(filter_name):
+    cog = _cog()
+    member = _member(user_id=7, role_ids=(111,))
+    cog.immunity_overrides_cache[(1, member.id)] = False
+    _policy(cog, filter_name, roles=(111,), strict=(77,))
+
+    assert await cog.security_filter_applies_to(
+        _message(member, channel_id=77), filter_name
+    ) is False
+    assert await cog.security_filter_applies_to(
+        _message(member, channel_id=555, parent_id=77), filter_name
+    ) is False
+
+    # Même salon : les membres non exemptés restent filtrés.
+    outsider = _member(user_id=8, role_ids=(222,))
+    cog.immunity_overrides_cache[(1, outsider.id)] = False
+    assert await cog.security_filter_applies_to(
+        _message(outsider, channel_id=77), filter_name
+    ) is True
+
+
+@pytest.mark.asyncio
+async def test_global_legacy_bypass_override_off_is_still_disabled_in_strict_channel():
+    cog = _cog()
+    member = _member(user_id=7, role_ids=(456,))
+    cog.immunity_overrides_cache[(1, member.id)] = False
+    cog.exempt_roles_cache[1] = {456}
+    _policy(cog, "antilink", strict=(88,))
+    assert await cog.security_filter_applies_to(
+        _message(member, channel_id=88), "antilink"
+    ) is True
+
+
+@pytest.mark.asyncio
+async def test_bypass_antilink_does_not_exempt_other_security_filters():
+    cog = _cog()
+    member = _member(user_id=7, role_ids=(123,))
+    cog.immunity_overrides_cache[(1, member.id)] = None
+    _policy(cog, "antilink", roles=(123,), strict=(77,))
+    _policy(cog, "antiscam", strict=(77,))
+    message = _message(member, channel_id=77)
+    assert await cog.security_filter_applies_to(message, "antilink") is False
     assert await cog.security_filter_applies_to(message, "antiscam") is True
 
 
