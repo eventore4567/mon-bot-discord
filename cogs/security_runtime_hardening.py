@@ -711,7 +711,7 @@ class SecurityHardening(commands.Cog):
         embed = _embed_securite('PANIC actif', f"Activé <t:{row['created_at']}:R> par <@{row['created_by']}>.\nUtilisez `+panic off` pour restaurer le snapshot.", kind='danger')
         await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
-    @commands.command(name="security-repair", aliases=["securite-repair", "security-fix"])
+    @commands.command(name="security-repair", aliases=["securite-repair", "security-fix"], help="Appliquer les protections de sécurité recommandées du serveur.")
     @commands.guild_only()
     @commands.has_permissions(administrator=True)
     async def security_repair(self, ctx: commands.Context):
