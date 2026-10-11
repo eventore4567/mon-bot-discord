@@ -166,3 +166,73 @@ def test_lastmessage_duplicate_round_is_refused_without_cooldown(monkeypatch):
         cog._finish_community.assert_not_awaited()
 
     asyncio.run(scenario())
+
+
+def test_emoji_race_returns_without_waiting_for_clicks(monkeypatch):
+    async def scenario():
+        cog, bot, ctx, send = _prepare(monkeypatch)
+        finished = asyncio.Event()
+
+        class FakeView:
+            winner = None
+
+            def __init__(self, pool, target):
+                self.pool, self.target = pool, target
+
+            async def wait(self):
+                await finished.wait()
+
+        monkeypatch.setattr(games_economy, "_EmojiRaceView", FakeView)
+        monkeypatch.setattr(games_economy.panels, "avec_composants", lambda card, view: card)
+        monkeypatch.setattr(games_economy.game_rewards, "secure_pick", lambda items: items[0])
+
+        await asyncio.wait_for(cog.emoji_race.callback(cog, ctx), timeout=1)
+        assert send.await_count == 1
+        assert len(cog._community_tasks) == 1
+        assert cog._finish_community.await_count == 0
+        finished.set()
+        await asyncio.gather(*tuple(cog._community_tasks))
+        assert send.await_count == 2
+        cog._finish_community.assert_awaited_once_with(123, 789, "emoji-race")
+
+    asyncio.run(scenario())
+
+
+def test_reaction_event_returns_before_button_wait(monkeypatch):
+    async def scenario():
+        cog, bot, ctx, send = _prepare(monkeypatch)
+        finished = asyncio.Event()
+        views = []
+        edited = AsyncMock()
+
+        class FakeView:
+            winner = None
+            elapsed = None
+
+            def __init__(self, options, target):
+                self.options, self.target = options, target
+                views.append(self)
+
+            async def wait(self):
+                await finished.wait()
+
+        monkeypatch.setattr(games_economy, "_reaction_round",
+                            lambda: (["🍋 citron", "🍎 pomme"], "🍎 pomme"))
+        monkeypatch.setattr(games_economy, "_CommunityRaceButtonView", FakeView)
+        monkeypatch.setattr(games_economy.game_rewards, "secure_delay", lambda *_: 0.0)
+        monkeypatch.setattr(games_economy.panels, "avec_composants", lambda card, view: card)
+        monkeypatch.setattr(games_economy.panels, "editer", edited)
+
+        await asyncio.wait_for(cog.reactionevent.callback(cog, ctx), timeout=1)
+        assert send.await_count == 1
+        assert len(cog._community_tasks) == 1
+        assert cog._finish_community.await_count == 0
+
+        await asyncio.sleep(0.01)
+        assert len(views) == 1
+        finished.set()
+        await asyncio.gather(*tuple(cog._community_tasks))
+        assert edited.await_count == 2
+        cog._finish_community.assert_awaited_once_with(123, 789, "reactionevent")
+
+    asyncio.run(scenario())
