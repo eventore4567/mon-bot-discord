@@ -36,6 +36,67 @@ _SESSION_KEY = "sentrix_ha_dashboard_proxy_session"
 _INSTALLED = False
 
 
+def _dashboard_unavailable(request: web.Request, reason: str) -> web.Response:
+    """Page de repli lisible pour les NAVIGATIONS, JSON pour les API/OAuth.
+
+    Une indisponibilité du peer HA ne signifie pas « maintenance du bot » :
+    le navigateur peut retenter sans perdre sa session ni ouvrir un faux login.
+    Ne jamais recopier les détails internes de l'erreur dans le HTML.
+    """
+    if request.method not in {"GET", "HEAD"} or (
+        not request.path.startswith(("/", "/app", "/dashboard"))
+        or request.path.startswith(("/api", "/oauth", "/verify", "/health", "/ready", "/login"))
+    ):
+        response = web.json_response(
+            {"ok": False, "error": "dashboard_temporary_unavailable", "retry_after": 5},
+            status=503,
+        )
+    elif "text/html" not in request.headers.get("Accept", ""):
+        response = web.json_response(
+            {"ok": False, "error": "dashboard_temporary_unavailable", "retry_after": 5},
+            status=503,
+        )
+    else:
+        html = """<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07091a"><title>SentriX · Reconnexion du dashboard</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}
+*{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:24px;
+background:radial-gradient(ellipse 70% 55% at 50% 5%,#272256 0%,transparent 67%),
+radial-gradient(ellipse 60% 35% at 100% 100%,#152747 0%,transparent 75%),#07091a;color:#f5f5ff}
+main{max-width:600px;width:100%;border:1px solid #36315f;border-radius:24px;padding:clamp(25px,5vw,44px);
+background:linear-gradient(148deg,rgba(30,29,66,.94),rgba(12,16,40,.96));box-shadow:0 28px 90px #0006}
+header{display:flex;align-items:center;gap:12px;color:#dad0ff;font-size:13px;font-weight:800;letter-spacing:.19em}
+.logo{width:42px;height:42px;display:grid;place-items:center;border-radius:13px;
+background:linear-gradient(145deg,#8c7af2,#5d59ce);color:white;font-size:23px;box-shadow:0 8px 24px #8c7af23a}
+.status{display:inline-flex;align-items:center;gap:9px;margin-top:34px;font-weight:650;font-size:12px;color:#e5ca9b}
+.status i{width:8px;height:8px;border-radius:50%;background:#e8b968;box-shadow:0 0 0 5px #e8b96820}
+h1{margin:12px 0 12px;font-size:clamp(27px,5vw,40px);letter-spacing:-.045em;line-height:1.13}
+p{color:#b6b7d2;font-size:15px;line-height:1.7;margin:0}
+.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+button,a{display:inline-flex;justify-content:center;align-items:center;min-height:44px;border-radius:12px;
+padding:12px 17px;font:700 14px inherit;cursor:pointer;text-decoration:none}
+button{color:#100c30;border:0;background:#c8b9ff}button:hover{background:#ded5ff}
+a{color:#e1dafa;border:1px solid #4c466f;background:#ffffff0a}a:hover{background:#ffffff13}
+footer{margin-top:27px;padding-top:19px;border-top:1px solid #ffffff18;color:#9295b9;font-size:12px}
+@media(prefers-reduced-motion:no-preference){main{animation:appear .35s ease-out}@keyframes appear{from{opacity:.5;transform:translateY(9px)}to{opacity:1;transform:none}}}
+</style></head><body>
+<main><header><span class="logo" aria-hidden="true">S</span>SENTRIX</header>
+<div class="status"><i aria-hidden="true"></i>Connexion au serveur en cours</div>
+<h1>Le dashboard se reconnecte.</h1>
+<p>La connexion entre nos deux instances se rétablit. Les protections du bot continuent si l’instance Discord est active.
+Tu peux réessayer sans perdre ta session.</p>
+<div class="actions"><button type="button" onclick="location.reload()">Réessayer maintenant</button>
+<a href="https://mon-bot-discord-production-8944.up.railway.app/app" rel="noopener">Accès direct de secours ↗</a></div>
+<footer>SentriX · Serveur web momentanément indisponible · Actualisation possible dans quelques secondes</footer>
+</main></body></html>"""
+        response = web.Response(status=503, text=html, content_type="text/html", charset="utf-8")
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Retry-After"] = "5"
+    return response
+
+
 def _truthy_env(name: str) -> bool:
     return (os.getenv(name, "") or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -125,26 +186,11 @@ def install(dashboard_module: Any, coordinator: Any | None = None) -> None:
 
             # Une requete deja proxifiee ne doit jamais rebondir entre les deux services.
             if request.headers.get(_PROXY_HEADER) == "1":
-                return web.json_response(
-                    {
-                        "ok": False,
-                        "error": "leader_unavailable",
-                        "detail": "Aucune instance HA active ne peut servir le dashboard pour le moment.",
-                        "ha_state": state,
-                    },
-                    status=503,
-                )
+                return _dashboard_unavailable(request, "leader_unavailable")
 
             peer_base = _peer_base_url(role)
             if not peer_base:
-                return web.json_response(
-                    {
-                        "ok": False,
-                        "error": "ha_peer_unknown",
-                        "detail": "Le pair HA du dashboard n'est pas configure.",
-                    },
-                    status=503,
-                )
+                return _dashboard_unavailable(request, "ha_peer_unknown")
 
             session: ClientSession = request.app[_SESSION_KEY]
             target = f"{peer_base}{request.rel_url}"
@@ -172,14 +218,7 @@ def install(dashboard_module: Any, coordinator: Any | None = None) -> None:
                     target,
                     exc,
                 )
-                return web.json_response(
-                    {
-                        "ok": False,
-                        "error": "ha_leader_unreachable",
-                        "detail": "Le dashboard actif est temporairement indisponible. Reessayez dans quelques secondes.",
-                    },
-                    status=503,
-                )
+                return _dashboard_unavailable(request, "ha_leader_unreachable")
 
         # Le proxy doit passer avant les middlewares applicatifs afin qu'une instance passive
         # ne tente jamais d'evaluer ses propres donnees Discord absentes.
