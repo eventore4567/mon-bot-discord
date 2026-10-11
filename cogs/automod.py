@@ -2733,11 +2733,18 @@ class AutoMod(commands.Cog, name="Automod"):
         # avant pour tout le monde, sans interrupteur, et appliquait un timeout.
         if conf.get("antiinsult") and await self.security_filter_applies_to(message, "antiinsult"):
             dataset_match = self.moderation_dataset.match(message.content)
-            if dataset_match:
+            if dataset_match and dataset_match.confidence >= 0.92:
                 return await self._delete_and_timeout(
                     message,
-                    "Contenu offensant détecté par le filtre multilingue.",
+                    f"Contenu offensant confirmé ({dataset_match.reason}, confiance {dataset_match.confidence:.0%}).",
                     detection_kind=dataset_match.kind,
+                )
+            if dataset_match and dataset_match.confidence >= 0.70:
+                return await self._delete_and_warn(
+                    message,
+                    f"Contenu offensant probable ({dataset_match.reason}, confiance {dataset_match.confidence:.0%}).",
+                    "multilingual_toxicity",
+                    allow_escalation=False,
                 )
 
         # Incident de spam en cours pour ce membre : tout ce qu'il envoie encore pendant
@@ -3005,6 +3012,7 @@ class AutoMod(commands.Cog, name="Automod"):
         filter_name: str = "automod",
         *,
         censored_content: str | None = None,
+        allow_escalation: bool = True,
     ):
         """Supprime le message et traite la détection comme un incident par membre.
 
@@ -3070,23 +3078,24 @@ class AutoMod(commands.Cog, name="Automod"):
                 filter_name,
             )
 
-        risk_points = RISK_SIGNAL_POINTS.get(filter_name, 10)
-        try:
-            await self.add_risk_signal(
-                message.guild,
-                message.author.id,
-                filter_name,
-                risk_points,
-                reason=reason,
-                target=message.author,
-            )
-        except Exception:
-            logger.exception(
-                "Score de risque AutoMod indisponible guild=%s user=%s filtre=%s.",
-                message.guild.id,
-                message.author.id,
-                filter_name,
-            )
+        if allow_escalation:
+            risk_points = RISK_SIGNAL_POINTS.get(filter_name, 10)
+            try:
+                await self.add_risk_signal(
+                    message.guild,
+                    message.author.id,
+                    filter_name,
+                    risk_points,
+                    reason=reason,
+                    target=message.author,
+                )
+            except Exception:
+                logger.exception(
+                    "Score de risque AutoMod indisponible guild=%s user=%s filtre=%s.",
+                    message.guild.id,
+                    message.author.id,
+                    filter_name,
+                )
 
         action = None
         infraction_count = 0
@@ -3110,7 +3119,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     incident.action_label = f"🔇 Mute {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)}"
                 elif action == "mute_failed":
                     incident.action_label = f"⚠️ Mute prévu {helpers.format_duration(spam_duration or SPAM_TIMEOUT_SECONDS)} — non appliqué"
-            else:
+            elif allow_escalation:
                 action, infraction_count = await self._maybe_escalate(
                     message.guild,
                     message.author,

@@ -34,12 +34,12 @@ RUNTIME_MARKER = "Setup Security Choice V75"
 EXTRA_PROTECTIONS: tuple[tuple[str, str, str], ...] = (
     (
         "honeypot",
-        "Honeypot anti-raid",
+        "Salon piège",
         "Piège les comptes suspects qui interagissent avec le salon de sécurité.",
     ),
     (
         "verification",
-        "Vérification anti-alt",
+        "Vérification des nouveaux membres",
         "Ajoute la vérification humaine et le score de confiance SentriX.",
     ),
 )
@@ -56,11 +56,11 @@ AUTOMOD_DESCRIPTIONS = {
     "antiaccount": "Filtre les comptes Discord trop récents.",
     "antiscam": "Détecte et bloque les contenus typiques de scam.",
     "antinuke": "Protège les rôles, salons et actions serveur sensibles.",
-    "security_vanity": "Détecte les changements suspects du vanity URL et tente de restaurer l'ancien code.",
-    "security_prune": "Détecte les prunes de membres via le journal d'audit et identifie l'auteur.",
+    "security_vanity": "Surveille le lien personnalisé du serveur et tente de restaurer l'ancien code.",
+    "security_prune": "Détecte les suppressions massives de membres via le journal d'audit.",
     "security_permissions": "Bloque et restaure les élévations de permissions dangereuses sur rôles et salons.",
-    "join_gate": "Combine âge du compte, avatar et vitesse d'arrivée avant d'accorder la confiance.",
-    "risk_engine": "Combine plusieurs signaux de risque avec décroissance temporelle et alertes graduées.",
+    "join_gate": "Contrôle l'âge du compte, l'avatar et la vitesse d'arrivée.",
+    "risk_engine": "Regroupe plusieurs alertes récentes pour repérer un comportement dangereux.",
 }
 
 

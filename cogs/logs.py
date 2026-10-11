@@ -250,20 +250,16 @@ class Logs(commands.Cog, name="Logs"):
         *,
         max_age_seconds: int = 10,
     ) -> tuple[discord.abc.User | None, discord.AuditLogEntry | None]:
-        """Corrèle type + cible + timestamp ; jamais simplement « la dernière entrée »."""
-        if guild.me is None or not guild.me.guild_permissions.view_audit_log:
-            return None, None
-        current = discord.utils.utcnow()
-        try:
-            async for entry in guild.audit_logs(limit=10, action=action):
-                if getattr(entry.target, "id", None) != target_id:
-                    continue
-                if abs((current - entry.created_at).total_seconds()) > max_age_seconds:
-                    continue
-                return entry.user, entry
-        except (discord.Forbidden, discord.HTTPException):
-            return None, None
-        return None, None
+        """Corrèle type + cible + timestamp ; jamais simplement la dernière entrée."""
+        from utils.audit_correlation import correlate_audit_entry
+
+        result = await correlate_audit_entry(
+            guild,
+            action,
+            target_id=target_id,
+            max_age_seconds=max_age_seconds,
+        )
+        return result.actor, result.entry
 
     async def _message_delete_actor(
         self,

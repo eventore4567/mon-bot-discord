@@ -35,10 +35,10 @@ def _panel_embed(bot, guild: discord.Guild) -> discord.Embed:
     )
     avatar = _brand_avatar(bot)
     if avatar:
-        embed.set_author(name="SentriX • Security Gateway", icon_url=avatar)
+        embed.set_author(name="SentriX • Vérification", icon_url=avatar)
         embed.set_thumbnail(url=avatar)
     else:
-        embed.set_author(name="SentriX • Security Gateway")
+        embed.set_author(name="SentriX • Vérification")
 
     embed.add_field(
         name="🛡️ CONTRÔLES",
@@ -83,7 +83,7 @@ def _trap_embed(bot, verify_channel: discord.TextChannel, sanction: str) -> disc
     avatar = _brand_avatar(bot)
     if avatar:
         embed.set_author(name="SentriX • Anti-Bot Honeypot", icon_url=avatar)
-    embed.set_footer(text="SentriX • Security Gateway • Honeypot actif")
+    embed.set_footer(text="SentriX • Vérification • Salon piège actif")
     return embed
 
 
@@ -117,7 +117,7 @@ def _status_embed(title: str, description: str, *, state: str = "info") -> disco
         description=description,
         colour=colours.get(state, 0x5865F2),
     )
-    embed.set_footer(text="SentriX • Security Gateway")
+    embed.set_footer(text="SentriX • Vérification")
     return embed
 
 

@@ -93,22 +93,18 @@ class SoundboardLogs(commands.Cog, name="SoundboardLogs"):
         max_age_seconds: int = 12,
     ):
         """Corrèle strictement action + cible + âge ; l'absence d'Audit Log est normale."""
-        if not target_id or guild.me is None or not guild.me.guild_permissions.view_audit_log:
+        if not target_id:
             return None, None
         action = getattr(discord.AuditLogAction, action_name, None)
-        if action is None:
-            return None, None
-        now = discord.utils.utcnow()
-        try:
-            async for entry in guild.audit_logs(limit=10, action=action):
-                if getattr(entry.target, "id", None) != target_id:
-                    continue
-                if abs((now - entry.created_at).total_seconds()) > max_age_seconds:
-                    continue
-                return entry.user, entry
-        except (discord.Forbidden, discord.HTTPException):
-            return None, None
-        return None, None
+        from utils.audit_correlation import correlate_audit_entry
+
+        result = await correlate_audit_entry(
+            guild,
+            action,
+            target_id=target_id,
+            max_age_seconds=max_age_seconds,
+        )
+        return result.actor, result.entry
 
     async def _send(
         self,

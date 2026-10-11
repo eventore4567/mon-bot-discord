@@ -44,6 +44,43 @@ _MIN_STANDALONE_LENGTH = 3
 @dataclass(frozen=True)
 class ModerationMatch:
     kind: str
+    confidence: float = 0.0
+    targeted: bool = False
+    reason: str = "contexte indéterminé"
+
+
+_TARGET_MARKERS = frozenset({
+    "tu", "toi", "ton", "ta", "tes", "vous", "votre", "vos",
+    "you", "your", "youre", "u", "ur",
+    "eres", "usted", "ustedes", "te", "tus",
+})
+_REPORTING_MARKERS = (
+    "il m a dit", "elle m a dit", "on m a dit", "m a traite", "m a insult",
+    "exemple", "citation", "je cite", "quote", "quoted", "he said", "she said",
+    "they said", "called me", "lyrics", "paroles", "definition", "définition",
+)
+
+
+def _context_confidence(normalized: str, kind: str) -> tuple[float, bool, str]:
+    """Estime prudemment si le motif est une attaque, pas une citation ou un cours."""
+    tokens = tuple(normalized.split())
+    targeted = bool(set(tokens) & _TARGET_MARKERS)
+    reporting = any(marker in normalized for marker in _REPORTING_MARKERS)
+    base = {
+        "phrase": 0.94,
+        "groupe_de_mots": 0.93,
+        "mot_ou_phrase_sans_espace": 0.88,
+        "mot": 0.70,
+    }.get(kind, 0.50)
+    if targeted:
+        base += 0.24 if kind == "mot" else 0.08
+    if reporting:
+        base -= 0.42
+    confidence = max(0.0, min(0.99, base))
+    reason = "attaque adressée" if targeted else "motif offensant sans cible certaine"
+    if reporting:
+        reason = "citation, signalement ou contexte pédagogique possible"
+    return confidence, targeted, reason
 
 
 def normalize_message(text: str) -> str:
@@ -244,20 +281,27 @@ class MultilingualModerationDataset:
         for index, token in enumerate(tokens):
             for phrase in self._phrases_by_first.get(token, ()):
                 if tokens[index:index + len(phrase)] == phrase:
-                    return ModerationMatch("phrase")
+                    confidence, targeted, reason = _context_confidence(normalized, "phrase")
+                    return ModerationMatch("phrase", confidence, targeted, reason)
 
         compact = normalized.replace(" ", "")
         for first_character in set(compact):
             for candidate in self._substrings_by_first.get(first_character, ()):
                 if candidate in compact:
-                    return ModerationMatch("mot_ou_phrase_sans_espace")
+                    kind = "mot_ou_phrase_sans_espace"
+                    confidence, targeted, reason = _context_confidence(normalized, kind)
+                    return ModerationMatch(kind, confidence, targeted, reason)
 
         for max_gap, group_tokens, uses_no_space_script in self._groups:
             if uses_no_space_script:
                 if self._ordered_substring_group(compact, group_tokens):
-                    return ModerationMatch("groupe_de_mots")
+                    kind = "groupe_de_mots"
+                    confidence, targeted, reason = _context_confidence(normalized, kind)
+                    return ModerationMatch(kind, confidence, targeted, reason)
             elif self._ordered_token_group(tokens, group_tokens, max_gap):
-                return ModerationMatch("groupe_de_mots")
+                kind = "groupe_de_mots"
+                confidence, targeted, reason = _context_confidence(normalized, kind)
+                return ModerationMatch(kind, confidence, targeted, reason)
 
         for token in _tokens_candidats(tokens):
             if token not in self._terms:
@@ -266,5 +310,6 @@ class MultilingualModerationDataset:
                 continue
             if token in _AMBIGUOUS_STANDALONE_TERMS:
                 continue
-            return ModerationMatch("mot")
+            confidence, targeted, reason = _context_confidence(normalized, "mot")
+            return ModerationMatch("mot", confidence, targeted, reason)
         return None

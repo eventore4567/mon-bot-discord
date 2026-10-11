@@ -50,11 +50,11 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS sentrix_security_v71 (
     guild_id INTEGER PRIMARY KEY,
     raid_intensity TEXT NOT NULL DEFAULT 'normal',
-    honeypot_enabled INTEGER NOT NULL DEFAULT 1,
+    honeypot_enabled INTEGER NOT NULL DEFAULT 0,
     honeypot_action TEXT NOT NULL DEFAULT 'softban',
     honeypot_delete_message INTEGER NOT NULL DEFAULT 1,
     honeypot_mute_minutes INTEGER NOT NULL DEFAULT 60,
-    verification_enabled INTEGER NOT NULL DEFAULT 1,
+    verification_enabled INTEGER NOT NULL DEFAULT 0,
     verification_threshold INTEGER NOT NULL DEFAULT 1888,
     verification_min_account_age_minutes INTEGER NOT NULL DEFAULT 30,
     updated_by INTEGER,
@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS sentrix_security_v71 (
 HONEYPOT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS honeypot_verification (
     guild_id INTEGER PRIMARY KEY,
-    enabled INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 0,
     category_id INTEGER,
     trap_channel_id INTEGER,
     verify_channel_id INTEGER,
@@ -131,6 +131,31 @@ async def ensure_schema(bot: commands.Bot) -> None:
         return
     await bot.db.execute(SCHEMA)
     await bot.db.execute(HONEYPOT_SCHEMA)
+    # Les anciennes valeurs par défaut activaient Honeypot et Vérification dès la
+    # première ouverture du panneau. Ne corriger que les lignes jamais enregistrées
+    # par un administrateur (updated_at=0), et conserver une activation historique
+    # lorsqu'elle pointe vers de vraies ressources Discord déjà configurées.
+    await bot.db.execute(
+        """
+        UPDATE sentrix_security_v71
+        SET honeypot_enabled = CASE
+                WHEN EXISTS (
+                    SELECT 1 FROM honeypot_verification h
+                    WHERE h.guild_id = sentrix_security_v71.guild_id
+                      AND h.enabled = 1
+                      AND h.trap_channel_id IS NOT NULL
+                      AND h.unverified_role_id IS NOT NULL
+                ) THEN honeypot_enabled ELSE 0 END,
+            verification_enabled = CASE
+                WHEN EXISTS (
+                    SELECT 1 FROM guild_config g
+                    WHERE g.guild_id = sentrix_security_v71.guild_id
+                      AND g.verification_channel IS NOT NULL
+                      AND COALESCE(g.verify_role, g.verification_role) IS NOT NULL
+                ) THEN verification_enabled ELSE 0 END
+        WHERE updated_at = 0
+        """
+    )
     bot._sentrix_security_v71_schema_ready = True
 
 
@@ -151,11 +176,11 @@ async def settings(bot: commands.Bot, guild_id: int) -> dict[str, Any]:
         action = "softban"
     return {
         "raid_intensity": intensity,
-        "honeypot_enabled": bool(_get(row, "honeypot_enabled", 1)),
+        "honeypot_enabled": bool(_get(row, "honeypot_enabled", 0)),
         "honeypot_action": action,
         "honeypot_delete_message": bool(_get(row, "honeypot_delete_message", 1)),
         "honeypot_mute_minutes": max(1, min(40320, int(_get(row, "honeypot_mute_minutes", 60)))),
-        "verification_enabled": bool(_get(row, "verification_enabled", 1)),
+        "verification_enabled": bool(_get(row, "verification_enabled", 0)),
         "verification_threshold": _clamp_threshold(_get(row, "verification_threshold", DEFAULT_SCORE_THRESHOLD)),
         "verification_min_account_age_minutes": _clamp_age(
             _get(row, "verification_min_account_age_minutes", DEFAULT_MIN_ACCOUNT_AGE_MINUTES)

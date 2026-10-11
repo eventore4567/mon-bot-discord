@@ -23,13 +23,13 @@ const AUTOMOD = [
   ['antiraid', 'Anti-raid', 'Réagit aux arrivées anormales.'],
   ['antibot', 'Anti-bots', 'Contrôle les ajouts de bots.'],
   ['antiaccount', 'Anti-comptes récents', 'Détecte les comptes trop récents.'],
-  ['join_gate', 'Join Gate', 'Évalue la confiance à l’arrivée.'],
-  ['risk_engine', 'Moteur de risque', 'Combine les signaux de sécurité.'],
-  ['antinuke', 'Anti-nuke', 'Protège salons, rôles et actions critiques.'],
-  ['security_vanity', 'Protection Vanity URL', 'Surveille le lien personnalisé.'],
-  ['security_prune', 'Protection Prune', 'Détecte les suppressions massives de membres.'],
+  ['join_gate', 'Contrôle des arrivées', 'Évalue la confiance à l’arrivée.'],
+  ['risk_engine', 'Analyse des risques', 'Combine les signaux de sécurité.'],
+  ['antinuke', 'Protection anti-destruction', 'Protège salons, rôles et actions critiques.'],
+  ['security_vanity', 'Lien personnalisé', 'Surveille le lien personnalisé.'],
+  ['security_prune', 'Suppressions massives', 'Détecte les suppressions massives de membres.'],
   ['security_permissions', 'Permissions dangereuses', 'Bloque les élévations critiques.'],
-  ['escalation', 'Escalade AutoMod', 'Compte les récidives (Infractions 1 h). Les filtres de contenu suppriment sans jamais exclure, expulser ni bannir seuls.'],
+  ['escalation', 'Sanctions progressives', 'Compte les récidives (infractions sur 1 h). Les filtres incertains ne sanctionnent jamais seuls.'],
 ];
 const LOG_TYPES = [['Messages', 'log_messages'], ['Membres', 'log_members'], ['Vocal', 'log_voice'], ['Rôles', 'log_roles'], ['Serveur', 'log_server'], ['AutoMod', 'log_automod'], ['Modération', 'log_moderation'], ['Tickets', 'ticket_log_channel'], ['Erreurs', 'error_channel']];
 const settings = () => state.guild?.settings || {};

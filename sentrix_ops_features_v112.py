@@ -152,7 +152,12 @@ def _patch_contextual_automod(bot, ops) -> None:
         def match_v112(text: str, _original=current_match):
             result = _original(text)
             if result is not None and should_downgrade_dataset_match(text, result.kind):
-                return ModerationMatch("mot_contextuel")
+                return ModerationMatch(
+                    "mot_contextuel",
+                    min(result.confidence, 0.30),
+                    result.targeted,
+                    "contexte explicatif ou citation probable",
+                )
             return result
         match_v112._sentrix_v112 = True
         dataset.match = match_v112

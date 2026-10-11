@@ -199,27 +199,36 @@ async function renderSecurity() {
 
     <section class="card full">
       <div class="card-head">
-        <div><h2>Réponse d’urgence</h2><p>Le mode PANIC active les protections recommandées et verrouille l’écriture @everyone avec un snapshot restaurable.</p></div>
-        <span class="badge ${panic.active ? 'bad' : 'ok'}">${panic.active ? 'PANIC actif' : 'PANIC inactif'}</span>
+        <div><h2>Réponse d’urgence</h2><p>Le mode urgence active les protections recommandées et verrouille l’écriture @everyone avec une sauvegarde restaurable.</p></div>
+        <span class="badge ${panic.active ? 'bad' : 'ok'}">${panic.active ? 'URGENCE ACTIVE' : 'URGENCE INACTIVE'}</span>
       </div>
       <div class="toolbar" style="margin-top:12px">
-        <button class="btn ${panic.active ? '' : 'danger'}" type="button" id="securityPanic" ${panic.owner_controls ? '' : 'disabled'}>${panic.active ? 'Restaurer le serveur' : 'Activer PANIC'}</button>
+        <button class="btn ${panic.active ? '' : 'danger'}" type="button" id="securityPanic" ${panic.owner_controls ? '' : 'disabled'}>${panic.active ? 'Restaurer le serveur' : 'Activer le mode urgence'}</button>
         ${panic.active && panic.created_at ? `<small>Actif depuis ${esc(when(panic.created_at))}${panic.created_by ? ' · par ' + esc(panic.created_by) : ''}</small>` : ''}
         ${!panic.owner_controls ? '<small>Réservé au propriétaire du serveur ou du bot.</small>' : ''}
       </div>
     </section>
 
     <section class="card">
-      <div class="card-head"><div><h2>Simulation / dry-run</h2><p>Aucune action Discord n’est exécutée : aperçu de ce que SentriX détecterait et pourrait bloquer maintenant.</p></div><span class="badge blue">Lecture seule</span></div>
+      <div class="card-head"><div><h2>Aperçu sans action</h2><p>Aucune action Discord n’est exécutée : aperçu de ce que SentriX détecterait et pourrait bloquer maintenant.</p></div><span class="badge blue">Lecture seule</span></div>
       <div class="list" style="margin-top:12px">${simulationRows}</div>
     </section>
 
     <section class="card">
-      <div class="card-head"><div><h2>Timeline sécurité</h2><p>Incidents anti-nuke, mode PANIC, pièces dangereuses et actions AutoMod récentes.</p></div><span class="badge">${plural(timeline.length, 'événement')}</span></div>
+      <div class="card-head"><div><h2>Historique de sécurité</h2><p>Incidents graves, mode urgence, pièces dangereuses et actions automatiques récentes.</p></div><span class="badge">${plural(timeline.length, 'événement')}</span></div>
       <div class="list compact" style="margin-top:12px">${timelineRows}</div>
     </section>
 
     ${missing.length ? `<div class="notice warn full">SentriX n’a pas toutes les permissions nécessaires : ${esc(missing.map(p => p.name).join(', '))}. Certaines protections peuvent détecter un risque sans pouvoir agir.</div>` : ''}
+
+    <section class="card full">
+      <div class="card-head"><div><h2>Vocal et partage d’écran</h2><p>Limites réelles de Discord, sans promesse trompeuse.</p></div><span class="badge warn">Information</span></div>
+      <div class="list compact" style="margin-top:12px">
+        <div class="row"><div class="row-main"><b>Un salon vocal par serveur</b><small>Une même instance de SentriX ne peut être connectée qu’à un salon vocal à la fois dans un serveur. Elle peut toutefois être connectée simultanément dans plusieurs serveurs.</small></div></div>
+        <div class="row"><div class="row-main"><b>Analyse de la voix non activée</b><small>La bibliothèque actuelle n’offre pas de réception audio officiellement prise en charge. Aucun son n’est enregistré ni transcrit. Une future version exigerait consentement visible, salon choisi, durée de conservation et recours.</small></div></div>
+        <div class="row"><div class="row-main"><b>Streams non analysables</b><small>Discord fournit l’état « en stream » ou « caméra active », mais pas les images du partage d’écran via l’API bot publique. SentriX ne promet donc aucune modération du contenu vidéo.</small></div></div>
+      </div>
+    </section>
 
     <section class="card full">
       <div class="card-head">

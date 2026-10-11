@@ -86,9 +86,9 @@ _PROTECTION_CATALOG = {
         "supports_policy": True,
     },
     "antiscam": {
-        "label": "Anti-scam",
+        "label": "Anti-arnaques",
         "group": "Messages",
-        "description": "Détecte phishing, faux Nitro, crypto et pièces jointes dangereuses.",
+        "description": "Détecte le hameçonnage, les faux Nitro, les arnaques crypto et les pièces jointes dangereuses.",
         "supports_policy": True,
     },
     "antiinsult": {
@@ -116,31 +116,31 @@ _PROTECTION_CATALOG = {
         "supports_policy": False,
     },
     "join_gate": {
-        "label": "Join Gate",
+        "label": "Contrôle des arrivées",
         "group": "Arrivées",
         "description": "Combine âge du compte, avatar et vitesse d'arrivée avant d'accorder la confiance.",
         "supports_policy": False,
     },
     "risk_engine": {
-        "label": "Moteur de risque",
+        "label": "Analyse des risques",
         "group": "Arrivées",
         "description": "Combine plusieurs signaux de risque et déclenche des alertes graduées.",
         "supports_policy": False,
     },
     "antinuke": {
-        "label": "Anti-nuke",
+        "label": "Protection anti-destruction",
         "group": "Serveur",
         "description": "Protège les rôles, salons, webhooks et actions critiques.",
         "supports_policy": False,
     },
     "security_vanity": {
-        "label": "Protection Vanity URL",
+        "label": "Lien personnalisé",
         "group": "Serveur",
         "description": "Détecte et restaure les changements suspects du lien personnalisé.",
         "supports_policy": False,
     },
     "security_prune": {
-        "label": "Protection Prune",
+        "label": "Suppressions massives",
         "group": "Serveur",
         "description": "Détecte les suppressions massives de membres via le journal d'audit.",
         "supports_policy": False,
@@ -152,7 +152,7 @@ _PROTECTION_CATALOG = {
         "supports_policy": False,
     },
     "escalation": {
-        "label": "Escalade AutoMod",
+        "label": "Sanctions progressives",
         "group": "Réponse",
         "description": "Augmente progressivement les sanctions lors des récidives.",
         "supports_policy": False,

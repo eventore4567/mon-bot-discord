@@ -30,7 +30,7 @@ MAX_FAILURES = 5
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS honeypot_verification (
     guild_id INTEGER PRIMARY KEY,
-    enabled INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 0,
     category_id INTEGER,
     trap_channel_id INTEGER,
     verify_channel_id INTEGER,

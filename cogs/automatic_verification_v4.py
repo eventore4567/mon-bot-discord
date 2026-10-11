@@ -109,7 +109,7 @@ class AutomaticVerification(commands.Cog, name=_COG_NAME):
         await self.bot.db.execute("""
             CREATE TABLE IF NOT EXISTS honeypot_verification (
                 guild_id INTEGER PRIMARY KEY,
-                enabled INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 0,
                 category_id INTEGER,
                 trap_channel_id INTEGER,
                 verify_channel_id INTEGER,
