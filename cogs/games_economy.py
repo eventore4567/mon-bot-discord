@@ -65,6 +65,7 @@ from cogs.games_catalog import (
 from services import game_stakes
 from utils import checks, design_system, game_rewards, game_visuals, stats_service, temporary_boosts
 from utils import sentrix_panels as panels
+from utils.game_duel_invites import DuelInvitation
 
 logger = logging.getLogger("bot.games-economy")
 
@@ -1365,6 +1366,35 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def _invite(self, ctx, game_name: str, opponent, session_id: str,
+                      title: str, start) -> None:
+        """Aucune partie ni récompense avant acceptation de l'adversaire."""
+        guild_id = ctx.guild.id
+
+        async def cancel():
+            game_rewards.release_play_lock(guild_id, ctx.author.id, game_name)
+            game_rewards.release_play_lock(guild_id, opponent.id, game_name)
+
+        invite = DuelInvitation(
+            challenger_id=ctx.author.id, opponent_id=opponent.id,
+            start=start, cancel=cancel,
+        )
+        try:
+            embed = await _embed(
+                self.bot, guild_id, title=title,
+                description=(
+                    f"⚔️ {ctx.author.mention} défie {opponent.mention} !\\n"
+                    f"✅ {opponent.mention} doit accepter pour jouer.\\n"
+                    "⏱️ 45 secondes · Refus sans pénalité."
+                ),
+            )
+            invite.message = await panels.envoyer(
+                ctx, panels.avec_composants(panels.depuis_embed(embed), invite)
+            )
+        except Exception:
+            await cancel()
+            raise
+
     @commands.hybrid_command(name="duel", description="Défier un membre en pierre-feuille-ciseaux (récompense au gagnant).", with_app_command=False)
     @app_commands.describe(adversaire="Le membre à défier")
     async def duel(self, ctx: commands.Context, adversaire: discord.Member):
@@ -1376,9 +1406,15 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel', description=err, kind='warning')))
   # le verrou individuel ne s'applique pas aux duels à 2
-        view = _RPSDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
-        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel — Pierre-feuille-ciseaux', description=f'⚔️ {ctx.author.mention} défie {adversaire.mention} !\nCliquez sur le bouton pour faire votre choix EN PRIVÉ.')), view))
-        view.message = msg
+        async def start(msg):
+            view = _RPSDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
+            await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Duel — Pierre-feuille-ciseaux",
+                description=f"⚔️ {ctx.author.mention} vs {adversaire.mention}\\n"
+                            "✅ Défi accepté. Faites vos choix EN PRIVÉ !"
+            )), view))
+            view.message = msg
+        await self._invite(ctx, "duel", adversaire, sid, "Duel — Pierre-feuille-ciseaux", start)
 
     @commands.hybrid_command(name="numberduel", description="Duel : chacun choisit un nombre secret entre 1 et 100, le plus proche gagne.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre à défier")
@@ -1391,9 +1427,14 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=err, kind='warning')))
 
-        view = _NumberDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
-        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel du nombre secret', description=f'🔢 {ctx.author.mention} vs {adversaire.mention}\nLe bot a choisi un nombre secret entre 1 et 100. Cliquez pour proposer le vôtre EN PRIVÉ.')), view))
-        view.message = msg
+        async def start(msg):
+            view = _NumberDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
+            await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Duel du nombre secret",
+                description="✅ Défi accepté ! Proposez chacun votre nombre entre 1 et 100 EN PRIVÉ."
+            )), view))
+            view.message = msg
+        await self._invite(ctx, "numberduel", adversaire, sid, "Duel du nombre secret", start)
 
     @commands.hybrid_command(name="quizduel", description="Duel de quiz : répondez en privé, le plus rapide des bonnes réponses gagne.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre à défier")
@@ -1406,10 +1447,18 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de quiz', description=err, kind='warning')))
 
-        question, answer, difficulty = game_rewards.secure_pick(WORDGAME_CLUES)
-        view = _QuizDuelView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid, answer=answer)
-        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de quiz', description=f'❓ {ctx.author.mention} vs {adversaire.mention}\n**{question}**\nDifficulté : **{difficulty}**\nCliquez pour répondre EN PRIVÉ.')), view))
-        view.message = msg
+        async def start(msg):
+            # Question dévoilée après acceptation : personne ne prépare sa réponse.
+            question, answer, difficulty = game_rewards.secure_pick(WORDGAME_CLUES)
+            view = _QuizDuelView(cog=self, guild_id=guild_id, p1=ctx.author,
+                                 p2=adversaire, session_id=sid, answer=answer)
+            await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Duel de quiz",
+                description=f"❓ {question}\\nDifficulté : {difficulty}\\n"
+                            "✅ Défi accepté ! Répondez EN PRIVÉ."
+            )), view))
+            view.message = msg
+        await self._invite(ctx, "quizduel", adversaire, sid, "Duel de quiz", start)
 
     @commands.hybrid_command(name="reactionduel", description="Duel de réaction : soyez le premier à cliquer quand le bouton apparaît.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre à défier")
@@ -1422,19 +1471,51 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=err, kind='warning')))
 
-        msg = await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=f'⚡ {ctx.author.mention} vs {adversaire.mention}\n⏳ Préparez-vous...')))
-        # Duel 1v1 pour une recompense : il suffit qu'un des deux puisse
-        # pre-calibrer son clic pour gagner a tous les coups.
-        await asyncio.sleep(game_rewards.secure_delay(2.0, 6.0))
-        view = _ReactionDuelView(p1=ctx.author, p2=adversaire)
-        await panels.editer(msg, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description='🔴 **MAINTENANT !**')), view))
-        await view.wait()
-        await _finish_duel(self.bot, guild_id, "reactionduel", ctx.author, adversaire)
-        if view.winner is None:
-            await game_rewards.reward_game_winner(self.bot, guild_id, ctx.author.id, "reactionduel", 0, sid, result="draw")
-            return await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description="⏱️ Personne n'a cliqué à temps.")))
-        reward = await game_rewards.reward_game_winner(self.bot, guild_id, view.winner.id, "reactionduel", 35, sid, result="win")
-        await panels.editer(msg, panels.depuis_embed(await _embed(self.bot, guild_id, title='Duel de réaction', description=f'⚡ {view.winner.mention} a été le plus rapide !' + _reward_line(reward), kind='success')))
+        async def start(msg):
+            await panels.editer(msg, panels.depuis_embed(await _embed(
+                self.bot, guild_id, title="Duel de réaction",
+                description="✅ Défi accepté. ⚡ Préparez-vous..."
+            )))
+            asyncio.create_task(
+                self._play_reaction_duel(msg, guild_id, ctx.author, adversaire, sid),
+                name=f"reactionduel-{sid}",
+            )
+        await self._invite(ctx, "reactionduel", adversaire, sid, "Duel de réaction", start)
+
+    async def _play_reaction_duel(self, msg, guild_id, p1, p2, sid):
+        try:
+            await asyncio.sleep(game_rewards.secure_delay(2.0, 6.0))
+            view = _ReactionDuelView(p1=p1, p2=p2)
+            await panels.editer(msg, panels.avec_composants(panels.depuis_embed(
+                await _embed(self.bot, guild_id, title="Duel de réaction",
+                             description="🔴 **MAINTENANT !** Le plus rapide gagne !")
+            ), view))
+            await view.wait()
+            if view.winner is None:
+                await game_rewards.reward_game_winner(
+                    self.bot, guild_id, p1.id, "reactionduel", 0, sid, result="draw",
+                )
+                desc, kind = "⏱️ Personne n'a cliqué.", "warning"
+            else:
+                reward = await game_rewards.reward_game_winner(
+                    self.bot, guild_id, view.winner.id, "reactionduel", 35, sid, result="win",
+                )
+                desc = f"🏆 {view.winner.mention} a été le plus rapide !" + _reward_line(reward)
+                kind = "success"
+            await panels.editer(msg, panels.depuis_embed(
+                await _embed(self.bot, guild_id, title="Duel de réaction",
+                             description=desc, kind=kind)
+            ))
+        except Exception:
+            logger.exception("Duel de réaction interrompu")
+            try:
+                await panels.editer(msg, panels.Panneau(
+                    titre="Duel interrompu", sous_titre="Réessayez plus tard.", kind="warning"
+                ))
+            except discord.HTTPException:
+                pass
+        finally:
+            await _finish_duel(self.bot, guild_id, "reactionduel", p1, p2)
 
     @commands.hybrid_command(name="connect4", description="Jouer au Puissance 4 contre un autre membre.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre à défier")
@@ -1447,9 +1528,15 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         if not started:
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=err, kind='warning')))
 
-        view = ConnectFourView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
-        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(await _embed(self.bot, guild_id, title='Puissance 4', description=view.render(f'Au tour de {ctx.author.mention} (🔴)'))), view))
-        view.message = msg
+        async def start(msg):
+            view = ConnectFourView(cog=self, guild_id=guild_id,
+                                   p1=ctx.author, p2=adversaire, session_id=sid)
+            await panels.editer(msg, panels.avec_composants(panels.depuis_embed(
+                await _embed(self.bot, guild_id, title="Puissance 4",
+                             description=view.render(f"✅ Défi accepté ! Au tour de {ctx.author.mention} 🔴"))
+            ), view))
+            view.message = msg
+        await self._invite(ctx, "connect4", adversaire, sid, "Puissance 4", start)
 
 
 class _RPSPickView(discord.ui.View):
@@ -1495,7 +1582,7 @@ class _RPSDuelView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         try:
-            await self.message.edit(content="⏱️ Duel expiré (l'un des deux joueurs n'a pas répondu).", view=self)
+            await panels.editer(self.message, panels.depuis_embed(await _embed(self.cog.bot, self.guild_id, title="Duel expiré", description="⏱️ Un joueur n’a pas répondu.", kind="warning")))
         except Exception:
             logger.warning("Étape non critique ignorée dans on_timeout", exc_info=True)
 
@@ -1520,7 +1607,7 @@ class _RPSDuelView(discord.ui.View):
             reward = await game_rewards.reward_game_winner(self.cog.bot, self.guild_id, winner.id, "duel", 35, self.session_id, result="win")
             desc = f"⚔️ {self.p1.mention} : **{c1}** | {self.p2.mention} : **{c2}**\n🏆 {winner.mention} gagne !" + _reward_line(reward)
         if self.message:
-            await self.message.edit(embed=await _embed(self.cog.bot, self.guild_id, title="Duel — Pierre-feuille-ciseaux", description=desc, kind="success" if winner else "primary"), view=self)
+            await panels.editer(self.message, panels.depuis_embed(await _embed(self.cog.bot, self.guild_id, title="Duel — Pierre-feuille-ciseaux", description=desc, kind="success" if winner else "primary")))
 
 
 class _RPSDuelButton(discord.ui.Button):
@@ -1576,7 +1663,7 @@ class _NumberDuelView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         try:
-            await self.message.edit(content="⏱️ Duel expiré.", view=self)
+            await panels.editer(self.message, panels.depuis_embed(await _embed(self.cog.bot, self.guild_id, title="Duel expiré", description="⏱️ Un joueur n’a pas répondu.", kind="warning")))
         except Exception:
             logger.warning("Étape non critique ignorée dans on_timeout", exc_info=True)
 
@@ -1606,7 +1693,7 @@ class _NumberDuelView(discord.ui.View):
             desc = f"🔢 Nombre secret : **{self.target}**\n{self.p1.mention} : {n1} | {self.p2.mention} : {n2}\n🏆 {winner.mention} était le plus proche !" + _reward_line(reward)
             kind = "success"
         if self.message:
-            await self.message.edit(embed=await _embed(self.cog.bot, self.guild_id, title="Duel du nombre secret", description=desc, kind=kind), view=self)
+            await panels.editer(self.message, panels.depuis_embed(await _embed(self.cog.bot, self.guild_id, title="Duel du nombre secret", description=desc, kind=kind)))
 
 
 class _QuizDuelModal(discord.ui.Modal, title="Duel de quiz"):
@@ -1644,7 +1731,7 @@ class _QuizDuelView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         try:
-            await self.message.edit(content="⏱️ Duel expiré.", view=self)
+            await panels.editer(self.message, panels.depuis_embed(await _embed(self.cog.bot, self.guild_id, title="Duel expiré", description="⏱️ Un joueur n’a pas répondu.", kind="warning")))
         except Exception:
             logger.warning("Étape non critique ignorée dans on_timeout", exc_info=True)
 
@@ -1681,7 +1768,7 @@ class _QuizDuelView(discord.ui.View):
             desc = f"❓ Bonne réponse : **{_primary_answer(self.answer)}**\n🏆 {winner.mention} gagne !" + _reward_line(reward)
             kind = "success"
         if self.message:
-            await self.message.edit(embed=await _embed(self.cog.bot, self.guild_id, title="Duel de quiz", description=desc, kind=kind), view=self)
+            await panels.editer(self.message, panels.depuis_embed(await _embed(self.cog.bot, self.guild_id, title="Duel de quiz", description=desc, kind=kind)))
 
 
 class _DuelModalButton(discord.ui.Button):
