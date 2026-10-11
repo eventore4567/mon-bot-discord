@@ -446,7 +446,8 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("permissions list", "permissions liste", "List every command and who can run it."),
 
     # Staff tools remain one level deep. Never expose bot-owner commands.
-    _e("staff member", "member", "Open a member's staff record."),
+    # /moderation view ouvre déjà la même fiche membre ET une recherche :
+    # ne pas publier un second accès /staff member au même panneau.
     _e("staff note", "note", "Manage internal staff notes."),
     _e("staff history", "staff-history", "Read staff activity history."),
     _e("staff proof", "staff-proof", "Manage moderation evidence."),
