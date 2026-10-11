@@ -370,10 +370,9 @@ def _scam_hit(content: str) -> str | None:
         return motif
     return None
 
-# Règle Discord AutoMod native créée par SentriX lorsque l'anti-liens est actif.
-# Les motifs sont volontairement compatibles avec le moteur Rust Regex de Discord :
-# pas de lookbehind/lookahead. Le filtre Python ci-dessus reste le filet de sécurité
-# pour les admins/Gérer le serveur, que Discord exempte toujours de ses règles natives.
+# Noms des ANCIENNES règles natives auto-créées par SentriX. Depuis la
+# migration vers le filtrage local, elles servent seulement au nettoyage sûr
+# des règles dont creator_id correspond réellement au bot.
 NATIVE_ANTILINK_RULE_NAME = "SentriX • Anti-liens"
 NATIVE_ANTILINK_CUSTOM_MESSAGE = "Les liens sont interdits sur ce serveur."
 NATIVE_BLACKLIST_RULE_NAME = "SentriX • Mots interdits"
@@ -1144,109 +1143,56 @@ class AutoMod(commands.Cog, name="Automod"):
                 channels.append(channel)
         return roles, channels
 
-    async def _sync_native_antilink_rule(self, guild: discord.Guild) -> bool:
-        """Synchronise l'anti-liens SentriX avec Discord AutoMod.
+    async def _remove_owned_native_rule(
+        self,
+        guild: discord.Guild,
+        name: str,
+    ) -> bool:
+        """Retire uniquement une ancienne règle Discord AutoMod créée par SentriX.
 
-        Retourne True si la règle native est dans l'état demandé. En cas de permission
-        absente, quota AutoMod atteint ou erreur Discord, le filtre SentriX local reste
-        actif : la sécurité ne devient jamais dépendante du moteur natif.
+        Discord bloque avant l'événement on_message, donc ne peut pas connaître
+        les exemptions individuelles / « all perms » du moteur SentriX. La
+        modération des messages reste active dans le listener local. Ne jamais
+        toucher aux règles créées par les administrateurs ou d'autres bots,
+        même si elles portent le même nom.
         """
-        lock = self._native_antilink_locks.setdefault(guild.id, asyncio.Lock())
-        async with lock:
-            conf_row = await self.bot.db.get_automod(guild.id)
-            enabled = bool(conf_row and conf_row["antilink"])
-
-            me = guild.me
-            if me is None or not me.guild_permissions.manage_guild:
-                if enabled:
-                    logger.warning(
-                        "AutoMod natif anti-liens non synchronisé guild=%s: permission Gérer le serveur absente",
-                        guild.id,
-                    )
-                return not enabled
-
-            try:
-                rules = await guild.fetch_automod_rules()
-            except (discord.Forbidden, discord.HTTPException):
-                logger.warning(
-                    "Lecture des règles Discord AutoMod impossible guild=%s",
-                    guild.id,
-                    exc_info=True,
-                )
-                return False
-
-            sentrix_rules = [r for r in rules if r.name == NATIVE_ANTILINK_RULE_NAME]
-            rule = sentrix_rules[0] if sentrix_rules else None
-
-            # Nettoie d'éventuels doublons d'anciennes versions.
-            for duplicate in sentrix_rules[1:]:
-                try:
-                    await duplicate.delete(reason="SentriX: suppression doublon AutoMod anti-liens")
-                except (discord.Forbidden, discord.HTTPException):
-                    logger.warning("Suppression doublon AutoMod impossible guild=%s rule=%s", guild.id, duplicate.id)
-
-            native_policy = await self._native_policy_exemptions(guild, "antilink")
-            if enabled and native_policy is None:
-                # Discord ne peut pas représenter strict-channel > role-bypass.
-                if rule is not None:
-                    try:
-                        await rule.delete(reason="SentriX: politique anti-liens gérée par le moteur local")
-                    except (discord.Forbidden, discord.HTTPException):
-                        return False
-                return True
-            exempt_roles, exempt_channels = native_policy or ([], [])
-
-            if not enabled:
-                if rule is not None:
-                    try:
-                        await rule.delete(reason="SentriX: anti-liens désactivé")
-                    except (discord.Forbidden, discord.HTTPException):
-                        logger.warning(
-                            "Désactivation règle Discord AutoMod anti-liens impossible guild=%s",
-                            guild.id,
-                            exc_info=True,
-                        )
-                        return False
-                return True
-
-            trigger = discord.AutoModTrigger(
-                regex_patterns=list(NATIVE_ANTILINK_REGEX_PATTERNS),
+        me = getattr(guild, "me", None)
+        if me is None or not getattr(me.guild_permissions, "manage_guild", False):
+            logger.warning(
+                "Nettoyage règle SentriX %s impossible guild=%s : permission Gérer le serveur absente.",
+                name, guild.id,
             )
-            actions = [
-                discord.AutoModRuleAction(
-                    custom_message=NATIVE_ANTILINK_CUSTOM_MESSAGE,
-                )
-            ]
-
-            try:
-                if rule is None:
-                    await guild.create_automod_rule(
-                        name=NATIVE_ANTILINK_RULE_NAME,
-                        event_type=discord.AutoModRuleEventType.message_send,
-                        trigger=trigger,
-                        actions=actions,
-                        enabled=True,
-                        exempt_roles=exempt_roles,
-                        exempt_channels=exempt_channels,
-                        reason="SentriX: anti-liens activé",
-                    )
-                else:
-                    await rule.edit(
-                        trigger=trigger,
-                        actions=actions,
-                        enabled=True,
-                        exempt_roles=exempt_roles,
-                        exempt_channels=exempt_channels,
-                        reason="SentriX: synchronisation anti-liens",
-                    )
-                return True
-            except (discord.Forbidden, discord.HTTPException, ValueError):
+            return False
+        own_id = getattr(getattr(self.bot, "user", None), "id", None) or getattr(me, "id", None)
+        if own_id is None:
+            logger.warning("Nettoyage AutoMod %s impossible guild=%s : identité bot inconnue.", name, guild.id)
+            return False
+        try:
+            rules = await guild.fetch_automod_rules()
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Liste AutoMod inaccessible guild=%s", guild.id, exc_info=True)
+            return False
+        for rule in rules:
+            if getattr(rule, "name", None) != name:
+                continue
+            creator_id = getattr(rule, "creator_id", None)
+            if creator_id is None or int(creator_id) != int(own_id):
                 logger.warning(
-                    "Création/synchronisation de la règle Discord AutoMod anti-liens impossible guild=%s",
-                    guild.id,
-                    exc_info=True,
+                    "Règle AutoMod homonyme conservée guild=%s name=%s creator=%s (pas attribuée à SentriX).",
+                    guild.id, name, creator_id,
                 )
+                continue
+            try:
+                await rule.delete(reason="SentriX : filtres locaux pour respecter les exemptions admin et membre")
+            except (discord.Forbidden, discord.HTTPException):
+                logger.warning("Suppression de la règle SentriX impossible guild=%s rule=%s", guild.id, rule.id, exc_info=True)
                 return False
+            logger.info("Ancienne règle native SentriX retirée guild=%s rule=%s name=%s", guild.id, rule.id, name)
+        return True
+
+    async def _sync_native_antilink_rule(self, guild: discord.Guild) -> bool:
+        """Anti-liens LOCAL : plus de blocage natif avant le contrôle des admins."""
+        return await self._remove_owned_native_rule(guild, NATIVE_ANTILINK_RULE_NAME)
 
     async def _upsert_native_rule(
         self,
@@ -1258,69 +1204,13 @@ class AutoMod(commands.Cog, name="Automod"):
         custom_message: str,
         policy_filter: str | None = None,
     ) -> bool:
-        """Crée/modifie/supprime une règle AutoMod SentriX sans doublon."""
-        me = guild.me
-        if me is None or not me.guild_permissions.manage_guild:
-            return False
+        """Compatibilité : retirer les anciennes règles SentriX, sans recréation.
 
-        try:
-            rules = await guild.fetch_automod_rules()
-        except (discord.Forbidden, discord.HTTPException):
-            return False
-
-        matches = [rule for rule in rules if rule.name == name]
-        rule = matches[0] if matches else None
-        for duplicate in matches[1:]:
-            try:
-                await duplicate.delete(reason=f"SentriX: suppression doublon {name}")
-            except (discord.Forbidden, discord.HTTPException):
-                pass
-
-        exempt_roles: list[discord.Role] = []
-        exempt_channels: list[discord.abc.GuildChannel] = []
-        if enabled and policy_filter:
-            native_policy = await self._native_policy_exemptions(guild, policy_filter)
-            if native_policy is None:
-                # Correctness first: le moteur local sait appliquer le salon strict
-                # avant le rôle bypass, Discord AutoMod natif ne le sait pas.
-                enabled = False
-            else:
-                exempt_roles, exempt_channels = native_policy
-
-        if not enabled or trigger is None:
-            if rule is not None:
-                try:
-                    await rule.delete(reason=f"SentriX: désactivation {name}")
-                except (discord.Forbidden, discord.HTTPException):
-                    return False
-            return True
-
-        actions = [discord.AutoModRuleAction(custom_message=custom_message)]
-        try:
-            if rule is None:
-                await guild.create_automod_rule(
-                    name=name,
-                    event_type=discord.AutoModRuleEventType.message_send,
-                    trigger=trigger,
-                    actions=actions,
-                    enabled=True,
-                    exempt_roles=exempt_roles,
-                    exempt_channels=exempt_channels,
-                    reason=f"SentriX: activation {name}",
-                )
-            else:
-                await rule.edit(
-                    trigger=trigger,
-                    actions=actions,
-                    enabled=True,
-                    exempt_roles=exempt_roles,
-                    exempt_channels=exempt_channels,
-                    reason=f"SentriX: synchronisation {name}",
-                )
-            return True
-        except (discord.Forbidden, discord.HTTPException, ValueError):
-            logger.warning("Synchronisation règle Discord AutoMod impossible guild=%s name=%s", guild.id, name, exc_info=True)
-            return False
+        Discord AutoMod natif n'a pas toutes les exemptions par utilisateur ou
+        par permissions de gestion. Tous les filtres actifs restent gérés
+        localement par SentriX, selon leurs réglages de serveur.
+        """
+        return await self._remove_owned_native_rule(guild, name)
 
     async def _sync_native_target_links_rule(self, guild: discord.Guild) -> bool:
         rows = await self.bot.db.fetchall(
@@ -1411,7 +1301,12 @@ class AutoMod(commands.Cog, name="Automod"):
         )
 
     async def _sync_native_suite(self, guild: discord.Guild) -> None:
-        """Suite utile : chaque règle correspond à une vraie protection SentriX active/configurée."""
+        """Migration des anciennes règles natives SentriX vers les filtres locaux.
+
+        Le bot garde les règles d'autres créateurs intactes. La migration se
+        produit au démarrage, à l'arrivée sur un serveur et aux changements de
+        réglages. Les règles natives ne sont plus recréées.
+        """
         await self._sync_native_antilink_rule(guild)
         await self._sync_native_blacklist_rule(guild)
         await self._sync_native_target_links_rule(guild)
@@ -1421,105 +1316,8 @@ class AutoMod(commands.Cog, name="Automod"):
         await self._sync_native_harmful_rule(guild)
 
     async def _sync_native_blacklist_rule(self, guild: discord.Guild) -> bool:
-        """Expose les mots interdits SentriX à Discord AutoMod natif.
-
-        Discord accepte jusqu'à 1000 mots-clés dans une règle. Au-delà, le moteur local
-        SentriX continue de couvrir la liste complète.
-        """
-        lock = self._native_antilink_locks.setdefault(guild.id, asyncio.Lock())
-        async with lock:
-            me = guild.me
-            if me is None or not me.guild_permissions.manage_guild:
-                return False
-
-            rows = await self.bot.db.fetchall(
-                "SELECT word FROM blacklist_words WHERE guild_id = ? ORDER BY word",
-                (guild.id,),
-            )
-            keywords: list[str] = []
-            seen: set[str] = set()
-            for row in rows or ():
-                value = str(row["word"] or "").strip()
-                if not value or len(value) > 60:
-                    continue
-                folded = value.casefold()
-                if folded in seen:
-                    continue
-                seen.add(folded)
-                keywords.append(value)
-                if len(keywords) >= 1000:
-                    break
-            keywords.sort(key=str.casefold)
-
-            try:
-                rules = await guild.fetch_automod_rules()
-            except (discord.Forbidden, discord.HTTPException):
-                logger.warning(
-                    "Lecture règle Discord AutoMod mots interdits impossible guild=%s",
-                    guild.id,
-                    exc_info=True,
-                )
-                return False
-
-            sentrix_rules = [r for r in rules if r.name == NATIVE_BLACKLIST_RULE_NAME]
-            rule = sentrix_rules[0] if sentrix_rules else None
-            for duplicate in sentrix_rules[1:]:
-                try:
-                    await duplicate.delete(reason="SentriX: suppression doublon mots interdits")
-                except (discord.Forbidden, discord.HTTPException):
-                    pass
-
-            native_policy = await self._native_policy_exemptions(guild, "antiinsult")
-            if keywords and native_policy is None:
-                if rule is not None:
-                    try:
-                        await rule.delete(reason="SentriX: politique mots interdits gérée par le moteur local")
-                    except (discord.Forbidden, discord.HTTPException):
-                        return False
-                return True
-            exempt_roles, exempt_channels = native_policy or ([], [])
-
-            if not keywords:
-                if rule is not None:
-                    try:
-                        await rule.delete(reason="SentriX: aucun mot interdit configuré")
-                    except (discord.Forbidden, discord.HTTPException):
-                        return False
-                return True
-
-            trigger = discord.AutoModTrigger(keyword_filter=keywords)
-            actions = [
-                discord.AutoModRuleAction(custom_message=NATIVE_BLACKLIST_CUSTOM_MESSAGE)
-            ]
-            try:
-                if rule is None:
-                    await guild.create_automod_rule(
-                        name=NATIVE_BLACKLIST_RULE_NAME,
-                        event_type=discord.AutoModRuleEventType.message_send,
-                        trigger=trigger,
-                        actions=actions,
-                        enabled=True,
-                        exempt_roles=exempt_roles,
-                        exempt_channels=exempt_channels,
-                        reason="SentriX: synchronisation mots interdits",
-                    )
-                else:
-                    await rule.edit(
-                        trigger=trigger,
-                        actions=actions,
-                        enabled=True,
-                        exempt_roles=exempt_roles,
-                        exempt_channels=exempt_channels,
-                        reason="SentriX: synchronisation mots interdits",
-                    )
-                return True
-            except (discord.Forbidden, discord.HTTPException, ValueError):
-                logger.warning(
-                    "Synchronisation Discord AutoMod mots interdits impossible guild=%s",
-                    guild.id,
-                    exc_info=True,
-                )
-                return False
+        """Les mots interdits restent filtrés localement avec bypass administrateur."""
+        return await self._remove_owned_native_rule(guild, NATIVE_BLACKLIST_RULE_NAME)
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild) -> None:
