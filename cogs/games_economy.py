@@ -1730,6 +1730,7 @@ class ConnectFourView(discord.ui.View):
         self.current = p1
         self.message: discord.Message | None = None
         self._settled = False
+        self._victory_gif: str | None = None
         for col in range(self.COLS):
             self.add_item(_ConnectFourButton(col))
 
@@ -1766,7 +1767,7 @@ class ConnectFourView(discord.ui.View):
             # Un GIF de victoire UNIQUEMENT quand la partie se termine :
             # laisser le plateau et les boutons en haut pendant les tours.
             image=(
-                game_visuals.image_for("Puissance 4", status, kind="success")
+                self._victory_gif
                 if "gagne la partie" in status.casefold() else None
             ),
         )
@@ -1820,6 +1821,9 @@ class ConnectFourView(discord.ui.View):
             self._settled = True
             await _finish_duel(self.cog.bot, self.guild_id, "connect4", self.p1, self.p2)
             winner = self.current
+            self._victory_gif = await game_visuals.verified_image_for(
+                "Puissance 4", "Victoire !", kind="success"
+            )
             reward = await game_rewards.reward_game_winner(self.cog.bot, self.guild_id, winner.id, "connect4", 40, self.session_id, result="win")
             await panels.editer(
                 interaction.response,
