@@ -433,6 +433,12 @@ ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "
 INCIDENT_WINDOW_SECONDS = 30.0
 INCIDENT_LOG_DELAY_SECONDS = 4.0
 SPAM_FILTERS = frozenset({"antispam", "antispam_duplicate", "antiemoji", "antimention"})
+# Le contenu contenant un lien interdit est SUPPRIMÉ, jamais republié sous
+# le nom/avatar du membre via un webhook (même avec une URL censurée).
+LINK_NOTICE_FILTERS = frozenset({
+    "antilink", "antiinvite", "blacklist_link", "blacklist_word_link",
+})
+NO_REPOST_FILTERS = LINK_NOTICE_FILTERS | {"antiscam"}
 
 # Progression dédiée au spam :
 # 1) rappel public avec ping ; 2) vrai warn enregistré ; 3+) timeout croissant.
@@ -3115,9 +3121,9 @@ class AutoMod(commands.Cog, name="Automod"):
         """
         labels = {
             "blacklist_word": "votre message contient un mot interdit sur le serveur.",
-            "blacklist_link": "votre message contient un lien interdit sur le serveur.",
+            "blacklist_link": "les liens sont interdits dans ce salon.",
             "blacklist_word_link": "votre message contient un mot interdit et un lien interdit sur le serveur.",
-            "antilink": "votre message contient un lien interdit sur le serveur.",
+            "antilink": "les liens sont interdits dans ce salon.",
             "antiinvite": "votre message contient une invitation Discord interdite sur le serveur.",
             "antiscam": "votre message a été bloqué par la protection anti-arnaque.",
         }
@@ -3202,7 +3208,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # Republication contrôlée SentriX : seulement APRÈS suppression réussie, et uniquement si
         # le texte a pu être censuré de manière sûre. Sans Gérer les webhooks, on garde
         # automatiquement le comportement suppression + avertissement.
-        if deleted and censored_content:
+        if deleted and censored_content and filter_name not in NO_REPOST_FILTERS:
             await self._repost_censored(message, censored_content)
 
         key = (message.guild.id, message.author.id)
@@ -3330,10 +3336,17 @@ class AutoMod(commands.Cog, name="Automod"):
             else self._public_automod_message(filter_name, reason)
         )
         try:
-            if filter_name in {"blacklist_word", "blacklist_link", "blacklist_word_link", "antilink", "antiinvite", "antiscam"}:
-                # Une carte courte avec liseré ambre, sans image/bannière ni
-                # enveloppe d'embed blanche. Discord supprime automatiquement
-                # l'avertissement au bout de huit secondes.
+            if filter_name in LINK_NOTICE_FILTERS:
+                # Le membre voit un avertissement LISIBLE, sans embed, carte
+                # blanche, webhook ou repost du lien interdit. La mention est
+                # uniquement visuelle : aucun ping n'est envoyé.
+                await message.channel.send(
+                    f"🚫 {message.author.mention} Les liens sont interdits dans ce salon.",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=8,
+                )
+            elif filter_name in {"blacklist_word", "antiscam"}:
+                # Les autres infractions conservent leur interface existante.
                 try:
                     await message.channel.send(
                         view=self._content_notice_view(message.author.mention, filter_name),
