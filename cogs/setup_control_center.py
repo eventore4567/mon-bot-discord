@@ -517,6 +517,150 @@ class FieldChannelSelect(discord.ui.ChannelSelect):
         await self.owner.refresh(interaction)
 
 
+class SetupCommandAccessModal(discord.ui.Modal):
+    """Gère l'accès aux commandes directement dans /setup > Modération > Avancé.
+
+    Les deux anciennes commandes +disablecommand / +enablecommand écrivent dans
+    la même table : aucune nouvelle politique de permissions n'est créée.
+    """
+
+    def __init__(self, owner):
+        super().__init__(title="SentriX • Accès aux commandes", timeout=300)
+        self.owner = owner
+        self.command_name = discord.ui.TextInput(
+            label="Commande (ex. ban ou music play)",
+            placeholder="Nom de la commande sans + ni /",
+            required=True,
+            max_length=100,
+        )
+        self.operation = discord.ui.TextInput(
+            label="Action : activer ou desactiver",
+            placeholder="activer",
+            required=True,
+            min_length=6,
+            max_length=12,
+        )
+        self.add_item(self.command_name)
+        self.add_item(self.operation)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await _can_setup(self.owner.bot, interaction.user, interaction.guild):
+            return await _permission_error(interaction)
+        name = str(self.command_name.value).strip().lstrip("+/").strip().casefold()
+        operation = str(self.operation.value).strip().casefold()
+        if operation not in {"activer", "desactiver", "désactiver"}:
+            return await interaction.response.send_message(
+                "Action inconnue. Écrivez **activer** ou **desactiver**.",
+                ephemeral=True,
+            )
+        target = self.owner.bot.get_command(name)
+        if target is None:
+            return await interaction.response.send_message(
+                f"Commande `{name[:60]}` introuvable. Utilisez son nom + d'origine.",
+                ephemeral=True,
+            )
+        # Désactiver le setup reviendrait à condamner la configuration.
+        if operation != "activer" and str(target.root_parent.name if target.root_parent else target.name).casefold() in {"setup", "help"}:
+            return await interaction.response.send_message(
+                "Les commandes de récupération **setup** et **help** restent actives.",
+                ephemeral=True,
+            )
+        stored = str(target.qualified_name)
+        if operation == "activer":
+            await self.owner.bot.db.execute(
+                "DELETE FROM disabled_commands WHERE guild_id = ? AND command_name = ?",
+                (self.owner.guild.id, stored),
+            )
+        else:
+            await self.owner.bot.db.execute(
+                "INSERT OR IGNORE INTO disabled_commands (guild_id, command_name) VALUES (?, ?)",
+                (self.owner.guild.id, stored),
+            )
+        await self.owner.audit(interaction.user.id, f"command:{stored}", operation)
+        await interaction.response.send_message(
+            f"✅ Commande `{stored}` **{'activée' if operation == 'activer' else 'désactivée'}**. "
+            "Actualisez /setup pour voir les changements.",
+            ephemeral=True,
+        )
+
+
+class SetupWarnThresholdModal(discord.ui.Modal):
+    """Configure le seuil de warns depuis le centre, pas via un slash isolé."""
+
+    def __init__(self, owner):
+        super().__init__(title="SentriX • Seuil des avertissements", timeout=300)
+        self.owner = owner
+        self.limit = discord.ui.TextInput(
+            label="Nombre de warns avant ban (0 = off)",
+            placeholder="0",
+            required=True,
+            max_length=4,
+        )
+        self.add_item(self.limit)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await _can_setup(self.owner.bot, interaction.user, interaction.guild):
+            return await _permission_error(interaction)
+        raw = str(self.limit.value).strip()
+        if not raw.isdecimal() or int(raw) > 999:
+            return await interaction.response.send_message(
+                "Entrez un nombre entier entre 0 et 999 (0 = désactivé).",
+                ephemeral=True,
+            )
+        value = int(raw)
+        await self.owner.bot.db.set_guild_config(
+            self.owner.guild.id, "warn_ban_threshold", value,
+        )
+        await self.owner.audit(interaction.user.id, "warn_ban_threshold", value)
+        await interaction.response.send_message(
+            f"✅ Seuil d'avertissements : **{value or 'désactivé'}**. "
+            "Actualisez /setup pour voir le réglage.",
+            ephemeral=True,
+        )
+
+
+class SetupIgnoredChannelSelect(discord.ui.ChannelSelect):
+    """Choisir un salon bascule son exemption; aucune création de canal."""
+
+    def __init__(self, owner):
+        self.owner = owner
+        super().__init__(
+            placeholder="Ignorer / réactiver un salon (basculer)",
+            min_values=1,
+            max_values=1,
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            row=2,
+        )
+
+    async def callback(self, interaction):
+        chosen = self.values[0] if self.values else None
+        channel = self.owner.guild.get_channel(int(chosen.id)) if chosen else None
+        if channel is None:
+            return await _refuse(interaction, "Ce salon n'existe plus.")
+        row = await self.owner.bot.db.fetchone(
+            "SELECT channel_id FROM ignored_channels WHERE guild_id = ? AND channel_id = ?",
+            (self.owner.guild.id, channel.id),
+        )
+        if row:
+            await self.owner.bot.db.execute(
+                "DELETE FROM ignored_channels WHERE guild_id = ? AND channel_id = ?",
+                (self.owner.guild.id, channel.id),
+            )
+        else:
+            await self.owner.bot.db.execute(
+                "INSERT OR IGNORE INTO ignored_channels (guild_id, channel_id) VALUES (?, ?)",
+                (self.owner.guild.id, channel.id),
+            )
+        automod = self.owner.bot.get_cog("Automod")
+        if automod is not None:
+            automod.ignored_channels_cache.pop(self.owner.guild.id, None)
+        await self.owner.audit(
+            interaction.user.id, "ignored_channel",
+            f"{channel.id}:{'off' if row else 'on'}",
+        )
+        await self.owner.refresh(interaction)
+
+
 class AutomodSelect(discord.ui.Select):
     def __init__(self, view):
         self.owner = view
@@ -1019,9 +1163,31 @@ class SetupView(discord.ui.LayoutView):
         self.ajouter(home); self.ajouter(refresh); self.ajouter(avance); self.ajouter(close)
 
         if self.category == "moderation":
-            self.ajouter(FieldRoleSelect(self, "mod_role", "Rôle staff", 2))
-            self.ajouter(FieldRoleSelect(self, "mute_role", "Rôle mute", 3))
-            self.ajouter(FieldRoleSelect(self, "warn_role", "Rôle warn", 4))
+            if self.avance:
+                # Affichage alternatif plutôt qu'une 6e ligne de sélecteurs :
+                # Discord refuse les panneaux avec trop d'ActionRows.
+                self.ajouter(SetupIgnoredChannelSelect(self))
+                manage_commands = discord.ui.Button(
+                    label="Accès aux commandes", style=discord.ButtonStyle.primary,
+                )
+                warn_limit = discord.ui.Button(
+                    label="Seuil des warns", style=discord.ButtonStyle.secondary,
+                )
+
+                async def configure_commands(interaction):
+                    await interaction.response.send_modal(SetupCommandAccessModal(self))
+
+                async def configure_warns(interaction):
+                    await interaction.response.send_modal(SetupWarnThresholdModal(self))
+
+                manage_commands.callback = configure_commands
+                warn_limit.callback = configure_warns
+                self.ajouter(manage_commands)
+                self.ajouter(warn_limit)
+            else:
+                self.ajouter(FieldRoleSelect(self, "mod_role", "Rôle staff", 2))
+                self.ajouter(FieldRoleSelect(self, "mute_role", "Rôle mute", 3))
+                self.ajouter(FieldRoleSelect(self, "warn_role", "Rôle warn", 4))
         elif self.category == "security":
             self.ajouter(AutomodSelect(self))
         elif self.category == "logs":
@@ -1383,7 +1549,7 @@ class SetupView(discord.ui.LayoutView):
         """Configuration reelle de la categorie : salons, roles, sources."""
         cle = self.category
         if cle == "moderation":
-            return [
+            sections = [
                 panels.Section(
                     "Rôles configurés",
                     [
@@ -1393,6 +1559,33 @@ class SetupView(discord.ui.LayoutView):
                     ],
                 )
             ]
+            if self.avance:
+                ignored = await self.bot.db.fetchall(
+                    "SELECT channel_id FROM ignored_channels WHERE guild_id = ? LIMIT 30",
+                    (self.guild.id,),
+                )
+                disabled = await self.bot.db.fetchall(
+                    "SELECT command_name FROM disabled_commands WHERE guild_id = ? LIMIT 30",
+                    (self.guild.id,),
+                )
+                threshold = int(_get(conf, "warn_ban_threshold", 0) or 0)
+                ignored_list = [
+                    _channel(self.guild, _get(row, "channel_id")) for row in ignored[:8]
+                ]
+                disabled_list = [
+                    str(_get(row, "command_name", "")) for row in disabled[:8]
+                ]
+                sections.append(
+                    panels.Section(
+                        "Restrictions (Paramètres avancés)",
+                        [
+                            panels.Ligne("Salon(s) ignoré(s)", " · ".join(ignored_list) or "Aucun"),
+                            panels.Ligne("Commandes désactivées", ", ".join(disabled_list) or "Aucune"),
+                            panels.Ligne("Ban après warns", str(threshold) if threshold else "Désactivé"),
+                        ],
+                    )
+                )
+            return sections
         if cle == "security":
             row = await self.bot.db.fetchone(
                 "SELECT * FROM automod_settings WHERE guild_id = ?", (self.guild.id,)
