@@ -40,8 +40,6 @@ GIFS: dict[str, str] = {
     "boss-power": "https://media.giphy.com/media/j9oeNL144oaZQq2tJO/giphy.gif",
     "boss-guard": "https://media.giphy.com/media/WDRyxPW1BSpHIDH5Cg/giphy.gif",
     "boss-counter": "https://media.giphy.com/media/qJyZZ9B6Za6Yjsp69O/giphy.gif",
-    "boss-victory": "https://media.giphy.com/media/f8Wil9jWfDhTbnw87P/giphy.gif",
-    "boss-defeat": "https://media.giphy.com/media/j8HIpI6nyLkNUwxP3w/giphy.gif",
 }
 
 logger = logging.getLogger("bot.game-visuals")
