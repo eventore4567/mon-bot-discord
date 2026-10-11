@@ -193,7 +193,16 @@ def test_permission_helper_does_not_exempt_partial_staff_or_role_names():
 async def test_antigif_runtime_skips_full_permission_staff_but_not_regular_users():
     from cogs.security_owner_immunity_final import _patch_antigif
 
-    runtime = SimpleNamespace(handle_message=AsyncMock(return_value="filtered"))
+    from types import MethodType
+
+    calls = []
+
+    async def original_handle_message(_self, message):
+        calls.append(message.author.id)
+        return "filtered"
+
+    runtime = SimpleNamespace()
+    runtime.handle_message = MethodType(original_handle_message, runtime)
     bot = SimpleNamespace(_sentrix_antigif_runtime=runtime)
     _patch_antigif(bot)
 
@@ -201,6 +210,7 @@ async def test_antigif_runtime_skips_full_permission_staff_but_not_regular_users
     regular = _member()
     assert await runtime.handle_message(_message(admin)) is None
     assert await runtime.handle_message(_message(regular)) == "filtered"
+    assert calls == [regular.id]
     assert runtime.handle_message.__func__._sentrix_owner_antigif_immunity is True
 
 
