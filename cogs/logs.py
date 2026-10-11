@@ -150,6 +150,42 @@ def _permission_label(name: str) -> str:
     return name.replace("_", " ").capitalize()
 
 
+def _permission_badge_fields(
+    title: str,
+    names: list[str],
+    *,
+    limit: int = 1024,
+) -> list[tuple[str, str, bool]]:
+    """Affiche chaque permission dans son propre code inline Discord.
+
+    Discord rend `Attach files` dans une pastille grise. Un tronquage brut
+    en plein `...` casserait le Markdown : les longues listes sont donc
+    réparties en champs complets, sans perdre de permission.
+    """
+    if not names:
+        return []
+    chunks: list[str] = []
+    current = ""
+    on_line = 0
+    for name in names:
+        label = _permission_label(name).replace("`", "")[:120]
+        badge = f"`{label}`"
+        separator = ("\\n" if on_line and on_line % 4 == 0 else "  ") if current else ""
+        if current and len(current) + len(separator) + len(badge) > limit:
+            chunks.append(current)
+            current = badge
+            on_line = 1
+        else:
+            current += separator + badge
+            on_line += 1
+    if current:
+        chunks.append(current)
+    return [
+        (title if idx == 0 else f"{title} (suite {idx + 1})", chunk, False)
+        for idx, chunk in enumerate(chunks)
+    ]
+
+
 def _stay_of(member) -> int | None:
     """Le séjour d'un membre : sa date d'arrivée en millisecondes (None si inconnue)."""
     joined = getattr(member, "joined_at", None)
@@ -1143,21 +1179,9 @@ class Logs(commands.Cog, name="Logs"):
         added = sorted(after_permissions - before_permissions)
         removed = sorted(before_permissions - after_permissions)
         if added:
-            fields.append(
-                (
-                    "Permissions ajoutées",
-                    ", ".join(_permission_label(name) for name in added)[:1024],
-                    False,
-                )
-            )
+            fields.extend(_permission_badge_fields("Permissions ajoutées", added))
         if removed:
-            fields.append(
-                (
-                    "Permissions supprimées",
-                    ", ".join(_permission_label(name) for name in removed)[:1024],
-                    False,
-                )
-            )
+            fields.extend(_permission_badge_fields("Permissions supprimées", removed))
         if len(fields) == 1:
             return
         actor, audit = await self._audit_actor(
