@@ -27,7 +27,13 @@ def _cog() -> AutoMod:
     return cog
 
 
-def _member(*, user_id: int = 7, role_ids: tuple[int, ...] = ()) -> discord.Member:
+def _member(
+    *,
+    user_id: int = 7,
+    role_ids: tuple[int, ...] = (),
+    administrator: bool = False,
+    manage_guild: bool = False,
+) -> discord.Member:
     guild = Mock(spec=discord.Guild)
     guild.id = 1
     guild.owner_id = 999
@@ -37,6 +43,9 @@ def _member(*, user_id: int = 7, role_ids: tuple[int, ...] = ()) -> discord.Memb
     member.bot = False
     member.guild = guild
     member.roles = [SimpleNamespace(id=role_id) for role_id in role_ids]
+    member.guild_permissions = SimpleNamespace(
+        administrator=administrator, manage_guild=manage_guild,
+    )
     return member
 
 
@@ -67,6 +76,46 @@ async def test_role_bypass_applies_only_to_its_filter_outside_strict_channel():
 
     assert await cog.security_filter_applies_to(message, "antispam") is False
     assert await cog.security_filter_applies_to(message, "antilink") is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filter_name", ["antilink", "antiinvite", "blacklist_link"])
+async def test_administrator_can_post_links_and_invites_even_in_strict_channels(filter_name):
+    cog = _cog()
+    member = _member(administrator=True)
+    cog.immunity_overrides_cache[(1, member.id)] = None
+    _policy(cog, "antilink", strict=(77,))
+    _policy(cog, "antiinvite", strict=(77,))
+
+    assert await cog.security_filter_applies_to(
+        _message(member, channel_id=77), filter_name,
+    ) is False
+    assert await cog.security_filter_applies_to(
+        _message(member, channel_id=501, parent_id=77), filter_name,
+    ) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("filter_name", ["antiscam", "antiinsult", "antispam", "antimention"])
+async def test_administrator_link_exemption_does_not_disable_other_protections(filter_name):
+    cog = _cog()
+    member = _member(administrator=True)
+    cog.immunity_overrides_cache[(1, member.id)] = None
+    _policy(cog, filter_name)
+
+    assert await cog.security_filter_applies_to(_message(member), filter_name) is True
+
+
+@pytest.mark.asyncio
+async def test_manage_server_without_administrator_is_not_all_perms():
+    cog = _cog()
+    member = _member(manage_guild=True)
+    cog.immunity_overrides_cache[(1, member.id)] = None
+    _policy(cog, "antilink", strict=(77,))
+    _policy(cog, "antiinvite", strict=(77,))
+
+    assert await cog.security_filter_applies_to(_message(member), "antilink") is True
+    assert await cog.security_filter_applies_to(_message(member, channel_id=77), "antiinvite") is True
 
 
 @pytest.mark.asyncio
