@@ -33,6 +33,7 @@ def _member(
     role_ids: tuple[int, ...] = (),
     administrator: bool = False,
     manage_guild: bool = False,
+    full_staff: bool = False,
 ) -> discord.Member:
     guild = Mock(spec=discord.Guild)
     guild.id = 1
@@ -44,7 +45,13 @@ def _member(
     member.guild = guild
     member.roles = [SimpleNamespace(id=role_id) for role_id in role_ids]
     member.guild_permissions = SimpleNamespace(
-        administrator=administrator, manage_guild=manage_guild,
+        administrator=administrator,
+        manage_guild=manage_guild or full_staff,
+        manage_channels=full_staff,
+        manage_roles=full_staff,
+        manage_messages=full_staff,
+        kick_members=full_staff,
+        ban_members=full_staff,
     )
     return member
 
@@ -135,6 +142,76 @@ async def test_administrator_is_exempt_in_legacy_automod_access_check():
     member = _member(administrator=True)
     cog.immunity_overrides_cache[(1, member.id)] = False
     assert await cog.is_automod_exempt(member) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filter_name",
+    [
+        "antispam", "antilink", "antiinvite", "antimention",
+        "anticaps", "antiemoji", "antiscam", "antiinsult",
+    ],
+)
+async def test_full_permissions_staff_bypasses_every_message_filter(filter_name):
+    cog = _cog()
+    member = _member(full_staff=True)
+    cog.immunity_overrides_cache[(1, member.id)] = False
+    _policy(cog, filter_name, strict=(77,))
+    assert await cog.security_filter_applies_to(
+        _message(member, channel_id=77), filter_name,
+    ) is False
+
+
+@pytest.mark.asyncio
+async def test_full_permissions_staff_skips_message_and_deletion_synchronously():
+    cog = _cog()
+    member = _member(full_staff=True)
+    msg = _message(member)
+    msg.id = 2026
+    msg.content = "free nitro claim https://discord.com@fake-prize.example"
+    msg.delete = AsyncMock()
+    cog.automod_cache[1] = {"antispam": 1, "antiscam": 1, "antilink": 1}
+    cog._delete_and_warn = AsyncMock()
+    await cog.on_message(msg)
+    cog._delete_and_warn.assert_not_awaited()
+    await AutoMod._delete_and_warn(cog, msg, "possible scam", "antiscam")
+    msg.delete.assert_not_awaited()
+
+
+def test_permission_helper_does_not_exempt_partial_staff_or_role_names():
+    from utils.security_member_bypass import can_bypass_message_filters
+
+    assert can_bypass_message_filters(_member(full_staff=True)) is True
+    assert can_bypass_message_filters(_member(administrator=True)) is True
+    assert can_bypass_message_filters(_member(manage_guild=True)) is False
+    mock_staff = _member()
+    mock_staff.roles = [SimpleNamespace(id=123, name="Administrateur")]
+    assert can_bypass_message_filters(mock_staff) is False
+
+
+@pytest.mark.asyncio
+async def test_antigif_runtime_skips_full_permission_staff_but_not_regular_users():
+    from cogs.security_owner_immunity_final import _patch_antigif
+
+    from types import MethodType
+
+    calls = []
+
+    async def original_handle_message(_self, message):
+        calls.append(message.author.id)
+        return "filtered"
+
+    runtime = SimpleNamespace()
+    runtime.handle_message = MethodType(original_handle_message, runtime)
+    bot = SimpleNamespace(_sentrix_antigif_runtime=runtime)
+    _patch_antigif(bot)
+
+    admin = _member(full_staff=True)
+    regular = _member()
+    assert await runtime.handle_message(_message(admin)) is None
+    assert await runtime.handle_message(_message(regular)) == "filtered"
+    assert calls == [regular.id]
+    assert runtime.handle_message.__func__._sentrix_owner_antigif_immunity is True
 
 
 @pytest.mark.asyncio

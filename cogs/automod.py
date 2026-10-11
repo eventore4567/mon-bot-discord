@@ -47,6 +47,7 @@ import config
 from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
 from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
+from utils.security_member_bypass import can_bypass_message_filters
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
 from services import moderation as moderation_service
@@ -55,15 +56,12 @@ logger = logging.getLogger("bot")
 
 
 def _is_discord_administrator(member: discord.abc.User) -> bool:
-    """Exemption AutoMod fondée sur la permission réelle, jamais le nom d'un rôle.
+    """Compatibilité historique : admin Discord OU rôle de direction « all perms ».
 
-    Il s'agit seulement des filtres de *messages*, pas des gardes anti-nuke,
-    anti-raid ou de la protection du serveur. Vérification légère, sans DB.
+    Un modérateur avec une seule permission de gestion n'est pas exempté.
+    Ce garde est limité à la modération des messages, jamais à l'anti-nuke.
     """
-    return (
-        isinstance(member, discord.Member)
-        and getattr(getattr(member, "guild_permissions", None), "administrator", False) is True
-    )
+    return isinstance(member, discord.Member) and can_bypass_message_filters(member)
 
 
 # Redirecteurs d'invitation aussi courants que discord.gg lui-même : les
@@ -1742,7 +1740,7 @@ class AutoMod(commands.Cog, name="Automod"):
 
         Priorité :
         1. immunité personnelle explicitement activée / propriétaire par défaut ;
-        2. Administrateur Discord => aucun filtre de messages, même en salon strict ;
+        2. Admin Discord ou rôle all-perms => aucun filtre de messages, même en salon strict ;
         3. salon strict => le filtre s'applique même à un membre/rôle bypass ;
         4. salon ignoré => filtre ignoré ;
         5. membre ou rôle bypass de ce filtre / rôle AutoMod global => ignoré ;
@@ -1755,9 +1753,9 @@ class AutoMod(commands.Cog, name="Automod"):
         if canonical not in SECURITY_FILTER_POLICY_KEYS:
             return True
 
-        # Exemption prioritaire et uniforme pour TOUS les filtres de messages.
-        # Le cache, les salons stricts et les overrides personnels ne doivent
-        # jamais forcer une sanction AutoMod sur un vrai administrateur.
+        # Exemption prioritaire pour les vrais administrateurs et les rôles
+        # all-perms. Elle prime sur les salons stricts et les overrides, mais
+        # ne désactive AUCUNE protection globale de sécurité du serveur.
         if _is_discord_administrator(message.author):
             return False
 
