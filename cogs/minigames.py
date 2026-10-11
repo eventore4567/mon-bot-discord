@@ -22,6 +22,7 @@ from discord.ext import commands
 from cogs.games_catalog import ROULEAU_SLOTS
 from utils import embeds, helpers, design_system, game_rewards, game_visuals
 from utils import sentrix_panels as panels
+from utils.game_duel_invites import DuelInvitation
 
 logger = logging.getLogger("bot.minigames")
 
@@ -339,22 +340,28 @@ class Minigames(commands.Cog, name="Minigames"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Question de culture générale', description=err, kind='warning')))
 
         question, answer = game_rewards.secure_pick(TRIVIA_QUESTIONS)
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Question de culture générale', description=f'❓ {question}\nVous avez 15 secondes.')))
-
-        def check(m):
-            return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
-
-        try:
-            msg = await self.bot.wait_for("message", check=check, timeout=15)
-        except asyncio.TimeoutError:
+        options = game_rewards.secure_shuffle([
+            answer, *[ans for _q, ans in TRIVIA_QUESTIONS if ans != answer][:3],
+        ])
+        view = _QuizChoiceView(ctx.author.id, options, timeout=15)
+        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(
+            await self._embed(guild_id, title="Question de culture générale",
+                              description=f"❓ {question}\n⏱️ 15 secondes · Cliquez sur la bonne réponse.")
+        ), view))
+        await view.wait()
+        if view.choice is None:
             await self._finish(ctx, "trivia", session_id, "loss", 0)
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Temps écoulé', description=f'⏱️ La réponse était **{answer}**.', kind='warning')))
-        if game_rewards.answer_matches(msg.content, answer):
+            desc, kind = f"⏱️ Temps écoulé ! Réponse : **{answer}**.", "warning"
+        elif game_rewards.answer_matches(view.choice, answer):
             reward = await self._finish(ctx, "trivia", session_id, "win", REWARD_TRIVIA)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Bonne réponse !', description='✅ **Bien joué !**' + self._reward_line(reward), kind='success')))
+            desc, kind = f"🏆 Bravo ! La réponse était **{answer}**." + self._reward_line(reward), "success"
         else:
             await self._finish(ctx, "trivia", session_id, "loss", 0)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(guild_id, title='Mauvaise réponse', description=f'❌ La bonne réponse était **{answer}**.', kind='danger')))
+            desc, kind = f"💥 Raté ! Réponse : **{answer}**.", "danger"
+        await panels.editer(msg, panels.depuis_embed(
+            await self._embed(guild_id, title="Question de culture générale — Résultat",
+                              description=desc, kind=kind)
+        ))
 
     @commands.hybrid_command(name="tictactoe", description="Jouer au morpion contre un autre membre.", with_app_command=False)
     @app_commands.describe(adversaire="Le membre contre qui jouer")
@@ -391,10 +398,49 @@ class Minigames(commands.Cog, name="Minigames"):
                 ),
             )
 
-        view = TicTacToeView(ctx.author, adversaire, cog=self, session_id=session_id)
-        e = await self._embed(guild_id, title="Morpion", description=f"{ctx.author.mention} (❌) vs {adversaire.mention} (⭕)\nAu tour de {ctx.author.mention}")
-        msg = await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), view))
-        view.message = msg
+        allowed, remaining = await game_rewards.check_cooldown(
+            self.bot, guild_id, adversaire.id, "tictactoe", 15,
+        )
+        if not allowed:
+            game_rewards.release_play_lock(guild_id, ctx.author.id, "tictactoe")
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                guild_id, title="Morpion", description=f"L'adversaire doit attendre {remaining}s.", kind="warning"
+            )))
+        if not game_rewards.acquire_play_lock(guild_id, adversaire.id, "tictactoe"):
+            game_rewards.release_play_lock(guild_id, ctx.author.id, "tictactoe")
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                guild_id, title="Morpion", description="L'adversaire joue déjà.", kind="warning"
+            )))
+
+        async def cancel():
+            game_rewards.release_play_lock(guild_id, ctx.author.id, "tictactoe")
+            game_rewards.release_play_lock(guild_id, adversaire.id, "tictactoe")
+
+        async def start(msg):
+            view = TicTacToeView(ctx.author, adversaire, cog=self, session_id=session_id)
+            await panels.editer(msg, panels.avec_composants(panels.depuis_embed(
+                await self._embed(guild_id, title="Morpion",
+                                  description=f"❌ {ctx.author.mention} vs ⭕ {adversaire.mention}\n"
+                                              f"✅ Défi accepté ! Au tour de {ctx.author.mention}.")
+            ), view))
+            view.message = msg
+
+        invite = DuelInvitation(
+            challenger_id=ctx.author.id, opponent_id=adversaire.id,
+            start=start, cancel=cancel,
+        )
+        try:
+            invite.message = await panels.envoyer(ctx, panels.avec_composants(
+                panels.depuis_embed(await self._embed(
+                    guild_id, title="Morpion — Invitation",
+                    description=f"🎯 {ctx.author.mention} défie {adversaire.mention} !\n"
+                                f"{adversaire.mention} doit accepter pour commencer.\n"
+                                "⏱️ 45 secondes pour répondre."
+                )), invite
+            ))
+        except Exception:
+            await cancel()
+            raise
 
     @commands.hybrid_command(name="hangman", description="Jouer au pendu.", with_app_command=False)
     async def hangman(self, ctx: commands.Context):
@@ -736,6 +782,44 @@ class Minigames(commands.Cog, name="Minigames"):
         )))
 
 
+class _QuizChoiceView(discord.ui.View):
+    """Quatre réponses privées au joueur et un seul résultat public."""
+    def __init__(self, author_id: int, options: list[str], *, timeout: float):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.choice: str | None = None
+        self._lock = asyncio.Lock()
+        for option in options[:4]:
+            self.add_item(_QuizChoiceButton(str(option)))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Seul le joueur peut répondre à ce quiz.", ephemeral=True,
+            )
+            return False
+        return True
+
+
+class _QuizChoiceButton(discord.ui.Button):
+    def __init__(self, choice: str):
+        super().__init__(label=choice[:75], style=discord.ButtonStyle.secondary)
+        self.choice = choice
+
+    async def callback(self, interaction: discord.Interaction):
+        view: _QuizChoiceView = panels.vue_source(self)
+        async with view._lock:
+            if view.choice is not None:
+                return await interaction.response.send_message(
+                    "Vous avez déjà répondu.", ephemeral=True
+                )
+            view.choice = self.choice
+            for child in view.children:
+                child.disabled = True
+            await interaction.response.defer()
+            panels.terminer_vue(self)
+
+
 class _BlackjackView(discord.ui.View):
     """Deux boutons, réarmés après chaque carte.
 
@@ -812,7 +896,7 @@ class TicTacToeButton(discord.ui.Button):
         self.y = y
 
     async def callback(self, interaction: discord.Interaction):
-        view: "TicTacToeView" = self.view
+        view: "TicTacToeView" = panels.vue_source(self)
         if interaction.user.id != view.current_player.id:
             return await interaction.response.send_message("Ce n'est pas votre tour !", ephemeral=True)
         symbol = "❌" if view.current_player == view.player_x else "⭕"
@@ -825,18 +909,21 @@ class TicTacToeButton(discord.ui.Button):
         if winner:
             for child in view.children:
                 child.disabled = True
-            await interaction.response.edit_message(content=f"🎉 {view.current_player.mention} a gagné !", view=view)
+            await interaction.response.defer()
+            await panels.editer(interaction.message, panels.depuis_embed(await view.cog._embed(view.player_x.guild.id, title="Morpion — Victoire", description=f"🏆 {view.current_player.mention} a gagné !", kind="success")))
             await view._reward_winner(view.current_player)
             return
         if view.is_full():
             for child in view.children:
                 child.disabled = True
-            await interaction.response.edit_message(content="🤝 Match nul !", view=view)
+            await interaction.response.defer()
+            await panels.editer(interaction.message, panels.depuis_embed(await view.cog._embed(view.player_x.guild.id, title="Morpion — Égalité", description="🤝 Match nul !")))
             await view._finish_draw()
             return
 
         view.current_player = view.player_o if view.current_player == view.player_x else view.player_x
-        await interaction.response.edit_message(content=f"Au tour de {view.current_player.mention}", view=view)
+        await interaction.response.defer()
+        await panels.editer(interaction.message, panels.avec_composants(panels.depuis_embed(await view.cog._embed(view.player_x.guild.id, title="Morpion", description=f"🎯 Au tour de {view.current_player.mention}")), view))
 
 
 class TicTacToeView(discord.ui.View):
@@ -865,6 +952,7 @@ class TicTacToeView(discord.ui.View):
             return None
 
         game_rewards.release_play_lock(guild_id, self.player_x.id, "tictactoe")
+        game_rewards.release_play_lock(guild_id, self.player_o.id, "tictactoe")
         # Les deux joueurs ont participé : le cooldown empêche les invitations en boucle.
         await game_rewards.touch_cooldown(self.cog.bot, guild_id, self.player_x.id, "tictactoe")
         await game_rewards.touch_cooldown(self.cog.bot, guild_id, self.player_o.id, "tictactoe")
@@ -889,7 +977,7 @@ class TicTacToeView(discord.ui.View):
             child.disabled = True
         if self.message is not None:
             try:
-                await self.message.edit(view=self)
+                await panels.editer(self.message, panels.depuis_embed(await self.cog._embed(guild_id, title="Morpion — Expiré", description="⏱️ Partie expirée.", kind="warning")))
             except discord.HTTPException:
                 pass
 
