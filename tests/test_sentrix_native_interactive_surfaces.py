@@ -179,5 +179,8 @@ def test_dashboard_security_has_full_control_center_and_per_filter_policy():
     assert 'data-security-config=' in ui
     assert 'id="securityPolicyBypassRoles"' in ui
     assert 'id="securityPolicyStrictChannels"' in ui
-    assert "salon strict → rôle bypass → protection normale" in ui
+    assert "salon strict → membre ou rôle exempté → protection normale" in ui
+    assert "security_filter_bypass_members" in api
+    assert 'id="securityPolicyMemberSearch"' in ui
+    assert "Retirer les membres exemptés" in ui
     assert "Retirer les rôles bypass" in ui
