@@ -108,6 +108,16 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "games quick": "Quick games.",
     "games races": "First to answer wins.",
     "games stats": "Your game statistics.",
+    "staff": "Staff collaboration and moderation follow-up.",
+    "invites": "Invitation tracking and reward management.",
+    "security rules": "Blacklists and allowed domains.",
+    "security words": "Forbidden words management.",
+    "security bots": "Choose which bots are allowed.",
+    "security protection": "Trusted members for anti-nuke.",
+    "security tools": "Security diagnostics, backups and recovery.",
+    "role panel": "Manage self-assignable role menus.",
+    "role buttons": "Manage reaction-based role buttons.",
+    "events bracket": "Tournament organisation.",
 }
 
 
@@ -146,6 +156,14 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("moderation dm-disable", "sanctiondm off", "Disable the DM for a sanction type."),
     _e("moderation dm-reset", "sanctiondm reset", "Restore the default sanction DM."),
 
+    # Existing + commands with no slash equivalent: familiar, short names.
+    _e("moderation hackban", "hackban", "Ban a user who is not in the server."),
+    _e("moderation unwarn", "unwarn", "Remove one warning from a member."),
+    _e("moderation hide", "hide", "Hide the channel from members."),
+    _e("moderation show", "show", "Make the channel visible again."),
+    _e("moderation move", "move", "Move a member to a voice channel."),
+    _e("moderation disconnect", "disconnect", "Disconnect a member from voice."),
+
     # ------------------------------------------------------------------ Sécurité
     _e("security antispam", "antispam", "Enable or disable anti-spam."),
     _e("security antilink", "antilink", "Enable or disable link blocking."),
@@ -167,6 +185,35 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("security score", "sentrixpro security", "Show the server security score."),
     _e("security blacklist-sync", "syncbl", "Ban every member on the SentriX blacklist."),
 
+    # More specific operations go into subgroups instead of 20 long /security-* names.
+    _e("security rules add", "blacklist-add", "Block a word or phrase."),
+    _e("security rules remove", "blacklist-remove", "Remove a blocked word or phrase."),
+    _e("security rules list", "blacklist-list", "Show the current blacklist."),
+    _e("security rules block", "blacklist-user", "Block a member through the blacklist."),
+    _e("security rules unblock", "unblacklist-user", "Remove a member from the blacklist."),
+    _e("security rules members", "blacklist-users", "List blacklisted members."),
+    _e("security rules allow", "whitelist-domain", "Allow a domain through the link filter."),
+    _e("security rules deny", "unwhitelist-domain", "Remove an allowed domain."),
+    _e("security words add", "mots-interdits-ajouter", "Add a forbidden word."),
+    _e("security words remove", "mots-interdits-retirer", "Remove a forbidden word."),
+    _e("security words list", "mots-interdits", "List forbidden words."),
+    _e("security bots allow", "antibot-allow", "Allow a bot to join the server."),
+    _e("security bots deny", "antibot-deny", "Remove a bot from the allowlist."),
+    _e("security protection allow", "antinuke-whitelist-add", "Trust a member for anti-nuke."),
+    _e("security protection remove", "antinuke-whitelist-remove", "Revoke anti-nuke trust."),
+    _e("security protection list", "antinuke-whitelist-list", "List anti-nuke exemptions."),
+    _e("security tools status", "automod-status", "Show AutoMod protection status."),
+    _e("security tools history", "automod-history", "Show AutoMod enforcement history."),
+    _e("security tools scan", "security-check", "Check active server protections."),
+    _e("security tools repair", "security-repair", "Repair security configuration."),
+    _e("security tools permissions", "permission-audit", "Inspect dangerous permissions."),
+    _e("security tools backup", "server-backup", "Back up server configuration."),
+    _e("security tools recover", "server-restore", "Restore a server backup."),
+    _e("security tools snapshot", "role-snapshot", "Save a snapshot of server roles."),
+    _e("security tools roles", "role-restore", "Restore previously saved roles."),
+    _e("security tools isolate", "quarantine", "Quarantine a risky member."),
+    _e("security tools release", "unquarantine", "Release a quarantined member."),
+
     # ---------------------------------------------------------------------- Logs
     _e("logs enable", "logevent on", "Enable a log event."),
     _e("logs disable", "logevent off", "Disable a log event."),
@@ -176,6 +223,10 @@ CATALOG: tuple[SlashEntry, ...] = (
     # ------------------------------------------------------------------- Tickets
     _e("tickets open", "ticket", "Open a support ticket."),
     _e("tickets summary", "sentrixpro ticket-summary", "Summarise a ticket."),
+    _e("tickets reopen", "ticket-reopen", "Reopen a closed ticket."),
+    _e("tickets transcript", "tickettranscript", "Export a ticket transcript."),
+    _e("tickets stats", "ticketstats", "View support ticket statistics."),
+    _e("tickets staff", "ticketstaffstats", "View ticket staff activity."),
 
     # ----------------------------------------------------------------- Communauté
     _e("suggestions submit", "suggest", "Submit a suggestion."),
@@ -257,6 +308,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("user avatar", "avatar", "Show a member's avatar."),
     _e("user invites", "invites", "Show a member's invites."),
     _e("user invited-by", "invited-by", "Show who invited a member."),
+    _e("user dm", "dm", "Send a direct message to a member."),
 
     _e("server info", "serverinfo", "Show information about this server."),
     _e("server members", "membercount", "Show the member count."),
@@ -270,6 +322,8 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("server goal", "sentrixpro goal", "Create, list or delete a server goal."),
     _e("server health", "server-health", "Check channels, roles and permissions."),
     _e("server audit", "server-audit", "Audit the server structure."),
+    _e("server say", "say", "Post a message as SentriX."),
+    _e("server metrics", "command-stats", "Show command usage statistics."),
 
     _e("role give", "giverole", "Give a role to a member."),
     _e("role remove", "removerole", "Remove a role from a member."),
@@ -277,6 +331,15 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("role mass", "massrole", "Add or remove a role for every member."),
     _e("role menu", "rolepanel dropdown", "Post a self-role dropdown menu."),
     _e("role reactions", "rolepanel reaction", "Post a self-role reaction panel."),
+    _e("role panel create", "rolepanel create", "Create a role selection panel."),
+    _e("role panel add", "rolepanel add", "Add a role to a role panel."),
+    _e("role panel remove", "rolepanel remove", "Remove a role from a role panel."),
+    _e("role panel list", "rolepanel list", "List configured role panels."),
+    _e("role panel delete", "rolepanel delete", "Delete a role panel."),
+    _e("role panel refresh", "rolepanel-refresh", "Refresh a role selection panel."),
+    _e("role buttons add", "reactionrole-add", "Add a reaction role."),
+    _e("role buttons remove", "reactionrole-remove", "Remove a reaction role."),
+    _e("role buttons list", "reactionrole-list", "List reaction role bindings."),
 
     # -------------------------------------------------------------- Vérification
     _e("verification captcha", "verification", "Set up rules, CAPTCHA and the verified role."),
@@ -288,6 +351,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("verification example-add", "proofexample", "Add an example screenshot."),
     _e("verification example-remove", "proofexample-remove", "Remove an example screenshot."),
     _e("verification examples", "proofexamples", "List the example screenshots."),
+    _e("verification repair", "verify-repair", "Restore a missing verification panel."),
 
     _e("config mod-role", "setmodrole", "Set the staff role."),
     _e("config prefix", "setprefix", "Change the text command prefix."),
@@ -324,10 +388,16 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("events leave", "event-leave", "Leave an event."),
     _e("events tournaments", "tournament-list", "List running tournaments."),
     _e("events tournament-join", "tournament-join", "Join a tournament."),
+    _e("events create", "event-create", "Create a community event."),
+    _e("events cancel", "event-cancel", "Cancel a community event."),
+    _e("events announce", "announce", "Send a server announcement."),
+    _e("events bracket create", "tournament-create", "Create a tournament."),
+    _e("events bracket start", "tournament-start", "Start a tournament."),
 
     _e("notifications add", "notifs-ping", "Get alerts for a social media channel."),
     _e("notifications list", "notifs-list", "List the watched social media channels."),
     _e("notifications remove", "notifs-remove", "Stop watching a social media channel."),
+    _e("notifications status", "notifs-status", "Check notification delivery status."),
 
     _e("counter status", "infinit status", "Show the counting game status."),
     _e("counter stop", "infinit stop", "Pause the counting game."),
@@ -378,9 +448,43 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("bot changelog", "changelog", "Show the latest SentriX updates."),
     _e("bot feedback", "feedback", "Send feedback to the SentriX team."),
     _e("bot bug", "report-bug", "Report a bug to the SentriX team."),
+    _e("bot status", "bot-status", "Show the current SentriX status."),
 
     _e("permissions explain", "permissions explain", "Explain why a command is allowed or denied."),
     _e("permissions list", "permissions liste", "List every command and who can run it."),
+
+    # Staff tools remain one level deep. Never expose bot-owner commands.
+    _e("staff member", "member", "Open a member's staff record."),
+    _e("staff note", "note", "Manage internal staff notes."),
+    _e("staff history", "staff-history", "Read staff activity history."),
+    _e("staff proof", "staff-proof", "Manage moderation evidence."),
+    _e("staff incident", "incident", "Record a staff incident."),
+    _e("staff watch", "watch", "Watch a member for repeat incidents."),
+    _e("staff center", "staff", "Open the staff control center."),
+    _e("staff handover", "handover", "Prepare a staff shift handover."),
+    _e("staff emergency", "urgence", "Open emergency staff actions."),
+    _e("staff audit", "audit", "Audit staff and moderation activity."),
+    _e("staff report", "report", "Create a staff report."),
+    _e("staff absence", "absence", "Manage staff absences."),
+    _e("staff remind", "staff-reminder", "Send staff reminders."),
+
+    # Invite tools are actions, not a dozen arbitrary top-level slash names.
+    _e("invites members", "invited-list", "Show members invited by a user."),
+    _e("invites codes", "invite-codes", "List invitation codes."),
+    _e("invites stats", "invite-stats", "Show invite statistics."),
+    _e("invites rank", "invite-rank", "Show a member's invite rank."),
+    _e("invites history", "invite-history", "View invitation history."),
+    _e("invites info", "invite-info", "Inspect an invitation."),
+    _e("invites sources", "invite-sources", "See where invites came from."),
+    _e("invites retention", "invite-retention", "Track member retention."),
+    _e("invites search", "invite-search", "Search invitation records."),
+    _e("invites label", "invite-label", "Name an invitation code."),
+    _e("invites unlabel", "invite-unlabel", "Remove a code label."),
+    _e("invites sync", "sync-invites", "Refresh invitation statistics."),
+    _e("invites reset", "reset-invites", "Reset server invitation statistics."),
+    _e("invites bonus", "addbonusinvites", "Add bonus invitations to a member."),
+    _e("invites deduct", "removebonusinvites", "Remove bonus invitations."),
+    _e("invites bonuses", "invitebonushistory", "Show bonus invitation history."),
 
     # -------------------------------------------------------------------- Musique
     _e("music play", "music play", "Play a song or a link."),
