@@ -11,6 +11,7 @@ mais boutons, scores, mises, récompenses et résultats restent utilisables.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import re
 import time
@@ -38,6 +39,9 @@ logger = logging.getLogger("bot.game-visuals")
 # La validité dépend de l'accessibilité du CDN *depuis Railway*.
 # Cache succès 1 h, échec 2 min : pas de requête à chaque clic sur les boutons.
 _MEDIA_STATE: dict[str, tuple[float, bool]] = {}
+_MEDIA_BYTES: dict[str, bytes] = {}
+MAX_GIF_BYTES = 4 * 1024 * 1024
+_ATTACHMENT_PREFIX = "sentrix_game_"
 _MEDIA_LOCK: asyncio.Lock | None = None
 _VALID_SECONDS = 3600
 _INVALID_SECONDS = 120
@@ -73,28 +77,88 @@ async def _probe_gif(url: str) -> bool:
         return False
 
 
+async def _fetch_gif_bytes(url: str) -> bytes | None:
+    """Charge le VRAI fichier binaire avec une taille bornée.
+
+    Un simple GET Range ne suffit pas : Discord pourrait recevoir un GIF valide
+    au premier octet mais incomplet ou refusé par le CDN sur la requête suivante.
+    """
+    try:
+        timeout = aiohttp.ClientTimeout(total=7, connect=3)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers={"Accept": "image/gif"}) as response:
+                if response.status != 200:
+                    return None
+                mime = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                if mime != "image/gif":
+                    return None
+                content_length = response.content_length
+                if content_length is not None and content_length > MAX_GIF_BYTES:
+                    return None
+                chunks = bytearray()
+                async for chunk in response.content.iter_chunked(65536):
+                    chunks.extend(chunk)
+                    if len(chunks) > MAX_GIF_BYTES:
+                        return None
+                raw = bytes(chunks)
+                # GIF signé ET terminé, pour ne pas envoyer un média tronqué.
+                if len(raw) < 14 or raw[:6] not in (b"GIF87a", b"GIF89a"):
+                    return None
+                if raw[-1:] != b";":
+                    return None
+                return raw
+    except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+        return None
+
+
+def attachment_file_for(image_url: str) -> discord.File | None:
+    """Crée un fichier Discord NEUF depuis le cache, pour send ET edit."""
+    prefix = "attachment://" + _ATTACHMENT_PREFIX
+    if not str(image_url).startswith(prefix) or not str(image_url).endswith(".gif"):
+        return None
+    scene = str(image_url)[len(prefix):-4]
+    data = _MEDIA_BYTES.get(scene)
+    if not data:
+        return None
+    return discord.File(io.BytesIO(data), filename=_ATTACHMENT_PREFIX + scene + ".gif")
+
+
 async def verified_image_for(
     title: str, description: str | None = None, kind: str = "primary"
 ) -> str | None:
-    """N'ajoute une galerie que si le CDN fournit réellement un GIF."""
+    """Renvoie une référence à une pièce jointe locale, jamais un hotlink.
+
+    Un CDN valide pour Railway peut rester inaccessible au proxy média Discord.
+    La seule méthode fiable est l'upload des octets GIF dans le MÊME message
+    Components V2. Sans octets locaux, aucune MediaGallery n'est ajoutée.
+    """
     scene = scene_for(title, description, kind)
     url = GIFS.get(scene) if scene else None
     if not url:
         return None
-    now = time.monotonic()
+    attachment = f"attachment://{_ATTACHMENT_PREFIX}{scene}.gif"
     cached = _MEDIA_STATE.get(url)
-    if cached is not None and cached[0] > now:
-        return url if cached[1] else None
+    if cached is not None and cached[0] > time.monotonic():
+        return attachment if cached[1] and _MEDIA_BYTES.get(scene) else None
     async with _lock():
-        now = time.monotonic()
         cached = _MEDIA_STATE.get(url)
-        if cached is not None and cached[0] > now:
-            return url if cached[1] else None
-        ok = await _probe_gif(url)
-        _MEDIA_STATE[url] = (now + (_VALID_SECONDS if ok else _INVALID_SECONDS), ok)
-        if not ok:
-            logger.warning("Animation %s inaccessible ou non-GIF ; panneau sans image.", scene)
-        return url if ok else None
+        if cached is not None and cached[0] > time.monotonic():
+            return attachment if cached[1] and _MEDIA_BYTES.get(scene) else None
+        data = await _fetch_gif_bytes(url)
+        success = bool(data)
+        if success:
+            _MEDIA_BYTES[scene] = data
+        else:
+            _MEDIA_BYTES.pop(scene, None)
+            logger.warning(
+                "GIF %s non téléchargeable (%s) ; jeu servi sans image.",
+                scene, url.split("/")[-2] if "/" in url else "source",
+            )
+        _MEDIA_STATE[url] = (
+            time.monotonic() + (_VALID_SECONDS if success else _INVALID_SECONDS),
+            success,
+        )
+        return attachment if success else None
 
 
 async def preflight_assets() -> dict[str, bool]:
@@ -218,9 +282,11 @@ def decorate_embed(
     On ne modifie ni la logique de jeu, ni la description (questions, résultats,
     récompenses, références), ni les callbacks des boutons.
     """
-    url = image_for(title, description, kind)
-    if url:
-        embed.set_image(url=url)
+    # L'ancienne fonction synchrone ne doit jamais injecter une URL extérieure
+    # non vérifiée. Elle exploite seulement les GIFs déjà téléchargés.
+    scene = scene_for(title, description, kind)
+    if scene in _MEDIA_BYTES:
+        embed.set_image(url=f"attachment://{_ATTACHMENT_PREFIX}{scene}.gif")
     return embed
 
 
@@ -228,4 +294,4 @@ def result_icon(title: str, description: str | None = None, kind: str = "primary
     return ICONS.get(scene_for(title, description, kind) or "", "")
 
 
-__all__ = ["GIFS", "ICONS", "scene_for", "image_for", "verified_image_for", "decorate_embed", "decorate_embed_checked", "preflight_assets", "result_icon"]
+__all__ = ["GIFS", "ICONS", "scene_for", "image_for", "verified_image_for", "attachment_file_for", "decorate_embed", "decorate_embed_checked", "preflight_assets", "result_icon"]
