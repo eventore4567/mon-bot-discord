@@ -267,8 +267,8 @@ async function renderSecurity() {
       ${switchRow(`Activer ${policy.label || 'cette protection'}`, policyKey, Boolean(a[policyKey]), policy.description || '')}
       ${policy.supports_policy ? `
         <div class="notice" style="margin-top:12px">
-          Priorité : <b>salon strict → membre ou rôle exempté → protection normale</b>. Dans un salon strict, les exemptions individuelles et par rôle ne s'appliquent pas. Les threads héritent du salon parent.
-          ${['antilink', 'antiinvite'].includes(policyKey) ? '<p><b>Exception administrateur :</b> les membres ayant la permission Discord Administrateur peuvent envoyer des liens et des invitations, même dans un salon strict. L’anti-arnaque reste actif.</p>' : ''}
+          <b>Administrateurs :</b> tous les filtres de messages SentriX sont ignorés pour les membres ayant réellement la permission Discord Administrateur (liens, anti-spam, anti-arnaque, mots interdits), même en salon strict. L’anti-nuke reste actif.
+          <p>Pour les autres membres : <b>salon strict → membre ou rôle exempté → protection normale</b>. Dans un salon strict, les exemptions individuelles et par rôle ne s'appliquent pas. Les threads héritent du salon parent.</p>
         </div>
         <div class="fields" style="margin-top:12px">
           <div class="field full">
