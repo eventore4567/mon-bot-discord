@@ -1057,7 +1057,7 @@ class AutoMod(commands.Cog, name="Automod"):
         # Les règles natives Discord n'acceptent pas les exemptions par utilisateur.
         # Ne pas laisser une règle native sanctionner un membre exempté : dans ce
         # cas, SentriX applique lui-même ce filtre sur les messages.
-        if policy["member_ids"] or (strict_channel_ids and bypass_role_ids):
+        if policy.get("member_ids") or (strict_channel_ids and bypass_role_ids):
             return None
 
         roles = [
