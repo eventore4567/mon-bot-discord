@@ -246,6 +246,27 @@ def compute_reward(settings: dict, base_amount: int) -> int:
     return max(0, round(amount))
 
 
+async def economy_rewards_enabled(bot, guild_id: int) -> bool:
+    """L'interrupteur Économie de +setup active AUTOMATIQUEMENT les gains des jeux.
+
+    Aucune configuration supplémentaire « argent des jeux » : même état
+    module_settings pour + et /. Les DB mockées sans fetchone sont des anciens
+    tests unitaires ; les bases de production utilisent toutes fetchone.
+    """
+    if not callable(getattr(bot.db, "fetchone", None)):
+        return True  # Compatibility with isolated GameReward tests (no actual DB).
+    try:
+        from utils import system_features
+        return bool(await system_features.is_system_enabled(bot.db, guild_id, "economy"))
+    except Exception:
+        # Ne jamais créditer d'argent si la lecture du module échoue.
+        import logging
+        logging.getLogger("bot.game-rewards").exception(
+            "État économie illisible (guild=%s) ; aucun crédit accordé.", guild_id
+        )
+        return False
+
+
 async def reward_game_winner(
     bot, guild_id: int, user_id: int, game_name: str, base_amount: int, session_id: str,
     result: str = "win", metadata: dict | None = None,
@@ -258,8 +279,14 @@ async def reward_game_winner(
     """
     metadata = metadata or {}
     settings = await get_settings(bot, guild_id)
+    # Les jeux restent jouables quand l'économie est OFF, mais aucun argent
+    # ne peut être crédité. Sitôt économie ON, les victoires paient sans setup.
+    economy_on = (
+        await economy_rewards_enabled(bot, guild_id)
+        if result == "win" and base_amount > 0 else True
+    )
 
-    if result == "win" and base_amount > 0:
+    if result == "win" and base_amount > 0 and economy_on:
         limit = int(settings.get("daily_limit", 0) or 0)
         if limit > 0:
             played = await bot.db.count_game_rewards_today(guild_id, user_id)
@@ -276,7 +303,9 @@ async def reward_game_winner(
                     metadata={**metadata, "daily_limit": limit, "played_today": played},
                 )
 
-    final_amount = compute_reward(settings, base_amount) if result == "win" else 0
+    final_amount = compute_reward(settings, base_amount) if result == "win" and economy_on else 0
+    if not economy_on:
+        metadata = {**metadata, "economy_disabled": True}
     if result == "win" and final_amount > 0:
         boosted_amount, boost = await temporary_boosts.apply_money_boost(
             bot.db, guild_id, user_id, final_amount
@@ -300,7 +329,9 @@ async def reward_game_winner(
         )
     reward = GameReward(
         success=True, game_name=game_name, session_id=session_id, guild_id=guild_id, user_id=user_id,
-        amount=credited or 0, result=result, reason="ok", display_id=display_id_or_reason, metadata=metadata,
+        amount=credited or 0, result=result,
+        reason="economy_disabled" if not economy_on else "ok",
+        display_id=display_id_or_reason, metadata=metadata,
     )
     if settings.get("logs_enabled", True):
         await _emit_game_log(bot, guild_id, reward)
