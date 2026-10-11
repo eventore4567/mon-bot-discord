@@ -53,7 +53,7 @@ _BAD_INPUT = re.compile(
 )
 _FAMILIES = (
     ("slap", ("gifle", "slap")),
-    ("coin", ("pile ou face", "coinflip", "roulette", "roulette russe", "blackjack", "casino", "des", "dice", "slot", "machine a sous", "highlow")),
+    ("coin", ("pile ou face", "coinflip", "roulette", "roulette russe", "blackjack", "casino", "lancer", "dice", "slot", "machine a sous", "highlow")),
     ("race", ("course", "race", "vitesse", "reflex", "reaction", "fasttype", "rapidite")),
     ("think", ("quiz", "trivia", "enigme", "math", "memoire", "memory", "mot", "pendu", "guess", "scramble", "potion", "detective")),
     ("fight", ("duel", "combat", "dragon", "zombie", "arene", "archery", "tir", "bomb", "bombe", "bombes", "lava", "lave", "rocket", "ghost", "fantome")),
