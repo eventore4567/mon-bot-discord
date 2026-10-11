@@ -1689,10 +1689,11 @@ class AutoMod(commands.Cog, name="Automod"):
 
         Priorité :
         1. immunité personnelle explicitement activée / propriétaire par défaut ;
-        2. salon strict => le filtre s'applique même à un membre/rôle bypass ;
-        3. salon ignoré => filtre ignoré ;
-        4. membre ou rôle bypass de ce filtre / rôle AutoMod global => ignoré ;
-        5. comportement normal.
+        2. Administrateur Discord => liens et invitations permis, même en salon strict ;
+        3. salon strict => le filtre s'applique même à un membre/rôle bypass ;
+        4. salon ignoré => filtre ignoré ;
+        5. membre ou rôle bypass de ce filtre / rôle AutoMod global => ignoré ;
+        6. comportement normal.
 
         Un override personnel OFF transforme le propriétaire en membre normal, comme
         avant cette politique. Les threads héritent du salon parent.
@@ -1716,6 +1717,16 @@ class AutoMod(commands.Cog, name="Automod"):
             member.id == member.guild.owner_id or member.id in config.OWNER_IDS
         ):
             return False
+
+        # « All perms » signifie la permission Discord Administrateur.
+        # Elle autorise les liens ordinaires ET les invitations, y compris
+        # dans les salons stricts. Les autres filtres (arnaques, spam,
+        # insultes) continuent d'agir : aucune immunité générale n'est créée.
+        # Lire la permission effective plutôt que le nom du rôle.
+        if canonical in {"antilink", "antiinvite"}:
+            permissions = getattr(member, "guild_permissions", None)
+            if getattr(permissions, "administrator", False) is True:
+                return False
 
         # Les salons stricts reprennent la priorité sur le bypass individuel,
         # les rôles ciblés et les exemptions globales héritées.
