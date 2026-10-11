@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import sqlite3
 import string
 import time
 from dataclasses import dataclass
@@ -1628,7 +1629,24 @@ async def _repair_enabled_systems(bot: commands.Bot) -> None:
                 )
                 continue
 
-            result, error = await cog.refresh_existing_panels(guild)
+            # Au démarrage, les autres cogs migrent aussi la DB. Un verrou
+            # SQLite temporaire ne doit pas condamner le portail jusqu'au
+            # prochain redémarrage du bot. On ne réessaie QUE cette erreur :
+            # un 403 Discord ou un salon supprimé ne se corrige pas en boucle.
+            for attempt in range(4):
+                try:
+                    result, error = await cog.refresh_existing_panels(guild)
+                    break
+                except sqlite3.OperationalError as exc:
+                    if "locked" not in str(exc).casefold() or attempt == 3:
+                        raise
+                    delay = 1.5 * (2 ** attempt)
+                    logger.warning(
+                        "Portail en attente du déverrouillage DB guild=%s "
+                        "tentative=%s/4 pause=%.1fs",
+                        guild.id, attempt + 1, delay,
+                    )
+                    await asyncio.sleep(delay)
             if error:
                 logger.warning("V120 : panel non actualisé guild=%s : %s", guild.id, error)
             else:
