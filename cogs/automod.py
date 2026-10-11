@@ -47,6 +47,7 @@ import config
 from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
 from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
+from utils.raid_join_deduplicator import RaidJoinDeduplicator
 from utils.security_member_bypass import can_bypass_message_filters
 from utils import sentrix_panels as panels
 from utils.moderation_dataset import MultilingualModerationDataset
@@ -997,6 +998,8 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         self.join_tracker = FenetreGlissante(fenetre=RAID_JOIN_WINDOW, purge_toutes=100)
         self.slow_join_tracker = FenetreGlissante(fenetre=RAID_SLOW_WINDOW, purge_toutes=100)
+        self._recent_raid_joins = RaidJoinDeduplicator(ttl_seconds=20, max_entries=8192)
+        self._raid_alert_last: dict[int, float] = {}
         self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
         self.infraction_tracker = FenetreGlissante(fenetre=ESCALATION_WINDOW)
         self.repeat_tracker = FenetreGlissante(fenetre=REPEAT_WINDOW)
@@ -3515,6 +3518,12 @@ class AutoMod(commands.Cog, name="Automod"):
         if not conf:
             return
 
+        # Un événement Discord JOIN dupliqué ne doit jamais être interprété
+        # comme une nouvelle arrivée ni répéter un kick, un signal de risque
+        # ou un comptage anti-raid. Le cache expire en 20 s.
+        if not self._recent_raid_joins.first_join(member.guild.id, member.id):
+            return
+
         if conf["antibot"] and member.bot:
             if await self._bot_is_allowlisted(member.guild.id, member.id):
                 await self.add_risk_signal(member.guild, member.id, "bot_allowlisted_join", 5, reason="Bot allowlisté ajouté au serveur", target=member)
@@ -3529,6 +3538,15 @@ class AutoMod(commands.Cog, name="Automod"):
                 await self.log_action(member.guild, e)
             except discord.HTTPException:
                 pass
+            return
+
+        # Le propriétaire et les vrais responsables « Gérer le serveur »
+        # ne peuvent être expulsés pour ancienneté ni mutés sur leur arrivée.
+        # Les bots gardent la politique antibot, sans passe-droit automatique.
+        if not member.bot and (
+            member.id == member.guild.owner_id
+            or can_bypass_message_filters(member)
+        ):
             return
 
         account_age = (discord.utils.utcnow() - member.created_at).days
@@ -3561,12 +3579,16 @@ class AutoMod(commands.Cog, name="Automod"):
                     reason=", ".join(join_reasons),
                     target=member,
                 )
-                if score >= RISK_ACTION_THRESHOLD and member.guild.me and member.guild.me.guild_permissions.moderate_members and member.top_role < member.guild.me.top_role:
-                    try:
-                        until = discord.utils.utcnow() + timedelta(seconds=SPAM_TIMEOUT_SECONDS)
-                        await member.timeout(until, reason="AutoMod Join Gate : score Risk critique")
-                    except (discord.Forbidden, discord.HTTPException):
-                        pass
+                # Les métadonnées passives d'un join (ancienneté, avatar,
+                # afflux de membres) ne prouvent pas qu'un utilisateur spamme.
+                # Enregistrer le score pour la surveillance, mais ne JAMAIS
+                # timeout sur la seule base de ce score : les sanctions sont
+                # réservées à des infractions de messages/actions confirmées.
+                if score >= RISK_ACTION_THRESHOLD:
+                    logger.info(
+                        "Anti-raid Join Gate : score élevé non sanctionnant guild=%s user=%s score=%s",
+                        member.guild.id, member.id, round(score, 1),
+                    )
 
         if conf["antiaccount"]:
             if account_age < 7:
@@ -3590,6 +3612,16 @@ class AutoMod(commands.Cog, name="Automod"):
             raid_rapide = arrivees >= RAID_JOIN_THRESHOLD
             raid_lent = arrivees_lentes >= RAID_SLOW_THRESHOLD
             if raid_rapide or raid_lent:
+                # On ne journalise pas 100 alertes identiques pendant un afflux
+                # prolongé. En revanche la protection continue pour les
+                # arrivées suivantes et le mode rapide peut toujours agir.
+                tick = time.monotonic()
+                last = self._raid_alert_last.get(member.guild.id, -9999.0)
+                if len(self._raid_alert_last) > 4096:
+                    self._raid_alert_last.clear()
+                should_log = tick - last >= 60
+                if should_log:
+                    self._raid_alert_last[member.guild.id] = tick
                 e = embeds.log_entry(
                     "🚨 Raid potentiel détecté", config.COLOR_WARNING,
                     raison=(
@@ -3603,24 +3635,29 @@ class AutoMod(commands.Cog, name="Automod"):
                         f"📈 Arrivées en {RAID_SLOW_WINDOW // 60} min": str(arrivees_lentes),
                     },
                 )
-                await self.log_action(member.guild, e)
+                if should_log:
+                    await self.log_action(member.guild, e)
                 await self.add_risk_signal(member.guild, member.id, "raid_join_velocity", 35, reason="Arrivée pendant un raid potentiel", target=member)
+                # Une vague LENTE de 60 comptes/10 min peut aussi résulter
+                # d'un événement légitime. On alerte, mais le changement
+                # global de vérification nécessite un raid RAPIDE confirmé.
                 # Réponse automatique : relever le niveau de vérification du serveur
                 # freine immédiatement les faux comptes fraîchement créés, sans avoir
                 # à verrouiller manuellement tous les salons.
                 try:
-                    if member.guild.verification_level != discord.VerificationLevel.highest:
+                    if raid_rapide and member.guild.verification_level != discord.VerificationLevel.highest:
                         await member.guild.edit(
                             verification_level=discord.VerificationLevel.highest,
                             reason="AutoMod : raid détecté, niveau de vérification relevé automatiquement",
                         )
-                        await self.log_action(
-                            member.guild,
-                            embeds.log_entry(
-                                "🔒 Niveau de vérification relevé", config.COLOR_WARNING,
-                                raison="Relevé automatiquement suite à un raid détecté",
-                            ),
-                        )
+                        if should_log:
+                            await self.log_action(
+                                member.guild,
+                                embeds.log_entry(
+                                    "🔒 Niveau de vérification relevé", config.COLOR_WARNING,
+                                    raison="Relevé automatiquement après afflux rapide confirmé",
+                                ),
+                            )
                 except discord.Forbidden:
                     pass
                 # Évite de redéclencher la même alerte à chaque nouvel arrivant tant que le raid dure.
