@@ -990,6 +990,8 @@ class AutoMod(commands.Cog, name="Automod"):
         self._native_automod_bootstrap_task: asyncio.Task | None = None
         # Diagnostic des blocages Discord natifs, sans stocker le contenu privé.
         self._native_block_last_seen: dict[tuple[int, int, int], float] = {}
+        self._local_block_last_seen: dict[tuple[int, int, str], float] = {}
+        self._admin_link_last_seen: dict[tuple[int, int], float] = {}
         self._native_rule_details: dict[tuple[int, int], tuple[str, int | None]] = {}
 
         # Toute écriture AutoMod venant des commandes, du Dashboard ou de l'IA passe
@@ -1087,6 +1089,63 @@ class AutoMod(commands.Cog, name="Automod"):
             raise
         except Exception:
             logger.exception("Bootstrap de nettoyage AutoMod interrompu")
+
+    @commands.Cog.listener()
+    async def on_automod_action(self, execution: discord.AutoModAction) -> None:
+        """Identifier les blocages exécutés par Discord AVANT le moteur Python.
+
+        Ce signal est émis par l'intent auto_moderation_execution. Le contenu du
+        message, les mots correspondants et les pièces jointes ne sont jamais
+        journalisés. Une limitation réduit le bruit en cas de raid.
+        """
+        action = getattr(execution, "action", None)
+        if getattr(action, "type", None) != discord.AutoModRuleActionType.block_message:
+            return
+        guild_id = int(getattr(execution, "guild_id", 0) or 0)
+        rule_id = int(getattr(execution, "rule_id", 0) or 0)
+        user_id = int(getattr(execution, "user_id", 0) or 0)
+        if not guild_id or not rule_id or not user_id:
+            return
+        seen_key = (guild_id, rule_id, user_id)
+        now = time.monotonic()
+        if now - self._native_block_last_seen.get(seen_key, -9999.0) < 30:
+            return
+        if len(self._native_block_last_seen) > 2000:
+            self._native_block_last_seen.clear()
+        self._native_block_last_seen[seen_key] = now
+
+        guild = self.bot.get_guild(guild_id)
+        member = guild.get_member(user_id) if guild is not None else None
+        privileged = (
+            can_bypass_message_filters(member) if member is not None else None
+        )
+        details = self._native_rule_details.get((guild_id, rule_id))
+        if details is None:
+            details = ("inconnue", None)
+            if guild is not None and getattr(
+                getattr(getattr(guild, "me", None), "guild_permissions", None),
+                "manage_guild", False,
+            ):
+                try:
+                    rule = await guild.fetch_automod_rule(rule_id)
+                except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                    pass
+                else:
+                    details = (
+                        str(getattr(rule, "name", "inconnue"))[:90],
+                        getattr(rule, "creator_id", None),
+                    )
+            if len(self._native_rule_details) > 1000:
+                self._native_rule_details.clear()
+            self._native_rule_details[(guild_id, rule_id)] = details
+        level = logging.WARNING if privileged else logging.INFO
+        logger.log(
+            level,
+            "SENTRIX_BLOCK_SOURCE=discord_native guild=%s user=%s channel=%s rule=%s "
+            "rule_name=%s creator=%s privileged=%s (aucun contenu enregistré)",
+            guild_id, user_id, getattr(execution, "channel_id", None), rule_id,
+            details[0], details[1], privileged,
+        )
 
     async def _on_automod_setting_changed(self, guild_id: int, field: str, value: int) -> None:
         self.automod_cache.pop(int(guild_id), None)
@@ -2582,6 +2641,19 @@ class AutoMod(commands.Cog, name="Automod"):
         # Le bypass admin s'applique AVANT la blacklist, le spam, l'anti-arnaque,
         # les insultes et toute détection qui pourrait supprimer un message.
         if _is_discord_administrator(message.author):
+            # Prouve que le message de l'administrateur est bien arrivé au bot.
+            # Si Discord l'intercepte auparavant, seul on_automod_action apparaît.
+            if LINK_RE.search(_normalize_link_text(message.content)):
+                key = (message.guild.id, message.author.id)
+                now = time.monotonic()
+                if now - self._admin_link_last_seen.get(key, -9999.0) >= 60:
+                    if len(self._admin_link_last_seen) > 2000:
+                        self._admin_link_last_seen.clear()
+                    self._admin_link_last_seen[key] = now
+                    logger.info(
+                        "SENTRIX_LINK_BYPASS=staff guild=%s user=%s channel=%s",
+                        message.guild.id, message.author.id, message.channel.id,
+                    )
             return
 
         content_lower = message.content.lower()
@@ -3006,6 +3078,19 @@ class AutoMod(commands.Cog, name="Automod"):
         # appelleraient cette méthode directement, sans passer par le filtre.
         if _is_discord_administrator(message.author):
             return
+        if filter_name in {
+            "antilink", "antiinvite", "antiscam", "blacklist_link", "blacklist_word_link",
+        }:
+            key = (message.guild.id, message.author.id, str(filter_name))
+            now = time.monotonic()
+            if now - self._local_block_last_seen.get(key, -9999.0) >= 30:
+                if len(self._local_block_last_seen) > 2000:
+                    self._local_block_last_seen.clear()
+                self._local_block_last_seen[key] = now
+                logger.info(
+                    "SENTRIX_BLOCK_SOURCE=local guild=%s user=%s channel=%s filter=%s",
+                    message.guild.id, message.author.id, message.channel.id, filter_name,
+                )
         self._mark_xp_skip(message.id)
         deleted = False
         try:
