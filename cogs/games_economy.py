@@ -87,12 +87,15 @@ COINFLIP_MISE_MIN = 10
 COINFLIP_MISE_MAX = 2_000
 
 
-async def _embed(bot, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary") -> discord.Embed:
+async def _embed(bot, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary", scene: str | None = None) -> discord.Embed:
     style = design_system.CATEGORY_STYLES["games"]
     colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
     default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
     design = await bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
-    resolved_title = design_system.kind_title(title, kind=kind, category_emoji=style["emoji"])
+    # Dans un jeu, une défaite n'est JAMAIS une « Action impossible ».
+    # L'usage peut venir d'une commande +, d'un /group ou d'un bouton, donc
+    # le contexte de commande n'est pas un indicateur suffisamment fiable.
+    resolved_title = str(title)
     embed = design_system.create_embed(
         title=resolved_title,
         description=description,
@@ -102,7 +105,9 @@ async def _embed(bot, guild_id: int | None, *, title: str, description: str = No
     embed.title = f"{_game_icon(title)} {resolved_title}"
     if description:
         embed.description = str(description)
-    return await game_visuals.decorate_embed_checked(embed, title=title, description=description, kind=kind)
+    return await game_visuals.decorate_embed_checked(
+        embed, title=title, description=description, kind=kind, scene=scene
+    )
 
 
 # Plus haut ou plus bas : la valeur reste un nombre de 1 a 13 pour la comparaison,
@@ -1232,8 +1237,13 @@ class _EmojiOrderButton(discord.ui.Button):
 
 
 class _BossFightView(discord.ui.View):
+    """Un duel contre le boss avec phases animées ATTACK/POWER/GUARD/COUNTER.
+
+    Le GIF de l'action s'affiche AVANT la riposte. Les boutons sont désactivés
+    pendant la séquence pour qu'un second clic ne dépense pas deux tours.
+    """
     def __init__(self, cog: GamesRapides, ctx: commands.Context, session_id: str):
-        super().__init__(timeout=85)
+        super().__init__(timeout=110)
         self.cog = cog
         self.ctx = ctx
         self.session_id = session_id
@@ -1249,10 +1259,27 @@ class _BossFightView(discord.ui.View):
             self.add_item(_BossFightButton(label, emoji, action, style))
 
     def summary(self, status: str) -> str:
+        p = "🟩" * max(0, self.hp // 3) + "⬛" * max(0, (14 - self.hp) // 3)
+        boss = "🟥" * max(0, self.boss_hp // 3) + "⬛" * max(0, (18 - self.boss_hp) // 3)
         return (
             f"👤 Vos PV : **{max(0, self.hp)}/14**  ·  🐲 Boss : **{max(0, self.boss_hp)}/18**\n"
+            f"❤️ {p}  ·  🐉 {boss}\n"
             f"🔄 Tour **{self.turn}/7**\n\n{status}"
         )
+
+    async def _phase(self, status: str, *, scene: str | None, buttons: bool) -> None:
+        """Édite le MÊME panneau Discord avec le GIF propre à cette phase."""
+        for child in self.children:
+            child.disabled = not buttons
+        embed = await _embed(
+            self.cog.bot, self.ctx.guild.id, title="Combat de boss",
+            description=self.summary(status), kind="primary", scene=scene,
+        )
+        panel = panels.depuis_embed(embed)
+        if buttons:
+            panel = panels.avec_composants(panel, self)
+        if self.message is not None:
+            await panels.editer(self.message, panel)
 
     async def finish(self, *, won: bool, status: str):
         if self._settled:
@@ -1270,20 +1297,24 @@ class _BossFightView(discord.ui.View):
             desc += _reward_line(reward)
         if self.message:
             await panels.editer(self.message, panels.depuis_embed(await _embed(
-                self.cog.bot, self.ctx.guild.id, title="Combat de boss — " + ("Victoire" if won else "Défaite"),
+                self.cog.bot, self.ctx.guild.id,
+                title="Combat de boss — " + ("Victoire" if won else "Défaite"),
                 description=desc, kind="success" if won else "danger",
+                scene="win" if won else "loss",
             )))
 
     async def on_timeout(self):
         async with self._lock:
             if not self._settled:
                 try:
-                    await self.finish(won=False, status="⏱️ Vous avez quitté l'arène.")
+                    await self.finish(won=False, status="⏱️ Le boss a quitté l'arène.")
                 except Exception:
                     logger.exception("Expiration du combat de boss")
 
 
 class _BossFightButton(discord.ui.Button):
+    _SCENES = {"attack": "boss-attack", "power": "boss-power", "guard": "boss-guard"}
+
     def __init__(self, label, emoji, action, style):
         super().__init__(label=label, emoji=emoji, style=style)
         self.action = action
@@ -1291,33 +1322,58 @@ class _BossFightButton(discord.ui.Button):
     async def callback(self, interaction):
         view: _BossFightView = panels.vue_source(self)
         if interaction.user.id != view.ctx.author.id:
-            return await interaction.response.send_message("Ce boss appartient à un autre joueur.", ephemeral=True)
+            return await interaction.response.send_message(
+                "Ce boss appartient à un autre joueur.", ephemeral=True
+            )
         await interaction.response.defer()
         async with view._lock:
             if view._settled:
                 return
             view.turn += 1
             if self.action == "guard":
-                damage, text, defense = 1, "🛡️ Bouclier levé !", 3
+                damage, defense, action_status = 1, 3, "🛡️ Vous levez votre bouclier !"
             elif self.action == "power":
                 hit = game_rewards.secure_chance(0.65)
                 damage = game_rewards.secure_randint(5, 8) if hit else 0
-                text, defense = ("🔥 Coup puissant !" if hit else "💨 Pouvoir esquivé !"), 0
+                defense = 0
+                action_status = "🔥 Vous déchaînez votre pouvoir !" if hit else "💨 Votre pouvoir échoue !"
             else:
                 damage = game_rewards.secure_randint(2, 5)
-                text, defense = "⚔️ Vous attaquez !", 0
+                defense, action_status = 0, "⚔️ Vous attaquez le boss !"
+
+            # 1) L'animation du joueur, avec des boutons bloqués.
+            # La scène reste spécifique à l'action, même si les PV sont faibles.
             view.boss_hp -= damage
+            await view._phase(
+                f"{action_status}\n🎯 Dégâts : **{damage} PV**",
+                scene=self._SCENES[self.action], buttons=False,
+            )
             if view.boss_hp <= 0:
-                return await view.finish(won=True, status=f"{text} 🏆 Boss vaincu !")
+                return await view.finish(won=True, status=f"{action_status}\n🏆 Boss vaincu !")
+
+            await asyncio.sleep(0.9)
+
+            # 2) Le boss agit : son GIF est DIFFERENT de celui du joueur.
             retaliation = max(0, game_rewards.secure_randint(2, 5) - defense)
+            await view._phase(
+                f"🐲 Le boss prépare une riposte !\n"
+                f"{'🛡️ Votre bouclier absorbe une partie du coup.' if self.action == 'guard' else '💥 Esquivez son attaque !'}",
+                scene="boss-counter", buttons=False,
+            )
+            await asyncio.sleep(0.9)
             view.hp -= retaliation
-            status = f"{text} -{damage} PV au boss · 💥 Riposte : -{retaliation} PV."
+
+            # 3) Le même panneau montre les nouveaux PV et rend les boutons.
+            status = (f"{action_status}  `-{damage} PV`\n"
+                      f"🐲 Riposte du boss : `-{retaliation} PV`")
             if view.hp <= 0 or view.turn >= 7:
-                return await view.finish(won=False, status=status + " 💀 Vous êtes vaincu.")
-            await panels.editer(interaction.message, panels.avec_composants(panels.depuis_embed(
-                await _embed(view.cog.bot, view.ctx.guild.id, title="Combat de boss",
-                             description=view.summary(status))
-            ), view))
+                return await view.finish(
+                    won=False, status=status + "\n💀 Vous avez été vaincu.",
+                )
+            await view._phase(
+                status + "\n🎮 Choisissez votre prochaine action !",
+                scene=self._SCENES[self.action], buttons=True,
+            )
 
 
 class _EmojiAnswerView(discord.ui.View):
