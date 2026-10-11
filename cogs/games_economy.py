@@ -1763,6 +1763,12 @@ class ConnectFourView(discord.ui.View):
             sections=[panels.Section("Plateau", texte=rows_text)],
             pied=f"{self.p1.display_name} {self.SYMBOLS['p1']}  ·  "
             f"{self.p2.display_name} {self.SYMBOLS['p2']}",
+            # Un GIF de victoire UNIQUEMENT quand la partie se termine :
+            # laisser le plateau et les boutons en haut pendant les tours.
+            image=(
+                game_visuals.image_for("Puissance 4", status, kind="success")
+                if "gagne la partie" in status.casefold() else None
+            ),
         )
 
     def _lowest_row(self, col: int) -> int | None:
