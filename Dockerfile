@@ -1,13 +1,14 @@
 FROM denoland/deno:bin-2.9.5 AS deno
+# FFmpeg/FFprobe statiques : évitent l'installation apt de >200 paquets Debian.
+# Le précédent build Railway standby échouait avec « No space left on device »
+# pendant apt-get install ffmpeg ; les deux binaires restent disponibles.
+FROM mwader/static-ffmpeg:8.1.2 AS ffmpeg_static
 FROM python:3.11-slim
 
-# yt-dlp a désormais besoin d'un runtime JavaScript pour résoudre les challenges
-# YouTube. Deno est le runtime recommandé et est activé par défaut par yt-dlp.
+# yt-dlp utilise Deno pour résoudre les challenges YouTube.
 COPY --from=deno /deno /usr/local/bin/deno
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+COPY --from=ffmpeg_static /ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg_static /ffprobe /usr/local/bin/ffprobe
 
 WORKDIR /app
 
