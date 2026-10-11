@@ -25,6 +25,11 @@ import discord
 logger = logging.getLogger("bot.security.raid-recovery")
 RAID_VERIFICATION_HOLD_SECONDS = 15 * 60
 RAID_AUDIT_LOOKBACK_LIMIT = 100
+def _level_value(value) -> int:
+    """discord.py VerificationLevel est une Enum custom, pas un IntEnum."""
+    return int(getattr(value, "value", value))
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sentrix_raid_verification_restore (
     guild_id INTEGER PRIMARY KEY,
@@ -58,7 +63,7 @@ class RaidVerificationRecovery:
     def _expect(self, guild_id: int, level: discord.VerificationLevel):
         if len(self._expected_levels) > 4096:
             self._expected_levels.clear()
-        self._expected_levels[int(guild_id)] = (int(level), time.monotonic() + 120)
+        self._expected_levels[int(guild_id)] = (_level_value(level), time.monotonic() + 120)
 
     async def protect(self, guild: discord.Guild, *, now: int | None = None) -> bool:
         """Relever la vérification pour un raid rapide, ou prolonger la protection.
@@ -94,7 +99,7 @@ class RaidVerificationRecovery:
                 "INSERT OR REPLACE INTO sentrix_raid_verification_restore "
                 "(guild_id, previous_level, raised_at, restore_after) VALUES (?, ?, ?, ?)",
                 (
-                    guild.id, int(current), timestamp,
+                    guild.id, _level_value(current), timestamp,
                     timestamp + RAID_VERIFICATION_HOLD_SECONDS,
                 ),
             )
@@ -123,7 +128,7 @@ class RaidVerificationRecovery:
         record = self._expected_levels.get(after.id)
         if record is not None:
             expected_level, expires_at = record
-            if time.monotonic() <= expires_at and int(after.verification_level) == expected_level:
+            if time.monotonic() <= expires_at and _level_value(after.verification_level) == expected_level:
                 self._expected_levels.pop(after.id, None)
                 return
             self._expected_levels.pop(after.id, None)
@@ -162,14 +167,14 @@ class RaidVerificationRecovery:
                 if old is None and new is None:
                     continue
                 try:
-                    old_level = int(old)
-                    new_level = int(new)
+                    old_level = _level_value(old)
+                    new_level = _level_value(new)
                 except (TypeError, ValueError):
                     return False
                 if (
                     actor_id == bot_id
                     and old_level == previous_level
-                    and new_level == int(discord.VerificationLevel.highest)
+                    and new_level == _level_value(discord.VerificationLevel.highest)
                 ):
                     bot_raised = True
                 elif actor_id != bot_id:
@@ -208,7 +213,7 @@ class RaidVerificationRecovery:
                     results["cancelled"] += 1
                     continue
                 previous = int(state["previous_level"])
-                if previous < 0 or previous >= int(discord.VerificationLevel.highest):
+                if previous < 0 or previous >= _level_value(discord.VerificationLevel.highest):
                     await self._forget(guild_id)
                     results["cancelled"] += 1
                     continue
