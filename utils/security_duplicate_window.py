@@ -37,8 +37,6 @@ class DuplicateMessageWindow:
     ) -> bool:
         """Retourne vrai dès trois copies dans une fenêtre de 12 secondes."""
         value = self._fingerprint(content)
-        if len(value) < 3:
-            return False
         moment = time.monotonic() if now is None else float(now)
         cutoff = moment - self.window_seconds
 
@@ -49,6 +47,9 @@ class DuplicateMessageWindow:
             if self._hits[oldest][-1] >= cutoff:
                 break
             self._hits.popitem(last=False)
+
+        if len(value) < 3:
+            return False
 
         key = (int(guild_id), int(user_id), value)
         past = self._hits.pop(key, [])
