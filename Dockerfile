@@ -39,6 +39,7 @@ RUN python -m pytest -q \
     tests/test_automod_enforcement_resilience.py \
     tests/test_security_message_bypass_regression.py \
     tests/test_security_duplicate_short_replies.py \
+    tests/test_antilink_delete_notice.py \
     tests/test_automod_idempotent_sanctions_v131.py \
     tests/test_raid_verification_recovery_v130.py \
     tests/test_automod_log_manage_style.py \
