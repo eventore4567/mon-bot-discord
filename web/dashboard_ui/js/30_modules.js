@@ -268,7 +268,7 @@ async function renderSecurity() {
       ${policy.supports_policy ? `
         <div class="notice" style="margin-top:12px">
           <b>Équipe de direction :</b> les membres ayant la permission Discord <b>Administrateur</b> ou <b>Gérer le serveur</b> contournent les filtres de messages SentriX (anti-spam, anti-arnaque, liens, mots interdits), même en salon strict. L’anti-nuke et les protections du serveur restent actifs. Un simple nom de rôle « Admin » ne suffit pas.
-          <p>Pour les autres membres : <b>salon strict → membre ou rôle exempté → protection normale</b>. Dans un salon strict, les exemptions individuelles et par rôle ne s'appliquent pas. Les threads héritent du salon parent.</p>
+          <p>Pour les autres membres : <b>membre ou rôle exempté → salon strict → protection normale</b>. Les exemptions enregistrées restent valables même dans un salon strict. Les threads héritent du salon parent.</p>
         </div>
         <div class="fields" style="margin-top:12px">
           <div class="field full">
@@ -284,9 +284,9 @@ async function renderSecurity() {
             <small>Le bypass concerne uniquement <b>${esc(policy.label || policyKey)}</b>.</small>
           </div>
           <div class="field full">
-            <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — bypass interdit</label></div>
+            <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — contrôle renforcé</label></div>
             <select id="securityPolicyStrictChannels" multiple size="7">${policyChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
-            <small>Dans ces salons, les membres et rôles exemptés sont aussi contrôlés par cette protection.</small>
+            <small>Dans ces salons, la protection s'applique aux membres non exemptés, même si le salon est ignoré ailleurs. Les rôles et membres exemptés gardent leur autorisation.</small>
           </div>
         </div>
         <div class="toolbar">
