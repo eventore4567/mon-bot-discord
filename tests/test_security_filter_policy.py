@@ -275,7 +275,7 @@ async def test_strict_channel_and_its_threads_respect_individual_bypass():
     assert await cog.security_filter_applies_to(_message(member, channel_id=77), "antiscam") is False
     assert await cog.security_filter_applies_to(
         _message(member, channel_id=999, parent_id=77), "antiscam"
-    ) is True
+    ) is False
     assert await cog.security_filter_applies_to(_message(member, channel_id=78), "antiscam") is False
 
 
