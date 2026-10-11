@@ -311,13 +311,20 @@ CREATE TABLE IF NOT EXISTS antispam_protected_channels (
 );
 
 -- Politique de contournement PAR protection de messages.
--- Un rôle bypass n'est exempté que du filtre choisi. Les salons stricts ont
--- priorité sur ces rôles : dans ces salons, le filtre s'applique quand même.
+-- Les exemptions de rôle ET de membre sont limitées à une protection.
+-- Les salons stricts prennent la priorité sur les deux types d'exemption.
 CREATE TABLE IF NOT EXISTS security_filter_bypass_roles (
     guild_id INTEGER NOT NULL,
     filter_name TEXT NOT NULL,
     role_id INTEGER NOT NULL,
     PRIMARY KEY (guild_id, filter_name, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS security_filter_bypass_members (
+    guild_id INTEGER NOT NULL,
+    filter_name TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, filter_name, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS security_filter_strict_channels (
@@ -1981,6 +1988,11 @@ class Database:
             "WHERE guild_id = ? AND filter_name = ? ORDER BY role_id",
             (guild_id, filter_name),
         )
+        members = await self.fetchall(
+            "SELECT user_id FROM security_filter_bypass_members "
+            "WHERE guild_id = ? AND filter_name = ? ORDER BY user_id",
+            (guild_id, filter_name),
+        )
         strict_channels = await self.fetchall(
             "SELECT channel_id FROM security_filter_strict_channels "
             "WHERE guild_id = ? AND filter_name = ? ORDER BY channel_id",
@@ -1988,6 +2000,7 @@ class Database:
         )
         return {
             "role_ids": [int(row["role_id"]) for row in roles],
+            "member_ids": [int(row["user_id"]) for row in members],
             "strict_channel_ids": [int(row["channel_id"]) for row in strict_channels],
         }
 
@@ -1997,6 +2010,7 @@ class Database:
         filter_name: str,
         *,
         role_ids: list[int] | tuple[int, ...] = (),
+        member_ids: list[int] | tuple[int, ...] | None = None,
         strict_channel_ids: list[int] | tuple[int, ...] = (),
     ) -> None:
         """Remplace atomiquement la politique d'un filtre.
@@ -2015,6 +2029,20 @@ class Database:
                 "(guild_id,filter_name,role_id) VALUES (?,?,?)",
                 (guild_id, filter_name, role_id),
             )
+
+        # None = ancien appelant : conserver les bypass individuels existants.
+        # [] = administrateur qui souhaite supprimer toutes ces exemptions.
+        if member_ids is not None:
+            await self.execute(
+                "DELETE FROM security_filter_bypass_members WHERE guild_id = ? AND filter_name = ?",
+                (guild_id, filter_name),
+            )
+            for user_id in dict.fromkeys(int(value) for value in member_ids):
+                await self.execute(
+                    "INSERT OR IGNORE INTO security_filter_bypass_members "
+                    "(guild_id,filter_name,user_id) VALUES (?,?,?)",
+                    (guild_id, filter_name, user_id),
+                )
 
         await self.execute(
             "DELETE FROM security_filter_strict_channels WHERE guild_id = ? AND filter_name = ?",
