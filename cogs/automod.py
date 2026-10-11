@@ -245,6 +245,13 @@ _SCAM_SPOOFED_AUTHORITIES = frozenset({
     "steampowered.com", "epicgames.com", "paypal.com", "metamask.io",
 })
 _SCAM_URL_RE = re.compile(r"\b(?:https?|hxxps?)://[^\s<>()]+", re.IGNORECASE)
+# Hôtes sans https:// et avec homoglyphes (ex. « discοrd.gg »). Le matcher
+# ASCII LINK_RE ne reconnaissait pas ces imitations si aucun schéma n'était
+# écrit ; ne sanctionner que les hôtes confirmés par l'analyse des sosies.
+_SCAM_BARE_HOST_RE = re.compile(
+    r"(?<![\w@])(?:[\w-]+\.)+(?:com|gg|net|org|io|gift|app|xyz|ru|info|co|site|online|dev)\b",
+    re.IGNORECASE,
+)
 _SCAM_BRANDS = ("discord", "nitro", "roblox", "robux", "steam", "vbucks", "crypto", "wallet")
 _SCAM_LURES = ("free", "gift", "claim", "bonus", "verify", "airdrop", "giveaway", "reward")
 _SCAM_CTA = (
@@ -335,6 +342,17 @@ def _scam_hit(content: str) -> str | None:
 
     if suspicious_hosts:
         return f"domaine suspect: {suspicious_hosts[0][:120]}"
+
+    # Un lien sans préfixe https:// écrit avec une lettre grecque/cyrillique
+    # ressemble visuellement à une marque officielle. On ne généralise PAS le
+    # filtre de domaines Unicode à un bloqueur de mots ou d'URLs ordinaires :
+    # seul un sosie de marque confirmé est sanctionné.
+    for match in _SCAM_BARE_HOST_RE.finditer(str(content or "")):
+        host = match.group(0)
+        result = lookalike_domains.examiner(host)
+        if result is not None:
+            brand, _ = result
+            return f"domaine suspect: {host[:85]} (imite {brand})"
 
     normalized = text_normalization.normaliser(content)
     if any(text_normalization.normaliser(marker) in normalized for marker in _SCAM_DISCUSSION_MARKERS):
