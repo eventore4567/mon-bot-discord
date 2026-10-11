@@ -21,7 +21,7 @@ def test_automod_incident_defaults_are_defined_before_escalation():
 
 
 
-def test_security_bypass_is_per_filter_and_strict_channels_take_priority():
+def test_security_bypass_is_per_filter_and_explicit_exemptions_take_priority():
     source = (ROOT / "cogs" / "automod.py").read_text(encoding="utf-8")
 
     assert "async def get_security_filter_policy_cached" in source
@@ -37,10 +37,13 @@ def test_security_bypass_is_per_filter_and_strict_channels_take_priority():
         source.index("async def security_filter_applies_to"):
         source.index("async def get_antispam_policy_cached")
     ]
-    # Le salon strict est évalué avant les rôles bypass, y compris les anciens
-    # rôles d'exemption AutoMod globaux.
-    assert helper.index("if strict:") < helper.index('if policy["role_ids"]')
-    assert helper.index("if strict:") < helper.index("get_exempt_roles_cached")
+    # Les exemptions configurées doivent être contrôlées AVANT le salon
+    # strict, sinon les admins/modérateurs exemptés restent bloqués.
+    assert helper.index('if member.id in policy.get("member_ids"') < helper.index("if strict:")
+    assert helper.index('if policy["role_ids"]') < helper.index("if strict:")
+    assert helper.index("get_exempt_roles_cached") < helper.index("if strict:")
+    # Le salon strict garde priorité sur les salons ignorés pour non-exemptés.
+    assert helper.index("if strict:") < helper.index("get_ignored_channels_cached")
 
 
 def test_security_filter_policy_schema_is_persistent_and_legacy_safe():
