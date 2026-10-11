@@ -874,11 +874,11 @@ DANGEROUS_PERMS = [
 ]
 SPAM_WINDOW = 6  # secondes observées pour le comptage anti-spam
 SPAM_THRESHOLD = 5  # messages dans la fenêtre avant sanction
-# Flood lent réparti sur plusieurs salons : 20 messages SIGNIFICATIFS dans 60 s
+# Flood lent réparti sur plusieurs salons : 14 messages SIGNIFICATIFS dans 60 s
 # et au moins 4 salons distincts. Cette double condition évite de sanctionner
 # une discussion active dans un seul salon ou des réponses brèves (« ok », « +1 »).
 SPAM_CROSS_CHANNEL_WINDOW = 60
-SPAM_CROSS_CHANNEL_THRESHOLD = 20
+SPAM_CROSS_CHANNEL_THRESHOLD = 14
 SPAM_CROSS_CHANNEL_MIN_CHANNELS = 4
 SPAM_CROSS_CHANNEL_MIN_LENGTH = 12
 
@@ -2747,6 +2747,19 @@ class AutoMod(commands.Cog, name="Automod"):
         # Les exemptions de rôles ne sont plus court-circuitées globalement ici :
         # chaque filtre les évalue afin qu'un salon strict puisse reprendre priorité.
 
+        # Un lien de phishing passe AVANT l'anti-liens générique. Sinon le
+        # message est supprimé comme simple lien, la protection anti-arnaque
+        # ne voit jamais l'URL et le modérateur perd la vraie cause.
+        if conf and conf.get("antiscam") and await self.security_filter_applies_to(message, "antiscam"):
+            early_scam_reason = _scam_hit(message.content)
+            if early_scam_reason:
+                return await self._delete_and_warn(
+                    message,
+                    f"Message d'arnaque potentiel détecté ({early_scam_reason}).",
+                    "antiscam",
+                    censored_content=_compose_censored_content(message.content, scam=True),
+                )
+
         # Détections prioritaires pouvant être combinées dans un seul avertissement.
         # Chaque détection consulte sa propre politique de rôles bypass / salons stricts.
         words = await self.get_blacklist_words_cached(message.guild.id)
@@ -2826,13 +2839,14 @@ class AutoMod(commands.Cog, name="Automod"):
                     allow_escalation=False,
                 )
 
-        # Incident de spam en cours pour ce membre : tout ce qu'il envoie encore pendant
-        # la fenêtre est supprimé sans nouvel avertissement ni nouvelle carte de log.
+        # Incident de spam : suppression silencieuse sur une courte fenêtre
+        # de 8 secondes seulement. L'ancien code utilisait 30 secondes et
+        # empêchait un membre de reparler longtemps après la rafale.
         incident = self.incidents.get((message.guild.id, message.author.id))
         if (
             incident is not None
             and incident.filter_name in SPAM_FILTERS
-            and time.monotonic() - incident.started < INCIDENT_WINDOW_SECONDS
+            and time.monotonic() - incident.started < SPAM_INCIDENT_WINDOW_SECONDS
             and await self.security_filter_applies_to(message, incident.filter_name)
         ):
             return await self._delete_and_warn(message, incident.reason, incident.filter_name)
@@ -2851,15 +2865,6 @@ class AutoMod(commands.Cog, name="Automod"):
         antiscam_applies = bool(conf["antiscam"]) and await self.security_filter_applies_to(
             message, "antiscam"
         )
-        motif_scam = _scam_hit(message.content) if antiscam_applies else None
-        if motif_scam:
-            return await self._delete_and_warn(
-                message,
-                f"Message d'arnaque potentiel détecté ({motif_scam}).",
-                "antiscam",
-                censored_content=_compose_censored_content(message.content, scam=True),
-            )
-
         if antiscam_applies and message.attachments:
             candidates = [
                 attachment for attachment in message.attachments[:2]
