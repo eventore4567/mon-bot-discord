@@ -238,5 +238,5 @@ def test_fetch_rejects_html_and_excessive_media(monkeypatch):
     assert asyncio.run(game_visuals._fetch_gif_bytes("https://cdn.example/g.gif")) is None
     session.response = Response("image/gif", b"GIF89a" + b"123" + b";", size=game_visuals.MAX_GIF_BYTES + 1)
     assert asyncio.run(game_visuals._fetch_gif_bytes("https://cdn.example/g.gif")) is None
-    session.response = Response("image/gif", b"GIF89a" + b"123" + b";")
-    assert asyncio.run(game_visuals._fetch_gif_bytes("https://cdn.example/g.gif")) == b"GIF89a123;"
+    session.response = Response("image/gif", b"GIF89a" + b"12345678" + b";")
+    assert asyncio.run(game_visuals._fetch_gif_bytes("https://cdn.example/g.gif")) == b"GIF89a12345678;"
