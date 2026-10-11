@@ -20,7 +20,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.games_catalog import ROULEAU_SLOTS
-from utils import embeds, helpers, design_system, game_rewards
+from utils import embeds, helpers, design_system, game_rewards, game_visuals
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.minigames")
@@ -87,7 +87,7 @@ class Minigames(commands.Cog, name="Minigames"):
         # Le titre d'un mini-jeu porte le pictogramme de CE jeu, comme dans
         # cogs/games_economy : « Question de culture générale » arrivait nu.
         embed.title = f"{pictogramme_de_titre(title)} {resolu}"
-        return embed
+        return game_visuals.decorate_embed(embed, title=title, description=description, kind=kind)
 
     @staticmethod
     def _coeurs(restants: int, total: int = ESSAIS_PENDU) -> str:
