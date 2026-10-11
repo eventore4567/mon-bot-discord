@@ -23,6 +23,7 @@ from cogs.games_catalog import ROULEAU_SLOTS
 from utils import embeds, helpers, design_system, game_rewards, game_visuals
 from utils import sentrix_panels as panels
 from utils.game_duel_invites import DuelInvitation
+from utils.blackjack_cards import render_table_gif
 
 logger = logging.getLogger("bot.minigames")
 
@@ -90,6 +91,9 @@ class Minigames(commands.Cog, name="Minigames"):
         # Le titre d'un mini-jeu porte le pictogramme de CE jeu, comme dans
         # cogs/games_economy : « Question de culture générale » arrivait nu.
         embed.title = f"{pictogramme_de_titre(title)} {resolu}"
+        # Le blackjack a SA propre animation de vraies cartes, sans GIF générique.
+        if title == "Blackjack":
+            return embed
         return await game_visuals.decorate_embed_checked(embed, title=title, description=description, kind=kind)
 
     @staticmethod
