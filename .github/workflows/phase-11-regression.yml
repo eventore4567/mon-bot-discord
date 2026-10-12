@@ -51,6 +51,7 @@ jobs:
             tests: >-
               tests/test_structured_game_logs_and_hierarchy.py
               tests/test_log_markdown_readability.py
+              tests/test_deleted_log_media_previews.py
               tests/test_log_expired_media_gallery.py
               tests/test_regroupement_positions_roles.py
               tests/test_free_text_publications.py
