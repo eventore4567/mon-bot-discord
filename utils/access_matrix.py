@@ -95,6 +95,11 @@ PUBLIC_COMMANDS = frozenset({
     # Mini-jeux
     "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
     "blackjack", "slots", "coinflip", "dice", "luckyroll", "highlow", "memory",
+    # Jeux et SentriX Fun ajoutés le 12/10/2026 sans classement : non classés, ils
+    # étaient refusés à tous les membres (accès « fail-closed »).
+    "bossfight", "doors", "emojiorder",
+    "fun", "hug", "kiss", "cuddle", "pat", "poke", "slap", "tickle", "highfive", "wave",
+    "dance", "compliment", "roast", "hack", "scan", "aura", "ship",
     "reaction", "scramble", "wordgame", "emojiquiz", "colorquiz", "fasttype", "minesweeper",
     "duel", "connect4", "numberduel", "reactionduel", "quizduel", "triviastart",
     "wordrace", "reactionevent", "guessrace", "mathrace", "lastmessage",
@@ -225,6 +230,9 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     # autre message (mesuré le 08/10/2026). Une seule décision : Administrateur.
     "verification": "administrator",
     "verify-setup": "administrator",
+    # Ajoutées le 12/10/2026 sans classement (fail-closed) : outils d'administration.
+    "verify-repair": "administrator",
+    "manage": "administrator",
     "verify-panel": "administrator",
     "verify-config": "administrator",
     "verification-config": "administrator",

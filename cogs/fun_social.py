@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+import random
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
@@ -184,6 +185,74 @@ def menu_embed(page: str = "social") -> discord.Embed:
     return embed
 
 
+# --------------------------------------------------------------------------
+# Faux piratage et scan : une SIMULATION crédible, différente à chaque fois.
+# Aucune donnée réelle n'est lue : tout est tiré de ces listes. Pas d'identifiant,
+# pas de mot de passe, pas de mention — rien qui puisse passer pour un vrai accès.
+# --------------------------------------------------------------------------
+_HACK_RECHERCHES = (
+    "comment devenir riche rapidement ?", "est-ce que les pigeons dorment debout ?",
+    "pourquoi mon wifi me déteste", "recette avec juste des pâtes et du ketchup",
+    "comment avoir l'air occupé au travail", "combien de temps peut-on dormir d'affilée",
+    "est-ce normal de parler à sa plante", "comment gagner un débat sans avoir raison",
+    "meilleure excuse pour annuler une sortie", "les chats nous comprennent-ils vraiment",
+    "comment arrêter de procrastiner (demain)", "que faire si on a oublié un anniversaire",
+)
+_HACK_ACTIVITE = ("Faible", "Modérée", "Élevée", "Très élevée", "Suspecte")
+_HACK_DANGER = ("Faible", "Modéré", "Élevé", "Critique pour les biscuits du placard")
+_HACK_ACCES = ("Réussi", "Réussi au 3ᵉ essai", "Partiel", "Refusé — défenses trop solides")
+_HACK_RARES = (
+    "⚠️ Contre-attaque détectée : la cible a hacké la simulation en retour.",
+    "🛰️ Signal perdu : la cible s'est déconnectée pour aller manger.",
+    "🏆 Profil inviolable : même la simulation abandonne.",
+)
+
+
+def _hack_text() -> str:
+    rng = random.SystemRandom()
+    lignes = [
+        "**Analyse terminée**",
+        f"Accès au profil : **{rng.choice(_HACK_ACCES)}**",
+        f"Niveau de discrétion : **{rng.randint(12, 98)} %**",
+        f"Activité détectée : **{rng.choice(_HACK_ACTIVITE)}**",
+        f"Dernière recherche simulée : **« {rng.choice(_HACK_RECHERCHES)} »**",
+        f"Indice de danger : **{rng.choice(_HACK_DANGER)}**",
+    ]
+    if rng.random() < 0.12:
+        lignes.append("")
+        lignes.append(rng.choice(_HACK_RARES))
+    lignes.append("")
+    lignes.append("-# Simulation pour rire : aucune donnée réelle n'est consultée.")
+    return "\n".join(lignes)
+
+
+_SCAN_PROFILS = (
+    ("Le stratège", "anticipe tout, sauf ce qu'il va manger ce soir"),
+    ("L'insomniaque créatif", "ses meilleures idées arrivent à 3 h du matin"),
+    ("Le diplomate", "met tout le monde d'accord, surtout sur la pizza"),
+    ("L'explorateur", "clique sur tous les boutons pour voir ce qu'ils font"),
+    ("Le calme olympien", "rien ne l'atteint, pas même les notifications"),
+    ("Le chef d'équipe", "organise un planning pour organiser le planning"),
+    ("L'imprévisible", "même le scan n'a pas réussi à le cerner"),
+)
+_SCAN_TRAITS = ("Concentration", "Sens de l'humour", "Énergie sociale", "Créativité",
+                "Patience", "Productivité", "Résistance au café", "Sens de l'orientation")
+
+
+def _scan_text() -> str:
+    rng = random.SystemRandom()
+    nom, verdict = rng.choice(_SCAN_PROFILS)
+    traits = rng.sample(_SCAN_TRAITS, 3)
+    lignes = [f"Profil détecté : **{nom}**", f"_{verdict[0].upper() + verdict[1:]}._", ""]
+    for trait in traits:
+        valeur = rng.randint(8, 100)
+        lignes.append(f"{trait} : **{valeur} %** {'▰' * (valeur // 20)}{'▱' * (5 - valeur // 20)}")
+    if rng.random() < 0.1:
+        lignes += ["", "✨ Résultat rare : profil jamais vu sur ce serveur."]
+    lignes += ["", "-# Scan fictif pour rire : rien n'est réellement analysé."]
+    return "\n".join(lignes)
+
+
 def _profile_embed(mode: str, user: discord.Member, guild_id: int, *,
                    other: discord.Member | None = None) -> discord.Embed:
     """Construit des fiches humoristiques : les valeurs ne proviennent pas de Discord."""
@@ -207,23 +276,9 @@ def _profile_embed(mode: str, user: discord.Member, guild_id: int, *,
                 else "Épique" if score >= 4000 else "Rare" if score >= 1500 else "Apprenti")
         e.description = f"⚡ **{score:,} points d'aura**\n🏅 Rang : **{rank}**\n{'🟪' * min(10, max(1, score // 1000))}"
     elif mode == "scan":
-        e.description = (
-            f"🧠 Intelligence imaginaire : **{score}%**\n"
-            f"😎 Charisme cosmique : **{score2}%**\n"
-            f"🍕 Passion pizza : **{score3}%**\n"
-            f"⚡ Énergie : **{fixed_score(guild_id, user.id, 'energy')}%**\n"
-            f"🐱 Animal totem : **{('chat', 'renard', 'panda', 'capybara')[score % 4]}**"
-        )
+        e.description = _scan_text()
     elif mode == "hack":
-        e.description = (
-            "🎭 **SIMULATION HUMORISTIQUE — aucune donnée réelle.**\n\n"
-            f"🔓 Accès au royaume des memes : **réussi**\n"
-            f"🍪 Cookies imaginaires : **{score}**\n"
-            f"🖥️ Onglets interdimensionnels : **{score2}**\n"
-            f"🔎 Dernière recherche fictive : **comment devenir une légende ?**\n"
-            f"🛡️ Mot de passe imaginaire : **croissant-magique**\n"
-            f"💥 Niveau de chaos : **{score3}%**"
-        )
+        e.description = _hack_text()
     elif mode == "ship":
         partner = other or user
         pair = sorted((user.id, partner.id))
@@ -318,7 +373,7 @@ class FunSocial(commands.Cog, name="FunSocial"):
         if action not in ACTIONS and action != "stats":
             return await ctx.send("❓ Action inconnue. Tape `+fun` pour voir tout le catalogue.")
         if self._throttle(ctx.guild.id, ctx.author.id):
-            return await ctx.send("⏳ Patiente 4 secondes avant une autre action Fun.", delete_after=5)
+            return await ctx.send("⏳ Patientez 4 secondes avant une autre action Fun.", delete_after=5)
         target = member or ctx.author
         if action in REACTIONS:
             if member is None:

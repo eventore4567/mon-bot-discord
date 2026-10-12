@@ -54,14 +54,18 @@ def test_fake_scores_are_stable_per_day_and_not_based_on_discord_data():
 
 def test_hack_and_scan_are_clearly_fictional_and_do_not_expose_real_credentials():
     fake_hack = fun._profile_embed("hack", member(8), 123)
-    assert "SIMULATION HUMORISTIQUE" in fake_hack.description
-    assert "aucune donnée réelle" in fake_hack.description
-    assert "croissant-magique" in fake_hack.description
-    assert "@" not in fake_hack.description
+    # Toujours une simulation annoncée, jamais d'identifiant ni de mention, et
+    # de vraies variations d'un lancement à l'autre (plus de « croissant-magique »).
+    hacks = {fun._profile_embed("hack", member(8), 123).description for _ in range(12)}
+    for text in hacks:
+        assert "Simulation pour rire" in text and "aucune donnée réelle" in text
+        assert "@" not in text and "mot de passe" not in text.lower()
+        assert "croissant" not in text and "imaginaire" not in text.lower()
+    assert len(hacks) > 1
     fake_scan = fun._profile_embed("scan", member(8), 123)
     assert "scan fictif" in fake_scan.title.lower()
     assert "fictif" in fake_scan.footer.text.lower() or "inventé" in fake_scan.footer.text.lower()
-    assert "Intelligence imaginaire" in fake_scan.description
+    assert "Profil détecté" in fake_scan.description and "imaginaire" not in fake_scan.description.lower()
 
 
 def test_fun_menu_has_three_pages_and_discord_length_budget():
@@ -127,7 +131,7 @@ async def test_social_cooldown_applies_between_different_shortcuts(monkeypatch):
     await cog.run_action(ctx, "dance")
     await cog.run_action(ctx, "cry")
     assert ctx.send.await_count == 2
-    assert "Patiente 4 secondes" in ctx.send.await_args.args[0]
+    assert "Patientez 4 secondes" in ctx.send.await_args.args[0]
 
 
 def test_cog_is_loaded_before_visual_finalizer_and_help_category():
