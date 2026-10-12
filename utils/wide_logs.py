@@ -204,10 +204,14 @@ def _strip_identity_prelude(description: str, identity_name: str | None, identit
     while lines and not lines[0].strip():
         lines.pop(0)
     if identity_name and lines:
-        first = re.sub(r"[*_`#>]", "", lines[0]).strip().casefold()
-        if identity_name.casefold() in first:
-            lines.pop(0)
-    if identity_id and lines and str(identity_id) in lines[0]:
+        # A count like 17 is NOT the identity of a role-reorder log.
+        # Matching by substring used to erase "Rôles concernés : 17".
+        identity = str(identity_name).strip()
+        if not (identity.isdecimal() and len(identity) < 15):
+            first = re.sub(r"[*_`#>]", "", lines[0]).strip().casefold()
+            if identity.casefold() in first:
+                lines.pop(0)
+    if identity_id and len(str(identity_id)) >= 15 and lines and str(identity_id) in lines[0]:
         lines.pop(0)
     while lines and not lines[0].strip():
         lines.pop(0)
@@ -1171,31 +1175,24 @@ def _trace_identity_label(event_type: str) -> str:
     return "Élément"
 
 
-_INLINE_BOLD_RE = re.compile(r"\\*\\*([^*\\n\\`]{1,72})\\*\\*")
-_EXISTING_CODE_RE = re.compile(r"(```[\\s\\S]*?```|`[^`\\n]*`)")
-
-
 def _bold_log_labels_as_badges(content: str) -> str:
-    """Affiche les mots courts en gras comme des pastilles grises Discord.
+    """Preserve real Discord Markdown without inventing inline-code badges.
 
-    Les titres restent des titres. Les vraies mentions Discord, liens et textes
-    déjà en code restent intacts ; convertir une mention en code la rendrait
-    non cliquable. Cette fonction est réservée au RENDU, jamais aux données
-    conservées dans l'historique.
+    The previous regex had double-escaped quantifiers (\\\\*): it matched
+    ordinary letters and split titles and role names into random code chips.
+    Keep the author's intentional **bold**, headings and clickable mentions.
+    Discord's own renderer supplies typography; code chips do not belong here.
     """
-    parts = _EXISTING_CODE_RE.split(str(content or ""))
-    for index in range(0, len(parts), 2):
-        def _to_chip(match):
-            label = match.group(1).strip()
-            if not label or any(char in label for char in ("<", ">", "[", "]", "\\n")):
-                return match.group(0)
-            if "://" in label or label.startswith(("#", "@")):
-                return match.group(0)
-            return f"`{label}`"
+    return str(content or "")
 
-        parts[index] = _INLINE_BOLD_RE.sub(_to_chip, parts[index])
-    return "".join(parts)
 
+def _clean_role_positions(content: str) -> str:
+    """Show small role positions as 4 → 17, not grey `4` → `17` tokens.
+
+    Only role-movement summaries use this cleanup. In particular it must never
+    touch the original content of deleted or edited user messages.
+    """
+    return re.sub(r"`([0-9]{1,3})`", r"\1", str(content or ""))
 
 def _trace_body_parts(body: str) -> tuple[str, str]:
     """Sépare le résumé immédiat des détails longs.
@@ -1263,6 +1260,10 @@ class WideLogView(discord.ui.LayoutView):
         header_lines = [meta, f"## {title}"]
         identity_ref = _trace_identity_ref(event_type, identity_id)
         identity_display = identity_ref or (safe_text(identity_name)[:80] if identity_name else "")
+        # A role-reorder event may carry a count (17) as its "identity".
+        # It is not an individual Discord entity: avoid "Élément · 17".
+        if title.casefold() in {"rôles déplacés", "roles moved"} and identity_display.isdecimal() and len(identity_display) < 15:
+            identity_display = ""
         if not identity_display and event_type in {"invite_create", "invite_delete"}:
             identity_display = "Non renseigné par Discord"
         context_bits: list[str] = []
@@ -1305,6 +1306,10 @@ class WideLogView(discord.ui.LayoutView):
             identity_id=identity_id,
         )
         summary, details = _trace_body_parts(body)
+        # Role moves need legible numeric positions, not inline code chips.
+        if "rôles déplacés" in title.casefold() or "roles moved" in title.casefold():
+            summary = _clean_role_positions(summary)
+            details = _clean_role_positions(details)
         # Tous les journaux métiers utilisent les mêmes pastilles que les
         # permissions. Ne pas réécrire le Markdown de messages d'utilisateurs
         # supprimés/édités : leur contenu doit rester fidèle à l'original.
