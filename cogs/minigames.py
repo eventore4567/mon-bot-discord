@@ -616,7 +616,7 @@ class Minigames(commands.Cog, name="Minigames"):
             vue: discord.ui.View | None = None,
         ) -> panels.Panneau:
             embed = await self._embed(
-                guild_id, title="Blackjack", description=description, kind=kind,
+                guild_id, title="Blackjack", description=description.replace("**", ""), kind=kind,
             )
             resultat = self._panneau_blackjack(
                 embed, joueur, croupier, devoile=devoile, phase=phase,
