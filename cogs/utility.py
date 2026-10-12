@@ -1981,8 +1981,13 @@ class Utility(commands.Cog, name="Utility"):
             await ctx.channel.send(contenu, allowed_mentions=safe_mentions)
 
         # N'accuser réception qu'une fois le message réellement publié.
+        # /server say passe par le routeur V95, qui fait déjà defer(thinking=True).
+        # Répondre seulement si response.is_done() == False laissait le spinner
+        # « SentriX réfléchit... » permanent malgré la publication effective.
         if ctx.interaction:
-            if not ctx.interaction.response.is_done():
+            if ctx.interaction.response.is_done():
+                await ctx.interaction.edit_original_response(content="Publication envoyée.")
+            else:
                 await ctx.interaction.response.send_message("Publication envoyée.", ephemeral=True)
         elif ctx.message is not None:
             try:
