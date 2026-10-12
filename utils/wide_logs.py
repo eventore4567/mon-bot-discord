@@ -1235,6 +1235,8 @@ class WideLogView(discord.ui.LayoutView):
         emoji: str = "",
         log_type: str = "",
         media_items: list[tuple[str, str, str]] | None = None,
+        *,
+        available_attachments: set[str] | None = None,
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(
@@ -1336,6 +1338,11 @@ class WideLogView(discord.ui.LayoutView):
 
         # Médias seulement après le contexte métier.
         if media_items:
+            # An original Discord CDN image URL can expire immediately after
+            # message deletion. A gallery using those URLs displays four broken
+            # placeholders instead of four photos. Preview ONLY files actually
+            # re-uploaded on THIS log message (attachment://).
+            attached = set(available_attachments or ())
             media_gallery = discord.ui.MediaGallery()
             gallery_count = 0
             fallback_files: list[tuple[str, str]] = []
@@ -1347,7 +1354,13 @@ class WideLogView(discord.ui.LayoutView):
                 if not source:
                     continue
 
-                if content_type.startswith("image/"):
+                attached_name = source[len("attachment://"):] if source.startswith("attachment://") else ""
+                verified_local_image = (
+                    content_type.startswith("image/")
+                    and attached_name in attached
+                    and bool(attached_name)
+                )
+                if verified_local_image:
                     try:
                         media_gallery.add_item(media=source)
                         gallery_count += 1
@@ -1355,8 +1368,7 @@ class WideLogView(discord.ui.LayoutView):
                     except Exception:
                         logger.exception(
                             "SENTRIX TRACE V7 media gallery item failed filename=%s type=%s",
-                            filename,
-                            content_type,
+                            filename, content_type,
                         )
                 fallback_files.append((source, filename))
 
@@ -1368,7 +1380,8 @@ class WideLogView(discord.ui.LayoutView):
 
             file_cls = getattr(discord.ui, "File", None)
             for source, filename in fallback_files[:5]:
-                if file_cls is not None and source.startswith("attachment://"):
+                attached_name = source[len("attachment://"):] if source.startswith("attachment://") else ""
+                if file_cls is not None and attached_name and attached_name in attached:
                     try:
                         container.add_item(file_cls(media=source))
                         continue
@@ -1377,12 +1390,15 @@ class WideLogView(discord.ui.LayoutView):
                             "SENTRIX TRACE V7 file component failed filename=%s",
                             filename,
                         )
-                if source.startswith(("https://", "http://")):
+                if source.startswith("https://"):
                     container.add_item(
-                        discord.ui.TextDisplay(f"[Ouvrir {filename}]({source})")
+                        discord.ui.TextDisplay(
+                            f"[Ouvrir {filename}]({source})\n"
+                            "-# Aperçu non conservé ; le lien d'origine peut avoir expiré."
+                        )
                     )
                 else:
-                    container.add_item(discord.ui.TextDisplay(f"**{filename}**"))
+                    container.add_item(discord.ui.TextDisplay(f"**{filename}** · Aperçu indisponible"))
 
         # Footer discret AVANT les actions : les boutons restent réellement tout en
         # bas de la carte, comme une barre d'actions premium, et ne sont plus coupés
@@ -1641,6 +1657,11 @@ async def send_wide_log(
             emoji,
             event_type,
             media_items,
+            available_attachments={
+                str(getattr(f, "filename", "") or "")
+                for f in ([extra_file] if extra_file is not None else []) + list(extra_files or [])
+                if getattr(f, "filename", None)
+            },
         )
     except Exception as exc:
         logger.error(
