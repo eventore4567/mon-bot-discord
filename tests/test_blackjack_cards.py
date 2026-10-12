@@ -65,3 +65,19 @@ def test_blackjack_is_never_classed_as_a_coinflip_gif():
     from utils import game_visuals
     assert game_visuals.scene_for("Blackjack", "Commence !") is None
     assert game_visuals.scene_for("Blackjack", "Gagné !", "success") is None
+
+
+def test_blackjack_text_is_clear_without_markdown_and_has_separate_scores():
+    dealer = [("9♠", 9), ("7♥", 7)]
+    player = [("7♦", 7), ("9♣", 9)]
+    hidden = Minigames._table_blackjack(player, dealer, devoile=False)
+    assert "Croupier : 9♠ · carte cachée" in hidden
+    assert "Total du croupier : masqué" in hidden
+    assert "Vous : 7♦ · 9♣" in hidden
+    assert "Votre total : 16 / 21" in hidden
+    assert "7♥" not in hidden
+    assert "`" not in hidden and "**" not in hidden
+    shown = Minigames._table_blackjack(player, dealer, devoile=True)
+    assert "9♠ · 7♥" in shown
+    assert "Total du croupier : 16 points" in shown
+    assert "carte cachée" not in shown
