@@ -7,6 +7,7 @@ Discord Event -> Audit Log corrélé -> normalisation -> déduplication -> grand
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import re
@@ -120,6 +121,75 @@ def _attachment_media(attachments) -> list[tuple[str, str, str]]:
     return items[:10]
 
 
+# Discord deleted-message CDN URLs are often revoked. Keep up to 4 image
+# previews as actual, per-log attachments, never as dead external gallery URLs.
+_MAX_PREVIEW_IMAGES = 4
+_MAX_PREVIEW_IMAGE_BYTES = 6 * 1024 * 1024
+_MAX_PREVIEW_TOTAL_BYTES = 16 * 1024 * 1024
+_PREVIEW_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+async def _snapshot_deleted_images(
+    attachments: list[discord.Attachment],
+    media_items: list[tuple[str, str, str]],
+) -> tuple[list[tuple[str, str, str]], list[discord.File]]:
+    """Copy recoverable deleted-message images into the log's own attachments.
+
+    If Discord no longer serves an image, leave its original URL as a *link*
+    rather than creating an empty MediaGallery placeholder. A bounded download
+    prevents deleted-image traffic from monopolising anti-spam/moderation.
+    """
+    previews = list(media_items)
+    candidates: list[tuple[int, object, str]] = []
+    for i, attachment in enumerate(list(attachments or [])[:10]):
+        if i >= len(previews) or len(candidates) >= _MAX_PREVIEW_IMAGES:
+            break
+        _url, filename, content_type = previews[i]
+        suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if not content_type.startswith("image/") or suffix not in _PREVIEW_EXTENSIONS:
+            continue
+        try:
+            if int(getattr(attachment, "size", 0) or 0) > _MAX_PREVIEW_IMAGE_BYTES:
+                continue
+        except (TypeError, ValueError):
+            continue
+        if not callable(getattr(attachment, "read", None)):
+            continue
+        candidates.append((i, attachment, suffix))
+
+    async def load(candidate: tuple[int, object, str]):
+        i, attachment, suffix = candidate
+        try:
+            async def retrieve():
+                try:
+                    return await attachment.read(use_cached=True)
+                except (discord.HTTPException, OSError):
+                    return await attachment.read(use_cached=False)
+            blob = await asyncio.wait_for(retrieve(), timeout=4)
+            if not isinstance(blob, bytes) or not blob or len(blob) > _MAX_PREVIEW_IMAGE_BYTES:
+                return None
+            return i, suffix, blob
+        except (discord.HTTPException, OSError, asyncio.TimeoutError, ValueError, TypeError):
+            logger.debug("Image supprimée non archivable (index=%d)", i, exc_info=True)
+            return None
+
+    results = await asyncio.gather(*(load(candidate) for candidate in candidates))
+    media_files: list[discord.File] = []
+    total = 0
+    for item in results:
+        if item is None:
+            continue
+        i, suffix, blob = item
+        if total + len(blob) > _MAX_PREVIEW_TOTAL_BYTES:
+            continue
+        total += len(blob)
+        new_name = f"sentrix-log-image-{i + 1}{suffix}"
+        media_files.append(discord.File(io.BytesIO(blob), filename=new_name))
+        _original_url, filename, content_type = previews[i]
+        previews[i] = (f"attachment://{new_name}", filename, content_type)
+    return previews, media_files
+
+
 def _attachment_summary(items: list[tuple[str, str, str]]) -> str | None:
     if not items:
         return None
@@ -206,6 +276,7 @@ class Logs(commands.Cog, name="Logs"):
         view: discord.ui.View | None = None,
         event_key: str | None = None,
         media_items: list[tuple[str, str, str]] | None = None,
+        media_files: list[discord.File] | None = None,
     ) -> bool:
         logger.debug(
             "SXTRACE 2 CALL guild=%s log_type=%s category=%s event_key=%s target=%s.%s",
@@ -222,6 +293,7 @@ class Logs(commands.Cog, name="Logs"):
             view=view,
             event_key=event_key,
             media_items=media_items,
+            media_files=media_files,
         )
 
     @staticmethod
@@ -515,6 +587,7 @@ class Logs(commands.Cog, name="Logs"):
             message_id=message.id,
         )
         media_items = _attachment_media(message.attachments)
+        preview_items, media_files = await _snapshot_deleted_images(message.attachments, media_items)
         fields = [
             ("Auteur", _user_ref(message.author.id), True),
             ("Supprimé par", self._delete_actor_text(actor), True),
@@ -542,7 +615,8 @@ class Logs(commands.Cog, name="Logs"):
             panel,
             view=view,
             event_key=key,
-            media_items=media_items,
+            media_items=preview_items,
+            media_files=media_files,
         )
         await self._forget_cached_message(message.id)
 

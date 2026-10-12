@@ -768,6 +768,7 @@ async def send_log(
     identity_id: int | None = None,
     identity_icon: str | None = None,
     media_items: list[tuple[str, str, str]] | None = None,
+    media_files: list[discord.File] | None = None,
 ) -> bool:
     """Pipeline unique : event -> catégorie -> log_config -> validation -> Components V2."""
     logger.debug(
@@ -957,6 +958,7 @@ async def send_log(
         identity_id=identity_id,
         identity_icon=identity_icon,
         media_items=media_items,
+        extra_files=media_files,
     )
     if not envoye and wide_logs.echecs_permanents(channel_id) >= ECHECS_AVANT_COUPURE:
         await _couper_route_inaccessible(bot, guild, category, channel_id)
