@@ -47,6 +47,7 @@ import config
 from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
 from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
+from utils.purge_queue import SuppressionsGroupees
 from utils.raid_join_deduplicator import RaidJoinDeduplicator
 from utils.automod_message_claims import AutomodMessageClaims
 from utils.raid_verification_recovery import RaidVerificationRecovery
@@ -444,6 +445,12 @@ NO_REPOST_FILTERS = LINK_NOTICE_FILTERS | {"antiscam"}
 # 1) rappel public avec ping ; 2) vrai warn enregistré ; 3+) timeout croissant.
 # Après 24 h sans nouvel incident de spam, la progression repart au premier rappel.
 SPAM_INCIDENT_WINDOW_SECONDS = 8.0
+# Vague de spam : quand plusieurs membres spamment le même salon, un seul
+# avertissement public regroupé par seconde au lieu d'un par membre (mesuré :
+# 20 spammeurs = 20 messages du bot ajoutés au flot). Le premier part tout de suite.
+SPAM_NOTICE_GROUP_WINDOW_SECONDS = 6.0
+SPAM_NOTICE_GROUP_DELAY_SECONDS = 1.0
+SPAM_NOTICE_MAX_MENTIONS = 10
 SPAM_ESCALATION_RESET_SECONDS = 86400
 SPAM_MUTE_DURATIONS_SECONDS = (600, 1800, 3600, 10800, 21600, 43200, 86400)
 SPAM_TIMEOUT_SECONDS = SPAM_MUTE_DURATIONS_SECONDS[0]
@@ -954,6 +961,13 @@ REPEAT_CHANNEL_THRESHOLD = 3  # salons différents recevant le même message
 # les sanctionner ferait couper la protection par les admins — donc plus de
 # protection du tout.
 REPEAT_MIN_LENGTH = 12
+# Raid coordonné : le même message posté par plusieurs comptes, chacun sous son
+# propre seuil (mesuré : 15 comptes × 1 message identique = 0 suppression). Pour
+# ne pas prendre une fête (« joyeux anniversaire ! » × 6) pour un raid, seul un
+# message long ou portant un lien compte.
+COORDINATED_WINDOW = 20
+COORDINATED_AUTHORS = 5
+COORDINATED_MIN_LENGTH = 40
 RAID_JOIN_WINDOW = 10  # secondes observées pour l'afflux d'arrivées
 RAID_JOIN_THRESHOLD = 8  # arrivées dans la fenêtre avant alerte de raid
 # Même angle mort que l'anti-spam : une fenêtre courte ne voit que la vitesse.
@@ -1013,6 +1027,7 @@ class AutoMod(commands.Cog, name="Automod"):
         self.nuke_tracker = FenetreGlissante(fenetre=NUKE_ACTION_WINDOW, purge_toutes=100)
         self.infraction_tracker = FenetreGlissante(fenetre=ESCALATION_WINDOW)
         self.repeat_tracker = FenetreGlissante(fenetre=REPEAT_WINDOW)
+        self.coordinated_tracker = FenetreGlissante(fenetre=COORDINATED_WINDOW, purge_toutes=200)
         self.risk_scores: dict[tuple[int, int], tuple[float, float]] = {}
         self.incidents: dict[tuple[int, int], _Incident] = {}
         # Plusieurs cogs traitent on_message en parallèle. La réservation est
@@ -1861,7 +1876,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 "warning_ping",
                 stage,
                 None,
-                "⚠️ arrête le spam. Si tu continues, tu recevras un avertissement.",
+                "⚠️ merci d'arrêter le spam. En cas de récidive, vous recevrez un avertissement.",
             )
 
         if stage == 2:
@@ -2957,9 +2972,29 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if conf["antispam"] and await self.security_filter_applies_to(message, "antispam"):
             key = (message.guild.id, message.author.id)
-            if self.spam_tracker.ajouter(key) >= SPAM_THRESHOLD:
+            group = self._coordinated_copies(message, link_content)
+            if group:
+                reason = "Même message publié par plusieurs comptes (raid coordonné)."
+                results = await asyncio.gather(
+                    *(self._delete_and_warn(m, reason, "antispam") for m in group),
+                    return_exceptions=True,
+                )
+                for failure in results:
+                    if isinstance(failure, Exception):
+                        logger.error("Raid coordonné : traitement d'un message impossible", exc_info=failure)
+                return
+            if self.spam_tracker.ajouter(key, message) >= SPAM_THRESHOLD:
+                # La rafale entière part, pas seulement le message qui franchit le seuil :
+                # les premiers restaient affichés (4 par spammeur, mesuré).
+                burst = [m for m in self.spam_tracker.valeurs(key) if m is not None and m is not message]
                 self.spam_tracker.reinitialiser(key)
-                return await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
+                earlier = self._delete_burst(message.guild.id, burst)
+                result = await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
+                incident = self.incidents.get(key)
+                if incident is not None and earlier:
+                    incident.deleted += len(earlier)
+                await asyncio.gather(*earlier, return_exceptions=True)
+                return result
 
             # Une promotion envoyée toutes les quelques secondes dans de
             # nombreux salons contourne le seuil de rafale courte. Suivi par
@@ -2982,6 +3017,49 @@ class AutoMod(commands.Cog, name="Automod"):
             if motif_repete:
                 self.repeat_tracker.reinitialiser(key)
                 return await self._delete_and_warn(message, motif_repete, "antispam")
+
+    def _coordinated_copies(self, message: discord.Message, link_content: str) -> list[discord.Message]:
+        """Les messages identiques de plusieurs comptes, dès qu'ils sont assez nombreux.
+
+        Retourne la liste à traiter (celui-ci compris, et ceux qui ont précédé et
+        n'ont pas encore été traités), ou une liste vide.
+        """
+        contenu = text_normalization.normaliser(message.content)
+        if len(contenu) < COORDINATED_MIN_LENGTH and not LINK_RE.search(link_content):
+            return []
+        if len(contenu) < REPEAT_MIN_LENGTH:
+            return []
+        empreinte = hash("".join(contenu.split()))
+        cle = (message.guild.id, empreinte)
+        tracker = getattr(self, "coordinated_tracker", None)
+        if tracker is None:
+            tracker = self.coordinated_tracker = FenetreGlissante(fenetre=COORDINATED_WINDOW, purge_toutes=200)
+        tracker.ajouter(cle, message)
+        copies = [m for m in tracker.valeurs(cle) if m is not None]
+        if len({m.author.id for m in copies}) < COORDINATED_AUTHORS:
+            return []
+        return copies
+
+    def _purge_queue(self) -> SuppressionsGroupees:
+        """Suppressions regroupées par salon : sous une rafale de plusieurs spammeurs,
+        un appel groupé au lieu d'un appel par message. Créée à la demande, comme
+        les autres états du cog que certains appelants construisent sans __init__."""
+        queue = getattr(self, "_purge", None)
+        if queue is None:
+            queue = self._purge = SuppressionsGroupees()
+        return queue
+
+    def _delete_burst(self, guild_id: int, messages: list[discord.Message]) -> list[asyncio.Future]:
+        """Met en file la suppression des messages d'une rafale déjà détectée, sans
+        avertissement ni log de plus : l'incident en cours les compte."""
+        futures = []
+        for earlier in messages:
+            if not self._sanctioned_messages.claim(guild_id, earlier.id):
+                continue
+            self._mark_xp_skip(earlier.id)
+            log_service.mark_purged((earlier.id,))
+            futures.append(asyncio.ensure_future(self._purge_queue().supprimer(earlier)))
+        return futures
 
     def _detecter_repetition(self, message: discord.Message, key: tuple[int, int]) -> str | None:
         """Le même message répété, quelle que soit sa vitesse.
@@ -3198,18 +3276,23 @@ class AutoMod(commands.Cog, name="Automod"):
                     message.guild.id, message.author.id, message.channel.id, filter_name,
                 )
         self._mark_xp_skip(message.id)
-        deleted = False
-        try:
-            await message.delete()
-            deleted = True
-        except discord.HTTPException:
-            pass
+        # La suppression part tout de suite, mais l'incident est enregistré AVANT de
+        # l'attendre. Avant, les messages suivants du même membre arrivaient pendant
+        # l'appel à Discord, ne voyaient aucun incident et restaient visibles
+        # (mesuré : jusqu'à 10 messages sur 12 par spammeur, tools/spam_burst_e2e.py).
+        if filter_name in SPAM_FILTERS:
+            # La carte AutoMod de l'incident résume la rafale (nombre, extrait) : pas
+            # de carte « Message supprimé » par message en plus — mesuré : 242 cartes
+            # pour une vague de 20 spammeurs. Même règle que +clear.
+            log_service.mark_purged((message.id,))
+        deletion = asyncio.ensure_future(self._purge_queue().supprimer(message))
 
-        # Republication contrôlée SentriX : seulement APRÈS suppression réussie, et uniquement si
-        # le texte a pu être censuré de manière sûre. Sans Gérer les webhooks, on garde
-        # automatiquement le comportement suppression + avertissement.
-        if deleted and censored_content and filter_name not in NO_REPOST_FILTERS:
-            await self._repost_censored(message, censored_content)
+        async def finish_deletion() -> None:
+            # Republication contrôlée SentriX : seulement APRÈS suppression réussie, et
+            # uniquement si le texte a pu être censuré de manière sûre. Sans Gérer les
+            # webhooks, on garde automatiquement le comportement suppression + avertissement.
+            if await deletion and censored_content and filter_name not in NO_REPOST_FILTERS:
+                await self._repost_censored(message, censored_content)
 
         key = (message.guild.id, message.author.id)
         now_ts = time.monotonic()
@@ -3221,6 +3304,7 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         if incident is not None and now_ts - incident.started < incident_window:
             incident.deleted += 1
+            await finish_deletion()
             return
         incident = _Incident(
             started=now_ts,
@@ -3235,6 +3319,7 @@ class AutoMod(commands.Cog, name="Automod"):
             for candidate, item in list(self.incidents.items()):
                 if item.started < cutoff:
                     self.incidents.pop(candidate, None)
+        await finish_deletion()
 
         await self._record_incident_trace(message, incident)
         try:
@@ -3361,6 +3446,10 @@ class AutoMod(commands.Cog, name="Automod"):
                         f"{message.author.mention}, {public_text}",
                         supprimer_apres=6,
                     )
+            elif filter_name in SPAM_FILTERS and self._group_spam_notice(
+                message.channel, message.author.mention, public_text
+            ):
+                pass
             else:
                 await panels.texte_court(
                     message.channel,
@@ -3371,6 +3460,59 @@ class AutoMod(commands.Cog, name="Automod"):
             pass
 
         asyncio.create_task(self._flush_incident_log(message.guild, message.author, key, incident))
+
+    def _group_spam_notice(self, channel, mention: str, text: str) -> bool:
+        """True si l'avertissement rejoint un envoi groupé (l'appelant n'envoie rien).
+
+        Le premier spammeur d'un salon est averti tout de suite ; ceux qui suivent
+        dans les secondes d'après sont réunis dans un seul message.
+        """
+        now = time.monotonic()
+        notices = getattr(self, "_spam_notices", None)
+        if notices is None:
+            notices = self._spam_notices = {}
+        wave = notices.get(channel.id)
+        if wave is None or now - wave["since"] > SPAM_NOTICE_GROUP_WINDOW_SECONDS:
+            if len(notices) > 500:
+                notices = self._spam_notices = {
+                    cid: w for cid, w in notices.items()
+                    if now - w["since"] <= SPAM_NOTICE_GROUP_WINDOW_SECONDS or w["task"] is not None
+                }
+            notices[channel.id] = {"since": now, "pending": {}, "task": None, "named": {mention}}
+            return False
+        if mention in wave["named"]:
+            # Le même membre récidive : son nouvel avertissement (étape suivante)
+            # part tout de suite, il ne se noie pas dans la vague.
+            return False
+        wave["named"].add(mention)
+        mentions = wave["pending"].setdefault(text, [])
+        if mention not in mentions:
+            mentions.append(mention)
+        if wave["task"] is None:
+            wave["task"] = asyncio.create_task(self._send_grouped_spam_notice(channel, wave))
+        return True
+
+    async def _send_grouped_spam_notice(self, channel, wave: dict) -> None:
+        try:
+            await asyncio.sleep(SPAM_NOTICE_GROUP_DELAY_SECONDS)
+        finally:
+            pending, wave["pending"], wave["task"] = wave["pending"], {}, None
+            wave["since"] = time.monotonic()
+        lines = []
+        for text, mentions in pending.items():
+            shown = ", ".join(mentions[:SPAM_NOTICE_MAX_MENTIONS])
+            hidden = len(mentions) - SPAM_NOTICE_MAX_MENTIONS
+            if hidden > 0:
+                shown += f" et {hidden} autre{'s' if hidden > 1 else ''}"
+            lines.append(f"{shown}, {text}")
+        if not lines:
+            return
+        try:
+            await panels.texte_court(channel, "\n".join(lines), supprimer_apres=6)
+        except discord.HTTPException:
+            pass
+        except Exception:
+            logger.exception("Avertissement anti-spam groupé impossible salon=%s", getattr(channel, "id", None))
 
     async def _spam_timeout(self, guild: discord.Guild, member: discord.abc.User, reason: str) -> str | None:
         """Exclusion temporaire directe pour un incident de spam (une seule par incident)."""
