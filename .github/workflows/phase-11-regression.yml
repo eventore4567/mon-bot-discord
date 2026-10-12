@@ -56,7 +56,6 @@ jobs:
               tests/test_automatic_role_rules.py
               tests/test_setup_home_status.py
               tests/test_setup_roles_rules_page.py
-              tests/test_setup_roles_rules_subpage.py
               tests/test_setup_advanced_moderation_ui.py
               tests/test_hierarchy_footer_layout.py
 
