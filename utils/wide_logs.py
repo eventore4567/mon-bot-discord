@@ -211,7 +211,7 @@ def _strip_identity_prelude(description: str, identity_name: str | None, identit
             first = re.sub(r"[*_`#>]", "", lines[0]).strip().casefold()
             if identity.casefold() in first:
                 lines.pop(0)
-    if identity_id and lines and str(identity_id) in lines[0]:
+    if identity_id and len(str(identity_id)) >= 15 and lines and str(identity_id) in lines[0]:
         lines.pop(0)
     while lines and not lines[0].strip():
         lines.pop(0)
