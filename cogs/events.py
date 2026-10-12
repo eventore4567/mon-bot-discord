@@ -10,8 +10,8 @@ Cog GIVEAWAYS / ÉVÉNEMENTS.
 import random
 import discord
 from discord import app_commands
-from discord.ext import commands
-from cogs.automatic_role_rules import sync_giveaway_blacklist, tasks
+from discord.ext import commands, tasks
+from cogs.automatic_role_rules import sync_giveaway_blacklist
 
 import config
 from utils import embeds, checks, helpers, design_system
