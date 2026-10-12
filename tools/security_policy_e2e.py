@@ -66,9 +66,12 @@ async def main() -> int:
     # 3 — L'exemption est limitée à SON filtre : l'invitation reste supprimée.
     check(await deleted(INVITE, with_bypass), "le même rôle n'exempte pas de l'anti-invitations")
 
-    # 4 — Salon strict : même le rôle exempté est soumis à la règle.
+    # 4 — Salon strict : il impose le filtre (même salon ignoré), mais une exemption
+    # CONFIGURÉE par le serveur reste respectée (décision b371b7e3, 11/10/2026 —
+    # le dashboard le promet ainsi).
     await policy("antilink", roles=[BYPASS_ROLE], strict=[h.CID])
-    check(await deleted(LINK, with_bypass), "salon strict : le rôle exempté est quand même filtré")
+    check(not await deleted(LINK, with_bypass), "salon strict : le rôle exempté configuré reste exempté")
+    check(await deleted(LINK), "salon strict : un membre sans exemption est filtré")
     await policy("antilink")
 
     # 5 — Salon ignoré : aucun filtre, pour tout le monde.
@@ -79,11 +82,11 @@ async def main() -> int:
     await policy("antilink")
     await db.execute("DELETE FROM ignored_channels WHERE guild_id=?", (h.GID,))
 
-    # 6 — Rôle exempté de TOUT l'AutoMod (historique) : exempté, sauf en salon strict.
+    # 6 — Rôle exempté de TOUT l'AutoMod (historique) : exempté, salon strict compris.
     await db.execute("INSERT INTO automod_exempt_roles (guild_id, role_id) VALUES (?, ?)", (h.GID, BYPASS_ROLE))
     check(not await deleted(LINK, with_bypass), "rôle exempté de tout l'AutoMod : le lien passe")
     await policy("antilink", strict=[h.CID])
-    check(await deleted(LINK, with_bypass), "rôle exempté global en salon strict : filtré")
+    check(not await deleted(LINK, with_bypass), "rôle exempté global en salon strict : toujours exempté")
     await policy("antilink")
     await db.execute("DELETE FROM automod_exempt_roles WHERE guild_id=?", (h.GID,))
 

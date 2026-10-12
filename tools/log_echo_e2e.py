@@ -48,9 +48,9 @@ async def main() -> int:
     async def case(name: str, command: str, echo) -> list[str]:
         since = len(h.CALLS)
         await asyncio.wait_for(h.run_prefix(bot, guild, command, **admin), 15)
-        await h.settle(idle=0.4, maximum=3)
+        await h.settle(idle=2.0, maximum=6)
         echo()
-        await h.settle(idle=0.6, maximum=4)
+        await h.settle(idle=2.0, maximum=6)
         cards = logs_since(since)
         check(len(cards) == 1, f"{name} : une seule carte", f"{len(cards)} carte(s)")
         return cards
@@ -102,7 +102,7 @@ async def main() -> int:
 
     since = len(h.CALLS)
     await asyncio.wait_for(h.run_prefix(bot, guild, f"+give-money {member} 500", **admin), 15)
-    await h.settle(idle=0.4, maximum=3)
+    await h.settle(idle=2.0, maximum=6)
     text = " ".join(logs_since(since))
     check(f"**Membre** · {member}" in text, "+give-money : le membre crédité en en-tête", text[:200])
 

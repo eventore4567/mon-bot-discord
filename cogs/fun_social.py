@@ -18,6 +18,8 @@ import aiohttp
 import discord
 from discord.ext import commands
 
+from utils import sentrix_panels as panels
+
 logger = logging.getLogger("bot.fun-social")
 
 # Action -> (titre, emoji, verbe, categorie GIF). Categories officielles Nekos.best v2.
@@ -315,15 +317,15 @@ class FunMenu(discord.ui.View):
 
     @discord.ui.button(label="Réactions", emoji="💗", style=discord.ButtonStyle.primary)
     async def reactions(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await interaction.response.edit_message(embed=menu_embed("social"), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(menu_embed("social")), self))
 
     @discord.ui.button(label="Animations", emoji="🎭", style=discord.ButtonStyle.secondary)
     async def animations(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await interaction.response.edit_message(embed=menu_embed("solo"), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(menu_embed("solo")), self))
 
     @discord.ui.button(label="Tests & défis", emoji="🔮", style=discord.ButtonStyle.secondary)
     async def modes(self, interaction: discord.Interaction, _: discord.ui.Button):
-        await interaction.response.edit_message(embed=menu_embed("fun"), view=self)
+        await panels.editer(interaction.response, panels.avec_composants(panels.depuis_embed(menu_embed("fun")), self))
 
 
 class FunSocial(commands.Cog, name="FunSocial"):
@@ -367,11 +369,13 @@ class FunSocial(commands.Cog, name="FunSocial"):
                          other: discord.Member | None = None) -> None:
         action = action.strip().lower()
         if action in {"help", "menu", "list", "liste"}:
-            return await ctx.send(embed=menu_embed(), view=FunMenu())
+            # Même transport que les autres panneaux : un embed + une vue envoyés
+            # en direct étaient reconvertis en carte et la vue perdait ses boutons.
+            return await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(menu_embed()), FunMenu()))
         if not ctx.guild:
             return await ctx.send("🎉 Les commandes Fun fonctionnent sur un serveur Discord.")
         if action not in ACTIONS and action != "stats":
-            return await ctx.send("❓ Action inconnue. Tape `+fun` pour voir tout le catalogue.")
+            return await ctx.send("❓ Action inconnue. Tapez `+fun` pour voir tout le catalogue.")
         if self._throttle(ctx.guild.id, ctx.author.id):
             return await ctx.send("⏳ Patientez 4 secondes avant une autre action Fun.", delete_after=5)
         target = member or ctx.author

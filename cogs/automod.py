@@ -2723,7 +2723,7 @@ class AutoMod(commands.Cog, name="Automod"):
         domain = _canonical_whitelist_domain(domaine)
         if domain is None:
             return await panels.envoyer(
-                ctx, panels.depuis_embed(embeds.warning("Indique le nom du domaine à retirer (ex : `youtube.com`)."))
+                ctx, panels.depuis_embed(embeds.warning("Indiquez le nom du domaine à retirer (ex : `youtube.com`)."))
             )
         await self.bot.db.execute(
             "DELETE FROM whitelist_domains WHERE guild_id = ? AND domain = ?",
