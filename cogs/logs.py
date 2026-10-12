@@ -71,6 +71,33 @@ def _active_timeout(member: discord.Member):
     return until
 
 
+
+def _timeout_duration_label(until, *, now=None) -> str | None:
+    """Temps restant au moment du log (Discord fournit la fin, pas la durée initiale)."""
+    if until is None:
+        return None
+    if now is None:
+        now = discord.utils.utcnow()
+    if getattr(until, "tzinfo", None) is None:
+        from datetime import timezone
+        until = until.replace(tzinfo=timezone.utc)
+    import math
+    remaining = (until - now).total_seconds()
+    if remaining <= 0:
+        return None
+    seconds = math.ceil(remaining)
+    if seconds < 60:
+        return f"{seconds} s"
+    total_minutes = math.ceil(seconds / 60)
+    days, rest = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(rest, 60)
+    if days:
+        return f"{days} j" + (f" {hours} h" if hours else "")
+    if hours:
+        return f"{hours} h" + (f" {minutes} min" if minutes else "")
+    return f"{minutes} min"
+
+
 def _user_ref(user_id: int) -> str:
     return f"<@{int(user_id)}>"
 
@@ -913,6 +940,9 @@ class Logs(commands.Cog, name="Logs"):
                 fields.append(("Modérateur", _user_ref(actor.id), True))
             fin = _active_timeout(after)
             if fin:
+                duree = _timeout_duration_label(fin)
+                if duree:
+                    fields.append(("Durée restante", duree, True))
                 fields.append(("Fin prévue", discord.utils.format_dt(fin, "F"), True))
             panel = self._embed(
                 "Timeout appliqué" if fin else "Timeout retiré",
