@@ -127,14 +127,17 @@ def fixed_score(guild_id: int, user_id: int, key: str, *, limit: int = 100) -> i
 
 
 def gif_url_is_safe(url: str, category: str) -> bool:
-    parsed = urlsplit(url)
-    return (
-        parsed.scheme == "https" and parsed.hostname == "nekos.best"
-        and parsed.port in (None, 443)
-        and parsed.path.startswith(f"/api/v2/{category}/")
-        and parsed.path.endswith(".gif")
-        and not parsed.username and not parsed.password
-    )
+    try:
+        parsed = urlsplit(url)
+        return (
+            parsed.scheme == "https" and parsed.hostname == "nekos.best"
+            and parsed.port in (None, 443)
+            and parsed.path.startswith(f"/api/v2/{category}/")
+            and parsed.path.endswith(".gif")
+            and not parsed.username and not parsed.password
+        )
+    except ValueError:
+        return False
 
 
 async def fetch_gif(category: str) -> tuple[str | None, str | None]:
@@ -174,7 +177,7 @@ def menu_embed(page: str = "social") -> discord.Embed:
         title=f"🎉 SentriX Fun  •  {title}",
         description="Un catalogue de jeux sociaux, de GIFs anime adaptés et de défis.\n"
                     f"**{example}**\n\n"
-                    + " · ".join(f"\`{name}\`" for name in entries),
+                    + " · ".join(f"`{name}`" for name in entries),
         colour=FUN_COLORS.get(page, FUN_COLORS["social"]),
     )
     embed.set_footer(text=f"{len(ACTIONS)} actions disponibles • Aucun vrai scan ni piratage")
@@ -313,13 +316,13 @@ class FunSocial(commands.Cog, name="FunSocial"):
         if not ctx.guild:
             return await ctx.send("🎉 Les commandes Fun fonctionnent sur un serveur Discord.")
         if action not in ACTIONS and action != "stats":
-            return await ctx.send("❓ Action inconnue. Tape \`+fun\` pour voir tout le catalogue.")
+            return await ctx.send("❓ Action inconnue. Tape `+fun` pour voir tout le catalogue.")
         if self._throttle(ctx.guild.id, ctx.author.id):
             return await ctx.send("⏳ Patiente 4 secondes avant une autre action Fun.", delete_after=5)
         target = member or ctx.author
         if action in REACTIONS:
             if member is None:
-                return await ctx.send(f"💗 Utilise \`+fun {action} @membre\` (ou le raccourci disponible).")
+                return await ctx.send(f"💗 Utilise `+fun {action} @membre` (ou le raccourci disponible).")
             title, emoji, verb, category = REACTIONS[action]
             body = f"{ctx.author.mention} **{verb}** {target.mention} !"
             if action == "hug":
@@ -349,7 +352,19 @@ class FunSocial(commands.Cog, name="FunSocial"):
                 embed.add_field(name="🎞️ Animation", value="GIF temporairement indisponible.", inline=False)
         elif action in {"aura", "hack", "scan", "ship", "rate", "luck", "vibe", "mood",
                         "rizz", "brain", "chaos", "wanted", "personality"}:
+            # Deux membres sont comparés sans imposer une mention supplémentaire.
+            if action == "ship" and other is None and member is not None:
+                other = ctx.author
             embed = _profile_embed(action, target, ctx.guild.id, other=other)
+            category = {"aura": "smug", "ship": "handhold", "luck": "happy",
+                        "vibe": "dance", "mood": "smile", "rizz": "wink",
+                        "chaos": "tableflip"}.get(action)
+            if category:
+                gif, anime = await fetch_gif(category)
+                if gif:
+                    embed.set_image(url=gif)
+                if anime:
+                    embed.add_field(name="🎬 Anime", value=anime, inline=False)
         elif action == "stats":
             try:
                 row = await self.bot.db.fetchone(
