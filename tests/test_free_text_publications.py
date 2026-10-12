@@ -104,3 +104,31 @@ async def test_too_long_publication_preserves_source_and_never_truncates_silentl
     ctx.message.delete.assert_not_awaited()
     error.assert_awaited_once()
     assert "3 500" in error.await_args.args[1]
+
+
+@pytest.mark.asyncio
+async def test_deferred_server_say_closes_thinking_placeholder_after_publication():
+    """V95 /server say is deferred before invoking the +say implementation."""
+    response = SimpleNamespace(is_done=Mock(return_value=True), send_message=AsyncMock())
+    interaction = SimpleNamespace(response=response, edit_original_response=AsyncMock())
+    ctx = _ctx()
+    ctx.interaction = interaction
+    await Utility.say.callback(object(), ctx, texte="Annonce de test")
+
+    ctx.channel.send.assert_awaited_once()
+    interaction.edit_original_response.assert_awaited_once_with(
+        content="Publication envoyée."
+    )
+    response.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_non_deferred_server_say_responds_ephemeral_once():
+    response = SimpleNamespace(is_done=Mock(return_value=False), send_message=AsyncMock())
+    interaction = SimpleNamespace(response=response, edit_original_response=AsyncMock())
+    ctx = _ctx()
+    ctx.interaction = interaction
+    await Utility.say.callback(object(), ctx, texte="Annonce de test")
+
+    response.send_message.assert_awaited_once_with("Publication envoyée.", ephemeral=True)
+    interaction.edit_original_response.assert_not_awaited()
