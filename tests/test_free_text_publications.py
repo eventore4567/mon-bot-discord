@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
