@@ -679,6 +679,7 @@ async def _audit_actor_for(
     *,
     target_id: int | None = None,
     invite_code: str | None = None,
+    target_ids: set[int] | None = None,
 ) -> discord.abc.User | None:
     if action is None or guild.me is None or not guild.me.guild_permissions.view_audit_log:
         return None
@@ -689,6 +690,8 @@ async def _audit_actor_for(
                 continue
             target = entry.target
             if target_id is not None and getattr(target, "id", None) != target_id:
+                continue
+            if target_ids is not None and getattr(target, "id", None) not in target_ids:
                 continue
             if invite_code is not None and getattr(target, "code", None) not in {None, invite_code}:
                 continue
@@ -1052,13 +1055,14 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
                 guild,
                 getattr(discord.AuditLogAction, "role_update", None),
                 target_id=next(iter(reels)) if len(reels) == 1 else None,
+                target_ids=set(reels),
             )
 
             lignes = []
             for role_id, (avant, apres) in sorted(reels.items(), key=lambda item: item[1][1], reverse=True):
                 role = guild.get_role(role_id)
                 nom = role.mention if role is not None else f"`{role_id}`"
-                lignes.append(f"{nom} : `{avant}` → `{apres}`")
+                lignes.append(f"{nom} : {avant} → {apres}")
 
             if len(reels) == 1:
                 titre = "Rôle modifié"
@@ -1069,8 +1073,8 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
             else:
                 titre = "Rôles déplacés"
                 fields = [
-                    ("Rôles concernés", f"**{len(reels)}**", True),
-                    ("Positions modifiées", "\n".join(lignes)[:1024], False),
+                    ("Rôles concernés", f"**{len(reels)}** (décalés lors d’un réarrangement)", True),
+                    ("Positions modifiées", "\n".join(lignes[:8]) + (f"\n… et {len(lignes)-8} autres rôles." if len(lignes)>8 else ""), False),
                 ]
             if actor is not None:
                 fields.append(("Modérateur", f"<@{actor.id}>", True))

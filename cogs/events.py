@@ -11,6 +11,7 @@ import random
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
+from cogs.automatic_role_rules import sync_giveaway_blacklist
 
 import config
 from utils import embeds, checks, helpers, design_system
@@ -384,7 +385,11 @@ class Events(commands.Cog, name="Events"):
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO giveaway_blacklist (guild_id, user_id) VALUES (?, ?)", (ctx.guild.id, membre.id)
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} ne peut plus participer aux giveaways.')))
+        role_result = await sync_giveaway_blacklist(self.bot, membre, excluded=True)
+        reply = f"{membre.mention} ne peut plus participer aux giveaways."
+        if role_result:
+            reply += "\n" + role_result
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(reply)))
 
     @commands.hybrid_command(name="giveaway-unblacklist", description="Autoriser à nouveau un membre à participer aux giveaways.", with_app_command=False)
     @app_commands.describe(membre="Le membre à retirer de la liste noire")
@@ -393,7 +398,11 @@ class Events(commands.Cog, name="Events"):
         await self.bot.db.execute(
             "DELETE FROM giveaway_blacklist WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'{membre.mention} peut à nouveau participer aux giveaways.')))
+        role_result = await sync_giveaway_blacklist(self.bot, membre, excluded=False)
+        reply = f"{membre.mention} peut à nouveau participer aux giveaways."
+        if role_result:
+            reply += "\n" + role_result
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(reply)))
 
     # ---------------------------------------------------------------- ÉVÉNEMENTS
 

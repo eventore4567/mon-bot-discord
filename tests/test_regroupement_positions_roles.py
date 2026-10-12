@@ -82,8 +82,10 @@ async def _vingt_deplacements_donnent_un_seul_log():
     assert "Rôles concernés" in champs
     assert "**20**" in champs["Rôles concernés"]
     # Aucun déplacement n'est perdu.
-    for role_id, _, _ in mouvements:
-        assert str(role_id) in champs["Positions modifiées"]
+    # 8 rôles détaillés max : une rafale de 29 ne doit pas remplir tout le salon.
+    assert len(champs["Positions modifiées"].splitlines()) <= 9
+    assert "12 autres rôles" in champs["Positions modifiées"]
+    assert "un réarrangement" in champs["Rôles concernés"]
 
 
 def test_une_rafale_de_vingt_roles_ne_produit_qu_un_log():
@@ -96,7 +98,7 @@ async def _un_seul_deplacement_garde_le_format_historique():
     panel = envois[0]["panel"]
     champs = {f.name: f.value for f in panel.fields}
     assert "Rôle" in champs and "Position modifiée" in champs
-    assert "`3` → `9`" in champs["Position modifiée"]
+    assert "3 → 9" in champs["Position modifiée"]
 
 
 def test_un_deplacement_isole_conserve_le_format_detaille():
@@ -162,3 +164,29 @@ async def _cog_unload_annule_les_taches():
 
 def test_le_dechargement_du_cog_ne_laisse_aucune_tache():
     asyncio.run(_cog_unload_annule_les_taches())
+
+
+async def _ne_pas_attribuer_un_role_deplace_a_un_audit_sans_rapport():
+    from datetime import datetime, timezone
+    unrelated = Mock()
+    unrelated.created_at = datetime.now(timezone.utc)
+    unrelated.target = Mock()
+    unrelated.target.id = 99999
+    unrelated.user = Mock()
+    unrelated.user.id = 42
+    guild = _guild()
+    guild.me = Mock()
+    guild.me.guild_permissions.view_audit_log = True
+
+    async def entries(*, limit, action):
+        yield unrelated
+
+    guild.audit_logs = entries
+    result = await v3._audit_actor_for(
+        guild, discord.AuditLogAction.role_update, target_ids={1000, 1001}
+    )
+    assert result is None, "Un audit portant sur un autre rôle n'identifie pas le responsable."
+
+
+def test_audit_log_de_roles_inconnexes_ne_designe_pas_un_responsable():
+    asyncio.run(_ne_pas_attribuer_un_role_deplace_a_un_audit_sans_rapport())

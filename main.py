@@ -138,6 +138,7 @@ EXTENSIONS = [
     "cogs.games_economy",
     "cogs.games_arcade",
     "cogs.music",
+    "cogs.automatic_role_rules",  # Rôles automatiques opt-in, avant les commandes giveaways
     "cogs.events",
     # Rétablit la racine +giveaway que le catalogue annonce depuis toujours. Chargé
     # APRÈS cogs.events, dont il délègue les commandes giveaway-* existantes.

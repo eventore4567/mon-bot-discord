@@ -182,7 +182,7 @@ SECURITY_CENTER_PROTECTIONS: tuple[tuple[str, str, str, str], ...] = (
     ("risk_engine", "Moteur de risque", "Arrivées", "Score multi-signaux et alertes graduées."),
     ("antinuke", "Anti-nuke", "Serveur", "Rôles, salons, webhooks et actions critiques."),
     ("security_vanity", "Protection Vanity URL", "Serveur", "Surveille le lien personnalisé du serveur."),
-    ("security_prune", "Protection Prune", "Serveur", "Détecte les suppressions massives de membres."),
+    ("security_prune", "Protection contre l’exclusion massive", "Serveur", "Alerte si de nombreux membres sont expulsés d’un coup."),
     ("security_permissions", "Permissions dangereuses", "Serveur", "Bloque les élévations critiques de permissions."),
     ("escalation", "Escalade AutoMod", "Réponse", "Compte les récidives (Infractions 1 h). Les filtres de contenu suppriment sans jamais exclure, expulser ni bannir seuls."),
     ("honeypot", "Honeypot anti-bot", "Avancé", "Piège les comptes suspects dans le salon prévu."),
