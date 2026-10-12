@@ -35,6 +35,7 @@ CATEGORIES = {
     "welcome": ("Bienvenue", "Accueil des nouveaux membres : salon, message, image."),
     "goodbye": ("Départs", "Message envoyé quand un membre quitte le serveur."),
     "roles": ("Rôles", "Autorôles, vérification, rôles membres et récompenses."),
+    "auto_roles": ("Rôles automatiques", "Giveaways, avertissements et sanctions : choisissez les rôles."),
     "levels": ("Niveaux & économie", "XP, activité, argent, banque, récompenses et boutique."),
     "notifications": ("Notifications", "YouTube, Twitch et TikTok, salons et rôles mentionnés."),
     "music": ("Musique", "Activer le lecteur, choisir le vocal musique et gérer le panneau du chat vocal."),
@@ -47,9 +48,9 @@ AUTOMOD = (
     ("antiinvite", "Anti-invitation"), ("antimention", "Anti-ping"), ("anticaps", "Anti-majuscules"),
     ("antiemoji", "Anti-emoji"), ("antibot", "Anti-bot"), ("antiaccount", "Anti-compte récent"),
     ("antiscam", "Anti-scam"), ("antinuke", "Anti-nuke"), ("antiinsult", "Anti-insultes"),
-    ("security_vanity", "Protection vanity URL"), ("security_prune", "Détection member prune"),
-    ("security_permissions", "Permissions dangereuses"), ("join_gate", "Join Gate avancé"),
-    ("risk_engine", "Risk score comportemental"),
+    ("security_vanity", "Protection du lien personnalisé"), ("security_prune", "Détection de suppressions massives de membres"),
+    ("security_permissions", "Permissions dangereuses"), ("join_gate", "Filtre des nouvelles arrivées"),
+    ("risk_engine", "Analyse des comportements suspects"),
 )
 
 BOT_PERMS = {
@@ -275,6 +276,20 @@ async def module_statuses(bot, guild, conf):
         tuple(role_errors),
     )
 
+
+    from cogs.automatic_role_rules import giveaway_role_id
+    contest_role_id = await giveaway_role_id(bot, guild.id)
+    automatic_errors = (
+        ("Le rôle d'exclusion des concours a été supprimé.",)
+        if _missing_resource(guild, contest_role_id, role=True) else ()
+    )
+    configured_auto_roles = bool(contest_role_id or _get(conf, "warn_role") or _get(conf, "mute_role"))
+    result["auto_roles"] = (
+        ConfigState.ERROR if automatic_errors else ConfigState.ACTIVE if configured_auto_roles else ConfigState.UNCONFIGURED,
+        "Concours, avertissements et mises en sourdine.",
+        automatic_errors,
+    )
+
     level_count = await bot.db.fetchone("SELECT COUNT(*) AS n FROM levels WHERE guild_id = ?", (guild.id,))
     economy_count = await bot.db.fetchone("SELECT COUNT(*) AS n FROM economy WHERE guild_id = ?", (guild.id,))
     shop_count = await bot.db.fetchone("SELECT COUNT(*) AS n FROM shop_items WHERE guild_id = ?", (guild.id,))
@@ -424,7 +439,7 @@ class CategorySelect(discord.ui.Select):
 
 # Champs pour lesquels SentriX devra AGIR sur le rôle (l'attribuer) : la hiérarchie
 # Discord doit le permettre au moment où on l'enregistre, pas au premier membre.
-_MANAGED_ROLE_FIELDS = frozenset({"autorole", "mute_role", "warn_role", "verify_role", "verification_role", "member_role", "booster_role"})
+_MANAGED_ROLE_FIELDS = frozenset({"autorole", "mute_role", "warn_role", "verify_role", "verification_role", "member_role", "booster_role", "giveaway_block_role"})
 # Champs où SentriX devra ÉCRIRE dans le salon (et souvent joindre un embed/fichier).
 _WRITABLE_CHANNEL_FIELDS = frozenset({
     "welcome_channel", "goodbye_channel", "level_channel", "log_channel", "ticket_log_channel",
@@ -492,6 +507,31 @@ class FieldRoleSelect(discord.ui.RoleSelect):
         value = role.id if role else None
         await self.owner.bot.db.set_guild_config(self.owner.guild.id, self.field, value)
         await self.owner.audit(interaction.user.id, self.field, value)
+        await self.owner.refresh(interaction)
+
+
+class GiveawayBlockedRoleSelect(discord.ui.RoleSelect):
+    """Rôle choisi dans /setup, ajouté lors d'une exclusion des concours."""
+
+    def __init__(self, view):
+        self.owner = view
+        super().__init__(
+            placeholder="Rôle si exclu des giveaways (facultatif)",
+            min_values=0, max_values=1, row=2,
+        )
+
+    async def callback(self, interaction):
+        from cogs.automatic_role_rules import set_giveaway_role
+        role = self.values[0] if self.values else None
+        reason = validate_role_choice(self.owner.guild, role, "giveaway_block_role")
+        if reason:
+            return await _refuse(interaction, reason)
+        await set_giveaway_role(
+            self.owner.bot, self.owner.guild.id, role.id if role else None,
+        )
+        await self.owner.audit(
+            interaction.user.id, "giveaway_block_role", role.id if role else None,
+        )
         await self.owner.refresh(interaction)
 
 
@@ -1276,6 +1316,10 @@ class SetupView(discord.ui.LayoutView):
             self.ajouter(FieldRoleSelect(self, "autorole", "Rôle donné à l'arrivée", 2))
             self.ajouter(FieldRoleSelect(self, "verify_role", "Rôle vérifié", 3))
             self.ajouter(FieldRoleSelect(self, "member_role", "Rôle membre", 4))
+        elif self.category == "auto_roles":
+            self.ajouter(GiveawayBlockedRoleSelect(self))
+            self.ajouter(FieldRoleSelect(self, "warn_role", "Rôle après avertissement", 3))
+            self.ajouter(FieldRoleSelect(self, "mute_role", "Rôle de mise en sourdine", 4))
         elif self.category == "levels":
             self.ajouter(FieldChannelSelect(self, "level_channel", "Salon des notifications de niveau", 2))
         elif self.category == "music":
@@ -1737,6 +1781,28 @@ class SetupView(discord.ui.LayoutView):
                         panels.Ligne(f"Niveau {_get(row, 'level')}", _role(self.guild, _get(row, "role_id")))
                         for row in rewards[:10]
                     ] or [panels.Ligne("Aucune", "`+levelroles` en ajoute une")],
+                ),
+            ]
+        if cle == "auto_roles":
+            from cogs.automatic_role_rules import giveaway_role_id
+            contest_role = await giveaway_role_id(self.bot, self.guild.id)
+            return [
+                panels.Section(
+                    "Rôles attribués après une action",
+                    [
+                        panels.Ligne(
+                            "Exclu des concours",
+                            _role(self.guild, contest_role),
+                            indice="Ajouté par +giveaway blacklist ; retiré par +giveaway unblacklist seulement si SentriX l'a donné.",
+                        ),
+                        panels.Ligne("Avertissement", _role(self.guild, _get(conf, "warn_role"))),
+                        panels.Ligne("Mise en sourdine", _role(self.guild, _get(conf, "mute_role"))),
+                    ],
+                ),
+                panels.Section(
+                    "À savoir",
+                    texte="Aucun rôle créé automatiquement. Choisissez un rôle existant placé sous SentriX. "
+                          "Les rôles de sanctions conservent les règles de la modération existante.",
                 ),
             ]
         if cle == "levels":
