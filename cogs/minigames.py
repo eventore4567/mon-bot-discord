@@ -552,6 +552,24 @@ class Minigames(commands.Cog, name="Minigames"):
         """Repli accessible en texte simple ; aucune balise Markdown dans les cartes."""
         return " · ".join(carte for carte, _valeur in main)
 
+    @classmethod
+    def _table_blackjack(
+        cls, joueur: list[tuple[str, int]],
+        croupier: list[tuple[str, int]], *,
+        devoile: bool = False,
+    ) -> str:
+        """Rendu accessible sans Markdown, scores séparés des cartes."""
+        dealer_cards = cls._main_lisible(croupier if devoile else croupier[:1])
+        if not devoile:
+            dealer_cards += " · carte cachée"
+        dealer_total = f"{cls._total(croupier)} points" if devoile else "masqué"
+        return (
+            f"🎩 Croupier : {dealer_cards}\n"
+            f"Total du croupier : {dealer_total}\n\n"
+            f"🃏 Vous : {cls._main_lisible(joueur)}\n"
+            f"Votre total : {cls._total(joueur)} / 21"
+        )
+
     @staticmethod
     def _panneau_blackjack(
         embed: discord.Embed, joueur: list[tuple[str, int]],
@@ -590,10 +608,7 @@ class Minigames(commands.Cog, name="Minigames"):
         croupier = [paquet.pop(), paquet.pop()]
 
         def table(devoile: bool = False) -> str:
-            return (
-                f"🎩 **Croupier** : **{self._total(croupier) if devoile else '?'}** points\n"
-                f"🃏 **Votre main** : **{self._total(joueur)}** points"
-            )
+            return self._table_blackjack(joueur, croupier, devoile=devoile)
 
         async def panneau(
             description: str, *, kind: str = "primary",
