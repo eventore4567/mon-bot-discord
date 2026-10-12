@@ -134,6 +134,7 @@ EXTENSIONS = [
     "cogs.economy",
     "cogs.levels",
     "cogs.minigames",
+    "cogs.fun_social",  # 69 interactions Fun, GIFs pertinents et profils fictifs
     "cogs.games_economy",
     "cogs.games_arcade",
     "cogs.music",
