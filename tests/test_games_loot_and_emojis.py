@@ -285,7 +285,8 @@ def test_le_blackjack_joue_avec_un_vrai_paquet():
         assert Minigames._total(main) == attendu, [c for c, _v in main]
 
     rendu = Minigames._main_lisible([("A♠", 11), ("10♦", 10)])
-    assert rendu == "`A♠` `10♦`"
+    # Repli accessible : du texte lisible, sans les balises Markdown cassées.
+    assert rendu == "A♠ · 10♦"
 
 
 def test_plus_haut_ou_plus_bas_montre_une_carte_pas_un_nombre():

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import io
 import logging
 import re as _re
 from dataclasses import dataclass, field
@@ -714,6 +715,11 @@ class Panneau(discord.ui.LayoutView):
         # Pas de bandeau décoratif. Exception métier : GIF du mini-jeu
         # VALIDÉ et joint au même message que sa MediaGallery. Un fichier neuf
         # est construit à chaque édition (les discord.File sont consommés).
+        # Le GIF de chaque main reste isolé : pas de cache entre joueurs.
+        animation_locale = getattr(self, "_local_game_animation", None)
+        if animation_locale is not None:
+            nom, octets = animation_locale
+            return [discord.File(io.BytesIO(octets), filename=nom)]
         if self._game_gif_attachment:
             from utils.game_visuals import attachment_file_for
             gif = attachment_file_for(self._game_gif_attachment)

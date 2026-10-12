@@ -243,7 +243,7 @@ _FAMILIES = (
     ("doors", ("portes mysteres", "porte mystere", "doors")),
     ("emojiorder", ("chaine d'emojis", "emojiorder")),
     ("slap", ("gifle", "slap")),
-    ("coin", ("pile ou face", "coinflip", "roulette", "roulette russe", "blackjack", "casino", "lancer", "dice", "slot", "machine a sous", "highlow")),
+    ("coin", ("pile ou face", "coinflip", "roulette", "roulette russe", "casino", "lancer", "dice", "slot", "machine a sous", "highlow")),
     ("race", ("course", "race", "vitesse", "reflex", "reaction", "fasttype", "rapidite")),
     ("think", ("quiz", "trivia", "question", "culture generale", "enigme", "math", "memoire", "memory", "mot", "pendu", "guess", "scramble", "potion", "detective")),
     ("fight", ("duel", "combat", "dragon", "zombie", "arene", "archery", "tir", "bomb", "bombe", "bombes", "lava", "lave", "rocket", "ghost", "fantome")),
@@ -266,6 +266,9 @@ def scene_for(title: str, description: str | None = None, kind: str = "primary")
     title_normal = _normaliser(title)
     description_normal = _normaliser(description)
     if any(phrase in title_normal for phrase in _NOT_A_GAME):
+        return None
+    # Le blackjack fabrique son propre GIF depuis les vraies cartes distribuées.
+    if re.search(r"(?<!\w)blackjack(?!\w)", title_normal):
         return None
     if kind == "warning" or (kind == "danger" and _BAD_INPUT.search(description_normal)):
         return None
