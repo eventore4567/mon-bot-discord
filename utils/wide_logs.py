@@ -204,9 +204,13 @@ def _strip_identity_prelude(description: str, identity_name: str | None, identit
     while lines and not lines[0].strip():
         lines.pop(0)
     if identity_name and lines:
-        first = re.sub(r"[*_`#>]", "", lines[0]).strip().casefold()
-        if identity_name.casefold() in first:
-            lines.pop(0)
+        # A count like 17 is NOT the identity of a role-reorder log.
+        # Matching by substring used to erase "Rôles concernés : 17".
+        identity = str(identity_name).strip()
+        if not (identity.isdecimal() and len(identity) < 15):
+            first = re.sub(r"[*_`#>]", "", lines[0]).strip().casefold()
+            if identity.casefold() in first:
+                lines.pop(0)
     if identity_id and lines and str(identity_id) in lines[0]:
         lines.pop(0)
     while lines and not lines[0].strip():
