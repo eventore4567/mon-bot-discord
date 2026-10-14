@@ -101,9 +101,12 @@ def _attaques_insultes() -> tuple[str, ...]:
 
 
 def _voit_invitation(contenu: str) -> bool:
+    from cogs.automod import _invitation_apres_recollage_total
+
     return bool(
         INVITE_RE.search(_normalize_link_text(contenu))
         or INVITE_RE.search(_recoller_hotes_invitation(tn.normaliser(contenu)))
+        or _invitation_apres_recollage_total(_normalize_link_text(contenu))
     )
 
 
@@ -142,7 +145,14 @@ FAMILLES = (
             "rejoins disсord.gg/abcd",           # с cyrillique
             "rejoins ᴅɪsᴄᴏʀᴅ.ɢɢ/abcd",           # petites capitales
             "rejoins ｄｉｓｃｏｒｄ.ｇｇ/abcd",          # pleine chasse
-            "rejoins disc​ord.gg/abcd",      # espace zéro largeur
+            "rejoins disc​ord.gg/abcd",
+            # Ajoutées le 2026-10-14 : cinq de ces six ne passaient pas.
+            "rejoins discord.gg /abcd",
+            "rejoins discord,gg/abcd",
+            "rejoins disc0rd.gg/abcd",
+            "rejoins **discord.gg**/abcd",
+            "rejoins ||discord.gg/abcd||",
+            "rejoins d i s c o r d . g g / abcd",      # espace zéro largeur
         ),
         (
             "on se voit sur discord demain",
@@ -166,6 +176,7 @@ FAMILLES = (
             "fr33 nitr0 ici",
             "𝗳𝗿𝗲𝗲 𝗻𝗶𝘁𝗿𝗼 ici",
             "ｆｒｅｅ ｎｉｔｒｏ ici",
+            "steam gift gratuit",            # variante française manquante
             "frее nitro ici",                     # е cyrillique
             "nitro gratuit pour tous",
             "n1tr0 gr4tu1t pour tous",
@@ -248,12 +259,35 @@ FAMILLES = (
             "va sur https:/ /exemple.com",
             "va sur exemple[.]com",
             "va sur 192.168.1.1/admin",
+            # Ajoutées le 2026-10-14. Les huit précédentes passaient toutes ;
+            # sur ces dix-neuf, sept ne passaient pas.
+            "va sur exemple .com",
+            "va sur exemple,com",
+            "va sur ｅｘｅｍｐｌｅ.ｃｏｍ",
+            "va sur exemple·com",
+            "va sur exemple[dot]com",
+            "va sur exemple{.}com",
+            "va sur xn--e1afmkfd.xn--p1ai",
+            "va sur **exemple.com**",
+            "va sur ||https://exemple.com||",
+            "va sur <https://exemple.com>",
+            "va sur EXEMPLE.COM",
         ),
         (
             "bonjour tout le monde",
             "j'ai 3.5 de moyenne",
             "rendez-vous à 14.30",
             "le fichier fait 2.5 Go",
+            # Contrepartie de la virgule et de l'espace acceptés avant un TLD :
+            # ces nombres ne doivent jamais devenir des adresses.
+            "j'ai 3,5 de moyenne ce trimestre",
+            "prix : 12,99 euros seulement",
+            "le taux est de 2,75 pourcent",
+            "coordonnées 48.85, 2.35",
+            "version 1.2.3 disponible au téléchargement",
+            "elle a eu 18.5 en physique",
+            "le train part à 7.42",
+            "section 3.1.4 du règlement",
         ),
     ),
 )

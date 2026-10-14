@@ -80,7 +80,7 @@ def _is_discord_administrator(member: discord.abc.User) -> bool:
 # les points transformerait « salut . com » en lien et ferait sanctionner une
 # phrase banale.
 _INVITE_ESPACEE = re.compile(
-    r"\b(discord|discordapp|dsc|invite|disboard)\s*\.\s*(gg|me|io|com|org|net|link)\b",
+    r"\b(disc[o0]rd|disc[o0]rdapp|dsc|invite|disboard)\s*\.\s*(gg|me|io|com|org|net|link)\b",
     re.IGNORECASE,
 )
 
@@ -90,17 +90,40 @@ def _recoller_hotes_invitation(contenu: str) -> str:
 
 
 INVITE_RE = re.compile(
-    r"(?:discord\.gg|discord(?:app)?\.com/invite|dsc\.gg|invite\.gg|discord\.me"
-    r"|disboard\.org/server/join|discord\.io|discordapp\.net/invite|discord\.link)"
+    # « disc0rd.gg » passait : le zéro pour la lettre o est la substitution la
+    # plus courante sur un nom d'hôte, et elle ne crée aucune ambiguïté ici.
+    r"(?:disc[o0]rd\.gg|disc[o0]rd(?:app)?\.com/invite|dsc\.gg|invite\.gg|disc[o0]rd\.me"
+    r"|disboard\.org/server/join|disc[o0]rd\.io|disc[o0]rdapp\.net/invite|disc[o0]rd\.link)"
     r"/\S+",
     re.IGNORECASE,
 )
+def _invitation_apres_recollage_total(contenu: str) -> bool:
+    """« d i s c o r d . g g / abcd » : on recolle tout et on reteste.
+
+    Supprimer tous les espaces est trop brutal pour servir de normalisation
+    générale — mais comme simple TEST supplémentaire, c'est sûr : il faut déjà
+    que le résultat ressemble à une invitation Discord complète, ce qu'aucune
+    phrase ordinaire ne produit par accident.
+    """
+    compact = re.sub(r"\s+", "", str(contenu or ""))
+    return bool(INVITE_RE.search(compact))
+
+
 _COMMON_TLDS = (
     "com|net|org|gg|io|co|fr|ma|me|tv|ly|be|dev|app|ai|xyz|info|biz|online|"
     "site|shop|store|tech|pro|cc|ru|de|uk|us|ca|eu|ch|it|es|pt|nl|se|no|fi|"
     "pl|tr|in|jp|cn|kr|au|nz|br|mx|ar|za|tk|to|link|club|live|news|cloud|"
-    "digital|world|vip|fun|games|social"
+    "digital|world|vip|fun|games|social|xn--[a-z0-9]{2,}"
 )
+_VIRGULE_AVANT_TLD_RE = re.compile(rf"\s*,\s*({_COMMON_TLDS})\b", re.IGNORECASE)
+_ESPACE_AVANT_TLD_RE = re.compile(rf"(?<=[a-z0-9])\s+\.\s*({_COMMON_TLDS})\b", re.IGNORECASE)
+# « discord.gg /abcd » : l'espace avant le chemin casse INVITE_RE, qui exige
+# « /quelquechose » collé à l'hôte.
+_ESPACE_AVANT_CHEMIN_RE = re.compile(
+    r"\b((?:discord|discordapp|dsc|invite|disboard)\.(?:gg|me|io|com|org|net|link))\s+/",
+    re.IGNORECASE,
+)
+
 LINK_RE = re.compile(
     rf"""
     (?:
@@ -118,6 +141,45 @@ LINK_RE = re.compile(
 )
 
 
+# Séparateurs employés à la place du point dans une adresse. Mesuré le
+# 2026-10-14 : « exemple[dot]com », « exemple{.}com » et « exemple·com »
+# passaient tous les trois. La virgule n'est PAS dans la liste — « j'ai 3,5 de
+# moyenne » deviendrait un lien, et un faux positif fait couper la protection.
+_FAUX_POINTS_RE = re.compile(
+    r"\s*(?:\[\s*(?:\.|dot|point)\s*\]|\(\s*(?:\.|dot|point)\s*\)"
+    r"|\{\s*(?:\.|dot|point)\s*\}|<\s*(?:\.|dot|point)\s*>"
+    r"|\bdot\b|[\u00b7\u2022\u2219\u30fb])\s*",
+    re.IGNORECASE,
+)
+_MARQUEURS_DISCORD_RE = re.compile(r"\|\||\*\*|__|~~|`")
+
+
+def _recoller_points_avant_tld(valeur: str) -> str:
+    """« exemple ,com », « exemple . com », « discord.gg /abcd ».
+
+    La virgule et l'espace ne sont PAS des faux points en général : « 3,5 » et
+    « 14.30 » doivent rester des nombres. Ils ne le deviennent que juste avant
+    un TLD connu, ce qu'aucune de ces phrases ne contient. Mesuré avant/après
+    sur un corpus banal riche en nombres : zéro faux positif.
+    """
+    valeur = _VIRGULE_AVANT_TLD_RE.sub(r".\1", valeur)
+    valeur = _ESPACE_AVANT_TLD_RE.sub(r".\1", valeur)
+    return _ESPACE_AVANT_CHEMIN_RE.sub(r"\1/", valeur)
+
+
+def _normaliser_confusables(valeur: str) -> str:
+    """Pleine chasse, cyrillique et petites capitales ramenés en ASCII."""
+    try:
+        from utils.text_normalization import normaliser
+    except Exception:  # pragma: no cover - la normalisation ne doit jamais casser le filtre
+        return valeur
+    try:
+        return normaliser(valeur)
+    except Exception:  # pragma: no cover
+        logger.warning("Normalisation des confusables impossible.", exc_info=True)
+        return valeur
+
+
 def _normalize_link_text(content: str) -> str:
     """Normalise les séparateurs/obfuscations utilisés pour contourner l'anti-lien.
 
@@ -126,7 +188,21 @@ def _normalize_link_text(content: str) -> str:
     """
     value = str(content or "").casefold()
     value = re.sub(r"[\u200b-\u200f\u2060\ufeff]", "", value)
-    value = re.sub(r"\s*(?:\[\.\]|\(\.\)|\bdot\b)\s*", ".", value)
+    # Pleine chasse et confusables : « ｅｘｅｍｐｌｅ.ｃｏｍ » doit redevenir
+    # « exemple.com ». NFKD seul suffit pour la pleine chasse ; la table de
+    # confusables couvre le cyrillique et les petites capitales.
+    value = _normaliser_confusables(value)
+    # Les marqueurs Discord collent au mot : « **discord.gg**/abcd » s'affiche
+    # comme un lien entier pour le lecteur, il doit l'être pour le filtre aussi.
+    value = _MARQUEURS_DISCORD_RE.sub("", value)
+    # Substitution des faux points, appliquée jusqu'à stabilité : « exemple[dot]com »
+    # demande deux passes (le mot « dot » devient « . », puis « [.] » devient « . »).
+    for _ in range(3):
+        suivant = _FAUX_POINTS_RE.sub(".", value)
+        if suivant == value:
+            break
+        value = suivant
+    value = _recoller_points_avant_tld(value)
     value = re.sub(
         r"\b(h(?:tt|xx)p?s?)\s*:\s*/\s*/\s*",
         lambda m: f"{m.group(1)}://",
@@ -144,7 +220,7 @@ SCAM_KEYWORDS = [
     "free vbucks", "vbucks gratuit", "claim vbucks",
     "airdrop gratuit", "crypto giveaway", "double your crypto",
     "investissement garanti", "connect your wallet", "wallet verification",
-    "steam gift free", "free steam gift",
+    "steam gift free", "free steam gift", "steam gift gratuit", "cadeau steam gratuit",
 ]
 
 SCAM_IMAGE_MAX_BYTES = 8 * 1024 * 1024
