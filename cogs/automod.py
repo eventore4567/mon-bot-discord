@@ -52,6 +52,7 @@ from utils import embeds, checks, helpers, log_service, text_normalization, ai_s
 from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
 from utils.purge_queue import SuppressionsGroupees
+from utils import spam_sensitivity
 from utils.raid_join_deduplicator import RaidJoinDeduplicator
 from utils.automod_message_claims import AutomodMessageClaims
 from utils.raid_verification_recovery import RaidVerificationRecovery
@@ -956,6 +957,7 @@ DANGEROUS_PERMS = [
     "administrator", "manage_guild", "manage_roles", "manage_channels", "manage_webhooks",
     "ban_members", "kick_members", "moderate_members", "mention_everyone",
 ]
+# Réactivité normale. Chaque serveur a désormais la sienne : utils/spam_sensitivity.py.
 SPAM_WINDOW = 6  # secondes observées pour le comptage anti-spam
 SPAM_THRESHOLD = 5  # messages dans la fenêtre avant sanction
 # Flood lent réparti sur plusieurs salons : 14 messages SIGNIFICATIFS dans 60 s
@@ -1031,7 +1033,9 @@ class AutoMod(commands.Cog, name="Automod"):
         # une entrée par membre ayant parlé une fois, gardée à vie, même après son
         # départ. Mesuré à 12,4 Mo pour 50 000 membres sur le seul spam_tracker,
         # et rien ne redescendait. FenetreGlissante oublie les clés inactives.
-        self.spam_tracker = FenetreGlissante(fenetre=SPAM_WINDOW)
+        # Fenêtre la plus large permise : chaque serveur compte sur la sienne
+        # (utils/spam_sensitivity.py).
+        self.spam_tracker = FenetreGlissante(fenetre=spam_sensitivity.FENETRE_MAX)
         self.cross_channel_spam_tracker = FenetreGlissante(
             fenetre=SPAM_CROSS_CHANNEL_WINDOW,
         )
@@ -2736,20 +2740,57 @@ class AutoMod(commands.Cog, name="Automod"):
             lines.append(f"<t:{r['timestamp']}:R> — {who} — `{r['filter_name']}` → **{r['action']}**\n╰ {r['reason']}")
         await panels.envoyer(ctx, panels.depuis_embed(embeds.neutral(title, '\n\n'.join(lines))))
 
-    @commands.hybrid_command(name="security-level", description="Définir le niveau de sécurité global du serveur.")
-    @app_commands.describe(niveau="Niveau de sécurité")
+    @commands.hybrid_command(name="security-level", description="Définir le niveau de sécurité et la réactivité de l'anti-spam.")
+    @app_commands.describe(
+        niveau="Faible, Moyen, Élevé, ou Personnalisé pour choisir vos propres seuils anti-spam",
+        messages=f"Personnalisé : messages avant intervention ({spam_sensitivity.MESSAGES_MIN} à {spam_sensitivity.MESSAGES_MAX})",
+        secondes=f"Personnalisé : en combien de secondes ({spam_sensitivity.SECONDES_MIN} à {spam_sensitivity.SECONDES_MAX})",
+    )
     @app_commands.choices(niveau=[
         app_commands.Choice(name="Faible", value="faible"),
         app_commands.Choice(name="Moyen", value="moyen"),
         app_commands.Choice(name="Élevé", value="eleve"),
+        app_commands.Choice(name="Personnalisé", value="personnalise"),
     ])
     @checks.is_owner_or_admin_for("securite")
-    async def security_level(self, ctx: commands.Context, niveau: str):
+    async def security_level(
+        self, ctx: commands.Context, niveau: str, messages: int | None = None, secondes: int | None = None,
+    ):
+        niveau = (niveau or "").strip().lower().replace("é", "e")
+        if niveau in {"personnalise", "perso", "custom"}:
+            # Les seuils choisis par le serveur ; les interrupteurs des filtres ne bougent pas.
+            if messages is None or secondes is None:
+                reglage = await spam_sensitivity.lire(self.bot, ctx.guild.id)
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.info(
+                    f"Anti-spam actuel : **{reglage.seuils.phrase()}** (réactivité {reglage.niveau}). "
+                    f"Pour choisir vos seuils : `+security-level personnalise <messages> <secondes>`, "
+                    f"par exemple `+security-level personnalise 6 8`."
+                )))
+            seuils = await spam_sensitivity.personnaliser(
+                self.bot, ctx.guild.id, messages, secondes, getattr(ctx.author, "id", None)
+            )
+            self._oublier_seuils(ctx.guild.id)
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.success(
+                f"Anti-spam personnalisé : SentriX intervient à partir de **{seuils.phrase()}**. "
+                "Les filtres activés restent inchangés."
+            )))
+        if niveau not in SECURITY_PRESETS:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                "Niveau inconnu. Choisissez `faible`, `moyen`, `eleve` ou `personnalise`."
+            )))
         await self.bot.db.set_guild_config(ctx.guild.id, "security_level", niveau)
         for field, value in SECURITY_PRESETS.get(niveau, {}).items():
             await self.bot.db.set_automod(ctx.guild.id, field, value)
+        # Choisir un niveau remplace les seuils personnalisés éventuels.
+        await spam_sensitivity.oublier_personnalisation(self.bot, ctx.guild.id)
+        self._oublier_seuils(ctx.guild.id)
         self.automod_cache.pop(ctx.guild.id, None)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Niveau de sécurité réglé sur **{niveau}**. Les filtres associés ont été ajustés.')))
+        reglage = await spam_sensitivity.lire(self.bot, ctx.guild.id)
+        nom = {"faible": "Faible", "moyen": "Moyen", "eleve": "Élevé"}[niveau]
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(
+            f"Niveau de sécurité réglé sur **{nom}**. Les filtres associés ont été ajustés ; "
+            f"l'anti-spam intervient à partir de **{reglage.seuils.phrase()}** (réactivité {reglage.niveau})."
+        )))
 
     # ---------------------------------------------------------------- BLACKLIST MOTS
 
@@ -3083,8 +3124,10 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if conf["antispam"] and await self.security_filter_applies_to(message, "antispam"):
             key = (message.guild.id, message.author.id)
-            group = self._coordinated_copies(message, link_content)
+            seuils = await self._spam_seuils(message.guild.id)
+            group = self._coordinated_copies(message, link_content, seuils.comptes_coordonnes)
             if group:
+                self._noter_spammeur(message.guild, message.author.id, raid=True)
                 reason = "Même message publié par plusieurs comptes (raid coordonné)."
                 results = await asyncio.gather(
                     *(self._delete_and_warn(m, reason, "antispam") for m in group),
@@ -3094,10 +3137,14 @@ class AutoMod(commands.Cog, name="Automod"):
                     if isinstance(failure, Exception):
                         logger.error("Raid coordonné : traitement d'un message impossible", exc_info=failure)
                 return
-            if self.spam_tracker.ajouter(key, message) >= SPAM_THRESHOLD:
+            self.spam_tracker.ajouter(key, message)
+            if self.spam_tracker.compter(key, fenetre=seuils.secondes) >= seuils.messages:
                 # La rafale entière part, pas seulement le message qui franchit le seuil :
                 # les premiers restaient affichés (4 par spammeur, mesuré).
-                burst = [m for m in self.spam_tracker.valeurs(key) if m is not None and m is not message]
+                burst = [
+                    m for m in self.spam_tracker.valeurs(key, fenetre=seuils.secondes)
+                    if m is not None and m is not message
+                ]
                 self.spam_tracker.reinitialiser(key)
                 earlier = self._delete_burst(message.guild.id, burst)
                 result = await self._delete_and_warn(message, "Spam de messages détecté.", "antispam")
@@ -3124,12 +3171,14 @@ class AutoMod(commands.Cog, name="Automod"):
                         "antispam",
                     )
 
-            motif_repete = self._detecter_repetition(message, key)
+            motif_repete = self._detecter_repetition(message, key, seuil=seuils.repetitions)
             if motif_repete:
                 self.repeat_tracker.reinitialiser(key)
                 return await self._delete_and_warn(message, motif_repete, "antispam")
 
-    def _coordinated_copies(self, message: discord.Message, link_content: str) -> list[discord.Message]:
+    def _coordinated_copies(
+        self, message: discord.Message, link_content: str, comptes: int = COORDINATED_AUTHORS
+    ) -> list[discord.Message]:
         """Les messages identiques de plusieurs comptes, dès qu'ils sont assez nombreux.
 
         Retourne la liste à traiter (celui-ci compris, et ceux qui ont précédé et
@@ -3147,9 +3196,82 @@ class AutoMod(commands.Cog, name="Automod"):
             tracker = self.coordinated_tracker = FenetreGlissante(fenetre=COORDINATED_WINDOW, purge_toutes=200)
         tracker.ajouter(cle, message)
         copies = [m for m in tracker.valeurs(cle) if m is not None]
-        if len({m.author.id for m in copies}) < COORDINATED_AUTHORS:
+        if len({m.author.id for m in copies}) < comptes:
             return []
         return copies
+
+    async def _spam_seuils(self, guild_id: int) -> spam_sensitivity.Seuils:
+        """Seuils anti-spam du serveur (gardés une minute), renfort anti-raid compris."""
+        cache = getattr(self, "_reglages_spam", None)
+        if cache is None:
+            cache = self._reglages_spam = {}
+        now = time.monotonic()
+        hit = cache.get(guild_id)
+        if hit is None or hit[0] <= now:
+            try:
+                reglage = await spam_sensitivity.lire(self.bot, guild_id)
+            except Exception:
+                logger.exception("Seuils anti-spam illisibles guild=%s : réactivité normale.", guild_id)
+                reglage = spam_sensitivity.Reglage(
+                    spam_sensitivity.NIVEAU_PAR_DEFAUT,
+                    spam_sensitivity.NIVEAUX[spam_sensitivity.NIVEAU_PAR_DEFAUT],
+                )
+            if len(cache) > 5000:
+                cache.clear()
+            cache[guild_id] = hit = (now + 60, reglage)
+        seuils = hit[1].seuils
+        if self._renfort_actif(guild_id):
+            seuils = seuils.plus_strict(spam_sensitivity.NIVEAUX["stricte"])
+        return seuils
+
+    def _oublier_seuils(self, guild_id: int) -> None:
+        getattr(self, "_reglages_spam", {}).pop(guild_id, None)
+
+    def _renfort_actif(self, guild_id: int) -> bool:
+        return getattr(self, "_renfort_jusqua", {}).get(guild_id, 0.0) > time.monotonic()
+
+    def _noter_spammeur(self, guild: discord.Guild, member_id: int, *, raid: bool = False) -> None:
+        """Plusieurs membres en incident anti-spam en même temps : renfort anti-raid."""
+        tracker = getattr(self, "_spammeurs_recents", None)
+        if tracker is None:
+            tracker = self._spammeurs_recents = FenetreGlissante(
+                fenetre=spam_sensitivity.RENFORT_FENETRE, purge_toutes=100
+            )
+        tracker.ajouter(guild.id, int(member_id))
+        distincts = len(set(tracker.valeurs(guild.id)))
+        if not raid and distincts < spam_sensitivity.RENFORT_SPAMMEURS:
+            return
+        jusqua = getattr(self, "_renfort_jusqua", None)
+        if jusqua is None:
+            jusqua = self._renfort_jusqua = {}
+        deja = self._renfort_actif(guild.id)
+        jusqua[guild.id] = time.monotonic() + spam_sensitivity.RENFORT_SECONDES
+        if not deja:
+            asyncio.create_task(self._annoncer_renfort(guild, distincts, raid))
+
+    async def _annoncer_renfort(self, guild: discord.Guild, distincts: int, raid: bool) -> None:
+        stricte = spam_sensitivity.NIVEAUX["stricte"]
+        cause = (
+            "le même message a été publié par plusieurs comptes"
+            if raid else f"{distincts} membres ont déclenché l'anti-spam en moins de "
+            f"{spam_sensitivity.RENFORT_FENETRE} s"
+        )
+        carte = embeds.log_entry(
+            "Renfort anti-raid activé",
+            config.COLOR_WARNING,
+            extra={
+                "Cause": cause[:1].upper() + cause[1:] + ".",
+                "Réactivité": f"stricte ({stricte.phrase()}) pendant "
+                              f"{spam_sensitivity.RENFORT_SECONDES // 60} min, puis retour au niveau du serveur",
+                "Sanctions": "inchangées (rappel, puis avertissement, puis mute)",
+            },
+        )
+        try:
+            # Pas log_action : sa mise en forme AutoMod décrit un incident de membre
+            # (« Spam bloqué », Protection, Sanction), pas un changement de réactivité.
+            await helpers.send_log(self.bot, guild, "spam_boost", carte)
+        except Exception:
+            logger.exception("Annonce du renfort anti-raid impossible guild=%s", guild.id)
 
     def _purge_queue(self) -> SuppressionsGroupees:
         """Suppressions regroupées par salon : sous une rafale de plusieurs spammeurs,
@@ -3172,7 +3294,9 @@ class AutoMod(commands.Cog, name="Automod"):
             futures.append(asyncio.ensure_future(self._purge_queue().supprimer(earlier)))
         return futures
 
-    def _detecter_repetition(self, message: discord.Message, key: tuple[int, int]) -> str | None:
+    def _detecter_repetition(
+        self, message: discord.Message, key: tuple[int, int], seuil: int = REPEAT_THRESHOLD
+    ) -> str | None:
         """Le même message répété, quelle que soit sa vitesse.
 
         L'empreinte passe par la normalisation de sécurité : « FREE NITRO » et
@@ -3196,7 +3320,7 @@ class AutoMod(commands.Cog, name="Automod"):
         salon_id = getattr(message.channel, "id", 0)
         self.repeat_tracker.ajouter(key, (empreinte, salon_id))
         precedents = [v for v in self.repeat_tracker.valeurs(key) if v and v[0] == empreinte]
-        if len(precedents) >= REPEAT_THRESHOLD:
+        if len(precedents) >= seuil:
             return "Message identique répété plusieurs fois."
         if len({salon for _e, salon in precedents}) >= REPEAT_CHANNEL_THRESHOLD:
             return "Même message recopié dans plusieurs salons."
@@ -3425,6 +3549,8 @@ class AutoMod(commands.Cog, name="Automod"):
             message_preview=_automod_message_preview(message),
         )
         self.incidents[key] = incident
+        if filter_name in SPAM_FILTERS:
+            self._noter_spammeur(message.guild, message.author.id)
         if len(self.incidents) > 5000:
             cutoff = now_ts - INCIDENT_WINDOW_SECONDS
             for candidate, item in list(self.incidents.items()):

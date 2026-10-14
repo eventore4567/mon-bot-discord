@@ -55,15 +55,21 @@ class FenetreGlissante:
             self._purger(instant)
         return len(recents)
 
-    def compter(self, cle: Hashable, maintenant: float | None = None) -> int:
+    def compter(
+        self, cle: Hashable, maintenant: float | None = None, fenetre: float | None = None
+    ) -> int:
+        """Nombre d'événements récents. ``fenetre`` (au plus celle du compteur) permet
+        un seuil propre à chaque serveur sur un même compteur."""
         instant = time.time() if maintenant is None else maintenant
-        limite = instant - self.fenetre
+        limite = instant - min(self.fenetre, self.fenetre if fenetre is None else float(fenetre))
         return sum(1 for e in self._evenements.get(cle, ()) if e[0] > limite)
 
-    def valeurs(self, cle: Hashable, maintenant: float | None = None) -> list[object]:
+    def valeurs(
+        self, cle: Hashable, maintenant: float | None = None, fenetre: float | None = None
+    ) -> list[object]:
         """Les valeurs encore dans la fenêtre, de la plus ancienne à la plus récente."""
         instant = time.time() if maintenant is None else maintenant
-        limite = instant - self.fenetre
+        limite = instant - min(self.fenetre, self.fenetre if fenetre is None else float(fenetre))
         return [valeur for moment, valeur in self._evenements.get(cle, ()) if moment > limite]
 
     def reinitialiser(self, cle: Hashable) -> None:

@@ -128,6 +128,7 @@ LOG_REGISTRY: dict[str, tuple[str, str, str]] = {
     "automod_spam": ("spam", "🚫", "error"),
     "spam_detected": ("spam", "🚫", "error"),
     "spam_purge": ("spam", "🧹", "warning"),
+    "spam_boost": ("spam", "🛡️", "warning"),
     "antiraid": ("raid", "🛡️", "error"),
     "raid_detected": ("raid", "🛡️", "error"),
     "raid_lockdown": ("raid", "🔒", "error"),

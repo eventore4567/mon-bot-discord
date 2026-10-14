@@ -995,6 +995,7 @@ _TRACE_TITLES: dict[str, str] = {
     "automod_spam": "Spam bloqué",
     "spam_detected": "Spam détecté",
     "spam_purge": "Spam nettoyé",
+    "spam_boost": "Renfort anti-raid activé",
     "antiraid": "Protection anti-raid",
     "raid_detected": "Raid détecté",
     "raid_lockdown": "Serveur verrouillé",

@@ -56,7 +56,7 @@ DASHBOARD_HELP_UI = r"""
 
   const fieldHints = {
     prefix:"Entre 1 et 5 caractères. Évitez un préfixe déjà utilisé par plusieurs autres bots.",
-    security_level:"Faible convient aux petits serveurs calmes ; moyen est recommandé ; élevé est plus strict.",
+    security_level:"Règle aussi la réactivité de l'anti-spam : faible = 7 messages en 6 s, moyen (recommandé) = 5 en 6 s, élevé = 4 en 5 s. Seuils personnalisés : +security-level personnalise.",
     warn_ban_threshold:"Quand ce nombre est atteint, SentriX peut appliquer la sanction automatique configurée.",
     log_messages:"Choisissez un salon réservé au staff pour les messages supprimés ou modifiés.",
     log_members:"Arrivées, départs et changements concernant les membres.",
