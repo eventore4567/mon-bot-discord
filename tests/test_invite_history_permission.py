@@ -107,3 +107,35 @@ async def test_le_role_staff_configure_suffit_aussi(envoyer):
     ctx.bot.db.get_guild_config = AsyncMock(return_value={"mod_role": 77})
     await _appeler(ctx, _cible(2), envoyer)
     ctx.bot.db.fetchall.assert_awaited_once()
+
+
+# --------------------------------------------------------------------------
+# L'instrument de mesure lui-même
+#
+# Après le correctif, tools/permission_audit_sweep.py signalait TOUJOURS une
+# « escalade » sur +invitehistory. Cause : le persona « membre » est
+# harness.TARGET_ID, et l'invocation générée mentionne cette même cible. Le
+# membre consultait donc son propre historique — ce que le correctif autorise
+# exprès. Un faux positif qui pousse à fermer un usage légitime pour faire
+# taire le rapport.
+# --------------------------------------------------------------------------
+
+
+def test_l_audit_ne_crie_plus_a_l_escalade_quand_le_persona_se_vise_lui_meme():
+    from tools.permission_audit_sweep import _vise_soi_meme
+
+    from tools import sentrix_e2e_harness as harness
+
+    cible = harness.TARGET_ID
+    assert _vise_soi_meme({"persona": "membre", "invocation": f"+invitehistory <@{cible}>"})
+    assert not _vise_soi_meme({"persona": "membre", "invocation": "+invitehistory <@999>"})
+    assert not _vise_soi_meme({"persona": "administrateur", "invocation": f"+invitehistory <@{cible}>"})
+
+
+def test_le_persona_membre_est_bien_la_cible_du_harnais():
+    """Si cela change, la garde ci-dessus ne protège plus rien."""
+    from tools.permission_audit_sweep import PERSONAS
+
+    from tools import sentrix_e2e_harness as harness
+
+    assert PERSONAS["membre"]["author_id"] == harness.TARGET_ID

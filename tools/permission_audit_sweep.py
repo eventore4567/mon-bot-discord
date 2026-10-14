@@ -233,6 +233,25 @@ def _expected(name: str, tier: str, persona: str, module_off: bool, bot_missing:
     return ("autorise", "")
 
 
+def _vise_soi_meme(row: dict[str, Any]) -> bool:
+    """La commande vise-t-elle le persona qui l'invoque ?
+
+    Le persona « membre » EST harness.TARGET_ID, et les invocations générées
+    mentionnent cette même cible. « +invitehistory <@TARGET_ID> » lancé par
+    le membre revient donc à consulter SON PROPRE historique — une commande
+    en libre-service a parfaitement le droit de l'autoriser.
+
+    Sans cette distinction, l'audit signalait une escalade de privilège là où
+    il n'y avait qu'un membre regardant ses propres données ; c'est le genre
+    de faux positif qui fait perdre une heure et, pire, qui pousse à fermer un
+    usage légitime pour faire taire le rapport.
+    """
+    auteur = PERSONAS.get(row.get("persona"), {}).get("author_id")
+    if auteur is None:
+        return False
+    return f"<@{auteur}>" in str(row.get("invocation") or "")
+
+
 def _classify(row: dict[str, Any]) -> list[str]:
     issues: list[str] = []
     text = (row.get("full_text") or row["text"] or "").casefold()
@@ -249,8 +268,11 @@ def _classify(row: dict[str, Any]) -> list[str]:
     if expected == "autorise-ou-module":
         expected = "refuse" if actual == "refuse" else "autorise"
     if actual == "autorise" and expected == "refuse":
-        if row["persona"] == "membre" and cause == "permission":
+        if row["persona"] == "membre" and cause == "permission" and not _vise_soi_meme(row):
             issues.append("escalade")
+        elif _vise_soi_meme(row):
+            # Rien d'anormal : le persona s'interroge lui-même.
+            pass
         else:
             issues.append("ecart")
     elif actual == "refuse" and expected == "autorise":
