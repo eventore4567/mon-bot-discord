@@ -107,6 +107,7 @@ class Security(commands.Cog):
 
     @commands.hybrid_command(
         name="quarantine",
+        aliases=["quar"],
         description="Isoler un membre suspect : rôles retirés (sauvegardés) + muet pendant une durée donnée.",
     )
     @app_commands.describe(membre="Le membre à mettre en quarantaine", duree="Durée (ex: 7d, 12h, 30m)", raison="La raison")
@@ -168,6 +169,7 @@ class Security(commands.Cog):
 
     @commands.hybrid_command(
         name="unquarantine",
+        aliases=["unquar"],
         description="Lever immédiatement la quarantaine d'un membre et lui rendre ses rôles.",
         with_app_command=False,
     )
@@ -186,7 +188,8 @@ class Security(commands.Cog):
     # ---------------------------------------------------------------- SNAPSHOTS DE RÔLES
 
     @commands.hybrid_command(
-        name="role-snapshot", description="Sauvegarder les rôles actuels d'un membre (pour restauration future).",
+        name="role-snapshot",
+        aliases=["rolesave"], description="Sauvegarder les rôles actuels d'un membre (pour restauration future).",
         with_app_command=False,
     )
     @app_commands.describe(membre="Le membre dont sauvegarder les rôles")
@@ -207,7 +210,8 @@ class Security(commands.Cog):
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
-        name="role-restore", description="Restaurer les rôles d'un membre depuis un snapshot précédent.",
+        name="role-restore",
+        aliases=["roleload"], description="Restaurer les rôles d'un membre depuis un snapshot précédent.",
         with_app_command=False,
     )
     @app_commands.describe(membre="Le membre concerné", snapshot_id="L'identifiant du snapshot (voir +role-snapshot)")
@@ -254,7 +258,8 @@ class Security(commands.Cog):
     # ---------------------------------------------------------------- AUDIT DE PERMISSIONS
 
     @commands.hybrid_command(
-        name="permission-audit", description="Analyser les permissions du serveur et repérer les réglages dangereux.",
+        name="permission-audit",
+        aliases=["perms"], description="Analyser les permissions du serveur et repérer les réglages dangereux.",
     )
     @checks.is_owner_or_admin_for("securite")
     async def permission_audit(self, ctx: commands.Context):
