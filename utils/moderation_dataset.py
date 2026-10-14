@@ -22,6 +22,13 @@ DATASET_PATH = (
 _ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060\ufeff]")
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _DISCORD_MARKUP_RE = re.compile(r"<(?:@!?|@&|#)\d+>|<a?:[A-Za-z0-9_]+:\d+>")
+# Découpe par balisage Discord : « co||nnard » et « co**nnard** » s'affichent
+# comme un seul mot pour le lecteur, mais la ponctuation devenant un espace
+# plus bas, ils arrivaient en DEUX tokens que rien ne recollait — le recollage
+# ne traite que les suites de caractères isolés (« c o n »). Mesuré le
+# 2026-10-14 : 76 évasions sur ces deux familles seules. On retire donc les
+# marqueurs avant la passe de ponctuation, ce qui reconstitue le mot vu.
+_MARQUEURS_DISCORD_RE = re.compile(r"\|\||\*\*|__|~~|`")
 _NO_SPACE_SCRIPT_RE = re.compile(r"[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u9fff]")
 
 # Termes pouvant être vulgaires, sexuels ou familiers sans constituer à eux seuls
@@ -97,6 +104,7 @@ def normalize_message(text: str) -> str:
     value = _ZERO_WIDTH_RE.sub("", value)
     value = _URL_RE.sub(" ", value)
     value = _DISCORD_MARKUP_RE.sub(" ", value)
+    value = _MARQUEURS_DISCORD_RE.sub("", value)
     value = "".join(char if (char.isalnum() or char.isspace()) else " " for char in value)
     return " ".join(value.split())
 
@@ -105,6 +113,14 @@ def normalize_message(text: str) -> str:
 # en remplacement : « a1 » ne doit pas cesser d'être « a1 » sous prétexte qu'il
 # pourrait se lire « ai ».
 _LEET_TOKEN = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+
+_REPETITIONS_RE = re.compile(r"(.)\1+")
+
+
+def _compacter_repetitions(token: str) -> str:
+    """« aaaanduu » -> « andu ». Une seule lettre par série identique."""
+    return _REPETITIONS_RE.sub(r"\1", token)
 
 
 def _tokens_candidats(tokens: tuple[str, ...]) -> tuple[str, ...]:
@@ -128,6 +144,15 @@ def _tokens_candidats(tokens: tuple[str, ...]) -> tuple[str, ...]:
         if len(suite) >= 3:
             candidats.append("".join(suite))
         suite = []
+
+    # Lettres étirées : « coonnaard » se lit comme le terme nominal. On ajoute
+    # la forme compactée en CANDIDAT, jamais en remplacement — « bonne » reste
+    # « bonne » et ne devient pas « bone ». Mesuré le 2026-10-14 : 38 évasions
+    # sur cette seule famille.
+    for token in list(candidats):
+        compacte = _compacter_repetitions(token)
+        if compacte != token and len(compacte) >= 3:
+            candidats.append(compacte)
 
     for token in list(candidats):
         deleete = token.translate(_LEET_TOKEN)

@@ -17,8 +17,12 @@ le membre est automatiquement mute (3), expulsé (5) puis banni (7) — sans int
 manuelle. Désactivable via /automod-escalation. Historique consultable via /automod-history
 et /automod-status (statistiques des dernières 24h par filtre).
 
-Exemptions : administrateurs, propriétaire(s) du bot, rôle staff (/setmodrole) et tout
-rôle ajouté via /automod-exempt-role-add ne sont jamais filtrés par AutoMod.
+Exemptions : propriétaire du serveur, propriétaire(s) du bot et tout rôle ajouté via
+/automod-exempt-role-add ne sont jamais filtrés par AutoMod. La permission
+« Administrateur » n'exempte de rien : Discord exempte toujours les administrateurs de
+ses règles AutoMod natives, et le filtre Python de ce module est précisément le filet
+qui les rattrape. Un membre dont le rôle dépasse celui de SentriX échappe en revanche
+aux sanctions Discord — voir _repondre_abus_privilegie pour ce qui est fait alors.
 
 Le filtre multilingue intégré analyse 2 663 termes, 1 200 phrases et 120 groupes de
 mots dans 28 langues. Une détection supprime le message et applique immédiatement une
@@ -424,7 +428,20 @@ ESCALATION_RULES = [  # (seuil d'infractions atteint, action) — évalué du pl
 ]
 MUTE_ESCALATION_SECONDS = 600  # 10 minutes
 DATASET_TIMEOUT_SECONDS = 600  # sanction directe du filtre multilingue
-ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "ban": "🔨 Bannissement"}
+ESCALATION_LABELS = {"mute": "🔇 Mute 10 minutes", "kick": "👢 Expulsion", "ban": "🔨 Bannissement",
+                     "derank": "🛡️ Rôles à risque retirés"}
+
+# Un membre dont le rôle le plus haut est au-dessus de celui de SentriX est hors
+# de portée des sanctions Discord : ni timeout, ni kick, ni ban ne passeront.
+# Jusqu'ici l'escalade abandonnait là, en silence — aucune sanction, aucune
+# alerte, aucune trace. Un staff qui abusait ne produisait donc aucun signal.
+#
+# La réponse est volontairement graduée : une bêtise isolée ne déclenche rien,
+# seul le seuil le plus haut d'ESCALATION_RULES compte comme abus avéré. À ce
+# moment SentriX fait ce que Discord l'autorise à faire — retirer les rôles à
+# risque qui sont sous le sien — et prévient le propriétaire dans tous les cas,
+# y compris quand il n'a rien pu retirer, en disant exactement pourquoi.
+ABUS_PRIVILEGIE_SEUIL = max(seuil for seuil, _ in ESCALATION_RULES)
 
 # Une rafale de spam est traitée comme UN incident par membre : la première détection
 # supprime, sanctionne, prévient et journalise ; les détections suivantes dans la
@@ -1983,8 +2000,11 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if action_to_take is None:
             return None, count
-        if member.id == guild.owner_id or member.top_role >= guild.me.top_role:
-            return None, count  # hors de portée du bot, inutile d'essayer
+        if member.id == guild.owner_id:
+            return None, count  # le propriétaire du serveur n'est jamais sanctionné
+        if member.top_role >= guild.me.top_role:
+            # Hors de portée des sanctions Discord, mais plus hors de vue.
+            return await self._repondre_abus_privilegie(guild, member, reason, count), count
 
         try:
             # La carte d'incident AutoMod est le seul log : pas de doublon « Timeout appliqué ».
@@ -2001,6 +2021,89 @@ class AutoMod(commands.Cog, name="Automod"):
         except discord.Forbidden:
             return None, count
 
+    async def _repondre_abus_privilegie(
+        self, guild: discord.Guild, member: discord.Member, reason: str, count: int
+    ) -> str | None:
+        """Répond à un membre hors de portée des sanctions Discord.
+
+        Discord refuse timeout, kick et ban sur un membre dont le rôle le plus
+        haut dépasse celui du bot. Le retrait de rôle, lui, suit une autre
+        règle : il suffit que le rôle visé soit sous celui du bot. SentriX peut
+        donc désarmer un staff qui le dépasse, à condition que le rôle à retirer
+        soit sous le sien.
+
+        Une bêtise isolée ne déclenche rien : seul le seuil le plus haut compte
+        comme abus avéré. Au-delà, le propriétaire est prévenu dans tous les
+        cas — y compris quand rien n'a pu être retiré, ce qui est précisément
+        l'information qui manquait.
+        """
+        if count < ABUS_PRIVILEGIE_SEUIL:
+            return None
+
+        moi = guild.me
+        retires: list[discord.Role] = []
+        bloques: list[discord.Role] = []
+        if moi is not None and moi.guild_permissions.manage_roles:
+            for role in member.roles:
+                if role == guild.default_role or role.managed:
+                    continue
+                if not any(getattr(role.permissions, perm, False) for perm in DANGEROUS_PERMS):
+                    continue
+                (retires if role < moi.top_role else bloques).append(role)
+            if retires:
+                try:
+                    await member.remove_roles(
+                        *retires,
+                        reason=f"AutoMod : abus confirmé ({count} infractions/1h) — {reason}",
+                    )
+                except discord.Forbidden:
+                    bloques.extend(retires)
+                    retires = []
+                except discord.HTTPException:
+                    logger.warning(
+                        "Retrait des rôles à risque impossible sur guild=%s membre=%s.",
+                        guild.id, member.id, exc_info=True,
+                    )
+                    bloques.extend(retires)
+                    retires = []
+
+        if retires:
+            action = "rôles à risque retirés : " + ", ".join(r.name for r in retires)
+        elif bloques:
+            action = (
+                "aucun rôle retiré — ses rôles à risque sont au-dessus de celui de SentriX "
+                "(" + ", ".join(r.name for r in bloques) + "). "
+                "Remontez le rôle de SentriX au-dessus pour qu'il puisse agir."
+            )
+        else:
+            action = (
+                "aucun rôle à risque trouvé sous celui de SentriX, et les sanctions Discord "
+                "(exclusion, expulsion, bannissement) sont refusées sur un membre qui le dépasse."
+            )
+
+        carte = embeds.log_entry(
+            "🚨 ABUS D'UN MEMBRE PRIVILÉGIÉ", config.COLOR_ERROR,
+            cible=member, cible_label="👤 Membre concerné",
+            raison=reason,
+            extra={
+                "⚔️ Action prise": action,
+                "📊 Infractions": f"{count} en 1 h (seuil d'abus : {ABUS_PRIVILEGIE_SEUIL})",
+                "🔗 ID": f"`{member.id}`",
+            },
+        )
+        await self.log_action(guild, carte)
+        try:
+            proprietaire = guild.owner or await guild.fetch_member(guild.owner_id)
+            if proprietaire:
+                await panels.envoyer(proprietaire, panels.depuis_embed(carte))
+        except (discord.Forbidden, discord.HTTPException, AttributeError):
+            pass
+
+        if retires:
+            self.infraction_tracker.reinitialiser((guild.id, member.id))
+            return "derank"
+        return None
+
     async def toggle(self, ctx: commands.Context, field: str, etat: str):
         value = 1 if etat == "on" else 0
         await self.bot.db.set_automod(ctx.guild.id, field, value)
@@ -2013,8 +2116,12 @@ class AutoMod(commands.Cog, name="Automod"):
         if field == "escalation":
             # Politique de cogs/content_filter_policy : les filtres de contenu ne
             # sanctionnent jamais seuls. Le réglage ne doit pas promettre l'inverse.
-            message += ("\nLes récidives sont comptées sur les cartes AutoMod ; les filtres de contenu "
-                        "suppriment le message sans jamais exclure, expulser ni bannir automatiquement.")
+            message += ("\nLes récidives sont comptées sur une heure glissante : "
+                        f"{ESCALATION_RULES[2][0]} infractions déclenchent une exclusion temporaire, "
+                        f"{ESCALATION_RULES[1][0]} une expulsion, {ESCALATION_RULES[0][0]} un bannissement. "
+                        "Un membre dont le rôle dépasse celui de SentriX ne peut pas être sanctionné par "
+                        "Discord : à partir du dernier seuil, ses rôles à risque situés sous celui de "
+                        "SentriX lui sont retirés et le propriétaire du serveur est prévenu.")
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(message)))
 
     # ---------------------------------------------------------------- TOGGLES (10 commandes explicites)

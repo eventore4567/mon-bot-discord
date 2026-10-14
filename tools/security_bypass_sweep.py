@@ -66,6 +66,19 @@ _DEGUISEMENTS = (
         chr(0x1D5EE + ord(c) - 97) if "a" <= c <= "z" else c for c in t
     )),
     ("petites capitales", lambda t: "".join(_PETITES_CAPS.get(c, c) for c in t)),
+    # Familles ajoutées le 2026-10-14. Les neuf précédentes passaient toutes :
+    # un corpus épuisé ne prouve pas qu'un filtre est solide, seulement qu'on a
+    # arrêté de chercher. Celles-ci sont les plus utilisées aujourd'hui.
+    ("largeur nulle", lambda t: "\u200b".join(t)),
+    ("jointeur largeur nulle", lambda t: "\u200c".join(t)),
+    ("diacritiques", lambda t: "".join(c + "\u0301" for c in t)),
+    ("lettres répétées", lambda t: "".join(c * 2 if c in "aeiou" else c for c in t)),
+    ("soulignés", lambda t: "_".join(t)),
+    ("pleine chasse", lambda t: "".join(
+        chr(0xFF21 + ord(c) - 97) if "a" <= c <= "z" else c for c in t
+    )),
+    ("spoiler Discord", lambda t: t[:2] + "||" + t[2:] if len(t) > 3 else t),
+    ("gras Discord", lambda t: t[:2] + "**" + t[2:] if len(t) > 3 else t),
 )
 
 
@@ -185,6 +198,19 @@ FAMILLES = (
             "c'est un t-shirt rouge",
             "o.k. pour demain",
             "salut ça va ? on se voit demain au parc",
+            # Ajoutées le 2026-10-14 avec le compactage des lettres étirées.
+            # Ce compactage ajoute « bone » comme candidat pour « bonne » : ces
+            # phrases sont donc le garde-fou de la contrepartie, pas du décor.
+            "appelle moi quand tu veux",
+            "cette collection est magnifique",
+            "mille mercis pour votre aide",
+            "ennuyeux mais nécessaire",
+            "la grammaire est correcte",
+            "parfaitement d'accord avec toi",
+            "toutes les commandes fonctionnent",
+            "allo tout le monde ça va",
+            "nous avons une bonne nouvelle",
+            "c'est trop cool merci beaucoup",
         ),
     ),
     (
