@@ -18,6 +18,7 @@ vérifiable, pas une "boîte noire".
 """
 
 import json
+import logging
 from datetime import timedelta
 
 import discord
@@ -27,6 +28,8 @@ from discord.ext import commands, tasks
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as panels
 from database.db import now
+
+logger = logging.getLogger("bot.security-tools")
 
 SCORE_DEDUCTIONS = {"🔴 Critique": 30, "🟠 À surveiller": 15, "🟡 Information": 5}
 
@@ -421,17 +424,232 @@ class Security(commands.Cog):
         e.add_field(name="Restaurer plus tard", value=f"`+server-restore {cur.lastrowid}`", inline=False)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
+    # ---------------------------------------------------------------- JOURNAL D'AUDIT
+    # Une sauvegarde ne sert que si quelqu'un a pensé à la faire AVANT. Le
+    # journal d'audit Discord, lui, existe toujours : chaque suppression de
+    # salon ou de rôle y laisse le nom et les réglages de l'objet supprimé.
+    # C'est donc le seul filet disponible après un nuke sur un serveur qui
+    # n'avait aucune sauvegarde.
+    FENETRE_AUDIT_HEURES_DEFAUT = 24
+    LIMITE_ENTREES_AUDIT = 400
+
+    async def _suppressions_recentes(self, guild: discord.Guild, heures: int) -> dict:
+        """Relit le journal d'audit et reconstitue ce qui a été supprimé.
+
+        Ne renvoie que ce qui n'existe plus aujourd'hui : un salon supprimé
+        puis recréé à la main ne doit pas être proposé une deuxième fois.
+        """
+        depuis = discord.utils.utcnow() - timedelta(hours=heures)
+        roles_vivants = {r.name for r in guild.roles}
+        salons_vivants = {c.name for c in guild.channels}
+
+        roles: list[dict] = []
+        categories: list[dict] = []
+        salons: list[dict] = []
+        auteurs: dict[int, int] = {}
+        premiere = derniere = None
+
+        paires = (
+            (discord.AuditLogAction.role_delete, "role"),
+            (discord.AuditLogAction.channel_delete, "channel"),
+        )
+        for action, genre in paires:
+            try:
+                entrees = [
+                    e async for e in guild.audit_logs(limit=self.LIMITE_ENTREES_AUDIT, action=action)
+                    if e.created_at >= depuis
+                ]
+            except discord.Forbidden:
+                raise
+            except discord.HTTPException:
+                logger.warning("Journal d'audit illisible sur guild=%s action=%s", guild.id, action, exc_info=True)
+                continue
+
+            for entree in entrees:
+                avant = entree.before
+                nom = getattr(avant, "name", None)
+                if not nom:
+                    continue
+                acteur = getattr(entree.user, "id", None)
+                if acteur is not None:
+                    auteurs[acteur] = auteurs.get(acteur, 0) + 1
+                premiere = entree.created_at if premiere is None else min(premiere, entree.created_at)
+                derniere = entree.created_at if derniere is None else max(derniere, entree.created_at)
+
+                if genre == "role":
+                    if nom in roles_vivants or nom == "@everyone":
+                        continue
+                    roles_vivants.add(nom)  # une seule recréation par nom
+                    roles.append({
+                        "name": nom,
+                        "permissions": int(getattr(getattr(avant, "permissions", None), "value", 0) or 0),
+                        "color": int(getattr(getattr(avant, "colour", None), "value", 0) or 0),
+                        "hoist": bool(getattr(avant, "hoist", False)),
+                        "mentionable": bool(getattr(avant, "mentionable", False)),
+                    })
+                    continue
+
+                if nom in salons_vivants:
+                    continue
+                salons_vivants.add(nom)
+                type_salon = getattr(avant, "type", None)
+                fiche = {
+                    "name": nom,
+                    "topic": getattr(avant, "topic", None),
+                    "nsfw": bool(getattr(avant, "nsfw", False)),
+                }
+                if type_salon == discord.ChannelType.category:
+                    categories.append(fiche)
+                elif type_salon in (discord.ChannelType.voice, discord.ChannelType.stage_voice):
+                    fiche["kind"] = "voice"
+                    salons.append(fiche)
+                else:
+                    fiche["kind"] = "text"
+                    salons.append(fiche)
+
+        return {
+            "roles": roles, "categories": categories, "channels": salons,
+            "auteurs": auteurs, "premiere": premiere, "derniere": derniere,
+        }
+
+    async def _restaurer_depuis_audit(self, ctx: commands.Context, heures: int):
+        """Recrée ce que le journal d'audit Discord dit avoir été supprimé.
+
+        Rien n'est supprimé ni modifié : on ne recrée que ce qui n'existe
+        plus, par nom. Le journal ne conserve pas la catégorie d'origine d'un
+        salon, donc les salons recréés arrivent hors catégorie — c'est dit
+        dans le compte rendu plutôt que passé sous silence.
+        """
+        guild = ctx.guild
+        moi = guild.me
+        if moi is None or not moi.guild_permissions.view_audit_log:
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                "Il me faut la permission **Voir le journal d'audit** pour savoir ce qui a été supprimé."
+            )))
+
+        attente = await panels.envoyer(ctx, panels.depuis_embed(embeds.info(
+            f"Lecture du journal d'audit Discord sur les **{heures} dernières heures**…"
+        )))
+        try:
+            trouve = await self._suppressions_recentes(guild, heures)
+        except discord.Forbidden:
+            return await panels.editer(attente, panels.depuis_embed(embeds.error(
+                "Discord refuse l'accès au journal d'audit. Vérifiez la permission **Voir le journal d'audit**."
+            )))
+
+        total = len(trouve["roles"]) + len(trouve["categories"]) + len(trouve["channels"])
+        if not total:
+            return await panels.editer(attente, panels.depuis_embed(embeds.info(
+                f"Aucune suppression de salon ou de rôle à rattraper sur les {heures} dernières heures. "
+                "Tout ce qui a été supprimé existe à nouveau, ou rien n'a été supprimé."
+            )))
+
+        qui = ", ".join(
+            f"<@{uid}> ({n})" for uid, n in sorted(trouve["auteurs"].items(), key=lambda kv: -kv[1])[:5]
+        ) or "inconnu"
+        quand = (
+            f"<t:{int(trouve['premiere'].timestamp())}:f> → <t:{int(trouve['derniere'].timestamp())}:f>"
+            if trouve["premiere"] and trouve["derniere"] else "période inconnue"
+        )
+
+        apercu = embeds.warning(
+            f"Le journal d'audit Discord indique **{total}** élément(s) supprimé(s) et toujours absent(s).\n\n"
+            "SentriX va les **recréer**. Rien de ce qui existe aujourd'hui ne sera supprimé ni modifié.",
+            title="🧾 Restauration depuis le journal d'audit",
+        )
+        apercu.add_field(name="À recréer", value=(
+            f"**{len(trouve['roles'])}** rôle(s), **{len(trouve['categories'])}** catégorie(s), "
+            f"**{len(trouve['channels'])}** salon(s)"
+        ), inline=False)
+        apercu.add_field(name="Supprimés par", value=qui, inline=False)
+        apercu.add_field(name="Entre", value=quand, inline=False)
+        apercu.add_field(name="À savoir", value=(
+            "Le journal d'audit ne conserve ni la catégorie d'origine d'un salon, ni ses permissions "
+            "détaillées, ni son historique de messages. Les salons reviennent hors catégorie, à replacer "
+            "à la main. Pour une restauration fidèle, `+server-backup` reste la bonne méthode — en amont."
+        ), inline=False)
+
+        vue = helpers.ConfirmView(ctx.author.id)
+        await panels.editer(attente, panels.avec_composants(panels.depuis_embed(apercu), vue))
+        await vue.wait()
+        if not vue.value:
+            return await panels.editer(attente, panels.depuis_embed(embeds.error("Restauration annulée.")))
+
+        raison = f"Restauration depuis le journal d'audit par {ctx.author}"
+        faits = {"roles": 0, "categories": 0, "channels": 0}
+        echecs: list[str] = []
+
+        for fiche in trouve["roles"]:
+            try:
+                await guild.create_role(
+                    name=fiche["name"], colour=discord.Colour(fiche["color"]),
+                    hoist=fiche["hoist"], mentionable=fiche["mentionable"],
+                    permissions=discord.Permissions(fiche["permissions"]), reason=raison,
+                )
+                faits["roles"] += 1
+            except discord.HTTPException:
+                echecs.append(f"rôle « {fiche['name']} »")
+
+        for fiche in trouve["categories"]:
+            try:
+                await guild.create_category(fiche["name"], reason=raison)
+                faits["categories"] += 1
+            except discord.HTTPException:
+                echecs.append(f"catégorie « {fiche['name']} »")
+
+        for fiche in trouve["channels"]:
+            try:
+                if fiche["kind"] == "voice":
+                    await guild.create_voice_channel(fiche["name"], reason=raison)
+                else:
+                    await guild.create_text_channel(
+                        fiche["name"], topic=fiche.get("topic"),
+                        nsfw=fiche.get("nsfw", False), reason=raison,
+                    )
+                faits["channels"] += 1
+            except discord.HTTPException:
+                echecs.append(f"salon « {fiche['name']} »")
+
+        texte = (
+            f"● Restauration terminée depuis le journal d'audit : **{faits['roles']}** rôle(s), "
+            f"**{faits['categories']}** catégorie(s), **{faits['channels']}** salon(s) recréé(s)."
+        )
+        if echecs:
+            texte += "\n\n⚠️ Non recréé(s) — Discord a refusé : " + ", ".join(echecs[:10])
+            if len(echecs) > 10:
+                texte += f" et {len(echecs) - 10} autre(s)"
+        resultat = embeds.success(texte) if not echecs else embeds.warning(texte)
+        await panels.editer(attente, panels.depuis_embed(resultat))
+        await self.log_action(guild, embeds.log_entry(
+            "🧾 Restauration depuis le journal d'audit", 0x4DA3FF,
+            acteur=ctx.author,
+            extra={
+                "♻️ Recréés": f"{faits['roles']} rôle(s), {faits['categories']} catégorie(s), {faits['channels']} salon(s)",
+                "🕒 Fenêtre": f"{heures} h",
+                "⚠️ Échecs": str(len(echecs)),
+            },
+        ))
+
     @commands.hybrid_command(
         name="server-restore",
         description="Recréer les rôles/catégories/salons manquants d'une sauvegarde (rien n'est supprimé).",
         with_app_command=False,
     )
-    @app_commands.describe(backup_id="L'identifiant de la sauvegarde (voir +server-backup)")
+    @app_commands.describe(
+        backup_id="L'identifiant de la sauvegarde (voir +server-backup). Sans rien : relit le journal d'audit Discord.",
+    )
     @checks.is_owner_or_admin_for("securite")
-    async def server_restore(self, ctx: commands.Context, backup_id: int):
+    async def server_restore(self, ctx: commands.Context, backup_id: int | None = None):
+        if backup_id is None:
+            return await self._restaurer_depuis_audit(ctx, self.FENETRE_AUDIT_HEURES_DEFAUT)
+
         row = await self.bot.db.fetchone("SELECT * FROM server_backups WHERE id = ? AND guild_id = ?", (backup_id, ctx.guild.id))
         if not row:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f'Aucune sauvegarde #{backup_id} trouvée sur ce serveur.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                f"Aucune sauvegarde #{backup_id} trouvée sur ce serveur.\n"
+                "Sans sauvegarde, tapez `+server-restore` sans numéro : SentriX relira le journal "
+                "d'audit Discord et proposera de recréer ce qui a été supprimé récemment."
+            )))
         data = json.loads(row["data_json"])
 
         preview = embeds.warning(
