@@ -43,6 +43,23 @@ _AMBIGUOUS_STANDALONE_TERMS = frozenset({
     "trio", "xx", "xxx", "yaoi", "zizi",
 })
 
+# Mots parfaitement ordinaires en français que le dataset multilingue contient
+# comme insultes. Mesuré le 2026-10-14 sur 151 mots français courants : ces
+# trois-là, et eux seuls, faisaient supprimer des phrases banales —
+# « il a attrapé la balle au vol », « cette idée est folle mais géniale »,
+# « je mets une pelle dans le coffre » — avec une confiance de 0,70, soit
+# au-dessus du seuil de suppression de cogs/automod.
+#
+# Les retirer du dataset laisserait passer « tu es une folle ». Ils ne sont
+# donc pas supprimés : ils exigent une cible explicite (tu, toi, vous…).
+# « pele » mérite une mention : ce n'est pas « pelle » qui est dans le dataset,
+# c'est « pele ». C'est donc le compactage des lettres étirées, ajouté le même
+# jour pour fermer 38 évasions, qui rendait « pelle » détectable. Scan de
+# vérification sur les 12 760 mots du dépôt : la compaction ne crée que deux
+# détections nouvelles, « pelle »->« pele » et « conn »->« con » — la seconde
+# étant une abréviation de code, et « con » une vraie insulte.
+_TERMES_ORDINAIRES_SAUF_SI_CIBLE = frozenset({"balle", "folle", "pelle", "pele"})
+
 # Les tokens de 1–2 caractères sont beaucoup trop ambigus dans un dataset
 # multilingue pour justifier une suppression de message à eux seuls.
 _MIN_STANDALONE_LENGTH = 3
@@ -61,6 +78,12 @@ _TARGET_MARKERS = frozenset({
     "you", "your", "youre", "u", "ur",
     "eres", "usted", "ustedes", "te", "tus",
 })
+# La normalisation casse l'apostrophe : « t'es » devient « t es ». Sans ces
+# bigrammes, « t'es qu'une folle » n'était pas vu comme adressé alors que
+# « tu es une folle » l'était — or c'est la forme la plus courante en tchat
+# français. Un « t » isolé ne vient que d'une contraction de deuxième personne.
+_MARQUEURS_CIBLE_CONTRACTES = ("t es", "t as", "t etais", "t avais", "t seras", "t etais")
+
 _REPORTING_MARKERS = (
     "il m a dit", "elle m a dit", "on m a dit", "m a traite", "m a insult",
     "exemple", "citation", "je cite", "quote", "quoted", "he said", "she said",
@@ -68,10 +91,26 @@ _REPORTING_MARKERS = (
 )
 
 
+# Pour les mots ordinaires en français, un simple « ton » ne suffit pas :
+# « la balle est dans ton camp » est une expression figée, pas une insulte. Il
+# faut une attribution explicite — quelqu'un EST traité de ce mot.
+_ATTRIBUTIONS = (
+    "tu es", "t es", "tu n es", "vous etes", "t as", "tu as",
+    "espece de", "bande de", "sale", "quelle", "quel", "t etais", "tu etais",
+)
+
+
+def _attribue_a_quelquun(normalized: str) -> bool:
+    """Le mot est-il attribué à une personne, et pas seulement voisin d'un « ton » ?"""
+    return any(f" {motif} " in f" {normalized} " for motif in _ATTRIBUTIONS)
+
+
 def _context_confidence(normalized: str, kind: str) -> tuple[float, bool, str]:
     """Estime prudemment si le motif est une attaque, pas une citation ou un cours."""
     tokens = tuple(normalized.split())
-    targeted = bool(set(tokens) & _TARGET_MARKERS)
+    targeted = bool(set(tokens) & _TARGET_MARKERS) or any(
+        marqueur in normalized for marqueur in _MARQUEURS_CIBLE_CONTRACTES
+    )
     reporting = any(marker in normalized for marker in _REPORTING_MARKERS)
     base = {
         "phrase": 0.94,
@@ -336,5 +375,7 @@ class MultilingualModerationDataset:
             if token in _AMBIGUOUS_STANDALONE_TERMS:
                 continue
             confidence, targeted, reason = _context_confidence(normalized, "mot")
+            if token in _TERMES_ORDINAIRES_SAUF_SI_CIBLE and not _attribue_a_quelquun(normalized):
+                continue
             return ModerationMatch("mot", confidence, targeted, reason)
         return None
