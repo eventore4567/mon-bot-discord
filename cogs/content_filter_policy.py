@@ -82,6 +82,10 @@ def _patch_automod(bot: commands.Bot) -> None:
     # listener historique.
     original_delete_and_warn = automod._delete_and_warn
     original_maybe_escalate = automod._maybe_escalate
+    # `automod` ci-dessus est l'INSTANCE du cog ; le seuil d'abus est une
+    # constante de module. On importe le module sous un nom distinct pour
+    # que la différence saute aux yeux au lieu de produire une AttributeError.
+    from . import automod as _automod_module
 
     async def _owner_immunity_is_off(_self, message_or_member) -> bool:
         guild = getattr(message_or_member, "guild", None)
@@ -140,7 +144,34 @@ def _patch_automod(bot: commands.Bot) -> None:
         # Le compteur d'infractions est une FenetreGlissante depuis qu'il fuyait
         # (une clé par membre, conservée à vie). Sa fenêtre est déjà celle de
         # l'escalade AutoMod (ESCALATION_WINDOW), seule source de cette durée.
-        return None, _self.infraction_tracker.ajouter((guild.id, member.id))
+        count = _self.infraction_tracker.ajouter((guild.id, member.id))
+
+        # Un membre hors de portée des sanctions Discord qui franchit le seuil
+        # d'abus avéré est la seule exception à la règle « suppression seule »,
+        # au même titre que l'anti-nuke. Il ne s'agit pas de sanctionner un
+        # membre pour un message : il s'agit de désarmer un staff qui abuse de
+        # sa position, et surtout de prévenir le propriétaire — sans quoi
+        # personne n'apprend jamais que c'est arrivé.
+        #
+        # Sans ce branchement, _repondre_abus_privilegie serait du code mort :
+        # cette politique remplace _maybe_escalate sur l'instance, donc tous les
+        # appelants passent ici et jamais par l'original.
+        moi = getattr(guild, "me", None)
+        if (
+            moi is not None
+            and member.id != guild.owner_id
+            and count >= _automod_module.ABUS_PRIVILEGIE_SEUIL
+            and member.top_role >= moi.top_role
+        ):
+            try:
+                await _self._repondre_abus_privilegie(guild, member, reason, count)
+            except Exception:
+                logger.exception(
+                    "Réponse à l'abus d'un membre privilégié impossible sur guild=%s membre=%s.",
+                    guild.id, member.id,
+                )
+
+        return None, count
 
     automod._maybe_escalate = MethodType(delete_only_escalation, automod)
 

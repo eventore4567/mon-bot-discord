@@ -171,3 +171,48 @@ def test_la_doc_du_module_n_affirme_plus_que_les_admins_sont_exemptes():
     doc = automod.__doc__ or ""
     assert "Exemptions : administrateurs" not in doc
     assert "n'exempte de rien" in doc
+
+
+# --------------------------------------------------------------------------
+# La politique de contenu vivante
+#
+# Erreur que ces tests existent pour ne plus refaire : j'avais conclu que
+# cogs/content_filter_policy ne tournait pas en production, au motif qu'il
+# n'est pas dans les 48 entrées d'EXTENSIONS de main.py. Les journaux Railway
+# du 2026-10-14 20:00:58 disent le contraire — « Politique contenu activée ».
+# Il remplace _maybe_escalate sur l'instance du cog, donc TOUS les appelants
+# passent par lui et jamais par l'original : sans branchement explicite,
+# _repondre_abus_privilegie était du code mort.
+#
+# L'absence d'EXTENSIONS ne prouve pas qu'un module est mort. Seuls les
+# journaux de production le prouvent.
+# --------------------------------------------------------------------------
+
+
+def test_la_politique_de_contenu_atteint_la_reponse_a_l_abus():
+    """Garde de source : le branchement doit exister dans la politique vivante."""
+    import inspect
+
+    from cogs import content_filter_policy
+
+    source = inspect.getsource(content_filter_policy)
+    assert "_repondre_abus_privilegie" in source, (
+        "delete_only_escalation n'appelle pas la réponse : elle serait du code mort"
+    )
+    assert "_automod_module.ABUS_PRIVILEGIE_SEUIL" in source, (
+        "le seuil doit venir du module, pas de l'instance du cog"
+    )
+
+
+@pytest.mark.asyncio
+async def test_la_politique_de_contenu_ne_sanctionne_toujours_pas_un_membre_normal():
+    """La règle « suppression seule » reste entière pour qui est à portée."""
+    import inspect
+
+    from cogs import content_filter_policy
+
+    source = inspect.getsource(content_filter_policy)
+    # La condition doit exiger que le membre DÉPASSE le bot ; sinon la politique
+    # se mettrait à agir sur des membres ordinaires, ce qu'elle interdit.
+    assert "member.top_role >= moi.top_role" in source
+    assert "member.id != guild.owner_id" in source

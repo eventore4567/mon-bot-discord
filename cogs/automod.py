@@ -2116,12 +2116,16 @@ class AutoMod(commands.Cog, name="Automod"):
         if field == "escalation":
             # Politique de cogs/content_filter_policy : les filtres de contenu ne
             # sanctionnent jamais seuls. Le réglage ne doit pas promettre l'inverse.
-            message += ("\nLes récidives sont comptées sur une heure glissante : "
-                        f"{ESCALATION_RULES[2][0]} infractions déclenchent une exclusion temporaire, "
-                        f"{ESCALATION_RULES[1][0]} une expulsion, {ESCALATION_RULES[0][0]} un bannissement. "
-                        "Un membre dont le rôle dépasse celui de SentriX ne peut pas être sanctionné par "
-                        "Discord : à partir du dernier seuil, ses rôles à risque situés sous celui de "
-                        "SentriX lui sont retirés et le propriétaire du serveur est prévenu.")
+            # Vérifié dans les journaux de production le 2026-10-14 :
+            # cogs/content_filter_policy est bien chargé (« Politique contenu
+            # activée ») et remplace _maybe_escalate. Les filtres de contenu ne
+            # sanctionnent donc réellement pas. Seule exception, ci-dessous.
+            message += ("\nLes récidives sont comptées sur une heure glissante ; les filtres de "
+                        "contenu suppriment le message sans exclure, expulser ni bannir. "
+                        f"Une seule exception : au-delà de {ABUS_PRIVILEGIE_SEUIL} infractions en 1 h, "
+                        "un membre dont le rôle dépasse celui de SentriX — donc intouchable par les "
+                        "sanctions Discord — se voit retirer ses rôles à risque situés sous celui de "
+                        "SentriX, et le propriétaire du serveur est prévenu dans tous les cas.")
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(message)))
 
     # ---------------------------------------------------------------- TOGGLES (10 commandes explicites)
