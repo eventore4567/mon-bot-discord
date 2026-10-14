@@ -498,6 +498,24 @@ class Invites(commands.Cog, name="Invites"):
     @app_commands.describe(membre="L'invitant à consulter")
     async def invite_history(self, ctx: commands.Context, membre: discord.Member = None):
         membre = membre or ctx.author
+        # Relevé par tools/permission_audit_sweep.py le 2026-10-14, seule
+        # escalade de l'audit : la commande n'avait aucun contrôle, donc
+        # n'importe quel membre pouvait lire qui un autre avait invité, avec
+        # les codes d'invitation et le marqueur « compte récent ». C'est de
+        # l'information de staff. Consulter SON propre historique reste libre.
+        if membre.id != ctx.author.id and not await checks.is_mod_or_permission(
+            ctx, "manage_guild"
+        ):
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(
+                    embeds.error(
+                        "Il te faut la permission **Gérer le serveur** (ou le rôle staff "
+                        "configuré dans Setup) pour consulter l'historique d'invitations "
+                        "de quelqu'un d'autre. Sans argument, tu vois le tien."
+                    )
+                ),
+            )
         rows = await self.bot.db.fetchall(
             "SELECT member_id,invite_code,joined_at,left_at,account_age_days "
             "FROM member_invites WHERE guild_id=? AND inviter_id=? ORDER BY joined_at DESC LIMIT 15",
