@@ -495,7 +495,14 @@ class SentriXV21(commands.Cog):
         )
         embed.add_field(
             name="Discord",
-            value=f"{'En ligne' if discord_state.get('ready') else 'Indisponible'} · {discord_state.get('latency_ms', '?')} ms",
+            value=(
+                f"{'En ligne' if discord_state.get('ready') else 'Indisponible'}"
+                + (
+                    " · latence inconnue"
+                    if discord_state.get("latency_ms") is None
+                    else f" · {discord_state['latency_ms']} ms"
+                )
+            ),
             inline=True,
         )
         embed.add_field(
