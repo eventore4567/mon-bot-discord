@@ -260,6 +260,9 @@ async def _periodic_snapshot_loop(bot: Any, durable: Any) -> None:
             result = await durable.snapshot(reason="ha_periodic", clean_shutdown=False)
             if result.get("stored"):
                 logger.info("HA: snapshot périodique id=%s.", result.get("snapshot_id"))
+            elif result.get("reason") == "postgres_primary":
+                # Base principale PostgreSQL : pas de fichier SQLite à sauvegarder. Normal.
+                return
             else:
                 logger.warning("HA: snapshot périodique non stocké: %s", result)
     except asyncio.CancelledError:

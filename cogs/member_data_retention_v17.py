@@ -484,7 +484,7 @@ class MemberDataRetentionV17(commands.Cog):
                     durable.snapshot(reason=reason, clean_shutdown=False),
                     timeout=60,
                 )
-                if not result.get("stored"):
+                if not result.get("stored") and result.get("reason") != "postgres_primary":
                     logger.warning("Snapshot durable membre non stocké: %s", result)
             except asyncio.CancelledError:
                 raise
