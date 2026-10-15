@@ -439,7 +439,7 @@ GAME_COOLDOWNS = {
     "blackjack": 4, "slots": 4, "minesweeper": 4,
     "coinflip": 4, "dice": 4, "luckyroll": 4, "highlow": 4, "memory": 4, "reaction": 4,
     "scramble": 4, "wordgame": 4, "emojiquiz": 4, "colorquiz": 4, "fasttype": 4,
-    "duel": 4, "numberduel": 4, "quizduel": 4, "reactionduel": 4, "connect4": 4,
+    "duel": 4, "numberduel": 4, "quizduel": 4, "reactionduel": 4, "connect4": 4, "fight": 4,
     "triviastart": 4, "wordrace": 4, "mathrace": 4, "guessrace": 4,
     "reactionevent": 4, "emoji-race": 4, "lastmessage": 4,
     "adventure": 4, "dungeon": 4, "mining": 4, "fishing": 4,

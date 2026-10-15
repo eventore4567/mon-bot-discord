@@ -533,6 +533,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("games casino slots", "slots", "Play the slot machine."),
 
     _e("games duels connect4", "connect4", "Play Connect 4 against a member."),
+    _e("games duels fight", "fight", "Turn-based fight against a member: attack, shield, special power."),
     _e("games duels rps", "duel", "Challenge a member to rock paper scissors."),
     _e("games duels number", "numberduel", "Closest secret number wins."),
     _e("games duels quiz", "quizduel", "Fastest correct answer wins."),

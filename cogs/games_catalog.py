@@ -5,6 +5,7 @@ GAME_CATALOG = {
     "guess-number": ("🔢 Devine le nombre", "rapide"),
     "trivia": ("❓ Question de culture générale", "rapide"),
     "tictactoe": ("⭕ Morpion (duel)", "duel"),
+    "fight": ("⚔️ Combat contre un membre", "duel"),
     "hangman": ("🎯 Pendu", "rapide"),
     "math-quiz": ("🧮 Quiz mathématique", "rapide"),
     "blackjack": ("🃏 Blackjack (vs bot)", "rapide"),

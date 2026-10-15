@@ -1720,6 +1720,176 @@ class _ColorButton(discord.ui.Button):
 # récompense (pas de pari entre joueurs, uniquement contre la "banque" virtuelle du bot).
 # =============================================================================
 
+FIGHT_REWARD = 45
+FIGHT_TURN_SECONDS = 45
+FIGHT_WINDUP_SECONDS = 0.7
+
+
+class _FightButton(discord.ui.Button):
+    def __init__(self, combat_view: "_FightView", action: str, label: str, style: discord.ButtonStyle):
+        super().__init__(label=label, style=style)
+        # Référence directe : une fois posé dans le panneau, ``self.view`` est le
+        # panneau Components V2, pas la vue du combat.
+        self.combat_view = combat_view
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.combat_view.jouer(interaction, self.action)
+
+
+class _FightView(discord.ui.View):
+    """Combat entre deux membres, tour par tour (règles : utils/pvp_engine.py).
+
+    Seul le joueur dont c'est le tour peut cliquer ; ses boutons changent selon
+    l'état (pouvoir grisé tant qu'il n'est pas chargé). Chaque coup s'anime en
+    deux temps — l'élan, puis l'impact et ses dégâts — et un joueur qui ne joue
+    pas pendant 45 s abandonne. La récompense passe par game_rewards, comme
+    tous les jeux : une seule économie, un seul paiement par partie.
+    """
+
+    def __init__(self, cog, guild_id: int, p1: discord.Member, p2: discord.Member, session_id: str):
+        super().__init__(timeout=None)
+        from utils import pvp_engine
+
+        self.cog, self.guild_id, self.session_id = cog, guild_id, session_id
+        self.membres = {p1.id: p1, p2.id: p2}
+        self.combat = pvp_engine.Combat(
+            pvp_engine.Combattant(p1.id, p1.display_name), pvp_engine.Combattant(p2.id, p2.display_name)
+        )
+        self.combat.actif = game_rewards.secure_randint(0, 1)
+        self.message: discord.Message | None = None
+        self.fini = False
+        self._lock = asyncio.Lock()
+        self._minuteur: asyncio.Task | None = None
+        self.b_attaque = _FightButton(self, pvp_engine.ATTAQUER, "⚔️ Attaquer", discord.ButtonStyle.danger)
+        self.b_bouclier = _FightButton(self, pvp_engine.BOUCLIER, "🛡️ Bouclier", discord.ButtonStyle.primary)
+        self.b_pouvoir = _FightButton(self, pvp_engine.POUVOIR_SPECIAL, "✨ Pouvoir", discord.ButtonStyle.success)
+        for bouton in (self.b_attaque, self.b_bouclier, self.b_pouvoir):
+            self.add_item(bouton)
+
+    # ---------------------------------------------------------------- affichage
+    def _ligne(self, combattant) -> str:
+        from utils import pvp_engine
+
+        etat = []
+        if combattant.bouclier:
+            etat.append("🛡️ protégé")
+        etat.append("⚡" * combattant.charge + "·" * (pvp_engine.CHARGE_POUVOIR - combattant.charge))
+        return (
+            f"**{combattant.nom}** `{pvp_engine.barre(combattant.pv)}` **{combattant.pv} PV** · "
+            + " · ".join(etat)
+        )
+
+    def _texte(self, entete: str) -> str:
+        from utils import pvp_engine
+
+        c = self.combat
+        tour = min(c.tour, pvp_engine.TOURS_MAX)
+        lignes = [entete, "", f"Tour **{tour}/{pvp_engine.TOURS_MAX}**", self._ligne(c.a), self._ligne(c.b)]
+        if not c.termine and not self.fini:
+            lignes += ["", f"🎯 À **{c.joueur.nom}** de jouer ({FIGHT_TURN_SECONDS} s).",
+                       "-# ⚔️ 10-16 dégâts · 🛡️ absorbe 75 % du prochain coup · ✨ 20-26 dégâts, 3 charges"]
+        return "\n".join(lignes)
+
+    def _boutons(self) -> None:
+        from utils import pvp_engine
+
+        joueur = self.combat.joueur
+        self.b_attaque.disabled = self.b_bouclier.disabled = False
+        self.b_pouvoir.disabled = not joueur.peut_pouvoir
+        self.b_pouvoir.label = (
+            "✨ Pouvoir" if joueur.peut_pouvoir else f"✨ Pouvoir ({joueur.charge}/{pvp_engine.CHARGE_POUVOIR})"
+        )
+        if self.fini:
+            for bouton in (self.b_attaque, self.b_bouclier, self.b_pouvoir):
+                bouton.disabled = True
+
+    async def render(self, entete: str, *, kind: str = "primary", avec_vue: bool = True) -> None:
+        self._boutons()
+        panneau = panels.depuis_embed(await _embed(
+            self.cog.bot, self.guild_id, title="Combat", description=self._texte(entete), kind=kind,
+        ))
+        if avec_vue:
+            panneau = panels.avec_composants(panneau, self)
+        await panels.editer(self.message, panneau)
+
+    # ---------------------------------------------------------------- tours
+    def armer_tour(self) -> None:
+        if self._minuteur is not None:
+            self._minuteur.cancel()
+        self._minuteur = asyncio.create_task(self._abandon_si_inactif(self.combat.tour, self.combat.actif))
+
+    async def _abandon_si_inactif(self, tour: int, actif: int) -> None:
+        await asyncio.sleep(FIGHT_TURN_SECONDS)
+        async with self._lock:
+            if self.fini or (self.combat.tour, self.combat.actif) != (tour, actif):
+                return
+            absent = self.combat.joueur
+            await self._terminer(self.combat.adversaire, f"⏱️ **{absent.nom}** n'a pas joué : abandon.")
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in self.membres:
+            await interaction.response.send_message("Ce combat oppose deux autres membres.", ephemeral=True)
+            return False
+        if self.fini or interaction.user.id != self.combat.joueur.user_id:
+            await interaction.response.send_message("Ce n'est pas votre tour.", ephemeral=True)
+            return False
+        return True
+
+    async def jouer(self, interaction: discord.Interaction, action: str) -> None:
+        from utils import pvp_engine
+        from utils.pve_engine import AleaSecurise
+
+        if interaction.user.id not in self.membres:
+            return await interaction.response.send_message("Ce combat oppose deux autres membres.", ephemeral=True)
+        async with self._lock:
+            if self.fini or interaction.user.id != self.combat.joueur.user_id:
+                return await interaction.response.send_message("Ce n'est pas votre tour.", ephemeral=True)
+            if action == pvp_engine.POUVOIR_SPECIAL and not self.combat.joueur.peut_pouvoir:
+                return await interaction.response.send_message("Votre pouvoir n'est pas encore chargé.", ephemeral=True)
+            await interaction.response.defer()
+            joueur, cible = self.combat.joueur, self.combat.adversaire
+            elan = {
+                pvp_engine.ATTAQUER: f"⚔️ **{joueur.nom}** prend son élan vers {cible.nom}…",
+                pvp_engine.BOUCLIER: f"🛡️ **{joueur.nom}** se met en garde…",
+                pvp_engine.POUVOIR_SPECIAL: f"✨ **{joueur.nom}** concentre toute son énergie…",
+            }[action]
+            # Élan : boutons grisés le temps de l'animation, puis l'impact.
+            for bouton in (self.b_attaque, self.b_bouclier, self.b_pouvoir):
+                bouton.disabled = True
+            await panels.editer(self.message, panels.avec_composants(panels.depuis_embed(await _embed(
+                self.cog.bot, self.guild_id, title="Combat", description=self._texte(elan),
+            )), self))
+            await asyncio.sleep(FIGHT_WINDUP_SECONDS)
+            coup = self.combat.jouer(action, AleaSecurise())
+            impact = ("💥 " if coup.degats else "") + coup.texte
+            if self.combat.termine:
+                gagnant = self.combat.vainqueur()
+                return await self._terminer(gagnant, impact)
+            await self.render(impact, kind="danger" if coup.degats >= 20 else "primary")
+            self.armer_tour()
+
+    async def _terminer(self, gagnant, dernier_coup: str) -> None:
+        self.fini = True
+        self.stop()
+        if self._minuteur is not None and self._minuteur is not asyncio.current_task():
+            self._minuteur.cancel()
+        bot = self.cog.bot
+        membres = list(self.membres.values())
+        await _finish_duel(bot, self.guild_id, "fight", membres[0], membres[1])
+        if gagnant is None:
+            await game_rewards.reward_game_winner(bot, self.guild_id, membres[0].id, "fight", 0, self.session_id, result="draw")
+            fin = f"{dernier_coup}\n\n🤝 **Égalité** après {min(self.combat.tour, 30)} tours."
+            kind = "primary"
+        else:
+            reward = await game_rewards.reward_game_winner(
+                bot, self.guild_id, gagnant.user_id, "fight", FIGHT_REWARD, self.session_id, result="win",
+            )
+            fin = f"{dernier_coup}\n\n🏆 **{gagnant.nom}** remporte le combat !" + _reward_line(reward)
+            kind = "success"
+        await self.render(fin, kind=kind)
+
+
 class GamesDuels(commands.Cog, name="GamesDuels"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1752,6 +1922,25 @@ class GamesDuels(commands.Cog, name="GamesDuels"):
         except Exception:
             await cancel()
             raise
+
+    @commands.hybrid_command(name="fight", description="Combat au tour par tour contre un membre : attaque, bouclier, pouvoir spécial.", with_app_command=False)
+    @app_commands.describe(adversaire="Le membre à défier")
+    async def fight(self, ctx: commands.Context, adversaire: discord.Member):
+        guild_id = ctx.guild.id if ctx.guild else None
+        invalid = game_rewards.validate_opponent(ctx.author, adversaire)
+        if invalid:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Combat", description=invalid, kind="danger")))
+        started, err, sid = await _precheck_duel(self.bot, ctx, "fight", adversaire, 20)
+        if not started:
+            return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title="Combat", description=err, kind="warning")))
+
+        async def start(msg):
+            view = _FightView(cog=self, guild_id=guild_id, p1=ctx.author, p2=adversaire, session_id=sid)
+            view.message = msg
+            await view.render(f"✅ Défi accepté ! Le sort désigne **{view.combat.joueur.nom}** pour ouvrir le combat.")
+            view.armer_tour()
+
+        await self._invite(ctx, "fight", adversaire, sid, "Combat", start)
 
     @commands.hybrid_command(name="duel", description="Défier un membre en pierre-feuille-ciseaux (récompense au gagnant).", with_app_command=False)
     @app_commands.describe(adversaire="Le membre à défier")

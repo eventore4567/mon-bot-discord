@@ -97,7 +97,7 @@ PUBLIC_COMMANDS = frozenset({
     "blackjack", "slots", "coinflip", "dice", "luckyroll", "highlow", "memory",
     # Jeux et SentriX Fun ajoutés le 12/10/2026 sans classement : non classés, ils
     # étaient refusés à tous les membres (accès « fail-closed »).
-    "bossfight", "doors", "emojiorder",
+    "bossfight", "doors", "emojiorder", "fight",
     "fun", "hug", "kiss", "cuddle", "pat", "poke", "slap", "tickle", "highfive", "wave",
     "dance", "compliment", "roast", "hack", "scan", "aura", "ship",
     "reaction", "scramble", "wordgame", "emojiquiz", "colorquiz", "fasttype", "minesweeper",

@@ -68,9 +68,9 @@ async def test_refusal_and_timeout_release_locks_without_starting_or_rewarding(m
 def test_all_multiplayer_games_require_acceptance():
     import inspect
     source = inspect.getsource(games_economy.GamesDuels)
-    assert source.count("await self._invite(") == 5
+    assert source.count("await self._invite(") == 6
     assert 'await self._invite(ctx, "duel"' in source
-    for name in ("numberduel", "quizduel", "reactionduel", "connect4"):
+    for name in ("numberduel", "quizduel", "reactionduel", "connect4", "fight"):
         assert f'await self._invite(ctx, "{name}"' in source
     morpion = inspect.getsource(minigames.Minigames.tictactoe.callback)
     assert "DuelInvitation(" in morpion
