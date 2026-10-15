@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 import discord
+from utils import cluster
 from discord.ext import commands
 
 from database.db import now
@@ -391,7 +392,9 @@ class CommunityGrowth(commands.Cog):
     async def on_ready(self):
         rows = await self.bot.db.fetchall("SELECT channel_id,guild_id FROM temporary_voice_channels")
         for row in rows:
-            guild = self.bot.get_guild(int(row["guild_id"]))
+            guild, etat = cluster.etat_serveur(self.bot, int(row["guild_id"]))
+            if guild is None and etat != cluster.PARTI:
+                continue  # autre processus ou indisponible : on garde la trace du salon
             if guild is None or guild.get_channel(int(row["channel_id"])) is None:
                 await self.bot.db.execute("DELETE FROM temporary_voice_channels WHERE channel_id=?", (int(row["channel_id"]),))
 

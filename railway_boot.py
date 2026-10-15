@@ -27,8 +27,18 @@ class SentriXAutoShardedBot(commands.AutoShardedBot):
     """AutoShardedBot qui respecte SHARD_COUNT quand l'opérateur veut le figer."""
 
     def __init__(self, *args, **kwargs):
+        from utils import cluster
+
         if config.SHARD_COUNT > 0:
             kwargs.setdefault("shard_count", config.SHARD_COUNT)
+        if cluster.cluster_count() > 1:
+            # Plusieurs processus actifs : chacun n'ouvre que SA part des shards.
+            if config.SHARD_COUNT <= 0:
+                raise RuntimeError(
+                    "SENTRIX_CLUSTER_COUNT > 1 exige SHARD_COUNT : sans nombre de shards fixe, "
+                    "deux processus ne peuvent pas se répartir les serveurs."
+                )
+            kwargs.setdefault("shard_ids", cluster.shard_ids_for_cluster(config.SHARD_COUNT))
         super().__init__(*args, **kwargs)
 
 
@@ -325,6 +335,20 @@ async def run() -> None:
 
     await bot.db.connect()
     logger.info("Base prête pour le démarrage anticipé du dashboard Railway.")
+    from utils import cluster
+
+    if cluster.cluster_count() > 1:
+        if bot.db.backend != "postgres":
+            raise RuntimeError(
+                "SENTRIX_CLUSTER_COUNT > 1 exige SENTRIX_DB_BACKEND=postgres : plusieurs processus "
+                "actifs ne peuvent pas partager un fichier SQLite."
+            )
+        asyncio.create_task(cluster.battement(bot), name="sentrix-cluster-heartbeat")
+        logger.warning(
+            "Cluster %s/%s : shards %s sur %s.",
+            cluster.cluster_id(), cluster.cluster_count(),
+            cluster.shard_ids_for_cluster(config.SHARD_COUNT), config.SHARD_COUNT,
+        )
     logger.info(
         "Sharding production actif : configuration=%s, runtime=%s.",
         config.SHARD_COUNT or "auto",

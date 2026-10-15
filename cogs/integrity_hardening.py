@@ -23,6 +23,7 @@ from discord.ext import commands
 
 from database.db import now
 from utils import embeds, stats_service
+from utils import cluster
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.integrity-hardening")
@@ -240,7 +241,9 @@ def _install_tickets(bot: commands.Bot) -> bool:
                         (now() - 60,),
                     )
                     for row in rows[:100]:
-                        guild = bot.get_guild(int(row["guild_id"]))
+                        guild, etat = cluster.etat_serveur(bot, int(row["guild_id"]))
+                        if guild is None and etat != cluster.PARTI:
+                            continue  # autre processus ou indisponible : rien à conclure
                         channel = guild.get_channel(int(row["channel_id"])) if guild else None
                         if channel is None:
                             await bot.db.execute(

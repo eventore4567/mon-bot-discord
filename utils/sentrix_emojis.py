@@ -333,6 +333,18 @@ async def synchroniser(bot, *, forcer: bool = False) -> dict[str, int]:
 
     deja = {str(getattr(i, "name", "") or ""): i for i in existants}
 
+    from utils import cluster as _cluster
+
+    if not _cluster.is_primary_cluster():
+        # Les émojis d'application sont communs à tous les processus : seul le cluster 0
+        # les crée ou les remplace, les autres les lisent pour les afficher.
+        for nom, item in deja.items():
+            if nom.startswith(PREFIXE):
+                _RESOLUS[nom] = str(item)
+                bilan["existants"] += 1
+        _SYNCHRONISE = True
+        return bilan
+
     # Version précédente encore en place : on efface avant de reposer. Un
     # emoji d'application n'est pas modifiable en place, et `create` sur un nom
     # existant échoue — sans cette purge, les anciennes icônes resteraient

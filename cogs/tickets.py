@@ -46,6 +46,7 @@ from cogs.ticket_constants import (
 from services.tickets import count_genuinely_open_tickets
 from services import tickets as tickets_service
 from utils import embeds, checks, helpers, design_system
+from utils import cluster
 from utils import sentrix_panels as sx_panels
 from database.db import now
 
@@ -2034,7 +2035,9 @@ class Tickets(commands.Cog):
         if elapsed < row["autoclose_hours"] * 3600:
             return
 
-        guild = self.bot.get_guild(row["guild_id"])
+        guild, etat = cluster.etat_serveur(self.bot, row["guild_id"])
+        if guild is None and etat != cluster.PARTI:
+            return  # autre processus ou serveur indisponible : le ticket n'est pas perdu
         channel = guild.get_channel(row["channel_id"]) if guild else None
         if not guild or not channel:
             await self.bot.db.execute(

@@ -26,6 +26,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from utils import embeds, checks, helpers, design_system
+from utils import cluster
 from utils import sentrix_panels as panels
 from database.db import now
 
@@ -70,7 +71,11 @@ class Security(commands.Cog):
             "SELECT * FROM quarantines WHERE active = 1 AND expires_at <= ?", (now(),)
         )
         for row in rows:
-            guild = self.bot.get_guild(row["guild_id"])
+            guild, etat = cluster.etat_serveur(self.bot, row["guild_id"])
+            if guild is None and etat != cluster.PARTI:
+                # Indisponible ou géré ailleurs : on réessaiera, sinon le membre resterait
+                # en quarantaine pour toujours (la ligne passée inactive, rôles jamais rendus).
+                continue
             if not guild:
                 await self.bot.db.execute("UPDATE quarantines SET active = 0 WHERE id = ?", (row["id"],))
                 continue

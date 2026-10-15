@@ -218,7 +218,16 @@ async def _post_stats_once(bot) -> dict[str, Any]:
     if not topgg_token and not dbl_token:
         return {}
 
+    from utils import cluster
+
+    if not cluster.is_primary_cluster():
+        # Chaque processus ne voit qu'une part des serveurs : seul le cluster 0
+        # publie, avec le total de tous les clusters.
+        return {}
     stats = _snapshot(bot)
+    if cluster.cluster_count() > 1:
+        totals = await cluster.totaux(bot)
+        stats["guilds"], stats["users"] = totals["guilds"], totals["members"]
     results: dict[str, Any] = {}
     timeout = ClientTimeout(total=15, connect=6)
 

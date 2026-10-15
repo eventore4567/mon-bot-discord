@@ -127,7 +127,9 @@ async def _enforce_gateway_transport(bot: commands.Bot) -> None:
         # Gateway. Sur le chemin sain (aucun endpoint trouvé), rien n'a changé depuis
         # le sync de main.py : inutile de reproduire l'appel réseau.
         synced_count = state.get("resynced_commands") or 0
-        if endpoint_configured:
+        from utils import cluster as _cluster
+
+        if endpoint_configured and _cluster.is_primary_cluster():
             synced = await bot.tree.sync()
             synced_count = len(synced)
             state["resynced_commands"] = synced_count

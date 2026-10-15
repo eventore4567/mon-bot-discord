@@ -101,6 +101,12 @@ class SentriXFailoverCoordinator:
         )
 
         lock_name = (os.getenv("SENTRIX_FAILOVER_LOCK_NAME") or "failover:discord-primary").strip()
+        from utils import cluster as _cluster
+
+        if _cluster.cluster_count() > 1:
+            # Un bail par cluster : chaque part des shards a son propre leader, et un
+            # secours peut reprendre n'importe laquelle. Un seul cluster : clé inchangée.
+            lock_name = f"{lock_name}:cluster-{_cluster.cluster_id()}"
         self.lock_key = storage_key(lock_name)
         # Mémoire du dernier leader, indépendante du lease (qui expire, lui).
         # Elle permet de distinguer « je reprends la main après MON propre

@@ -30,6 +30,7 @@ from discord.ext import commands, tasks
 
 from database.db import now
 from utils import embeds, helpers
+from utils import cluster
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.excellence-runtime")
@@ -1156,7 +1157,11 @@ async def _ticket_reminders(bot: commands.Bot) -> None:
         "WHERE t.status='ouvert'"
     )
     for row in rows:
-        guild = bot.get_guild(row["guild_id"])
+        guild, etat = cluster.etat_serveur(bot, row["guild_id"])
+        if guild is None and etat != cluster.PARTI:
+            # Autre processus, ou serveur momentanément indisponible (panne Discord :
+            # il n'a alors aucun salon). Ne rien conclure, le ticket est intact.
+            continue
         channel = guild.get_channel(row["channel_id"]) if guild else None
         if guild is None or channel is None:
             await bot.db.execute("UPDATE tickets SET status='supprime' WHERE id=?", (row["id"],))
