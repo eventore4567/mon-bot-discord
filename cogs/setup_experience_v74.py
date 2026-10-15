@@ -891,11 +891,16 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             (*values, self.guild.id),
         )
         await security_v71.ensure_schema(self.bot)
+        # Salon piège et vérification n'agissent qu'avec le système de vérification
+        # installé : sans lui, « Activer la sécurité » les cochait pour rien.
+        from . import setup_security_choice_v75 as v75
+
+        extras = int(enabled and await v75._honeypot_resources_ready(self))
         await security_v71.update_setting(
-            self.bot, self.guild.id, "honeypot_enabled", int(enabled), actor_id
+            self.bot, self.guild.id, "honeypot_enabled", extras, actor_id
         )
         await security_v71.update_setting(
-            self.bot, self.guild.id, "verification_enabled", int(enabled), actor_id
+            self.bot, self.guild.id, "verification_enabled", extras, actor_id
         )
         if enabled:
             await security_v71.update_setting(

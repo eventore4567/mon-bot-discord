@@ -91,11 +91,24 @@ async def _selected_protections(view: v74.SentriXSetupV74) -> set[str]:
         logger.debug("Lecture des réglages sécurité V71 impossible", exc_info=True)
         advanced = {}
 
-    if bool(advanced.get("honeypot_enabled", False)):
-        selected.add("honeypot")
-    if bool(advanced.get("verification_enabled", False)):
-        selected.add("verification")
+    # Le salon piège et la vérification reposent sur le système de vérification
+    # (salons et rôles). Sans lui, ils ne font rien : ne pas les montrer cochés.
+    if (
+        advanced.get("honeypot_enabled") or advanced.get("verification_enabled")
+    ) and await _honeypot_resources_ready(view):
+        if bool(advanced.get("honeypot_enabled", False)):
+            selected.add("honeypot")
+        if bool(advanced.get("verification_enabled", False)):
+            selected.add("verification")
     return selected
+
+
+EXTRAS_NOT_INSTALLED = (
+    "**Salon piège** et **Vérification des nouveaux membres** ont besoin du système de "
+    "vérification SentriX (salon de vérification, salon piège, rôle « Non vérifié »). "
+    "Il n'est pas installé : ces deux protections ne feraient rien. Installez-le avec le "
+    "bouton ci-dessous, après avoir choisi le rôle Vérifié dans **Règlement & accès**."
+)
 
 
 async def _honeypot_resources_ready(view: v74.SentriXSetupV74) -> bool:
@@ -166,11 +179,14 @@ async def _save_protections(
 
     await security_v71.ensure_schema(view.bot)
     notice = None
-    if "honeypot" in chosen and not await _honeypot_resources_ready(view):
+    if chosen & {"honeypot", "verification"} and not await _honeypot_resources_ready(view):
+        # Cochées sans système de vérification, ces deux protections s'affichaient
+        # actives et ne faisaient rien (signalé le 15/10/2026).
         chosen.discard("honeypot")
+        chosen.discard("verification")
         notice = (
-            "Honeypot n’a pas été activé : ses rôles/salons existants sont manquants. "
-            "SentriX ne crée rien automatiquement."
+            "Salon piège et Vérification n'ont pas été activés : le système de vérification "
+            "n'est pas installé. Utilisez « Installer la vérification » sur cette page."
         )
     honeypot_enabled = int("honeypot" in chosen)
     verification_enabled = int("verification" in chosen)
@@ -239,7 +255,9 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
         )
         for field, label in setup_ui.AUTOMOD
     ]
-    option_specs.extend(EXTRA_PROTECTIONS)
+    extras_ready = await _honeypot_resources_ready(self)
+    if extras_ready:
+        option_specs.extend(EXTRA_PROTECTIONS)
     total = len(option_specs)
 
     status = discord.ui.Button(
@@ -350,6 +368,47 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
 
     protection_select.callback = save_selection
     container.add_item(discord.ui.ActionRow(protection_select))
+
+    if not extras_ready:
+        install = discord.ui.Button(
+            label="Installer la vérification (crée 2 salons et le rôle Non vérifié)",
+            style=discord.ButtonStyle.primary,
+        )
+
+        async def install_verification(interaction: discord.Interaction):
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            honeypot = self.bot.get_cog("HoneypotVerification")
+            if honeypot is None:
+                error = "Le système de vérification n'est pas chargé sur ce bot."
+            else:
+                try:
+                    _result, error = await honeypot.create_or_refresh_system(self.guild, sanction="softban")
+                except Exception:
+                    logger.exception("Installation de la vérification impossible guild=%s", self.guild.id)
+                    error = "L'installation a échoué. Réessayez dans un instant."
+            if not error:
+                # L'administrateur vient de l'installer : les deux protections démarrent
+                # actives (sinon les nouveaux membres resteraient bloqués en « Non vérifié »).
+                for field in ("honeypot_enabled", "verification_enabled"):
+                    await security_v71.update_setting(self.bot, self.guild.id, field, 1, interaction.user.id)
+                await core.set_module_enabled(
+                    self.bot, self.guild.id, "security", True, actor_id=interaction.user.id
+                )
+                await _refresh_security_runtime(self)
+            await self.refresh(interaction)
+            try:
+                await interaction.followup.send(
+                    f"⚠️ {error}" if error else
+                    "Vérification installée : Salon piège et Vérification des nouveaux membres sont actifs.",
+                    ephemeral=True,
+                )
+            except discord.HTTPException:
+                pass
+
+        install.callback = install_verification
+        container.add_item(discord.ui.TextDisplay(EXTRAS_NOT_INSTALLED))
+        container.add_item(discord.ui.ActionRow(install))
 
     all_on = discord.ui.Button(label="Activer toutes les protections", style=discord.ButtonStyle.success)
     all_off = discord.ui.Button(label="Désactiver toutes les protections", style=discord.ButtonStyle.danger)
