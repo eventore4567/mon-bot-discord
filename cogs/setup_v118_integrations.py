@@ -14,6 +14,7 @@ import sentrix_setup_compact_v113 as v4
 import sentrix_setup_guided_v117 as guided
 import sentrix_setup_v116 as v116
 from utils import log_service
+from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.setup-v118")
 _INSTALLED = False
@@ -168,11 +169,14 @@ class InviteTrackerSetupView(discord.ui.View):
 
 
 class VerificationSetupView(discord.ui.View):
-    def __init__(self, bot: commands.Bot, guild_id: int, author_id: int):
+    def __init__(self, bot: commands.Bot, guild_id: int, author_id: int, *, panneau: bool = False):
         super().__init__(timeout=300)
         self.bot = bot
         self.guild_id = guild_id
         self.author_id = author_id
+        # Ouvert depuis la page Sécurité, le message est un panneau (Components V2) :
+        # il ne peut pas être réédité avec un embed (Discord renvoie 400).
+        self.panneau = panneau
 
         repair_btn = discord.ui.Button(
             label="Activer / mettre à jour", style=discord.ButtonStyle.success, row=0
@@ -201,8 +205,10 @@ class VerificationSetupView(discord.ui.View):
                     "Module de vérification indisponible.", ephemeral=True
                 )
             await interaction.response.defer()
-            _ok, message = await honeypot.disable_system(interaction.guild)
-            await interaction.edit_original_response(embed=await self.build_embed(), view=self)
+            ok, message = await honeypot.disable_system(interaction.guild)
+            if ok:
+                await self._set_protections(interaction, False)
+            await self._render(interaction)
             await interaction.followup.send(message, ephemeral=True)
 
         disable_btn.callback = disable_cb
@@ -224,22 +230,25 @@ class VerificationSetupView(discord.ui.View):
             )
         await interaction.response.defer()
         current = await honeypot.config(interaction.guild.id, enabled_only=False)
+        error = None
         if current and current["enabled"]:
-            # Modification d'un système déjà actif : jamais de création de salon.
-            # Si un salon a été supprimé, on laisse le serveur tel quel.
+            # Système actif et intact : on met à jour la sanction et les panneaux
+            # existants, sans rien créer.
             await self.bot.db.execute(
                 "UPDATE honeypot_verification SET sanction=? WHERE guild_id=?",
                 (sanction, interaction.guild.id),
             )
             result, error = await honeypot.refresh_existing_panels(interaction.guild)
-            if error:
-                return await interaction.followup.send(error, ephemeral=True)
-            message = (
-                f"Panel web mis à jour dans {result['verify'].mention}. "
-                "Aucun salon ni catégorie n'a été créé."
-            )
-        else:
-            # Activation explicite depuis /setup : création initiale autorisée.
+            if not error:
+                message = (
+                    f"Panel web mis à jour dans {result['verify'].mention}. "
+                    "Aucun salon ni catégorie n'a été créé."
+                )
+        if not (current and current["enabled"]) or error:
+            # Activation explicite par l'administrateur : création initiale autorisée.
+            # Aussi quand le système est marqué actif mais que ses salons ont été
+            # supprimés : sinon « Activer » refusait, le panneau ne s'affichait plus
+            # et rien ne permettait de le republier (signalé le 15/10/2026).
             result, error = await honeypot.create_or_refresh_system(
                 interaction.guild, sanction=sanction
             )
@@ -249,8 +258,30 @@ class VerificationSetupView(discord.ui.View):
                 f"Vérification web activée : {result['verify'].mention} · "
                 f"Honeypot : {result['trap'].mention}."
             )
-        await interaction.edit_original_response(embed=await self.build_embed(), view=self)
+        # Installé = chaque arrivant reçoit « Non vérifié ». Si la vérification restait
+        # désactivée côté réglages, son bouton répondait « désactivée » et le nouveau
+        # membre restait bloqué dehors. L'administrateur vient de l'activer : on suit.
+        await self._set_protections(interaction, True)
+        await self._render(interaction)
         await interaction.followup.send(message, ephemeral=True)
+
+    async def _set_protections(self, interaction: discord.Interaction, enabled: bool) -> None:
+        from . import security_verification_v71 as security_v71
+
+        try:
+            for field in ("honeypot_enabled", "verification_enabled"):
+                await security_v71.update_setting(
+                    self.bot, self.guild_id, field, int(enabled), interaction.user.id
+                )
+        except Exception:
+            logger.exception("Réglages vérification/piège non synchronisés guild=%s", self.guild_id)
+
+    async def _render(self, interaction: discord.Interaction) -> None:
+        embed = await self.build_embed()
+        if self.panneau:
+            await panels.editer(interaction, panels.avec_composants(panels.depuis_embed(embed), self))
+        else:
+            await interaction.edit_original_response(embed=embed, view=self)
 
     async def build_embed(self) -> discord.Embed:
         guild = self.bot.get_guild(self.guild_id)
