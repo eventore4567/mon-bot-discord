@@ -71,6 +71,71 @@ def _manageable(guild: discord.Guild, role: discord.Role | None) -> bool:
     )
 
 
+WARN_ACTION = "warn"
+MUTE_ACTION = "mute"
+
+
+async def give(bot, member: discord.Member, action: str, role: discord.Role | None, *, reason: str):
+    """Ajoute ``role`` pour ``action`` ; rend (ajouté, erreur).
+
+    L'attribution n'est retenue QUE si SentriX a réellement ajouté le rôle. Un
+    membre qui l'avait déjà (donné à la main par le staff) n'est pas retenu : à la
+    levée de la sanction, SentriX ne lui retirera donc jamais un rôle qu'il n'a
+    pas donné.
+    """
+    guild = member.guild
+    if role is None or role in member.roles:
+        return False, None
+    try:
+        # Discord applique lui-même la hiérarchie : un refus est toléré et expliqué.
+        await member.add_roles(role, reason=reason)
+    except discord.HTTPException as exc:
+        return False, str(exc)
+    try:
+        await ensure_schema(bot)
+        await bot.db.execute(
+            "INSERT INTO automatic_role_assignments (guild_id,user_id,action,role_id) VALUES (?,?,?,?) "
+            "ON CONFLICT(guild_id,user_id,action) DO UPDATE SET role_id=excluded.role_id",
+            (guild.id, member.id, action, role.id),
+        )
+    except Exception:
+        # Le rôle est donné ; seule sa trace manque (il ne sera pas retiré automatiquement).
+        logger.exception("Attribution automatique non retenue guild=%s action=%s", guild.id, action)
+    return True, None
+
+
+async def take_back(bot, member: discord.Member, action: str, *, reason: str) -> str | None:
+    """Retire le rôle de ``action`` s'il a été donné par SentriX ; rend un mot d'état.
+
+    « absent » : SentriX n'avait rien donné (rien n'est touché) ; « retire » ;
+    « deja_retire » ; « refuse » : Discord ou la hiérarchie s'y oppose (la trace
+    est gardée pour réessayer plus tard).
+    """
+    guild = member.guild
+    await ensure_schema(bot)
+    tracked = await bot.db.fetchone(
+        "SELECT role_id FROM automatic_role_assignments WHERE guild_id=? AND user_id=? AND action=?",
+        (guild.id, member.id, action),
+    )
+    if not tracked:
+        return "absent"
+    role = guild.get_role(int(tracked["role_id"]))
+    state = "deja_retire"
+    if role is not None and role in member.roles:
+        if not _manageable(guild, role):
+            return "refuse"
+        try:
+            await member.remove_roles(role, reason=reason)
+        except discord.HTTPException:
+            return "refuse"
+        state = "retire"
+    await bot.db.execute(
+        "DELETE FROM automatic_role_assignments WHERE guild_id=? AND user_id=? AND action=?",
+        (guild.id, member.id, action),
+    )
+    return state
+
+
 async def sync_giveaway_blacklist(
     bot: commands.Bot, member: discord.Member, *, excluded: bool,
 ) -> str | None:

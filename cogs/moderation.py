@@ -163,6 +163,33 @@ class Moderation(commands.Cog):
             except Exception:
                 logger.exception("Suppression de la sanction temporaire #%s impossible.", row["id"])
 
+    async def _expirer_role_de_mute(self, row) -> bool:
+        """Fin naturelle d'un mute : on retire le rôle de mute donné par SentriX.
+
+        Le timeout Discord se lève seul, mais le rôle restait pour toujours.
+        Rien n'est retiré s'il a été posé à la main (cogs/automatic_role_rules).
+        """
+        from cogs import automatic_role_rules
+        from utils import cluster
+
+        guild, etat = cluster.etat_serveur(self.bot, row["guild_id"])
+        if guild is None:
+            return etat == cluster.PARTI  # indisponible ou ailleurs : on réessaiera
+        member = guild.get_member(int(row["user_id"]))
+        if member is None:
+            try:
+                member = await guild.fetch_member(int(row["user_id"]))
+            except discord.NotFound:
+                return True  # parti du serveur : il n'a plus le rôle
+            except discord.HTTPException:
+                return False
+        if member.is_timed_out():
+            return False  # re-muté entre-temps : le rôle reste jusqu'à la nouvelle fin
+        etat_role = await automatic_role_rules.take_back(
+            self.bot, member, automatic_role_rules.MUTE_ACTION, reason="Fin du mute"
+        )
+        return etat_role != "refuse"
+
     async def _expirer_tempaction(self, row) -> bool:
         """Lève UNE sanction échue.
 
@@ -178,6 +205,8 @@ class Moderation(commands.Cog):
         l'appelant, qui garde la ligne : le tour suivant retombera sur NotFound et
         la consommera. Réessayer est donc toujours sans danger.
         """
+        if row["action"] == "mute_role":
+            return await self._expirer_role_de_mute(row)
         guild = self.bot.get_guild(row["guild_id"])
         if not guild or row["action"] != "ban":
             return True  # rien à lever ici : la ligne n'a plus d'objet
@@ -1122,7 +1151,8 @@ class Moderation(commands.Cog):
         if member is not None and not await self.check_targetable(ctx, member):
             return
         await self.bot.db.execute("DELETE FROM warnings WHERE id = ?", (warn_id,))
-        await self._reply(ctx, f"Avertissement #{warn_id} supprimé.")
+        note = await self._retirer_role_avertissement_si_plus_aucun(ctx.guild, member)
+        await self._reply(ctx, f"Avertissement #{warn_id} supprimé.{note}")
 
     @commands.hybrid_command(name="warnings", description="Afficher les avertissements d'un membre.")
     @app_commands.describe(membre="Le membre à consulter")
@@ -1167,11 +1197,33 @@ class Moderation(commands.Cog):
         await self.bot.db.execute(
             "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?", (ctx.guild.id, membre.id)
         )
+        note = await self._retirer_role_avertissement_si_plus_aucun(ctx.guild, membre)
         await self.log_simple(ctx, "warnings_cleared", "🧹 Avertissements effacés", {
             "👤 Membre": f"{membre.mention}\n`{membre.id}`",
             "🗑️ Effacés": "nombre indisponible" if efface < 0 else f"{efface} avertissement(s)",
         })
-        await self._reply(ctx, f"Tous les avertissements de {membre.mention} ont été supprimés.")
+        await self._reply(ctx, f"Tous les avertissements de {membre.mention} ont été supprimés.{note}")
+
+    async def _retirer_role_avertissement_si_plus_aucun(self, guild, member) -> str:
+        """Plus aucun avertissement : le rôle d'avertissement donné par SentriX part
+        aussi. Il restait pour toujours. Un rôle posé à la main n'est jamais touché."""
+        if member is None:
+            return ""
+        from cogs import automatic_role_rules
+
+        reste = await self.bot.db.fetchone(
+            "SELECT COUNT(*) AS n FROM warnings WHERE guild_id = ? AND user_id = ?", (guild.id, member.id)
+        )
+        if reste and int(reste["n"] or 0) > 0:
+            return ""
+        etat = await automatic_role_rules.take_back(
+            self.bot, member, automatic_role_rules.WARN_ACTION, reason="Avertissements effacés"
+        )
+        if etat == "retire":
+            return " Le rôle d'avertissement a été retiré."
+        if etat == "refuse":
+            return " ⚠️ Le rôle d'avertissement n'a pas pu être retiré (hiérarchie ou permissions)."
+        return ""
 
     # ---------------------------------------------------------------- DOSSIERS DE SANCTION
 

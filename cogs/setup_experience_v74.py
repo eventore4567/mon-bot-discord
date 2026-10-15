@@ -458,7 +458,150 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             return await self._build_music()
         if page == "ai":
             return await self._build_ai()
+        if page == "roles":
+            return await self._build_roles()
         return await super()._build_page(page)
+
+    async def _build_roles(self) -> None:
+        """Rôles automatiques : chaque règle « action → rôle » au même endroit.
+
+        Elles étaient éparpillées (arrivée ici, vérification dans Règlement,
+        avertissement et mute dans Modération, exclusion des giveaways ailleurs).
+        Chaque sélecteur montre le réglage en cours et écrit au MÊME endroit
+        qu'avant : aucune donnée ne bouge. Un rôle impossible à donner (au-dessus
+        de SentriX, géré par une intégration, @everyone) est refusé avec la raison.
+        """
+        from utils import welcome_autoroles
+        from . import automatic_role_rules
+        from . import setup_v2_ui
+
+        conf = await self.bot.db.get_guild_config(self.guild.id)
+        enabled = await core.module_enabled(self.bot, self.guild.id, "roles")
+        arrival_ids = await welcome_autoroles.configured_ids(self.bot, self.guild.id)
+        giveaway_id = await automatic_role_rules.giveaway_role_id(self.bot, self.guild.id)
+        rewards = await self.bot.db.fetchall(
+            "SELECT level, role_id FROM level_roles WHERE guild_id = ? ORDER BY level", (self.guild.id,)
+        )
+
+        def current(field: str):
+            if field == "giveaway_block_role":
+                return giveaway_id
+            value = setup_ui._get(conf, field)
+            if field == "verify_role" and not value:
+                value = setup_ui._get(conf, "verification_role")
+            return int(value) if value else None
+
+        def mention(role_id) -> str:
+            role = self.guild.get_role(int(role_id)) if role_id else None
+            return role.mention if role else "Aucun"
+
+        rules = (
+            ("verify_role", "Vérification", "donné quand un membre réussit la vérification"),
+            ("member_role", "Membre principal", "le rôle « membre » de référence du serveur"),
+            ("warn_role", "Avertissement", "donné à un membre averti, retiré quand il n'a plus d'avertissement"),
+            ("mute_role", "Mute", "donné pendant un mute, retiré à la fin du mute"),
+            ("giveaway_block_role", "Exclusion des giveaways", "donné à l'exclusion, retiré quand elle est levée"),
+        )
+        lines = [
+            f"**Arrivée** → {' '.join(mention(i) for i in arrival_ids) or 'Aucun'} · donné à chaque nouveau membre",
+        ]
+        lines += [f"**{label}** → {mention(current(field))} · {hint}" for field, label, hint in rules]
+        if rewards:
+            shown = ", ".join(f"niv. {r['level']} → {mention(r['role_id'])}" for r in rewards[:6])
+            more = f" (+{len(rewards) - 6})" if len(rewards) > 6 else ""
+            lines.append(f"**Récompenses de niveau** → {shown}{more}")
+        else:
+            lines.append("**Récompenses de niveau** → Aucune")
+
+        toggle = discord.ui.Button(
+            label="Désactiver" if enabled else "Activer",
+            style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,
+        )
+
+        async def toggle_module(interaction: discord.Interaction):
+            try:
+                await core.set_module_enabled(
+                    self.bot, self.guild.id, "roles", not enabled, actor_id=interaction.user.id
+                )
+            except core.ModuleSetupRequired as exc:
+                return await setup_ui._refuse(interaction, str(exc))
+            await self.refresh(interaction)
+
+        toggle.callback = toggle_module
+
+        container = discord.ui.Container()
+        v73.poser_banniere(container)
+        container.add_item(
+            discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "-# SENTRIX CORE · Configuration · setup\n# 🏷️ Rôles automatiques\n"
+                    "Un rôle n'est donné que si vous l'avez choisi ici. SentriX ne crée aucun rôle, "
+                    "respecte la hiérarchie, et à la levée d'une sanction ne retire que le rôle "
+                    "qu'il a lui-même donné — jamais un rôle posé à la main."
+                ),
+                accessory=toggle,
+            )
+        )
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay("### Règles en place\n" + "\n".join(lines)))
+        container.add_item(discord.ui.Separator())
+
+        owner = self.backend
+
+        arrival = discord.ui.RoleSelect(
+            placeholder="Arrivée : rôles donnés à chaque nouveau membre (5 max.)",
+            min_values=0,
+            max_values=welcome_autoroles.MAX_ROLES,
+            default_values=[discord.Object(id=i) for i in arrival_ids if self.guild.get_role(i)],
+        )
+
+        async def save_arrival(interaction: discord.Interaction):
+            for role in arrival.values:
+                problem = welcome_autoroles.role_problem(self.guild, self.guild.get_role(role.id))
+                if problem:
+                    return await setup_ui._refuse(interaction, problem)
+            ids = await welcome_autoroles.save(self.bot, self.guild.id, [r.id for r in arrival.values])
+            await owner.audit(interaction.user.id, "autorole", ",".join(map(str, ids)) or None)
+            await self.refresh(interaction)
+
+        arrival.callback = save_arrival
+        container.add_item(discord.ui.ActionRow(arrival))
+
+        for field, label, _hint in rules:
+            role_id = current(field)
+            select = discord.ui.RoleSelect(
+                placeholder=f"{label} : choisir le rôle (vide = aucun)",
+                min_values=0,
+                max_values=1,
+                default_values=[discord.Object(id=role_id)] if role_id and self.guild.get_role(role_id) else [],
+            )
+
+            async def save(interaction: discord.Interaction, *, _field=field, _select=select):
+                role = _select.values[0] if _select.values else None
+                reason = setup_ui.validate_role_choice(self.guild, role, _field)
+                if reason:
+                    return await setup_ui._refuse(interaction, reason)
+                value = role.id if role else None
+                if _field == "giveaway_block_role":
+                    await automatic_role_rules.set_giveaway_role(self.bot, self.guild.id, value)
+                else:
+                    await self.bot.db.set_guild_config(self.guild.id, _field, value)
+                await owner.audit(interaction.user.id, _field, value)
+                await self.refresh(interaction)
+
+            select.callback = save
+            container.add_item(discord.ui.ActionRow(select))
+
+        reward = discord.ui.Button(label="Ajouter / modifier une récompense de niveau", style=discord.ButtonStyle.secondary)
+
+        async def open_reward(interaction: discord.Interaction):
+            await interaction.response.send_modal(setup_v2_ui.LevelRewardModal(owner))
+
+        reward.callback = open_reward
+        container.add_item(discord.ui.ActionRow(reward))
+
+        self._add_navigation(container)
+        self.add_item(container)
 
     async def _build_ai(self) -> None:
         settings = await ai_service.get_settings(self.bot, self.guild.id)
@@ -1236,11 +1379,19 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         async def set_mute_role(interaction: discord.Interaction):
             role = mute_select.values[0] if mute_select.values else None
+            # Même vérification que la page Rôles automatiques : avant, n'importe quel
+            # rôle était accepté (@everyone, rôle au-dessus de SentriX…) et échouait en silence.
+            reason = setup_ui.validate_role_choice(self.guild, role, "mute_role")
+            if reason:
+                return await setup_ui._refuse(interaction, reason)
             await _set_optional_role(self, "mute_role", role)
             await self.refresh(interaction)
 
         async def set_warn_role(interaction: discord.Interaction):
             role = warn_select.values[0] if warn_select.values else None
+            reason = setup_ui.validate_role_choice(self.guild, role, "warn_role")
+            if reason:
+                return await setup_ui._refuse(interaction, reason)
             await _set_optional_role(self, "warn_role", role)
             await self.refresh(interaction)
 

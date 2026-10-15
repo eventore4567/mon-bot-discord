@@ -59,6 +59,7 @@ en avoir besoin.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -183,27 +184,36 @@ async def persist_tempaction(
 _EVENT_KIND = {"mute": "timeout", "unmute": "timeout", "ban": "ban", "kick": "kick", "unban": "unban", "tempban": "ban"}
 
 
-async def _apply_mute_role(bot: Any, guild: discord.Guild, target: discord.Member, *, add: bool, reason: str) -> None:
-    """Badge optionnel « rôle pendant un mute » (+setup › Modération) : ajouté au mute,
-    retiré à l'unmute. Best-effort : jamais bloquant pour la sanction elle-même."""
+async def _apply_mute_role(
+    bot: Any, guild: discord.Guild, target: discord.Member, *, add: bool, reason: str,
+    seconds: int | None = None,
+) -> None:
+    """Rôle optionnel « pendant un mute » (+setup › Rôles automatiques).
+
+    Ajouté au mute, retiré à l'unmute ET à la fin naturelle du mute (tempaction
+    « mute_role »). Avant : retiré à l'unmute même si le membre l'avait reçu à la
+    main, et jamais retiré quand le mute expirait seul. Le retrait ne touche
+    désormais que le rôle donné par SentriX. Best-effort : jamais bloquant.
+    """
+    from cogs import automatic_role_rules
+
     try:
+        if not add:
+            await automatic_role_rules.take_back(bot, target, automatic_role_rules.MUTE_ACTION, reason=reason)
+            return
         conf = await bot.db.get_guild_config(guild.id)
         role_id = int(conf["mute_role"] or 0) if conf and "mute_role" in conf.keys() else 0
+        role = guild.get_role(role_id) if role_id else None
+        added, _error = await automatic_role_rules.give(
+            bot, target, automatic_role_rules.MUTE_ACTION, role, reason=reason
+        )
+        if added and seconds:
+            await bot.db.execute(
+                "INSERT INTO tempactions (guild_id, user_id, action, expires_at) VALUES (?, ?, 'mute_role', ?)",
+                (guild.id, target.id, int(time.time()) + int(seconds)),
+            )
     except Exception:
-        return
-    role = guild.get_role(role_id) if role_id else None
-    if role is None or role.is_default() or role.managed:
-        return
-    me = guild.me
-    if me is None or not me.guild_permissions.manage_roles or role >= me.top_role:
-        return
-    try:
-        if add and role not in target.roles:
-            await target.add_roles(role, reason=reason)
-        elif not add and role in target.roles:
-            await target.remove_roles(role, reason=reason)
-    except discord.HTTPException:
-        logger.debug("Badge de mute non synchronisé (guild=%s membre=%s).", guild.id, target.id, exc_info=True)
+        logger.debug("Rôle de mute non synchronisé (guild=%s membre=%s).", guild.id, target.id, exc_info=True)
 
 
 async def _hierarchy_error(
@@ -425,7 +435,7 @@ async def mute(
     until = discord.utils.utcnow() + timedelta(seconds=seconds)
     log_service.mark_sanction(guild.id, target.id, "timeout")
     await target.timeout(until, reason=f"{actor} : {reason}")
-    await _apply_mute_role(bot, guild, target, add=True, reason=f"Mute par {actor} : {reason}")
+    await _apply_mute_role(bot, guild, target, add=True, reason=f"Mute par {actor} : {reason}", seconds=seconds)
 
     dm_sent = False
     dm_text = render_dm_text(seconds) if render_dm_text else None
@@ -543,18 +553,18 @@ async def _count_warnings(bot: Any, *, guild_id: int, target_id: int) -> tuple[i
 
 
 async def _apply_warn_role(
-    target: discord.Member, role: discord.Role | None, *, actor: discord.Member, reason: str,
+    bot: Any, target: discord.Member, role: discord.Role | None, *, actor: discord.Member, reason: str,
 ) -> tuple[bool, str | None]:
-    """Reproduit exactement le comportement existant : rien à faire si aucun
-    rôle n'est configuré ou si le membre l'a déjà ; seule discord.HTTPException
-    est tolérée (permissions/hiérarchie), pas d'élargissement du filet."""
+    """Rien à faire si aucun rôle n'est configuré ou si le membre l'a déjà. Le rôle
+    donné par SentriX est retenu (cogs/automatic_role_rules) : effacer les
+    avertissements le retire, sans jamais toucher un rôle posé à la main."""
+    from cogs import automatic_role_rules
+
     if role is None or role in target.roles:
         return False, None
-    try:
-        await target.add_roles(role, reason=f"Avertissement par {actor} : {reason}")
-        return True, None
-    except discord.HTTPException as exc:
-        return False, str(exc)
+    return await automatic_role_rules.give(
+        bot, target, automatic_role_rules.WARN_ACTION, role, reason=f"Avertissement par {actor} : {reason}"
+    )
 
 
 async def _send_dm_best_effort(target: discord.abc.User, text: str | None) -> bool:
@@ -601,7 +611,7 @@ async def warn(
     )
 
     total_warnings, count_error = await _count_warnings(bot, guild_id=guild.id, target_id=target.id)
-    role_assigned, role_error = await _apply_warn_role(target, warn_role, actor=actor, reason=reason)
+    role_assigned, role_error = await _apply_warn_role(bot, target, warn_role, actor=actor, reason=reason)
     dm_sent = await _send_dm_best_effort(target, dm_text)
 
     case_number, persistence_error = await persist_sanction(
