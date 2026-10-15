@@ -1056,6 +1056,11 @@ class EnterpriseSuite(commands.Cog, name=_COG_NAME):
         return boto3.client("s3", **kwargs), bucket
 
     async def create_external_backup(self, actor_id: int | None = None) -> dict[str, Any]:
+        if getattr(self.bot.db, "backend", "sqlite") == "postgres":
+            raise ValueError(
+                "La base de SentriX est sur PostgreSQL : sauvegardes et restaurations se font "
+                "côté PostgreSQL (Railway), plus par fichier."
+            )
         async with self._backup_lock:
             path = Path(getattr(self.bot.db, "path", ""))
             if not path.exists():

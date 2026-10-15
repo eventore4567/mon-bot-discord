@@ -1496,6 +1496,57 @@ FAKE_INVITE_ACCOUNT_AGE_DAYS = 3
 FAKE_INVITE_QUICK_LEAVE_SECONDS = 3600
 
 
+
+#: La base principale ouverte par le bot (pour les modules qui gardaient leur
+#: propre connexion au fichier SQLite, comme l'historique de utils/wide_logs).
+ACTIVE: "Database | None" = None
+
+
+def _postgres_schema(path: str | None = None) -> str:
+    """Schéma Postgres de CETTE instance : deux bots branchés par erreur sur le même
+    Postgres (SentriX et Bot'Odboug) ne partagent jamais leurs tables."""
+    if path and os.getenv("SENTRIX_PG_SCHEMA_FROM_PATH", "").strip() == "1":
+        # Tests uniquement : chaque fichier de base (un par test) a son propre schéma,
+        # comme chaque fichier SQLite est une base vierge.
+        import hashlib
+        import uuid
+
+        if str(path) == ":memory:":
+            return "t_mem_" + uuid.uuid4().hex[:12]  # comme SQLite : une base vierge à chaque fois
+        return "t_" + hashlib.sha1(str(path).encode()).hexdigest()[:16]
+    explicit = os.getenv("SENTRIX_PG_SCHEMA", "").strip()
+    if explicit:
+        return explicit
+    try:
+        from utils.instance_identity import instance_key
+
+        key = instance_key()
+    except Exception:
+        key = "sentrix"
+    import re as _re
+
+    return _re.sub(r"[^a-z0-9_]", "_", str(key).lower())[:50] or "sentrix"
+
+
+def _postgres_url() -> str:
+    """URL Postgres de la base principale (SENTRIX_POSTGRES_URL, sinon DATABASE_URL)."""
+    return (
+        os.getenv("SENTRIX_POSTGRES_URL") or os.getenv("POSTGRES_URL") or os.getenv("DATABASE_URL") or ""
+    ).strip()
+
+
+class _SharedConnection:
+    """« async with » sur une connexion qu'on ne doit pas fermer en sortant."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, *exc):
+        return False
+
 class Database:
     """Petit wrapper async autour d'aiosqlite, partagé par tous les cogs."""
 
@@ -1526,9 +1577,36 @@ class Database:
         # ne doivent jamais recevoir le même numéro.
         self._sanctions_lock = asyncio.Lock()
 
+    @property
+    def backend(self) -> str:
+        """« postgres » si SENTRIX_DB_BACKEND=postgres et une URL Postgres est fournie."""
+        wanted = os.getenv("SENTRIX_DB_BACKEND", "sqlite").strip().lower()
+        if wanted in {"postgres", "postgresql", "pg"} and _postgres_url():
+            return "postgres"
+        return "sqlite"
+
+    def _isolated_connection(self):
+        """Une connexion pour une transaction dédiée (SQLite : un second fichier
+        ouvert ; Postgres : la connexion principale, déjà sérialisée)."""
+        if self.backend == "postgres":
+            return _SharedConnection(self._conn)
+        return aiosqlite.connect(self.path)
+
     async def connect(self):
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        self._conn = await aiosqlite.connect(self.path)
+        global ACTIVE
+        ACTIVE = self
+        if self.backend == "postgres":
+            from database.pg_backend import PgConnection
+
+            # Même code SQL que SQLite, traduit à la volée (database/pg_dialect.py).
+            self._conn = await PgConnection.connect(
+                _postgres_url(),
+                schema=_postgres_schema(self.path),
+                pool_size=int(os.getenv("SENTRIX_PG_POOL", "8") or 8),
+            )
+        else:
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+            self._conn = await aiosqlite.connect(self.path)
         self._conn.row_factory = aiosqlite.Row
         # WAL = lectures/écritures concurrentes sans se bloquer mutuellement.
         # synchronous=NORMAL = bon compromis vitesse/sécurité, recommandé avec WAL.
@@ -1788,8 +1866,12 @@ class Database:
             await self._conn.close()
 
     async def execute(self, query: str, params: tuple = ()):
-        cur = await self._conn.execute(query, params)
-        await self._conn.commit()
+        fast = getattr(self._conn, "execute_and_commit", None)
+        if fast is not None:
+            cur = await fast(query, params)
+        else:
+            cur = await self._conn.execute(query, params)
+            await self._conn.commit()
         if cur.rowcount != 0 and _is_configuration_write(query):
             self._schedule_config_snapshot()
         return cur
@@ -2401,7 +2483,7 @@ class Database:
             raise ValueError("La raison ne peut pas dépasser 500 caractères.")
 
         async with self._sanctions_lock:
-            async with aiosqlite.connect(self.path) as conn:
+            async with self._isolated_connection() as conn:
                 conn.row_factory = aiosqlite.Row
                 await conn.execute("PRAGMA foreign_keys=ON;")
                 await conn.execute("BEGIN IMMEDIATE")

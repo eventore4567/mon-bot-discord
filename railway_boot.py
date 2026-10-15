@@ -12,6 +12,7 @@ trop tôt.
 
 import asyncio
 import logging
+import os
 import pathlib
 import traceback
 
@@ -303,6 +304,24 @@ async def run() -> None:
     _install_dashboard_loader_guard_prestart()
 
     durable = await _prepare_durable_store(bot)
+
+    if bot.db.backend == "postgres":
+        # Première fois sur PostgreSQL : on importe la dernière sauvegarde SQLite
+        # (écrite par l'ancien processus en s'arrêtant), une seule fois. Seul le
+        # leader HA arrive ici. En cas d'échec, rien n'est validé côté Postgres et le
+        # démarrage s'arrête : mieux vaut un bot arrêté qu'un bot sans ses données.
+        from pathlib import Path
+
+        from database.db import _postgres_schema, _postgres_url
+        from utils import pg_import
+
+        result = await pg_import.ensure_imported(
+            _postgres_url(),
+            _postgres_schema(),
+            Path(config.DATABASE_PATH),
+            durable=durable,
+        )
+        logger.warning("Base principale PostgreSQL : %s", {k: v for k, v in result.items() if k != "tables"})
 
     await bot.db.connect()
     logger.info("Base prête pour le démarrage anticipé du dashboard Railway.")

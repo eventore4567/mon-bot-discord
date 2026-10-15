@@ -3221,6 +3221,17 @@ class AutoMod(commands.Cog, name="Automod"):
                     if isinstance(failure, Exception):
                         logger.error("Raid coordonné : traitement d'un message impossible", exc_info=failure)
                 return
+            # Revérifié ici, sans attente avant le comptage : un message qui a passé le
+            # contrôle d'incident plus haut puis attendu la base pendant que l'incident
+            # s'ouvrait arrivait au compteur juste remis à zéro, et restait affiché
+            # (mesuré sur PostgreSQL, où chaque lecture est un aller-retour réseau).
+            incident = self.incidents.get(key)
+            if (
+                incident is not None
+                and incident.filter_name in SPAM_FILTERS
+                and time.monotonic() - incident.started < SPAM_INCIDENT_WINDOW_SECONDS
+            ):
+                return await self._delete_and_warn(message, incident.reason, incident.filter_name)
             self.spam_tracker.ajouter(key, message)
             if self.spam_tracker.compter(key, fenetre=seuils.secondes) >= seuils.messages:
                 # La rafale entière part, pas seulement le message qui franchit le seuil :

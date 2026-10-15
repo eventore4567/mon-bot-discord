@@ -195,6 +195,16 @@ async def _prepare_leader_storage(
             f"PostgreSQL durable indisponible: {getattr(durable, 'error', 'erreur inconnue')}"
         )
 
+    if getattr(getattr(bot, "db", None), "backend", "sqlite") == "postgres":
+        # Base principale PostgreSQL, partagée par le primaire et le secours : le
+        # nouveau leader lit directement les données à jour. Ni snapshot de référence
+        # (il n'y a plus de fichier SQLite à protéger), ni restauration au takeover —
+        # celle-ci fermait la connexion pour restaurer un fichier que le bot n'utilise plus.
+        logger.warning(
+            "HA: base principale PostgreSQL partagée — reprise immédiate, aucune restauration SQLite."
+        )
+        return
+
     _guard_durable_snapshots(durable)
     # Dès qu'une instance devient leader, les écritures de configuration déclenchent
     # un snapshot PostgreSQL rapproché. Le snapshot périodique reste un filet de sécurité.

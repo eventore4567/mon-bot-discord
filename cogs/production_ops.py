@@ -132,6 +132,13 @@ def _prune_backups_sync(directory: Path, keep: int) -> None:
 async def create_verified_backup(bot: commands.Bot) -> Path | None:
     """Create one consistent backup and verify it before publishing the file."""
     state = _ops_state(bot)
+    if getattr(getattr(bot, "db", None), "backend", "sqlite") == "postgres":
+        # La base vit dans PostgreSQL : copier le fichier SQLite figé depuis la bascule
+        # produirait des « sauvegardes » trompeuses. Celles de Postgres font foi.
+        state["last_backup_ok"] = True
+        state["last_backup_error"] = None
+        state["backup_mode"] = "postgres"
+        return None
     source = _database_path(bot)
     directory = _backup_dir(bot)
     if source is None or directory is None or not source.exists():

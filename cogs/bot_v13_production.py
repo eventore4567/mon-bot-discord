@@ -552,6 +552,8 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
         owner = self
 
         async def create_consistent_backup(instance, actor_id: int | None = None) -> dict[str, Any]:
+            if getattr(instance.bot.db, "backend", "sqlite") == "postgres":
+                raise ValueError("La base de SentriX est sur PostgreSQL : sauvegardes et restaurations se font côté PostgreSQL (Railway), plus par fichier.")
             async with instance._backup_lock:
                 path = Path(getattr(instance.bot.db, "path", ""))
                 if not path.exists():
@@ -607,6 +609,8 @@ class BotV13Production(commands.Cog, name="BotV13Production"):
                         pass
 
         async def restore_verified_backup(instance, backup_id: int, actor_id: int) -> None:
+            if getattr(instance.bot.db, "backend", "sqlite") == "postgres":
+                raise ValueError("La base de SentriX est sur PostgreSQL : sauvegardes et restaurations se font côté PostgreSQL (Railway), plus par fichier.")
             async with instance._backup_lock:
                 row = await instance.bot.db.fetchone(
                     "SELECT * FROM external_backups_v2 WHERE id=? AND status='ready'",

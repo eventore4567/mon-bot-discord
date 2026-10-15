@@ -1439,9 +1439,27 @@ def _ensure_database_parent() -> None:
     Path(path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
 
 
+def _main_postgres():
+    """La base principale si elle tourne sur Postgres : l'historique doit y vivre,
+    pas dans un fichier SQLite local que l'autre service ne voit pas."""
+    try:
+        from database import db as database_module
+    except Exception:
+        return None
+    active = getattr(database_module, "ACTIVE", None)
+    if active is not None and getattr(active, "backend", "sqlite") == "postgres" and active._conn is not None:
+        return active
+    return None
+
+
 async def ensure_log_storage(force: bool = False) -> None:
     global _DB_READY
     if _DB_READY and not force:
+        return
+    main = _main_postgres()
+    if main is not None:
+        await main._conn.executescript(_LOG_SCHEMA)
+        _DB_READY = True
         return
     _ensure_database_parent()
     async with aiosqlite.connect(_database_path()) as db:
@@ -1485,6 +1503,14 @@ def _history_description(embed: discord.Embed) -> str:
 async def _record_log(*, guild_id: int, log_type: str, kind: str, embed: discord.Embed) -> None:
     await ensure_log_storage()
     target_id, moderator_id = extract_history_ids(embed)
+    main = _main_postgres()
+    if main is not None:
+        await main.execute(
+            "INSERT INTO logs (guild_id,log_type,banner_kind,target_id,moderator_id,title,description,created_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (int(guild_id), str(log_type), str(kind), target_id, moderator_id, safe_text(embed.title)[:300], _history_description(embed), int(time.time())),
+        )
+        return
     async with aiosqlite.connect(_database_path()) as db:
         await db.execute("PRAGMA busy_timeout = 5000")
         await db.execute(
@@ -1752,6 +1778,14 @@ async def send_wide_log(
 async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> list[dict[str, Any]]:
     await ensure_log_storage()
     safe_limit = max(1, min(int(limit), 50))
+    main = _main_postgres()
+    if main is not None:
+        rows = await main.fetchall(
+            "SELECT id,guild_id,log_type,banner_kind,target_id,moderator_id,title,description,created_at "
+            "FROM logs WHERE guild_id=? AND target_id=? ORDER BY created_at DESC,id DESC LIMIT ?",
+            (int(guild_id), int(target_id), safe_limit),
+        )
+        return [dict(zip(row.keys(), row)) for row in rows]
     async with aiosqlite.connect(_database_path()) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA busy_timeout = 5000")

@@ -55,6 +55,16 @@ ON sentrix_main_db_snapshots (instance_key, created_at DESC);
 """
 
 
+def primary_is_postgres() -> bool:
+    """La base principale tourne-t-elle sur PostgreSQL (database/db.py) ?
+
+    Alors le fichier SQLite n'est plus la source de vérité : le sauvegarder
+    enregistrerait un fichier obsolète comme « dernière sauvegarde », et le
+    restaurer n'aurait aucun effet sur le bot.
+    """
+    return os.getenv("SENTRIX_DB_BACKEND", "sqlite").strip().lower() in {"postgres", "postgresql", "pg"}
+
+
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     try:
         value = int(os.getenv(name, str(default)) or default)
@@ -170,6 +180,8 @@ class DurableDatabaseReplica:
 
     async def restore_latest_if_needed(self) -> dict[str, Any]:
         """Restaure seulement la dernière sauvegarde de CETTE instance."""
+        if primary_is_postgres() and not self.force_restore:
+            return {"restored": False, "reason": "postgres_primary"}
         local_ok = await self._local_healthy()
         if local_ok and not self.force_restore:
             return {"restored": False, "reason": "local_healthy"}
@@ -232,6 +244,10 @@ class DurableDatabaseReplica:
                 return {"restored": False, "reason": "restore_error", "error": self.error}
 
     async def snapshot(self, *, reason: str = "periodic", clean_shutdown: bool = False) -> dict[str, Any]:
+        if primary_is_postgres():
+            # Les données vivent dans PostgreSQL : le fichier SQLite est figé depuis la
+            # bascule, l'enregistrer écraserait la vraie « dernière sauvegarde » SQLite.
+            return {"stored": False, "reason": "postgres_primary"}
         if self.pool is None and not await self.connect():
             return {"stored": False, "reason": "postgres_unavailable", "error": self.error}
         if not await self._local_healthy():
