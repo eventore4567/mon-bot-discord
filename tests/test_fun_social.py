@@ -143,3 +143,28 @@ def test_cog_is_loaded_before_visual_finalizer_and_help_category():
     assert CATEGORY_NAMES["FunSocial"] == "Fun"
     names = {c.name for c in fun.FunSocial.__cog_commands__}
     assert {"fun", "hug", "hack", "scan", "aura", "ship", "slap"}.issubset(names)
+
+
+def test_aura_dit_l_evolution_et_le_rang_avec_une_jauge():
+    from cogs import fun_social
+
+    texte, score = fun_social._aura_texte(1, 42)
+    assert "depuis hier" in texte and "Rang :" in texte and ("▰" in texte or "▱" in texte)
+    assert 0 <= score <= 9999
+    # Le score du jour est stable : deux consultations donnent le même nombre.
+    assert fun_social._aura_texte(1, 42)[1] == score
+
+
+def test_ship_nom_de_couple_jauge_et_message_selon_le_score():
+    from types import SimpleNamespace
+
+    from cogs import fun_social
+
+    assert fun_social._nom_de_couple("Jayden", "Alice") == "Jayice"
+    a = SimpleNamespace(id=1, mention="<@1>", display_name="Jayden")
+    b = SimpleNamespace(id=2, mention="<@2>", display_name="Alice")
+    texte = fun_social._ship_texte(1, a, b)
+    assert "Nom de couple : **Jayice**" in texte and "%" in texte and ("▰" in texte or "▱" in texte)
+    assert texte.count("_") >= 2, "un message adapté au score accompagne le pourcentage"
+    # Même couple, même jour : même score, quel que soit l'ordre.
+    assert fun_social._ship_texte(1, b, a).split("**")[3] == texte.split("**")[3]

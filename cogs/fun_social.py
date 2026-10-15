@@ -122,11 +122,77 @@ CHALLENGES = (
 )
 
 
-def fixed_score(guild_id: int, user_id: int, key: str, *, limit: int = 100) -> int:
+def fixed_score(guild_id: int, user_id: int, key: str, *, limit: int = 100, day: str | None = None) -> int:
     """Score de fiction stable par jour et par membre, sans données personnelles."""
-    day = datetime.now(timezone.utc).date().isoformat()
+    day = day or datetime.now(timezone.utc).date().isoformat()
     raw = f"sentrix-fun|{guild_id}|{user_id}|{day}|{key}".encode()
     return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big") % (limit + 1)
+
+
+def _hier() -> str:
+    from datetime import timedelta
+
+    return (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+
+
+# Aura : un rang, une jauge, l'évolution depuis hier et des phrases qui changent.
+_AURA_RANGS = (
+    (9000, "Mythique", ("Les murs du salon vibrent légèrement.", "Même le bot baisse le volume en votre présence.")),
+    (7000, "Légendaire", ("Une aura qui entre dans la pièce avant vous.", "Les notifications se mettent en mode silencieux par respect.")),
+    (4000, "Épique", ("Solide, lumineuse, un peu frimeuse.", "Une présence qu'on remarque sans la chercher.")),
+    (1500, "Rare", ("Discrète mais bien réelle.", "L'aura du membre fiable sur qui l'on compte.")),
+    (0, "Apprenti", ("Elle charge encore, patience.", "Petite flamme, gros potentiel.")),
+)
+
+
+def _aura_texte(guild_id: int, user_id: int) -> tuple[str, int]:
+    rng = random.SystemRandom()
+    score = fixed_score(guild_id, user_id, "aura", limit=9999)
+    hier = fixed_score(guild_id, user_id, "aura", limit=9999, day=_hier())
+    seuil, rang, phrases = next(r for r in _AURA_RANGS if score >= r[0])
+    delta = score - hier
+    fleche = f"▲ +{delta:,}".replace(",", " ") if delta > 0 else f"▼ {delta:,}".replace(",", " ") if delta < 0 else "= stable"
+    jauge = "▰" * (score // 1000) + "▱" * (10 - score // 1000)
+    lignes = [
+        f"⚡ **{score:,} points d'aura**".replace(",", " ") + f" · {fleche} depuis hier",
+        f"`{jauge}`",
+        f"🏅 Rang : **{rang}** — {rng.choice(phrases)}",
+    ]
+    if fixed_score(guild_id, user_id, "aura-rare", limit=39) == 0:
+        lignes += ["", "🌌 **Éclipse d'aura** : un jour sur quarante, l'aura déborde. C'est aujourd'hui."]
+    return "\n".join(lignes), score
+
+
+# Ship : un nom de couple, une jauge et un message selon la compatibilité.
+_SHIP_MESSAGES = (
+    (100, ("Compatibilité parfaite. Le serveur peut préparer les confettis.",)),
+    (80, ("Un duo qui se comprend sans finir ses phrases.", "Ça sent la complicité à plein nez.")),
+    (60, ("Une belle entente, avec un peu d'entraînement.", "Prometteur : il manque juste un fou rire partagé.")),
+    (40, ("Ça peut marcher… avec beaucoup de mèmes en commun.", "Des débuts timides, mais rien n'est perdu.")),
+    (20, ("Plutôt amis que duo inséparable.", "Le courant passe, sur le mode économie d'énergie.")),
+    (1, ("Deux planètes dans deux galaxies différentes.", "Pour l'instant, c'est un « bonjour » poli.")),
+    (0, ("Zéro pile. L'algorithme lui-même s'excuse.",)),
+)
+
+
+def _nom_de_couple(a: str, b: str) -> str:
+    a, b = a.strip() or "A", b.strip() or "B"
+    return (a[: max(1, (len(a) + 1) // 2)] + b[len(b) // 2:]).capitalize()
+
+
+def _ship_texte(guild_id: int, user: discord.Member, partner: discord.Member) -> str:
+    rng = random.SystemRandom()
+    pair = sorted((user.id, partner.id))
+    score = fixed_score(guild_id, pair[0], f"ship:{pair[1]}")
+    message = rng.choice(next(m for seuil, m in _SHIP_MESSAGES if score >= seuil))
+    # Pas d'émoji dans la jauge : la couche d'affichage sobre les retire du texte.
+    coeurs = "`" + "▰" * (score // 10) + "▱" * (10 - score // 10) + "`"
+    return (
+        f"{user.mention} 💞 {partner.mention}\n"
+        f"Nom de couple : **{_nom_de_couple(user.display_name, partner.display_name)}**\n\n"
+        f"Compatibilité du jour : **{score} %**\n{coeurs}\n_{message}_\n\n"
+        "-# Simple jeu : le score change chaque jour, aucune vraie prédiction."
+    )
 
 
 def gif_url_is_safe(url: str, category: str) -> bool:
@@ -274,23 +340,13 @@ def _profile_embed(mode: str, user: discord.Member, guild_id: int, *,
     e = discord.Embed(title=f"{title} • {user.display_name[:60]}", colour=colour)
     e.set_thumbnail(url=user.display_avatar.url)
     if mode == "aura":
-        rank = ("Mythique" if score >= 9000 else "Légendaire" if score >= 7000
-                else "Épique" if score >= 4000 else "Rare" if score >= 1500 else "Apprenti")
-        e.description = f"⚡ **{score:,} points d'aura**\n🏅 Rang : **{rank}**\n{'🟪' * min(10, max(1, score // 1000))}"
+        e.description = _aura_texte(guild_id, user.id)[0]
     elif mode == "scan":
         e.description = _scan_text()
     elif mode == "hack":
         e.description = _hack_text()
     elif mode == "ship":
-        partner = other or user
-        pair = sorted((user.id, partner.id))
-        compatibility = fixed_score(guild_id, pair[0], f"ship:{pair[1]}")
-        e.description = (
-            f"{user.mention} 💞 {partner.mention}\n"
-            f"Compatibilité fictive : **{compatibility}%**\n"
-            + "💗" * max(1, compatibility // 10)
-            + "\n*Simple jeu, aucune vraie prédiction.*"
-        )
+        e.description = _ship_texte(guild_id, user, other or user)
     elif mode == "wanted":
         e.description = (
             f"🚨 Recherché pour : **avoir volé {score2} cookies au serveur**\n"
@@ -344,6 +400,41 @@ class FunSocial(commands.Cog, name="FunSocial"):
             self.last_action = {k: t for k, t in self.last_action.items() if now - t < 180}
         return False
 
+    async def _aura_classement(self, guild: discord.Guild, target: discord.Member) -> str | None:
+        """Les auras du jour sur ce serveur : le podium et la place du membre."""
+        try:
+            db = self.bot.db
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS fun_aura_daily (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
+                "day TEXT NOT NULL, score INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id, day))"
+            )
+            day = datetime.now(timezone.utc).date().isoformat()
+            score = fixed_score(guild.id, target.id, "aura", limit=9999)
+            await db.execute(
+                "INSERT INTO fun_aura_daily (guild_id, user_id, day, score) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id, day) DO UPDATE SET score = excluded.score",
+                (guild.id, target.id, day, score),
+            )
+            rows = await db.fetchall(
+                "SELECT user_id, score FROM fun_aura_daily WHERE guild_id = ? AND day = ? ORDER BY score DESC, user_id",
+                (guild.id, day),
+            )
+        except Exception:
+            logger.warning("Classement d'aura indisponible", exc_info=True)
+            return None
+        if len(rows) < 2:
+            return "Premier à mesurer son aura aujourd'hui : le classement se remplit avec les suivants."
+        medailles = ("1.", "2.", "3.")
+        lignes = []
+        for i, row in enumerate(rows[:3]):
+            membre = guild.get_member(int(row["user_id"]))
+            nom = membre.display_name if membre else "membre parti"
+            lignes.append(f"{medailles[i]} **{nom[:32]}** — {int(row['score']):,}".replace(",", " "))
+        place = next(i for i, row in enumerate(rows, start=1) if int(row["user_id"]) == target.id)
+        if place > 3:
+            lignes.append(f"… {target.display_name[:32]} : **#{place}** sur {len(rows)}")
+        return "\n".join(lignes)
+
     async def _count_hug(self, guild_id: int, user_id: int) -> int | None:
         try:
             db = getattr(self.bot, "db", None)
@@ -387,7 +478,8 @@ class FunSocial(commands.Cog, name="FunSocial"):
             if action == "hug":
                 count = await self._count_hug(ctx.guild.id, target.id)
                 if count is not None:
-                    body += f"\n💞 {target.mention} a reçu **{count} câlins** au total sur ce serveur."
+                    body += (f"\n💞 {target.mention} a reçu **{count} câlin{'s' if count > 1 else ''}** "
+                             "au total sur ce serveur.")
             embed = discord.Embed(title=f"{emoji} {title} !", description=body, colour=FUN_COLORS["social"])
             embed.set_thumbnail(url=ctx.author.display_avatar.url)
             gif, anime = await fetch_gif(category)
@@ -395,8 +487,8 @@ class FunSocial(commands.Cog, name="FunSocial"):
                 embed.set_image(url=gif)
             if anime:
                 embed.add_field(name="🎬 Anime", value=anime, inline=False)
-            if not gif:
-                embed.add_field(name="🎞️ Animation", value="GIF temporairement indisponible.", inline=False)
+            # GIF indisponible : le message reste complet sans lui (brief : un GIF
+            # cassé ne doit jamais abîmer la présentation).
         elif action in SOLO:
             title, emoji, verb, category = SOLO[action]
             embed = discord.Embed(title=f"{emoji} {title}", description=f"{ctx.author.mention} **{verb}** !",
@@ -408,13 +500,16 @@ class FunSocial(commands.Cog, name="FunSocial"):
                 embed.add_field(name="🎬 Anime", value=anime, inline=False)
             if not gif:
                 embed.set_thumbnail(url=ctx.author.display_avatar.url)
-                embed.add_field(name="🎞️ Animation", value="GIF temporairement indisponible.", inline=False)
         elif action in {"aura", "hack", "scan", "ship", "rate", "luck", "vibe", "mood",
                         "rizz", "brain", "chaos", "wanted", "personality"}:
             # Deux membres sont comparés sans imposer une mention supplémentaire.
             if action == "ship" and other is None and member is not None:
                 other = ctx.author
             embed = _profile_embed(action, target, ctx.guild.id, other=other)
+            if action == "aura":
+                classement = await self._aura_classement(ctx.guild, target)
+                if classement:
+                    embed.add_field(name="Classement du jour", value=classement, inline=False)
             category = {"aura": "smug", "ship": "handhold", "luck": "happy",
                         "vibe": "dance", "mood": "smile", "rizz": "wink",
                         "chaos": "tableflip"}.get(action)
