@@ -78,12 +78,16 @@ def _set_author(embed: discord.Embed, bot: commands.Bot) -> None:
 async def _purge_local_slash_for_guild(bot: commands.Bot, guild: discord.Guild) -> int:
     if getattr(guild, "unavailable", False) or not getattr(guild, "name", ""):
         return 0  # serveur indisponible : rien à lire, on repassera au prochain démarrage
+    from utils import once_per_guild
+
     try:
         remote = await bot.tree.fetch_commands(guild=guild)
     except discord.HTTPException:
         logger.info("Slash locaux illisibles pour %s (%s) ; nouvel essai au prochain démarrage.", guild.name, guild.id)
         return 0
     if not remote:
+        # Propre : SentriX ne publie plus de commandes locales, il le restera.
+        await once_per_guild.marquer(bot, LOCAL_SLASH_TASK, guild.id)
         return 0
     try:
         bot.tree.clear_commands(guild=guild)
@@ -91,8 +95,14 @@ async def _purge_local_slash_for_guild(bot: commands.Bot, guild: discord.Guild) 
     except discord.HTTPException:
         logger.exception("Impossible de supprimer les slash locaux de %s (%s).", guild.name, guild.id)
         return 0
+    await once_per_guild.marquer(bot, LOCAL_SLASH_TASK, guild.id)
     logger.warning("Nettoyage slash local : %s commande(s) supprimée(s) de %s.", len(remote), guild.id)
     return len(remote)
+
+
+#: Purge des commandes « / » locales : un appel Discord par serveur, fait une fois
+#: pour toutes (utils/once_per_guild.py) au lieu de deux à chaque démarrage.
+LOCAL_SLASH_TASK = "local-slash-purge"
 
 
 def _install_local_slash_cleanup(bot: commands.Bot) -> None:
@@ -104,12 +114,14 @@ def _install_local_slash_cleanup(bot: commands.Bot) -> None:
             return
         bot._sentrix_local_slash_cleanup_running_v6 = True
         try:
+            from utils import once_per_guild
+
             total = 0
-            for delay in (0, 8):
-                if delay:
-                    await asyncio.sleep(delay)
-                for guild in list(bot.guilds):
-                    total += await _purge_local_slash_for_guild(bot, guild)
+            by_id = {g.id: g for g in list(bot.guilds)}
+            for guild_id in await once_per_guild.restants(bot, LOCAL_SLASH_TASK, by_id):
+                guild = by_id[guild_id]
+                total += await _purge_local_slash_for_guild(bot, guild)
+                await asyncio.sleep(0.2)
             logger.info("Nettoyage slash terminé : %s commande(s) locale(s) supprimée(s).", total)
         finally:
             bot._sentrix_local_slash_cleanup_running_v6 = False

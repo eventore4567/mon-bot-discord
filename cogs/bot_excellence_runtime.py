@@ -46,6 +46,7 @@ TICKET_ACTIVITY_FLUSH_SECONDS = 20
 SUPERVISOR_INTERVAL_SECONDS = 60
 VIEW_REPAIR_INTERVAL_SECONDS = 3600
 HEALTH_SNAPSHOT_INTERVAL_SECONDS = 900
+MISSING_PERMISSIONS_SAMPLE = 100  # serveurs détaillés par instantané ; le total est gardé à part
 RISK_WINDOW_SECONDS = 3600
 RISK_LEVEL_DECAY_SECONDS = 86400
 
@@ -1335,10 +1336,21 @@ async def _health_snapshot(bot: commands.Bot) -> None:
         await _record_incident(bot, "database_health", f"{type(exc).__name__}: {exc}")
 
     missing: dict[str, list[str]] = {}
-    for guild in bot.guilds:
+    missing_total = 0
+    for index, guild in enumerate(list(bot.guilds)):
+        # Sans pause, ce parcours bloquait la boucle d'événements pendant tout le
+        # passage (l'AutoMod attendait) ; à grande échelle, ce sont des secondes.
+        if index and index % 500 == 0:
+            await asyncio.sleep(0)
         issues = await _guild_permission_issues(guild)
         if issues:
-            missing[str(guild.id)] = issues
+            missing_total += 1
+            # La ligne gardait la liste de TOUS les serveurs concernés, toutes les
+            # 15 minutes et sans purge : des mégaoctets par ligne à grande échelle.
+            if len(missing) < MISSING_PERMISSIONS_SAMPLE:
+                missing[str(guild.id)] = issues
+    if missing_total > len(missing):
+        missing["_total"] = [str(missing_total)]
     loops = _background_loop_status(bot)
     persistent_views = len(getattr(bot, "persistent_views", []) or [])
     await bot.db.execute(
@@ -1357,8 +1369,8 @@ async def _health_snapshot(bot: commands.Bot) -> None:
             now(),
         ),
     )
-    if missing:
-        logger.warning("Diagnostic permissions : %s serveur(s) ont au moins une permission recommandée manquante.", len(missing))
+    if missing_total:
+        logger.warning("Diagnostic permissions : %s serveur(s) ont au moins une permission recommandée manquante.", missing_total)
     logger.info(
         "Diagnostic runtime : DB=%s, %s cogs, %s vues persistantes, latence=%sms.",
         "OK" if db_ok else "ERREUR",

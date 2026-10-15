@@ -23,6 +23,7 @@ une heuristique (plusieurs comptes très récents invités par la même personne
 temps) qui peut se tromper — à traiter comme une alerte à vérifier, pas une preuve.
 """
 
+import asyncio
 import logging
 import time
 
@@ -43,6 +44,11 @@ logger = logging.getLogger("bot.invites")
 SUSPECT_WINDOW = 600
 SUSPECT_THRESHOLD = 3
 SUSPECT_ACCOUNT_AGE_DAYS = 3
+# Préchargement des invitations au démarrage : un appel Discord par serveur. Fait
+# d'un trait, il saturait la limite globale de l'API (≈ 50 requêtes/s) pendant de
+# longues minutes à grande échelle — celle dont l'AutoMod a besoin pour supprimer
+# le spam. Il part en tâche de fond, à débit borné, les plus gros serveurs d'abord.
+INVITE_PREFETCH_INTERVAL = 0.5
 
 
 class Invites(commands.Cog, name="Invites"):
@@ -50,6 +56,11 @@ class Invites(commands.Cog, name="Invites"):
         self.bot = bot
         self.invite_cache: dict[int, dict[str, int]] = {}
         self.recent_new_accounts: dict[tuple[int, int], list[float]] = {}
+        self._prefetch_task: asyncio.Task | None = None
+
+    def cog_unload(self):
+        if self._prefetch_task is not None:
+            self._prefetch_task.cancel()
 
     async def cache_guild_invites(self, guild: discord.Guild):
         try:
@@ -60,8 +71,30 @@ class Invites(commands.Cog, name="Invites"):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        for guild in self.bot.guilds:
-            await self.cache_guild_invites(guild)
+        # on_ready revient à chaque reconnexion complète : une seule tâche à la fois,
+        # et seuls les serveurs pas encore en cache.
+        if self._prefetch_task is None or self._prefetch_task.done():
+            self._prefetch_task = asyncio.create_task(self._prefetch_invites())
+
+    async def _prefetch_invites(self) -> None:
+        guilds = sorted(
+            (
+                g for g in list(self.bot.guilds)
+                if g.id not in self.invite_cache
+                # Sans « Gérer le serveur », Discord refuse : inutile de dépenser l'appel.
+                and getattr(getattr(g.me, "guild_permissions", None), "manage_guild", False)
+            ),
+            key=lambda g: g.member_count or 0,
+            reverse=True,
+        )
+        for guild in guilds:
+            if guild.id in self.invite_cache:
+                continue
+            try:
+                await self.cache_guild_invites(guild)
+            except discord.HTTPException:
+                logger.debug("Invitations illisibles guild=%s", guild.id, exc_info=True)
+            await asyncio.sleep(INVITE_PREFETCH_INTERVAL)
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -82,6 +115,12 @@ class Invites(commands.Cog, name="Invites"):
         try:
             current = await guild.invites()
         except discord.Forbidden:
+            return None
+        if guild.id not in self.invite_cache:
+            # Pas encore de référence pour ce serveur (préchargement en cours) : toute
+            # invitation déjà utilisée aurait « augmenté » et la première aurait été
+            # désignée à tort. On garde la référence, et on ne devine pas.
+            self.invite_cache[guild.id] = {inv.code: (inv.uses or 0) for inv in current}
             return None
         cached = self.invite_cache.get(guild.id, {})
         used = None

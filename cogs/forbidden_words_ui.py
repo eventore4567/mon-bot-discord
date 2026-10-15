@@ -202,8 +202,10 @@ class ForbiddenWordsUI(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         self._patch_runtime()
-        for guild in self.bot.guilds:
-            await self._sync(guild)
+        # Plus de passage sur chaque serveur ici : il ne faisait que retirer l'ancienne
+        # règle native « mots interdits », que le nettoyage AutoMod groupé retire déjà
+        # une fois pour toutes (cogs/automod.py, NATIVE_CLEANUP_TASK). C'était un appel
+        # Discord par serveur à chaque démarrage et reconnexion.
 
     @commands.hybrid_command(
         name="mots-interdits-ajouter",

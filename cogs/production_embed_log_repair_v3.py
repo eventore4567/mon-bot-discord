@@ -185,6 +185,20 @@ class ProductionEmbedLogRepairV3(commands.Cog, name="ProductionEmbedLogRepairV3"
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self._ready_task: asyncio.Task | None = None
+        # Serveurs où la migration est déjà appliquée : chargés en UNE requête. Avant,
+        # chaque démarrage relisait ~16 réglages de logs par serveur, deux fois
+        # (on_ready + on_guild_available) — 1,6 million de lectures à 100 000 serveurs
+        # pour une migration faite une seule fois (tools/scale_ready_probe.py).
+        self._applied: set[int] | None = None
+
+    async def _applied_guilds(self) -> set[int]:
+        if self._applied is None:
+            await _ensure_migration_table(self.bot)
+            rows = await self.bot.db.fetchall(
+                f"SELECT guild_id FROM {_MIGRATION_TABLE} WHERE migration_key = ?", (_MIGRATION_KEY,)
+            )
+            self._applied = {int(r["guild_id"]) for r in rows}
+        return self._applied
 
     async def _repair_all(self) -> None:
         state = _state(self.bot)
@@ -193,17 +207,30 @@ class ProductionEmbedLogRepairV3(commands.Cog, name="ProductionEmbedLogRepairV3"
         state["logs_cog_loaded"] = loaded
         state["log_listener_count"] = listeners
 
-        checked = recovered = configured = enabled = 0
+        checked = recovered = 0
+        applied = await self._applied_guilds()
         for guild in list(self.bot.guilds):
+            if guild.id in applied:
+                continue
             try:
                 result = await repair_guild_runtime(self.bot, guild)
                 checked += 1
                 recovered += int(bool(result["recovered"]))
-                configured += int(result["configured"])
-                enabled += int(result["enabled"])
+                applied.add(guild.id)
             except Exception as exc:
                 state["last_error"] = type(exc).__name__
                 logger.exception("Réparation V3 impossible guild=%s.", guild.id)
+        # Compteurs de santé : un comptage SQL, pas une lecture par serveur et par type.
+        configured = enabled = 0
+        try:
+            row = await self.bot.db.fetchone(
+                "SELECT COUNT(*) AS configured, "
+                "COALESCE(SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END), 0) AS enabled "
+                "FROM log_config WHERE channel_id IS NOT NULL"
+            )
+            configured, enabled = int(row["configured"] or 0), int(row["enabled"] or 0)
+        except Exception:
+            logger.debug("Comptage des routes de logs impossible.", exc_info=True)
 
         state.update(
             {
@@ -234,7 +261,11 @@ class ProductionEmbedLogRepairV3(commands.Cog, name="ProductionEmbedLogRepairV3"
     @commands.Cog.listener()
     async def on_guild_available(self, guild: discord.Guild) -> None:
         try:
+            applied = await self._applied_guilds()
+            if guild.id in applied:
+                return
             await repair_guild_runtime(self.bot, guild)
+            applied.add(guild.id)
         except Exception:
             logger.exception("Réparation V3 on_guild_available impossible guild=%s.", guild.id)
 

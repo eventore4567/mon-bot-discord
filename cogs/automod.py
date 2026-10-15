@@ -539,6 +539,7 @@ NO_REPOST_FILTERS = LINK_NOTICE_FILTERS | {"antiscam"}
 # 1) rappel public avec ping ; 2) vrai warn enregistré ; 3+) timeout croissant.
 # Après 24 h sans nouvel incident de spam, la progression repart au premier rappel.
 SPAM_INCIDENT_WINDOW_SECONDS = 8.0
+NATIVE_CLEANUP_TASK = "automod-native-rules-cleanup"
 # Vague de spam : quand plusieurs membres spamment le même salon, un seul
 # avertissement public regroupé par seconde au lieu d'un par membre (mesuré :
 # 20 spammeurs = 20 messages du bot ajoutés au flot). Le premier part tout de suite.
@@ -1265,14 +1266,21 @@ class AutoMod(commands.Cog, name="Automod"):
         """Vérifie toutes les guilds et résume ce qui est réellement nettoyé."""
         try:
             await self.bot.wait_until_ready()
+            from utils import once_per_guild
+
             totals = {"removed": 0, "protected": 0, "external": 0, "failed": 0}
             checked = 0
-            for guild in list(self.bot.guilds):
-                result = await self._sync_native_suite(guild)
+            # Migration ponctuelle : un serveur nettoyé ne l'est plus à chaque démarrage
+            # (un appel Discord par serveur et par redémarrage, mesuré).
+            by_id = {g.id: g for g in list(self.bot.guilds)}
+            for guild_id in await once_per_guild.restants(self.bot, NATIVE_CLEANUP_TASK, by_id):
+                result = await self._sync_native_suite(by_id[guild_id])
                 if result is not None:
                     checked += 1
                     for name in totals:
                         totals[name] += result[name]
+                    if not result["failed"]:
+                        await once_per_guild.marquer(self.bot, NATIVE_CLEANUP_TASK, guild_id)
                 await asyncio.sleep(0.15)
             logger.info(
                 "AutoMod nettoyage terminé guilds=%s checked=%s removed=%s protected=%s external=%s failed=%s",
