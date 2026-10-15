@@ -966,6 +966,14 @@ def publish(bot: Any) -> dict[str, Any]:
             missing.append(entry.source)
             continue
         _english_options(leaf, entry.path)
+        try:
+            # Choix d'origine repris, et suggestions pendant la frappe pour les
+            # options texte libre (utils/slash_suggestions.py).
+            from utils import slash_suggestions
+
+            slash_suggestions.enrichir(bot, leaf, entry.source, entry.path)
+        except Exception:
+            logger.exception("Suggestions non branchées sur /%s.", entry.path)
         parts = entry.path.split()
         if len(parts) == 1:
             roots[parts[0]] = leaf
