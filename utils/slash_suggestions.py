@@ -112,6 +112,26 @@ RAISONS = [
     "Contournement de sanction", "Double compte", "Pseudo ou avatar inapproprié",
 ]
 
+# Une option « raison » n'est pas toujours un motif de sanction. /afk demande
+# pourquoi on s'absente, /rep pourquoi on remercie quelqu'un, /invites bonus
+# pourquoi on crédite des invitations. Proposer « Compte suspect (raid) » ou
+# « Usurpation d'identité » à quelqu'un qui part manger n'a aucun sens, et
+# c'est ce que faisait la règle générale sur le nom d'option.
+RAISONS_ABSENCE = [
+    "Je reviens vite", "Pause", "Repas", "Au travail", "En cours", "En révisions",
+    "Je dors", "Occupé", "En déplacement", "Pas devant l'écran", "En jeu",
+]
+
+RAISONS_REPUTATION = [
+    "Merci pour l'aide", "Toujours disponible", "Bon conseil", "Super accueil",
+    "A résolu mon problème", "Très patient", "Bonne ambiance", "Beau geste",
+]
+
+RAISONS_INVITATIONS = [
+    "Récompense d'événement", "Correction d'un comptage", "Participation au concours",
+    "Compensation", "Invitations frauduleuses", "Parrainage",
+]
+
 DUREES = [
     ("1 minute", "1m"), ("5 minutes", "5m"), ("10 minutes", "10m"), ("30 minutes", "30m"),
     ("1 heure", "1h"), ("3 heures", "3h"), ("6 heures", "6h"), ("12 heures", "12h"),
@@ -272,7 +292,6 @@ PAR_COMMANDE: dict[tuple[str, str], Provider] = {
 
 PAR_OPTION: dict[str, Provider] = {
     "ville": _statique([(v, v) for v in VILLES], garder_saisie=True),
-    "raison": _statique([(r, r) for r in RAISONS], garder_saisie=True),
     "duree": _statique(DUREES, garder_saisie=True),
     "prefixe": _statique(PREFIXES, garder_saisie=True),
     "commande": _commandes,
@@ -283,6 +302,32 @@ for _path in ("embeds edit", "embeds preview", "embeds send", "embeds delete", "
               "embeds export"):
     PAR_COMMANDE[(_path, "nom")] = _vivant("embeds", _embeds)
 PAR_COMMANDE[("embeds rename", "ancien_nom")] = _vivant("embeds", _embeds)
+
+# « raison » n'est plus une règle générale sur le nom d'option : chaque famille
+# reçoit la sienne. Une commande absente de ces listes garde un champ libre
+# sans suggestion, ce qui vaut mieux qu'une suggestion à côté de la plaque.
+_SANCTIONS = (
+    "ban", "unban", "kick", "warn", "timeout", "untimeout",
+    "moderation hackban", "moderation tempban", "moderation lock",
+    "security tools isolate", "security rules block",
+)
+for _chemin in _SANCTIONS:
+    PAR_COMMANDE[(_chemin, "raison")] = _statique([(r, r) for r in RAISONS], garder_saisie=True)
+
+for _chemin in ("afk",):
+    PAR_COMMANDE[(_chemin, "raison")] = _statique(
+        [(r, r) for r in RAISONS_ABSENCE], garder_saisie=True
+    )
+
+for _chemin in ("rep give",):
+    PAR_COMMANDE[(_chemin, "raison")] = _statique(
+        [(r, r) for r in RAISONS_REPUTATION], garder_saisie=True
+    )
+
+for _chemin in ("invites bonus", "invites deduct"):
+    PAR_COMMANDE[(_chemin, "raison")] = _statique(
+        [(r, r) for r in RAISONS_INVITATIONS], garder_saisie=True
+    )
 
 
 # --------------------------------------------------------------- branchement
@@ -327,4 +372,7 @@ def enrichir(bot: Any, leaf: Any, source: str, path: str) -> int:
     return count
 
 
-__all__ = ["enrichir", "VILLES", "RAISONS", "DUREES", "PAR_COMMANDE", "PAR_OPTION"]
+__all__ = [
+    "enrichir", "VILLES", "RAISONS", "RAISONS_ABSENCE", "RAISONS_REPUTATION",
+    "RAISONS_INVITATIONS", "DUREES", "PAR_COMMANDE", "PAR_OPTION",
+]
