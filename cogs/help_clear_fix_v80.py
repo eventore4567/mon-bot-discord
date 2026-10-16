@@ -31,8 +31,8 @@ def _neutralize_mentions(value: object) -> str:
 def _install_help_safety() -> None:
     current_catalog = help_v79._catalog
     if not getattr(current_catalog, "_sentrix_v80_private_owner_filter", False):
-        def safe_catalog(bot):
-            rows = current_catalog(bot)
+        def safe_catalog(bot, **options):
+            rows = current_catalog(bot, **options)
             return [
                 entry for entry in rows
                 if help_v79._normalise(entry.key).split(" ", 1)[0] not in _PRIVATE_HELP_ROOTS

@@ -142,7 +142,9 @@ def test_descriptions_d_options_anglaises():
 def test_chaque_override_vise_une_commande_publiee():
     """Une précision d'option sur un chemin qui n'existe plus serait du code mort
     silencieux : on la verrait ici, pas en production."""
-    chemins = {e.path for e in sc.CATALOG}
+    # Un chemin masqué faute d'usage (utils/unused_commands.py) garde ses
+    # précisions : elles resservent dès que la commande est remise au menu.
+    chemins = {e.path for e in (*sc.CATALOG, *sc._MASQUEES_DU_MENU)}
     orphelins = sorted({p for p, _o in sc.OPTION_OVERRIDES} - chemins)
     assert orphelins == [], orphelins
 
@@ -150,3 +152,18 @@ def test_chaque_override_vise_une_commande_publiee():
 def test_les_options_traduites_ont_une_description():
     sans = sorted(a for a in sc.OPTION_NAMES.values() if a not in sc.OPTION_DESCRIPTIONS)
     assert sans == [], sans
+
+
+def test_les_commandes_jamais_utilisees_quittent_le_menu_mais_restent_tracees():
+    """Décision du 16/10/2026 (utils/unused_commands.py) : masquées du « / »,
+    utilisables en préfixe, et la raison est écrite dans RETIRED."""
+    from utils import unused_commands
+
+    publiees = {e.source for e in sc.CATALOG}
+    assert not (publiees & unused_commands.MASQUEES)
+    for entree in sc._MASQUEES_DU_MENU:
+        assert "unused" in sc.RETIRED[entree.source] or entree.source in sc.RETIRED
+    # La modération et la sécurité ne sont jamais masquées, même sans usage.
+    for garde in ("hackban", "tempban", "quarantine", "panic status", "antinuke-whitelist-add",
+                  "clearwarnings", "verify-repair", "music skip", "giveaway end"):
+        assert not unused_commands.masquee(garde), garde

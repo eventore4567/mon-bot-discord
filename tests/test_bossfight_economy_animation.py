@@ -136,7 +136,9 @@ def test_prefix_and_slash_game_paths_reuse_the_same_command_callbacks():
     ):
         commands.update({command.name: command for command in cls.__cog_commands__})
     paths = {item.source: item.path for item in slash_catalog.CATALOG}
-    for game in ("bossfight", "doors", "emojiorder", "duel", "trivia", "tictactoe"):
+    # tictactoe : masqué du « / » faute d'usage (utils/unused_commands.py) ; fight
+    # couvre le même cas, un duel publié.
+    for game in ("bossfight", "doors", "emojiorder", "duel", "trivia", "fight"):
         assert game in commands
         assert paths[game].startswith("games ")
         assert callable(commands[game].callback)

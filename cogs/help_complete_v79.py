@@ -22,7 +22,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds
+from utils import embeds, unused_commands
 from utils import sentrix_panels as panels
 from utils.command_permissions import (
     ADMIN_COGS,
@@ -115,13 +115,18 @@ def _walk_slash(bot: commands.Bot):
         yield from walk(node)
 
 
-def _catalog(bot: commands.Bot) -> list[HelpEntry]:
+def _catalog(bot: commands.Bot, *, avec_masquees: bool = False) -> list[HelpEntry]:
     entries: dict[str, HelpEntry] = {}
 
     # Ne pas filtrer command.hidden : l'utilisateur a demandé que toutes les commandes
     # réellement enregistrées restent consultables, y compris les commandes admin/owner.
+    # Exception décidée le 16/10/2026 : les commandes jamais utilisées en production
+    # (utils/unused_commands.py) quittent les pages ; leur fiche reste accessible par
+    # leur nom exact (``avec_masquees``).
     for command in bot.walk_commands():
         name = command.qualified_name.strip()
+        if not avec_masquees and unused_commands.masquee(name):
+            continue
         key = _normalise(name)
         if not key:
             continue
@@ -483,8 +488,10 @@ class SentriXHelpV79(discord.ui.LayoutView):
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# Centre d'aide SentriX\n"
-                    "Le catalogue affiche maintenant **toutes les commandes enregistrées** : commandes `+`, commandes `/`, "
-                    "sous-commandes slash et commandes administratives.\n\n"
+                    "Toutes les commandes en service : commandes `+`, commandes `/`, "
+                    "sous-commandes slash et commandes administratives. "
+                    f"Les {len(unused_commands.MASQUEES)} commandes jamais utilisées restent "
+                    "disponibles en `+` : `+help nom` affiche leur fiche.\n\n"
                     f"**{len(entries)} commandes uniques** · **{prefix_count} en +** · **{slash_count} en /**"
                     + (f" · **{slash_only} uniquement en /**" if slash_only else "")
                     + f"\nCatégories : page **{self.home_index + 1}/{pages}**"
@@ -710,6 +717,9 @@ async def _send_help_v79(self, target, query: str | None = None):
     if query:
         rows = _search(self.bot, query)
         exact = _exact(rows, query)
+        if exact is None:
+            exact = next((entry for entry in _catalog(self.bot, avec_masquees=True)
+                          if entry.key == _normalise(query) and unused_commands.masquee(entry.key)), None)
         if exact is not None:
             view.show_detail(exact)
         else:

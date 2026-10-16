@@ -53,6 +53,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from utils import unused_commands as _unused
+
 logger = logging.getLogger("bot.slash-catalog")
 
 
@@ -610,6 +612,17 @@ RETIRED: dict[str, str] = {
     "sentrixpro notifications": "status view covered by /setup",
     "sentrixpro welcome": "welcome lives in /setup",
 }
+
+# Masquées faute d'usage réel (utils/unused_commands.py, décision du 16/10/2026) :
+# elles quittent le menu « / » mais restent utilisables en préfixe.
+_MASQUEES_DU_MENU = tuple(e for e in CATALOG if _unused.masquee(e.source))
+CATALOG = tuple(e for e in CATALOG if not _unused.masquee(e.source))
+for _entree in _MASQUEES_DU_MENU:
+    RETIRED.setdefault(
+        _entree.source,
+        f"unused from {_unused.PERIODE[0]} to {_unused.PERIODE[1]} (usage report)",
+    )
+del _entree
 
 
 # --------------------------------------------------------------------------

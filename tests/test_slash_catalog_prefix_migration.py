@@ -27,7 +27,13 @@ def test_prefix_only_actions_get_clear_category_paths():
         "staff-reminder": "staff remind",
         "dm": "user dm",
     }
+    # Masquées faute d'usage le 16/10/2026 (utils/unused_commands.py) : hors du
+    # menu, mais leur chemin reste défini pour le jour où on les remet.
+    masked = {entry.source: entry.path for entry in catalog._MASQUEES_DU_MENU}
     for source, path in expected.items():
+        if source in masked:
+            assert masked[source] == path and source in catalog.RETIRED, (source, path)
+            continue
         assert mapped.get(source) == path, (source, path, mapped.get(source))
 
 

@@ -56,12 +56,12 @@ def test_v79_merges_matching_prefix_and_slash_invocations(monkeypatch):
         return SimpleNamespace(name=name, callback=callback, commands=(), binding=None)
 
     economy = SimpleNamespace(
-        name="economy", commands=(slash("balance", "balance"), slash("give", "give-money")), callback=None,
+        name="economy", commands=(slash("balance", "balance"), slash("deposit", "deposit")), callback=None,
     )
     racines = [slash("ping", "ping"), economy, slash("orphan", None)]
     tree = SimpleNamespace(get_commands=lambda type=None: racines)
     bot = SimpleNamespace(
-        walk_commands=lambda: [prefix("balance"), prefix("give-money"), prefix("ping")],
+        walk_commands=lambda: [prefix("balance"), prefix("deposit"), prefix("ping")],
         tree=tree,
     )
     monkeypatch.setattr(v79, "_binding_name", lambda node: "")
@@ -70,7 +70,7 @@ def test_v79_merges_matching_prefix_and_slash_invocations(monkeypatch):
 
     # Trois commandes + : chacune réunie à son chemin slash, quel que soit son nom.
     assert rows["balance"].slash_name == "economy balance"
-    assert rows["give-money"].slash_name == "economy give"
+    assert rows["deposit"].slash_name == "economy deposit"
     assert rows["ping"].slash_name == "ping"
     # Une commande slash sans source connue reste une entrée à part.
     assert "orphan" in rows and rows["orphan"].prefix_command is None

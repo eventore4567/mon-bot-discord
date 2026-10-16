@@ -16,7 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
-from utils import access_matrix, embeds, sentrix_emojis
+from utils import access_matrix, embeds, sentrix_emojis, unused_commands
 from utils import sentrix_panels as panels
 from utils.command_permissions import command_example, command_requirement
 
@@ -131,6 +131,10 @@ def _visible(bot: commands.Bot, _member=None) -> list[commands.Command]:
         if root_name in access_matrix.OWNER_ONLY_COMMANDS or root_name in {
             "unsyncbl", "alias", "set-nickname",
         }:
+            continue
+        # Jamais utilisées en production (utils/unused_commands.py) : hors des
+        # pages, mais « +help nom » affiche toujours leur fiche.
+        if unused_commands.masquee(name_key):
             continue
 
         callback = _callback_key(getattr(command, "callback", None))
@@ -897,6 +901,11 @@ class OfficialHelp(commands.Cog, name="SentriXHelp"):
         if query:
             rows = _search(self.bot, _visible(self.bot, member), query)
             exact = _exact_match(self.bot, rows, query)
+            if exact is None:
+                # Une commande masquée faute d'usage garde sa fiche, par son nom exact.
+                direct = self.bot.get_command(str(query).strip().lstrip("+/").strip())
+                if direct is not None and unused_commands.masquee(direct.qualified_name):
+                    exact = direct
             if exact:
                 vue = VueAide(
                     self.bot, prefix, member.id,
