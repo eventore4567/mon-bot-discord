@@ -51,7 +51,7 @@ REACTIONS: dict[str, tuple[str, str, str, str]] = {
     "stare": ("Regard intense", "👀", "fixe", "stare"),
     "clap": ("Applaudissements", "👏", "applaudit", "clap"),
     "comfort": ("Réconfort", "🫂", "réconforte", "hug"),
-    "cheer": ("Encouragement", "📣", "encourage", "happy"),
+    "cheer": ("Encouragement", "📣", "encourage", "thumbsup"),
 }
 SOLO: dict[str, tuple[str, str, str, str]] = {
     "dance": ("Dance !", "💃", "se lance dans une danse légendaire", "dance"),
@@ -195,6 +195,37 @@ def _ship_texte(guild_id: int, user: discord.Member, partner: discord.Member) ->
     )
 
 
+# Le GIF suit le résultat affiché : un ship à 12 % ne montre pas deux mains
+# enlacées, une humeur à 8 % pas un grand sourire. (seuil minimal, catégorie),
+# du plus haut au plus bas ; catégories vérifiées sur nekos.best/api/v2/endpoints.
+GIFS_PAR_SCORE: dict[str, tuple[tuple[int, str], ...]] = {
+    "ship": ((80, "cuddle"), (50, "handhold"), (25, "shrug"), (0, "nope")),
+    "mood": ((80, "happy"), (50, "smile"), (25, "bored"), (0, "cry")),
+    "luck": ((90, "dance"), (60, "happy"), (30, "shrug"), (0, "facepalm")),
+    "vibe": ((60, "dance"), (30, "sip"), (0, "bored")),
+    "rizz": ((70, "wink"), (35, "smug"), (0, "bleh")),
+    "chaos": ((70, "tableflip"), (30, "spin"), (0, "sip")),
+    "rate": ((80, "clap"), (40, "thumbsup"), (0, "shrug")),
+    "brain": ((70, "think"), (30, "nod"), (0, "confused")),
+    "aura": ((5000, "smug"), (2500, "shrug"), (0, "bored")),
+}
+
+
+def gif_selon_score(mode: str, score: int) -> str | None:
+    paliers = GIFS_PAR_SCORE.get(mode)
+    if not paliers:
+        return None
+    return next(categorie for seuil, categorie in paliers if score >= seuil)
+
+
+def score_affiche(mode: str, guild_id: int, user_id: int, other_id: int | None = None) -> int:
+    """Le score que la fiche montre : celui qui doit choisir le GIF."""
+    if mode == "ship":
+        pair = sorted((user_id, other_id or user_id))
+        return fixed_score(guild_id, pair[0], f"ship:{pair[1]}")
+    return fixed_score(guild_id, user_id, mode, limit=9999 if mode == "aura" else 100)
+
+
 def gif_url_is_safe(url: str, category: str) -> bool:
     try:
         parsed = urlsplit(url)
@@ -212,6 +243,7 @@ def gif_url_is_safe(url: str, category: str) -> bool:
 async def fetch_gif(category: str) -> tuple[str | None, str | None]:
     """Un GIF de la categorie voulue ; aucun remplacement trompeur par un autre GIF."""
     valid = {data[3] for data in (*REACTIONS.values(), *SOLO.values())}
+    valid |= {categorie for paliers in GIFS_PAR_SCORE.values() for _seuil, categorie in paliers}
     if category not in valid:
         return None, None
     timeout = aiohttp.ClientTimeout(total=5)
@@ -510,9 +542,8 @@ class FunSocial(commands.Cog, name="FunSocial"):
                 classement = await self._aura_classement(ctx.guild, target)
                 if classement:
                     embed.add_field(name="Classement du jour", value=classement, inline=False)
-            category = {"aura": "smug", "ship": "handhold", "luck": "happy",
-                        "vibe": "dance", "mood": "smile", "rizz": "wink",
-                        "chaos": "tableflip"}.get(action)
+            category = gif_selon_score(action, score_affiche(
+                action, ctx.guild.id, target.id, (other or target).id))
             if category:
                 gif, anime = await fetch_gif(category)
                 if gif:

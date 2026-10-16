@@ -116,8 +116,9 @@ async def test_aura_contains_score_avatar_and_matching_visual(monkeypatch):
     assert "Aura" in e.title
     assert "points d'aura" in e.description
     assert "Camille" in e.title
-    assert e.image.url.endswith("/smug/demo.gif")
-    assert called == ["smug"]
+    attendu = fun.gif_selon_score("aura", fun.score_affiche("aura", 123, 9))
+    assert e.image.url.endswith(f"/{attendu}/demo.gif")
+    assert called == [attendu]
 
 
 @pytest.mark.asyncio
@@ -168,3 +169,58 @@ def test_ship_nom_de_couple_jauge_et_message_selon_le_score():
     assert texte.count("_") >= 2, "un message adapté au score accompagne le pourcentage"
     # Même couple, même jour : même score, quel que soit l'ordre.
     assert fun_social._ship_texte(1, b, a).split("**")[3] == texte.split("**")[3]
+
+
+# Catégories GIF de nekos.best/api/v2/endpoints (relevé du 16/10/2026).
+NEKOS_GIFS = {
+    "angry", "baka", "bite", "bleh", "blowkiss", "blush", "bonk", "bored", "carry", "clap",
+    "confused", "cry", "cuddle", "dance", "facepalm", "feed", "handhold", "handshake", "happy",
+    "highfive", "hug", "kabedon", "kick", "kiss", "lappillow", "laugh", "lurk", "nod", "nom",
+    "nope", "nya", "pat", "peck", "poke", "pout", "punch", "run", "salute", "shake", "shocked",
+    "shoot", "shrug", "sip", "slap", "sleep", "smile", "smug", "spin", "stare", "tableflip",
+    "teehee", "think", "thumbsup", "tickle", "wag", "wave", "wink", "yawn", "yeet",
+}
+
+
+def test_toutes_les_categories_gif_existent_chez_nekos():
+    utilisees = {d[3] for d in (*fun.REACTIONS.values(), *fun.SOLO.values())}
+    utilisees |= {c for paliers in fun.GIFS_PAR_SCORE.values() for _s, c in paliers}
+    assert utilisees <= NEKOS_GIFS, utilisees - NEKOS_GIFS
+
+
+def test_le_gif_suit_le_score_affiche():
+    assert fun.gif_selon_score("ship", 12) == "nope"
+    assert fun.gif_selon_score("ship", 95) == "cuddle"
+    assert fun.gif_selon_score("mood", 5) == "cry"
+    assert fun.gif_selon_score("mood", 100) == "happy"
+    assert fun.gif_selon_score("aura", 0) == "bored"
+    assert fun.gif_selon_score("aura", 9999) == "smug"
+    assert fun.gif_selon_score("scan", 50) is None
+    # Chaque palier part de 0 : aucun score sans GIF, ordre décroissant.
+    for mode, paliers in fun.GIFS_PAR_SCORE.items():
+        seuils = [seuil for seuil, _c in paliers]
+        assert seuils == sorted(seuils, reverse=True) and seuils[-1] == 0, mode
+
+
+def test_encourager_montre_un_geste_d_encouragement():
+    assert fun.REACTIONS["cheer"][3] == "thumbsup"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["ship", "mood", "luck", "rizz"])
+async def test_la_commande_utilise_le_meme_score_que_la_fiche(monkeypatch, mode):
+    called = []
+
+    async def gif(category):
+        called.append(category)
+        return f"https://nekos.best/api/v2/{category}/demo.gif", None
+
+    monkeypatch.setattr(fun, "fetch_gif", gif)
+    cog = fun.FunSocial(SimpleNamespace(db=None))
+    ctx = fake_context(1)
+    await cog.run_action(ctx, mode, member(9, "Camille"))
+    e = ctx.send.await_args.kwargs["embed"]
+    autre = 1 if mode == "ship" else 9
+    score = fun.score_affiche(mode, 123, 9, autre)
+    assert called == [fun.gif_selon_score(mode, score)]
+    assert f"{score}" in e.description
