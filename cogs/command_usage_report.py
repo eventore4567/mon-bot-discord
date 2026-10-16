@@ -33,13 +33,17 @@ class CommandUsageReport(commands.Cog):
 
     async def _ecrire(self) -> None:
         await asyncio.sleep(DELAI_SECONDES)
-        try:
-            r = await command_usage.resume(self.bot.db, catalogue(self.bot))
-        except Exception:
-            logger.warning("Résumé d'usage des commandes indisponible.", exc_info=True)
-            return
-        for ligne in command_usage.lignes_de_journal(r):
-            logger.info(ligne)
+        noms = catalogue(self.bot)
+        # 30 jours : l'usage actuel ; depuis le début : la seule base solide pour
+        # dire qu'une commande n'a jamais servi.
+        for jours in (command_usage.JOURS, None):
+            try:
+                r = await command_usage.resume(self.bot.db, noms, jours=jours)
+            except Exception:
+                logger.warning("Résumé d'usage des commandes indisponible.", exc_info=True)
+                return
+            for ligne in command_usage.lignes_de_journal(r):
+                logger.info(ligne)
 
     def cog_unload(self):
         if self._tache is not None:

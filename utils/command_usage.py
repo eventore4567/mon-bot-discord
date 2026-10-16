@@ -22,10 +22,11 @@ TOP = 40
 LIGNE_MAX = 1500  # une ligne de journal Railway reste lisible et entière
 
 
-async def resume(db: Any, catalogue: list[str], *, jours: int = JOURS,
+async def resume(db: Any, catalogue: list[str], *, jours: int | None = JOURS,
                  maintenant: int | None = None) -> dict[str, Any]:
+    """``jours=None`` : depuis la première ligne du journal."""
     maintenant = int(maintenant or time.time())
-    depuis_ts = maintenant - jours * 86400
+    depuis_ts = maintenant - jours * 86400 if jours else 0
     lignes = await db.fetchall(
         "SELECT command_name, COUNT(*) AS n, COUNT(DISTINCT guild_id) AS g "
         "FROM command_logs WHERE timestamp >= ? GROUP BY command_name",
@@ -71,13 +72,14 @@ def lignes_de_journal(r: dict[str, Any]) -> list[str]:
 
     depuis = (datetime.fromtimestamp(r["depuis"], timezone.utc).date().isoformat()
               if r["depuis"] else "aucune donnée")
+    periode = f"{r['jours']} j" if r["jours"] else "DEPUIS LE DÉBUT"
     lignes = [
-        f"USAGE COMMANDES {r['jours']} j : {r['total']} exécutions, {r['serveurs']} serveurs, "
+        f"USAGE COMMANDES {periode} : {r['total']} exécutions, {r['serveurs']} serveurs, "
         f"{r['utilisees']}/{r['catalogue']} commandes utilisées, {len(r['jamais'])} jamais ; "
         f"journal depuis {depuis}"
     ]
-    lignes += _decouper("USAGE TOP : ", [f"{nom}={n} ({g} srv)" for nom, (n, g) in r["top"]])
-    lignes += _decouper(f"USAGE JAMAIS ({len(r['jamais'])}) : ", r["jamais"])
+    lignes += _decouper(f"USAGE TOP {periode} : ", [f"{nom}={n} ({g} srv)" for nom, (n, g) in r["top"]])
+    lignes += _decouper(f"USAGE JAMAIS {periode} ({len(r['jamais'])}) : ", r["jamais"])
     if r["hors_catalogue"]:
         lignes += _decouper("USAGE HORS CATALOGUE : ", r["hors_catalogue"])
     return lignes
