@@ -280,9 +280,7 @@ async def fake_request(self, route, *, files=None, form=None, **kwargs):
     if path == "/users/@me":
         return user(BOT_ID, "SentriX")
     if re.match(r"/interactions/\d+/[^/]+/callback$", path):
-        return {"interaction": {"id": path.split("/")[2], "type": 2, "activity_instance_id": None,
-                                "response_message_id": None, "response_message_loading": True,
-                                "response_message_ephemeral": False}, "resource": None}
+        return callback_payload(path, js)
     if re.match(r"/webhooks/\d+/[^/]+$", path) and method == "POST":
         STATE["msg_seq"] += 1
         return message_payload(STATE["msg_seq"], CID, (js or {}).get("content"))
@@ -304,15 +302,29 @@ async def fake_request(self, route, *, files=None, form=None, **kwargs):
     return {}
 
 
+def callback_payload(path: str, js) -> dict:
+    """Comme Discord avec ``with_response=1`` : une réponse type 4 (message) ou 7
+    (mise à jour) renvoie le message dans ``resource`` — sans quoi un
+    ``panels.envoyer`` en première réponse slash rendait None, ce qui n'arrive pas
+    en production."""
+    kind = (js or {}).get("type") if isinstance(js, dict) else None
+    resource = None
+    if kind in (4, 7):
+        STATE["msg_seq"] += 1
+        content = ((js or {}).get("data") or {}).get("content")
+        resource = {"type": kind, "message": message_payload(STATE["msg_seq"], CID, content)}
+    return {"interaction": {"id": path.split("/")[2], "type": 2, "activity_instance_id": None,
+                            "response_message_id": None, "response_message_loading": kind == 5,
+                            "response_message_ephemeral": False}, "resource": resource}
+
+
 async def fake_webhook_request(self, route, session=None, *, payload=None, multipart=None, files=None,
                                reason=None, auth_token=None, params=None, **_kw):
     js = payload if payload is not None else _payload_from_form(multipart)
     path = route.url.replace(Route.BASE, "") if hasattr(route, "url") else route.path
     CALLS.append((route.method, path, js))
     if "/callback" in path:
-        return {"interaction": {"id": path.split("/")[2], "type": 2, "activity_instance_id": None,
-                                "response_message_id": None, "response_message_loading": True,
-                                "response_message_ephemeral": False}, "resource": None}
+        return callback_payload(path, js)
     STATE["msg_seq"] += 1
     return message_payload(STATE["msg_seq"], CID, (js or {}).get("content") if isinstance(js, dict) else None)
 
@@ -580,7 +592,12 @@ def slash_options_from_spec(bot, spec: str) -> tuple[str, list]:
 
 async def run_slash(bot, guild, spec: str) -> None:
     root_name, options = slash_options_from_spec(bot, spec)
-    await bot.tree._call(build_interaction(bot, root_name, options))
+    interaction = build_interaction(bot, root_name, options)
+    # Comme discord.py (ConnectionState.parse_interaction_create) : l'événement
+    # « interaction » part AUSSI. Sans lui, les écouteurs d'interaction — dont le
+    # minuteur qui affiche « réfléchit… » à 1,8 s — ne tournaient jamais en test.
+    bot.dispatch("interaction", interaction)
+    await bot.tree._call(interaction)
 
 
 def _component_texts(components) -> list[str]:

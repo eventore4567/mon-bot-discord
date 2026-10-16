@@ -249,6 +249,7 @@ async def _invoke_native(
             await command.call_after_hooks(ctx)
 
     if not ctx.command_failed:
+        await _acknowledge_if_silent(ctx.interaction)
         bot.dispatch("command_completion", ctx)
 
 
@@ -288,6 +289,7 @@ async def _invoke_legacy(
         for target in forced:
             target.__dict__.pop("_parse_arguments", None)
     if not ctx.command_failed:
+        await _acknowledge_if_silent(ctx.interaction)
         bot.dispatch("command_completion", ctx)
 
 
@@ -381,6 +383,46 @@ async def _send_short_error(interaction: discord.Interaction, error: BaseExcepti
         logger.warning("Impossible d'envoyer l'erreur slash compacte : interaction expirée.")
 
 
+async def _acknowledge_if_silent(interaction: discord.Interaction | None) -> None:
+    """La commande a réussi sans rien répondre à Discord (elle a écrit directement
+    dans le salon) : une courte confirmation éphémère, sinon Discord afficherait
+    « L'application ne répond pas ». Si c'est le minuteur des commandes lentes qui a
+    affiché « réfléchit… » et que rien ne l'a remplacé, il est refermé."""
+    if interaction is None:
+        return
+    timer = interaction.extras.pop("sentrix_slow_timer", None)
+    if timer is not None:
+        timer.cancel()
+    if interaction.response.is_done():
+        if interaction.extras.get("sentrix_slow_defer"):
+            from cogs import slash_reliability_v7
+
+            await slash_reliability_v7._settle_deferred(interaction, "commande lente")
+        return
+    try:
+        await interaction.response.send_message("Commande exécutée.", ephemeral=True)
+    except (discord.InteractionResponded, discord.NotFound):
+        return
+    except discord.HTTPException:
+        logger.debug("Accusé de réception slash impossible.", exc_info=True)
+
+
+SLOW_COMMAND_DEFER_SECONDS = 1.8
+
+
+async def _defer_if_slow(interaction: discord.Interaction) -> None:
+    await asyncio.sleep(SLOW_COMMAND_DEFER_SECONDS)
+    if interaction.response.is_done():
+        return
+    try:
+        await interaction.response.defer(thinking=True)
+        interaction.extras["sentrix_slow_defer"] = True
+    except (discord.InteractionResponded, discord.NotFound):
+        return
+    except discord.HTTPException:
+        logger.debug("Defer d'une commande slash lente impossible.", exc_info=True)
+
+
 async def _invoke_original_fixed(
     bot: commands.Bot,
     command: commands.Command,
@@ -388,9 +430,14 @@ async def _invoke_original_fixed(
     option_names: tuple[str, ...],
     kwargs: dict,
 ) -> None:
-    if not interaction.response.is_done():
-        await interaction.response.defer(thinking=True)
-
+    # Plus de « SentriX réfléchit… » d'office : il s'affichait avant TOUTE commande
+    # « / », même instantanée (mesuré : 9 sur 9, tools/slash_response_probe.py), et
+    # coûtait un aller-retour Discord de plus avant la vraie réponse. Une commande
+    # rapide répond directement ; une commande lente reçoit « réfléchit… » après
+    # SLOW_COMMAND_DEFER_SECONDS (Discord laisse 3 s). Le minuteur vit ici : celui de
+    # cogs/slash_reliability_v7 est retiré au boot par cogs/canonical_interactions.
+    watchdog = asyncio.create_task(_defer_if_slow(interaction))
+    interaction.extras["sentrix_slow_timer"] = watchdog
     ctx = await _make_context(bot, interaction)
     try:
         if _supports_direct_binding(command, option_names):
@@ -410,6 +457,8 @@ async def _invoke_original_fixed(
         ctx.command_failed = True
         logger.exception("Erreur inattendue slash groupée %s", command.qualified_name)
         await _send_short_error(interaction, exc)
+    finally:
+        watchdog.cancel()
 
 
 def install() -> None:

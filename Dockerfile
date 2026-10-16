@@ -46,6 +46,7 @@ RUN python -m pytest -q \
     tests/test_pg_dialect.py \
     tests/test_pg_ha_boot.py \
     tests/test_cluster.py \
+    tests/test_slash_slow_defer.py \
     tests/test_pvp_engine.py \
     tests/test_raid_verification_recovery_v130.py \
     tests/test_automod_log_manage_style.py \
