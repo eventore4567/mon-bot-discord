@@ -135,6 +135,7 @@ EXTENSIONS = [
     "cogs.levels",
     "cogs.minigames",
     "cogs.fun_social",  # 69 interactions Fun, GIFs pertinents et profils fictifs
+    "cogs.command_usage_report",  # usage réel des commandes dans le journal (comptes seuls)
     "cogs.games_economy",
     "cogs.games_arcade",
     "cogs.music",

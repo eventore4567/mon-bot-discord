@@ -49,6 +49,7 @@ RUN python -m pytest -q \
     tests/test_slash_slow_defer.py \
     tests/test_pvp_engine.py \
     tests/test_fun_social.py \
+    tests/test_command_usage.py \
     tests/test_raid_verification_recovery_v130.py \
     tests/test_automod_log_manage_style.py \
     tests/test_sentrix_trace_style.py \
