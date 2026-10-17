@@ -34,7 +34,16 @@ def test_help_v77_keeps_all_commands_visible_and_adds_navigation():
 
 
 def test_help_v77_has_expected_user_facing_categories():
-    source = HELP_V77.read_text(encoding="utf-8")
+    """Porte sur la donnée, plus sur le texte du fichier.
+
+    Les libellés vivent depuis le 2026-10-17 dans utils/command_categories,
+    consultée aussi par la page web /commands. Chercher la chaîne dans le
+    source de ce module-ci passait à côté dès qu'elle déménageait, alors que
+    les catégories, elles, étaient bien là.
+    """
+    from utils import command_categories
+
+    labels = {nom for _emoji, nom, _desc in command_categories.CATEGORIES.values()}
 
     for label in (
         "Modération",
@@ -50,7 +59,7 @@ def test_help_v77_has_expected_user_facing_categories():
         "Utilitaires",
         "Administration",
     ):
-        assert label in source
+        assert label in labels
 
 
 def test_help_v77_is_installed_after_official_help_runtime_is_available():

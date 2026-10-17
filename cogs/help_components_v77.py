@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict
 
+from utils import command_categories as _categories
+
 import discord
 from discord.ext import commands
 
@@ -23,54 +25,13 @@ logger = logging.getLogger("bot.help-components-v77")
 RUNTIME_MARKER = "Help Components V2 V77"
 PAGE_SIZE = 6
 
-CATEGORY_META = OrderedDict(
-    (
-        ("moderation", ("🛡️", "Modération", "Ban, kick, mute, warn, clear et gestion des sanctions.")),
-        ("security", ("🔒", "Sécurité", "Anti-spam, anti-raid, vérification et protections du serveur.")),
-        ("tickets", ("🎫", "Tickets", "Support, panels, tickets et outils liés aux demandes.")),
-        ("community", ("👋", "Bienvenue & rôles", "Bienvenue, rôles, autorôles et outils de communauté.")),
-        ("logs", ("📜", "Logs", "Journaux du serveur, historique et suivi des actions.")),
-        ("economy", ("🪙", "Économie & niveaux", "Argent, banque, boutique, XP, niveaux et progression.")),
-        ("ai", ("🧠", "Intelligence artificielle", "Assistant SentriX, recherche, mémoire et génération d'images.")),
-        ("notifications", ("🔔", "Notifications", "YouTube, TikTok, Twitch et rôles de notification.")),
-        ("games", ("🎮", "Jeux & événements", "Mini-jeux, giveaways, activités et divertissement.")),
-        ("music", ("🎵", "Musique", "Lecture et commandes musicales disponibles sur SentriX.")),
-        ("utility", ("🛠️", "Utilitaires", "Informations, statistiques, serveur, membre et outils pratiques.")),
-        ("administration", ("⚙️", "Administration", "Configuration et outils avancés pour gérer le serveur.")),
-    )
-)
-
-COG_CATEGORY = {
-    "Moderation": "moderation",
-    "Automod": "security",
-    "Security": "security",
-    "SecurityTools": "security",
-    "Verification": "security",
-    "ProofVerification": "security",
-    "Tickets": "tickets",
-    "Welcome": "community",
-    "Roles": "community",
-    "RolePanel": "community",
-    "ReactionRoles": "community",
-    "Logs": "logs",
-    "Economy": "economy",
-    "Levels": "economy",
-    "GamesEconomy": "games",
-    "Minigames": "games",
-    "Events": "games",
-    "Music": "music",
-    "Ai": "ai",
-    "AI": "ai",
-    "Notifications": "notifications",
-    "Utility": "utility",
-    "Stats": "utility",
-    "Invites": "utility",
-    "Configuration": "administration",
-    "ServerBuilder": "administration",
-    "Owner": "administration",
-    "EmbedBuilder": "administration",
-    "Design": "administration",
-}
+# Les catégories vivent désormais dans utils/command_categories, consultée
+# aussi par la page web /commands. Avant, les deux surfaces répondaient
+# différemment pour la même commande : cette table ne couvrait que 29 cogs sur
+# les 47 publiés, et 66 commandes sur 327 tombaient dans « Administration ».
+# Les noms historiques restent des alias pour ne rien casser autour.
+CATEGORY_META = _categories.CATEGORIES
+COG_CATEGORY = _categories.PAR_COG
 
 LEGACY_CATEGORY_FALLBACK = {
     "Modération": "moderation",
@@ -88,32 +49,14 @@ def _cog_name(command: commands.Command) -> str:
 
 
 def _category_key(command: commands.Command) -> str:
-    cog = _cog_name(command)
-    if cog in COG_CATEGORY:
-        return COG_CATEGORY[cog]
-
-    folded = cog.casefold()
-    if "moder" in folded:
-        return "moderation"
-    if any(word in folded for word in ("security", "secur", "automod", "verification")):
-        return "security"
-    if "ticket" in folded:
-        return "tickets"
-    if any(word in folded for word in ("welcome", "role", "community")):
-        return "community"
-    if "log" in folded:
-        return "logs"
-    if any(word in folded for word in ("econom", "level", "shop")):
-        return "economy"
-    if folded in {"ai", "ia"} or "artificial" in folded:
-        return "ai"
-    if "notif" in folded:
-        return "notifications"
-    if any(word in folded for word in ("game", "event", "giveaway", "minigame")):
-        return "games"
-    if "music" in folded:
-        return "music"
-    return LEGACY_CATEGORY_FALLBACK.get(legacy._category(command), "administration")
+    """Délègue à la source unique ; le repli historique reste le dernier recours."""
+    cle = _categories.resoudre(_cog_name(command), getattr(command, "qualified_name", ""))
+    if cle != _categories.DEFAUT:
+        return cle
+    # Le défaut peut venir d'un cog inconnu : on laisse sa chance à l'ancien
+    # classement par nom de commande avant de s'en contenter.
+    ancien = LEGACY_CATEGORY_FALLBACK.get(legacy._category(command))
+    return ancien or cle
 
 
 def _all_rows(bot: commands.Bot, member=None) -> list[commands.Command]:

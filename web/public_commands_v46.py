@@ -19,6 +19,18 @@ def _clean(value, fallback="") -> str:
     return " ".join(text.split())
 
 
+def _categorie_affichee(command) -> str:
+    """Catégorie lisible d'une commande, depuis la source unique."""
+    from utils import command_categories
+
+    brut = getattr(command, "cog_name", None)
+    nom = getattr(command, "qualified_name", None) or getattr(command, "name", "")
+    try:
+        return command_categories.nom_simple(command_categories.resoudre(brut, nom))
+    except Exception:  # pragma: no cover - l'affichage ne doit jamais casser la page
+        return _clean(brut, "Utilitaires")
+
+
 def _prefix_commands(bot) -> list[dict]:
     rows = []
     seen = set()
@@ -37,9 +49,29 @@ def _prefix_commands(bot) -> list[dict]:
         )
         signature = _clean(getattr(command, "signature", ""))
         usage = f"+{name}" + (f" {signature}" if signature else "")
-        cog = _clean(getattr(command, "cog_name", None), "Autres")
+        # Même table que /help : utils/command_categories. La page affichait
+        # jusqu'ici le nom du cog brut, d'où « SentriXV21 » et « BotV10 » comme
+        # catégories visibles par les membres, et 47 catégories au lieu de 12.
+        cog = _categorie_affichee(command)
         rows.append({"kind": "prefix", "name": name, "usage": usage, "description": description, "category": cog})
     return sorted(rows, key=lambda item: item["name"])
+
+
+def _categorie_slash(bot, name: str) -> str:
+    """Un nom slash hérite de la catégorie de la commande préfixée de même nom."""
+    from utils import command_categories
+
+    racine = str(name or "").split()[0]
+    jumelle = None
+    try:
+        jumelle = bot.get_command(racine)
+    except Exception:
+        jumelle = None
+    brut = getattr(jumelle, "cog_name", None) if jumelle is not None else None
+    try:
+        return command_categories.nom_simple(command_categories.resoudre(brut, racine))
+    except Exception:  # pragma: no cover
+        return "Utilitaires"
 
 
 def _slash_commands(bot) -> list[dict]:
@@ -58,7 +90,12 @@ def _slash_commands(bot) -> list[dict]:
             continue
         seen.add(name)
         description = _clean(getattr(command, "description", None), "Commande SentriX.")
-        rows.append({"kind": "slash", "name": name, "usage": f"/{name}", "description": description, "category": "Slash"})
+        rows.append({
+            "kind": "slash", "name": name, "usage": f"/{name}", "description": description,
+            # « Slash » n'est pas un sujet : une commande slash appartient à la
+            # même catégorie que son équivalent préfixé.
+            "category": _categorie_slash(bot, name),
+        })
     return sorted(rows, key=lambda item: item["name"])
 
 
