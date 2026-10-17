@@ -622,12 +622,17 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         await panels.envoyer(ctx, panels.depuis_embed(await self.build_progress_embed(ctx.guild, membre or ctx.author)))
 
-    @commands.hybrid_command(name="checkin", description="Récupérer votre récompense de présence quotidienne.", with_app_command=False)
-    async def checkin(self, ctx):
-        if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
-        result = await self.claim_checkin(ctx.guild, ctx.author)
-        if result["claimed"]: await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"**+{_fmt(result['reward'])}** pièces · série **{result['streak']} j**.")))
-        else: await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"Déjà récupéré aujourd'hui · série **{result['streak']} j**.")))
+    # La commande +checkin a été retirée le 2026-10-17. Elle faisait doublon
+    # avec +daily : deux « récompenses quotidiennes » lisibles à l'identique,
+    # deux tables et deux cooldowns indépendants, donc 250 à 350 pièces par
+    # jour pour qui connaissait les deux contre 200 pour les autres.
+    #
+    # Les journaux d'usage de la production tranchent : +checkin n'a JAMAIS
+    # été utilisée sur les 29 serveurs depuis le début, +daily si.
+    #
+    # La fonctionnalité reste entière : claim_checkin est appelée par le
+    # bouton du panneau (plus haut dans ce fichier), et la série continue
+    # d'alimenter +progress et +profilecard via cogs/sentrix_v21.
 
     @commands.hybrid_command(name="market", description="Afficher le marché entre membres.", with_app_command=False)
     async def market(self, ctx):

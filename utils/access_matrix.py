@@ -121,7 +121,7 @@ PUBLIC_COMMANDS = frozenset({
     # corps de la commande, pas ici (la cible n'est pas connue au niveau matrice).
     "permissions",
     # Hubs et profils membre (anciennement fail-closed par oubli)
-    "checkin", "progress", "profilecard",
+    "progress", "profilecard",
     "achievements", "achievements-v21", "challenges", "missions", "gamelobby", "matchmake",
     "market", "market-buy", "market-sell", "market-cancel", "market-find",
     "market-history", "market-my", "transactions", "shopwindow",

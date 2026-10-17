@@ -244,7 +244,6 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("economy balance", "balance", "Show your balance or a member's."),
     _e("economy daily", "daily", "Claim your daily reward."),
     _e("economy weekly", "weekly", "Claim your weekly reward."),
-    _e("economy checkin", "checkin", "Claim your daily check-in reward."),
     _e("economy work", "work", "Work to earn coins."),
     _e("economy rob", "rob", "Try to rob another member."),
     _e("economy pay", "pay", "Send coins to another member."),
