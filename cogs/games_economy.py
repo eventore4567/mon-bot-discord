@@ -87,7 +87,7 @@ COINFLIP_MISE_MIN = 10
 COINFLIP_MISE_MAX = 2_000
 
 
-async def _embed(bot, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary", scene: str | None = None) -> discord.Embed:
+async def _embed(bot, guild_id: int | None, *, title: str, description: str = None, kind: str = "primary", scene: str | None = None, graine: object = None) -> discord.Embed:
     style = design_system.CATEGORY_STYLES["games"]
     colour_key = {"primary": "primary_color", "success": "success_color", "warning": "warning_color", "danger": "danger_color"}.get(kind, "primary_color")
     default_colour = style["colour"] if kind == "primary" else getattr(design_system.COLORS, kind)
@@ -105,8 +105,10 @@ async def _embed(bot, guild_id: int | None, *, title: str, description: str = No
     embed.title = f"{_game_icon(title)} {resolved_title}"
     if description:
         embed.description = str(description)
+    # `graine` fait varier l'animation d'un tour à l'autre sans la faire
+    # clignoter à l'intérieur d'un même tour : même graine, même image.
     return await game_visuals.decorate_embed_checked(
-        embed, title=title, description=description, kind=kind, scene=scene
+        embed, title=title, description=description, kind=kind, scene=scene, graine=graine
     )
 
 
@@ -1273,9 +1275,14 @@ class _BossFightView(discord.ui.View):
         """Édite le MÊME panneau Discord avec le GIF propre à cette phase."""
         for child in self.children:
             child.disabled = not buttons
+        # Le numéro de tour sert de graine : l'animation change d'un tour à
+        # l'autre, mais reste la même pendant tout le tour — un panneau est
+        # réédité plusieurs fois par tour, et une image tirée au hasard
+        # clignoterait entre deux clics.
         embed = await _embed(
             self.cog.bot, self.ctx.guild.id, title="Combat de boss",
             description=self.summary(status), kind="primary", scene=scene,
+            graine=getattr(self, "turn", 0),
         )
         panel = panels.depuis_embed(embed)
         if buttons:
@@ -1303,6 +1310,8 @@ class _BossFightView(discord.ui.View):
                 title="Combat de boss — " + ("Victoire" if won else "Défaite"),
                 description=desc, kind="success" if won else "danger",
                 scene="win" if won else "loss",
+                # Deux combats gagnés d'affilée ne montrent pas la même victoire.
+                graine=getattr(self, "turn", 0),
             )))
 
     async def on_timeout(self):

@@ -11,6 +11,7 @@ mais boutons, scores, mises, récompenses et résultats restent utilisables.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
 import re
@@ -55,6 +56,71 @@ _ATTACHMENT_PREFIX = "sentrix_game_"
 _MEDIA_LOCK: asyncio.Lock | None = None
 _VALID_SECONDS = 3600
 _INVALID_SECONDS = 120
+
+
+# Variantes par scène. Jayden, le 2026-10-17 : « quand on attaque ça monte un
+# GIF d'attaque, pas le même à chaque fois ». Jusqu'ici une scène = une seule
+# image, donc la même animation à chaque coup.
+#
+# Les variantes ne sont PAS de nouvelles URL inventées : ce sont celles déjà
+# déclarées dans GIFS ci-dessus, dont les octets sont vérifiés par
+# _fetch_gif_bytes avant tout envoi. Les scènes « boss-* » existaient sans
+# jamais être choisies par scene_for ; elles servent enfin.
+VARIANTES: dict[str, tuple[str, ...]] = {
+    "fight": ("boss-attack", "boss-power", "boss-counter", "boss-counter-alt", "slap"),
+    "win": ("boss-power", "arcade"),
+    "loss": ("boss-guard", "slap"),
+    "arcade": ("doors", "emojiorder"),
+    "race": ("arcade",),
+    "think": ("doors",),
+}
+
+
+def urls_de_scene(scene: str) -> tuple[str, ...]:
+    """Toutes les images utilisables pour une scène, la canonique en tête."""
+    canonique = GIFS.get(scene)
+    if not canonique:
+        return ()
+    vues = {canonique}
+    urls = [canonique]
+    for autre in VARIANTES.get(scene, ()):
+        url = GIFS.get(autre)
+        if url and url not in vues:
+            vues.add(url)
+            urls.append(url)
+    return tuple(urls)
+
+
+def url_de_scene(scene: str, graine: object = None) -> str | None:
+    """Image d'une scène, variée mais STABLE pour une même graine.
+
+    Le choix doit rester déterministe : un panneau de jeu est réédité à chaque
+    clic de bouton, et tirer au hasard ferait clignoter l'animation en plein
+    tour. La graine est donc le numéro de tour (ou l'identifiant du message) —
+    même tour, même image ; tour suivant, image suivante.
+    """
+    urls = urls_de_scene(scene)
+    if not urls:
+        return None
+    if graine is None or len(urls) == 1:
+        return urls[0]
+    if isinstance(graine, int):
+        index = graine
+    else:
+        # Stable d'un processus à l'autre, contrairement à hash() sur une str.
+        index = int.from_bytes(hashlib.blake2b(str(graine).encode("utf-8"), digest_size=8).digest(), "big")
+    return urls[index % len(urls)]
+
+
+def _cle_variante(scene: str, url: str) -> str:
+    """Identifiant stable d'une variante, utilisable comme nom de fichier."""
+    urls = urls_de_scene(scene)
+    if not urls or url == urls[0]:
+        return scene
+    try:
+        return f"{scene}-v{urls.index(url) + 1}"
+    except ValueError:
+        return scene
 
 
 def _lock() -> asyncio.Lock:
@@ -135,7 +201,7 @@ def attachment_file_for(image_url: str) -> discord.File | None:
 
 async def verified_image_for(
     title: str, description: str | None = None, kind: str = "primary",
-    *, scene: str | None = None,
+    *, scene: str | None = None, graine: object = None,
 ) -> str | None:
     """Renvoie une référence à une pièce jointe locale, jamais un hotlink.
 
@@ -146,9 +212,13 @@ async def verified_image_for(
     # Un combat multi-phases sélectionne EXPLICITEMENT son action.
     # Le moteur général garde sa résolution par titre pour les autres jeux.
     scene = scene if scene in GIFS else scene_for(title, description, kind)
-    url = GIFS.get(scene) if scene else None
+    url = url_de_scene(scene, graine) if scene else None
     if not url:
         return None
+    # La clé du cache suit l'IMAGE, pas la scène : deux variantes de « fight »
+    # ont des octets différents et ne doivent pas se télescoper, ni dans
+    # _MEDIA_BYTES ni dans le nom de la pièce jointe du message.
+    scene = _cle_variante(scene, url)
     attachment = f"attachment://{_ATTACHMENT_PREFIX}{scene}.gif"
     cached = _MEDIA_STATE.get(url)
     if cached is not None and cached[0] > time.monotonic():
@@ -207,10 +277,10 @@ async def preflight_assets() -> dict[str, bool]:
 
 async def decorate_embed_checked(
     embed: discord.Embed, *, title: str, description: str | None = None,
-    kind: str = "primary", scene: str | None = None,
+    kind: str = "primary", scene: str | None = None, graine: object = None,
 ) -> discord.Embed:
     """Pour les commandes de jeu : aucun cadre vide si un GIF ne charge pas."""
-    url = await verified_image_for(title, description, kind, scene=scene)
+    url = await verified_image_for(title, description, kind, scene=scene, graine=graine)
     if url:
         embed.set_image(url=url)
     return embed
@@ -286,9 +356,12 @@ def scene_for(title: str, description: str | None = None, kind: str = "primary")
     return "arcade"
 
 
-def image_for(title: str, description: str | None = None, kind: str = "primary") -> str | None:
+def image_for(
+    title: str, description: str | None = None, kind: str = "primary",
+    *, graine: object = None,
+) -> str | None:
     scene = scene_for(title, description, kind)
-    return GIFS.get(scene) if scene else None
+    return url_de_scene(scene, graine) if scene else None
 
 
 def decorate_embed(
