@@ -32,6 +32,7 @@ jobs:
         run: |
           PYTHONPATH=. python tests/test_owner_log_rebuild_v2_resilience.py
           PYTHONPATH=. python tests/test_logs_unified_v6.py
+          python -m pytest -q tests/test_logs_member_identity.py tests/test_sentrix_emojis.py
         env:
           DISCORD_TOKEN: "ci.fake.token"
           DATABASE_PATH: "/tmp/sentrix-reset-logs-v2.db"
