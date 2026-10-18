@@ -280,7 +280,10 @@ def _native_annotation(annotation):
         discord.TextChannel, discord.VoiceChannel, discord.StageChannel,
         discord.CategoryChannel, discord.ForumChannel,
     }
-    if annotation in supported:
+    # discord.ext.commands.Greedy[...] est un objet non hashable :
+    # « annotation in supported » levait TypeError pendant le registre slash V110.
+    # Seuls des types Python concrets appartiennent à cet ensemble.
+    if isinstance(annotation, type) and annotation in supported:
         return annotation
     origin = typing.get_origin(annotation)
     if origin is typing.Literal:
