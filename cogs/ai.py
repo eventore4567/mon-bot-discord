@@ -34,6 +34,7 @@ config.py). Les erreurs affichées restent génériques ; le détail technique n
 dans les logs serveur (logger "bot.ai").
 """
 
+import asyncio
 import copy
 import io
 import json
@@ -2588,10 +2589,29 @@ class Ai(commands.Cog, name="Ai"):
         if self._check_minute_limit(guild_id or 0, user_id, settings["per_minute_limit"]):
             return {"ok": False, "error": "⏳ Trop de demandes en une minute — patiente un peu."}
 
+        previous_response_id = None
         if guild_id:
-            used_today = await ai_service.get_daily_usage(self.bot, guild_id, user_id)
+            # Ces lectures ne dependent pas les unes des autres. Sur PostgreSQL distant,
+            # les attendre en serie ajoutait plusieurs allers-retours avant meme que la
+            # requete OpenAI commence.
+            if settings["memory_enabled"]:
+                used_today, memory, instructions = await asyncio.gather(
+                    ai_service.get_daily_usage(self.bot, guild_id, user_id),
+                    ai_service.get_conversation_history(
+                        self.bot, guild_id, channel_id, user_id, settings["memory_minutes"]
+                    ),
+                    self._build_system_instructions(user_id, author_name),
+                )
+                _, previous_response_id = memory
+            else:
+                used_today, instructions = await asyncio.gather(
+                    ai_service.get_daily_usage(self.bot, guild_id, user_id),
+                    self._build_system_instructions(user_id, author_name),
+                )
             if used_today >= settings["daily_limit"]:
                 return {"ok": False, "error": f"📅 Limite quotidienne atteinte ({settings['daily_limit']} demandes/jour). Réessaie demain."}
+        else:
+            instructions = await self._build_system_instructions(user_id, author_name)
 
         model_key = ai_service.pick_model(question, forced_advanced=forced_advanced)
         if settings["default_model"] == ai_service.MODEL_LUNA and not forced_advanced:
@@ -2599,14 +2619,6 @@ class Ai(commands.Cog, name="Ai"):
         elif settings["default_model"] == ai_service.MODEL_SOL:
             model_key = ai_service.MODEL_SOL
         reasoning_effort = ai_service.pick_reasoning_effort(model_key, settings["reasoning_effort"])
-
-        previous_response_id = None
-        if guild_id and settings["memory_enabled"]:
-            _, previous_response_id = await ai_service.get_conversation_history(
-                self.bot, guild_id, channel_id, user_id, settings["memory_minutes"],
-            )
-
-        instructions = await self._build_system_instructions(user_id, author_name)
 
         prompt = question + suffix
         result = await ai_service.generate(
@@ -2621,10 +2633,21 @@ class Ai(commands.Cog, name="Ai"):
 
         if guild_id:
             tokens = ai_service.estimate_tokens(prompt) + ai_service.estimate_tokens(result.text)
-            await ai_service.record_usage(self.bot, guild_id, user_id, tokens_estimate=tokens)
-            if settings["memory_enabled"]:
+            async def persist_conversation():
+                if not settings["memory_enabled"]:
+                    return
                 await ai_service.append_conversation(self.bot, guild_id, channel_id, user_id, "user", question)
                 await ai_service.append_conversation(self.bot, guild_id, channel_id, user_id, "assistant", result.text, response_id=result.response_id)
+
+            # Le compteur et la conversation sont independants. On conserve strictement
+            # l'ordre user -> assistant dans la conversation, mais on ne bloque plus ce
+            # groupe derriere l'ecriture du compteur.
+            await asyncio.gather(
+                ai_service.record_usage(
+                    self.bot, guild_id, user_id, tokens_estimate=tokens
+                ),
+                persist_conversation(),
+            )
 
         return {"ok": True, "text": result.text, "model_key": result.model_key or model_key}
 

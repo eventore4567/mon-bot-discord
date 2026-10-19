@@ -803,7 +803,9 @@ async def generate(
     log_args = (model_id, command, guild_id, channel_id, user_id)
 
     try:
+        started = time.monotonic()
         resp = await client.responses.create(**kwargs)
+        elapsed_ms = int((time.monotonic() - started) * 1000)
         text = getattr(resp, "output_text", None) or _extract_text(resp)
         if web_search:
             text = _append_web_citations(text, resp, max_sources=6 if video_search else 5)
@@ -817,6 +819,14 @@ async def generate(
         usage = getattr(resp, "usage", None)
         if usage is not None:
             usage_tokens = getattr(usage, "total_tokens", 0) or 0
+        logger.info(
+            "Reponse OpenAI terminee en %sms — modele=%s commande=%s web=%s tokens=%s",
+            elapsed_ms,
+            model_id,
+            command,
+            web_search,
+            usage_tokens,
+        )
         return AiResult(text=text or "", response_id=getattr(resp, "id", None),
                          model_key=model_key, usage_tokens=usage_tokens)
 

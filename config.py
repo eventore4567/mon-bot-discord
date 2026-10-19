@@ -22,7 +22,9 @@ if any(ord(ch) < 32 or ord(ch) == 127 for ch in DISCORD_TOKEN):
     )
 
 # --- Optionnel (fonctionnalités IA / utilitaires) ---
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")          # /ask, /ai, /sentrix, etc.
+# Railway peut conserver un espace ou un retour a la ligne lors d'un collage. Comme pour
+# DISCORD_TOKEN, on nettoie uniquement les bords : la cle n'est jamais journalisee.
+OPENAI_API_KEY = (os.getenv("OPENAI_API_KEY") or "").strip()  # /ask, /ai, /sentrix, etc.
 # Adresse optionnelle du fournisseur IA TEXTE. Vide en production par défaut : le SDK
 # utilise alors l'API OpenAI habituelle. En développement local, elle peut pointer vers
 # l'API compatible OpenAI de LM Studio (ex. http://127.0.0.1:1234/v1).
