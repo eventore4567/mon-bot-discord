@@ -16,12 +16,12 @@ from database.db import DEFAULT_STATS_SETTINGS
 
 
 EXPECTED_CONFIG = {
-    "accueil", "automod", "logs", "surveillance", "tickets",
+    "accueil", "automod", "logs", "tickets",
     "bienvenue", "moderation", "niveaux", "diagnostic",
 }
 
 
-def test_grouped_slash_config_has_surveillance_and_all_nine_sections():
+def test_grouped_slash_config_retains_eight_commands_with_surveillance_inside_panel():
     group = setup_control_center.OfficialSetup.config_group
     assert group.name == "config"
     assert {cmd.name for cmd in group.commands} == EXPECTED_CONFIG
