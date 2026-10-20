@@ -326,6 +326,33 @@ class MemberHistoryView(discord.ui.LayoutView):
             return False
         return True
 
+    async def _resolve_target_user(self, guild):
+        """Résout le vrai pseudo Discord, même si le membre a quitté le serveur."""
+        cached_member = guild.get_member(self.target_id)
+        if cached_member is not None:
+            return cached_member
+        if getattr(self, "_resolved_user_id", None) == self.target_id:
+            return getattr(self, "_resolved_user", None)
+        client = self.bot
+        resolved = None
+        if client is not None:
+            getter = getattr(client, "get_user", None)
+            if callable(getter):
+                resolved = getter(self.target_id)
+            if resolved is None:
+                fetch = getattr(client, "fetch_user", None)
+                if callable(fetch):
+                    try:
+                        resolved = await fetch(self.target_id)
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        logger.info(
+                            "Impossible de résoudre le profil Discord %s : ID toujours affiché",
+                            self.target_id,
+                        )
+        self._resolved_user_id = self.target_id
+        self._resolved_user = resolved
+        return resolved
+
     async def render(self, guild: discord.Guild) -> None:
         event_types = (
             FILTERS["voice"] if self.tab == "voice"
@@ -348,26 +375,29 @@ class MemberHistoryView(discord.ui.LayoutView):
             )
         self.records, self.counts = records, counts
         self.clear_items()
-        member = guild.get_member(self.target_id)
-        username = safe_text(member.display_name if member else str(self.target_id))
+        # Pas de simple snowflake à la place d'un pseudo : un membre parti
+        # peut être trouvé par get_user / fetch_user grâce à l'API Discord.
+        member = await self._resolve_target_user(guild)
+        username = _member_display_name(member, self.target_id)
         counters = {
             key: sum(counts.get(event, 0) for event in events)
             for key, events in COUNTERS.items()
         }
         self.add_item(_history_member_header(
-            username, counters, total=sum(counts.values()), member=member,
+            username, counters, total=sum(counts.values()),
+            member=member, target_id=self.target_id,
         ))
 
         names = {
-            "journal": ("📋 Journal d'activité", "Tous les événements du serveur"),
+            "journal": ("📋 Journal d'activité", "Tous les événements du membre"),
             "voice": ("🎧 Activité vocale", "Entrées, sorties, déplacements et durées"),
             "sanctions": ("⚖️ Sanctions", "Historique des sanctions appliquées"),
-            "settings": ("⚙️ Réglages du suivi", "Configuration en lecture seule"),
+            "settings": ("⚙️ Surveillance", "Options du suivi privé des membres"),
         }
         title, subtitle = names[self.tab]
         body = discord.ui.Container(accent_colour=discord.Colour(0x515B70))
         body.add_item(discord.ui.TextDisplay(f"### {title}\n-# {subtitle}"))
-        body.add_item(discord.ui.Separator())
+
         voice_summary = None
         if self.tab in {"voice", "settings"} and self.bot is not None:
             try:
@@ -380,19 +410,20 @@ class MemberHistoryView(discord.ui.LayoutView):
         if self.tab == "voice" and voice_summary:
             session = voice_summary.get("session")
             status = (
-                f"🟢 En vocal dans <#{session['channel_id']}>"
+                f"🟢 Dans <#{session['channel_id']}>"
                 f" depuis <t:{int(session['started_at'])}:R>"
                 if session else "⚪ Aucune session active connue"
             )
+            body.add_item(discord.ui.Separator())
             body.add_item(discord.ui.TextDisplay(
                 f"**📊 {int(voice_summary['completed_sessions'])} session(s)**"
                 f" · **{voice_history.duration_label(voice_summary['seconds'])}** cumulées\n"
                 f"{status}\n"
                 f"-# Suivi {'activé' if voice_summary['enabled'] else 'désactivé'}"
-                " · Durées observées uniquement, jamais d'audio."
+                " · Durées observées uniquement · Jamais d'audio"
             ))
-            body.add_item(discord.ui.Separator())
         elif self.tab == "settings":
+            body.add_item(discord.ui.Separator())
             if voice_summary:
                 route = None
                 try:
@@ -406,51 +437,41 @@ class MemberHistoryView(discord.ui.LayoutView):
                     if route and route.get("channel_id") else "Non configuré"
                 )
                 body.add_item(discord.ui.TextDisplay(
-                    "**🎧 Historique vocal**\n"
+                    "**👁️ Surveillance vocale**\n"
                     f"• Entrées et sorties : **{'Oui' if voice_summary['enabled'] else 'Non'}**\n"
                     f"• Déplacements : **{'Oui' if voice_summary['track_moves'] else 'Non'}**\n"
                     f"• Durées : **{'Oui' if voice_summary['track_duration'] else 'Non'}**\n"
-                    f"• Salon de publication : **{where}**\n\n"
-                    "Ouvre /config logs → 🎧 Suivi vocal pour modifier les réglages.\n"
-                    "-# Aucun enregistrement de conversation ni d'audio."
+                    f"• Salon de publication : {where}\n\n"
+                    "Configuration : " + chr(96) + "/config surveillance" + chr(96) + "\n"
+                    "-# Aucun enregistrement audio. Les journaux de salon sont indépendants."
                 ))
             else:
                 body.add_item(discord.ui.TextDisplay(
-                    "Statut indisponible. Ouvre /config logs pour vérifier."
+                    "Statut indisponible. Essaie /config surveillance."
                 ))
 
+        if self.tab != "settings" and not records:
+            body.add_item(discord.ui.Separator())
+            body.add_item(discord.ui.TextDisplay(
+                "📭 Aucun événement enregistré pour cette catégorie."
+            ))
+        self.add_item(body)
+
         if self.tab != "settings":
-            if not records:
-                body.add_item(discord.ui.TextDisplay(
-                    "📭 Aucun événement dans cet historique."
-                ))
             for index, event in enumerate(records):
                 event_id = int(event["id"])
-                event_title, emoji = TYPES.get(
-                    event["log_type"],
-                    (safe_text(event.get("title")) or "Événement", "📋"),
-                )
-                detail = _history_detail(event.get("description"))
-                detail_lines = detail.splitlines()
-                first_line = next((line for line in detail_lines if line and not line.startswith(">")), detail)
-                short = first_line[:133] + "…" if len(first_line) > 134 else first_line
-                timestamp = int(event["created_at"])
-                header = (
-                    f"**{emoji} {event_title}** · <t:{timestamp}:R>\n"
-                    f"-# {_date(timestamp)} · Événement {self.page * PER_PAGE + index + 1:02d}"
-                )
-                if self.expanded == event_id:
-                    mod = (
-                        f"**Responsable** · <@{event['moderator_id']}>\n"
-                        if event.get("moderator_id") else ""
+
+                async def toggle_detail(interaction: discord.Interaction, *, eid=event_id):
+                    self.expanded = None if self.expanded == eid else eid
+                    await self.render(interaction.guild)
+                    await interaction.response.edit_message(
+                        view=self, allowed_mentions=NO_MENTIONS,
                     )
-                    content = header + "\n\n" + mod + detail
-                else:
-                    content = header + "\n\n" + short
-                body.add_item(discord.ui.TextDisplay(content))
-                if index < len(records) - 1:
-                    body.add_item(discord.ui.Separator())
-        self.add_item(body)
+
+                self.add_item(_history_event_panel(
+                    event, index=self.page * PER_PAGE + index + 1,
+                    expanded=self.expanded == event_id, toggle=toggle_detail,
+                ))
 
         nav = discord.ui.Container()
         tabs = []
@@ -501,33 +522,9 @@ class MemberHistoryView(discord.ui.LayoutView):
             select.callback = choose_filter
             nav.add_item(discord.ui.ActionRow(select))
 
-        if records and self.tab != "settings":
-            details = []
-            for index, event in enumerate(records):
-                eid = int(event["id"])
-                button = discord.ui.Button(
-                    label=(
-                        f"Réduire #{self.page * PER_PAGE + index + 1}"
-                        if self.expanded == eid
-                        else f"Détails #{self.page * PER_PAGE + index + 1}"
-                    ),
-                    style=discord.ButtonStyle.secondary,
-                )
-
-                async def toggle_detail(interaction: discord.Interaction, *, event_id=eid):
-                    self.expanded = None if self.expanded == event_id else event_id
-                    await self.render(interaction.guild)
-                    await interaction.response.edit_message(
-                        view=self, allowed_mentions=NO_MENTIONS,
-                    )
-
-                button.callback = toggle_detail
-                details.append(button)
-            nav.add_item(discord.ui.ActionRow(*details))
-
         if self.tab == "settings":
             config_button = discord.ui.Button(
-                label="🎧 Configurer le suivi vocal",
+                label="👁️ Ouvrir Surveillance",
                 style=discord.ButtonStyle.secondary,
             )
 
