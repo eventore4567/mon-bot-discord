@@ -165,14 +165,17 @@ async def record_transition(
         )
         elapsed = max(0, stamp - int(row["started_at"])) if matches_before else None
         segment = max(0, stamp - int(row["channel_started_at"])) if matches_before else None
-        if elapsed is not None and settings["track_duration"]:
+        if elapsed is not None:
+            # Les sessions restent comptées même quand le staff ne souhaite
+            # pas conserver leur durée.
+            tracked_seconds = elapsed if settings["track_duration"] else 0
             await bot.db.execute(
                 "INSERT INTO member_voice_history_totals "
                 "(guild_id,user_id,seconds,completed_sessions) VALUES (?,?,?,1) "
                 "ON CONFLICT(guild_id,user_id) DO UPDATE SET "
                 "seconds=member_voice_history_totals.seconds+excluded.seconds,"
                 "completed_sessions=member_voice_history_totals.completed_sessions+1",
-                (guild_id, user_id, elapsed),
+                (guild_id, user_id, tracked_seconds),
             )
         return VoiceTransition("voice_leave", before_id, None,
                                duration_seconds=elapsed if settings["track_duration"] else None,
