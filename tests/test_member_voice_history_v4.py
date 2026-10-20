@@ -217,10 +217,10 @@ async def test_move_disabled_prevents_both_public_and_private_movement_logs(voic
 
 def test_setup_panel_exposes_vocal_config_without_new_slash_root():
     import inspect
-    from cogs.setup_control_center import SetupView
-    source = inspect.getsource(SetupView.render)
-    assert "🎧 Suivi vocal" in source
+    from cogs.setup_control_center import OfficialSetup
+    source = inspect.getsource(OfficialSetup.config_surveillance)
     assert "open_voice_history_config" in source
+    assert OfficialSetup.config_group.get_command("surveillance") is not None
 
 
 
