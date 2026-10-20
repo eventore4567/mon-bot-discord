@@ -1,10 +1,12 @@
 """Contrats du journal premium SentriX, indépendants de l'API Discord."""
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import discord
-from PIL import Image
 
 from cogs.log_history_center import PremiumLogAction, MemberHistoryView
-from utils.premium_log_banners import SIZE, build_premium_banner, get_premium_log_banner
-from utils.wide_logs import WideLogView, narrative_body
+from utils.wide_logs import WideLogView, narrative_body, send_wide_log
 
 
 GUILD_ID = 123456789012345678
@@ -25,18 +27,42 @@ def _embed(log_type="member_ban"):
     return embed
 
 
-def test_premium_banner_is_full_width_and_themed():
-    banner = build_premium_banner("member_ban")
-    assert banner.size == SIZE
-    assert SIZE[1] >= 180
-    assert banner.mode == "RGB"
-    assert get_premium_log_banner("member_ban").exists()
+def test_compact_voice_log_shows_small_avatar_only_and_no_repeated_mention():
+    embed = discord.Embed(title="Entrée en vocal")
+    embed.add_field(name="Membre", value=f"<@{USER_ID}>")
+    embed.add_field(name="Salon", value="<#323456789012345678>")
+    view = WideLogView(
+        embed,
+        "legacy-banner.webp",  # Ancienne valeur ignorée, même si encore fournie.
+        identity_id=USER_ID,
+        identity_name="moussa",
+        identity_icon="https://cdn.discordapp.com/embed/avatars/0.png",
+        log_type="voice_join",
+    )
+    items = list(_walk(view))
+    assert any(isinstance(item, discord.ui.Section) for item in items)
+    assert not any(isinstance(item, discord.ui.MediaGallery) for item in items)
+    content = "\n".join(str(getattr(item, "content", "")) for item in items)
+    assert content.count(f"<@{USER_ID}>") == 1
+    assert "A rejoint" in content
+    assert "\n> " not in content
+    assert "legacy-banner.webp" not in content
 
 
-def test_unban_and_ban_get_different_colours():
-    banned = build_premium_banner("member_ban").getpixel((29, 110))
-    unbanned = build_premium_banner("member_unban").getpixel((29, 110))
-    assert banned != unbanned
+def test_transport_does_not_upload_decorative_banner():
+    embed = discord.Embed(title="Entrée en vocal")
+    embed.add_field(name="Membre", value=f"<@{USER_ID}>")
+    embed.add_field(name="Salon", value="<#323456789012345678>")
+    channel = SimpleNamespace(
+        id=223456789012345678,
+        guild=None,
+        send=AsyncMock(return_value=SimpleNamespace(id=123, flags=SimpleNamespace(value=32768))),
+    )
+    ok = asyncio.run(send_wide_log(channel, embed, log_type="voice_join", identity_id=USER_ID))
+    assert ok is True
+    kwargs = channel.send.call_args.kwargs
+    assert kwargs["files"] == []
+    assert isinstance(kwargs["view"], WideLogView)
 
 
 def test_premium_log_has_persistent_history_and_unban_buttons_without_reference():
