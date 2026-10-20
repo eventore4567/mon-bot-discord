@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [dashboard-refonte-2026-09]
     paths:
+      - 'cogs/setup_control_center.py'
       - 'cogs/report_center.py'
       - 'cogs/warnings_config.py'
       - 'sentrix_v103_setup_fix.py'
