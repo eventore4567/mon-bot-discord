@@ -81,6 +81,7 @@ EXTENSIONS = [
     # ne soit pas retardé par le reste du chargement.
     "cogs.sentrix_emoji_sync",
     "cogs.moderation",
+    "cogs.report_center",  # Cartes de signalement privé et actions staff persistantes
     "cogs.automod",
     "cogs.forbidden_words_ui",
     # Ces quatre modules n'avaient qu'un install(), déclenché par l'enveloppe de
