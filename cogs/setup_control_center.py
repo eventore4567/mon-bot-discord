@@ -2052,25 +2052,72 @@ def _rangees_de(commandes):
 
 
 class OfficialSetup(commands.Cog, name="SentriXSetup"):
+    # Une seule racine slash /config : huit sous-commandes consomment UNE entrée
+    # dans la limite globale Discord (100 racines maximum).
+    config_group = app_commands.Group(
+        name="config",
+        description="Configurer SentriX par module, avec des panneaux Discord interactifs.",
+    )
+
     def __init__(self, bot):
         self.bot = bot
 
-    async def send_setup(self, target):
+    async def send_setup(
+        self, target, *, category: str | None = None,
+        private: bool = False, diagnostic: bool = False,
+    ):
         guild = getattr(target, "guild", None)
         member = getattr(target, "author", None) or getattr(target, "user", None)
         if not await _can_setup(self.bot, member, guild):
             return await _permission_error(target)
+        if category is not None and category not in CATEGORIES:
+            return await _permission_error(target)
         view = SetupView(self.bot, guild, member.id)
+        view.category = category
+        view.diagnostic_mode = bool(diagnostic)
         await view.composer()
-        return await panels.envoyer(target, view)
+        return await panels.envoyer(target, view, ephemere=private)
 
     @commands.command(name="setup", description="Ouvrir le centre de configuration SentriX.")
     async def prefix_setup(self, ctx):
         await self.send_setup(ctx)
 
     @app_commands.command(name="setup", description="Ouvrir le centre de configuration SentriX")
-    async def slash_setup(self, interaction):
+    async def slash_setup(self, interaction: discord.Interaction):
+        # Alias de transition : /setup continue à fonctionner jusqu'à migration.
         await self.send_setup(interaction)
+
+    @config_group.command(name="accueil", description="🏠 Centre principal de configuration SentriX.")
+    async def config_accueil(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, private=True)
+
+    @config_group.command(name="automod", description="🛡️ Anti-spam, anti-scam et protections du serveur.")
+    async def config_automod(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="security", private=True)
+
+    @config_group.command(name="logs", description="📋 Configurer les journaux et leurs salons.")
+    async def config_logs(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="logs", private=True)
+
+    @config_group.command(name="tickets", description="🎫 Configurer les tickets et les panels.")
+    async def config_tickets(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="tickets", private=True)
+
+    @config_group.command(name="bienvenue", description="👋 Configurer les messages d'arrivée.")
+    async def config_bienvenue(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="welcome", private=True)
+
+    @config_group.command(name="moderation", description="⚖️ Configurer les sanctions et les rôles staff.")
+    async def config_moderation(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="moderation", private=True)
+
+    @config_group.command(name="niveaux", description="⭐ Activer les niveaux, l'XP et les annonces.")
+    async def config_niveaux(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="levels", private=True)
+
+    @config_group.command(name="diagnostic", description="🔧 Vérifier les modules et la configuration.")
+    async def config_diagnostic(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, private=True, diagnostic=True)
 
 
 async def install(bot):
