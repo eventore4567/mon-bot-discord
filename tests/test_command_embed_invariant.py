@@ -117,9 +117,9 @@ class CommandEmbedInvariantTests(unittest.TestCase):
         )
         card = sx_embeds.success("Configuration enregistrée.")
         self.assertEqual(card.title, "Succès")
-        # Le statut reste sémantique dans le texte, mais aucun colour Discord
-        # ne doit réintroduire le liseré vertical sur le côté.
-        self.assertIsNone(card.colour)
+        # Le statut est coloré dans les embeds legacy pour distinguer un succès
+        # d'une erreur ; les panneaux modernes Components V2 restent sans liseré.
+        self.assertEqual(card.colour.value, sx_embeds.COLOR_SUCCESS)
 
 
 
