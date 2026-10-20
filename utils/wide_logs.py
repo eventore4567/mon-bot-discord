@@ -657,6 +657,11 @@ class WideLogView(discord.ui.LayoutView):
 
         # BLOC 2 — événement.
         title = safe_text(embed.title or "Journal SentriX")[:200]
+        # Les anciens numéros de dossier restent en SQLite mais disparaissent
+        # des logs visibles : l'historique se recherche par membre.
+        title = re.sub(r"\bDossier\s*#\d+\s*(?:[—:\-]\s*)?", "", title, flags=re.I)
+        title = re.sub(r"\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", "", title, flags=re.I)
+        title = title.strip(" —:-") or "Événement SentriX"
         badge = emoji or EVENT_EMOJI.get(log_type, DEFAULT_EVENT_EMOJI)
         heading = f"### {badge} {title}".strip()
         container.add_item(discord.ui.TextDisplay(heading))
