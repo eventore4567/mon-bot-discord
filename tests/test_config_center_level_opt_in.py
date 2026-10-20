@@ -10,7 +10,7 @@ import pytest
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
-from cogs import setup_control_center
+from cogs import setup_control_center, setup_v2_core
 from cogs.levels import Levels, BoolToggleButton
 from database.db import DEFAULT_STATS_SETTINGS
 
@@ -29,6 +29,10 @@ def test_grouped_slash_config_has_all_eight_sections():
     assert set(setup_control_center.CATEGORIES) >= {
         "security", "logs", "tickets", "welcome", "moderation", "levels",
     }
+
+
+def test_setting_level_channel_does_not_implicitly_start_xp():
+    assert "level_channel" not in setup_v2_core.GUILD_CONFIG_FIELD_MODULE
 
 
 def test_default_level_announcements_are_off_without_explicit_staff_opt_in():
