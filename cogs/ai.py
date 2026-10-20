@@ -744,7 +744,8 @@ class Ai(commands.Cog, name="Ai"):
                     guild_id=reply_to.guild.id if reply_to.guild else None,
                     fail_if_not_exists=False,
                 )
-                kwargs.setdefault("mention_author", True)
+                # Réponse Discord normale, sans ping et sans notification inutile.
+                kwargs.setdefault("mention_author", False)
             try:
                 return await destination.send(**kwargs)
             except discord.HTTPException:
@@ -760,18 +761,9 @@ class Ai(commands.Cog, name="Ai"):
         answer = await self.ask_ai(question, history, author_name=author_name,
                                     guild_id=guild_id, channel_id=channel_id, user_id=author.id, command=command)
         if ai_service.is_error_code(answer):
-            # La REPONSE de SentriX reste en texte brut (choix de Jayden) ; un
-            # echec, lui, est une interface d'erreur comme les autres. On passe
-            # par _send pour conserver la citation du message d'origine.
-            panneau = panels.depuis_embed(
-                await self._embed(
-                    guild_id,
-                    title=ai_service.error_title(answer),
-                    description=ai_service.error_message(answer),
-                    kind="danger",
-                )
-            )
-            return await _send(view=panneau, files=panneau.fichiers())
+            # Conversations ordinaires : aucun panneau de configuration ou carte
+            # Components V2 pour une erreur de génération IA.
+            return await _send(content=ai_service.error_message(answer)[:1800])
         history.append({"role": "user", "content": question})
         history.append({"role": "assistant", "content": answer})
         self.histories[author.id] = history[-10:]
@@ -2169,8 +2161,13 @@ class Ai(commands.Cog, name="Ai"):
             view.message = sent
             return True
 
-        # 3) Routeur structuré. Pour une conversation normale, parse_action() reste
-        # entièrement local et n'appelle plus de classifieur IA.
+        # Un échange normal va directement à l'IA conversationnelle. Même une
+        # question qui mentionne des rôles ou des salons n'est pas une commande.
+        # Les demandes qui expriment une action gardent le routeur sécurisé.
+        if not action_like and not multi_action:
+            return False
+
+        # 3) Routeur structuré : uniquement pour une intention d'action.
         action = await ai_actions.parse_action(
             question,
             guild_id=message.guild.id if message.guild else None,
