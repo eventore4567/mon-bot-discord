@@ -85,6 +85,7 @@ def test_header_shows_real_user_mention_and_compact_id():
     title = panel.children[0].children[0].content
     assert "**Tomioka**" in title
     assert "<@987654321012345678>" in title
+    assert chr(96) + "@tomioka" + chr(96) in title
     assert "ID : " + chr(96) + "987654321012345678" + chr(96) in title
     assert "Vue d'ensemble" not in title
     assert "Modération · Récapitulatif" in panel.children[2].content
@@ -98,7 +99,7 @@ def test_member_names_are_markdown_escaped():
 @pytest.mark.asyncio
 async def test_member_who_left_guild_gets_real_discord_username_from_api_once():
     user = SimpleNamespace(
-        id=987654321012345678, global_name="Tomioka",
+        id=987654321012345678, global_name="Tomioka", name="tomioka",
         display_avatar=SimpleNamespace(url="https://cdn.discordapp.com/avatars/123/profile.png"),
     )
     bot = SimpleNamespace(
