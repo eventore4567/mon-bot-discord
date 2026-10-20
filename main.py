@@ -240,7 +240,7 @@ PUBLIC_COMMANDS = frozenset({
     "invited-list",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
-    "report-bug", "afk", "roll", "choose",
+    "report-bug", "signaler ce message", "afk", "roll", "choose",
     # Intelligence artificielle
     "sentrix", "ask", "chat-reset", "summarize", "image-prompt", "image",
     "explain", "rewrite", "fact-check", "ai", "chat", "improve", "correct",
