@@ -437,10 +437,20 @@ class Logs(commands.Cog, name="Logs"):
             discord.AuditLogAction.kick,
             member.id,
         )
+        # Discord fournit encore le snapshot des rôles pendant member_remove.
+        # Conserver ce snapshot ici, avant que le membre ne disparaisse du cache.
+        former_roles = [
+            _role_ref(role.id) for role in member.roles
+            if role.id != member.guild.default_role.id
+        ]
+        former_roles_text = ", ".join(former_roles)[:1000] or "Aucun rôle attribué"
         if audit is not None:
             if log_service.is_recent_sanction(member.guild.id, member.id, "kick"):
                 return  # +kick : le dossier de modération est le seul log
-            fields = [("Membre", _user_ref(member.id), True)]
+            fields = [
+                ("Membre", _user_ref(member.id), True),
+                ("Rôles avant le départ", former_roles_text, False),
+            ]
             if actor:
                 fields.append(("Modérateur", _user_ref(actor.id), True))
             if audit.reason:
@@ -466,7 +476,10 @@ class Logs(commands.Cog, name="Logs"):
             )
             return
 
-        fields = [("Membre", _user_ref(member.id), True)]
+        fields = [
+            ("Membre", _user_ref(member.id), True),
+            ("Rôles avant le départ", former_roles_text, False),
+        ]
         if member.joined_at:
             duration = discord.utils.utcnow() - member.joined_at
             fields.append(("Présence", f"{max(0, duration.days)} jour(s)", True))
