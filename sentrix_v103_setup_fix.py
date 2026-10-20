@@ -107,8 +107,6 @@ def _replace_setup_slash(bot) -> bool:
         ("tickets", "🎫 Gérer les tickets et leurs catégories.", "tickets", False),
         ("bienvenue", "👋 Messages de bienvenue et autorôles.", "welcome", False),
         ("moderation", "⚖️ Sanctions et autorisations staff.", "moderation", False),
-        ("avertissements", "⚠️ Gérer avertissements, MP, seuils, rôles et logs.", None, False),
-        ("signalements", "🚨 Salon privé, notifications et suivi des signalements.", None, False),
         ("niveaux", "⭐ XP, niveaux et annonces sur activation.", "levels", False),
         ("diagnostic", "🔧 Analyser les problèmes de configuration.", None, True),
     )
@@ -120,16 +118,6 @@ def _replace_setup_slash(bot) -> bool:
                 return await interaction.response.send_message(
                     "Le Centre Config de SentriX est indisponible.", ephemeral=True,
                 )
-            if name == "avertissements":
-                from cogs.warnings_config import open_warning_config
-                return await open_warning_config(bot, interaction)
-            if name == "signalements":
-                report_cog = bot.get_cog("ReportCenter")
-                if report_cog is None:
-                    return await interaction.response.send_message(
-                        "Centre des signalements indisponible.", ephemeral=True,
-                    )
-                return await report_cog.open_config(interaction)
             await setup_cog.send_setup(
                 interaction, category=category, diagnostic=diagnostic, private=True,
             )
@@ -167,7 +155,7 @@ def _replace_setup_slash(bot) -> bool:
         logger.error("V103 : /config dépasse le budget global : %s/100 racines.", len(roots))
         return False
 
-    logger.info("V103 : /config publie 10 centres ; /setup slash retiré, +setup conservé.")
+    logger.info("V103 : /config publie 8 centres ; avertissements et signalements dans /config moderation.")
     return True
 
 
