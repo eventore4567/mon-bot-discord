@@ -237,10 +237,16 @@ class BoolToggleButton(discord.ui.Button):
 
     def _sync_label(self):
         value = self.view_ref.pending.get(self.key, False)
+        if self.key == "level_announce_enabled":
+            value = value and self.view_ref.pending.get("level_announce_opt_in", False)
         self.label = f"{self.base_label} : {'● Oui' if value else '○ Non'}"
 
     async def callback(self, interaction: discord.Interaction):
-        self.view_ref.pending[self.key] = not self.view_ref.pending.get(self.key, False)
+        current = bool(self.view_ref.pending.get(self.key, False))
+        if self.key == "level_announce_enabled":
+            current = current and bool(self.view_ref.pending.get("level_announce_opt_in", False))
+            self.view_ref.pending["level_announce_opt_in"] = not current
+        self.view_ref.pending[self.key] = not current
         self._sync_label()
         await self.view_ref.refresh(interaction)
 
@@ -556,7 +562,7 @@ class StatsConfigView(discord.ui.View):
         level_channel_text = f"<#{level_channel_id}>" if level_channel_id else "Salon du message (par défaut)"
         e.add_field(
             name="🎭 Niveaux",
-            value=f"Annonce : {'Activée' if p.get('level_announce_enabled', True) else 'Désactivée'}\nSalon d'annonce : {level_channel_text}\nGarder les anciens rôles : {'Oui' if p.get('level_keep_old_roles') else 'Non'}",
+            value=f"Annonce : {'Activée' if p.get('level_announce_enabled', False) and p.get('level_announce_opt_in', False) else 'Désactivée'}\nSalon d'annonce : {level_channel_text}\nGarder les anciens rôles : {'Oui' if p.get('level_keep_old_roles') else 'Non'}",
             inline=False,
         )
         e.add_field(name="💰 Emoji économie", value=p.get("economy_emoji", "🪙"), inline=True)
@@ -851,7 +857,9 @@ class Levels(commands.Cog, name="Levels"):
             # et le recalcul du niveau — source unique partagée avec +add-xp.
             new_xp, level, leveled_up = await self._apply_xp_delta(message.guild.id, message.author.id, gained)
             if leveled_up:
-                if settings.get("level_announce_enabled", True):
+                # Exige une action EXPLICITE du staff : un ancien réglage
+                # sauvegardé à True par défaut ne suffit plus à envoyer un MP/une annonce.
+                if settings.get("level_announce_enabled", False) and settings.get("level_announce_opt_in", False):
                     channel = message.guild.get_channel(conf["level_channel"]) if conf and conf["level_channel"] else message.channel
                     if channel:
                         await self._send_level_announcement(
