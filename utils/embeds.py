@@ -299,6 +299,7 @@ def _base(
     embed = discord.Embed(
         title=safe_title,
         description=_panel_description(description, clean=clean_description),
+        colour=_colour(resolved_kind, colour),
         timestamp=datetime.now(timezone.utc) if timestamp else None,
     )
     if thumbnail:
