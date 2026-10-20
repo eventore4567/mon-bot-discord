@@ -1428,6 +1428,56 @@ class SetupView(discord.ui.LayoutView):
             states = await module_switch_states(self.bot, self.guild.id)
             # Placé en tête : c'est l'action principale du premier écran.
             self._commandes.insert(0, ModuleSwitchSelect(self, states))
+        if self.category == "levels":
+            from cogs import setup_v2_core as core
+
+            levels_active = await core.module_enabled(self.bot, self.guild.id, "levels")
+            stats = await self.bot.db.get_stats_settings(self.guild.id)
+            announce_active = bool(
+                stats.get("level_announce_enabled", False)
+                and stats.get("level_announce_opt_in", False)
+            )
+
+            levels_button = discord.ui.Button(
+                label="Désactiver les niveaux" if levels_active else "Activer les niveaux",
+                style=discord.ButtonStyle.secondary,
+            )
+            announcements_button = discord.ui.Button(
+                label="Désactiver les annonces" if announce_active else "Activer les annonces",
+                style=discord.ButtonStyle.secondary,
+            )
+
+            async def toggle_levels(interaction):
+                try:
+                    await core.set_module_enabled(
+                        self.bot, self.guild.id, "levels", not levels_active,
+                        actor_id=interaction.user.id,
+                    )
+                except core.ModuleSetupRequired as exc:
+                    return await _refuse(interaction, str(exc))
+                await self.audit(interaction.user.id, "module:levels", "on" if not levels_active else "off")
+                await self.refresh(interaction)
+
+            async def toggle_announcements(interaction):
+                if not levels_active and not announce_active:
+                    return await _refuse(
+                        interaction,
+                        "Activez d'abord le module Niveaux et choisissez un salon. "
+                        "Les annonces restent désactivées tant que vous ne cliquez pas sur « Activer les annonces ».",
+                    )
+                new_enabled = not announce_active
+                await self.bot.db.set_stats_settings(
+                    self.guild.id,
+                    {"level_announce_enabled": new_enabled, "level_announce_opt_in": new_enabled},
+                )
+                await self.audit(interaction.user.id, "level:announcements", "on" if new_enabled else "off")
+                await self.refresh(interaction)
+
+            levels_button.callback = toggle_levels
+            announcements_button.callback = toggle_announcements
+            self.ajouter(levels_button)
+            self.ajouter(announcements_button)
+
         if self.category == "tickets":
             rows = await self.bot.db.fetchall(
                 "SELECT id, name FROM ticket_types WHERE guild_id = ? ORDER BY id", (self.guild.id,)
