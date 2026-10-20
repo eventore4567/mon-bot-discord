@@ -215,7 +215,7 @@ class MemberHistoryView(discord.ui.LayoutView):
             buttons = []
             for key in choices:
                 button = discord.ui.Button(
-                    label=FILTER_LABELS[key],
+                    label=("✓ " if self.filter == key else "") + FILTER_LABELS[key],
                     style=discord.ButtonStyle.secondary,
                 )
 
