@@ -1799,8 +1799,56 @@ async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> l
     return [dict(row) for row in rows]
 
 
+async def fetch_log_history_page(
+    guild_id: int,
+    target_id: int,
+    *,
+    offset: int = 0,
+    limit: int = 4,
+    event_types: tuple[str, ...] | None = None,
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """Pagination de l'historique à travers le backend canonique (Postgres/SQLite)."""
+    await ensure_log_storage()
+    safe_offset = max(0, int(offset))
+    safe_limit = max(1, min(int(limit), 20))
+    filters = tuple(str(item) for item in (event_types or ()))
+    where = "guild_id=? AND target_id=?"
+    params: list[Any] = [int(guild_id), int(target_id)]
+    if filters:
+        where += " AND log_type IN (" + ",".join("?" for _ in filters) + ")"
+        params.extend(filters)
+    summary_sql = (
+        "SELECT log_type, COUNT(*) AS n FROM logs "
+        "WHERE guild_id=? AND target_id=? GROUP BY log_type"
+    )
+    count_sql = f"SELECT COUNT(*) AS n FROM logs WHERE {where}"
+    records_sql = (
+        "SELECT id,guild_id,log_type,banner_kind,target_id,moderator_id,title,description,created_at "
+        f"FROM logs WHERE {where} ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?"
+    )
+    main = _main_postgres()
+    if main is not None:
+        summary_rows = await main.fetchall(summary_sql, (int(guild_id), int(target_id)))
+        count_row = await main.fetchone(count_sql, tuple(params))
+        rows = await main.fetchall(records_sql, tuple(params) + (safe_limit, safe_offset))
+        counts = {str(row["log_type"]): int(row["n"]) for row in summary_rows}
+        return [dict(zip(row.keys(), row)) for row in rows], int(count_row["n"] if count_row else 0), counts
+
+    async with aiosqlite.connect(_database_path()) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout = 5000")
+        async with db.execute(summary_sql, (int(guild_id), int(target_id))) as cursor:
+            counts = {str(row["log_type"]): int(row["n"]) for row in await cursor.fetchall()}
+        async with db.execute(count_sql, tuple(params)) as cursor:
+            count_row = await cursor.fetchone()
+        async with db.execute(records_sql, tuple(params) + (safe_limit, safe_offset)) as cursor:
+            rows = [dict(row) for row in await cursor.fetchall()]
+    return rows, int(count_row["n"] if count_row else 0), counts
+
+
 __all__ = [
     "FALLBACK_ENABLED", "NO_PINGS", "WideLogView", "build_rows", "compact_fields",
     "derive_identity", "ensure_log_storage", "extract_history_ids", "fetch_log_history",
+    "fetch_log_history_page",
     "log_runtime_capabilities", "narrative_body", "safe_text", "send_wide_log",
 ]
