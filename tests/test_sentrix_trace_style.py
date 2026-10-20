@@ -94,7 +94,9 @@ def test_trace_v7_layout_is_compact_and_media_stays_below_context():
     ]
 
     assert "SentriX Trace V7" in block
-    assert "header_lines = [meta, f\"## {title}\"]" in block
+    assert "header_lines = [meta, f\"### {title}\"]" in block
+    assert 'gallery.add_item(media=f"attachment://{banner_filename}")' not in block
+    assert "discord.ui.Section(" in block  # avatar placé sur le côté
     assert "summary, details = _trace_body_parts(body)" in block
     assert block.index("summary, details = _trace_body_parts(body)") < block.index("if media_items:")
     assert "📎" not in block
