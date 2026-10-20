@@ -108,7 +108,8 @@ EXTENSIONS = [
     "cogs.command_channel_gate",
     "cogs.server_builder",
     "cogs.logs",
-    "cogs.log_history_center",
+    # log_history_center n'a pas de commandes : importé par les actions
+    # persistantes dans setup_hook, sans ajouter une extension au catalogue.
     "cogs.snipe",
     "cogs.soundboard_logs",
     "cogs.utility",
