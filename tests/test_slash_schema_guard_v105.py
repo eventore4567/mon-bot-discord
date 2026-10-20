@@ -95,17 +95,21 @@ def test_direct_root_bridge_removes_internal_context_from_ping():
 
 
 @pytest.mark.asyncio
-async def test_setup_v103_has_zero_user_options_and_uses_configuration_authority():
+async def test_config_v103_has_eight_zero_option_user_routes_and_same_authority():
     bot = commands.Bot(command_prefix="+", intents=discord.Intents.none(), help_command=None)
 
     class SentriXSetup(commands.Cog):
-        async def send_setup(self, target) -> None:
+        async def send_setup(self, target, **kwargs) -> None:
             return None
 
     await bot.add_cog(SentriXSetup())
     assert v103._replace_setup_slash(bot) is True
 
-    setup = bot.tree.get_command("setup")
-    assert setup is not None
-    assert list(setup.parameters) == []
-    assert getattr(setup.callback, "_sentrix_setup_authority", None) == "configuration-v114"
+    assert bot.tree.get_command("setup") is None  # une racine récupérée
+    config = bot.tree.get_command("config")
+    assert config is not None
+    for name in ("accueil", "automod", "logs", "tickets", "bienvenue", "moderation", "niveaux", "diagnostic"):
+        command = config.get_command(name)
+        assert command is not None, name
+        assert list(command.parameters) == [], name
+        assert getattr(command.callback, "_sentrix_setup_authority", None) == "configuration-v114"

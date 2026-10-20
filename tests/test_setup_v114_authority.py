@@ -1,31 +1,48 @@
+"""V103 : la surface slash finale /config partage le moteur historique."""
+
 import asyncio
 import inspect
 from types import SimpleNamespace
+
+from discord import app_commands
 
 import sentrix_v103_setup_fix as v103
 
 
 class _FakeSetupCog:
-    """Le seul moteur de setup : cogs.setup_control_center.OfficialSetup.send_setup."""
-
     def __init__(self):
         self.calls = []
 
-    async def send_setup(self, target):
-        self.calls.append(target)
+    async def send_setup(self, target, **kwargs):
+        self.calls.append((target, kwargs))
 
 
 class _FakeTree:
     def __init__(self):
         self.removed = []
-        self.command = None
+        self.group = app_commands.Group(name="config", description="Réglages SentriX")
+        self.existing = app_commands.Command(
+            name="ancien", description="Commande historique",
+            callback=self._noop,
+        )
+        self.group.add_command(self.existing)
+        self.added = []
+
+    async def _noop(self, interaction):
+        return None
 
     def remove_command(self, name, **kwargs):
         self.removed.append((name, kwargs))
 
+    def get_command(self, name, **kwargs):
+        return self.group if name == "config" else None
+
+    def get_commands(self, **kwargs):
+        return [self.group]
+
     def add_command(self, command, *, override=False):
-        self.command = command
-        self.override = override
+        self.group = command
+        self.added.append((command, override))
 
 
 class _FakeBot:
@@ -34,9 +51,7 @@ class _FakeBot:
         self.tree = _FakeTree()
 
     def get_cog(self, name):
-        if name == "SentriXSetup":
-            return self.setup_cog
-        return None
+        return self.setup_cog if name == "SentriXSetup" else None
 
     async def is_owner(self, user):
         return True
@@ -50,28 +65,44 @@ def _interaction():
     )
 
 
-def test_v103_routes_slash_setup_to_the_single_setup_engine():
-    """/setup et +setup ouvrent le MÊME centre (OfficialSetup.send_setup) : plus de
-    seconde interface Configuration.SetupView derrière la commande slash."""
-    source = inspect.getsource(v103._replace_setup_slash) + inspect.getsource(v103._send_setup_v114)
+def test_v103_final_surface_routes_to_existing_official_setup_engine():
+    source = inspect.getsource(v103._replace_setup_slash)
     assert 'bot.get_cog("SentriXSetup")' in source
     assert ".send_setup(" in source
     assert "_open_setup_panel" not in source
 
 
-def test_v103_registers_native_zero_option_v114_setup():
+def test_v103_reuses_existing_config_group_keeps_legacy_leaf_and_removes_setup():
     bot = _FakeBot()
     assert v103._replace_setup_slash(bot) is True
-    command = bot.tree.command
-    assert command is not None
-    assert command.name == "setup"
-    assert bot.tree.override is True
-    assert getattr(command.callback, "_sentrix_setup_authority", None) == "configuration-v114"
-    assert list(inspect.signature(command.callback).parameters) == ["interaction"]
+    group = bot.tree.group
+    assert group.name == "config"
+    assert bot.tree.added == []  # V98 /config n'est pas écrasé !
+    names = {command.name for command in group.commands}
+    assert "ancien" in names
+    assert names >= {
+        "accueil", "automod", "logs", "tickets", "bienvenue",
+        "moderation", "niveaux", "diagnostic",
+    }
+    assert "setup" in [name for name, _ in bot.tree.removed]
+    for leaf in ("accueil", "niveaux", "diagnostic"):
+        callback = group.get_command(leaf).callback
+        assert getattr(callback, "_sentrix_setup_authority") == "configuration-v114"
+        assert list(inspect.signature(callback).parameters) == ["interaction"]
 
 
-def test_v103_setup_callback_opens_the_same_panel_as_prefix_setup():
+def test_v103_config_automod_callback_opens_private_security_category():
+    bot = _FakeBot()
+    assert v103._replace_setup_slash(bot)
+    interaction = _interaction()
+    asyncio.run(bot.tree.group.get_command("automod").callback(interaction))
+    assert bot.setup_cog.calls == [
+        (interaction, {"category": "security", "diagnostic": False, "private": True})
+    ]
+
+
+def test_v103_legacy_setup_bridge_still_uses_same_engine_for_prefix():
     bot = _FakeBot()
     interaction = _interaction()
     asyncio.run(v103._send_setup_v114(bot, interaction))
-    assert bot.setup_cog.calls == [interaction]
+    assert bot.setup_cog.calls == [(interaction, {})]

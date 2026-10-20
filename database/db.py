@@ -1113,7 +1113,9 @@ DEFAULT_STATS_SETTINGS = {
     "allow_view_others": True,
     "economy_emoji": "🪙",
     "reputation_cooldown": 86400,
-    "level_announce_enabled": True,
+    # Annonces de niveau OFF tant que le staff ne les a pas activées explicitement.
+    "level_announce_enabled": False,
+    "level_announce_opt_in": False,
     "level_keep_old_roles": False,
 }
 

@@ -433,6 +433,7 @@ class CategorySelect(discord.ui.Select):
 
     async def callback(self, interaction):
         self.owner.category = self.values[0]
+        self.owner.diagnostic_mode = False
         self.owner.selected_log = self.owner.selected_ticket = self.owner.selected_notification = None
         await self.owner.refresh(interaction)
 
@@ -1024,6 +1025,7 @@ class SetupView(discord.ui.LayoutView):
         super().__init__(timeout=900)
         self.bot, self.guild, self.author_id = bot, guild, int(author_id)
         self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
+        self.diagnostic_mode = False
         self._selected_log_setting = None
         self._commandes: list = []
         # Paramètres rares (ajoutés par les couches tierces via add_item / build_embed) :
@@ -1181,6 +1183,7 @@ class SetupView(discord.ui.LayoutView):
 
         async def go_home(interaction):
             self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
+            self.diagnostic_mode = False
             await self.refresh(interaction)
 
         async def do_refresh(interaction):
@@ -1425,6 +1428,56 @@ class SetupView(discord.ui.LayoutView):
             states = await module_switch_states(self.bot, self.guild.id)
             # Placé en tête : c'est l'action principale du premier écran.
             self._commandes.insert(0, ModuleSwitchSelect(self, states))
+        if self.category == "levels":
+            from cogs import setup_v2_core as core
+
+            levels_active = await core.module_enabled(self.bot, self.guild.id, "levels")
+            stats = await self.bot.db.get_stats_settings(self.guild.id)
+            announce_active = bool(
+                stats.get("level_announce_enabled", False)
+                and stats.get("level_announce_opt_in", False)
+            )
+
+            levels_button = discord.ui.Button(
+                label="Désactiver les niveaux" if levels_active else "Activer les niveaux",
+                style=discord.ButtonStyle.secondary,
+            )
+            announcements_button = discord.ui.Button(
+                label="Désactiver les annonces" if announce_active else "Activer les annonces",
+                style=discord.ButtonStyle.secondary,
+            )
+
+            async def toggle_levels(interaction):
+                try:
+                    await core.set_module_enabled(
+                        self.bot, self.guild.id, "levels", not levels_active,
+                        actor_id=interaction.user.id,
+                    )
+                except core.ModuleSetupRequired as exc:
+                    return await _refuse(interaction, str(exc))
+                await self.audit(interaction.user.id, "module:levels", "on" if not levels_active else "off")
+                await self.refresh(interaction)
+
+            async def toggle_announcements(interaction):
+                if not levels_active and not announce_active:
+                    return await _refuse(
+                        interaction,
+                        "Activez d'abord le module Niveaux et choisissez un salon. "
+                        "Les annonces restent désactivées tant que vous ne cliquez pas sur « Activer les annonces ».",
+                    )
+                new_enabled = not announce_active
+                await self.bot.db.set_stats_settings(
+                    self.guild.id,
+                    {"level_announce_enabled": new_enabled, "level_announce_opt_in": new_enabled},
+                )
+                await self.audit(interaction.user.id, "level:announcements", "on" if new_enabled else "off")
+                await self.refresh(interaction)
+
+            levels_button.callback = toggle_levels
+            announcements_button.callback = toggle_announcements
+            self.ajouter(levels_button)
+            self.ajouter(announcements_button)
+
         if self.category == "tickets":
             rows = await self.bot.db.fetchall(
                 "SELECT id, name FROM ticket_types WHERE guild_id = ? ORDER BY id", (self.guild.id,)
@@ -1451,12 +1504,50 @@ class SetupView(discord.ui.LayoutView):
         """
         conf = await self.bot.db.get_guild_config(self.guild.id)
         statuses = await module_statuses(self.bot, self.guild, conf)
-        if self.category is None:
+        if self.diagnostic_mode:
+            titre, resume, sections = await self._contenu_diagnostic(statuses)
+        elif self.category is None:
             titre, resume, sections = await self._contenu_accueil(statuses)
         else:
             titre, resume, sections = await self._contenu_categorie(conf, statuses)
         self._sections_base = list(sections)
         return _embed_de_sections(titre, resume, sections)
+
+    async def _contenu_diagnostic(self, statuses):
+        """Contrôle en lecture seule, fondé sur les vrais états du serveur."""
+        erreurs = [(cle, d) for cle, d in statuses.items() if d[0] == ConfigState.ERROR]
+        actifs = sum(d[0] == ConfigState.ACTIVE for d in statuses.values())
+        sections = [
+            panels.Section(
+                "État du serveur",
+                [
+                    panels.Ligne("Modules opérationnels", f"{actifs}/{len(statuses)}"),
+                    panels.Ligne("Configuration", f"{_completion(statuses)} %"),
+                    panels.Ligne("Problèmes détectés", str(len(erreurs))),
+                ],
+            ),
+            panels.Section(
+                "État des fonctionnalités",
+                [
+                    panels.Ligne(CATEGORIES[k][0], d[0].value, indice=d[1] if d[1] else None)
+                    for k, d in statuses.items()
+                ],
+            ),
+        ]
+        if erreurs:
+            sections.append(
+                panels.Section(
+                    "À corriger",
+                    [
+                        panels.Ligne(CATEGORIES[k][0], " · ".join(d[2][:2]))
+                        for k, d in erreurs
+                    ],
+                )
+            )
+        return "🔧 SentriX — Diagnostic", (
+            "État réel de la configuration. Cliquez sur « Actualiser » pour revérifier "
+            "ou sélectionnez une catégorie pour corriger un problème."
+        ), sections
 
     async def _contenu_accueil(self, statuses):
         """Vue d'ensemble : ce qui marche, ce qui manque, ce qui bloque."""
@@ -1806,9 +1897,18 @@ class SetupView(discord.ui.LayoutView):
                 ),
             ]
         if cle == "levels":
+            stats = await self.bot.db.get_stats_settings(self.guild.id)
+            announce_on = bool(stats.get("level_announce_enabled", False) and stats.get("level_announce_opt_in", False))
             return [
                 panels.Section(
                     "Réglages",
+                    [
+                        panels.Ligne(
+                            "Annonces automatiques",
+                            "● ACTIVÉES" if announce_on else "○ DÉSACTIVÉES — activation manuelle obligatoire",
+                        ),
+                    ] +
+
                     [
                         panels.Ligne("Salon des montées", _channel(self.guild, _get(conf, "level_channel"))),
                         panels.Ligne("Multiplicateur XP", str(_get(conf, "xp_multiplier", 1.0))),
@@ -1952,25 +2052,71 @@ def _rangees_de(commandes):
 
 
 class OfficialSetup(commands.Cog, name="SentriXSetup"):
+    # Une seule racine slash /config : huit sous-commandes consomment UNE entrée
+    # dans la limite globale Discord (100 racines maximum).
+    config_group = app_commands.Group(
+        name="config",
+        description="Configurer SentriX par module, avec des panneaux Discord interactifs.",
+    )
+
     def __init__(self, bot):
         self.bot = bot
 
-    async def send_setup(self, target):
+    async def send_setup(
+        self, target, *, category: str | None = None,
+        private: bool = False, diagnostic: bool = False,
+    ):
         guild = getattr(target, "guild", None)
         member = getattr(target, "author", None) or getattr(target, "user", None)
         if not await _can_setup(self.bot, member, guild):
             return await _permission_error(target)
+        if category is not None and category not in CATEGORIES:
+            return await _permission_error(target)
         view = SetupView(self.bot, guild, member.id)
+        view.category = category
+        view.diagnostic_mode = bool(diagnostic)
         await view.composer()
-        return await panels.envoyer(target, view)
+        return await panels.envoyer(target, view, ephemere=private)
 
     @commands.command(name="setup", description="Ouvrir le centre de configuration SentriX.")
     async def prefix_setup(self, ctx):
         await self.send_setup(ctx)
 
-    @app_commands.command(name="setup", description="Ouvrir le centre de configuration SentriX")
-    async def slash_setup(self, interaction):
-        await self.send_setup(interaction)
+    # /setup slash est remplacé par /config accueil, afin de respecter
+    # le plafond Discord de 100 commandes racines. +setup reste disponible
+    # comme solution de secours tant que la migration des panneaux se termine.
+
+    @config_group.command(name="accueil", description="🏠 Centre principal de configuration SentriX.")
+    async def config_accueil(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, private=True)
+
+    @config_group.command(name="automod", description="🛡️ Anti-spam, anti-scam et protections du serveur.")
+    async def config_automod(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="security", private=True)
+
+    @config_group.command(name="logs", description="📋 Configurer les journaux et leurs salons.")
+    async def config_logs(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="logs", private=True)
+
+    @config_group.command(name="tickets", description="🎫 Configurer les tickets et les panels.")
+    async def config_tickets(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="tickets", private=True)
+
+    @config_group.command(name="bienvenue", description="👋 Configurer les messages d'arrivée.")
+    async def config_bienvenue(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="welcome", private=True)
+
+    @config_group.command(name="moderation", description="⚖️ Configurer les sanctions et les rôles staff.")
+    async def config_moderation(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="moderation", private=True)
+
+    @config_group.command(name="niveaux", description="⭐ Activer les niveaux, l'XP et les annonces.")
+    async def config_niveaux(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, category="levels", private=True)
+
+    @config_group.command(name="diagnostic", description="🔧 Vérifier les modules et la configuration.")
+    async def config_diagnostic(self, interaction: discord.Interaction):
+        await self.send_setup(interaction, private=True, diagnostic=True)
 
 
 async def install(bot):
