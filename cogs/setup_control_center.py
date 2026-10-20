@@ -433,6 +433,7 @@ class CategorySelect(discord.ui.Select):
 
     async def callback(self, interaction):
         self.owner.category = self.values[0]
+        self.owner.diagnostic_mode = False
         self.owner.selected_log = self.owner.selected_ticket = self.owner.selected_notification = None
         await self.owner.refresh(interaction)
 
@@ -1024,6 +1025,7 @@ class SetupView(discord.ui.LayoutView):
         super().__init__(timeout=900)
         self.bot, self.guild, self.author_id = bot, guild, int(author_id)
         self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
+        self.diagnostic_mode = False
         self._selected_log_setting = None
         self._commandes: list = []
         # Paramètres rares (ajoutés par les couches tierces via add_item / build_embed) :
@@ -1181,6 +1183,7 @@ class SetupView(discord.ui.LayoutView):
 
         async def go_home(interaction):
             self.category = self.selected_log = self.selected_ticket = self.selected_notification = None
+            self.diagnostic_mode = False
             await self.refresh(interaction)
 
         async def do_refresh(interaction):
@@ -1451,12 +1454,50 @@ class SetupView(discord.ui.LayoutView):
         """
         conf = await self.bot.db.get_guild_config(self.guild.id)
         statuses = await module_statuses(self.bot, self.guild, conf)
-        if self.category is None:
+        if self.diagnostic_mode:
+            titre, resume, sections = await self._contenu_diagnostic(statuses)
+        elif self.category is None:
             titre, resume, sections = await self._contenu_accueil(statuses)
         else:
             titre, resume, sections = await self._contenu_categorie(conf, statuses)
         self._sections_base = list(sections)
         return _embed_de_sections(titre, resume, sections)
+
+    async def _contenu_diagnostic(self, statuses):
+        """Contrôle en lecture seule, fondé sur les vrais états du serveur."""
+        erreurs = [(cle, d) for cle, d in statuses.items() if d[0] == ConfigState.ERROR]
+        actifs = sum(d[0] == ConfigState.ACTIVE for d in statuses.values())
+        sections = [
+            panels.Section(
+                "État du serveur",
+                [
+                    panels.Ligne("Modules opérationnels", f"{actifs}/{len(statuses)}"),
+                    panels.Ligne("Configuration", f"{_completion(statuses)} %"),
+                    panels.Ligne("Problèmes détectés", str(len(erreurs))),
+                ],
+            ),
+            panels.Section(
+                "État des fonctionnalités",
+                [
+                    panels.Ligne(CATEGORIES[k][0], d[0].value, indice=d[1] if d[1] else None)
+                    for k, d in statuses.items()
+                ],
+            ),
+        ]
+        if erreurs:
+            sections.append(
+                panels.Section(
+                    "À corriger",
+                    [
+                        panels.Ligne(CATEGORIES[k][0], " · ".join(d[2][:2]))
+                        for k, d in erreurs
+                    ],
+                )
+            )
+        return "🔧 SentriX — Diagnostic", (
+            "État réel de la configuration. Cliquez sur « Actualiser » pour revérifier "
+            "ou sélectionnez une catégorie pour corriger un problème."
+        ), sections
 
     async def _contenu_accueil(self, statuses):
         """Vue d'ensemble : ce qui marche, ce qui manque, ce qui bloque."""
@@ -1806,9 +1847,18 @@ class SetupView(discord.ui.LayoutView):
                 ),
             ]
         if cle == "levels":
+            stats = await self.bot.db.get_stats_settings(self.guild.id)
+            announce_on = bool(stats.get("level_announce_enabled", False) and stats.get("level_announce_opt_in", False))
             return [
                 panels.Section(
                     "Réglages",
+                    [
+                        panels.Ligne(
+                            "Annonces automatiques",
+                            "● ACTIVÉES" if announce_on else "○ DÉSACTIVÉES — activation manuelle obligatoire",
+                        ),
+                    ] +
+
                     [
                         panels.Ligne("Salon des montées", _channel(self.guild, _get(conf, "level_channel"))),
                         panels.Ligne("Multiplicateur XP", str(_get(conf, "xp_multiplier", 1.0))),
