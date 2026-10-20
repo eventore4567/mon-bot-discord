@@ -746,6 +746,9 @@ class Ai(commands.Cog, name="Ai"):
                 )
                 # Réponse Discord normale, sans ping et sans notification inutile.
                 kwargs.setdefault("mention_author", False)
+            # Une réponse IA est une conversation, jamais une invitation à
+            # notifier @everyone, un rôle ou l'auteur par accident.
+            kwargs.setdefault("allowed_mentions", discord.AllowedMentions.none())
             try:
                 return await destination.send(**kwargs)
             except discord.HTTPException:
