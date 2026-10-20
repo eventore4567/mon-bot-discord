@@ -58,6 +58,8 @@ PUBLIC_COMMANDS = frozenset({
     # d'arbre, « translate message ». Non classé, il était listé fail-closed en
     # production le 08/10/2026 ; il prend la décision de /translate.
     "translate message",
+    # Menu contextuel : signalement privé accessible aux membres quand le staff l'active.
+    "signaler ce message",
     "report-bug", "afk", "roll", "choose", "privacy-policy",
     # Preuve
     "proof", "proofstatus",
