@@ -12,8 +12,8 @@ from cogs.setup_control_center import OfficialSetup
 from web import giveaway_dashboard_v101 as giveaway_dashboard
 
 
-def test_real_setup_is_native_and_never_exposes_internal_runtime_parameters():
-    command = OfficialSetup.slash_setup
+def test_real_config_is_native_and_never_exposes_internal_runtime_parameters():
+    command = OfficialSetup.config_group.get_command("accueil")
     assert isinstance(command, app_commands.Command)
     params = tuple(inspect.signature(command.callback).parameters)
     assert params == ("self", "interaction")
