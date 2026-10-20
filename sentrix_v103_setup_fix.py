@@ -152,7 +152,6 @@ def _replace_setup_slash(bot) -> bool:
             advanced = app_commands.Group(
                 name="advanced",
                 description="Réglages complémentaires du serveur.",
-                parent=group,
             )
             needed += 1  # Le nouveau sous-groupe occupe lui-même un emplacement.
         if not isinstance(advanced, app_commands.Group):
@@ -165,6 +164,8 @@ def _replace_setup_slash(bot) -> bool:
         for command in movable[-needed:]:
             group.remove_command(command.name)
             advanced.add_command(command)
+        if group.get_command("advanced") is None:
+            group.add_command(advanced)
         logger.info("V103 : %s réglages hérités déplacés dans /config advanced.", needed)
 
     for name, description, category, diagnostic in routes:
