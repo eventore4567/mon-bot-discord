@@ -285,7 +285,8 @@ GUILD_CONFIG_FIELD_MODULE: dict[str, str] = {
     "welcome_channel": "welcome",
     "goodbye_channel": "goodbye",
     "autorole": "roles",
-    "level_channel": "levels",
+    # La sélection du salon ne démarre pas l'XP : un clic explicite
+    # « Activer les niveaux » dans /config niveaux est obligatoire.
     "ticket_category": "tickets",
     "ticket_log_channel": "tickets",
     "log_channel": "logs",
