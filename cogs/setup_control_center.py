@@ -427,11 +427,20 @@ class CategorySelect(discord.ui.Select):
         self.owner = view
         super().__init__(
             placeholder="Choisir une catégorie",
-            options=[discord.SelectOption(label=CATEGORIES[key][0], value=key, description=CATEGORIES[key][1][:100]) for key in CATEGORY_ORDER],
+            options=(
+                [discord.SelectOption(label=CATEGORIES[key][0], value=key, description=CATEGORIES[key][1][:100]) for key in CATEGORY_ORDER]
+                + [discord.SelectOption(
+                    label="👁️ Surveillance", value="surveillance",
+                    description="Dossiers privés des membres, suivi vocal et durée des sessions",
+                )]
+            ),
             row=0,
         )
 
     async def callback(self, interaction):
+        if self.values[0] == "surveillance":
+            from cogs.voice_history_config import open_voice_history_config
+            return await open_voice_history_config(self.owner.bot, interaction)
         self.owner.category = self.values[0]
         self.owner.diagnostic_mode = False
         self.owner.selected_log = self.owner.selected_ticket = self.owner.selected_notification = None
@@ -1228,9 +1237,20 @@ class SetupView(discord.ui.LayoutView):
                     )
                 await cog.open_config(interaction)
 
+            surveillance = discord.ui.Button(
+                label="👁️ Surveillance", style=discord.ButtonStyle.secondary,
+            )
+
+            async def open_surveillance_panel(interaction):
+                from cogs.voice_history_config import open_voice_history_config
+                await open_voice_history_config(self.bot, interaction)
+
             warns.callback = open_warn_panel
             reports.callback = open_report_panel
-            for item in (home, warns, reports, avance, close):
+            surveillance.callback = open_surveillance_panel
+            # Le sélecteur « Choisir une catégorie » permet déjà de retourner
+            # à l'accueil : remplacer le bouton Accueil libère la cinquième place.
+            for item in (warns, reports, surveillance, avance, close):
                 self.ajouter(item)
         else:
             self.ajouter(home); self.ajouter(refresh); self.ajouter(avance); self.ajouter(close)
@@ -2127,11 +2147,6 @@ class OfficialSetup(commands.Cog, name="SentriXSetup"):
     @config_group.command(name="logs", description="📋 Configurer les journaux et leurs salons.")
     async def config_logs(self, interaction: discord.Interaction):
         await self.send_setup(interaction, category="logs", private=True)
-
-    @config_group.command(name="surveillance", description="👁️ Suivi privé de l'activité des membres et des vocaux.")
-    async def config_surveillance(self, interaction: discord.Interaction):
-        from cogs.voice_history_config import open_voice_history_config
-        await open_voice_history_config(self.bot, interaction)
 
     @config_group.command(name="tickets", description="🎫 Configurer les tickets et les panels.")
     async def config_tickets(self, interaction: discord.Interaction):
