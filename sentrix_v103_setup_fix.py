@@ -72,7 +72,7 @@ def _replace_setup_slash(bot) -> bool:
     """Publie /config après V95/V98/V110 et retire l'ancien slash /setup.
 
     V98 construit déjà une racine /config pour les commandes historiques : on
-    conserve ces sous-commandes et on AJOUTE les huit centres interactifs.
+    conserve ces sous-commandes et on AJOUTE neuf centres interactifs.
     Ajouter un second /config ferait disparaître la surface V98 et dépasserait
     le budget mondial des 100 commandes slash.
     """
