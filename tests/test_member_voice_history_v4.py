@@ -221,3 +221,19 @@ def test_setup_panel_exposes_vocal_config_without_new_slash_root():
     source = inspect.getsource(SetupView.render)
     assert "🎧 Suivi vocal" in source
     assert "open_voice_history_config" in source
+
+
+
+@pytest.mark.asyncio
+async def test_sessions_counted_but_duration_private_when_duration_option_off(voice_db):
+    bot = SimpleNamespace(db=voice_db)
+    await voice_history.set_setting(bot, 1, "enabled", True)
+    await voice_history.set_setting(bot, 1, "track_duration", False)
+    await voice_history.record_transition(bot, 1, 23, None, 45, now=100)
+    exit_event = await voice_history.record_transition(
+        bot, 1, 23, 45, None, now=160,
+    )
+    assert exit_event.duration_seconds is None
+    stats = await voice_history.get_member_summary(bot, 1, 23)
+    assert stats["completed_sessions"] == 1
+    assert stats["seconds"] == 0
