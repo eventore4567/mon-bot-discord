@@ -1,4 +1,4 @@
-"""SentriX V103 — garde de compatibilité de la route /setup.
+"""SentriX V103 — publication finale des panneaux /config.
 
 Historique : V103 réinstallait autrefois /setup en le redirigeant vers
 ``cogs.setup_control_center.SentriXSetup``. Depuis le Smart Setup V4/V114, cette route est
@@ -69,9 +69,15 @@ async def _send_setup_v114(bot, interaction: discord.Interaction) -> None:
 
 
 def _replace_setup_slash(bot) -> bool:
-    """Réinstalle /setup avec une signature native, dirigée vers Configuration.SetupView."""
+    """Publie /config après V95/V98/V110 et retire l'ancien slash /setup.
+
+    V98 construit déjà une racine /config pour les commandes historiques : on
+    conserve ces sous-commandes et on AJOUTE les huit centres interactifs.
+    Ajouter un second /config ferait disparaître la surface V98 et dépasserait
+    le budget mondial des 100 commandes slash.
+    """
     if bot.get_cog("SentriXSetup") is None:
-        logger.error("V103 : cog SentriXSetup (setup_control_center) introuvable ; /setup non remplacé.")
+        logger.error("V103 : centre officiel SentriXSetup introuvable ; /config indisponible.")
         return False
 
     tree = bot.tree
@@ -80,35 +86,76 @@ def _replace_setup_slash(bot) -> bool:
     except TypeError:
         tree.remove_command("setup")
 
-    async def setup_callback(interaction: discord.Interaction) -> None:
-        await _send_setup_v114(bot, interaction)
-
-    setup_callback.__name__ = "slash_setup_v114"
-    setup_callback.__qualname__ = setup_callback.__name__
-    setup_callback.__signature__ = inspect.Signature([
-        inspect.Parameter(
-            "interaction",
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            annotation=discord.Interaction,
+    try:
+        group = tree.get_command("config", type=discord.AppCommandType.chat_input)
+    except TypeError:
+        group = tree.get_command("config")
+    if group is None:
+        group = app_commands.Group(
+            name="config",
+            description="Panneaux de configuration du serveur SentriX.",
         )
-    ])
-    setup_callback.__annotations__ = {
-        "interaction": discord.Interaction,
-        "return": None,
-    }
-    setup_callback._sentrix_original_command = "setup"
-    setup_callback._sentrix_native_options = True
-    setup_callback._sentrix_setup_authority = "configuration-v114"
+        tree.add_command(group)
+    elif not isinstance(group, app_commands.Group):
+        logger.error("V103 : la racine /config existe mais n'est pas un groupe.")
+        return False
 
-    tree.add_command(
-        app_commands.Command(
-            name="setup",
-            description="Ouvrir le centre de configuration SentriX (le même que +setup)",
-            callback=setup_callback,
-        ),
-        override=True,
+    routes = (
+        ("accueil", "🏠 Centre principal de configuration.", None, False),
+        ("automod", "🛡️ Protection AutoMod, anti-spam et anti-raid.", "security", False),
+        ("logs", "📋 Configurer tous les journaux du serveur.", "logs", False),
+        ("tickets", "🎫 Gérer les tickets et leurs catégories.", "tickets", False),
+        ("bienvenue", "👋 Messages de bienvenue et autorôles.", "welcome", False),
+        ("moderation", "⚖️ Sanctions et autorisations staff.", "moderation", False),
+        ("niveaux", "⭐ XP, niveaux et annonces sur activation.", "levels", False),
+        ("diagnostic", "🔧 Analyser les problèmes de configuration.", None, True),
     )
-    logger.info("V103 : /setup ouvre le centre de configuration de +setup (moteur unique).")
+
+    def make_callback(name: str, category: str | None, diagnostic: bool):
+        async def config_callback(interaction: discord.Interaction) -> None:
+            setup_cog = bot.get_cog("SentriXSetup")
+            if setup_cog is None:
+                return await interaction.response.send_message(
+                    "Le Centre Config de SentriX est indisponible.", ephemeral=True,
+                )
+            await setup_cog.send_setup(
+                interaction, category=category, diagnostic=diagnostic, private=True,
+            )
+
+        config_callback.__name__ = f"config_{name}"
+        config_callback.__qualname__ = config_callback.__name__
+        config_callback.__signature__ = inspect.Signature([
+            inspect.Parameter(
+                "interaction",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                annotation=discord.Interaction,
+            )
+        ])
+        config_callback.__annotations__ = {
+            "interaction": discord.Interaction,
+            "return": None,
+        }
+        config_callback._sentrix_original_command = f"config {name}"
+        config_callback._sentrix_native_options = True
+        # Conservé pour les couches de compatibilité du setup historique.
+        config_callback._sentrix_setup_authority = "configuration-v114"
+        return config_callback
+
+    for name, description, category, diagnostic in routes:
+        if group.get_command(name) is not None:
+            group.remove_command(name)
+        group.add_command(app_commands.Command(
+            name=name,
+            description=description[:100],
+            callback=make_callback(name, category, diagnostic),
+        ))
+
+    roots = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
+    if len(roots) > 100:
+        logger.error("V103 : /config dépasse le budget global : %s/100 racines.", len(roots))
+        return False
+
+    logger.info("V103 : /config publie 8 centres ; /setup slash retiré, +setup conservé.")
     return True
 
 
