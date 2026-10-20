@@ -42,7 +42,6 @@ CREATE TABLE IF NOT EXISTS member_voice_history_totals (
     PRIMARY KEY (guild_id,user_id)
 )
 """
-_ready: set[int] = set()
 _schema_lock = asyncio.Lock()
 
 @dataclass(frozen=True)
@@ -58,15 +57,16 @@ class VoiceTransition:
 
 
 async def ensure_schema(bot) -> None:
-    key = id(bot.db)
-    if key in _ready:
+    # Attach readiness to the database object, never to its reusable id().
+    # In test suites, short-lived databases can reuse ids and skip migrations.
+    if getattr(bot.db, "_voice_history_schema_ready", False):
         return
     async with _schema_lock:
-        if key in _ready:
+        if getattr(bot.db, "_voice_history_schema_ready", False):
             return
         for statement in (_SETTINGS, _SESSIONS, _TOTALS):
             await bot.db.execute(statement)
-        _ready.add(key)
+        setattr(bot.db, "_voice_history_schema_ready", True)
 
 
 async def get_settings(bot, guild_id: int) -> dict:
