@@ -239,3 +239,17 @@ async def test_sessions_counted_but_duration_private_when_duration_option_off(vo
     stats = await voice_history.get_member_summary(bot, 1, 23)
     assert stats["completed_sessions"] == 1
     assert stats["seconds"] == 0
+
+
+
+@pytest.mark.asyncio
+async def test_surveillance_category_opens_private_center_directly():
+    from cogs.setup_control_center import CategorySelect
+    owner = SimpleNamespace(bot=SimpleNamespace(), guild=SimpleNamespace(id=1))
+    select = CategorySelect(owner)
+    assert any(item.value == "surveillance" for item in select.options)
+    select._values = ["surveillance"]
+    interaction = SimpleNamespace(guild_id=1, user=SimpleNamespace(id=12))
+    with patch("cogs.voice_history_config.open_voice_history_config", AsyncMock()) as open_panel:
+        await select.callback(interaction)
+    open_panel.assert_awaited_once_with(owner.bot, interaction)
