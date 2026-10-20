@@ -178,9 +178,9 @@ class MemberHistoryView(discord.ui.LayoutView):
             key: sum(counts.get(event, 0) for event in events)
             for key, events in COUNTERS.items()
         }
-        container = discord.ui.Container(accent_colour=discord.Colour(0x879BFF))
+        container = discord.ui.Container()  # Même présentation neutre que les logs.
         container.add_item(discord.ui.TextDisplay(
-            "## 🛡️ SENTRIX · HISTORIQUE DU MEMBRE\n"
+            "## SENTRIX · HISTORIQUE DU MEMBRE\n"
             f"### {username}\n"
             "-# Dossier de modération • Événements conservés sans référence publique."
         ))
@@ -192,8 +192,8 @@ class MemberHistoryView(discord.ui.LayoutView):
         container.add_item(discord.ui.Separator())
         blocks: list[str] = []
         for record in records:
-            title, icon = TYPES.get(
-                record["log_type"], (safe_text(record["title"]) or "Événement", "📋")
+            title, _icon = TYPES.get(
+                record["log_type"], (safe_text(record["title"]) or "Événement", "")
             )
             moderator = (
                 f" • Par <@{record['moderator_id']}>"
@@ -201,7 +201,7 @@ class MemberHistoryView(discord.ui.LayoutView):
             )
             detail = _history_detail(record.get("description") or "")
             blocks.append(
-                f"**{icon} {title}** · {_date(record['created_at'])}"
+                f"**{title}** · {_date(record['created_at'])}"
                 f"{moderator}\n{detail or 'Aucun détail enregistré.'}"
             )
         container.add_item(discord.ui.TextDisplay(
@@ -215,8 +215,8 @@ class MemberHistoryView(discord.ui.LayoutView):
             buttons = []
             for key in choices:
                 button = discord.ui.Button(
-                    label=FILTER_LABELS[key],
-                    style=discord.ButtonStyle.primary if self.filter == key else discord.ButtonStyle.secondary,
+                    label=("✓ " if self.filter == key else "") + FILTER_LABELS[key],
+                    style=discord.ButtonStyle.secondary,
                 )
 
                 async def selected(interaction: discord.Interaction, *, value: str = key):
@@ -284,7 +284,7 @@ class ConfirmUnban(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Confirmer le débannissement", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Confirmer le débannissement", style=discord.ButtonStyle.secondary)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         denied = await _access(interaction, unban=True)
         if denied:
@@ -350,7 +350,7 @@ class PremiumLogAction(
         super().__init__(discord.ui.Button(
             label="Historique" if action == "history" else "Débannir",
             emoji="📜" if action == "history" else "🛡️",
-            style=discord.ButtonStyle.secondary if action == "history" else discord.ButtonStyle.success,
+            style=discord.ButtonStyle.secondary,
             custom_id=f"sentrix:premiumlog:{action}:{guild_id}:{target_id}",
         ))
 
