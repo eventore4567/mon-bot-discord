@@ -18,7 +18,8 @@ import aiosqlite
 import discord
 
 import config
-from utils.log_banners import COLORS, get_banner
+from utils.log_banners import COLORS
+from utils.premium_log_banners import get_premium_log_banner
 from utils.log_categories import (
     DEFAULT_EVENT_EMOJI,
     EVENT_EMOJI,
@@ -315,6 +316,7 @@ def narrative_body(
     after = _field_value(embed, "après", "apres", "after")
     account_created = _field_value(embed, "compte créé", "compte cree", "account created")
     duration = _field_value(embed, "durée", "duree", "présence", "presence")
+    former_roles = _field_value(embed, "rôles avant le départ", "roles before leaving")
 
     lines: list[str] = []
     if event_type == "message_delete":
@@ -337,10 +339,14 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} a quitté le serveur.")
         if duration:
             lines.append(f"Présence sur le serveur : **{duration}**.")
+        if former_roles:
+            lines.append(f"**Rôles avant le départ :** {former_roles}")
     elif event_type == "member_kick":
         lines.append(f"{member or 'Un membre'} a été expulsé" + (f" par {moderator}" if moderator else "") + ".")
         if reason:
             lines.append(f"**Raison :** {reason}")
+        if former_roles:
+            lines.append(f"**Rôles avant l'expulsion :** {former_roles}")
     elif event_type == "member_ban":
         lines.append(
             f"{member or 'Un membre'} a été banni" + (f" par {moderator}" if moderator else "")
@@ -598,6 +604,7 @@ class WideLogView(discord.ui.LayoutView):
         identity_icon: str | None = None,
         emoji: str = "",
         log_type: str = "",
+        guild_id: int | None = None,
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(
@@ -630,8 +637,7 @@ class WideLogView(discord.ui.LayoutView):
         # BLOC 1 — identité de l'entité concernée, jamais le bot par défaut.
         if identity_name:
             ident = f"## {safe_text(identity_name)[:80]}"
-            if identity_id:
-                ident += f"\n> -# ID : {identity_id}"
+            # L'identifiant reste disponible dans le dossier, jamais sous l'avatar.
             placed = False
             if identity_icon:
                 try:
@@ -665,7 +671,9 @@ class WideLogView(discord.ui.LayoutView):
             container.add_item(discord.ui.TextDisplay(body[:3000]))
 
         footer = safe_text(getattr(embed.footer, "text", None))[:250]
-        if footer:
+        # Les anciennes références (SX-XXXX, BAN-0001, dossier #123) ne font
+        # plus partie de la présentation publique. La base conserve ses IDs.
+        if footer and not re.search(r"(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+|réf(?:érence)?\s*[:#])", footer, re.I):
             container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
         # Les boutons restent DANS le Container, en ActionRow, tous en secondary.
@@ -674,6 +682,19 @@ class WideLogView(discord.ui.LayoutView):
             add_separator()
             for row in rows:
                 container.add_item(row)
+
+        # Actions interactives persistantes : dossier privé et débannissement
+        # confirmé. On utilise des snowflakes, pas les vieilles références SX.
+        if guild_id and identity_id and log_type in {
+            "member_ban", "member_unban", "member_kick", "member_warn",
+            "member_timeout", "member_untimeout", "member_join", "member_leave",
+            "role_add", "role_remove", "member_roles", "message_delete", "message_edit",
+        }:
+            from cogs.log_history_center import PremiumLogAction
+            items = [PremiumLogAction("history", guild_id, identity_id)]
+            if log_type == "member_ban":
+                items.append(PremiumLogAction("unban", guild_id, identity_id))
+            container.add_item(discord.ui.ActionRow(*items))
 
         self.add_item(container)
 
@@ -786,8 +807,8 @@ async def send_wide_log(
     log_runtime_capabilities()
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     _category, emoji, kind = resolve(event_type, embed.title or "", embed.description or "")
-    banner_path = get_banner(event_type, embed.title or "", embed.description or "")
-    banner_filename = f"sentrix_log_{kind}.png"
+    banner_path = get_premium_log_banner(event_type, embed.title or "")
+    banner_filename = f"sentrix_premium_{kind}.webp"
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
@@ -824,6 +845,7 @@ async def send_wide_log(
             identity_icon,
             emoji,
             event_type,
+            int(guild.id) if guild is not None else None,
         )
     except Exception as exc:
         logger.error(
