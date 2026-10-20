@@ -20,7 +20,6 @@ import discord
 
 import config
 from utils.log_banners import COLORS, get_banner
-from utils.premium_log_banners import get_premium_log_banner
 from utils.log_categories import (
     CATEGORIES,
     DEFAULT_EVENT_EMOJI,
@@ -1252,20 +1251,10 @@ class WideLogView(discord.ui.LayoutView):
         available_attachments: set[str] | None = None,
     ) -> None:
         super().__init__(timeout=None)
+        # Le format compact utilise uniquement l'avatar à droite de l'en-tête.
+        # Les fichiers d'images utilisateur (messages supprimés, etc.) restent
+        # consultables plus bas dans leur galerie dédiée.
         container = discord.ui.Container()
-        # Bannière large générée par catégorie, sans données privées gravées
-        # dans l'image. Le contenu textuel Discord reste accessible.
-        if banner_filename:
-            gallery = discord.ui.MediaGallery()
-            gallery.add_item(media=f"attachment://{banner_filename}")
-            container.add_item(gallery)
-
-        # Plus de bandeau en tête : le premium vient de l'icône de l'événement,
-        # de la hiérarchie du texte et des actions, pas d'une image qui occupe
-        # le tiers de la carte. La pièce jointe correspondante est retirée au
-        # même endroit (voir `files` plus bas) — les deux DOIVENT disparaître
-        # ensemble, une galerie sans sa pièce jointe fait refuser le message
-        # entier par Discord.
 
         event_type = canonical_event_type(
             log_type,
@@ -1279,7 +1268,7 @@ class WideLogView(discord.ui.LayoutView):
         identity_label = _trace_identity_label(event_type)
 
         # 2 — en-tête compact : vraie mention Discord, jamais un gros ID brut.
-        header_lines = [meta, f"## {title}"]
+        header_lines = [meta, f"### {title}"]
         identity_ref = _trace_identity_ref(event_type, identity_id)
         identity_display = identity_ref or (safe_text(identity_name)[:80] if identity_name else "")
         # A role-reorder event may carry a count (17) as its "identity".
@@ -1328,6 +1317,13 @@ class WideLogView(discord.ui.LayoutView):
             identity_id=identity_id,
         )
         summary, details = _trace_body_parts(body)
+        # L'auteur est déjà visible juste à côté de sa photo de profil :
+        # ne pas le répéter en début de phrase pour les événements vocaux.
+        if event_type in {"voice_join", "voice_leave"} and identity_id and summary:
+            prefix = f"<@{identity_id}> "
+            if summary.startswith(prefix):
+                summary = summary[len(prefix):]
+                summary = summary[:1].upper() + summary[1:]
         # Role moves need legible numeric positions, not inline code chips.
         if "rôles déplacés" in title.casefold() or "roles moved" in title.casefold():
             summary = _clean_role_positions(summary)
@@ -1339,20 +1335,10 @@ class WideLogView(discord.ui.LayoutView):
             summary = _bold_log_labels_as_badges(summary)
             details = _bold_log_labels_as_badges(details)
         if summary:
-            # Avant/Après et contenu de message sont déjà formatés en blockquote.
-            # Les re-quoter ajouterait un deuxième niveau visuel inutile.
-            if event_type in {
-                "message_edit", "message_delete", "invite_create", "invite_delete"
-            }:
-                # Le conteneur V2 crée déjà le cadre. Une citation « > »
-                # supplémentaire ajoutait une barre grise sans intérêt.
-                container.add_item(discord.ui.TextDisplay(summary[:1600]))
-            else:
-                quoted = "\n".join(
-                    f"> {line}" if line.strip() else ">"
-                    for line in summary.splitlines()
-                )
-                container.add_item(discord.ui.TextDisplay(quoted[:1600]))
+            # Pas de grand encadré ni de barre de citation grise sur une action
+            # standard. Les citations existantes de messages utilisateur
+            # restent inchangées (elles sont créées par narrative_body).
+            container.add_item(discord.ui.TextDisplay(summary[:1600]))
         if details:
             container.add_item(discord.ui.TextDisplay(details[:2200]))
 
@@ -1665,7 +1651,7 @@ async def send_wide_log(
     identity_id: int | None = None,
     identity_icon: str | None = None,
 ) -> bool:
-    """Envoie le log Components V2 avec bannière, identité, événement et actions."""
+    """Envoie un log compact Components V2 avec avatar et actions."""
     if salon_inaccessible(getattr(channel, "id", None)):
         logger.debug(
             "SXTRACE 6 TRANSPORT phase=skip channel=%s reason=QUARANTAINE",
@@ -1675,24 +1661,14 @@ async def send_wide_log(
     log_runtime_capabilities()
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     _category, emoji, kind = resolve(event_type, embed.title or "", embed.description or "")
+    # Aucun visuel décoratif généré : photo de profil en miniature à droite.
     banner_filename = ""
-    banner_path = None
-    try:
-        banner_path = get_premium_log_banner(event_type, embed.title or "")
-        banner_filename = f"sentrix_premium_{kind}.webp"
-    except Exception:
-        # La journalisation ne doit jamais disparaître à cause de l'image.
-        logger.exception("Bannière premium indisponible, log envoyé sans image.")
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
         "decorative_banner=disabled",
         getattr(channel, "id", "?"), log_type, event_type, kind,
     )
-
-    # Plus d'abandon sur bannière manquante : la carte n'en affiche plus, donc
-    # son absence n'a plus aucune conséquence. Avant ce changement, un fichier
-    # introuvable faisait perdre le log ENTIER.
 
     guild = getattr(channel, "guild", None)
     identity_name, identity_id, identity_icon = derive_identity(
@@ -1731,23 +1707,9 @@ async def send_wide_log(
         logger.error("SENTRIX TRACE FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
-    try:
-        # Plus construit : la carte n'affiche plus de bandeau, et ouvrir un
-        # fichier par log pour ne jamais l'envoyer coûte une lecture disque à
-        # chaque événement.
-        banner_file = discord.File(str(banner_path), filename=banner_filename) if banner_path else None
-    except Exception as exc:
-        logger.error(
-            "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_FILE_FAILED type=%s",
-            type(exc).__name__,
-        )
-        logger.error("SENTRIX TRACE FAILED file type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
-        return False
-
-    # Vide : la galerie de bandeau a été retirée ci-dessus, donc plus rien ne
-    # référence ce fichier. Le joindre quand même alourdirait chaque log d'une
-    # image que personne n'affiche.
-    files: list[discord.File] = [banner_file] if banner_file is not None else []
+    # Uniquement les pièces jointes utiles (images/vidéos de messages).
+    # Aucun fichier de bannière ni upload inutile à chaque log.
+    files: list[discord.File] = []
     payload_files: list[discord.File] = []
     if extra_file is not None:
         payload_files.append(extra_file)
