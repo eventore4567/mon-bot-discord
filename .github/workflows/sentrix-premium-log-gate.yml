@@ -1,0 +1,36 @@
+name: SentriX Premium Logs Gate
+
+on:
+  pull_request:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'utils/wide_logs.py'
+      - 'utils/premium_log_banners.py'
+      - 'cogs/log_history_center.py'
+      - 'cogs/logs.py'
+      - 'cogs/ai.py'
+      - 'main.py'
+      - 'tests/test_premium_log_center.py'
+      - '.github/workflows/sentrix-premium-log-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  premium-logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DISCORD_TOKEN: ci.fake.token
+      DATABASE_PATH: /tmp/sentrix-premium-logs-ci.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+      - name: Compile changed production sources
+        run: python -m py_compile main.py cogs/ai.py cogs/logs.py cogs/log_history_center.py utils/wide_logs.py utils/premium_log_banners.py
+      - name: Premium Logs and Natural Conversation Contracts
+        run: |
+          python -m pytest -q             tests/test_premium_log_center.py             tests/test_logs_narratifs.py             tests/test_log_subject_and_actor.py             tests/test_log_markdown_readability.py             tests/test_logs_salon_inaccessible.py             tests/test_log_reveal_id_persistence.py             tests/test_ai_explicit_wake_ha.py             tests/test_plain_text_mentions.py             tests/test_natural_plan_ephemeral_ux.py
