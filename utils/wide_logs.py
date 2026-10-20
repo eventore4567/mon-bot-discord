@@ -20,7 +20,6 @@ import discord
 
 import config
 from utils.log_banners import COLORS, get_banner
-from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
 from utils.log_categories import (
     CATEGORIES,
     DEFAULT_EVENT_EMOJI,
@@ -1099,18 +1098,18 @@ def _trace_title(event_type: str, fallback: str = "") -> str:
     return str(event or "Événement").replace("_", " ").strip().capitalize()[:120]
 
 
-def _trace_meta(event_type: str, *, emoji: str = "") -> str:
-    """En-tête utilisateur : famille lisible, jamais le code technique interne."""
+def _trace_meta(event_type: str, *, emoji: str = "", neutral: bool = False) -> str:
+    """Libellé de catégorie discret, sans icône colorée pour les cartes neutres."""
     event = canonical_event_type(event_type)
     category = category_for(event)
     category_label = CATEGORIES.get(category, category.replace("_", " ").title())
-    marker = (emoji or marqueur_evenement(event)).strip()
-    prefix = f"{marker} " if marker else ""
     if event == "game_reward":
         category_label = "Jeux"
+    if neutral:
+        return f"-# {category_label}"
+    marker = (emoji or marqueur_evenement(event)).strip()
+    prefix = f"{marker} " if marker else ""
     if event in {"invite_create", "invite_delete"}:
-        # Icône explicite : un lien d'invitation ne doit pas hériter de
-        # l'icône « Paramètres » utilisée pour les autres Ressources.
         prefix = "🔗 "
     return f"-# {prefix}{category_label}"
 
@@ -1252,15 +1251,11 @@ class WideLogView(discord.ui.LayoutView):
         available_attachments: set[str] | None = None,
     ) -> None:
         super().__init__(timeout=None)
-        # Format neutre : image de 1200x24 presque transparente.
-        # Un MediaGallery en tête propose un ratio très large, SANS l'ancienne
-        # grande bannière. La photo du membre reste à droite dans Section.
-        # Le client Discord garde la maîtrise de la largeur réelle du panneau.
+        # Présentation « Équilibré » : bande native Discord très fine,
+        # sans image MediaGallery qui réservait une grande hauteur vide.
+        # Discord gère librement la largeur finale du conteneur.
         container = discord.ui.Container()
-        if banner_filename:
-            strip_gallery = discord.ui.MediaGallery()
-            strip_gallery.add_item(media=f"attachment://{banner_filename}")
-            container.add_item(strip_gallery)
+        container.add_item(_sep())
 
         event_type = canonical_event_type(
             log_type,
@@ -1270,7 +1265,7 @@ class WideLogView(discord.ui.LayoutView):
         title = _trace_title(event_type, embed.title or "")
         title = re.sub(r"(?i)\bDossier\s*#\d+\s*(?:[—:\-]\s*)?", "", title)
         title = re.sub(r"(?i)\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", "", title).strip(" —:-") or "Événement"
-        meta = _trace_meta(event_type, emoji=emoji)
+        meta = _trace_meta(event_type, emoji=emoji, neutral=True)
         identity_label = _trace_identity_label(event_type)
 
         # 2 — en-tête compact : vraie mention Discord, jamais un gros ID brut.
@@ -1657,7 +1652,7 @@ async def send_wide_log(
     identity_id: int | None = None,
     identity_icon: str | None = None,
 ) -> bool:
-    """Envoie un log compact Components V2 avec avatar et actions."""
+    """Envoie le modèle Équilibré neutre pour toutes les catégories de logs."""
     if salon_inaccessible(getattr(channel, "id", None)):
         logger.debug(
             "SXTRACE 6 TRANSPORT phase=skip channel=%s reason=QUARANTAINE",
@@ -1667,20 +1662,10 @@ async def send_wide_log(
     log_runtime_capabilities()
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     _category, emoji, kind = resolve(event_type, embed.title or "", embed.description or "")
-    # Un seul bandeau gris presque transparent pour TOUTES les catégories,
-    # y compris la modération, le vocal, les messages, rôles et tickets.
-    # Le type d'événement ne modifie jamais son apparence.
+    # Plus de bannière image, même ultra-fine : Discord réservait trop de vide.
+    # Le séparateur natif en haut de WideLogView conserve le style équilibré.
     banner_filename = ""
-    banner_path = None
     payload_file_candidates = ([extra_file] if extra_file is not None else []) + list(extra_files or [])
-    # Ne jamais sacrifier un fichier de message pour une décoration : Discord
-    # limite à 10 fichiers, et chaque MediaGallery doit référencer un fichier.
-    if len(payload_file_candidates) < 10:
-        try:
-            banner_path = get_premium_log_banner(event_type, embed.title or "")
-            banner_filename = BANNER_FILENAME
-        except (OSError, ValueError):
-            logger.exception("Bande neutre indisponible : log envoyé sans bande.")
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
@@ -1725,13 +1710,9 @@ async def send_wide_log(
         logger.error("SENTRIX TRACE FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
-    # Discord doit recevoir la bande avec la carte. Les vrais médias
-    # restent conservés en priorité ; un message avec 10 fichiers ne réserve
-    # aucune place pour la décoration.
-    files: list[discord.File] = (
-        [discord.File(str(banner_path), filename=banner_filename)]
-        if banner_path is not None else []
-    )
+    # Envoyer uniquement les pièces jointes authentiques (photos, vidéos,
+    # documents) : jamais d'image décorative ni d'espace perdu.
+    files: list[discord.File] = []
     payload_files: list[discord.File] = payload_file_candidates
 
     seen_names: set[str] = set()
