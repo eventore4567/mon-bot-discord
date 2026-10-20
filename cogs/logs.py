@@ -1045,7 +1045,6 @@ class Logs(commands.Cog, name="Logs"):
     # ---------------------------------------------------------------- VOCAL
 
     @commands.Cog.listener()
-    @commands.Cog.listener()
     async def on_ready(self):
         """Preserve ongoing sessions after a restart without counting downtime as fact."""
         if not log_service.is_primary_process():
