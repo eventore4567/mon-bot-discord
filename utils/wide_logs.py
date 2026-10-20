@@ -18,7 +18,8 @@ import aiosqlite
 import discord
 
 import config
-from utils.log_banners import COLORS, get_banner
+from utils.log_banners import COLORS
+from utils.premium_log_banners import get_premium_log_banner
 from utils.log_categories import (
     DEFAULT_EVENT_EMOJI,
     EVENT_EMOJI,
@@ -315,6 +316,7 @@ def narrative_body(
     after = _field_value(embed, "après", "apres", "after")
     account_created = _field_value(embed, "compte créé", "compte cree", "account created")
     duration = _field_value(embed, "durée", "duree", "présence", "presence")
+    former_roles = _field_value(embed, "rôles avant le départ", "roles before leaving")
 
     lines: list[str] = []
     if event_type == "message_delete":
@@ -337,10 +339,14 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} a quitté le serveur.")
         if duration:
             lines.append(f"Présence sur le serveur : **{duration}**.")
+        if former_roles:
+            lines.append(f"**Rôles avant le départ :** {former_roles}")
     elif event_type == "member_kick":
         lines.append(f"{member or 'Un membre'} a été expulsé" + (f" par {moderator}" if moderator else "") + ".")
         if reason:
             lines.append(f"**Raison :** {reason}")
+        if former_roles:
+            lines.append(f"**Rôles avant l'expulsion :** {former_roles}")
     elif event_type == "member_ban":
         lines.append(
             f"{member or 'Un membre'} a été banni" + (f" par {moderator}" if moderator else "")
@@ -598,6 +604,7 @@ class WideLogView(discord.ui.LayoutView):
         identity_icon: str | None = None,
         emoji: str = "",
         log_type: str = "",
+        guild_id: int | None = None,
     ) -> None:
         super().__init__(timeout=None)
         container = discord.ui.Container(
@@ -630,8 +637,7 @@ class WideLogView(discord.ui.LayoutView):
         # BLOC 1 — identité de l'entité concernée, jamais le bot par défaut.
         if identity_name:
             ident = f"## {safe_text(identity_name)[:80]}"
-            if identity_id:
-                ident += f"\n> -# ID : {identity_id}"
+            # L'identifiant reste disponible dans le dossier, jamais sous l'avatar.
             placed = False
             if identity_icon:
                 try:
@@ -651,6 +657,11 @@ class WideLogView(discord.ui.LayoutView):
 
         # BLOC 2 — événement.
         title = safe_text(embed.title or "Journal SentriX")[:200]
+        # Les anciens numéros de dossier restent en SQLite mais disparaissent
+        # des logs visibles : l'historique se recherche par membre.
+        title = re.sub(r"\bDossier\s*#\d+\s*(?:[—:\-]\s*)?", "", title, flags=re.I)
+        title = re.sub(r"\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", "", title, flags=re.I)
+        title = title.strip(" —:-") or "Événement SentriX"
         badge = emoji or EVENT_EMOJI.get(log_type, DEFAULT_EVENT_EMOJI)
         heading = f"### {badge} {title}".strip()
         container.add_item(discord.ui.TextDisplay(heading))
@@ -665,7 +676,9 @@ class WideLogView(discord.ui.LayoutView):
             container.add_item(discord.ui.TextDisplay(body[:3000]))
 
         footer = safe_text(getattr(embed.footer, "text", None))[:250]
-        if footer:
+        # Les anciennes références (SX-XXXX, BAN-0001, dossier #123) ne font
+        # plus partie de la présentation publique. La base conserve ses IDs.
+        if footer and not re.search(r"(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+|réf(?:érence)?\s*[:#])", footer, re.I):
             container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
         # Les boutons restent DANS le Container, en ActionRow, tous en secondary.
@@ -674,6 +687,19 @@ class WideLogView(discord.ui.LayoutView):
             add_separator()
             for row in rows:
                 container.add_item(row)
+
+        # Actions interactives persistantes : dossier privé et débannissement
+        # confirmé. On utilise des snowflakes, pas les vieilles références SX.
+        if guild_id and identity_id and log_type in {
+            "member_ban", "member_unban", "member_kick", "member_warn",
+            "member_timeout", "member_untimeout", "member_join", "member_leave",
+            "role_add", "role_remove", "member_roles", "message_delete", "message_edit",
+        }:
+            from cogs.log_history_center import PremiumLogAction
+            items = [PremiumLogAction("history", guild_id, identity_id)]
+            if log_type == "member_ban":
+                items.append(PremiumLogAction("unban", guild_id, identity_id))
+            container.add_item(discord.ui.ActionRow(*items))
 
         self.add_item(container)
 
@@ -786,8 +812,8 @@ async def send_wide_log(
     log_runtime_capabilities()
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     _category, emoji, kind = resolve(event_type, embed.title or "", embed.description or "")
-    banner_path = get_banner(event_type, embed.title or "", embed.description or "")
-    banner_filename = f"sentrix_log_{kind}.png"
+    banner_path = get_premium_log_banner(event_type, embed.title or "")
+    banner_filename = f"sentrix_premium_{kind}.webp"
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
@@ -824,6 +850,7 @@ async def send_wide_log(
             identity_icon,
             emoji,
             event_type,
+            int(guild.id) if guild is not None else None,
         )
     except Exception as exc:
         logger.error(
@@ -901,8 +928,53 @@ async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> l
     return [dict(row) for row in rows]
 
 
+async def fetch_log_history_page(
+    guild_id: int,
+    target_id: int,
+    *,
+    offset: int = 0,
+    limit: int = 4,
+    event_types: tuple[str, ...] | None = None,
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """Pagination SQL sans limite artificielle de 50 événements.
+
+    Le compteur par événement porte sur l'ensemble de l'historique, et non sur
+    les quatre cartes visibles ni sur la catégorie sélectionnée.
+    """
+    await ensure_log_storage()
+    safe_offset = max(0, int(offset))
+    safe_limit = max(1, min(int(limit), 20))
+    filters = tuple(str(item) for item in (event_types or ()))
+    where = "guild_id=? AND target_id=?"
+    params: list[Any] = [int(guild_id), int(target_id)]
+    if filters:
+        where += " AND log_type IN (" + ",".join("?" for _ in filters) + ")"
+        params.extend(filters)
+    async with aiosqlite.connect(_database_path()) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout = 5000")
+        async with db.execute(
+            "SELECT log_type, COUNT(*) AS n FROM logs WHERE guild_id=? AND target_id=? GROUP BY log_type",
+            (int(guild_id), int(target_id)),
+        ) as cursor:
+            totals = {str(row["log_type"]): int(row["n"]) for row in await cursor.fetchall()}
+        async with db.execute(
+            f"SELECT COUNT(*) AS n FROM logs WHERE {where}",
+            tuple(params),
+        ) as cursor:
+            count_row = await cursor.fetchone()
+        async with db.execute(
+            "SELECT id,guild_id,log_type,banner_kind,target_id,moderator_id,title,description,created_at "
+            f"FROM logs WHERE {where} ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
+            tuple(params) + (safe_limit, safe_offset),
+        ) as cursor:
+            records = [dict(row) for row in await cursor.fetchall()]
+    return records, int(count_row["n"] if count_row else 0), totals
+
+
 __all__ = [
     "FALLBACK_ENABLED", "NO_PINGS", "WideLogView", "build_rows", "compact_fields",
     "derive_identity", "ensure_log_storage", "extract_history_ids", "fetch_log_history",
+    "fetch_log_history_page",
     "log_runtime_capabilities", "narrative_body", "safe_text", "send_wide_log",
 ]
