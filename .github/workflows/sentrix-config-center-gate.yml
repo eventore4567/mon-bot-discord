@@ -5,6 +5,7 @@ on:
     branches: [dashboard-refonte-2026-09]
     paths:
       - 'cogs/setup_control_center.py'
+      - 'cogs/setup_v2_core.py'
       - 'sentrix_v103_setup_fix.py'
       - 'cogs/levels.py'
       - 'database/db.py'
@@ -28,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt pytest pytest-asyncio
       - name: Compile production modules and contracts
-        run: python -m py_compile cogs/setup_control_center.py sentrix_v103_setup_fix.py cogs/levels.py database/db.py tests/test_config_center_level_opt_in.py
+        run: python -m py_compile cogs/setup_control_center.py cogs/setup_v2_core.py sentrix_v103_setup_fix.py cogs/levels.py database/db.py tests/test_config_center_level_opt_in.py
       - name: Discord /config and level opt-in regression tests
         run: |
           python -m pytest -q \
@@ -36,6 +37,7 @@ jobs:
             tests/test_setup_v114_authority.py \
             tests/test_setup_manage_guild_access.py \
             tests/test_setup_compact_v113.py \
+            tests/test_setup_v2_runtime.py \
             tests/test_levels_niveaux_actifs_gaps.py \
             tests/test_services_levels.py \
             tests/test_setxp_level_recalc.py
