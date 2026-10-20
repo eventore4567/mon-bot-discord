@@ -18,6 +18,7 @@ import discord
 from discord.ext import commands
 
 from utils import embeds, log_service
+from services import voice_history
 
 logger = logging.getLogger("bot.logs")
 
@@ -1044,6 +1045,18 @@ class Logs(commands.Cog, name="Logs"):
     # ---------------------------------------------------------------- VOCAL
 
     @commands.Cog.listener()
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Preserve ongoing sessions after a restart without counting downtime as fact."""
+        if not log_service.is_primary_process():
+            return
+        for guild in self.bot.guilds:
+            try:
+                await voice_history.reconcile_guild(self.bot, guild)
+            except Exception:
+                logger.exception("Impossible de réconcilier le suivi vocal guild=%s", guild.id)
+
+    @commands.Cog.listener()
     async def on_voice_state_update(
         self,
         member: discord.Member,
@@ -1076,6 +1089,33 @@ class Logs(commands.Cog, name="Logs"):
             voice_type = "voice_move"
         else:
             voice_type = "voice_state"
+        transition = None
+        if (voice_type in {"voice_join", "voice_move", "voice_leave"}
+                and not member.bot and log_service.is_primary_process()):
+            try:
+                transition = await voice_history.record_transition(
+                    self.bot, member.guild.id, member.id,
+                    before.channel.id if before.channel else None,
+                    after.channel.id if after.channel else None,
+                )
+                if transition and transition.duration_seconds is not None:
+                    fields.append((
+                        "Durée de la session",
+                        voice_history.duration_label(transition.duration_seconds),
+                        True,
+                    ))
+                if (transition and transition.segment_seconds is not None
+                        and voice_type == "voice_move"):
+                    fields.append((
+                        "Temps dans le salon précédent",
+                        voice_history.duration_label(transition.segment_seconds),
+                        True,
+                    ))
+            except Exception:
+                logger.exception(
+                    "Suivi vocal impossible : guild=%s member=%s",
+                    member.guild.id, member.id,
+                )
         panel = self._embed("Activité vocale", identity=member, fields=fields)
         key = log_service.make_event_key(
             member.guild.id,
@@ -1083,7 +1123,19 @@ class Logs(commands.Cog, name="Logs"):
             target_id=member.id,
             discriminator=f"{getattr(after.channel, 'id', 0)}:{after.self_mute}:{after.self_deaf}",
         )
-        await self._send(member.guild, voice_type, panel, event_key=key)
+        delivered = await self._send(member.guild, voice_type, panel, event_key=key)
+        # /config logs peut activer l'archivage staff sans activer de salon
+        # public de logs. Ne jamais doubler les événements déjà envoyés.
+        if transition and transition.archive and not delivered:
+            try:
+                await voice_history.archive_undelivered_event(
+                    member.guild.id, voice_type, panel,
+                )
+            except Exception:
+                logger.exception(
+                    "Impossible d'archiver l'événement vocal guild=%s member=%s",
+                    member.guild.id, member.id,
+                )
 
     # ---------------------------------------------------------------- SALONS
 
