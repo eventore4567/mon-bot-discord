@@ -107,7 +107,12 @@ def _date(timestamp: int) -> str:
 
 
 def _history_detail(description: object) -> str:
-    """Lisible : labels structurés, suppression des doublons de salons."""
+    """Normalise les données historiques sans perdre leur contenu.
+
+    Chaque ligne est présentée en Markdown Discord (labels gras, citations,
+    mentions natives). On retire les doublons de salon mais jamais le contenu
+    de preuve.
+    """
     lines: list[str] = []
     for index, raw in enumerate(safe_text(description).splitlines()):
         line = raw.strip()
@@ -123,31 +128,37 @@ def _history_detail(description: object) -> str:
             continue
         if re.search(r"\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", key, re.I):
             continue
-        # Ne garder qu'une mention de salon : l'ancien log répète aussi son nom.
         line = re.sub(
             r"^(Salon\s*:\s*<#[0-9]+>)\s*[·•]\s*." + chr(96) +
             r"?#[^\n" + chr(96) + r"]+" + chr(96) + r"?\s*$",
             r"\1", line, flags=re.I,
         )
         match = re.match(
-            r"^(Salon|Rôle|Role|Contenu|Motif|Raison|Supprimé par|Modifié par|"
-            r"Ajouté par|Retiré par)\s*:\s*(.*)$", line, flags=re.I,
+            r"^(Salon|Rôle|Rôles avant le départ|Role|Contenu|Motif|Raison|"
+            r"Présence|Durée de la session|Temps dans le salon précédent|"
+            r"Supprimé par|Modifié par|Ajouté par|Retiré par|Avant|Après)"
+            r"\s*:\s*(.*)$", line, flags=re.I,
         )
         if match:
             label, value = match.groups()
+            mapped = {
+                "rôles avant le départ": "Rôles avant le départ",
+                "présence": "Présence sur le serveur",
+                "durée de la session": "Durée vocale",
+            }.get(label.casefold(), label)
             if label.casefold() == "contenu":
                 line = f"**Contenu**\n> {value or 'Message vide'}"
             else:
-                line = f"**{label}** · {value}"
+                line = f"**{mapped}** · {value}"
         lines.append(line)
-        if len("\n".join(lines)) > 520:
+        if len("\n".join(lines)) > 950:
             break
     result = "\n".join(lines).strip()
-    return result[:467] + "…" if len(result) > 470 else (result or "Aucun détail supplémentaire enregistré.")
+    return result[:897] + "…" if len(result) > 900 else (result or "Aucun détail supplémentaire enregistré.")
 
 
 def _history_event_block(record: dict, *, index: int) -> str:
-    """Un événement, un bloc distinct : date, acteur, motif et contenu."""
+    """Un événement lisible, compatible avec les anciens journaux."""
     title, emoji = TYPES.get(
         record["log_type"],
         (safe_text(record.get("title")) or "Événement", "📋"),
@@ -161,10 +172,21 @@ def _history_event_block(record: dict, *, index: int) -> str:
     )
     detail = _history_detail(record.get("description") or "")
     return (
-        f"**{emoji} {title}**   ·   {relative}\n"
+        f"**{emoji} {title}** · {relative}\n"
         f"-# Événement {index:02d} · {when}\n\n"
         f"{moderator}{detail}"
     )
+
+
+def _member_display_name(user: object | None, fallback_id: int) -> str:
+    name = (
+        getattr(user, "global_name", None)
+        or getattr(user, "display_name", None)
+        or getattr(user, "name", None)
+        or "Utilisateur Discord"
+    )
+    name = discord.utils.escape_markdown(safe_text(name)[:80])
+    return name or f"Utilisateur {fallback_id}"
 
 
 def _history_member_header(
@@ -172,32 +194,99 @@ def _history_member_header(
     counters: dict[str, int],
     *,
     total: int,
-    member: discord.Member | None,
+    member: discord.abc.User | None,
+    target_id: int | None = None,
 ) -> discord.ui.Container:
-    """Bande d'identité large sans image-galerie et sans espace vide."""
-    panel = discord.ui.Container(accent_colour=discord.Colour(0x737C90))
-    heading = (
-        "## 🛡️ SentriX · Historique du membre\n"
-        f"### {username}\n"
-        "-# Dossier de modération réservé au staff · Journal du serveur"
+    """En-tête avec mention réelle, pseudo, petit ID et avatar si connu.
+
+    Discord peut ne pas résoudre la mention d'un membre ayant quitté le serveur.
+    Son pseudo API reste visible, sans remplacer le nom par son seul snowflake.
+    """
+    panel = discord.ui.Container(accent_colour=discord.Colour(0x5865F2))
+    mention = f"<@{int(target_id)}>" if target_id else ""
+    id_text = f" · ID : " + chr(96) + str(target_id) + chr(96) if target_id else ""
+    header = (
+        "## 🛡️ SentriX · Dossier du membre\n"
+        f"**{username}**  {mention}\n"
+        f"-# Profil Discord{id_text}\n"
+        "-# Historique privé · Consultation réservée à la modération"
     )
     avatar = getattr(getattr(member, "display_avatar", None), "url", None)
     if avatar:
         panel.add_item(discord.ui.Section(
-            discord.ui.TextDisplay(heading),
+            discord.ui.TextDisplay(header),
             accessory=discord.ui.Thumbnail(str(avatar)),
         ))
     else:
-        panel.add_item(discord.ui.TextDisplay(heading))
+        panel.add_item(discord.ui.TextDisplay(header))
     panel.add_item(discord.ui.Separator())
     panel.add_item(discord.ui.TextDisplay(
-        "**📊 Vue d'ensemble des sanctions**\n"
+        "**📊 Modération · Récapitulatif**\n"
         f"⚠️ **{counters['warn']}** avertissements   ·   "
-        f"🔇 **{counters['mute']}** timeouts   ·   "
-        f"🚫 **{counters['ban']}** bans   ·   "
+        f"🔇 **{counters['mute']}** timeouts\n"
+        f"🚫 **{counters['ban']}** bannissements   ·   "
         f"🚪 **{counters['kick']}** expulsions\n"
-        f"-# {total} événement(s) dans le filtre · Lecture seule"
+        f"-# {total} événement(s) conservé(s) · Consultation uniquement"
     ))
+    return panel
+
+
+def _history_brief(record: dict) -> str:
+    """Extrait concis, avec citations et labels natifs Discord, jamais un pavé."""
+    detail = _history_detail(record.get("description"))
+    lines = detail.splitlines()
+    if not lines:
+        return "-# Aucun détail associé"
+    # Priorité au salon, au rôle ou au motif ; ne pas afficher une citation
+    # de message supprimé brute comme titre d'un événement.
+    chosen = next((line for line in lines if line.startswith("**") and line != "**Contenu**"), None)
+    if not chosen:
+        chosen = next((line for line in lines if not line.startswith(">")), "")
+    if not chosen:
+        chosen = lines[0]
+    return chosen[:160] + "…" if len(chosen) > 161 else chosen
+
+
+def _history_event_panel(
+    record: dict, *, index: int, expanded: bool, toggle,
+) -> discord.ui.Container:
+    """Une carte = un événement, avec son propre bouton Détails."""
+    log_type = str(record.get("log_type") or "")
+    emoji_title = TYPES.get(log_type, (safe_text(record.get("title")) or "Événement", "📋"))
+    title, emoji = emoji_title
+    # Le gris neutre domine ; les types importants restent identifiables
+    # sans multiplier les couleurs criardes.
+    accent = (
+        0xB5846F if log_type.startswith("message_")
+        else 0x647CA3 if log_type.startswith("voice_")
+        else 0x798B71 if log_type.startswith("role_") or log_type == "member_roles"
+        else 0x7B8199
+    )
+    panel = discord.ui.Container(accent_colour=discord.Colour(accent))
+    timestamp = int(record["created_at"])
+    panel.add_item(discord.ui.TextDisplay(
+        f"**{emoji} {title}**   ·   <t:{timestamp}:R>\n"
+        f"-# <t:{timestamp}:f>  ·  Événement " + chr(96) + f"{index:02d}" + chr(96)
+    ))
+    panel.add_item(discord.ui.Separator())
+    if expanded:
+        detail = _history_detail(record.get("description"))
+        moderator = (
+            f"**👮 Responsable** · <@{record['moderator_id']}>\n"
+            if record.get("moderator_id") else ""
+        )
+        panel.add_item(discord.ui.TextDisplay(
+            f"{moderator}{detail}"
+        ))
+    else:
+        panel.add_item(discord.ui.TextDisplay(_history_brief(record)))
+    button = discord.ui.Button(
+        label="Masquer les détails" if expanded else "Voir les détails",
+        emoji="🔼" if expanded else "🔎",
+        style=discord.ButtonStyle.secondary,
+    )
+    button.callback = toggle
+    panel.add_item(discord.ui.ActionRow(button))
     return panel
 
 
