@@ -65,6 +65,7 @@ class ReportReasonModal(discord.ui.Modal, title="🚨 Signaler un message"):
             reason=str(self.reason.value),
             source_channel_id=self.message.channel.id,
             source_message_id=self.message.id,
+            source_excerpt=(self.message.content or "")[:400],
         )
 
 
@@ -149,6 +150,8 @@ class ReportReviewView(discord.ui.LayoutView):
         card.add_item(discord.ui.TextDisplay(
             f"**Signalé par <@{r['reporter_id']}>** {source} · <t:{created}:R>\n"
             f"> {_safe(r['reason'], 500).replace(chr(10), chr(10)+'> ')}"
+            + (f"\n\n**Message signalé**\n> {_safe(r.get('source_excerpt'), 350).replace(chr(10), chr(10)+'> ')}"
+               if r.get("source_excerpt") else "")
         ))
         if r["source_message_id"] and r["source_channel_id"]:
             url = (
@@ -451,7 +454,7 @@ class ReportCenter(commands.Cog):
             "CREATE TABLE IF NOT EXISTS member_reports("
             "id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id INTEGER NOT NULL,"
             "target_id INTEGER NOT NULL,reporter_id INTEGER NOT NULL,reason TEXT NOT NULL,"
-            "source_channel_id INTEGER,source_message_id INTEGER,staff_channel_id INTEGER NOT NULL,"
+            "source_channel_id INTEGER,source_message_id INTEGER,source_excerpt TEXT,staff_channel_id INTEGER NOT NULL,"
             "staff_message_id INTEGER,status TEXT NOT NULL DEFAULT 'pending',"
             "claimed_by INTEGER,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)"
         )
@@ -500,7 +503,7 @@ class ReportCenter(commands.Cog):
         )
 
     async def submit_report(
-        self, interaction, *, target, reason, source_channel_id=None, source_message_id=None,
+        self, interaction, *, target, reason, source_channel_id=None, source_message_id=None, source_excerpt=None,
     ):
         guild = interaction.guild
         if guild is None:
@@ -536,11 +539,11 @@ class ReportCenter(commands.Cog):
         cursor = await self.bot.db.execute(
             "INSERT INTO member_reports "
             "(guild_id,target_id,reporter_id,reason,source_channel_id,source_message_id,"
-            "staff_channel_id,status,created_at,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,'pending',?,?)",
+            "source_excerpt,staff_channel_id,status,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,'pending',?,?)",
             (
                 guild.id, target.id, interaction.user.id, reason,
-                source_channel_id, source_message_id, channel.id, ts, ts,
+                source_channel_id, source_message_id, (source_excerpt or "")[:400], channel.id, ts, ts,
             ),
         )
         report_id = int(cursor.lastrowid)
