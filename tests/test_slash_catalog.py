@@ -169,12 +169,14 @@ def test_les_commandes_jamais_utilisees_quittent_le_menu_mais_restent_tracees():
         assert not unused_commands.masquee(garde), garde
 
 
-def test_exactement_cent_routes_slash_sont_masquees_sans_compter_les_parametres():
+def test_exactement_132_routes_slash_sont_masquees_sans_compter_les_parametres():
     """Le nombre demandé porte sur les feuilles du catalogue, pas sur les sources
     préfixées ni sur des valeurs comme le ``100`` accepté par ``/clear count``."""
     routes = {entry.path for entry in sc._MASQUEES_DU_MENU}
-    assert len(routes) == 100
+    assert len(routes) == 132
     assert len(routes) == len(sc._MASQUEES_DU_MENU)
+    assert len([entry for entry in sc.CATALOG if entry.path.startswith('games ')]) == 40
+    assert len([entry for entry in sc._MASQUEES_DU_MENU if entry.path.startswith('games ')]) == 26
     assert "clear" not in routes
     assert "count" not in routes
 
