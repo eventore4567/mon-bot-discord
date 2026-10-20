@@ -255,6 +255,9 @@ async def test_clear_un_message_ou_trop_vieux():
     seul[0].delete.assert_awaited_once()
     ctx.channel.delete_messages.assert_not_awaited()
 
+    # Deux scénarios indépendants : une seconde exécution immédiate est
+    # normalement refusée par le cooldown métier de 5 secondes.
+    moderation_module._CLEAR_COOLDOWNS.clear()
     vieux = [_message(2, age_jours=20), _message(3)]
     ctx = _clear_ctx(vieux)
     with patch.object(panels, "texte_court", AsyncMock()):
@@ -266,7 +269,10 @@ async def test_clear_un_message_ou_trop_vieux():
 async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
     cog = _cog()
     cog._send_clear_log = AsyncMock()
-    interaction = SimpleNamespace(response=SimpleNamespace(is_done=lambda: False, defer=AsyncMock()))
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(is_done=lambda: False, defer=AsyncMock()),
+        original_response=AsyncMock(return_value=SimpleNamespace(id=99999999)),
+    )
     ctx = _clear_ctx([_message(1), _message(2)], interaction=interaction)
     with patch.object(panels, "texte_court", AsyncMock()) as court:
         await Moderation.clear.callback(cog, ctx, 2)
@@ -274,6 +280,7 @@ async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
     assert court.await_args.kwargs.get("ephemere") is True
     assert court.await_args.args[1] == "2 message(s) supprimé(s)."
 
+    moderation_module._CLEAR_COOLDOWNS.clear()
     ctx = _clear_ctx([_message(1), _message(2), _message(3)])
     ctx.message = SimpleNamespace(id=3)
     with patch.object(panels, "texte_court", AsyncMock()) as court:
