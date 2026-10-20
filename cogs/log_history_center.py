@@ -204,11 +204,16 @@ def _history_member_header(
     """
     panel = discord.ui.Container(accent_colour=discord.Colour(0x5865F2))
     mention = f"<@{int(target_id)}>" if target_id else ""
-    id_text = f" · ID : " + chr(96) + str(target_id) + chr(96) if target_id else ""
+    account_name = safe_text(getattr(member, "name", "") or "").strip()
+    account_label = (
+        chr(96) + "@" + account_name[:32].replace(chr(96), "") + chr(96)
+        if account_name else "Compte Discord non résolu"
+    )
+    id_label = (chr(96) + str(target_id) + chr(96)) if target_id else "ID indisponible"
     header = (
         "## 🛡️ SentriX · Dossier du membre\n"
         f"**{username}**  {mention}\n"
-        f"-# Profil Discord{id_text}\n"
+        f"-# Pseudo du compte : {account_label} · ID : {id_label}\n"
         "-# Historique privé · Consultation réservée à la modération"
     )
     avatar = getattr(getattr(member, "display_avatar", None), "url", None)
