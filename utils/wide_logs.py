@@ -630,6 +630,9 @@ def narrative_body(
         utilisations = _field_value_exact(
             embed, "Utilisations max", "Utilisations maximum", "Max uses"
         )
+        creator = _first_user_ref(_field_value(embed, "créateur", "createur", "creator"))
+        if creator:
+            lines.append(f"**Créateur**\n{creator}")
         if channel:
             lines.append(f"**Salon**\n{channel}")
         if code:
