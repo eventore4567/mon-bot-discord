@@ -1115,6 +1115,11 @@ class Logs(commands.Cog, name="Logs"):
                     "Suivi vocal impossible : guild=%s member=%s",
                     member.guild.id, member.id,
                 )
+        if transition and voice_type == "voice_move" and not transition.archive:
+            # Le staff a explicitement désactivé les déplacements dans
+            # /config logs. Garder la base de session à jour pour les durées,
+            # mais ne pas publier ni archiver ce déplacement.
+            return
         panel = self._embed("Activité vocale", identity=member, fields=fields)
         key = log_service.make_event_key(
             member.guild.id,
