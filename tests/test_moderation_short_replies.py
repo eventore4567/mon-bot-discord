@@ -262,7 +262,11 @@ async def test_clear_un_message_ou_trop_vieux():
     ctx = _clear_ctx(vieux)
     with patch.object(panels, "texte_court", AsyncMock()):
         await Moderation.clear.callback(cog, ctx, 2)
-    ctx.channel.purge.assert_awaited_once()
+    # La purge traite les messages de plus de 14 jours individuellement :
+    # Discord ne les accepte pas dans un bulk delete.
+    vieux[0].delete.assert_awaited_once()
+    vieux[1].delete.assert_awaited_once()
+    ctx.channel.purge.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -276,7 +280,7 @@ async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
     ctx = _clear_ctx([_message(1), _message(2)], interaction=interaction)
     with patch.object(panels, "texte_court", AsyncMock()) as court:
         await Moderation.clear.callback(cog, ctx, 2)
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
     assert court.await_args.kwargs.get("ephemere") is True
     assert court.await_args.args[1] == "2 message(s) supprimé(s)."
 
