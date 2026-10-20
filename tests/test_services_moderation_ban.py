@@ -152,6 +152,39 @@ class SuccessfulBanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["delete_message_seconds"], 0)
 
 
+class MessageDeletionChoiceTests(unittest.IsolatedAsyncioTestCase):
+    """Le paramètre de /ban efface des messages antérieurs au bannissement."""
+
+    async def test_each_discord_choice_maps_to_its_native_seconds(self):
+        for seconds in (0, 900, 3600, 86400):
+            with self.subTest(seconds=seconds):
+                bot, guild, actor, target = _setup()
+                outcome = await moderation_service.ban(
+                    bot, guild=guild, actor=actor, target=target,
+                    reason="spam", delete_message_seconds=seconds,
+                )
+                self.assertTrue(outcome.executed)
+                guild.ban.assert_awaited_once()
+                self.assertEqual(guild.ban.await_args.kwargs["delete_message_seconds"], seconds)
+                bot.db.record_sanction.assert_awaited_once()
+
+    async def test_invalid_or_over_24h_windows_cause_no_dm_no_ban_no_record(self):
+        for value in (-1, 1, 901, 7200, 86401, 604800, True, "3600"):
+            with self.subTest(value=value):
+                bot, guild, actor, target = _setup()
+                outcome = await moderation_service.ban(
+                    bot, guild=guild, actor=actor, target=target,
+                    reason="spam", dm_text="Prévenir avant ban",
+                    delete_message_seconds=value,
+                )
+                self.assertFalse(outcome.executed)
+                self.assertIsNotNone(outcome.validation_error)
+                self.assertIn("24 heures", outcome.validation_error)
+                guild.ban.assert_not_awaited()
+                target.send.assert_not_awaited()
+                bot.db.record_sanction.assert_not_awaited()
+
+
 class PersistenceFailureNeverUndoesSuccessTests(unittest.IsolatedAsyncioTestCase):
     """Le test qui verrouille la correction du vrai trou trouvé en extrayant ce
     code : bot.db.record_sanction() n'était protégé par aucun try/except."""
@@ -194,6 +227,33 @@ class PersistSanctionDirectTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(case_number)
         self.assertEqual(error, "cassé")
+
+
+class SlashOptionsContracts(unittest.TestCase):
+    """Vérifie les vrais paramètres du slash de Discord, pas seulement la source."""
+
+    def test_ban_slash_has_dropdown_values_and_default_zero(self):
+        from cogs.moderation import Moderation
+
+        slash = Moderation.ban.app_command
+        self.assertIsNotNone(slash)
+        options = {parameter.name: parameter for parameter in slash.parameters}
+        self.assertIn("supprimer_messages", options)
+        self.assertEqual(options["supprimer_messages"].default, 0)
+        self.assertEqual(
+            [choice.value for choice in options["supprimer_messages"].choices],
+            [0, 900, 3600, 86400],
+        )
+
+    def test_warn_slash_has_boolean_notifier_default_true(self):
+        from cogs.moderation import Moderation
+
+        slash = Moderation.warn.app_command
+        self.assertIsNotNone(slash)
+        options = {parameter.name: parameter for parameter in slash.parameters}
+        self.assertIn("notifier", options)
+        self.assertIs(options["notifier"].default, True)
+
 
 
 if __name__ == "__main__":

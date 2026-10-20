@@ -73,6 +73,8 @@ from utils import checks, helpers, log_service
 logger = logging.getLogger("services.moderation")
 
 MAX_MUTE_SECONDS = 2419200  # 28 jours — limite native du timeout Discord
+# Fenêtres rétrospectives de suppression, limitées à 24 h.
+BAN_MESSAGE_DELETE_WINDOWS = frozenset({0, 15 * 60, 60 * 60, 24 * 60 * 60})
 
 
 @dataclass
@@ -324,8 +326,18 @@ async def ban(
     target: discord.Member,
     reason: str,
     dm_text: str | None = None,
+    delete_message_seconds: int = 0,
 ) -> SanctionOutcome:
-    """Pipeline complet du bannissement — voir _run_sanction_pipeline()."""
+    """Ban et suppression optionnelle des messages antérieurs (max. 24 h).
+
+    Les messages sont supprimés sur la période PRÉCÉDANT le bannissement,
+    pas durant les heures après celui-ci. Valider AVANT MP et action Discord.
+    """
+    if type(delete_message_seconds) is not int or delete_message_seconds not in BAN_MESSAGE_DELETE_WINDOWS:
+        return SanctionOutcome(
+            executed=False,
+            validation_error="Suppression invalide : aucune, 15 minutes, 1 heure ou 24 heures maximum.",
+        )
     return await _run_sanction_pipeline(
         bot,
         guild=guild,
@@ -334,7 +346,10 @@ async def ban(
         reason=reason,
         dm_text=dm_text,
         action="ban",
-        execute=lambda: guild.ban(target, reason=f"{actor} : {reason}", delete_message_seconds=0),
+        execute=lambda: guild.ban(
+            target, reason=f"{actor} : {reason}",
+            delete_message_seconds=delete_message_seconds,
+        ),
     )
 
 

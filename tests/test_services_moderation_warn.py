@@ -145,6 +145,44 @@ class BasicWarnTests(unittest.IsolatedAsyncioTestCase):
             await moderation_service.warn(bot, guild=guild, actor=actor, target=target, reason="test")
 
 
+class WarnNotificationOptOutTests(unittest.IsolatedAsyncioTestCase):
+    async def test_notifier_false_does_not_send_dm_but_still_records_warn(self):
+        # Le cog transforme notifier=False en dm_text=None.
+        bot, guild, actor, target = _setup()
+        result = await moderation_service.warn(
+            bot, guild=guild, actor=actor, target=target, reason="spam",
+            dm_text=None,
+        )
+        self.assertTrue(result.executed)
+        self.assertFalse(result.dm_sent)
+        target.send.assert_not_awaited()
+        bot.db.execute.assert_awaited_once()
+
+    async def test_notifier_false_skips_warning_and_autoban_dms(self):
+        # En cas de seuil auto-ban, notifier=False supprime AUSSI son MP.
+        bot, guild, actor, target = _setup(
+            fetchall=AsyncMock(return_value=[{"id": 1}, {"id": 2}, {"id": 3}]),
+        )
+        result = await moderation_service.warn(
+            bot, guild=guild, actor=actor, target=target, reason="spam",
+            dm_text=None, ban_threshold=3, render_ban_dm_text=None,
+        )
+        self.assertTrue(result.executed)
+        self.assertTrue(result.auto_ban_executed)
+        target.send.assert_not_awaited()
+        guild.ban.assert_awaited_once()
+
+    async def test_notifier_true_does_send_default_configured_message(self):
+        bot, guild, actor, target = _setup()
+        result = await moderation_service.warn(
+            bot, guild=guild, actor=actor, target=target, reason="spam",
+            dm_text="Tu as reçu un avertissement.",
+        )
+        self.assertTrue(result.executed)
+        self.assertTrue(result.dm_sent)
+        target.send.assert_awaited_once()
+
+
 class WarnRoleTests(unittest.IsolatedAsyncioTestCase):
     async def test_attribue_le_role_si_absent(self):
         bot, guild, actor, target = _setup()
