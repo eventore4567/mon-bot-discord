@@ -677,7 +677,7 @@ class ReportCenter(commands.Cog):
                 )
             if not result.executed:
                 return await interaction.followup.send(
-                    _safe(result.rejection_reason or "Sanction non autorisée.", 300),
+                    _safe(getattr(result, "rejection_reason", None) or getattr(result, "hierarchy_error", None) or "Sanction non autorisée.", 300),
                     ephemeral=True,
                 )
             await self.bot.db.execute(
