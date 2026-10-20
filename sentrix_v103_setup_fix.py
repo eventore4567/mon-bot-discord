@@ -104,6 +104,7 @@ def _replace_setup_slash(bot) -> bool:
         ("accueil", "🏠 Centre principal de configuration.", None, False),
         ("automod", "🛡️ Protection AutoMod, anti-spam et anti-raid.", "security", False),
         ("logs", "📋 Configurer tous les journaux du serveur.", "logs", False),
+        ("surveillance", "👁️ Suivi des membres et activité vocale, privé et facultatif.", None, False),
         ("tickets", "🎫 Gérer les tickets et leurs catégories.", "tickets", False),
         ("bienvenue", "👋 Messages de bienvenue et autorôles.", "welcome", False),
         ("moderation", "⚖️ Sanctions et autorisations staff.", "moderation", False),
@@ -118,6 +119,9 @@ def _replace_setup_slash(bot) -> bool:
                 return await interaction.response.send_message(
                     "Le Centre Config de SentriX est indisponible.", ephemeral=True,
                 )
+            if name == "surveillance":
+                from cogs.voice_history_config import open_voice_history_config
+                return await open_voice_history_config(bot, interaction)
             await setup_cog.send_setup(
                 interaction, category=category, diagnostic=diagnostic, private=True,
             )
@@ -155,7 +159,7 @@ def _replace_setup_slash(bot) -> bool:
         logger.error("V103 : /config dépasse le budget global : %s/100 racines.", len(roots))
         return False
 
-    logger.info("V103 : /config publie 8 centres ; avertissements et signalements dans /config moderation.")
+    logger.info("V103 : /config publie 9 centres ; surveillance indépendante des salons de logs.")
     return True
 
 
