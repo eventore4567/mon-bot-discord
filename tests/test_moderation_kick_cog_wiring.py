@@ -74,7 +74,7 @@ def _make_cog(*, case_number=17):
 
 
 class KickCogWiringTests(unittest.IsolatedAsyncioTestCase):
-    async def test_expulsion_reussie_appelle_le_service_et_confirme_en_une_ligne(self):
+    async def test_expulsion_reussie_appelle_le_service_et_confirme_par_carte_v2(self):
         cog = _make_cog(case_number=17)
         ctx, guild, actor, target = _fake_ctx()
 
@@ -106,9 +106,11 @@ class KickCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.kick.assert_awaited_once()
         ctx.send.assert_awaited()
-        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
-        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
-        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
+        # Succès : confirmation compacte, même après un échec de persistance.
+        from discord import ui
+        view = ctx.send.await_args.kwargs.get("view")
+        self.assertIsInstance(view, ui.LayoutView)
+        self.assertIsNone(ctx.send.await_args.kwargs.get("content"))
 
 
 if __name__ == "__main__":

@@ -952,6 +952,11 @@ def publish(bot: Any) -> dict[str, Any]:
     subgroups: dict[str, Any] = {}
     missing: list[str] = []
     hidden: list[str] = []
+    duplicate_aliases: list[tuple[str, str]] = []
+    # A single registered discord.ext.commands.Command object has ONE
+    # public slash path, even if multiple aliases resolve to that object.
+    # Similar-looking features (/warn vs /warnings) are not duplicates.
+    source_by_command_object: dict[int, str] = {}
 
     def group(path: str) -> Any:
         parts = path.split()
@@ -975,10 +980,15 @@ def publish(bot: Any) -> dict[str, Any]:
         if prefix is not None and getattr(prefix, "hidden", False):
             hidden.append(entry.source)
             continue
+        if prefix is not None and id(prefix) in source_by_command_object:
+            duplicate_aliases.append((entry.path, source_by_command_object[id(prefix)]))
+            continue
         leaf = _build_leaf(bot, entry, existing)
         if leaf is None:
             missing.append(entry.source)
             continue
+        if prefix is not None:
+            source_by_command_object[id(prefix)] = entry.path
         _english_options(leaf, entry.path)
         try:
             # Choix d'origine repris, et suggestions pendant la frappe pour les
@@ -1007,6 +1017,7 @@ def publish(bot: Any) -> dict[str, Any]:
         "leaves": leaves,
         "missing": missing,
         "hidden": hidden,
+        "duplicate_aliases": duplicate_aliases,
         # Racine construite mais absente de l'arbre après ajout : ne doit jamais
         # arriver, et serait sinon invisible (cas /profile, 07/10/2026).
         "lost_roots": sorted(set(roots) - published),
@@ -1017,7 +1028,12 @@ def publish(bot: Any) -> dict[str, Any]:
             "Catalogue slash : %s source(s) introuvable(s) %s, %s masquée(s) %s, racines perdues %s.",
             len(missing), missing[:10], len(hidden), hidden[:10], report["lost_roots"],
         )
-    logger.info("Catalogue slash publié : %s racines, %s commandes.", len(roots), leaves)
+    logger.info(
+        "Catalogue slash publié : %s racines, %s commandes, %s alias exact(s) retiré(s).",
+        len(roots), leaves, len(duplicate_aliases),
+    )
+    if duplicate_aliases:
+        logger.info("Alias slash exacts nettoyés : %s", duplicate_aliases[:25])
     return report
 
 

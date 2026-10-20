@@ -1,0 +1,47 @@
+name: SentriX Moderation UI and Slash Alias Dedup
+
+on:
+  pull_request:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'cogs/moderation.py'
+      - 'utils/moderation_feedback.py'
+      - 'utils/slash_catalog.py'
+      - 'tests/test_compact_moderation_and_exact_slash_duplicates.py'
+      - 'tests/test_moderation_short_replies.py'
+      - 'tests/test_moderation_ban_cog_wiring.py'
+      - 'tests/test_moderation_kick_cog_wiring.py'
+      - '.github/workflows/sentrix-moderation-ui-slash-dedup.yml'
+  workflow_dispatch:
+
+jobs:
+  moderation-slash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      DISCORD_TOKEN: ci.fake.token
+      DATABASE_PATH: /tmp/sentrix-ui-slash-ci.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+      - name: Compile new feedback and alias catalogue
+        run: python -m py_compile utils/moderation_feedback.py cogs/moderation.py utils/slash_catalog.py tests/test_compact_moderation_and_exact_slash_duplicates.py
+      - name: Regression - actual sanction execution and new cards
+        run: |
+          python -m pytest -q \
+            tests/test_compact_moderation_and_exact_slash_duplicates.py \
+            tests/test_moderation_short_replies.py \
+            tests/test_moderation_ban_cog_wiring.py \
+            tests/test_moderation_kick_cog_wiring.py \
+            tests/test_moderation_mute_cog_wiring.py \
+            tests/test_moderation_warn_cog_wiring.py \
+            tests/test_moderation_unban_cog_wiring.py \
+            tests/test_services_moderation_kick.py \
+            tests/test_services_moderation_ban.py \
+            tests/test_slash_catalog.py \
+            tests/test_discord_command_publish_audit.py

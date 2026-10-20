@@ -29,6 +29,14 @@ import discord  # noqa: E402
 from discord.ext import commands  # noqa: E402
 
 from cogs import moderation as moderation_module  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_clear_cooldowns():
+    # Cooldown de clear métier conservé en production, isolé entre les tests.
+    moderation_module._CLEAR_COOLDOWNS.clear()
+    yield
+    moderation_module._CLEAR_COOLDOWNS.clear()
 from cogs import runtime_consistency_v57, v17_moderation_security  # noqa: E402
 from cogs.moderation import Moderation  # noqa: E402
 from utils import log_service, sentrix_panels as panels  # noqa: E402
@@ -98,7 +106,7 @@ def test_mute_accepte_une_duree_francaise_en_deux_mots():
 # ------------------------------------------------------------------ réponses courtes
 
 @pytest.mark.asyncio
-async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
+async def test_ban_envoie_une_carte_compacte_et_journalise_la_fiche_complete():
     cog = _cog()
     cog._ack = AsyncMock()
     cog._get_sanction_dm_template = AsyncMock(return_value=None)
@@ -115,9 +123,9 @@ async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
         await Moderation.ban.callback(cog, ctx, membre, raison="spam")
 
     cog.log_sanction.assert_awaited_once()
-    court.assert_awaited_once()
-    assert court.await_args.args[1] == "<@7> a été banni."
-    envoyer.assert_not_awaited()
+    court.assert_not_awaited()
+    envoyer.assert_awaited_once()
+    assert isinstance(envoyer.await_args.args[1], discord.ui.LayoutView)
 
 
 @pytest.mark.asyncio
@@ -155,7 +163,8 @@ async def test_second_appel_immediat_ne_sanctionne_pas_deux_fois():
     service = AsyncMock(return_value=outcome)
 
     with patch.object(moderation_module.moderation_service, "warn", service), \
-         patch.object(panels, "texte_court", AsyncMock()):
+         patch.object(panels, "texte_court", AsyncMock()), \
+         patch.object(panels, "envoyer", AsyncMock()):
         cog.bot.db.get_guild_config = AsyncMock(return_value=None)
         outcome.role_assigned = False
         outcome.role_error = None
@@ -246,25 +255,36 @@ async def test_clear_un_message_ou_trop_vieux():
     seul[0].delete.assert_awaited_once()
     ctx.channel.delete_messages.assert_not_awaited()
 
+    # Deux scénarios indépendants : une seconde exécution immédiate est
+    # normalement refusée par le cooldown métier de 5 secondes.
+    moderation_module._CLEAR_COOLDOWNS.clear()
     vieux = [_message(2, age_jours=20), _message(3)]
     ctx = _clear_ctx(vieux)
     with patch.object(panels, "texte_court", AsyncMock()):
         await Moderation.clear.callback(cog, ctx, 2)
-    ctx.channel.purge.assert_awaited_once()
+    # La purge traite les messages de plus de 14 jours individuellement :
+    # Discord ne les accepte pas dans un bulk delete.
+    vieux[0].delete.assert_awaited_once()
+    vieux[1].delete.assert_awaited_once()
+    ctx.channel.purge.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
     cog = _cog()
     cog._send_clear_log = AsyncMock()
-    interaction = SimpleNamespace(response=SimpleNamespace(is_done=lambda: False, defer=AsyncMock()))
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(is_done=lambda: False, defer=AsyncMock()),
+        original_response=AsyncMock(return_value=SimpleNamespace(id=99999999)),
+    )
     ctx = _clear_ctx([_message(1), _message(2)], interaction=interaction)
     with patch.object(panels, "texte_court", AsyncMock()) as court:
         await Moderation.clear.callback(cog, ctx, 2)
-    interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
     assert court.await_args.kwargs.get("ephemere") is True
     assert court.await_args.args[1] == "2 message(s) supprimé(s)."
 
+    moderation_module._CLEAR_COOLDOWNS.clear()
     ctx = _clear_ctx([_message(1), _message(2), _message(3)])
     ctx.message = SimpleNamespace(id=3)
     with patch.object(panels, "texte_court", AsyncMock()) as court:

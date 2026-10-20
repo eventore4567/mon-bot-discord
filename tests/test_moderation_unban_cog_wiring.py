@@ -110,9 +110,8 @@ class UnbanCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.unban.assert_awaited_once()
         ctx.send.assert_awaited()
-        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
-        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
-        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
+        self.assertIsInstance(ctx.send.await_args.kwargs.get("view"), discord.ui.LayoutView)
+        self.assertIsNone(ctx.send.await_args.kwargs.get("content"))
 
 
 if __name__ == "__main__":
