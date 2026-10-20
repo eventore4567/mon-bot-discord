@@ -98,7 +98,7 @@ def test_mute_accepte_une_duree_francaise_en_deux_mots():
 # ------------------------------------------------------------------ réponses courtes
 
 @pytest.mark.asyncio
-async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
+async def test_ban_envoie_une_carte_compacte_et_journalise_la_fiche_complete():
     cog = _cog()
     cog._ack = AsyncMock()
     cog._get_sanction_dm_template = AsyncMock(return_value=None)
@@ -115,9 +115,9 @@ async def test_ban_repond_par_une_ligne_et_journalise_la_fiche_complete():
         await Moderation.ban.callback(cog, ctx, membre, raison="spam")
 
     cog.log_sanction.assert_awaited_once()
-    court.assert_awaited_once()
-    assert court.await_args.args[1] == "<@7> a été banni."
-    envoyer.assert_not_awaited()
+    court.assert_not_awaited()
+    envoyer.assert_awaited_once()
+    assert isinstance(envoyer.await_args.args[1], discord.ui.LayoutView)
 
 
 @pytest.mark.asyncio
@@ -155,7 +155,8 @@ async def test_second_appel_immediat_ne_sanctionne_pas_deux_fois():
     service = AsyncMock(return_value=outcome)
 
     with patch.object(moderation_module.moderation_service, "warn", service), \
-         patch.object(panels, "texte_court", AsyncMock()):
+         patch.object(panels, "texte_court", AsyncMock()), \
+         patch.object(panels, "envoyer", AsyncMock()):
         cog.bot.db.get_guild_config = AsyncMock(return_value=None)
         outcome.role_assigned = False
         outcome.role_error = None
