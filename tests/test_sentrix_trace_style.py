@@ -95,7 +95,11 @@ def test_trace_v7_layout_is_compact_and_media_stays_below_context():
 
     assert "SentriX Trace V7" in block
     assert "header_lines = [meta, f\"### {title}\"]" in block
-    assert 'gallery.add_item(media=f"attachment://{banner_filename}")' not in block
+    # Une bande quasi transparente 1200×24 remplace la bannière opaque :
+    # la galerie doit être placée avant l'en-tête de la carte, jamais après.
+    assert 'strip_gallery.add_item(media=f"attachment://{banner_filename}")' in block
+    assert block.index('strip_gallery.add_item(') < block.index('header_lines = [meta,')
+    assert 'container.add_item(strip_gallery)' in block
     assert "discord.ui.Section(" in block  # avatar placé sur le côté
     assert "summary, details = _trace_body_parts(body)" in block
     assert block.index("summary, details = _trace_body_parts(body)") < block.index("if media_items:")

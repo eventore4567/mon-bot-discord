@@ -20,6 +20,7 @@ import discord
 
 import config
 from utils.log_banners import COLORS, get_banner
+from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
 from utils.log_categories import (
     CATEGORIES,
     DEFAULT_EVENT_EMOJI,
@@ -1251,10 +1252,15 @@ class WideLogView(discord.ui.LayoutView):
         available_attachments: set[str] | None = None,
     ) -> None:
         super().__init__(timeout=None)
-        # Le format compact utilise uniquement l'avatar à droite de l'en-tête.
-        # Les fichiers d'images utilisateur (messages supprimés, etc.) restent
-        # consultables plus bas dans leur galerie dédiée.
+        # Format neutre : image de 1200x24 presque transparente.
+        # Un MediaGallery en tête propose un ratio très large, SANS l'ancienne
+        # grande bannière. La photo du membre reste à droite dans Section.
+        # Le client Discord garde la maîtrise de la largeur réelle du panneau.
         container = discord.ui.Container()
+        if banner_filename:
+            strip_gallery = discord.ui.MediaGallery()
+            strip_gallery.add_item(media=f"attachment://{banner_filename}")
+            container.add_item(strip_gallery)
 
         event_type = canonical_event_type(
             log_type,
@@ -1661,8 +1667,20 @@ async def send_wide_log(
     log_runtime_capabilities()
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     _category, emoji, kind = resolve(event_type, embed.title or "", embed.description or "")
-    # Aucun visuel décoratif généré : photo de profil en miniature à droite.
+    # Un seul bandeau gris presque transparent pour TOUTES les catégories,
+    # y compris la modération, le vocal, les messages, rôles et tickets.
+    # Le type d'événement ne modifie jamais son apparence.
     banner_filename = ""
+    banner_path = None
+    payload_file_candidates = ([extra_file] if extra_file is not None else []) + list(extra_files or [])
+    # Ne jamais sacrifier un fichier de message pour une décoration : Discord
+    # limite à 10 fichiers, et chaque MediaGallery doit référencer un fichier.
+    if len(payload_file_candidates) < 10:
+        try:
+            banner_path = get_premium_log_banner(event_type, embed.title or "")
+            banner_filename = BANNER_FILENAME
+        except (OSError, ValueError):
+            logger.exception("Bande neutre indisponible : log envoyé sans bande.")
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
@@ -1707,13 +1725,14 @@ async def send_wide_log(
         logger.error("SENTRIX TRACE FAILED construction type=%s message=%s\n%s", type(exc).__name__, exc, traceback.format_exc())
         return False
 
-    # Uniquement les pièces jointes utiles (images/vidéos de messages).
-    # Aucun fichier de bannière ni upload inutile à chaque log.
-    files: list[discord.File] = []
-    payload_files: list[discord.File] = []
-    if extra_file is not None:
-        payload_files.append(extra_file)
-    payload_files.extend(list(extra_files or []))
+    # Discord doit recevoir la bande avec la carte. Les vrais médias
+    # restent conservés en priorité ; un message avec 10 fichiers ne réserve
+    # aucune place pour la décoration.
+    files: list[discord.File] = (
+        [discord.File(str(banner_path), filename=banner_filename)]
+        if banner_path is not None else []
+    )
+    payload_files: list[discord.File] = payload_file_candidates
 
     seen_names: set[str] = set()
     for candidate in payload_files:
