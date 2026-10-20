@@ -1,0 +1,43 @@
+name: SentriX Reports and Warnings Gate
+
+on:
+  pull_request:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'cogs/setup_control_center.py'
+      - 'utils/access_matrix.py'
+      - 'cogs/report_center.py'
+      - 'cogs/warnings_config.py'
+      - 'sentrix_v103_setup_fix.py'
+      - 'main.py'
+      - 'tests/test_report_and_warning_centers.py'
+      - '.github/workflows/sentrix-reports-warnings-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  reports-warning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      DISCORD_TOKEN: ci.fake.token
+      DATABASE_PATH: /tmp/sentrix-reports-ci.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+      - name: Compile report and config modules
+        run: python -m py_compile cogs/report_center.py cogs/warnings_config.py sentrix_v103_setup_fix.py tests/test_report_and_warning_centers.py
+      - name: Test report and warning workflows
+        run: |
+          python -m pytest -q \
+            tests/test_report_and_warning_centers.py \
+            tests/test_setup_v114_authority.py \
+            tests/test_slash_schema_guard_v105.py \
+            tests/test_services_moderation_warn.py \
+            tests/test_moderation_warn_cog_wiring.py \
+            tests/test_config_center_level_opt_in.py \
+            tests/test_setup_manage_guild_access.py

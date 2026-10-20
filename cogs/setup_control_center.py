@@ -1203,7 +1203,37 @@ class SetupView(discord.ui.LayoutView):
             self.stop()
 
         home.callback, refresh.callback, close.callback = go_home, do_refresh, do_close
-        self.ajouter(home); self.ajouter(refresh); self.ajouter(avance); self.ajouter(close)
+
+        if self.category == "moderation":
+            # Discord : 5 ActionRows maximum. Le salon staff garde les trois
+            # selecteurs de rôles ET ses 2 nouveaux centres : on remplace
+            # seulement le bouton Actualiser (redondant avec la navigation)
+            # par Avertissements + Signalements dans la rangée des boutons.
+            warns = discord.ui.Button(
+                label="⚠️ Avertissements", style=discord.ButtonStyle.secondary,
+            )
+            reports = discord.ui.Button(
+                label="🚨 Signalements", style=discord.ButtonStyle.secondary,
+            )
+
+            async def open_warn_panel(interaction):
+                from cogs.warnings_config import open_warning_config
+                await open_warning_config(self.bot, interaction)
+
+            async def open_report_panel(interaction):
+                cog = self.bot.get_cog("ReportCenter")
+                if cog is None:
+                    return await interaction.response.send_message(
+                        "Centre des signalements indisponible.", ephemeral=True
+                    )
+                await cog.open_config(interaction)
+
+            warns.callback = open_warn_panel
+            reports.callback = open_report_panel
+            for item in (home, warns, reports, avance, close):
+                self.ajouter(item)
+        else:
+            self.ajouter(home); self.ajouter(refresh); self.ajouter(avance); self.ajouter(close)
 
         if self.category == "moderation":
             if self.avance:

@@ -155,7 +155,7 @@ def _replace_setup_slash(bot) -> bool:
         logger.error("V103 : /config dépasse le budget global : %s/100 racines.", len(roots))
         return False
 
-    logger.info("V103 : /config publie 8 centres ; /setup slash retiré, +setup conservé.")
+    logger.info("V103 : /config publie 8 centres ; avertissements et signalements dans /config moderation.")
     return True
 
 

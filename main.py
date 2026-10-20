@@ -81,6 +81,7 @@ EXTENSIONS = [
     # ne soit pas retardé par le reste du chargement.
     "cogs.sentrix_emoji_sync",
     "cogs.moderation",
+    "cogs.report_center",  # Cartes de signalement privé et actions staff persistantes
     "cogs.automod",
     "cogs.forbidden_words_ui",
     # Ces quatre modules n'avaient qu'un install(), déclenché par l'enveloppe de
@@ -239,7 +240,7 @@ PUBLIC_COMMANDS = frozenset({
     "invited-list",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
     "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
-    "report-bug", "afk", "roll", "choose",
+    "report-bug", "signaler ce message", "afk", "roll", "choose",
     # Intelligence artificielle
     "sentrix", "ask", "chat-reset", "summarize", "image-prompt", "image",
     "explain", "rewrite", "fact-check", "ai", "chat", "improve", "correct",
