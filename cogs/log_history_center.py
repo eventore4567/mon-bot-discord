@@ -15,7 +15,7 @@ from utils import log_service
 
 logger = logging.getLogger("bot.log-center")
 NO_MENTIONS = discord.AllowedMentions.none()
-PER_PAGE = 3
+PER_PAGE = 2
 
 TYPES = {
     "member_warn": ("Avertissement", "⚠️"),
