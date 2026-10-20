@@ -108,7 +108,6 @@ def _replace_setup_slash(bot) -> bool:
         ("bienvenue", "👋 Messages de bienvenue et autorôles.", "welcome", False),
         ("moderation", "⚖️ Sanctions et autorisations staff.", "moderation", False),
         ("niveaux", "⭐ XP, niveaux et annonces sur activation.", "levels", False),
-        ("diagnostic", "🔧 Analyser les problèmes de configuration.", None, True),
     )
 
     def make_callback(name: str, category: str | None, diagnostic: bool):
@@ -142,8 +141,8 @@ def _replace_setup_slash(bot) -> bool:
         return config_callback
 
     # Discord refuse un groupe possédant plus de 25 enfants directs.
-    # V98 fournit déjà des réglages historiques ; préserver leur exécution
-    # sous /config advanced plutôt que supprimer des commandes au hasard.
+    # Le diagnostic reste disponible depuis /setup et son panneau interactif.
+    # Éviter une 26e entrée sous /config et préserver les commandes historiques.
     planned = {name for name, *_ in routes}
     old_commands = [command for command in group.commands if command.name not in planned]
     needed = len(old_commands) + len(planned) - 25
