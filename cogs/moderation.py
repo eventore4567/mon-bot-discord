@@ -765,7 +765,12 @@ class Moderation(commands.Cog):
             ctx, "ban", membre, raison, case_number=outcome.case_number,
             extra_fields={"Messages supprimés": purge_label},
         )
-        purge_suffix = "" if not supprimer_messages else f" Messages des {purge_label} supprimés."
+        purge_suffix = {
+            0: "",
+            900: " Ses messages des 15 dernières minutes ont été supprimés.",
+            3600: " Ses messages de la dernière heure ont été supprimés.",
+            86400: " Ses messages des 24 dernières heures ont été supprimés.",
+        }[supprimer_messages]
         await self._reply(ctx, f"{membre.mention} a été banni.{purge_suffix}")
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
