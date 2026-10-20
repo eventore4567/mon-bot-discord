@@ -29,6 +29,14 @@ import discord  # noqa: E402
 from discord.ext import commands  # noqa: E402
 
 from cogs import moderation as moderation_module  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_clear_cooldowns():
+    # Cooldown de clear métier conservé en production, isolé entre les tests.
+    moderation_module._CLEAR_COOLDOWNS.clear()
+    yield
+    moderation_module._CLEAR_COOLDOWNS.clear()
 from cogs import runtime_consistency_v57, v17_moderation_security  # noqa: E402
 from cogs.moderation import Moderation  # noqa: E402
 from utils import log_service, sentrix_panels as panels  # noqa: E402
