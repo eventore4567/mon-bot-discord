@@ -191,3 +191,85 @@ async def test_warning_config_starts_without_implicit_sanction():
     assert isinstance(view.children[0], discord.ui.Container)
     assert db.get_guild_config.await_count == 1
     assert not hasattr(db, "set_guild_config")
+
+
+
+def test_moderation_panel_keeps_five_button_row_and_three_role_selects():
+    """The two report subpanels do not create a sixth Discord action row."""
+    bot = SimpleNamespace()
+    guild = SimpleNamespace(id=1)
+    view = setup_control_center.SetupView(bot, guild, author_id=11)
+    view.category = "moderation"
+    view.render()
+    buttons = [child for child in view._commandes if isinstance(child, discord.ui.Button)]
+    assert len(buttons) == 5
+    names = {child.label for child in buttons}
+    assert "⚠️ Avertissements" in names
+    assert "🚨 Signalements" in names
+    rows = setup_control_center._rangees_de(view._commandes)
+    assert len(rows) <= 5
+
+
+@pytest.mark.asyncio
+async def test_warning_mp_switch_preserves_custom_template(tmp_path):
+    db = Database(str(tmp_path / "warning-config.db"))
+    await db.connect()
+    try:
+        await db.execute(
+            "INSERT INTO sanction_dm_templates(guild_id,action,message,enabled) "
+            "VALUES (1,'warn','Texte personnalisé {raison}',1)"
+        )
+        bot = SimpleNamespace(db=db)
+        guild = SimpleNamespace(id=1)
+        view = warnings_config.WarningSettingsView(bot, guild, owner_id=3)
+        view.refresh = AsyncMock()
+        await view.toggle_dm(SimpleNamespace())
+        row = await db.fetchone(
+            "SELECT * FROM sanction_dm_templates WHERE guild_id=1 AND action='warn'"
+        )
+        assert row["enabled"] == 0
+        assert row["message"] == "Texte personnalisé {raison}"
+        await view.toggle_dm(SimpleNamespace())
+        row = await db.fetchone(
+            "SELECT * FROM sanction_dm_templates WHERE guild_id=1 AND action='warn'"
+        )
+        assert row["enabled"] == 1
+        assert row["message"] == "Texte personnalisé {raison}"
+        assert view.refresh.await_count == 2
+    finally:
+        await db._conn.close()
+
+
+@pytest.mark.asyncio
+async def test_claim_is_atomic_and_a_second_staff_cannot_steal_it(tmp_path):
+    db = Database(str(tmp_path / "claim.db"))
+    await db.connect()
+    try:
+        bot = SimpleNamespace(db=db)
+        cog = report_center.ReportCenter(bot)
+        await cog.ensure_schema()
+        cur = await db.execute(
+            "INSERT INTO member_reports(guild_id,target_id,reporter_id,reason,"
+            "staff_channel_id,created_at,updated_at) VALUES (1,4,5,'Signalement',6,10,10)"
+        )
+        report_id = cur.lastrowid
+        row = await cog.get_report(report_id)
+        v = report_center.ReportReviewView(cog, row)
+        cog.refresh_card = AsyncMock()
+        first = SimpleNamespace(
+            guild_id=1, user=SimpleNamespace(id=10),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        second = SimpleNamespace(
+            guild_id=1, user=SimpleNamespace(id=11),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+        await v.claim(first)
+        await v.claim(second)
+        item = await cog.get_report(report_id)
+        assert item["claimed_by"] == 10
+        assert item["status"] == "claimed"
+        cog.refresh_card.assert_awaited_once()
+        second.response.send_message.assert_awaited_once()
+    finally:
+        await db._conn.close()
