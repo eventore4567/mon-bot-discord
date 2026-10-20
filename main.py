@@ -108,6 +108,8 @@ EXTENSIONS = [
     "cogs.command_channel_gate",
     "cogs.server_builder",
     "cogs.logs",
+    # log_history_center n'a pas de commandes : importé par les actions
+    # persistantes dans setup_hook, sans ajouter une extension au catalogue.
     "cogs.snipe",
     "cogs.soundboard_logs",
     "cogs.utility",
@@ -729,7 +731,8 @@ class BotAllInOne(commands.Bot):
         # Boutons persistants des logs : ID et copie d'invitation.
         try:
             from utils.log_service import RevealIdButton, RevealInviteButton
-            self.add_dynamic_items(RevealIdButton, RevealInviteButton)
+            from cogs.log_history_center import PremiumLogAction
+            self.add_dynamic_items(RevealIdButton, RevealInviteButton, PremiumLogAction)
         except Exception:
             logger.warning("Impossible d'enregistrer les boutons de logs :\n" + traceback.format_exc())
 

@@ -799,6 +799,15 @@ class Logs(commands.Cog, name="Logs"):
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
+        # Un ban ne doit pas produire un second log « Membre parti ».
+        if log_service.is_recent_sanction(member.guild.id, member.id, "ban"):
+            return
+        roles_before = [
+            f"{role.mention} ({role.name})"
+            for role in member.roles
+            if role.id != member.guild.default_role.id
+        ]
+        roles_snapshot = ", ".join(roles_before)[:990] or "Aucun rôle attribué"
         # Un kick déclenche aussi on_member_remove. On le reconnaît par Audit Log afin
         # d'éviter le doublon « Membre expulsé » + « Membre parti ».
         actor, audit = await self._audit_actor(
@@ -809,7 +818,10 @@ class Logs(commands.Cog, name="Logs"):
         if audit is not None:
             if log_service.is_recent_sanction(member.guild.id, member.id, "kick"):
                 return  # +kick : le dossier de modération est le seul log
-            fields = [("Membre", _user_ref(member.id), True)]
+            fields = [
+                ("Membre", _user_ref(member.id), True),
+                ("Rôles avant le départ", roles_snapshot, False),
+            ]
             if actor:
                 fields.append(("Modérateur", _user_ref(actor.id), True))
             if audit.reason:
@@ -835,7 +847,10 @@ class Logs(commands.Cog, name="Logs"):
             )
             return
 
-        fields = [("Membre", _user_ref(member.id), True)]
+        fields = [
+            ("Membre", _user_ref(member.id), True),
+            ("Rôles avant le départ", roles_snapshot, False),
+        ]
         if member.joined_at:
             duration = discord.utils.utcnow() - member.joined_at
             fields.append(("Présence", f"{max(0, duration.days)} jour(s)", True))

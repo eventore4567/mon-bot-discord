@@ -20,6 +20,7 @@ import discord
 
 import config
 from utils.log_banners import COLORS, get_banner
+from utils.premium_log_banners import get_premium_log_banner
 from utils.log_categories import (
     CATEGORIES,
     DEFAULT_EVENT_EMOJI,
@@ -471,6 +472,7 @@ def narrative_body(
     after = _field_value(embed, "après", "apres", "after")
     account_created = _field_value(embed, "compte créé", "compte cree", "account created")
     duration = _field_value(embed, "durée", "duree", "présence", "presence")
+    former_roles = _field_value(embed, "rôles avant le départ")
 
     lines: list[str] = []
     if event_type == "game_reward":
@@ -525,10 +527,14 @@ def narrative_body(
         lines.append(f"{member or 'Un membre'} a quitté le serveur.")
         if duration:
             lines.append(f"Présence sur le serveur : **{duration}**.")
+        if former_roles:
+            lines.append(f"**Rôles avant le départ :** {former_roles}")
     elif event_type == "member_kick":
         lines.append(f"{member or 'Un membre'} a été expulsé" + (f" par {moderator}" if moderator else "") + ".")
         if reason:
             lines.append(f"**Raison :** {reason}")
+        if former_roles:
+            lines.append(f"**Rôles avant l'expulsion :** {former_roles}")
     elif event_type == "member_ban":
         lines.append(
             f"{member or 'Un membre'} a été banni" + (f" par {moderator}" if moderator else "")
@@ -624,6 +630,11 @@ def narrative_body(
         utilisations = _field_value_exact(
             embed, "Utilisations max", "Utilisations maximum", "Max uses"
         )
+        creator = _first_user_ref(_field_value(embed, "créateur", "createur", "creator"))
+        # Avec une identité déjà portée par l'en-tête (identity_id), éviter
+        # de répéter le créateur dans le corps de la carte.
+        if creator and identity_id is None:
+            lines.append(f"**Créateur**\n{creator}")
         if channel:
             lines.append(f"**Salon**\n{channel}")
         if code:
@@ -1237,11 +1248,17 @@ class WideLogView(discord.ui.LayoutView):
         log_type: str = "",
         media_items: list[tuple[str, str, str]] | None = None,
         *,
+        guild_id: int | None = None,
         available_attachments: set[str] | None = None,
     ) -> None:
         super().__init__(timeout=None)
-        container = discord.ui.Container(
-        )
+        container = discord.ui.Container()
+        # Bannière large générée par catégorie, sans données privées gravées
+        # dans l'image. Le contenu textuel Discord reste accessible.
+        if banner_filename:
+            gallery = discord.ui.MediaGallery()
+            gallery.add_item(media=f"attachment://{banner_filename}")
+            container.add_item(gallery)
 
         # Plus de bandeau en tête : le premium vient de l'icône de l'événement,
         # de la hiérarchie du texte et des actions, pas d'une image qui occupe
@@ -1256,6 +1273,8 @@ class WideLogView(discord.ui.LayoutView):
             embed.description or "",
         )
         title = _trace_title(event_type, embed.title or "")
+        title = re.sub(r"(?i)\bDossier\s*#\d+\s*(?:[—:\-]\s*)?", "", title)
+        title = re.sub(r"(?i)\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", "", title).strip(" —:-") or "Événement"
         meta = _trace_meta(event_type, emoji=emoji)
         identity_label = _trace_identity_label(event_type)
 
@@ -1409,11 +1428,8 @@ class WideLogView(discord.ui.LayoutView):
         footer_text = _trace_footer(event_type, footer)
         if time_text:
             footer_text = f"{time_text} · {footer_text}"
-        from utils.sentrix_trace import visible_ref
-
-        reference = visible_ref()
-        if reference:
-            footer_text = f"{footer_text} · Réf. {reference}"
+        # Plus de référence technique SX/BAN dans les logs visibles.
+        # Les numéros internes restent accessibles à la base de données.
         container.add_item(discord.ui.TextDisplay(f"-# {footer_text}"))
 
         rows = build_rows(old_view)
@@ -1424,7 +1440,16 @@ class WideLogView(discord.ui.LayoutView):
                 logger.exception("SENTRIX TRACE V7 actions separator")
             for row in rows:
                 container.add_item(row)
-
+        if guild_id and identity_id and event_type in {
+            "member_ban", "member_unban", "member_kick", "member_warn",
+            "member_timeout", "member_untimeout", "member_join", "member_leave",
+            "role_add", "role_remove", "member_roles", "message_delete", "message_edit",
+        }:
+            from cogs.log_history_center import PremiumLogAction
+            actions = [PremiumLogAction("history", guild_id, identity_id)]
+            if event_type == "member_ban":
+                actions.append(PremiumLogAction("unban", guild_id, identity_id))
+            container.add_item(discord.ui.ActionRow(*actions))
         self.add_item(container)
 
 
@@ -1651,6 +1676,13 @@ async def send_wide_log(
     event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
     _category, emoji, kind = resolve(event_type, embed.title or "", embed.description or "")
     banner_filename = ""
+    banner_path = None
+    try:
+        banner_path = get_premium_log_banner(event_type, embed.title or "")
+        banner_filename = f"sentrix_premium_{kind}.webp"
+    except Exception:
+        # La journalisation ne doit jamais disparaître à cause de l'image.
+        logger.exception("Bannière premium indisponible, log envoyé sans image.")
 
     logger.debug(
         "SXTRACE 6 TRANSPORT phase=enter channel=%s log_type=%s event_type=%s kind=%s "
@@ -1684,6 +1716,7 @@ async def send_wide_log(
             emoji,
             event_type,
             media_items,
+            guild_id=int(guild.id) if guild is not None else None,
             available_attachments={
                 str(getattr(f, "filename", "") or "")
                 for f in ([extra_file] if extra_file is not None else []) + list(extra_files or [])
@@ -1702,7 +1735,7 @@ async def send_wide_log(
         # Plus construit : la carte n'affiche plus de bandeau, et ouvrir un
         # fichier par log pour ne jamais l'envoyer coûte une lecture disque à
         # chaque événement.
-        banner_file = None
+        banner_file = discord.File(str(banner_path), filename=banner_filename) if banner_path else None
     except Exception as exc:
         logger.error(
             "SXTRACE 6 TRANSPORT phase=abort reason=BANNER_FILE_FAILED type=%s",
@@ -1714,7 +1747,7 @@ async def send_wide_log(
     # Vide : la galerie de bandeau a été retirée ci-dessus, donc plus rien ne
     # référence ce fichier. Le joindre quand même alourdirait chaque log d'une
     # image que personne n'affiche.
-    files: list[discord.File] = []
+    files: list[discord.File] = [banner_file] if banner_file is not None else []
     payload_files: list[discord.File] = []
     if extra_file is not None:
         payload_files.append(extra_file)
@@ -1799,8 +1832,56 @@ async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> l
     return [dict(row) for row in rows]
 
 
+async def fetch_log_history_page(
+    guild_id: int,
+    target_id: int,
+    *,
+    offset: int = 0,
+    limit: int = 4,
+    event_types: tuple[str, ...] | None = None,
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """Pagination de l'historique à travers le backend canonique (Postgres/SQLite)."""
+    await ensure_log_storage()
+    safe_offset = max(0, int(offset))
+    safe_limit = max(1, min(int(limit), 20))
+    filters = tuple(str(item) for item in (event_types or ()))
+    where = "guild_id=? AND target_id=?"
+    params: list[Any] = [int(guild_id), int(target_id)]
+    if filters:
+        where += " AND log_type IN (" + ",".join("?" for _ in filters) + ")"
+        params.extend(filters)
+    summary_sql = (
+        "SELECT log_type, COUNT(*) AS n FROM logs "
+        "WHERE guild_id=? AND target_id=? GROUP BY log_type"
+    )
+    count_sql = f"SELECT COUNT(*) AS n FROM logs WHERE {where}"
+    records_sql = (
+        "SELECT id,guild_id,log_type,banner_kind,target_id,moderator_id,title,description,created_at "
+        f"FROM logs WHERE {where} ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?"
+    )
+    main = _main_postgres()
+    if main is not None:
+        summary_rows = await main.fetchall(summary_sql, (int(guild_id), int(target_id)))
+        count_row = await main.fetchone(count_sql, tuple(params))
+        rows = await main.fetchall(records_sql, tuple(params) + (safe_limit, safe_offset))
+        counts = {str(row["log_type"]): int(row["n"]) for row in summary_rows}
+        return [dict(zip(row.keys(), row)) for row in rows], int(count_row["n"] if count_row else 0), counts
+
+    async with aiosqlite.connect(_database_path()) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout = 5000")
+        async with db.execute(summary_sql, (int(guild_id), int(target_id))) as cursor:
+            counts = {str(row["log_type"]): int(row["n"]) for row in await cursor.fetchall()}
+        async with db.execute(count_sql, tuple(params)) as cursor:
+            count_row = await cursor.fetchone()
+        async with db.execute(records_sql, tuple(params) + (safe_limit, safe_offset)) as cursor:
+            rows = [dict(row) for row in await cursor.fetchall()]
+    return rows, int(count_row["n"] if count_row else 0), counts
+
+
 __all__ = [
     "FALLBACK_ENABLED", "NO_PINGS", "WideLogView", "build_rows", "compact_fields",
     "derive_identity", "ensure_log_storage", "extract_history_ids", "fetch_log_history",
+    "fetch_log_history_page",
     "log_runtime_capabilities", "narrative_body", "safe_text", "send_wide_log",
 ]
