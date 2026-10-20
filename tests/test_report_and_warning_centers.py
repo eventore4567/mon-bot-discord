@@ -15,6 +15,13 @@ os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 from cogs import report_center, warnings_config, setup_control_center
 import sentrix_v103_setup_fix as v103
 from database.db import Database
+from utils import access_matrix
+
+
+def test_members_can_access_reporting_context_menu_without_moderation_permissions():
+    assert "signaler ce message" in access_matrix.PUBLIC_COMMANDS
+    assert access_matrix.module_for_command("signaler ce message") is None
+
 
 
 class FakeTree:
