@@ -442,12 +442,12 @@ class MemberHistoryView(discord.ui.LayoutView):
                     f"• Déplacements : **{'Oui' if voice_summary['track_moves'] else 'Non'}**\n"
                     f"• Durées : **{'Oui' if voice_summary['track_duration'] else 'Non'}**\n"
                     f"• Salon de publication : {where}\n\n"
-                    "Configuration : " + chr(96) + "/config surveillance" + chr(96) + "\n"
+                    "Configuration : " + chr(96) + "/config accueil → Surveillance" + chr(96) + "\n"
                     "-# Aucun enregistrement audio. Les journaux de salon sont indépendants."
                 ))
             else:
                 body.add_item(discord.ui.TextDisplay(
-                    "Statut indisponible. Essaie /config surveillance."
+                    "Statut indisponible. Essaie /config accueil → Surveillance."
                 ))
 
         if self.tab != "settings" and not records:
