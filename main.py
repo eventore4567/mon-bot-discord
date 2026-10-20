@@ -51,6 +51,7 @@ EXTENSIONS = [
     "cogs.configuration",
     "cogs.server_builder",
     "cogs.logs",
+    "cogs.log_history_center",
     "cogs.soundboard_logs",
     "cogs.utility",
     "cogs.guild_arrival",
@@ -488,7 +489,8 @@ class BotAllInOne(commands.Bot):
         # Boutons persistants des logs : ID et copie d'invitation.
         try:
             from utils.log_service import RevealIdButton, RevealInviteButton
-            self.add_dynamic_items(RevealIdButton, RevealInviteButton)
+            from cogs.log_history_center import PremiumLogAction
+            self.add_dynamic_items(RevealIdButton, RevealInviteButton, PremiumLogAction)
         except Exception:
             logger.warning("Impossible d'enregistrer les boutons de logs :\n" + traceback.format_exc())
 
