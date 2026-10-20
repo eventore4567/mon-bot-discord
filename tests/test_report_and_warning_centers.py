@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -11,7 +12,7 @@ from discord import app_commands
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
-from cogs import report_center, warnings_config
+from cogs import report_center, warnings_config, setup_control_center
 import sentrix_v103_setup_fix as v103
 from database.db import Database
 
@@ -35,7 +36,7 @@ class FakeTree:
         self.group = value
 
 
-def test_ten_config_panels_are_exposed_without_replacing_the_config_root():
+def test_report_and_warning_buttons_are_nested_under_moderation_without_exceeding_root_limit():
     bot = SimpleNamespace(tree=FakeTree())
     cog = SimpleNamespace(send_setup=AsyncMock())
     report = SimpleNamespace(open_config=AsyncMock())
@@ -49,9 +50,13 @@ def test_ten_config_panels_are_exposed_without_replacing_the_config_root():
     assert bot.tree.group is group
     assert {x.name for x in group.commands} >= {
         "accueil", "automod", "logs", "tickets", "bienvenue", "moderation",
-        "niveaux", "diagnostic", "avertissements", "signalements", "ancienne",
+        "niveaux", "diagnostic", "ancienne",
     }
-    assert all(not group.get_command(k).parameters for k in ("avertissements", "signalements"))
+    assert group.get_command("avertissements") is None
+    assert group.get_command("signalements") is None
+    source = inspect.getsource(setup_control_center.SetupView.render)
+    assert "⚠️ Avertissements" in source
+    assert "🚨 Signalements" in source
 
 
 @pytest.mark.asyncio
