@@ -928,8 +928,53 @@ async def fetch_log_history(guild_id: int, target_id: int, limit: int = 10) -> l
     return [dict(row) for row in rows]
 
 
+async def fetch_log_history_page(
+    guild_id: int,
+    target_id: int,
+    *,
+    offset: int = 0,
+    limit: int = 4,
+    event_types: tuple[str, ...] | None = None,
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """Pagination SQL sans limite artificielle de 50 événements.
+
+    Le compteur par événement porte sur l'ensemble de l'historique, et non sur
+    les quatre cartes visibles ni sur la catégorie sélectionnée.
+    """
+    await ensure_log_storage()
+    safe_offset = max(0, int(offset))
+    safe_limit = max(1, min(int(limit), 20))
+    filters = tuple(str(item) for item in (event_types or ()))
+    where = "guild_id=? AND target_id=?"
+    params: list[Any] = [int(guild_id), int(target_id)]
+    if filters:
+        where += " AND log_type IN (" + ",".join("?" for _ in filters) + ")"
+        params.extend(filters)
+    async with aiosqlite.connect(_database_path()) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("PRAGMA busy_timeout = 5000")
+        async with db.execute(
+            "SELECT log_type, COUNT(*) AS n FROM logs WHERE guild_id=? AND target_id=? GROUP BY log_type",
+            (int(guild_id), int(target_id)),
+        ) as cursor:
+            totals = {str(row["log_type"]): int(row["n"]) for row in await cursor.fetchall()}
+        async with db.execute(
+            f"SELECT COUNT(*) AS n FROM logs WHERE {where}",
+            tuple(params),
+        ) as cursor:
+            count_row = await cursor.fetchone()
+        async with db.execute(
+            "SELECT id,guild_id,log_type,banner_kind,target_id,moderator_id,title,description,created_at "
+            f"FROM logs WHERE {where} ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?",
+            tuple(params) + (safe_limit, safe_offset),
+        ) as cursor:
+            records = [dict(row) for row in await cursor.fetchall()]
+    return records, int(count_row["n"] if count_row else 0), totals
+
+
 __all__ = [
     "FALLBACK_ENABLED", "NO_PINGS", "WideLogView", "build_rows", "compact_fields",
     "derive_identity", "ensure_log_storage", "extract_history_ids", "fetch_log_history",
+    "fetch_log_history_page",
     "log_runtime_capabilities", "narrative_body", "safe_text", "send_wide_log",
 ]
