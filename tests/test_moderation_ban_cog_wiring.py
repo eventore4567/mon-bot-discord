@@ -110,11 +110,15 @@ class BanCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         guild.ban.assert_awaited_once()
         ctx.send.assert_awaited()
-        # La sanction Discord a réussi : la confirmation courte de succès est
-        # affichée (texte brut, plus de panneau dans le salon), même si la
-        # persistance du dossier a échoué en coulisses.
-        self.assertEqual(ctx.send.await_args.kwargs.get("content"), f"{target.mention} a été banni.")
-        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
+        # La sanction Discord a réussi : la nouvelle carte V2 confirme le
+        # succès, sans inventer de numéro de dossier lorsque la DB a échoué.
+        view = ctx.send.await_args.kwargs.get("view")
+        self.assertIsInstance(view, discord.ui.LayoutView)
+        self.assertIsNone(ctx.send.await_args.kwargs.get("content"))
+        self.assertIn("Dossier non enregistré", " ".join(
+            x.content for card in view.children for x in card.children
+            if isinstance(x, discord.ui.TextDisplay)
+        ))
 
 
 if __name__ == "__main__":
