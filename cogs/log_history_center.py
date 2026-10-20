@@ -99,7 +99,7 @@ def _date(timestamp: int) -> str:
 
 
 def _history_detail(description: object) -> str:
-    """Résumé utile et lisible, sans les ID techniques de l'ancien système."""
+    """Lisible : labels structurés, suppression des doublons de salons."""
     lines: list[str] = []
     for index, raw in enumerate(safe_text(description).splitlines()):
         line = raw.strip()
@@ -107,20 +107,90 @@ def _history_detail(description: object) -> str:
             continue
         key = re.sub(r"[*_]", "", line).strip()
         if index == 0 and line.startswith("**") and line.endswith("**"):
-            continue  # titre ou pseudo, déjà affiché dans le dossier
+            continue
         if re.match(
             r"^(?:ID|Réf(?:érence)?|Dossier|Membre|Modérateur|Moderateur|Auteur|Cible|Historique)\s*[:#]",
-            key,
-            re.I,
+            key, re.I,
         ):
             continue
         if re.search(r"\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", key, re.I):
             continue
+        # Ne garder qu'une mention de salon : l'ancien log répète aussi son nom.
+        line = re.sub(
+            r"^(Salon\s*:\s*<#[0-9]+>)\s*[·•]\s*." + chr(96) +
+            r"?#[^\n" + chr(96) + r"]+" + chr(96) + r"?\s*$",
+            r"\1", line, flags=re.I,
+        )
+        match = re.match(
+            r"^(Salon|Rôle|Role|Contenu|Motif|Raison|Supprimé par|Modifié par|"
+            r"Ajouté par|Retiré par)\s*:\s*(.*)$", line, flags=re.I,
+        )
+        if match:
+            label, value = match.groups()
+            if label.casefold() == "contenu":
+                line = f"**Contenu**\n> {value or 'Message vide'}"
+            else:
+                line = f"**{label}** · {value}"
         lines.append(line)
-        if len("\n".join(lines)) > 300:
+        if len("\n".join(lines)) > 520:
             break
     result = "\n".join(lines).strip()
-    return result[:267] + "…" if len(result) > 270 else (result or "Motif non précisé.")
+    return result[:467] + "…" if len(result) > 470 else (result or "Aucun détail supplémentaire enregistré.")
+
+
+def _history_event_block(record: dict, *, index: int) -> str:
+    """Un événement, un bloc distinct : date, acteur, motif et contenu."""
+    title, emoji = TYPES.get(
+        record["log_type"],
+        (safe_text(record.get("title")) or "Événement", "📋"),
+    )
+    when = _date(record["created_at"])
+    timestamp = int(record["created_at"])
+    relative = f"<t:{timestamp}:R>" if timestamp > 0 else ""
+    moderator = (
+        f"**Responsable** · <@{record['moderator_id']}>\n"
+        if record.get("moderator_id") else ""
+    )
+    detail = _history_detail(record.get("description") or "")
+    return (
+        f"**{emoji} {title}**   ·   {relative}\n"
+        f"-# Événement {index:02d} · {when}\n\n"
+        f"{moderator}{detail}"
+    )
+
+
+def _history_member_header(
+    username: str,
+    counters: dict[str, int],
+    *,
+    total: int,
+    member: discord.Member | None,
+) -> discord.ui.Container:
+    """Bande d'identité large sans image-galerie et sans espace vide."""
+    panel = discord.ui.Container(accent_colour=discord.Colour(0x737C90))
+    heading = (
+        "## 🛡️ SentriX · Historique du membre\n"
+        f"### {username}\n"
+        "-# Dossier de modération réservé au staff · Journal du serveur"
+    )
+    avatar = getattr(getattr(member, "display_avatar", None), "url", None)
+    if avatar:
+        panel.add_item(discord.ui.Section(
+            discord.ui.TextDisplay(heading),
+            accessory=discord.ui.Thumbnail(str(avatar)),
+        ))
+    else:
+        panel.add_item(discord.ui.TextDisplay(heading))
+    panel.add_item(discord.ui.Separator())
+    panel.add_item(discord.ui.TextDisplay(
+        "**📊 Vue d'ensemble des sanctions**\n"
+        f"⚠️ **{counters['warn']}** avertissements   ·   "
+        f"🔇 **{counters['mute']}** timeouts   ·   "
+        f"🚫 **{counters['ban']}** bans   ·   "
+        f"🚪 **{counters['kick']}** expulsions\n"
+        f"-# {total} événement(s) dans le filtre · Lecture seule"
+    ))
+    return panel
 
 
 class MemberHistoryView(discord.ui.LayoutView):
@@ -178,38 +248,40 @@ class MemberHistoryView(discord.ui.LayoutView):
             key: sum(counts.get(event, 0) for event in events)
             for key, events in COUNTERS.items()
         }
-        container = discord.ui.Container(accent_colour=discord.Colour(0x879BFF))
-        container.add_item(discord.ui.TextDisplay(
-            "## 🛡️ SENTRIX · HISTORIQUE DU MEMBRE\n"
-            f"### {username}\n"
-            "-# Dossier de modération • Événements conservés sans référence publique."
+        # Trois zones avec marges natives : identité, événements et navigation.
+        header = _history_member_header(
+            username, counters, total=total, member=member,
+        )
+        self.add_item(header)
+
+        # Tous les événements restent dans un même conteneur pour partager
+        # sa largeur, même quand un événement est très court.
+        journal = discord.ui.Container(accent_colour=discord.Colour(0x515A6A))
+        journal.add_item(discord.ui.TextDisplay(
+            "### 📋 Activité du membre\n"
+            "-# Historique classé du plus récent au plus ancien"
         ))
-        container.add_item(discord.ui.TextDisplay(
-            f"**{counters['warn']}** avertissements   ·   "
-            f"**{counters['mute']}** timeouts   ·   "
-            f"**{counters['ban']}** bans   ·   **{counters['kick']}** exclusions"
-        ))
-        container.add_item(discord.ui.Separator())
-        blocks: list[str] = []
-        for record in records:
-            title, icon = TYPES.get(
-                record["log_type"], (safe_text(record["title"]) or "Événement", "📋")
-            )
-            moderator = (
-                f" • Par <@{record['moderator_id']}>"
-                if record.get("moderator_id") else ""
-            )
-            detail = _history_detail(record.get("description") or "")
-            blocks.append(
-                f"**{icon} {title}** · {_date(record['created_at'])}"
-                f"{moderator}\n{detail or 'Aucun détail enregistré.'}"
-            )
-        container.add_item(discord.ui.TextDisplay(
-            "\n\n".join(blocks) if blocks else "Aucun événement dans cette catégorie."
-        ))
-        container.add_item(discord.ui.TextDisplay(
-            f"-# {FILTER_LABELS[self.filter]} · Page {self.page + 1}/{page_count} "
-            f"· {total} événements"
+        journal.add_item(discord.ui.Separator())
+        if not records:
+            journal.add_item(discord.ui.TextDisplay(
+                "📭 Aucun événement enregistré dans cette catégorie."
+            ))
+        else:
+            for i, record in enumerate(records):
+                journal.add_item(discord.ui.TextDisplay(
+                    _history_event_block(
+                        record, index=self.page * PER_PAGE + i + 1,
+                    )
+                ))
+                if i < len(records) - 1:
+                    journal.add_item(discord.ui.Separator())
+        self.add_item(journal)
+
+        navigation = discord.ui.Container()
+        navigation.add_item(discord.ui.TextDisplay(
+            "**🧭 Filtres et navigation**\n"
+            f"-# {FILTER_LABELS[self.filter]} · Page {self.page + 1}/{page_count}"
+            f" · {total} événement(s) dans cette catégorie"
         ))
         for choices in (("all", "warn", "mute", "ban"), ("kick", "roles", "messages", "members")):
             buttons = []
@@ -227,27 +299,27 @@ class MemberHistoryView(discord.ui.LayoutView):
 
                 button.callback = selected
                 buttons.append(button)
-            container.add_item(discord.ui.ActionRow(*buttons))
+            navigation.add_item(discord.ui.ActionRow(*buttons))
         selector = discord.ui.UserSelect(
-            placeholder="Choisir un autre membre du serveur…",
+            placeholder="🔎 Choisir un autre membre du serveur…",
             min_values=1,
             max_values=1,
         )
         selector.callback = self._change_target
         self.selector = selector
-        container.add_item(discord.ui.ActionRow(selector))
+        navigation.add_item(discord.ui.ActionRow(selector))
         previous = discord.ui.Button(
-            label="Précédent", style=discord.ButtonStyle.secondary,
+            label="◀ Précédent", style=discord.ButtonStyle.secondary,
             disabled=self.page == 0,
         )
         following = discord.ui.Button(
-            label="Suivant", style=discord.ButtonStyle.secondary,
+            label="Suivant ▶", style=discord.ButtonStyle.secondary,
             disabled=self.page >= page_count - 1,
         )
         previous.callback = self._previous
         following.callback = self._following
-        container.add_item(discord.ui.ActionRow(previous, following))
-        self.add_item(container)
+        navigation.add_item(discord.ui.ActionRow(previous, following))
+        self.add_item(navigation)
 
     async def _change_target(self, interaction: discord.Interaction) -> None:
         if not self.selector or not self.selector.values:
