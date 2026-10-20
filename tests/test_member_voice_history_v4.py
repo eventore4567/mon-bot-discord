@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
+import pytest_asyncio
 
 from database.db import Database
 from services import voice_history
@@ -13,7 +14,7 @@ from cogs.logs import Logs
 from cogs.voice_history_config import VoiceHistoryConfigView
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def voice_db(tmp_path):
     db = Database(str(tmp_path / "voice-history.db"))
     await db.connect()
