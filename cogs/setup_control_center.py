@@ -2082,10 +2082,9 @@ class OfficialSetup(commands.Cog, name="SentriXSetup"):
     async def prefix_setup(self, ctx):
         await self.send_setup(ctx)
 
-    @app_commands.command(name="setup", description="Ouvrir le centre de configuration SentriX")
-    async def slash_setup(self, interaction: discord.Interaction):
-        # Alias de transition : /setup continue à fonctionner jusqu'à migration.
-        await self.send_setup(interaction)
+    # /setup slash est remplacé par /config accueil, afin de respecter
+    # le plafond Discord de 100 commandes racines. +setup reste disponible
+    # comme solution de secours tant que la migration des panneaux se termine.
 
     @config_group.command(name="accueil", description="🏠 Centre principal de configuration SentriX.")
     async def config_accueil(self, interaction: discord.Interaction):
