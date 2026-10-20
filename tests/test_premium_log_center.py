@@ -1,11 +1,15 @@
 """Contrats du journal premium SentriX, indépendants de l'API Discord."""
 import asyncio
+import io
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import discord
 
 from cogs.log_history_center import PremiumLogAction, MemberHistoryView
+from utils.premium_log_banners import (
+    BANNER_FILENAME, SIZE, build_premium_banner, get_premium_log_banner,
+)
 from utils.wide_logs import WideLogView, narrative_body, send_wide_log
 
 
@@ -27,13 +31,13 @@ def _embed(log_type="member_ban"):
     return embed
 
 
-def test_compact_voice_log_shows_small_avatar_only_and_no_repeated_mention():
+def test_compact_voice_log_has_ultrathin_strip_and_side_avatar_without_repeated_mention():
     embed = discord.Embed(title="Entrée en vocal")
     embed.add_field(name="Membre", value=f"<@{USER_ID}>")
     embed.add_field(name="Salon", value="<#323456789012345678>")
     view = WideLogView(
         embed,
-        "legacy-banner.webp",  # Ancienne valeur ignorée, même si encore fournie.
+        BANNER_FILENAME,
         identity_id=USER_ID,
         identity_name="moussa",
         identity_icon="https://cdn.discordapp.com/embed/avatars/0.png",
@@ -41,7 +45,7 @@ def test_compact_voice_log_shows_small_avatar_only_and_no_repeated_mention():
     )
     items = list(_walk(view))
     assert any(isinstance(item, discord.ui.Section) for item in items)
-    assert not any(isinstance(item, discord.ui.MediaGallery) for item in items)
+    assert sum(isinstance(item, discord.ui.MediaGallery) for item in items) == 1
     content = "\n".join(str(getattr(item, "content", "")) for item in items)
     assert content.count(f"<@{USER_ID}>") == 1
     assert "A rejoint" in content
@@ -49,7 +53,7 @@ def test_compact_voice_log_shows_small_avatar_only_and_no_repeated_mention():
     assert "legacy-banner.webp" not in content
 
 
-def test_transport_does_not_upload_decorative_banner():
+def test_transport_uploads_only_ultrathin_strip_with_correct_filename():
     embed = discord.Embed(title="Entrée en vocal")
     embed.add_field(name="Membre", value=f"<@{USER_ID}>")
     embed.add_field(name="Salon", value="<#323456789012345678>")
@@ -61,8 +65,85 @@ def test_transport_does_not_upload_decorative_banner():
     ok = asyncio.run(send_wide_log(channel, embed, log_type="voice_join", identity_id=USER_ID))
     assert ok is True
     kwargs = channel.send.call_args.kwargs
-    assert kwargs["files"] == []
+    assert len(kwargs["files"]) == 1
+    assert kwargs["files"][0].filename == BANNER_FILENAME
     assert isinstance(kwargs["view"], WideLogView)
+    assert any(isinstance(x, discord.ui.MediaGallery)
+               for x in _walk(kwargs["view"]))
+    for file in kwargs["files"]:
+        file.close()
+
+
+
+def test_banner_is_1200x24_neutral_and_the_same_for_every_event_type():
+    img = build_premium_banner("member_ban")
+    assert img.size == SIZE == (1200, 24)
+    assert img.mode == "RGBA"
+    assert img.getpixel((600, 10))[3] == 0
+    assert img.getpixel((600, 23))[3] <= 24
+    path = get_premium_log_banner("member_ban")
+    assert path.exists() and path.suffix == ".png"
+    assert path == get_premium_log_banner("voice_join")
+    assert path == get_premium_log_banner("ticket_open")
+    assert path == get_premium_log_banner("message_delete")
+
+
+def test_every_category_receives_the_same_thin_strip():
+    # Chaque famille passe par send_wide_log et le même fichier,
+    # sans thème chromatique propre à la catégorie.
+    categories = (
+        "voice_join", "voice_leave", "member_ban", "member_warn",
+        "member_leave", "message_delete", "message_edit", "role_add",
+        "role_update", "channel_create", "invite_create", "ticket_open",
+        "automod_link", "guild_update", "soundboard_play",
+    )
+    async def check():
+        for event in categories:
+            embed = discord.Embed(title="Événement de test")
+            channel = SimpleNamespace(
+                id=223456789012345678,
+                guild=None,
+                send=AsyncMock(return_value=SimpleNamespace(
+                    id=124, flags=SimpleNamespace(value=32768),
+                )),
+            )
+            ok = await send_wide_log(channel, embed, log_type=event)
+            assert ok is True, event
+            kwargs = channel.send.call_args.kwargs
+            assert len(kwargs["files"]) == 1, event
+            assert kwargs["files"][0].filename == BANNER_FILENAME, event
+            assert any(isinstance(i, discord.ui.MediaGallery)
+                       for i in _walk(kwargs["view"])), event
+            for file in kwargs["files"]:
+                file.close()
+    asyncio.run(check())
+
+
+def test_ten_real_files_take_priority_over_decorative_strip():
+    embed = discord.Embed(title="Message supprimé")
+    attachments = [
+        discord.File(io.BytesIO(f"file{i}".encode()), filename=f"image{i}.png")
+        for i in range(10)
+    ]
+    channel = SimpleNamespace(
+        id=223456789012345678,
+        guild=None,
+        send=AsyncMock(return_value=SimpleNamespace(
+            id=125, flags=SimpleNamespace(value=32768),
+        )),
+    )
+    ok = asyncio.run(send_wide_log(
+        channel, embed, log_type="message_delete", extra_files=attachments,
+    ))
+    assert ok
+    files = channel.send.call_args.kwargs["files"]
+    assert len(files) == 10
+    assert all(file.filename != BANNER_FILENAME for file in files)
+    assert not any(isinstance(i, discord.ui.MediaGallery)
+                   for i in _walk(channel.send.call_args.kwargs["view"]))
+    for file in files:
+        file.close()
+
 
 
 def test_premium_log_has_persistent_history_and_unban_buttons_without_reference():
