@@ -25,7 +25,7 @@ def test_grouped_slash_config_has_all_eight_sections():
     group = setup_control_center.OfficialSetup.config_group
     assert group.name == "config"
     assert {cmd.name for cmd in group.commands} == EXPECTED_CONFIG
-    assert "setup" in {c.name for c in setup_control_center.OfficialSetup.__cog_app_commands__}
+    assert "setup" not in {c.name for c in setup_control_center.OfficialSetup.__cog_app_commands__}
     assert set(setup_control_center.CATEGORIES) >= {
         "security", "logs", "tickets", "welcome", "moderation", "levels",
     }
