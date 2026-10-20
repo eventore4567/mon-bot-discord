@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
+import discord
 from cogs.moderation import Moderation
 
 
