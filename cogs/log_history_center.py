@@ -9,7 +9,7 @@ import discord
 from discord.ext import commands
 
 from utils import access_matrix
-from utils.wide_logs import fetch_log_history, safe_text
+from utils.wide_logs import fetch_log_history_page, safe_text
 
 logger = logging.getLogger("bot.log-center")
 NO_MENTIONS = discord.AllowedMentions.none()
@@ -30,6 +30,21 @@ TYPES = {
     "message_delete": ("Message supprimé", "🗑️"),
     "message_edit": ("Message modifié", "✏️"),
 }
+FILTERS = {
+    "all": None,
+    "warn": ("member_warn",),
+    "mute": ("member_timeout", "member_untimeout"),
+    "ban": ("member_ban", "member_unban"),
+    "kick": ("member_kick",),
+    "roles": ("role_add", "role_remove", "member_roles"),
+    "messages": ("message_delete", "message_edit", "message_bulk"),
+    "members": ("member_join", "member_leave"),
+}
+FILTER_LABELS = {
+    "all": "Tout", "warn": "Warns", "mute": "Mutes", "ban": "Bans",
+    "kick": "Kicks", "roles": "Rôles", "messages": "Messages", "members": "Membres",
+}
+
 COUNTERS = {
     "warn": {"member_warn"},
     "mute": {"member_timeout"},
@@ -93,6 +108,8 @@ class MemberHistoryView(discord.ui.LayoutView):
         self.target_id = int(target_id)
         self.page = 0
         self.records: list[dict] = []
+        self.counts: dict[str, int] = {}
+        self.filter = "all"
         self.selector: discord.ui.UserSelect | None = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -109,21 +126,38 @@ class MemberHistoryView(discord.ui.LayoutView):
         return True
 
     async def render(self, guild: discord.Guild) -> None:
-        self.records = await fetch_log_history(self.guild_id, self.target_id, limit=50)
-        self.clear_items()
-        page_count = max(1, (len(self.records) + PER_PAGE - 1) // PER_PAGE)
+        filtered = FILTERS[self.filter]
+        records, total, counts = await fetch_log_history_page(
+            self.guild_id,
+            self.target_id,
+            offset=self.page * PER_PAGE,
+            limit=PER_PAGE,
+            event_types=filtered,
+        )
+        self.counts = counts
+        page_count = max(1, (total + PER_PAGE - 1) // PER_PAGE)
         self.page = max(0, min(self.page, page_count - 1))
+        if total and not records:
+            records, total, _ = await fetch_log_history_page(
+                self.guild_id,
+                self.target_id,
+                offset=self.page * PER_PAGE,
+                limit=PER_PAGE,
+                event_types=filtered,
+            )
+        self.records = records
+        self.clear_items()
         member = guild.get_member(self.target_id)
         username = safe_text(member.display_name if member else str(self.target_id))
         counters = {
-            key: sum(1 for record in self.records if record["log_type"] in events)
+            key: sum(counts.get(event, 0) for event in events)
             for key, events in COUNTERS.items()
         }
         container = discord.ui.Container(accent_colour=discord.Colour(0x879BFF))
         container.add_item(discord.ui.TextDisplay(
             "## 🛡️ SENTRIX · HISTORIQUE DU MEMBRE\n"
             f"### {username}\n"
-            "-# Dossier de modération • Les événements sont conservés sans référence publique."
+            "-# Dossier de modération • Événements conservés sans référence publique."
         ))
         container.add_item(discord.ui.TextDisplay(
             f"**{counters['warn']}** avertissements   ·   "
@@ -131,27 +165,46 @@ class MemberHistoryView(discord.ui.LayoutView):
             f"**{counters['ban']}** bans   ·   **{counters['kick']}** exclusions"
         ))
         container.add_item(discord.ui.Separator())
-        subset = self.records[self.page * PER_PAGE:(self.page + 1) * PER_PAGE]
-        if not subset:
-            container.add_item(discord.ui.TextDisplay(
-                "Aucun événement enregistré pour ce membre."
-            ))
-        for record in subset:
-            title, icon = TYPES.get(record["log_type"], (safe_text(record["title"]) or "Événement", "📋"))
+        blocks: list[str] = []
+        for record in records:
+            title, icon = TYPES.get(
+                record["log_type"], (safe_text(record["title"]) or "Événement", "📋")
+            )
             moderator = (
                 f" • Par <@{record['moderator_id']}>"
                 if record.get("moderator_id") else ""
             )
             detail = safe_text(record.get("description") or "")
-            if len(detail) > 250:
-                detail = detail[:247] + "…"
-            container.add_item(discord.ui.TextDisplay(
-                f"**{icon} {title}**  ·  {_date(record['created_at'])}"
+            if len(detail) > 270:
+                detail = detail[:267] + "…"
+            blocks.append(
+                f"**{icon} {title}** · {_date(record['created_at'])}"
                 f"{moderator}\n{detail or 'Aucun détail enregistré.'}"
-            ))
+            )
         container.add_item(discord.ui.TextDisplay(
-            f"-# Page {self.page + 1}/{page_count} · {len(self.records)} événements consultables"
+            "\n\n".join(blocks) if blocks else "Aucun événement dans cette catégorie."
         ))
+        container.add_item(discord.ui.TextDisplay(
+            f"-# {FILTER_LABELS[self.filter]} · Page {self.page + 1}/{page_count} "
+            f"· {total} événements"
+        ))
+        for choices in (("all", "warn", "mute", "ban"), ("kick", "roles", "messages", "members")):
+            buttons = []
+            for key in choices:
+                button = discord.ui.Button(
+                    label=FILTER_LABELS[key],
+                    style=discord.ButtonStyle.primary if self.filter == key else discord.ButtonStyle.secondary,
+                )
+
+                async def selected(interaction: discord.Interaction, *, value: str = key):
+                    self.filter = value
+                    self.page = 0
+                    await self.render(interaction.guild)
+                    await interaction.response.edit_message(view=self)
+
+                button.callback = selected
+                buttons.append(button)
+            container.add_item(discord.ui.ActionRow(*buttons))
         selector = discord.ui.UserSelect(
             placeholder="Choisir un autre membre du serveur…",
             min_values=1,
@@ -161,7 +214,8 @@ class MemberHistoryView(discord.ui.LayoutView):
         self.selector = selector
         container.add_item(discord.ui.ActionRow(selector))
         previous = discord.ui.Button(
-            label="Précédent", style=discord.ButtonStyle.secondary, disabled=self.page == 0
+            label="Précédent", style=discord.ButtonStyle.secondary,
+            disabled=self.page == 0,
         )
         following = discord.ui.Button(
             label="Suivant", style=discord.ButtonStyle.secondary,
