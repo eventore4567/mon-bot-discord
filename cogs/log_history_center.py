@@ -15,7 +15,7 @@ from utils import log_service
 
 logger = logging.getLogger("bot.log-center")
 NO_MENTIONS = discord.AllowedMentions.none()
-PER_PAGE = 3
+PER_PAGE = 2
 
 TYPES = {
     "member_warn": ("Avertissement", "⚠️"),
@@ -107,7 +107,12 @@ def _date(timestamp: int) -> str:
 
 
 def _history_detail(description: object) -> str:
-    """Lisible : labels structurés, suppression des doublons de salons."""
+    """Normalise les données historiques sans perdre leur contenu.
+
+    Chaque ligne est présentée en Markdown Discord (labels gras, citations,
+    mentions natives). On retire les doublons de salon mais jamais le contenu
+    de preuve.
+    """
     lines: list[str] = []
     for index, raw in enumerate(safe_text(description).splitlines()):
         line = raw.strip()
@@ -123,31 +128,37 @@ def _history_detail(description: object) -> str:
             continue
         if re.search(r"\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", key, re.I):
             continue
-        # Ne garder qu'une mention de salon : l'ancien log répète aussi son nom.
         line = re.sub(
             r"^(Salon\s*:\s*<#[0-9]+>)\s*[·•]\s*." + chr(96) +
             r"?#[^\n" + chr(96) + r"]+" + chr(96) + r"?\s*$",
             r"\1", line, flags=re.I,
         )
         match = re.match(
-            r"^(Salon|Rôle|Role|Contenu|Motif|Raison|Supprimé par|Modifié par|"
-            r"Ajouté par|Retiré par)\s*:\s*(.*)$", line, flags=re.I,
+            r"^(Salon|Rôle|Rôles avant le départ|Role|Contenu|Motif|Raison|"
+            r"Présence|Durée de la session|Temps dans le salon précédent|"
+            r"Supprimé par|Modifié par|Ajouté par|Retiré par|Avant|Après)"
+            r"\s*:\s*(.*)$", line, flags=re.I,
         )
         if match:
             label, value = match.groups()
+            mapped = {
+                "rôles avant le départ": "Rôles avant le départ",
+                "présence": "Présence sur le serveur",
+                "durée de la session": "Durée vocale",
+            }.get(label.casefold(), label)
             if label.casefold() == "contenu":
                 line = f"**Contenu**\n> {value or 'Message vide'}"
             else:
-                line = f"**{label}** · {value}"
+                line = f"**{mapped}** · {value}"
         lines.append(line)
-        if len("\n".join(lines)) > 520:
+        if len("\n".join(lines)) > 950:
             break
     result = "\n".join(lines).strip()
-    return result[:467] + "…" if len(result) > 470 else (result or "Aucun détail supplémentaire enregistré.")
+    return result[:897] + "…" if len(result) > 900 else (result or "Aucun détail supplémentaire enregistré.")
 
 
 def _history_event_block(record: dict, *, index: int) -> str:
-    """Un événement, un bloc distinct : date, acteur, motif et contenu."""
+    """Un événement lisible, compatible avec les anciens journaux."""
     title, emoji = TYPES.get(
         record["log_type"],
         (safe_text(record.get("title")) or "Événement", "📋"),
@@ -161,10 +172,21 @@ def _history_event_block(record: dict, *, index: int) -> str:
     )
     detail = _history_detail(record.get("description") or "")
     return (
-        f"**{emoji} {title}**   ·   {relative}\n"
+        f"**{emoji} {title}** · {relative}\n"
         f"-# Événement {index:02d} · {when}\n\n"
         f"{moderator}{detail}"
     )
+
+
+def _member_display_name(user: object | None, fallback_id: int) -> str:
+    name = (
+        getattr(user, "global_name", None)
+        or getattr(user, "display_name", None)
+        or getattr(user, "name", None)
+        or "Utilisateur Discord"
+    )
+    name = discord.utils.escape_markdown(safe_text(name)[:80])
+    return name or f"Utilisateur {fallback_id}"
 
 
 def _history_member_header(
@@ -172,32 +194,104 @@ def _history_member_header(
     counters: dict[str, int],
     *,
     total: int,
-    member: discord.Member | None,
+    member: discord.abc.User | None,
+    target_id: int | None = None,
 ) -> discord.ui.Container:
-    """Bande d'identité large sans image-galerie et sans espace vide."""
-    panel = discord.ui.Container(accent_colour=discord.Colour(0x737C90))
-    heading = (
-        "## 🛡️ SentriX · Historique du membre\n"
-        f"### {username}\n"
-        "-# Dossier de modération réservé au staff · Journal du serveur"
+    """En-tête avec mention réelle, pseudo, petit ID et avatar si connu.
+
+    Discord peut ne pas résoudre la mention d'un membre ayant quitté le serveur.
+    Son pseudo API reste visible, sans remplacer le nom par son seul snowflake.
+    """
+    panel = discord.ui.Container(accent_colour=discord.Colour(0x5865F2))
+    mention = f"<@{int(target_id)}>" if target_id else ""
+    account_name = safe_text(getattr(member, "name", "") or "").strip()
+    account_label = (
+        chr(96) + "@" + account_name[:32].replace(chr(96), "") + chr(96)
+        if account_name else "Compte Discord non résolu"
+    )
+    id_label = (chr(96) + str(target_id) + chr(96)) if target_id else "ID indisponible"
+    header = (
+        "## 🛡️ SentriX · Dossier du membre\n"
+        f"**{username}**  {mention}\n"
+        f"-# Pseudo du compte : {account_label} · ID : {id_label}\n"
+        "-# Historique privé · Consultation réservée à la modération"
     )
     avatar = getattr(getattr(member, "display_avatar", None), "url", None)
     if avatar:
         panel.add_item(discord.ui.Section(
-            discord.ui.TextDisplay(heading),
+            discord.ui.TextDisplay(header),
             accessory=discord.ui.Thumbnail(str(avatar)),
         ))
     else:
-        panel.add_item(discord.ui.TextDisplay(heading))
+        panel.add_item(discord.ui.TextDisplay(header))
     panel.add_item(discord.ui.Separator())
     panel.add_item(discord.ui.TextDisplay(
-        "**📊 Vue d'ensemble des sanctions**\n"
+        "**📊 Modération · Récapitulatif**\n"
         f"⚠️ **{counters['warn']}** avertissements   ·   "
-        f"🔇 **{counters['mute']}** timeouts   ·   "
-        f"🚫 **{counters['ban']}** bans   ·   "
+        f"🔇 **{counters['mute']}** timeouts\n"
+        f"🚫 **{counters['ban']}** bannissements   ·   "
         f"🚪 **{counters['kick']}** expulsions\n"
-        f"-# {total} événement(s) dans le filtre · Lecture seule"
+        f"-# {total} événement(s) conservé(s) · Consultation uniquement"
     ))
+    return panel
+
+
+def _history_brief(record: dict) -> str:
+    """Extrait concis, avec citations et labels natifs Discord, jamais un pavé."""
+    detail = _history_detail(record.get("description"))
+    lines = detail.splitlines()
+    if not lines:
+        return "-# Aucun détail associé"
+    # Priorité au salon, au rôle ou au motif ; ne pas afficher une citation
+    # de message supprimé brute comme titre d'un événement.
+    chosen = next((line for line in lines if line.startswith("**") and line != "**Contenu**"), None)
+    if not chosen:
+        chosen = next((line for line in lines if not line.startswith(">")), "")
+    if not chosen:
+        chosen = lines[0]
+    return chosen[:160] + "…" if len(chosen) > 161 else chosen
+
+
+def _history_event_panel(
+    record: dict, *, index: int, expanded: bool, toggle,
+) -> discord.ui.Container:
+    """Une carte = un événement, avec son propre bouton Détails."""
+    log_type = str(record.get("log_type") or "")
+    emoji_title = TYPES.get(log_type, (safe_text(record.get("title")) or "Événement", "📋"))
+    title, emoji = emoji_title
+    # Le gris neutre domine ; les types importants restent identifiables
+    # sans multiplier les couleurs criardes.
+    accent = (
+        0xB5846F if log_type.startswith("message_")
+        else 0x647CA3 if log_type.startswith("voice_")
+        else 0x798B71 if log_type.startswith("role_") or log_type == "member_roles"
+        else 0x7B8199
+    )
+    panel = discord.ui.Container(accent_colour=discord.Colour(accent))
+    timestamp = int(record["created_at"])
+    panel.add_item(discord.ui.TextDisplay(
+        f"**{emoji} {title}**   ·   <t:{timestamp}:R>\n"
+        f"-# <t:{timestamp}:f>  ·  Événement " + chr(96) + f"{index:02d}" + chr(96)
+    ))
+    panel.add_item(discord.ui.Separator())
+    if expanded:
+        detail = _history_detail(record.get("description"))
+        moderator = (
+            f"**👮 Responsable** · <@{record['moderator_id']}>\n"
+            if record.get("moderator_id") else ""
+        )
+        panel.add_item(discord.ui.TextDisplay(
+            f"{moderator}{detail}"
+        ))
+    else:
+        panel.add_item(discord.ui.TextDisplay(_history_brief(record)))
+    button = discord.ui.Button(
+        label="Masquer les détails" if expanded else "Voir les détails",
+        emoji="🔼" if expanded else "🔎",
+        style=discord.ButtonStyle.secondary,
+    )
+    button.callback = toggle
+    panel.add_item(discord.ui.ActionRow(button))
     return panel
 
 
@@ -237,6 +331,33 @@ class MemberHistoryView(discord.ui.LayoutView):
             return False
         return True
 
+    async def _resolve_target_user(self, guild):
+        """Résout le vrai pseudo Discord, même si le membre a quitté le serveur."""
+        cached_member = guild.get_member(self.target_id)
+        if cached_member is not None:
+            return cached_member
+        if getattr(self, "_resolved_user_id", None) == self.target_id:
+            return getattr(self, "_resolved_user", None)
+        client = self.bot
+        resolved = None
+        if client is not None:
+            getter = getattr(client, "get_user", None)
+            if callable(getter):
+                resolved = getter(self.target_id)
+            if resolved is None:
+                fetch = getattr(client, "fetch_user", None)
+                if callable(fetch):
+                    try:
+                        resolved = await fetch(self.target_id)
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        logger.info(
+                            "Impossible de résoudre le profil Discord %s : ID toujours affiché",
+                            self.target_id,
+                        )
+        self._resolved_user_id = self.target_id
+        self._resolved_user = resolved
+        return resolved
+
     async def render(self, guild: discord.Guild) -> None:
         event_types = (
             FILTERS["voice"] if self.tab == "voice"
@@ -259,26 +380,29 @@ class MemberHistoryView(discord.ui.LayoutView):
             )
         self.records, self.counts = records, counts
         self.clear_items()
-        member = guild.get_member(self.target_id)
-        username = safe_text(member.display_name if member else str(self.target_id))
+        # Pas de simple snowflake à la place d'un pseudo : un membre parti
+        # peut être trouvé par get_user / fetch_user grâce à l'API Discord.
+        member = await self._resolve_target_user(guild)
+        username = _member_display_name(member, self.target_id)
         counters = {
             key: sum(counts.get(event, 0) for event in events)
             for key, events in COUNTERS.items()
         }
         self.add_item(_history_member_header(
-            username, counters, total=sum(counts.values()), member=member,
+            username, counters, total=sum(counts.values()),
+            member=member, target_id=self.target_id,
         ))
 
         names = {
-            "journal": ("📋 Journal d'activité", "Tous les événements du serveur"),
+            "journal": ("📋 Journal d'activité", "Tous les événements du membre"),
             "voice": ("🎧 Activité vocale", "Entrées, sorties, déplacements et durées"),
             "sanctions": ("⚖️ Sanctions", "Historique des sanctions appliquées"),
-            "settings": ("⚙️ Réglages du suivi", "Configuration en lecture seule"),
+            "settings": ("⚙️ Surveillance", "Options du suivi privé des membres"),
         }
         title, subtitle = names[self.tab]
         body = discord.ui.Container(accent_colour=discord.Colour(0x515B70))
         body.add_item(discord.ui.TextDisplay(f"### {title}\n-# {subtitle}"))
-        body.add_item(discord.ui.Separator())
+
         voice_summary = None
         if self.tab in {"voice", "settings"} and self.bot is not None:
             try:
@@ -291,19 +415,20 @@ class MemberHistoryView(discord.ui.LayoutView):
         if self.tab == "voice" and voice_summary:
             session = voice_summary.get("session")
             status = (
-                f"🟢 En vocal dans <#{session['channel_id']}>"
+                f"🟢 Dans <#{session['channel_id']}>"
                 f" depuis <t:{int(session['started_at'])}:R>"
                 if session else "⚪ Aucune session active connue"
             )
+            body.add_item(discord.ui.Separator())
             body.add_item(discord.ui.TextDisplay(
                 f"**📊 {int(voice_summary['completed_sessions'])} session(s)**"
                 f" · **{voice_history.duration_label(voice_summary['seconds'])}** cumulées\n"
                 f"{status}\n"
                 f"-# Suivi {'activé' if voice_summary['enabled'] else 'désactivé'}"
-                " · Durées observées uniquement, jamais d'audio."
+                " · Durées observées uniquement · Jamais d'audio"
             ))
-            body.add_item(discord.ui.Separator())
         elif self.tab == "settings":
+            body.add_item(discord.ui.Separator())
             if voice_summary:
                 route = None
                 try:
@@ -317,51 +442,41 @@ class MemberHistoryView(discord.ui.LayoutView):
                     if route and route.get("channel_id") else "Non configuré"
                 )
                 body.add_item(discord.ui.TextDisplay(
-                    "**🎧 Historique vocal**\n"
+                    "**👁️ Surveillance vocale**\n"
                     f"• Entrées et sorties : **{'Oui' if voice_summary['enabled'] else 'Non'}**\n"
                     f"• Déplacements : **{'Oui' if voice_summary['track_moves'] else 'Non'}**\n"
                     f"• Durées : **{'Oui' if voice_summary['track_duration'] else 'Non'}**\n"
-                    f"• Salon de publication : **{where}**\n\n"
-                    "Ouvre /config logs → 🎧 Suivi vocal pour modifier les réglages.\n"
-                    "-# Aucun enregistrement de conversation ni d'audio."
+                    f"• Salon de publication : {where}\n\n"
+                    "Configuration : " + chr(96) + "/config accueil → Surveillance" + chr(96) + "\n"
+                    "-# Aucun enregistrement audio. Les journaux de salon sont indépendants."
                 ))
             else:
                 body.add_item(discord.ui.TextDisplay(
-                    "Statut indisponible. Ouvre /config logs pour vérifier."
+                    "Statut indisponible. Essaie /config accueil → Surveillance."
                 ))
 
+        if self.tab != "settings" and not records:
+            body.add_item(discord.ui.Separator())
+            body.add_item(discord.ui.TextDisplay(
+                "📭 Aucun événement enregistré pour cette catégorie."
+            ))
+        self.add_item(body)
+
         if self.tab != "settings":
-            if not records:
-                body.add_item(discord.ui.TextDisplay(
-                    "📭 Aucun événement dans cet historique."
-                ))
             for index, event in enumerate(records):
                 event_id = int(event["id"])
-                event_title, emoji = TYPES.get(
-                    event["log_type"],
-                    (safe_text(event.get("title")) or "Événement", "📋"),
-                )
-                detail = _history_detail(event.get("description"))
-                detail_lines = detail.splitlines()
-                first_line = next((line for line in detail_lines if line and not line.startswith(">")), detail)
-                short = first_line[:133] + "…" if len(first_line) > 134 else first_line
-                timestamp = int(event["created_at"])
-                header = (
-                    f"**{emoji} {event_title}** · <t:{timestamp}:R>\n"
-                    f"-# {_date(timestamp)} · Événement {self.page * PER_PAGE + index + 1:02d}"
-                )
-                if self.expanded == event_id:
-                    mod = (
-                        f"**Responsable** · <@{event['moderator_id']}>\n"
-                        if event.get("moderator_id") else ""
+
+                async def toggle_detail(interaction: discord.Interaction, *, eid=event_id):
+                    self.expanded = None if self.expanded == eid else eid
+                    await self.render(interaction.guild)
+                    await interaction.response.edit_message(
+                        view=self, allowed_mentions=NO_MENTIONS,
                     )
-                    content = header + "\n\n" + mod + detail
-                else:
-                    content = header + "\n\n" + short
-                body.add_item(discord.ui.TextDisplay(content))
-                if index < len(records) - 1:
-                    body.add_item(discord.ui.Separator())
-        self.add_item(body)
+
+                self.add_item(_history_event_panel(
+                    event, index=self.page * PER_PAGE + index + 1,
+                    expanded=self.expanded == event_id, toggle=toggle_detail,
+                ))
 
         nav = discord.ui.Container()
         tabs = []
@@ -412,33 +527,9 @@ class MemberHistoryView(discord.ui.LayoutView):
             select.callback = choose_filter
             nav.add_item(discord.ui.ActionRow(select))
 
-        if records and self.tab != "settings":
-            details = []
-            for index, event in enumerate(records):
-                eid = int(event["id"])
-                button = discord.ui.Button(
-                    label=(
-                        f"Réduire #{self.page * PER_PAGE + index + 1}"
-                        if self.expanded == eid
-                        else f"Détails #{self.page * PER_PAGE + index + 1}"
-                    ),
-                    style=discord.ButtonStyle.secondary,
-                )
-
-                async def toggle_detail(interaction: discord.Interaction, *, event_id=eid):
-                    self.expanded = None if self.expanded == event_id else event_id
-                    await self.render(interaction.guild)
-                    await interaction.response.edit_message(
-                        view=self, allowed_mentions=NO_MENTIONS,
-                    )
-
-                button.callback = toggle_detail
-                details.append(button)
-            nav.add_item(discord.ui.ActionRow(*details))
-
         if self.tab == "settings":
             config_button = discord.ui.Button(
-                label="🎧 Configurer le suivi vocal",
+                label="👁️ Ouvrir Surveillance",
                 style=discord.ButtonStyle.secondary,
             )
 

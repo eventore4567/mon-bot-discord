@@ -21,7 +21,7 @@ EXPECTED_CONFIG = {
 }
 
 
-def test_grouped_slash_config_has_all_eight_sections():
+def test_grouped_slash_config_retains_eight_commands_with_surveillance_inside_panel():
     group = setup_control_center.OfficialSetup.config_group
     assert group.name == "config"
     assert {cmd.name for cmd in group.commands} == EXPECTED_CONFIG

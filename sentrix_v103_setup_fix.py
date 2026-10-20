@@ -72,7 +72,7 @@ def _replace_setup_slash(bot) -> bool:
     """Publie /config après V95/V98/V110 et retire l'ancien slash /setup.
 
     V98 construit déjà une racine /config pour les commandes historiques : on
-    conserve ces sous-commandes et on AJOUTE les huit centres interactifs.
+    conserve ces sous-commandes et on AJOUTE huit centres interactifs.
     Ajouter un second /config ferait disparaître la surface V98 et dépasserait
     le budget mondial des 100 commandes slash.
     """
@@ -155,7 +155,7 @@ def _replace_setup_slash(bot) -> bool:
         logger.error("V103 : /config dépasse le budget global : %s/100 racines.", len(roots))
         return False
 
-    logger.info("V103 : /config publie 8 centres ; avertissements et signalements dans /config moderation.")
+    logger.info("V103 : /config publie 8 centres ; Surveillance accessible via la catégorie de l'accueil.")
     return True
 
 

@@ -35,13 +35,13 @@ class VoiceHistoryConfigView(discord.ui.LayoutView):
         route_on = bool(route["enabled"] and channel)
         container = discord.ui.Container(accent_colour=discord.Colour(0x64748B))
         container.add_item(discord.ui.TextDisplay(
-            "## 🎧 SentriX · Historique vocal\n"
-            "Suivi des connexions vocales et durée des sessions des membres.\n"
+            "## 👁️ SentriX · Centre de surveillance\n"
+            "Suivi privé de l'activité vocale des membres et des sessions.\n"
             "-# Aucune conversation audio n'est enregistrée."
         ))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
-            "**📋 Historique privé du membre**\n"
+            "**🎧 Surveillance vocale · Historique privé**\n"
             f"• Entrées et sorties : **{'Activées' if settings['enabled'] else 'Désactivées'}**\n"
             f"• Déplacements : **{'Activés' if settings['enabled'] and settings['track_moves'] else 'Désactivés'}**\n"
             f"• Durées : **{'Activées' if settings['enabled'] and settings['track_duration'] else 'Désactivées'}**\n"
@@ -79,7 +79,7 @@ class VoiceHistoryConfigView(discord.ui.LayoutView):
         container.add_item(discord.ui.ActionRow(enabled, moves, durations))
         container.add_item(discord.ui.Separator())
         container.add_item(discord.ui.TextDisplay(
-            "**🔊 Envoi des logs au salon Discord**\n"
+            "**📨 Publication dans les salons de logs (facultative)**\n"
             f"• Salon : {channel.mention if channel else 'Non configuré'}\n"
             f"• Publication dans le salon : **{'Activée' if route_on else 'Désactivée'}**\n"
             "-# Indépendant du dossier privé : aucune notification automatique quand le suivi est activé."
@@ -98,7 +98,7 @@ class VoiceHistoryConfigView(discord.ui.LayoutView):
         publish.callback = self.toggle_publishing
         container.add_item(discord.ui.ActionRow(publish))
         container.add_item(discord.ui.TextDisplay(
-            "-# Réglages réservés au staff · Les durées ne concernent que les sessions "
+            "-# Centre Surveillance · Réservé au staff · Durées uniquement pour les sessions "
             "réellement observées. Les connexions antérieures à l'activation ne sont pas reconstituées."
         ))
         self.add_item(container)

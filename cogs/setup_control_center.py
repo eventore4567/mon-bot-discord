@@ -427,11 +427,20 @@ class CategorySelect(discord.ui.Select):
         self.owner = view
         super().__init__(
             placeholder="Choisir une catégorie",
-            options=[discord.SelectOption(label=CATEGORIES[key][0], value=key, description=CATEGORIES[key][1][:100]) for key in CATEGORY_ORDER],
+            options=(
+                [discord.SelectOption(label=CATEGORIES[key][0], value=key, description=CATEGORIES[key][1][:100]) for key in CATEGORY_ORDER]
+                + [discord.SelectOption(
+                    label="👁️ Surveillance", value="surveillance",
+                    description="Dossiers privés des membres, suivi vocal et durée des sessions",
+                )]
+            ),
             row=0,
         )
 
     async def callback(self, interaction):
+        if self.values[0] == "surveillance":
+            from cogs.voice_history_config import open_voice_history_config
+            return await open_voice_history_config(self.owner.bot, interaction)
         self.owner.category = self.values[0]
         self.owner.diagnostic_mode = False
         self.owner.selected_log = self.owner.selected_ticket = self.owner.selected_notification = None
@@ -1204,21 +1213,6 @@ class SetupView(discord.ui.LayoutView):
 
         home.callback, refresh.callback, close.callback = go_home, do_refresh, do_close
 
-        if self.category == "logs":
-            # Ajouter le centre du suivi vocal sans créer une sixième rangée
-            # d'actions ni toucher à la commande globale /config.
-            voice_button = discord.ui.Button(
-                label="🎧 Suivi vocal", style=discord.ButtonStyle.secondary,
-            )
-
-            async def open_voice_panel(interaction):
-                from cogs.voice_history_config import open_voice_history_config
-                await open_voice_history_config(self.bot, interaction)
-
-            voice_button.callback = open_voice_panel
-            for item in (home, voice_button, avance, close):
-                self.ajouter(item)
-
         if self.category == "moderation":
             # Discord : 5 ActionRows maximum. Le salon staff garde les trois
             # selecteurs de rôles ET ses 2 nouveaux centres : on remplace
@@ -1243,11 +1237,22 @@ class SetupView(discord.ui.LayoutView):
                     )
                 await cog.open_config(interaction)
 
+            surveillance = discord.ui.Button(
+                label="👁️ Surveillance", style=discord.ButtonStyle.secondary,
+            )
+
+            async def open_surveillance_panel(interaction):
+                from cogs.voice_history_config import open_voice_history_config
+                await open_voice_history_config(self.bot, interaction)
+
             warns.callback = open_warn_panel
             reports.callback = open_report_panel
-            for item in (home, warns, reports, avance, close):
+            surveillance.callback = open_surveillance_panel
+            # Le sélecteur « Choisir une catégorie » permet déjà de retourner
+            # à l'accueil : remplacer le bouton Accueil libère la cinquième place.
+            for item in (warns, reports, surveillance, avance, close):
                 self.ajouter(item)
-        elif self.category != "logs":
+        else:
             self.ajouter(home); self.ajouter(refresh); self.ajouter(avance); self.ajouter(close)
 
         if self.category == "moderation":
