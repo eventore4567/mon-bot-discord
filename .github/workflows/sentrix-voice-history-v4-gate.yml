@@ -1,0 +1,42 @@
+name: SentriX Voice History V4 Gate
+
+on:
+  pull_request:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'services/voice_history.py'
+      - 'cogs/voice_history_config.py'
+      - 'cogs/logs.py'
+      - 'cogs/log_history_center.py'
+      - 'cogs/setup_control_center.py'
+      - 'tests/test_member_voice_history_v4.py'
+      - 'tests/test_member_history_readability.py'
+      - '.github/workflows/sentrix-voice-history-v4-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  voice-history-v4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    env:
+      DISCORD_TOKEN: ci.fake.token
+      DATABASE_PATH: /tmp/sentrix-voice-history-v4.db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio
+      - name: Compile Discord and session modules
+        run: python -m py_compile services/voice_history.py cogs/voice_history_config.py cogs/log_history_center.py cogs/logs.py cogs/setup_control_center.py
+      - name: V4 vocal persistence and interactive history
+        run: |
+          python -m pytest -q \
+            tests/test_member_voice_history_v4.py \
+            tests/test_member_history_readability.py \
+            tests/test_setup_manage_guild_access.py \
+            tests/test_setup_v114_authority.py \
+            tests/test_setup_compact_v113.py \
+            tests/test_config_center_level_opt_in.py

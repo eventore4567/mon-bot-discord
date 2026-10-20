@@ -1204,6 +1204,21 @@ class SetupView(discord.ui.LayoutView):
 
         home.callback, refresh.callback, close.callback = go_home, do_refresh, do_close
 
+        if self.category == "logs":
+            # Ajouter le centre du suivi vocal sans créer une sixième rangée
+            # d'actions ni toucher à la commande globale /config.
+            voice_button = discord.ui.Button(
+                label="🎧 Suivi vocal", style=discord.ButtonStyle.secondary,
+            )
+
+            async def open_voice_panel(interaction):
+                from cogs.voice_history_config import open_voice_history_config
+                await open_voice_history_config(self.bot, interaction)
+
+            voice_button.callback = open_voice_panel
+            for item in (home, voice_button, avance, close):
+                self.ajouter(item)
+
         if self.category == "moderation":
             # Discord : 5 ActionRows maximum. Le salon staff garde les trois
             # selecteurs de rôles ET ses 2 nouveaux centres : on remplace
@@ -1232,7 +1247,7 @@ class SetupView(discord.ui.LayoutView):
             reports.callback = open_report_panel
             for item in (home, warns, reports, avance, close):
                 self.ajouter(item)
-        else:
+        elif self.category != "logs":
             self.ajouter(home); self.ajouter(refresh); self.ajouter(avance); self.ajouter(close)
 
         if self.category == "moderation":
