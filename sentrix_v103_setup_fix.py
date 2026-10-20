@@ -141,6 +141,33 @@ def _replace_setup_slash(bot) -> bool:
         config_callback._sentrix_setup_authority = "configuration-v114"
         return config_callback
 
+    # Discord refuse un groupe possédant plus de 25 enfants directs.
+    # V98 fournit déjà des réglages historiques ; préserver leur exécution
+    # sous /config advanced plutôt que supprimer des commandes au hasard.
+    planned = {name for name, *_ in routes}
+    old_commands = [command for command in group.commands if command.name not in planned]
+    needed = len(old_commands) + len(planned) - 25
+    if needed > 0:
+        advanced = group.get_command("advanced")
+        if advanced is None:
+            advanced = app_commands.Group(
+                name="advanced",
+                description="Réglages complémentaires du serveur.",
+                parent=group,
+            )
+            needed += 1  # Le nouveau sous-groupe occupe lui-même un emplacement.
+        if not isinstance(advanced, app_commands.Group):
+            logger.error("V103 : /config advanced est occupé par une commande.")
+            return False
+        movable = [command for command in old_commands if command is not advanced]
+        if needed > len(movable) or len(advanced.commands) + needed > 25:
+            logger.error("V103 : impossible de répartir les sous-commandes /config sans perte.")
+            return False
+        for command in movable[-needed:]:
+            group.remove_command(command.name)
+            advanced.add_command(command)
+        logger.info("V103 : %s réglages hérités déplacés dans /config advanced.", needed)
+
     for name, description, category, diagnostic in routes:
         if group.get_command(name) is not None:
             group.remove_command(name)
