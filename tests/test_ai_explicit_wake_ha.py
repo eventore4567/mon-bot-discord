@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from unittest.mock import patch
 from types import MethodType, SimpleNamespace
 
 
@@ -65,7 +66,19 @@ def test_sentrix_yo_reaches_ai_reply_exactly_once():
     cog._invoke_natural_command = MethodType(no_natural_command, cog)
     cog.send_sentrix_reply = MethodType(capture_reply, cog)
 
-    asyncio.run(cog.on_message(message))
+    # Simuler explicitement les paramètres serveur : le listener ne doit pas
+    # contourner la configuration IA pour satisfaire un test sans vraie base.
+    async def enabled_settings(fake_bot, guild_id):
+        assert guild_id == 1
+        return {"enabled": True, "allowed_channels": []}
+
+    async def channel_allowed(self, guild_id, channel_id):
+        return False  # salon non bloqué
+
+    with patch("cogs.ai.ai_service.get_settings", new=enabled_settings), \
+         patch("cogs.ai.ai_service.is_channel_allowed", return_value=True), \
+         patch.object(Ai, "_channel_blocks_ai", channel_allowed):
+        asyncio.run(cog.on_message(message))
 
     assert calls == [("yo", message)]
 
