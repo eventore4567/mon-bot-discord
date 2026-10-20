@@ -705,11 +705,23 @@ class Moderation(commands.Cog):
     # ---------------------------------------------------------------- BAN
 
     @commands.hybrid_command(name="ban", description="Bannir définitivement un membre du serveur.")
-    @app_commands.describe(membre="Membre du serveur à bannir (peu importe le salon)", raison="La raison du bannissement")
+    @app_commands.choices(supprimer_messages=[
+        app_commands.Choice(name="Ne rien supprimer", value=0),
+        app_commands.Choice(name="15 minutes", value=900),
+        app_commands.Choice(name="1 heure", value=3600),
+        app_commands.Choice(name="24 heures (maximum)", value=86400),
+    ])
+    @app_commands.describe(
+        membre="Membre à bannir", raison="Raison du bannissement",
+        supprimer_messages="Supprimer ses messages envoyés AVANT le ban (24 h max)",
+    )
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
-    async def ban(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+    async def ban(
+        self, ctx: commands.Context, membre: discord.Member, *,
+        raison: str = "Aucune raison fournie", supprimer_messages: int = 0,
+    ):
         """Core V2, Phase 2 (docs/core-v2-plan.md) : première commande de sanction
         migrée vers services/moderation.py::ban(). Ce corps ne fait plus que
         l'adaptation Discord (parser ctx, préparer le texte du MP, rendre le
@@ -737,13 +749,24 @@ class Moderation(commands.Cog):
             )
 
         outcome = await moderation_service.ban(
-            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison,
+            dm_text=dm_text, delete_message_seconds=supprimer_messages,
         )
         if not outcome.executed:
-            return await self._reply(ctx, outcome.hierarchy_error, ephemere=True)
+            return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        await self.log_sanction(ctx, "ban", membre, raison, case_number=outcome.case_number)
-        await self._reply(ctx, f"{membre.mention} a été banni.")
+        # Le bannissement efface des messages datant des dernières X minutes,
+        # il ne programme pas une suppression X heures APRES le ban.
+        purge_label = {
+            0: "Aucun", 900: "15 dernières minutes", 3600: "1 dernière heure",
+            86400: "24 dernières heures",
+        }[supprimer_messages]
+        await self.log_sanction(
+            ctx, "ban", membre, raison, case_number=outcome.case_number,
+            extra_fields={"Messages supprimés": purge_label},
+        )
+        purge_suffix = "" if not supprimer_messages else f" Messages des {purge_label} supprimés."
+        await self._reply(ctx, f"{membre.mention} a été banni.{purge_suffix}")
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
@@ -1037,11 +1060,17 @@ class Moderation(commands.Cog):
     # ---------------------------------------------------------------- WARN
 
     @commands.hybrid_command(name="warn", description="Avertir un membre (enregistré en base de données).")
-    @app_commands.describe(membre="Membre du serveur à avertir (peu importe le salon)", raison="La raison de l'avertissement")
+    @app_commands.describe(
+        membre="Membre à avertir", raison="Raison de l'avertissement",
+        notifier="Envoyer un message privé au membre ? (true/false)",
+    )
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("moderate_members",), target="member_moderation")
-    async def warn(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
+    async def warn(
+        self, ctx: commands.Context, membre: discord.Member, *,
+        raison: str = "Aucune raison fournie", notifier: bool = True,
+    ):
         """Core V2, Phase 2 (docs/core-v2-plan.md) : sixième commande de
         sanction migrée — voir services/moderation.py::warn(). Forme la plus
         large de toutes les commandes migrées : au-delà du dossier de
@@ -1056,7 +1085,7 @@ class Moderation(commands.Cog):
             return await self._reply(ctx, "Cet avertissement vient déjà d'être lancé sur ce membre.", ephemere=True)
         await self._ack(ctx)
 
-        template = await self._get_sanction_dm_template(ctx.guild.id, "warn")
+        template = await self._get_sanction_dm_template(ctx.guild.id, "warn") if notifier else None
         dm_text = None
         if template is not None:
             dm_text = self._render_sanction_dm_text(
@@ -1087,7 +1116,7 @@ class Moderation(commands.Cog):
         outcome = await moderation_service.warn(
             self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison,
             dm_text=dm_text, warn_role=warn_role, ban_threshold=threshold,
-            render_ban_dm_text=render_ban_dm_text,
+            render_ban_dm_text=render_ban_dm_text if notifier else None,
         )
         if not outcome.executed:
             return await self._reply(ctx, outcome.hierarchy_error, ephemere=True)
@@ -1104,6 +1133,8 @@ class Moderation(commands.Cog):
             else "inconnu (erreur de comptage)"
         )
         extra = {"📌 Détails": f"Total d'avertissements : {total_txt}{role_note}"}
+        if not notifier:
+            extra["Notification"] = "Aucun MP envoyé (option notifier : false)."
         await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra, case_number=outcome.case_number)
         total_note = f" ({total_txt} au total)" if outcome.total_warnings is not None else ""
         await self._reply(ctx, f"{membre.mention} a été averti{total_note}.")
