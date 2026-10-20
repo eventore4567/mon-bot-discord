@@ -40,6 +40,7 @@ from utils.helpers import parse_duration
 from utils.v22_rules import clean_reason
 from database.db import now
 from services import moderation as moderation_service
+from utils.moderation_feedback import build_hierarchy_refusal, build_sanction_confirmation
 
 logger = logging.getLogger("bot.moderation")
 
@@ -78,45 +79,9 @@ def _claim_clear_cooldown(guild_id: int, user_id: int) -> float:
     return 0.0
 
 
-def _hierarchy_refusal_panel(message: str) -> panels.Panneau | None:
-    """Une hiérarchie Discord bloquante mérite une explication structurée.
-
-    Les confirmations de sanctions réussies restent des réponses courtes.
-    Seuls les refus donnant une action concrète passent dans ce panneau.
-    """
-    texte = str(message or "").casefold()
-    if "ne peut pas sanctionner ce membre" in texte:
-        # Nickname, move et ban partagent ce contrôle : ce n'est pas toujours
-        # une « sanction ». Garder un titre exact pour chaque opération.
-        titre = "Action impossible"
-        explication = "Le rôle du membre est égal ou supérieur à celui de SentriX."
-        solution = (
-            "Dans **Paramètres du serveur → Rôles**, placez le rôle "
-            "**SentriX** au-dessus de celui du membre concerné."
-        )
-    elif "ne peut pas gérer ce rôle" in texte:
-        titre = "Rôle inaccessible"
-        explication = "Ce rôle est égal ou supérieur au rôle de SentriX."
-        solution = (
-            "Dans **Paramètres du serveur → Rôles**, placez le rôle "
-            "**SentriX** au-dessus de ce rôle."
-        )
-    elif "vous ne pouvez pas sanctionner un membre ayant un rôle supérieur ou égal" in texte:
-        titre = "Action impossible"
-        explication = "Ce membre possède un rôle supérieur ou égal au vôtre."
-        solution = (
-            "Cette action doit être réalisée par un responsable dont le rôle "
-            "est supérieur à celui du membre, ou par le propriétaire du serveur."
-        )
-    else:
-        return None
-    return panels.Panneau(
-        titre=titre,
-        sous_titre=explication,
-        kind="warning",
-        sections=[panels.Section("Comment corriger", texte=solution)],
-        pied="Modération · Hiérarchie des rôles",
-    )
+def _hierarchy_refusal_panel(message: str) -> discord.ui.LayoutView | None:
+    """Le refus de hiérarchie est une petite carte native, pas une bannière."""
+    return build_hierarchy_refusal(message)
 
 
 class Moderation(commands.Cog):
@@ -496,11 +461,25 @@ class Moderation(commands.Cog):
         return candidate, rest[0] if rest else "Aucune raison"
 
     async def _reply(self, ctx: commands.Context, message: str, *, ephemere: bool = False):
-        """Confirmations courtes, mais refus de hiérarchie expliqués en panneau."""
+        """Erreurs de hiérarchie en carte courte, autres messages en texte."""
         panneau = _hierarchy_refusal_panel(message)
         if panneau is not None:
             return await panels.envoyer(ctx, panneau, ephemere=ephemere)
         return await panels.texte_court(ctx, message, ephemere=ephemere)
+
+    async def _confirm_sanction(
+        self, ctx: commands.Context, action: str, target: discord.abc.User,
+        reason: str, case_number: int | None, *,
+        suffix: str = "", duration: str | None = None,
+    ):
+        """Une confirmation Discord premium, même pour une sanction sans dossier DB."""
+        view = build_sanction_confirmation(
+            action=action, target=target, actor=ctx.author,
+            guild_id=ctx.guild.id if ctx.guild else None,
+            reason=reason, case_number=case_number,
+            suffix=suffix, duration=duration,
+        )
+        return await panels.envoyer(ctx, view)
 
     async def _ack(self, ctx: commands.Context):
         """Accuse réception IMMÉDIATEMENT, avant tout appel API/DB. Corrige la lenteur
@@ -771,7 +750,9 @@ class Moderation(commands.Cog):
             3600: " Ses messages de la dernière heure ont été supprimés.",
             86400: " Ses messages des 24 dernières heures ont été supprimés.",
         }[supprimer_messages]
-        await self._reply(ctx, f"{membre.mention} a été banni.{purge_suffix}")
+        await self._confirm_sanction(
+            ctx, "ban", membre, raison, outcome.case_number, suffix=purge_suffix,
+        )
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
@@ -825,7 +806,10 @@ class Moderation(commands.Cog):
             ctx, "tempban", membre, raison,
             duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
         )
-        await self._reply(ctx, f"{membre.mention} a été banni pendant {helpers.format_duration(outcome.duration_seconds)}.")
+        await self._confirm_sanction(
+            ctx, "tempban", membre, raison, outcome.case_number,
+            duration=helpers.format_duration(outcome.duration_seconds),
+        )
 
     @commands.hybrid_command(name="unban", description="Débannir un utilisateur via son identifiant Discord.")
     @app_commands.describe(user_id="L'identifiant Discord de l'utilisateur", raison="La raison")
@@ -867,7 +851,9 @@ class Moderation(commands.Cog):
             return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
         await self.log_sanction(ctx, "unban", outcome.resolved_target, raison, case_number=outcome.case_number)
-        await self._reply(ctx, f"{outcome.resolved_target} a été débanni.")
+        await self._confirm_sanction(
+            ctx, "unban", outcome.resolved_target, raison, outcome.case_number,
+        )
 
     # ---------------------------------------------------------------- HACKBAN
 
@@ -919,7 +905,10 @@ class Moderation(commands.Cog):
             self.bot, guild_id=ctx.guild.id, target_id=uid, actor_id=ctx.author.id, action="ban", reason=raison,
         )
         await self.log_sanction(ctx, "ban", user, raison, case_number=case_number)
-        await self._reply(ctx, f"{user.mention} a été banni par identifiant (absent du serveur).")
+        await self._confirm_sanction(
+            ctx, "hackban", user, raison, case_number,
+            suffix="Compte absent du serveur.",
+        )
 
     # ---------------------------------------------------------------- KICK
 
@@ -958,7 +947,9 @@ class Moderation(commands.Cog):
             return await self._reply(ctx, outcome.hierarchy_error, ephemere=True)
 
         await self.log_sanction(ctx, "kick", membre, raison, case_number=outcome.case_number)
-        await self._reply(ctx, f"{membre.mention} a été expulsé.")
+        await self._confirm_sanction(
+            ctx, "kick", membre, raison, outcome.case_number,
+        )
 
     # ---------------------------------------------------------------- MUTE
 
@@ -1020,7 +1011,10 @@ class Moderation(commands.Cog):
             duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
         ))
         try:
-            await self._reply(ctx, f"{membre.mention} a été rendu muet pendant {helpers.format_duration(outcome.duration_seconds)}.")
+            await self._confirm_sanction(
+                ctx, "mute", membre, raison, outcome.case_number,
+                duration=helpers.format_duration(outcome.duration_seconds),
+            )
         finally:
             # Toujours attendu : une tâche abandonnée avalerait son erreur, et
             # un log de sanction perdu en silence est exactement ce qu'il ne
@@ -1060,7 +1054,9 @@ class Moderation(commands.Cog):
             return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
         await self.log_sanction(ctx, "unmute", membre, raison, case_number=outcome.case_number)
-        await self._reply(ctx, f"{membre.mention} n'est plus muet.")
+        await self._confirm_sanction(
+            ctx, "unmute", membre, raison, outcome.case_number,
+        )
 
     # ---------------------------------------------------------------- WARN
 
@@ -1142,7 +1138,13 @@ class Moderation(commands.Cog):
             extra["Notification"] = "Aucun MP envoyé (option notifier : false)."
         await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra, case_number=outcome.case_number)
         total_note = f" ({total_txt} au total)" if outcome.total_warnings is not None else ""
-        await self._reply(ctx, f"{membre.mention} a été averti{total_note}.")
+        await self._confirm_sanction(
+            ctx, "warn", membre, raison, outcome.case_number,
+            suffix=(
+                f"{total_txt} avertissement(s) au total." + role_note
+                + ("" if notifier else " Aucun message privé envoyé.")
+            ),
+        )
 
         if not outcome.auto_ban_triggered:
             return
@@ -1171,7 +1173,11 @@ class Moderation(commands.Cog):
         ban_e.add_field(name="📝 Raison", value=f"Seuil de {threshold} avertissements atteint", inline=False)
         ban_e.add_field(name="📌 Détails", value=f"Bannissement automatique — total d'avertissements : {outcome.total_warnings}", inline=False)
         await self.log_action(ctx.guild, ban_e)
-        await self._reply(ctx, f"{membre.mention} a été banni automatiquement (seuil de {threshold} avertissements atteint).")
+        await self._confirm_sanction(
+            ctx, "ban", membre, f"Seuil de {threshold} avertissements atteint",
+            outcome.auto_ban_case_number,
+            suffix="Bannissement automatique : seuil configuré atteint.",
+        )
 
     @commands.hybrid_command(name="unwarn", description="Supprimer un avertissement précis via son identifiant.", with_app_command=False)
     @app_commands.describe(warn_id="L'identifiant de l'avertissement (voir /warnings)")
