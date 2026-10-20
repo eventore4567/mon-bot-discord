@@ -1497,17 +1497,25 @@ class Moderation(commands.Cog):
     def _clear_preview(cls, messages: list, limit: int = 10) -> str:
         rows: list[str] = []
         budget = 1000
-        for message in messages[:limit]:
+        for index, message in enumerate(messages[:limit], start=1):
             author = cls._neutralize_mentions(getattr(message.author, "display_name", str(message.author)))
             content = cls._neutralize_mentions(message.content or "[message sans texte]")
             content = discord.utils.escape_markdown(content).replace("\n", " ").strip()
-            if len(content) > 150:
-                content = content[:149].rstrip() + "…"
-            row = f"**{author}** — {content}"
-            if len("\n".join([*rows, row])) > budget:
+            if len(content) > 120:
+                content = content[:119].rstrip() + "…"
+            timestamp = getattr(message, "created_at", None)
+            when = f" · <t:{int(timestamp.timestamp())}:t>" if timestamp is not None else ""
+            attachments = len(getattr(message, "attachments", ()) or ())
+            attached = f" · {attachments} pièce(s) jointe(s)" if attachments else ""
+            row = (
+                f"╭ **#{index} · {author}**{when}\n"
+                f"│ {content}\n"
+                f"╰ `ID {message.id}`{attached}"
+            )
+            if len("\n\n".join([*rows, row])) > budget:
                 break
             rows.append(row)
-        return "\n".join(rows) if rows else "Aucun contenu texte disponible."
+        return "\n\n".join(rows) if rows else "Aucun contenu texte disponible."
 
     @staticmethod
     def _clear_transcript(ctx: commands.Context, messages: list, requested: int) -> bytes:

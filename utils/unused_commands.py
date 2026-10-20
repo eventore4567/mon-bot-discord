@@ -9,7 +9,13 @@ Masquer n'est PAS supprimer : chaque commande d'ici reste utilisable en préfixe
 toujours sa fiche. Elle disparaît seulement des pages de l'aide et du menu « / ».
 Pour en remettre une : la retirer de ``MASQUEES``.
 
-Parmi les 273 jamais utilisées, n'ont PAS été masquées (216) :
+La sélection finale contient exactement 100 routes du catalogue slash. Une source
+qui n'avait déjà aucune route dans le catalogue ne compte pas dans ce total : en
+particulier, un paramètre comme ``nombre=100`` de ``/clear`` n'est évidemment pas
+une commande. Les commandes essentielles de modération, sécurité, journaux,
+tickets, musique et les jeux représentatifs restent dans le menu slash.
+
+Parmi les commandes jamais utilisées, n'ont PAS été masquées :
 * modération, sécurité et urgence (53) — ne pas servir en temps calme ne les
   rend pas inutiles pendant un raid (panic, quarantine, tempban, antinuke…) ;
   plus ``note`` et ``watch`` (outils staff) et ``feedback`` (le retour des membres) ;
@@ -36,6 +42,32 @@ MASQUEES: frozenset[str] = frozenset({
     'remove-level-role', 'reset-economy', 'reset-levels', 'scramble', 'sell', 'sequence',
     'server-managed', 'set-bot', 'set-level-role', 'setstatus', 'status-rotate', 'syncbl',
     'systemstatus', 'target', 'theme', 'tictactoe', 'triviastart', 'weekly', 'wordgame',
+
+    # Sous-jeux très proches les uns des autres : les moteurs restent accessibles
+    # en préfixe, et le menu slash conserve un choix représentatif de jeux solo,
+    # rapides, duels, courses et statistiques.
+    'archery', 'bomb', 'collec', 'crown', 'detective', 'ghost', 'ice', 'lava',
+    'minesweeper', 'potion', 'rocket', 'safe', 'zombie',
+    'adventure', 'explore', 'hunt', 'mining', 'treasure',
+    'blackjack', 'coinflip', 'highlow', 'slots', 'choose', 'roll',
+    'gamehistory', 'gamestats',
+
+    # Raccourcis IA spécialisés qui exécutent la même famille de traitement que
+    # /ai ask. Les fonctions ne disparaissent pas : leurs commandes + restent là.
+    'code', 'explain', 'correct', 'improve', 'summarize', 'fact-check', 'image-prompt',
+
+    # Micro-vues d'invitations : /user invites et /server invites restent les deux
+    # entrées slash principales ; les outils détaillés restent en préfixe.
+    'invite-codes', 'invite-stats', 'invite-rank', 'invite-history',
+    'invite-info', 'invite-sources', 'invite-retention', 'invite-search',
+    'invite-label', 'invite-unlabel', 'sync-invites', 'reset-invites',
+    'addbonusinvites', 'removebonusinvites', 'invitebonushistory',
+
+    # Variantes de profil secondaires ; /profile view, progress et trust restent.
+    'profilecard', 'set-bio', 'voice-time', 'sentrixpro badges', 'sentrixpro season',
+
+    # Historique de versions secondaire ; /bot info et /bot status restent visibles.
+    'changelog',
 })
 
 

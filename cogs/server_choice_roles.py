@@ -256,8 +256,8 @@ async def publish_or_refresh(
 
 @commands.command(
     name="massrole",
-    help="Ajouter ou retirer un rôle à tous les membres du serveur.",
-    usage="<add|del> <rôle>",
+    help="Ajouter ou retirer un rôle pour tous les membres humains du serveur.",
+    usage="<add|remove> <rôle>",
 )
 @commands.guild_only()
 @checks.is_owner_or_admin()
@@ -282,8 +282,12 @@ async def _massrole_all_members(
             ctx,
             panels.depuis_embed(
                 discord.Embed(
-                    title="Massrole — action invalide",
-                    description="Utilisez `+massrole add @Rôle` pour l'ajouter à tout le monde ou `+massrole del @Rôle` pour le retirer à tout le monde.",
+                    title="Rôles en masse — action invalide",
+                    description=(
+                        "Choisissez une action claire :\n"
+                        "• `add @Rôle` — ajouter le rôle à tous les membres humains ;\n"
+                        "• `remove @Rôle` — retirer le rôle à tous les membres humains."
+                    ),
                 )
             ),
         )
@@ -305,14 +309,14 @@ async def _massrole_all_members(
     if problem:
         return await panels.envoyer(
             ctx,
-            panels.depuis_embed(discord.Embed(title="Massrole — impossible", description=problem)),
+            panels.depuis_embed(discord.Embed(title="Rôles en masse — impossible", description=problem)),
         )
 
     progress = await panels.envoyer(
         ctx,
         panels.depuis_embed(
             discord.Embed(
-                title="Massrole — traitement en cours",
+                title="Rôles en masse — traitement en cours",
                 description=(
                     f"{'Ajout' if mode == 'add' else 'Retrait'} de {role.mention} sur tous les membres du serveur. "
                     "SentriX traite les membres par lots pour respecter les limites Discord."
@@ -392,7 +396,7 @@ async def _massrole_all_members(
 
     verb = "ajouté" if mode == "add" else "retiré"
     result = discord.Embed(
-        title="Massrole terminé",
+        title="Rôles en masse — terminé",
         description=f"Rôle {role.mention} **{verb}** pour **{added_or_removed}** membre(s).",
     )
     result.add_field(name="Traités", value=str(processed), inline=True)

@@ -221,6 +221,20 @@ def _clear_ctx(messages: list, *, interaction=None) -> Mock:
     return ctx
 
 
+def test_clear_preview_separe_les_messages_en_petites_cartes_lisibles():
+    messages = [_message(11), _message(12)]
+    messages[0].content = "première ligne\ndeuxième ligne"
+    messages[1].content = "@everyone reste du texte"
+
+    preview = Moderation._clear_preview(messages)
+
+    assert "╭ **#1 · a**" in preview
+    assert "╰ `ID 11`" in preview
+    assert "\n\n╭ **#2 · a**" in preview
+    assert "première ligne deuxième ligne" in preview
+    assert "@\u200beveryone" in preview
+
+
 @pytest.mark.asyncio
 async def test_clear_repond_avant_le_journal_marque_les_purges_et_supprime_sans_relire():
     cog = _cog()
