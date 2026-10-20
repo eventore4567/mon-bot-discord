@@ -190,3 +190,34 @@ async def test_invalid_voice_setting_is_rejected_before_any_sql(voice_db):
     bot = SimpleNamespace(db=voice_db)
     with pytest.raises(ValueError):
         await voice_history.set_setting(bot, 1, "enabled;DROP TABLE levels", True)
+
+
+
+@pytest.mark.asyncio
+async def test_move_disabled_prevents_both_public_and_private_movement_logs(voice_db):
+    bot = SimpleNamespace(db=voice_db)
+    await voice_history.set_setting(bot, 1, "enabled", True)
+    await voice_history.set_setting(bot, 1, "track_moves", False)
+    await voice_history.record_transition(bot, 1, 12, None, 33, now=1000)
+    cog = Logs(bot)
+    cog._send = AsyncMock(return_value=True)
+    cog._embed = MagicMock(return_value=discord.Embed(title="Activité vocale"))
+    member = SimpleNamespace(id=12, guild=SimpleNamespace(id=1), bot=False)
+    before = SimpleNamespace(channel=SimpleNamespace(id=33), self_mute=False, self_deaf=False)
+    after = SimpleNamespace(channel=SimpleNamespace(id=44), self_mute=False, self_deaf=False)
+    with patch("cogs.logs.log_service.is_primary_process", return_value=True), patch(
+        "cogs.logs.voice_history.archive_undelivered_event", AsyncMock()
+    ) as archive:
+        await cog.on_voice_state_update(member, before, after)
+    cog._send.assert_not_awaited()
+    archive.assert_not_awaited()
+    info = await voice_history.get_member_summary(bot, 1, 12)
+    assert info["session"]["channel_id"] == 44
+
+
+def test_setup_panel_exposes_vocal_config_without_new_slash_root():
+    import inspect
+    from cogs.setup_control_center import SetupView
+    source = inspect.getsource(SetupView.render)
+    assert "🎧 Suivi vocal" in source
+    assert "open_voice_history_config" in source
