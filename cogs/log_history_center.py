@@ -98,6 +98,31 @@ def _date(timestamp: int) -> str:
         return "Date inconnue"
 
 
+def _history_detail(description: object) -> str:
+    """Résumé utile et lisible, sans les ID techniques de l'ancien système."""
+    lines: list[str] = []
+    for index, raw in enumerate(safe_text(description).splitlines()):
+        line = raw.strip()
+        if not line:
+            continue
+        key = re.sub(r"[*_]", "", line).strip()
+        if index == 0 and line.startswith("**") and line.endswith("**"):
+            continue  # titre ou pseudo, déjà affiché dans le dossier
+        if re.match(
+            r"^(?:ID|Réf(?:érence)?|Dossier|Membre|Modérateur|Moderateur|Auteur|Cible|Historique)\s*[:#]",
+            key,
+            re.I,
+        ):
+            continue
+        if re.search(r"\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", key, re.I):
+            continue
+        lines.append(line)
+        if len("\n".join(lines)) > 300:
+            break
+    result = "\n".join(lines).strip()
+    return result[:267] + "…" if len(result) > 270 else (result or "Motif non précisé.")
+
+
 class MemberHistoryView(discord.ui.LayoutView):
     """Dossier privé paginé ; le sélecteur permet de changer de membre."""
 
@@ -174,9 +199,7 @@ class MemberHistoryView(discord.ui.LayoutView):
                 f" • Par <@{record['moderator_id']}>"
                 if record.get("moderator_id") else ""
             )
-            detail = safe_text(record.get("description") or "")
-            if len(detail) > 270:
-                detail = detail[:267] + "…"
+            detail = _history_detail(record.get("description") or "")
             blocks.append(
                 f"**{icon} {title}** · {_date(record['created_at'])}"
                 f"{moderator}\n{detail or 'Aucun détail enregistré.'}"
