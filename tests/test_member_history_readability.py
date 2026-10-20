@@ -55,7 +55,7 @@ def _mock_history(data=None, total=28):
     return patch(
         "cogs.log_history_center.fetch_log_history_page",
         AsyncMock(return_value=(
-            _events(3) if data is None else data,
+            _events(2) if data is None else data,
             total,
             {"role_add": 1, "message_delete": 1, "member_leave": 1},
         )),
@@ -134,15 +134,15 @@ async def test_unresolvable_member_keeps_mention_and_id_not_raw_id_as_title():
 
 
 @pytest.mark.asyncio
-async def test_every_event_is_a_separate_wide_card_with_its_own_details_button():
+async def test_two_events_have_separate_wide_cards_with_detail_buttons():
     view = _view()
     with _mock_history():
         await view.render(_guild())
-    assert len(view.children) == 6  # profile + journal heading + 3 records + controls
+    assert len(view.children) == 5  # profile + journal heading + 2 records + controls
     profile, introduction, *cards, navigation = view.children
     assert isinstance(profile.children[0], discord.ui.Section)
     assert all(isinstance(x, discord.ui.Container) for x in view.children)
-    assert len(cards) == 3
+    assert len(cards) == 2
     assert len({id(card) for card in cards}) == 3
     for card in cards:
         assert isinstance(card.children[0], discord.ui.TextDisplay)
@@ -157,13 +157,13 @@ async def test_every_event_is_a_separate_wide_card_with_its_own_details_button()
     assert len(rows[1].children) == 1  # Dropdown
     assert len(rows[2].children) == 1  # MemberSelect
     assert len(rows[3].children) == 2  # Prev / Next
-    assert any("Page 1/10" in getattr(x, "content", "") for x in navigation.children)
+    assert any("Page 1/14" in getattr(x, "content", "") for x in navigation.children)
 
 
 @pytest.mark.asyncio
 async def test_expand_button_exposes_details_in_its_own_card():
     view = _view()
-    backend = AsyncMock(return_value=(_events(3), 6, {}))
+    backend = AsyncMock(return_value=(_events(2), 6, {}))
     guild = _guild()
     inter = SimpleNamespace(
         guild=guild, response=SimpleNamespace(edit_message=AsyncMock()),
@@ -183,7 +183,7 @@ async def test_expand_button_exposes_details_in_its_own_card():
 @pytest.mark.asyncio
 async def test_dropdown_filters_and_voice_tabs_keep_all_categories():
     view = _view()
-    backend = AsyncMock(return_value=(_events(3), 6, {}))
+    backend = AsyncMock(return_value=(_events(2), 6, {}))
     inter = SimpleNamespace(
         guild=_guild(), data={"values": ["voice"]},
         response=SimpleNamespace(edit_message=AsyncMock()),
