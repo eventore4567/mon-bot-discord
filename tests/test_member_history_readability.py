@@ -143,7 +143,7 @@ async def test_two_events_have_separate_wide_cards_with_detail_buttons():
     assert isinstance(profile.children[0], discord.ui.Section)
     assert all(isinstance(x, discord.ui.Container) for x in view.children)
     assert len(cards) == 2
-    assert len({id(card) for card in cards}) == 3
+    assert len({id(card) for card in cards}) == 2
     for card in cards:
         assert isinstance(card.children[0], discord.ui.TextDisplay)
         assert isinstance(card.children[1], discord.ui.Separator)
