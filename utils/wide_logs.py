@@ -631,7 +631,9 @@ def narrative_body(
             embed, "Utilisations max", "Utilisations maximum", "Max uses"
         )
         creator = _first_user_ref(_field_value(embed, "créateur", "createur", "creator"))
-        if creator:
+        # Avec une identité déjà portée par l'en-tête (identity_id), éviter
+        # de répéter le créateur dans le corps de la carte.
+        if creator and identity_id is None:
             lines.append(f"**Créateur**\n{creator}")
         if channel:
             lines.append(f"**Salon**\n{channel}")
