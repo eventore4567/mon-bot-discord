@@ -661,6 +661,11 @@ def access_tier(name: str) -> str:
         return "guild-owner"
     if key in SUBCOMMAND_TIERS:
         return f"categorie:{SUBCOMMAND_TIERS[key]}"
+    # Certaines commandes contextuelles Discord ont un nom avec des espaces,
+    # sans être des sous-commandes (ex. « signaler ce message »).
+    # Leur classement explicite doit primer sur l'héritage du premier mot.
+    if key in PUBLIC_COMMANDS:
+        return "public"
     # Sous-commande sans regle propre : elle herite de son groupe, exactement comme le
     # fait le garde au runtime via resolve_name.
     if " " in key:
