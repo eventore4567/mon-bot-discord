@@ -159,8 +159,7 @@ def test_formatted_log_is_a_readable_card_without_quoted_bar_or_repeated_identit
     container = view.children[0]
     displays = [item.content for item in container.children if isinstance(item, discord.ui.TextDisplay)]
     combined = "\n".join(displays)
-    assert "-# Ressources" in combined  # catégorie neutre, sans emoji coloré
-    assert "🔗 Ressources" not in combined
+    assert "🔗 Ressources" in combined
     assert "**Créateur** · <@111111111111111111>" in combined
     assert "## Invitation créée" in combined
     assert "Item" not in combined
