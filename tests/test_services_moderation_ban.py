@@ -229,5 +229,32 @@ class PersistSanctionDirectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error, "cassé")
 
 
+class SlashOptionsContracts(unittest.TestCase):
+    """Vérifie les vrais paramètres du slash de Discord, pas seulement la source."""
+
+    def test_ban_slash_has_dropdown_values_and_default_zero(self):
+        from cogs.moderation import Moderation
+
+        slash = Moderation.ban.app_command
+        self.assertIsNotNone(slash)
+        options = {parameter.name: parameter for parameter in slash.parameters}
+        self.assertIn("supprimer_messages", options)
+        self.assertEqual(options["supprimer_messages"].default, 0)
+        self.assertEqual(
+            [choice.value for choice in options["supprimer_messages"].choices],
+            [0, 900, 3600, 86400],
+        )
+
+    def test_warn_slash_has_boolean_notifier_default_true(self):
+        from cogs.moderation import Moderation
+
+        slash = Moderation.warn.app_command
+        self.assertIsNotNone(slash)
+        options = {parameter.name: parameter for parameter in slash.parameters}
+        self.assertIn("notifier", options)
+        self.assertIs(options["notifier"].default, True)
+
+
+
 if __name__ == "__main__":
     unittest.main()
