@@ -571,11 +571,10 @@ class Panneau(discord.ui.LayoutView):
             if str(image or "").startswith("attachment://sentrix_game_")
             else None
         )
-        # Direction produit : aucune bannière décorative, même si un ancien
-        # appelant passe encore banniere=True. On garde l'argument uniquement pour
-        # compatibilité API, mais le rendu et les pièces jointes restent désactivés.
+        # Le choix explicite de chaque écran reste prioritaire ; sinon on suit
+        # l'option globale. L'absence de média n'empêche jamais le message.
         self.avec_banniere = False
-        banniere = False
+        banniere = BANDEAUX_ACTIFS if banniere is None else bool(banniere)
         # La bannière/liseré exprime l'ÉTAT (succès, erreur, attention), tandis que
         # la signature conserve le DOMAINE de la commande. Ainsi une réussite
         # économique reste immédiatement identifiable comme Économie, sans perdre
