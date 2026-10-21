@@ -14,15 +14,14 @@ def test_v118_compiles():
 
 
 def test_v116_exposes_invite_and_advanced_security_sections():
-    assert "invitations" in v116.MODULE_BY_KEY
+    assert "surveillance" in v116.MODULE_BY_KEY
     security = {section.key for section in v116.MODULE_BY_KEY["security"].sections}
     assert {"vanity", "prune", "permissions", "join_gate", "risk"} <= security
-    invite_actions = {section.action for section in v116.MODULE_BY_KEY["invitations"].sections}
+    invite_actions = {section.action for section in v116.MODULE_BY_KEY["surveillance"].sections}
     assert "internal:invitations" in invite_actions
     verification_actions = {section.action for section in v116.MODULE_BY_KEY["verification"].sections}
     assert "internal:verification" in verification_actions
-    assert "rules" in v116.MODULE_BY_KEY
-    rule_actions = {section.action for section in v116.MODULE_BY_KEY["rules"].sections}
+    rule_actions = {section.action for section in v116.MODULE_BY_KEY["verification"].sections}
     assert "internal:rules" in rule_actions
 
 

@@ -161,7 +161,79 @@ MODULES: tuple[ModuleSpec, ...] = (
     )),
 )
 
+# Navigation publique demandée pour /setup. Les anciens modules restent décrits au-dessus
+# parce que leurs SectionSpec sont réutilisés : aucun moteur métier n'est supprimé, seule
+# la taxonomie visible est regroupée en quinze domaines stables.
+_LEGACY_MODULES = {module.key: module for module in MODULES}
+
+
+def _sections(*module_keys: str) -> tuple[SectionSpec, ...]:
+    """Fusionne des écrans existants sans dupliquer leurs callbacks."""
+    merged: list[SectionSpec] = []
+    seen: set[str] = set()
+    for module_key in module_keys:
+        for section in _LEGACY_MODULES[module_key].sections:
+            key = section.key
+            if key in seen:
+                key = f"{module_key}_{key}"
+            seen.add(key)
+            merged.append(SectionSpec(key, section.label, section.description, section.action))
+    return tuple(merged)
+
+
+MODULES = (
+    ModuleSpec("security", "Sécurité", "Anti-raid, anti-nuke, AutoMod et protections critiques.", _sections("security")),
+    ModuleSpec("surveillance", "Surveillance", "Journaux, invitations et suivi des activités du serveur.", _sections("logs", "invitations")),
+    ModuleSpec("moderation", "Modération", "Sanctions, avertissements, timeouts et historique.", _sections("moderation")),
+    ModuleSpec("verification", "Vérification", "CAPTCHA, portail, règlement et rôle vérifié.", _sections("verification", "rules")),
+    ModuleSpec("tickets", "Tickets", "Panels, formulaires, accès support et journaux.", _sections("tickets")),
+    ModuleSpec("staff", "Staff", "Rôles, permissions et outils réservés à l'équipe.", _sections("roles")),
+    ModuleSpec("welcome_goodbye", "Bienvenue / Départ", "Accueil, départ, autorôle et parcours membre.", _sections("members")),
+    ModuleSpec("economy", "Économie", "Monnaie, banque, boutique, inventaire et réputation.", _sections("economy")),
+    ModuleSpec("xp", "XP", "Progression, vocal, paliers, annonces et profils.", _sections("levels", "profile")),
+    ModuleSpec("games", "Jeux", "Jeux, récompenses et économie partagée.", (
+        _s("catalog", "Catalogue", "Configurer les jeux visibles et leurs règles.", "games-config"),
+        _s("rewards", "Récompenses", "Régler les gains et leurs limites quotidiennes.", "games-config"),
+        _s("permissions", "Permissions", "Contrôler qui peut lancer les jeux.", "games-config"),
+    )),
+    ModuleSpec("music", "Musique", "Lecteur vocal, salon musique et contrôles.", _sections("music")),
+    ModuleSpec("events", "Événements", "Événements planifiés, concours et notifications.", (
+        _s("calendar", "Planification", "Créer et gérer les événements du serveur.", "hint:+event"),
+        _s("giveaways", "Concours", "Configurer les concours et leurs récompenses.", "hint:+giveaway"),
+        _s("announcements", "Annonces", "Choisir les destinations et mentions.", "config:announce_channel"),
+    )),
+    ModuleSpec("ai", "IA", "Accès, réponses, images, filtrage et limites.", _sections("ai")),
+    ModuleSpec("automations", "Automatisations", "Réactions, règles de salons et notifications externes.", _sections("automation", "notifications")),
+    ModuleSpec("advanced", "Avancés", "Suggestions, réglages techniques et diagnostic global.", _sections("suggestions") + (
+        _s("diagnostic", "Diagnostic", "Vérifier les permissions, ressources et incohérences.", "diagnostic"),
+        _s("history", "Historique", "Consulter les sauvegardes et changements du setup.", "history"),
+    )),
+)
+
 MODULE_BY_KEY = {module.key: module for module in MODULES}
+# Compatibilité interne avec V117 et les sessions persistées avant cette refonte. Ces
+# alias ne sont pas exposés dans le menu public (qui parcourt MODULES), mais permettent
+# de rouvrir sans erreur une ancienne session enregistrée avec l'ancienne taxonomie.
+for _legacy_key, _legacy_module in _LEGACY_MODULES.items():
+    MODULE_BY_KEY.setdefault(_legacy_key, _legacy_module)
+
+CATEGORY_PERMISSIONS: dict[str, tuple[str, ...]] = {
+    "security": ("Gérer les messages", "Gérer les rôles", "Voir les logs d’audit"),
+    "surveillance": ("Voir les salons", "Envoyer des messages", "Voir les logs d’audit"),
+    "moderation": ("Modérer", "Expulser", "Bannir", "Gérer les messages"),
+    "verification": ("Gérer les rôles", "Gérer les salons", "Envoyer des messages"),
+    "tickets": ("Gérer les salons", "Gérer les rôles", "Envoyer des messages"),
+    "staff": ("Gérer les rôles", "Voir les logs d’audit"),
+    "welcome_goodbye": ("Envoyer des messages", "Intégrer des liens", "Gérer les rôles"),
+    "economy": ("Voir les salons", "Envoyer des messages"),
+    "xp": ("Voir les salons", "Envoyer des messages", "Gérer les rôles"),
+    "games": ("Voir les salons", "Envoyer des messages", "Ajouter des réactions"),
+    "music": ("Se connecter", "Parler", "Envoyer des messages"),
+    "events": ("Gérer les événements", "Envoyer des messages", "Mentionner les rôles"),
+    "ai": ("Envoyer des messages", "Intégrer des liens", "Joindre des fichiers"),
+    "automations": ("Gérer les messages", "Ajouter des réactions", "Envoyer des messages"),
+    "advanced": ("Gérer le serveur", "Voir les logs d’audit"),
+}
 
 
 def module_keys() -> tuple[str, ...]:
@@ -196,6 +268,11 @@ def _mention(guild: discord.Guild | None, conf: Any, key: str, *, role: bool = F
 async def _module_status(view, module_key: str) -> str:
     guild = view._guild()
     conf = await view.bot.db.get_guild_config(view.guild_id)
+    aliases = {
+        "surveillance": "logs", "staff": "roles", "welcome_goodbye": "members",
+        "xp": "levels", "automations": "automation", "advanced": "suggestions",
+    }
+    module_key = aliases.get(module_key, module_key)
     if module_key == "security":
         row = await view.bot.db.get_automod(view.guild_id)
         active = sum(1 for key in v4._CONFIG_MODULE.AUTOMOD_TOGGLE_LABELS if row and int(row[key] or 0))
@@ -289,9 +366,16 @@ async def _module_embed(view) -> discord.Embed:
     module = MODULE_BY_KEY[view._v116_module]
     section = next(s for s in module.sections if s.key == view._v116_section)
     status = await _module_status(view, module.key)
+    permissions = " · ".join(CATEGORY_PERMISSIONS.get(module.key, ())) or "Aucune permission supplémentaire"
     embed = discord.Embed(
         title=module.label,
-        description=f"{module.description}\n\n**État actuel**\n{status}\n\n**{section.label}**\n{section.description}",
+        description=(
+            f"{module.description}\n\n**État actuel**\n{status}\n\n"
+            f"**Permissions nécessaires**\n{permissions}\n\n"
+            f"**{section.label}**\n{section.description}\n\n"
+            "Les changements ne sont appliqués qu’après une action explicite dans l’écran ouvert. "
+            "Chaque assistant confirme sa sauvegarde."
+        ),
         colour=v4._CONFIG_MODULE.SETUP_COLOR_MAIN,
     )
     embed.set_footer(text=f"SentriX • Setup V116 • {module.label}")
@@ -497,6 +581,23 @@ async def _open_music_config(view, interaction: discord.Interaction) -> None:
     )
 
 
+async def _open_games_config(view, interaction: discord.Interaction) -> None:
+    """Ouvre le vrai configurateur des jeux dans /setup, sans redirection texte."""
+    cog = view.bot.get_cog("GamesSetup")
+    if cog is None or not callable(getattr(cog, "_build_home", None)):
+        return await interaction.response.send_message(
+            "Le configurateur des jeux n'est pas chargé.", ephemeral=True,
+        )
+    embed, subview = await cog._build_home(view.guild_id)
+    subview.author_id = interaction.user.id
+    message = await panels.envoyer(
+        interaction.response,
+        panels.avec_composants(panels.depuis_embed(embed), subview),
+        ephemere=True,
+    )
+    subview.message = message
+
+
 async def _run_action(view, interaction: discord.Interaction) -> None:
     _ensure_state(view)
     module = MODULE_BY_KEY[view._v116_module]
@@ -515,6 +616,8 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
         return await _open_automation(view, interaction, action.split(":", 1)[1])
     elif action == "music-config":
         return await _open_music_config(view, interaction)
+    elif action == "games-config":
+        return await _open_games_config(view, interaction)
     elif action == "verification":
         _route_to_config(view, "verify_role")
     elif action == "history":
