@@ -128,7 +128,7 @@ def build_hierarchy_refusal(message: str) -> discord.ui.LayoutView | None:
     # doivent être explicites et ne jamais être aplatis en erreur texte.
     from utils import sentrix_panels as panels
     return panels.Panneau(
-        titre=heading.replace("🛑 ", "").replace("Action refusée", "Action impossible"),
+        titre=heading.replace("🛑 ", "").replace("Action refusée", "Action refusée · Action impossible"),
         sous_titre=explanation,
         sections=(panels.Section("Comment corriger", texte=solution),),
         kind="warning",
