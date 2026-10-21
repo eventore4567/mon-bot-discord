@@ -203,7 +203,8 @@ def _replace_setup_slash(bot) -> bool:
 
     roots = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
     if len(roots) > 100:
-        logger.error("V103 : /config dépasse le budget global : %s/100 racines.", len(roots))
+        logger.error("V103 : budget global dépassé : %s/100 racines ; restantes=%s",
+                     len(roots), ", ".join(sorted(command.name for command in roots)))
         return False
 
     logger.info("V103 : /config publie 7 centres ; Surveillance accessible via la catégorie de l'accueil.")
