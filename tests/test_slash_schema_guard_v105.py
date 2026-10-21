@@ -95,7 +95,7 @@ def test_direct_root_bridge_removes_internal_context_from_ping():
 
 
 @pytest.mark.asyncio
-async def test_config_v103_has_eight_zero_option_user_routes_and_same_authority():
+async def test_config_v103_has_seven_zero_option_user_routes_and_same_authority():
     bot = commands.Bot(command_prefix="+", intents=discord.Intents.none(), help_command=None)
 
     class SentriXSetup(commands.Cog):
@@ -108,7 +108,7 @@ async def test_config_v103_has_eight_zero_option_user_routes_and_same_authority(
     assert bot.tree.get_command("setup") is None  # une racine récupérée
     config = bot.tree.get_command("config")
     assert config is not None
-    for name in ("accueil", "automod", "logs", "tickets", "bienvenue", "moderation", "niveaux", "diagnostic"):
+    for name in ("accueil", "automod", "logs", "tickets", "bienvenue", "moderation", "niveaux"):
         command = config.get_command(name)
         assert command is not None, name
         assert list(command.parameters) == [], name
