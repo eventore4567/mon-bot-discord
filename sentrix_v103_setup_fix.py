@@ -81,10 +81,8 @@ def _replace_setup_slash(bot) -> bool:
         return False
 
     tree = bot.tree
-    try:
-        tree.remove_command("setup", type=discord.AppCommandType.chat_input)
-    except TypeError:
-        tree.remove_command("setup")
+    # /setup est la porte d'entrée principale de SentriX : ne jamais la retirer
+    # lors de la reconstruction de /config.
 
     try:
         group = tree.get_command("config", type=discord.AppCommandType.chat_input)
