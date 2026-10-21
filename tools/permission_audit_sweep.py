@@ -349,7 +349,7 @@ async def _run_slash(bot, guild, root: str, options: list, persona: dict) -> tup
         return "autorise", text, False
     # /poll ouvre un formulaire natif et n'appelle pas Command.callback.
     # Un modal confirmé par Discord est une réussite du transport, pas un refus.
-    if root == "poll" and interaction.response.type == discord.InteractionResponseType.modal:
+    if root in {"poll", "suggestions"} and interaction.response.type == discord.InteractionResponseType.modal:
         return "autorise", text, False
     return "refuse", text, bool(reports) or "SXR-CMD-" in text
 
