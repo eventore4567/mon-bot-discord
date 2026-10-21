@@ -177,12 +177,35 @@ def _replace_setup_slash(bot) -> bool:
             callback=make_callback(name, category, diagnostic),
         ))
 
+    # Réutiliser la catégorie /user pour les utilitaires individuels lorsque
+    # le budget global Discord de 100 racines est dépassé.
+    roots_before = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
+    if len(roots_before) > 100:
+        destination = tree.get_command("user", type=discord.AppCommandType.chat_input)
+        if isinstance(destination, app_commands.Group):
+            for name in ("weather", "afk"):
+                if len(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)) <= 100:
+                    break
+                command = tree.get_command(name, type=discord.AppCommandType.chat_input)
+                if not isinstance(command, app_commands.Command):
+                    continue
+                if destination.get_command(name) or len(destination.commands) >= 25:
+                    continue
+                tree.remove_command(name, type=discord.AppCommandType.chat_input)
+                try:
+                    destination.add_command(command)
+                except Exception:
+                    tree.add_command(command)
+                    logger.exception("V103 : déplacement /%s vers /user impossible.", name)
+                else:
+                    logger.info("V103 : /%s regroupée sous /user %s.", name, name)
+
     roots = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
     if len(roots) > 100:
         logger.error("V103 : /config dépasse le budget global : %s/100 racines.", len(roots))
         return False
 
-    logger.info("V103 : /config publie 8 centres ; Surveillance accessible via la catégorie de l'accueil.")
+    logger.info("V103 : /config publie 7 centres ; Surveillance accessible via la catégorie de l'accueil.")
     return True
 
 
