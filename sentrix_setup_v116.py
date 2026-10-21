@@ -682,7 +682,14 @@ class _CaptchaChannelAccessView(discord.ui.View):
                 "Impossible de vérifier les salons de vérification : aucune permission modifiée.",
                 ephemeral=True,
             )
+        # Photographier les accès AVANT toute modification de catégorie :
+        # une catégorie verrouillée en cours de route change les permissions
+        # héritées de ses salons. Ne jamais exposer les salons staff privés.
         channels = list(self.guild.channels)
+        originally_public = {
+            channel.id for channel in channels
+            if channel.permissions_for(self.guild.default_role).view_channel
+        }
         total = len(channels)
         changed, skipped, unchanged, errors = 0, 0, 0, []
         progress = await interaction.followup.send(
@@ -691,7 +698,8 @@ class _CaptchaChannelAccessView(discord.ui.View):
             ephemeral=True, wait=True,
         )
         for index, channel in enumerate(channels, start=1):
-            if channel.id in protected_ids or not channel.permissions_for(me).manage_channels:
+            if (channel.id in protected_ids or channel.id not in originally_public
+                    or not channel.permissions_for(me).manage_channels):
                 skipped += 1
             else:
                 try:
