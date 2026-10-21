@@ -10,6 +10,7 @@ qui doivent rester actifs en production.
 from __future__ import annotations
 
 import asyncio
+import discord
 import inspect
 import os
 import pathlib
