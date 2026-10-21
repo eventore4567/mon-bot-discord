@@ -274,13 +274,13 @@ def _native_annotation(annotation):
             return annotation.annotation
     if isinstance(annotation, app_commands.transformers.RangeTransformer):
         return annotation
-    supported = {
+    supported = (
         str, int, float, bool,
         discord.Member, discord.User, discord.Role, discord.Attachment,
         discord.TextChannel, discord.VoiceChannel, discord.StageChannel,
         discord.CategoryChannel, discord.ForumChannel,
-    }
-    if annotation in supported:
+    )
+    if any(annotation is candidate for candidate in supported):
         return annotation
     origin = typing.get_origin(annotation)
     if origin is typing.Literal:
