@@ -185,7 +185,7 @@ MODULES = (
     ModuleSpec("security", "Sécurité", "Anti-raid, anti-nuke, AutoMod et protections critiques.", _sections("security")),
     ModuleSpec("surveillance", "Surveillance", "Journaux, invitations et suivi des activités du serveur.", _sections("logs", "invitations")),
     ModuleSpec("moderation", "Modération", "Sanctions, avertissements, timeouts et historique.", _sections("moderation")),
-    ModuleSpec("verification", "Vérification", "CAPTCHA, portail, règlement et rôle vérifié.", _sections("verification", "rules")),
+    ModuleSpec("verification", "Vérification", "CAPTCHA, portail, règlement et rôle vérifié.", _sections("verification", "rules") + ( _s("channel_access", "Accès aux salons", "Après CAPTCHA, donner accès au rôle vérifié et masquer les salons à @everyone.", "verification-channel-access"), )),
     ModuleSpec("tickets", "Tickets", "Panels, formulaires, accès support et journaux.", _sections("tickets")),
     ModuleSpec("staff", "Staff", "Rôles, permissions et outils réservés à l'équipe.", _sections("roles")),
     ModuleSpec("welcome_goodbye", "Bienvenue / Départ", "Accueil, départ, autorôle et parcours membre.", _sections("members")),
@@ -598,6 +598,106 @@ async def _open_games_config(view, interaction: discord.Interaction) -> None:
     subview.message = message
 
 
+
+class _CaptchaChannelAccessView(discord.ui.View):
+    """Confirmation avant de modifier les permissions des salons du serveur."""
+
+    def __init__(self, bot, guild: discord.Guild, owner_id: int):
+        super().__init__(timeout=300)
+        self.bot, self.guild, self.owner_id = bot, guild, int(owner_id)
+        self.role = None
+        chooser = discord.ui.RoleSelect(
+            placeholder="Rôle donnant accès après vérification", min_values=1, max_values=1,
+        )
+        chooser.callback = self.choose_role
+        self.chooser = chooser
+        self.add_item(chooser)
+        confirm = discord.ui.Button(
+            label="Confirmer les permissions des salons", style=discord.ButtonStyle.danger,
+        )
+        confirm.callback = self.confirm
+        self.add_item(confirm)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild_id != self.guild.id or interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Ce panneau appartient à un autre administrateur.", ephemeral=True)
+            return False
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Permission Administrateur requise.", ephemeral=True)
+            return False
+        return True
+
+    async def choose_role(self, interaction: discord.Interaction) -> None:
+        self.role = self.chooser.values[0] if self.chooser.values else None
+        if self.role is None or self.role == self.guild.default_role or self.role.managed:
+            self.role = None
+            return await interaction.response.send_message(
+                "Sélectionne un rôle normal, différent de @everyone.", ephemeral=True,
+            )
+        await interaction.response.send_message(
+            f"Rôle sélectionné : {self.role.mention}. "
+            "Clique sur Confirmer pour masquer les salons à @everyone et les rendre visibles à ce rôle. "
+            "Aucune permission n'a encore été modifiée.", ephemeral=True,
+        )
+
+    async def confirm(self, interaction: discord.Interaction) -> None:
+        role = self.role
+        if role is None:
+            return await interaction.response.send_message("Sélectionne d'abord le rôle vérifié.", ephemeral=True)
+        me = self.guild.me
+        if me is None or not me.guild_permissions.manage_channels:
+            return await interaction.response.send_message(
+                "SentriX doit posséder Gérer les salons.", ephemeral=True,
+            )
+        if role >= me.top_role and not me.guild_permissions.administrator:
+            return await interaction.response.send_message(
+                "Place le rôle SentriX au-dessus du rôle sélectionné.", ephemeral=True,
+            )
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        changed, skipped, errors = 0, 0, []
+        for channel in self.guild.channels:
+            if not channel.permissions_for(me).manage_channels:
+                skipped += 1
+                continue
+            try:
+                everyone = channel.overwrites_for(self.guild.default_role)
+                verified = channel.overwrites_for(role)
+                if everyone.view_channel is False and verified.view_channel is True:
+                    continue
+                everyone.view_channel = False
+                verified.view_channel = True
+                await channel.set_permissions(
+                    self.guild.default_role, overwrite=everyone,
+                    reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
+                )
+                await channel.set_permissions(
+                    role, overwrite=verified,
+                    reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
+                )
+                changed += 1
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                errors.append(f"{channel.name}: {type(exc).__name__}")
+        await interaction.followup.send(
+            f"Terminé : {changed} salons/catégories modifiés, "
+            f"{skipped} ignorés faute de permission, {len(errors)} erreurs."
+            + (" Erreurs : " + "; ".join(errors[:5]) if errors else ""),
+            ephemeral=True,
+        )
+
+
+async def _open_captcha_channel_access(view, interaction: discord.Interaction) -> None:
+    panel = _CaptchaChannelAccessView(view.bot, interaction.guild, interaction.user.id)
+    await interaction.response.send_message(
+        "**CAPTCHA · Accès aux salons**\n"
+        "Choisis le rôle attribué après vérification, puis confirme.\n"
+        "Le bot refuse alors Voir le salon à @everyone et l'autorise au rôle sélectionné "
+        "sur les salons existants, sans toucher aux autres permissions.\n"
+        "**Attention :** des rôles disposant d'autres autorisations explicites ou "
+        "de la permission Administrateur peuvent conserver l'accès.",
+        view=panel, ephemeral=True,
+    )
+
+
 async def _run_action(view, interaction: discord.Interaction) -> None:
     _ensure_state(view)
     module = MODULE_BY_KEY[view._v116_module]
@@ -618,6 +718,8 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
         return await _open_music_config(view, interaction)
     elif action == "games-config":
         return await _open_games_config(view, interaction)
+    elif action == "verification-channel-access":
+        return await _open_captcha_channel_access(view, interaction)
     elif action == "verification":
         _route_to_config(view, "verify_role")
     elif action == "history":
