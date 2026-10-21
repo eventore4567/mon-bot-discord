@@ -24,10 +24,10 @@ GAME_COMMANDS = frozenset({
 })
 
 NORMAL_DIRECT_COMMANDS = frozenset({
-    "help", "setup", "ping", "avatar", "userinfo", "afk", "setprefix", "setmodrole",
+    "help", "setup", "ping", "avatar", "userinfo", "afk", 
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "modview", "clear",
     "snipe", "editsnipe",
-    "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
+    "lock", "unlock", "clearwarnings", "slowmode", "nickname",
     "giverole", "removerole",
     "security", "antiraid", "antinuke", "panic", "syncbl",
     # Les treize bascules AutoMod, et non deux. Mesuré sur le bot booté le
@@ -164,6 +164,9 @@ MERGED_COMMANDS = (
 # Annoncer dans l'aide une commande volontairement retirée est exactement le
 # « vieux nom obsolète affiché » qu'il faut éviter.
 HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
+    # Réglages historiques toujours utilisables et recherchables dans +help,
+    # mais pas des commandes métiers de la surface directe principale.
+    "setprefix", "setmodrole", "resetnick",
     # Interrupteurs de système, 2026-09-26. cogs/feature_systems.py écrit noir
     # sur blanc que « les interrupteurs doivent TOUJOURS rester accessibles aux
     # administrateurs, sinon +level-system off bloquerait lui-même
