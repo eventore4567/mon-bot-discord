@@ -654,8 +654,30 @@ class _CaptchaChannelAccessView(discord.ui.View):
                 "Place le rôle SentriX au-dessus du rôle sélectionné.", ephemeral=True,
             )
         await interaction.response.defer(ephemeral=True, thinking=True)
+        # Les arrivants non vérifiés doivent conserver l'accès au portail CAPTCHA.
+        # Ne jamais masquer son salon ni sa catégorie par cette opération globale.
+        protected_ids = set()
+        try:
+            conf = await self.bot.db.get_guild_config(self.guild.id)
+            for field in ("verification_channel", "verification_channel_id",
+                          "rules_channel", "rules_channel_id"):
+                value = conf.get(field) if isinstance(conf, dict) else getattr(conf, field, None)
+                if value:
+                    protected_ids.add(int(value))
+            for channel_id in tuple(protected_ids):
+                protected = self.guild.get_channel(channel_id)
+                if protected and protected.category_id:
+                    protected_ids.add(protected.category_id)
+        except Exception:
+            return await interaction.followup.send(
+                "Impossible de vérifier les salons de vérification : aucune permission modifiée.",
+                ephemeral=True,
+            )
         changed, skipped, errors = 0, 0, []
         for channel in self.guild.channels:
+            if channel.id in protected_ids:
+                skipped += 1
+                continue
             if not channel.permissions_for(me).manage_channels:
                 skipped += 1
                 continue
