@@ -218,6 +218,9 @@ def _clear_ctx(messages: list, *, interaction=None) -> Mock:
     ctx.channel.history = historique
     ctx.channel.purge = AsyncMock(return_value=list(messages))
     ctx.channel.delete_messages = AsyncMock()
+    progress = _message(999999999)
+    progress.edit = AsyncMock()
+    ctx.channel.send = AsyncMock(return_value=progress)
     return ctx
 
 
@@ -252,7 +255,9 @@ async def test_clear_repond_avant_le_journal_marque_les_purges_et_supprime_sans_
         await Moderation.clear.callback(cog, ctx, 10)
         await asyncio.sleep(0.05)
 
-    assert ordre == ["reponse", "journal"]
+    assert ordre == ["journal"]
+    ctx.channel.send.assert_awaited_once()
+    ctx.channel.send.return_value.edit.assert_awaited_once()
     ctx.channel.delete_messages.assert_awaited_once()
     ctx.channel.purge.assert_not_awaited()
     assert all(log_service.is_purged(m.id) for m in messages)
@@ -300,12 +305,14 @@ async def test_clear_slash_est_ephemere_et_prefixe_temporaire():
 
     moderation_module._CLEAR_COOLDOWNS.clear()
     ctx = _clear_ctx([_message(1), _message(2), _message(3)])
-    ctx.message = SimpleNamespace(id=3)
-    with patch.object(panels, "texte_court", AsyncMock()) as court:
+    ctx.message = _message(3)
+    with patch.object(panels, "texte_court", AsyncMock()):
         await Moderation.clear.callback(cog, ctx, 2)
-    # Le message de commande est exclu du compte ; la confirmation est temporaire.
-    assert court.await_args.args[1] == "2 message(s) supprimé(s)."
-    assert court.await_args.kwargs.get("supprimer_apres") == 4
+    # Le message de commande est supprimé, sans entrer dans le décompte.
+    ctx.message.delete.assert_not_awaited()
+    assert ctx.message in ctx.channel.delete_messages.await_args.args[0]
+    ctx.channel.send.return_value.edit.assert_awaited_once_with(content="2 message(s) supprimé(s)."
+    )
 
 
 @pytest.mark.asyncio
