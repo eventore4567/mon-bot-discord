@@ -177,28 +177,29 @@ def _replace_setup_slash(bot) -> bool:
             callback=make_callback(name, category, diagnostic),
         ))
 
-    # Réutiliser la catégorie /user pour les utilitaires individuels lorsque
-    # le budget global Discord de 100 racines est dépassé.
-    roots_before = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
-    if len(roots_before) > 100:
+    # Weather est retirée uniquement du menu slash (la commande +weather reste).
+    # /afk est importante et doit garder sa racine directe.
+    weather = tree.get_command("weather", type=discord.AppCommandType.chat_input)
+    if weather is not None:
+        tree.remove_command("weather", type=discord.AppCommandType.chat_input)
+        logger.info("V103 : /weather retirée du menu slash ; +weather conservée.")
+
+    # Si nécessaire, ranger /translate dans /user pour respecter 100 racines.
+    if len(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)) > 100:
         destination = tree.get_command("user", type=discord.AppCommandType.chat_input)
-        if isinstance(destination, app_commands.Group):
-            for name in ("weather", "afk"):
-                if len(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)) <= 100:
-                    break
-                command = tree.get_command(name, type=discord.AppCommandType.chat_input)
-                if not isinstance(command, app_commands.Command):
-                    continue
-                if destination.get_command(name) or len(destination.commands) >= 25:
-                    continue
-                tree.remove_command(name, type=discord.AppCommandType.chat_input)
-                try:
-                    destination.add_command(command)
-                except Exception:
-                    tree.add_command(command)
-                    logger.exception("V103 : déplacement /%s vers /user impossible.", name)
-                else:
-                    logger.info("V103 : /%s regroupée sous /user %s.", name, name)
+        translate = tree.get_command("translate", type=discord.AppCommandType.chat_input)
+        if (isinstance(destination, app_commands.Group)
+                and isinstance(translate, app_commands.Command)
+                and destination.get_command("translate") is None
+                and len(destination.commands) < 25):
+            tree.remove_command("translate", type=discord.AppCommandType.chat_input)
+            try:
+                destination.add_command(translate)
+            except Exception:
+                tree.add_command(translate)
+                logger.exception("V103 : déplacement de /translate impossible.")
+            else:
+                logger.info("V103 : /translate regroupée sous /user translate.")
 
     roots = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
     if len(roots) > 100:
