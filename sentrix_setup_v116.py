@@ -661,7 +661,10 @@ class _CaptchaChannelAccessView(discord.ui.View):
             conf = await self.bot.db.get_guild_config(self.guild.id)
             for field in ("verification_channel", "verification_channel_id",
                           "rules_channel", "rules_channel_id"):
-                value = conf.get(field) if isinstance(conf, dict) else getattr(conf, field, None)
+                try:
+                    value = conf[field] if conf is not None else None
+                except (KeyError, IndexError, TypeError):
+                    value = None
                 if value:
                     protected_ids.add(int(value))
             for channel_id in tuple(protected_ids):
