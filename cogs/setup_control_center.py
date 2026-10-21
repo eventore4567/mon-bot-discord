@@ -2129,57 +2129,6 @@ class OfficialSetup(commands.Cog, name="SentriXSetup"):
         return await panels.envoyer(target, view, ephemere=private)
 
 
-    @commands.command(name="setup-acces-salons")
-    @commands.guild_only()
-    async def setup_channel_access(self, ctx, role: discord.Role, confirmation: str = ""):
-        """Restreint les salons existants au rôle sélectionné, sur confirmation."""
-        guild = ctx.guild
-        if not await _can_setup(self.bot, ctx.author, guild):
-            return await ctx.send("Cette action est réservée aux administrateurs.")
-        me = guild.me
-        if me is None or not me.guild_permissions.manage_channels:
-            return await ctx.send("SentriX doit disposer de Gérer les salons.")
-        if role == guild.default_role or role.managed:
-            return await ctx.send("Choisis un rôle normal différent de @everyone.")
-        if role >= me.top_role and not me.guild_permissions.administrator:
-            return await ctx.send("Le rôle choisi doit être sous le rôle SentriX.")
-        channels = list({channel.id: channel for channel in guild.channels}.values())
-        if confirmation != "CONFIRMER":
-            return await ctx.send(
-                f"Prévisualisation : {len(channels)} salons/catégories. "
-                f"@everyone perdra Voir le salon ; {role.mention} le gagnera. "
-                "Les autres autorisations resteront intactes. "
-                f"Confirme avec : +setup-acces-salons {role.mention} CONFIRMER"
-            )
-        changed, skipped, errors = 0, 0, []
-        for channel in channels:
-            if not channel.permissions_for(me).manage_channels:
-                skipped += 1
-                continue
-            try:
-                everyone = channel.overwrites_for(guild.default_role)
-                target = channel.overwrites_for(role)
-                if everyone.view_channel is False and target.view_channel is True:
-                    continue
-                everyone.view_channel = False
-                target.view_channel = True
-                await channel.set_permissions(
-                    guild.default_role, overwrite=everyone,
-                    reason=f"Configuration des accès confirmée par {ctx.author}",
-                )
-                await channel.set_permissions(
-                    role, overwrite=target,
-                    reason=f"Configuration des accès confirmée par {ctx.author}",
-                )
-                changed += 1
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                errors.append(f"{channel.name}: {type(exc).__name__}")
-        await ctx.send(
-            f"Accès configurés : {changed} salons/catégories, "
-            f"{skipped} ignorés, {len(errors)} erreurs."
-            + (" Erreurs : " + "; ".join(errors[:5]) if errors else "")
-        )
-
     @commands.command(name="setup", description="Ouvrir le centre de configuration SentriX.")
     async def prefix_setup(self, ctx):
         await self.send_setup(ctx)
