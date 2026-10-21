@@ -72,19 +72,12 @@ INTENTIONS_NEUTRES = frozenset({"info", "neutral", "brand"})
 # un numéro stable et lisible ("01 · Identité", "02 · Activité", ...).
 CORE_NAME = "SENTRIX CORE"
 
-#: Les bandeaux décoratifs sont retirés de l'interface. Le premium vient des
-#: composants, des icônes et de la hiérarchie du texte — pas d'une image qui
-#: occupe le tiers du message sans rien apprendre au lecteur.
-#:
-#: Un seul interrupteur, et il gouverne les DEUX côtés : `poser_bandeau`
-#: n'affiche plus de galerie, donc `pieces_jointes_de_famille` ne joint plus
-#: de fichier, puisque les deux consultent la même condition. Les séparer
-#: serait dangereux : une galerie sans sa pièce jointe fait REFUSER le message
-#: entier par Discord, pas afficher une image cassée.
-#:
-#: La plomberie reste en place et testée. Un écran qui aurait réellement
-#: besoin d'un bandeau n'a que cette ligne à changer.
-BANDEAUX_ACTIFS = False
+#: Bannière horizontale compacte commune à tous les panneaux structurés.
+#: 1024 × 72 pixels transparents : le logo central et deux traits lumineux
+#: reprennent la teinte du domaine, sans fond ni effet de carte volumineuse.
+#: La galerie et sa pièce jointe restent gouvernées par le même interrupteur
+#: pour éviter une référence attachment:// absente qui invaliderait le message.
+BANDEAUX_ACTIFS = True
 
 #: Icône de chaque domaine. Toute commande appartient à une famille, donc
 #: toute réponse peut porter son icône — sans qu'on ait à écrire un emoji
