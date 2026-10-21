@@ -606,6 +606,7 @@ class _CaptchaChannelAccessView(discord.ui.View):
         super().__init__(timeout=300)
         self.bot, self.guild, self.owner_id = bot, guild, int(owner_id)
         self.role = None
+        self._applying = False
         chooser = discord.ui.RoleSelect(
             placeholder="Rôle donnant accès après vérification", min_values=1, max_values=1,
         )
@@ -641,6 +642,10 @@ class _CaptchaChannelAccessView(discord.ui.View):
         )
 
     async def confirm(self, interaction: discord.Interaction) -> None:
+        if self._applying:
+            return await interaction.response.send_message(
+                "La configuration est déjà en cours. Suis la progression affichée.", ephemeral=True,
+            )
         role = self.role
         if role is None:
             return await interaction.response.send_message("Sélectionne d'abord le rôle vérifié.", ephemeral=True)
@@ -653,6 +658,7 @@ class _CaptchaChannelAccessView(discord.ui.View):
             return await interaction.response.send_message(
                 "Place le rôle SentriX au-dessus du rôle sélectionné.", ephemeral=True,
             )
+        self._applying = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         # Les arrivants non vérifiés doivent conserver l'accès au portail CAPTCHA.
         # Ne jamais masquer son salon ni sa catégorie par cette opération globale.
