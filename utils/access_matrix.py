@@ -355,7 +355,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "notifs-status", "notifs-test",
         # Journal des réglages et annulation (cogs/trace.py) : même niveau que /setup.
         "config-history",
-        "set-nickname", "alias", "diagnostic", "staff-diagnostic",
+        "set-nickname", "alias", "diagnostic", "staff-diagnostic", "staff-audit",
         # Anciennement fail-closed par oubli
         "suivi-bot", "server-audit", "healthcheck",
         "level-system", "security-repair",
