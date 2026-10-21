@@ -1412,6 +1412,13 @@ class Moderation(commands.Cog):
                 "ou `Voir l'historique`."
             )
             if is_prefix:
+                if progress is not None:
+                    try:
+                        await progress.edit(content=message)
+                        await progress.delete(delay=8)
+                        return
+                    except (discord.NotFound, discord.HTTPException):
+                        pass
                 return await ctx.channel.send(message, delete_after=8)
             try:
                 return await ctx.interaction.edit_original_response(content=message)
@@ -1420,6 +1427,13 @@ class Moderation(commands.Cog):
         except discord.HTTPException:
             message = "Une erreur est survenue, merci de réessayer."
             if is_prefix:
+                if progress is not None:
+                    try:
+                        await progress.edit(content=message)
+                        await progress.delete(delay=5)
+                        return
+                    except (discord.NotFound, discord.HTTPException):
+                        pass
                 return await ctx.channel.send(message, delete_after=5)
             try:
                 return await ctx.interaction.edit_original_response(content=message)
