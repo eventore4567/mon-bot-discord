@@ -12,6 +12,7 @@ from utils import access_matrix
 from utils.wide_logs import fetch_log_history_page, safe_text
 from services import voice_history
 from utils import log_service
+from utils import sentrix_panels
 
 logger = logging.getLogger("bot.log-center")
 NO_MENTIONS = discord.AllowedMentions.none()
@@ -226,12 +227,10 @@ def _history_member_header(
         panel.add_item(discord.ui.TextDisplay(header))
     panel.add_item(discord.ui.Separator())
     panel.add_item(discord.ui.TextDisplay(
-        "**📊 Modération · Récapitulatif**\n"
-        f"⚠️ **{counters['warn']}** avertissements   ·   "
-        f"🔇 **{counters['mute']}** timeouts\n"
-        f"🚫 **{counters['ban']}** bannissements   ·   "
-        f"🚪 **{counters['kick']}** expulsions\n"
-        f"-# {total} événement(s) conservé(s) · Consultation uniquement"
+        "**Modération · Récapitulatif**\n"
+        f"{counters['warn']} avert. · {counters['mute']} timeouts · "
+        f"{counters['ban']} bans · {counters['kick']} kicks · "
+        f"{total} événements"
     ))
     return panel
 
@@ -271,7 +270,7 @@ def _history_event_panel(
     timestamp = int(record["created_at"])
     panel.add_item(discord.ui.TextDisplay(
         f"**{emoji} {title}**   ·   <t:{timestamp}:R>\n"
-        f"-# <t:{timestamp}:f>  ·  Événement " + chr(96) + f"{index:02d}" + chr(96)
+        f"-# <t:{timestamp}:f> · #{index:02d}"
     ))
     panel.add_item(discord.ui.Separator())
     if expanded:
@@ -315,6 +314,7 @@ class MemberHistoryView(discord.ui.LayoutView):
         self.counts: dict[str, int] = {}
         self.filter = "all"
         self.selector: discord.ui.UserSelect | None = None
+        self._banner_attached = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -388,10 +388,12 @@ class MemberHistoryView(discord.ui.LayoutView):
             key: sum(counts.get(event, 0) for event in events)
             for key, events in COUNTERS.items()
         }
-        self.add_item(_history_member_header(
+        profile = _history_member_header(
             username, counters, total=sum(counts.values()),
             member=member, target_id=self.target_id,
-        ))
+        )
+        self._banner_attached = sentrix_panels.poser_bandeau(profile, "moderation")
+        self.add_item(profile)
 
         names = {
             "journal": ("📋 Journal d'activité", "Tous les événements du membre"),
@@ -401,7 +403,7 @@ class MemberHistoryView(discord.ui.LayoutView):
         }
         title, subtitle = names[self.tab]
         body = discord.ui.Container(accent_colour=discord.Colour(0x515B70))
-        body.add_item(discord.ui.TextDisplay(f"### {title}\n-# {subtitle}"))
+        body.add_item(discord.ui.TextDisplay(f"**{title}** · {subtitle}"))
 
         voice_summary = None
         if self.tab in {"voice", "settings"} and self.bot is not None:
@@ -706,7 +708,11 @@ class PremiumLogAction(
                     "Impossible de charger l'historique pour le moment.", ephemeral=True,
                 )
                 return
-            await interaction.response.send_message(view=panel, ephemeral=True, allowed_mentions=NO_MENTIONS)
+            await interaction.response.send_message(
+                view=panel, ephemeral=True, allowed_mentions=NO_MENTIONS,
+                files=(sentrix_panels.pieces_jointes_de_famille("moderation")
+                       if panel._banner_attached else []),
+            )
             return
         view = ConfirmUnban(
             author_id=interaction.user.id,

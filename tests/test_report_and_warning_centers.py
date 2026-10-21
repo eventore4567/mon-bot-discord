@@ -57,7 +57,7 @@ def test_report_and_warning_buttons_are_nested_under_moderation_without_exceedin
     assert bot.tree.group is group
     assert {x.name for x in group.commands} >= {
         "accueil", "automod", "logs", "tickets", "bienvenue", "moderation",
-        "niveaux", "diagnostic", "ancienne",
+        "niveaux", "ancienne",
     }
     assert group.get_command("avertissements") is None
     assert group.get_command("signalements") is None

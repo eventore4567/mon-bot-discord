@@ -274,13 +274,13 @@ def _native_annotation(annotation):
             return annotation.annotation
     if isinstance(annotation, app_commands.transformers.RangeTransformer):
         return annotation
-    supported = {
+    supported = (
         str, int, float, bool,
         discord.Member, discord.User, discord.Role, discord.Attachment,
         discord.TextChannel, discord.VoiceChannel, discord.StageChannel,
         discord.CategoryChannel, discord.ForumChannel,
-    }
-    if annotation in supported:
+    )
+    if any(annotation is candidate for candidate in supported):
         return annotation
     origin = typing.get_origin(annotation)
     if origin is typing.Literal:
@@ -611,10 +611,10 @@ def _remove_legacy_public_roots(tree: app_commands.CommandTree) -> None:
     """Supprime les anciennes racines qui ne doivent plus être publiées.
 
     Cette passe est volontairement minuscule et se lance après TOUTES les couches
-    de préparation. Les anciens slash français ne doivent plus être republiés :
-    /help est l'unique entrée publique d'aide.
+    de préparation. /aide est la racine publique requise par le contrôle V95 ;
+    seul son ancien alias slash /help doit être retiré.
     """
-    for name in ("aide",):
+    for name in ("help",):
         try:
             tree.remove_command(name, type=discord.AppCommandType.chat_input)
         except TypeError:

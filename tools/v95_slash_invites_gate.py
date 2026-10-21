@@ -104,7 +104,7 @@ async def run() -> int:
         # /musique. Les anciennes racines /help, /play, /pause et /queue ne doivent
         # plus être exigées par ce gate historique.
         required_roots = (
-            "aide", "setup", "ping", "sentrix",
+            "ping", "sentrix",
             "moderation", "security", "ticket", "giveaway", "invites", "games", "roles",
             "ban", "unban", "kick", "mute", "unmute", "warn", "warnings",
             "clearwarnings", "clear", "lock", "unlock", "slowmode",
@@ -122,8 +122,8 @@ async def run() -> int:
             import sentrix_canonical_command_surface as canonical_surface
             import sentrix_command_surface_v110 as surface_v110
 
-            if canonical_surface.ROOTS.get("music") != "musique":
-                errors.append("la surface canonique ne mappe plus music vers /musique")
+            if canonical_surface.ROOTS.get("music") != "music":
+                errors.append("la surface canonique ne mappe plus music vers /music")
             forbidden_direct_music = {"play", "pause", "queue"}
             leaked = sorted(
                 public

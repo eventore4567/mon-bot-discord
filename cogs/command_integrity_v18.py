@@ -238,7 +238,7 @@ def _audit_registry(bot: commands.Bot) -> dict[str, Any]:
     try:
         app_commands = list(bot.tree.walk_commands())
     except AttributeError:
-        app_commands = list(bot.tree.get_commands())
+        app_commands = list(bot.tree.get_commands(type=discord.AppCommandType.chat_input))
     app_names: set[str] = set()
     for command in app_commands:
         qualified = str(getattr(command, "qualified_name", getattr(command, "name", "")) or "")
@@ -250,8 +250,8 @@ def _audit_registry(bot: commands.Bot) -> dict[str, Any]:
         if not (1 <= len(name) <= 32):
             critical.append(f"nom slash invalide: {qualified}")
 
-    if len(bot.tree.get_commands()) > 100:
-        critical.append(f"budget slash dépassé: {len(bot.tree.get_commands())}/100")
+    if len(bot.tree.get_commands(type=discord.AppCommandType.chat_input)) > 100:
+        critical.append(f"budget slash dépassé: {len(bot.tree.get_commands(type=discord.AppCommandType.chat_input))}/100")
 
     return {
         "text_commands": len(commands_seen),

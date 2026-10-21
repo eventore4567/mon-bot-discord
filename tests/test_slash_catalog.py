@@ -167,3 +167,28 @@ def test_les_commandes_jamais_utilisees_quittent_le_menu_mais_restent_tracees():
     for garde in ("hackban", "tempban", "quarantine", "panic status", "antinuke-whitelist-add",
                   "clearwarnings", "verify-repair", "music skip", "giveaway end"):
         assert not unused_commands.masquee(garde), garde
+
+
+def test_exactement_132_routes_slash_sont_masquees_sans_compter_les_parametres():
+    """Le nombre demandé porte sur les feuilles du catalogue, pas sur les sources
+    préfixées ni sur des valeurs comme le ``100`` accepté par ``/clear count``."""
+    routes = {entry.path for entry in sc._MASQUEES_DU_MENU}
+    assert len(routes) == 132
+    assert len(routes) == len(sc._MASQUEES_DU_MENU)
+    assert len([entry for entry in sc.CATALOG if entry.path.startswith('games ')]) == 40
+    assert len([entry for entry in sc._MASQUEES_DU_MENU if entry.path.startswith('games ')]) == 26
+    # Les 66 routes de jeux restent enregistrées comme sources +, y compris
+    # celles masquées du catalogue slash. Seule la présentation change.
+    tous_les_jeux = [entry for entry in (*sc.CATALOG, *sc._MASQUEES_DU_MENU)
+                     if entry.path.startswith('games ')]
+    assert len(tous_les_jeux) == 66
+    assert len({entry.source for entry in tous_les_jeux}) == 66
+    assert "clear" not in routes
+    assert "count" not in routes
+
+    publiees = {entry.path for entry in sc.CATALOG}
+    for essentielle in (
+        "clear", "role mass", "logs search", "tickets open", "music play",
+        "games duels fight", "security antinuke", "moderation warnings",
+    ):
+        assert essentielle in publiees

@@ -72,7 +72,7 @@ def test_v103_final_surface_routes_to_existing_official_setup_engine():
     assert "_open_setup_panel" not in source
 
 
-def test_v103_reuses_existing_config_group_keeps_legacy_leaf_and_removes_setup():
+def test_v103_reuses_existing_config_group_keeps_legacy_leaf_and_preserves_setup():
     bot = _FakeBot()
     assert v103._replace_setup_slash(bot) is True
     group = bot.tree.group
@@ -82,10 +82,10 @@ def test_v103_reuses_existing_config_group_keeps_legacy_leaf_and_removes_setup()
     assert "ancien" in names
     assert names >= {
         "accueil", "automod", "logs", "tickets", "bienvenue",
-        "moderation", "niveaux", "diagnostic",
+        "moderation", "niveaux",
     }
-    assert "setup" in [name for name, _ in bot.tree.removed]
-    for leaf in ("accueil", "niveaux", "diagnostic"):
+    assert "setup" not in [name for name, _ in bot.tree.removed]
+    for leaf in ("accueil", "niveaux"):
         callback = group.get_command(leaf).callback
         assert getattr(callback, "_sentrix_setup_authority") == "configuration-v114"
         assert list(inspect.signature(callback).parameters) == ["interaction"]

@@ -1368,6 +1368,11 @@ class Moderation(commands.Cog):
 
         is_prefix = ctx.interaction is None
         protected_ids: set[int] = set()
+        progress = None
+        if is_prefix:
+            # Accusé de réception immédiat pendant les appels API de purge.
+            progress = await ctx.channel.send("Suppression des messages en cours…")
+            protected_ids.add(int(progress.id))
 
         if ctx.interaction is not None:
             # Les wrappers slash SentriX peuvent déjà avoir defer() avant d'entrer ici.
@@ -1382,18 +1387,20 @@ class Moderation(commands.Cog):
             except (discord.NotFound, discord.HTTPException, discord.ClientException):
                 pass
 
-        invocation_id = getattr(getattr(ctx, "message", None), "id", None) if is_prefix else None
-        history_limit = requested + (1 if is_prefix else len(protected_ids))
-        history = [message async for message in ctx.channel.history(limit=history_limit)]
-
+        invocation = getattr(ctx, "message", None) if is_prefix else None
+        invocation_id = getattr(invocation, "id", None)
+        # Les N messages demandés sont distincts du message +clear lui-même.
+        # Cette commande doit toujours être supprimée, même si elle n'apparaît
+        # plus dans la fenêtre d'historique à cause de nouveaux messages.
         candidates: list[discord.Message] = []
-        for message in history:
-            message_id = int(message.id)
-            if message_id in protected_ids:
+        async for message in ctx.channel.history(limit=requested + len(protected_ids) + (1 if is_prefix else 0)):
+            if message.id in protected_ids or message.id == invocation_id:
                 continue
             candidates.append(message)
-            if len(candidates) >= requested + (1 if is_prefix else 0):
+            if len(candidates) >= requested:
                 break
+        if invocation is not None and invocation_id not in protected_ids:
+            candidates.append(invocation)
 
         log_service.mark_purged(int(message.id) for message in candidates)
 
@@ -1405,6 +1412,13 @@ class Moderation(commands.Cog):
                 "ou `Voir l'historique`."
             )
             if is_prefix:
+                if progress is not None:
+                    try:
+                        await progress.edit(content=message)
+                        await progress.delete(delay=8)
+                        return
+                    except (discord.NotFound, discord.HTTPException):
+                        pass
                 return await ctx.channel.send(message, delete_after=8)
             try:
                 return await ctx.interaction.edit_original_response(content=message)
@@ -1413,6 +1427,13 @@ class Moderation(commands.Cog):
         except discord.HTTPException:
             message = "Une erreur est survenue, merci de réessayer."
             if is_prefix:
+                if progress is not None:
+                    try:
+                        await progress.edit(content=message)
+                        await progress.delete(delay=5)
+                        return
+                    except (discord.NotFound, discord.HTTPException):
+                        pass
                 return await ctx.channel.send(message, delete_after=5)
             try:
                 return await ctx.interaction.edit_original_response(content=message)
@@ -1427,7 +1448,11 @@ class Moderation(commands.Cog):
         texte = f"{len(messages)} message(s) supprimé(s)."
         if is_prefix:
             # Réponse courte, sans embed ni bloc visuel. Elle disparaît rapidement.
-            await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
+            if progress is not None:
+                await progress.edit(content=texte)
+                await progress.delete(delay=4)
+            else:
+                await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
         else:
             # texte_court sait utiliser la réponse différée de /clear et garde la
             # confirmation éphémère, sans dépendre directement de response.send_message.
@@ -1497,17 +1522,25 @@ class Moderation(commands.Cog):
     def _clear_preview(cls, messages: list, limit: int = 10) -> str:
         rows: list[str] = []
         budget = 1000
-        for message in messages[:limit]:
+        for index, message in enumerate(messages[:limit], start=1):
             author = cls._neutralize_mentions(getattr(message.author, "display_name", str(message.author)))
             content = cls._neutralize_mentions(message.content or "[message sans texte]")
             content = discord.utils.escape_markdown(content).replace("\n", " ").strip()
-            if len(content) > 150:
-                content = content[:149].rstrip() + "…"
-            row = f"**{author}** — {content}"
-            if len("\n".join([*rows, row])) > budget:
+            if len(content) > 120:
+                content = content[:119].rstrip() + "…"
+            timestamp = getattr(message, "created_at", None)
+            when = f" · <t:{int(timestamp.timestamp())}:t>" if timestamp is not None else ""
+            attachments = len(getattr(message, "attachments", ()) or ())
+            attached = f" · {attachments} pièce(s) jointe(s)" if attachments else ""
+            row = (
+                f"╭ **#{index} · {author}**{when}\n"
+                f"│ {content}\n"
+                f"╰ `ID {message.id}`{attached}"
+            )
+            if len("\n\n".join([*rows, row])) > budget:
                 break
             rows.append(row)
-        return "\n".join(rows) if rows else "Aucun contenu texte disponible."
+        return "\n\n".join(rows) if rows else "Aucun contenu texte disponible."
 
     @staticmethod
     def _clear_transcript(ctx: commands.Context, messages: list, requested: int) -> bytes:

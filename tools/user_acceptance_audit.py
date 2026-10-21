@@ -10,6 +10,7 @@ qui doivent rester actifs en production.
 from __future__ import annotations
 
 import asyncio
+import discord
 import inspect
 import os
 import pathlib
@@ -207,7 +208,7 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
             assert help_complete._category_for(command).key == "games", f"jeu +{name} hors catégorie Jeux"
         assert help_complete._category_for(bot.get_command("gamesetup")).key == "configuration"
 
-        slash_roots = list(bot.tree.get_commands())
+        slash_roots = list(bot.tree.get_commands(type=discord.AppCommandType.chat_input))
         assert len(slash_roots) <= 100, f"budget slash dépassé: {len(slash_roots)} racines"
 
         assert command_response_guard._INSTALLED, "filet de réponse des commandes absent"

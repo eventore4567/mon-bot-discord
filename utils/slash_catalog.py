@@ -773,6 +773,8 @@ OPTION_OVERRIDES: dict[tuple[str, str], str] = {
     ("warn", "member"): "The member to warn.",
     ("warn", "reason"): "Why they are warned. Shown in the logs.",
     ("clear", "count"): "Number of messages to delete, from 2 to 100.",
+    ("role mass", "action"): "Use add for every human member, or remove for every human member.",
+    ("role mass", "role"): "Role to add to or remove from every human member.",
     ("moderation tempban", "member"): "The member to ban.",
     ("moderation tempban", "duration"): "How long, e.g. 1h, 2d.",
     ("moderation warnings", "member"): "Whose warnings to show.",

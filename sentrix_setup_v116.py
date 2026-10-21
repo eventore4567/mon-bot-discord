@@ -161,7 +161,79 @@ MODULES: tuple[ModuleSpec, ...] = (
     )),
 )
 
+# Navigation publique demandée pour /setup. Les anciens modules restent décrits au-dessus
+# parce que leurs SectionSpec sont réutilisés : aucun moteur métier n'est supprimé, seule
+# la taxonomie visible est regroupée en quinze domaines stables.
+_LEGACY_MODULES = {module.key: module for module in MODULES}
+
+
+def _sections(*module_keys: str) -> tuple[SectionSpec, ...]:
+    """Fusionne des écrans existants sans dupliquer leurs callbacks."""
+    merged: list[SectionSpec] = []
+    seen: set[str] = set()
+    for module_key in module_keys:
+        for section in _LEGACY_MODULES[module_key].sections:
+            key = section.key
+            if key in seen:
+                key = f"{module_key}_{key}"
+            seen.add(key)
+            merged.append(SectionSpec(key, section.label, section.description, section.action))
+    return tuple(merged)
+
+
+MODULES = (
+    ModuleSpec("security", "Sécurité", "Anti-raid, anti-nuke, AutoMod et protections critiques.", _sections("security")),
+    ModuleSpec("surveillance", "Surveillance", "Journaux, invitations et suivi des activités du serveur.", _sections("logs", "invitations")),
+    ModuleSpec("moderation", "Modération", "Sanctions, avertissements, timeouts et historique.", _sections("moderation")),
+    ModuleSpec("verification", "Vérification", "CAPTCHA, portail, règlement et rôle vérifié.", _sections("verification", "rules") + ( _s("channel_access", "Accès aux salons", "Après CAPTCHA, donner accès au rôle vérifié et masquer les salons à @everyone.", "verification-channel-access"), )),
+    ModuleSpec("tickets", "Tickets", "Panels, formulaires, accès support et journaux.", _sections("tickets")),
+    ModuleSpec("staff", "Staff", "Rôles, permissions et outils réservés à l'équipe.", _sections("roles")),
+    ModuleSpec("welcome_goodbye", "Bienvenue / Départ", "Accueil, départ, autorôle et parcours membre.", _sections("members")),
+    ModuleSpec("economy", "Économie", "Monnaie, banque, boutique, inventaire et réputation.", _sections("economy")),
+    ModuleSpec("xp", "XP", "Progression, vocal, paliers, annonces et profils.", _sections("levels", "profile")),
+    ModuleSpec("games", "Jeux", "Jeux, récompenses et économie partagée.", (
+        _s("catalog", "Catalogue", "Configurer les jeux visibles et leurs règles.", "games-config"),
+        _s("rewards", "Récompenses", "Régler les gains et leurs limites quotidiennes.", "games-config"),
+        _s("permissions", "Permissions", "Contrôler qui peut lancer les jeux.", "games-config"),
+    )),
+    ModuleSpec("music", "Musique", "Lecteur vocal, salon musique et contrôles.", _sections("music")),
+    ModuleSpec("events", "Événements", "Événements planifiés, concours et notifications.", (
+        _s("calendar", "Planification", "Créer et gérer les événements du serveur.", "hint:+event"),
+        _s("giveaways", "Concours", "Configurer les concours et leurs récompenses.", "hint:+giveaway"),
+        _s("announcements", "Annonces", "Choisir les destinations et mentions.", "config:announce_channel"),
+    )),
+    ModuleSpec("ai", "IA", "Accès, réponses, images, filtrage et limites.", _sections("ai")),
+    ModuleSpec("automations", "Automatisations", "Réactions, règles de salons et notifications externes.", _sections("automation", "notifications")),
+    ModuleSpec("advanced", "Avancés", "Suggestions, réglages techniques et diagnostic global.", _sections("suggestions") + (
+        _s("diagnostic", "Diagnostic", "Vérifier les permissions, ressources et incohérences.", "diagnostic"),
+        _s("history", "Historique", "Consulter les sauvegardes et changements du setup.", "history"),
+    )),
+)
+
 MODULE_BY_KEY = {module.key: module for module in MODULES}
+# Compatibilité interne avec V117 et les sessions persistées avant cette refonte. Ces
+# alias ne sont pas exposés dans le menu public (qui parcourt MODULES), mais permettent
+# de rouvrir sans erreur une ancienne session enregistrée avec l'ancienne taxonomie.
+for _legacy_key, _legacy_module in _LEGACY_MODULES.items():
+    MODULE_BY_KEY.setdefault(_legacy_key, _legacy_module)
+
+CATEGORY_PERMISSIONS: dict[str, tuple[str, ...]] = {
+    "security": ("Gérer les messages", "Gérer les rôles", "Voir les logs d’audit"),
+    "surveillance": ("Voir les salons", "Envoyer des messages", "Voir les logs d’audit"),
+    "moderation": ("Modérer", "Expulser", "Bannir", "Gérer les messages"),
+    "verification": ("Gérer les rôles", "Gérer les salons", "Envoyer des messages"),
+    "tickets": ("Gérer les salons", "Gérer les rôles", "Envoyer des messages"),
+    "staff": ("Gérer les rôles", "Voir les logs d’audit"),
+    "welcome_goodbye": ("Envoyer des messages", "Intégrer des liens", "Gérer les rôles"),
+    "economy": ("Voir les salons", "Envoyer des messages"),
+    "xp": ("Voir les salons", "Envoyer des messages", "Gérer les rôles"),
+    "games": ("Voir les salons", "Envoyer des messages", "Ajouter des réactions"),
+    "music": ("Se connecter", "Parler", "Envoyer des messages"),
+    "events": ("Gérer les événements", "Envoyer des messages", "Mentionner les rôles"),
+    "ai": ("Envoyer des messages", "Intégrer des liens", "Joindre des fichiers"),
+    "automations": ("Gérer les messages", "Ajouter des réactions", "Envoyer des messages"),
+    "advanced": ("Gérer le serveur", "Voir les logs d’audit"),
+}
 
 
 def module_keys() -> tuple[str, ...]:
@@ -196,6 +268,11 @@ def _mention(guild: discord.Guild | None, conf: Any, key: str, *, role: bool = F
 async def _module_status(view, module_key: str) -> str:
     guild = view._guild()
     conf = await view.bot.db.get_guild_config(view.guild_id)
+    aliases = {
+        "surveillance": "logs", "staff": "roles", "welcome_goodbye": "members",
+        "xp": "levels", "automations": "automation", "advanced": "suggestions",
+    }
+    module_key = aliases.get(module_key, module_key)
     if module_key == "security":
         row = await view.bot.db.get_automod(view.guild_id)
         active = sum(1 for key in v4._CONFIG_MODULE.AUTOMOD_TOGGLE_LABELS if row and int(row[key] or 0))
@@ -289,9 +366,16 @@ async def _module_embed(view) -> discord.Embed:
     module = MODULE_BY_KEY[view._v116_module]
     section = next(s for s in module.sections if s.key == view._v116_section)
     status = await _module_status(view, module.key)
+    permissions = " · ".join(CATEGORY_PERMISSIONS.get(module.key, ())) or "Aucune permission supplémentaire"
     embed = discord.Embed(
         title=module.label,
-        description=f"{module.description}\n\n**État actuel**\n{status}\n\n**{section.label}**\n{section.description}",
+        description=(
+            f"{module.description}\n\n**État actuel**\n{status}\n\n"
+            f"**Permissions nécessaires**\n{permissions}\n\n"
+            f"**{section.label}**\n{section.description}\n\n"
+            "Les changements ne sont appliqués qu’après une action explicite dans l’écran ouvert. "
+            "Chaque assistant confirme sa sauvegarde."
+        ),
         colour=v4._CONFIG_MODULE.SETUP_COLOR_MAIN,
     )
     embed.set_footer(text=f"SentriX • Setup V116 • {module.label}")
@@ -497,6 +581,179 @@ async def _open_music_config(view, interaction: discord.Interaction) -> None:
     )
 
 
+async def _open_games_config(view, interaction: discord.Interaction) -> None:
+    """Ouvre le vrai configurateur des jeux dans /setup, sans redirection texte."""
+    cog = view.bot.get_cog("GamesSetup")
+    if cog is None or not callable(getattr(cog, "_build_home", None)):
+        return await interaction.response.send_message(
+            "Le configurateur des jeux n'est pas chargé.", ephemeral=True,
+        )
+    embed, subview = await cog._build_home(view.guild_id)
+    subview.author_id = interaction.user.id
+    message = await panels.envoyer(
+        interaction.response,
+        panels.avec_composants(panels.depuis_embed(embed), subview),
+        ephemere=True,
+    )
+    subview.message = message
+
+
+
+class _CaptchaChannelAccessView(discord.ui.View):
+    """Confirmation avant de modifier les permissions des salons du serveur."""
+
+    def __init__(self, bot, guild: discord.Guild, owner_id: int):
+        super().__init__(timeout=300)
+        self.bot, self.guild, self.owner_id = bot, guild, int(owner_id)
+        self.role = None
+        self._applying = False
+        chooser = discord.ui.RoleSelect(
+            placeholder="Rôle donnant accès après vérification", min_values=1, max_values=1,
+        )
+        chooser.callback = self.choose_role
+        self.chooser = chooser
+        self.add_item(chooser)
+        confirm = discord.ui.Button(
+            label="Confirmer les permissions des salons", style=discord.ButtonStyle.danger,
+        )
+        confirm.callback = self.confirm
+        self.add_item(confirm)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild_id != self.guild.id or interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Ce panneau appartient à un autre administrateur.", ephemeral=True)
+            return False
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("Permission Administrateur requise.", ephemeral=True)
+            return False
+        return True
+
+    async def choose_role(self, interaction: discord.Interaction) -> None:
+        self.role = self.chooser.values[0] if self.chooser.values else None
+        if self.role is None or self.role == self.guild.default_role or self.role.managed:
+            self.role = None
+            return await interaction.response.send_message(
+                "Sélectionne un rôle normal, différent de @everyone.", ephemeral=True,
+            )
+        await interaction.response.send_message(
+            f"Rôle sélectionné : {self.role.mention}. "
+            "Clique sur Confirmer pour masquer les salons à @everyone et les rendre visibles à ce rôle. "
+            "Aucune permission n'a encore été modifiée.", ephemeral=True,
+        )
+
+    async def confirm(self, interaction: discord.Interaction) -> None:
+        if self._applying:
+            return await interaction.response.send_message(
+                "La configuration est déjà en cours. Suis la progression affichée.", ephemeral=True,
+            )
+        role = self.role
+        if role is None:
+            return await interaction.response.send_message("Sélectionne d'abord le rôle vérifié.", ephemeral=True)
+        me = self.guild.me
+        if me is None or not me.guild_permissions.manage_channels:
+            return await interaction.response.send_message(
+                "SentriX doit posséder Gérer les salons.", ephemeral=True,
+            )
+        if role >= me.top_role and not me.guild_permissions.administrator:
+            return await interaction.response.send_message(
+                "Place le rôle SentriX au-dessus du rôle sélectionné.", ephemeral=True,
+            )
+        self._applying = True
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Les arrivants non vérifiés doivent conserver l'accès au portail CAPTCHA.
+        # Ne jamais masquer son salon ni sa catégorie par cette opération globale.
+        protected_ids = set()
+        try:
+            conf = await self.bot.db.get_guild_config(self.guild.id)
+            for field in ("verification_channel", "verification_channel_id",
+                          "rules_channel", "rules_channel_id"):
+                try:
+                    value = conf[field] if conf is not None else None
+                except (KeyError, IndexError, TypeError):
+                    value = None
+                if value:
+                    protected_ids.add(int(value))
+            for channel_id in tuple(protected_ids):
+                protected = self.guild.get_channel(channel_id)
+                if protected and protected.category_id:
+                    protected_ids.add(protected.category_id)
+        except Exception:
+            return await interaction.followup.send(
+                "Impossible de vérifier les salons de vérification : aucune permission modifiée.",
+                ephemeral=True,
+            )
+        # Photographier les accès AVANT toute modification de catégorie :
+        # une catégorie verrouillée en cours de route change les permissions
+        # héritées de ses salons. Ne jamais exposer les salons staff privés.
+        channels = list(self.guild.channels)
+        originally_public = {
+            channel.id for channel in channels
+            if channel.permissions_for(self.guild.default_role).view_channel
+        }
+        total = len(channels)
+        changed, skipped, unchanged, errors = 0, 0, 0, []
+        progress = await interaction.followup.send(
+            f"⏳ CAPTCHA · Configuration des accès\nRôle : {role.mention}\n"
+            f"Progression : 0/{total} salons et catégories.",
+            ephemeral=True, wait=True,
+        )
+        for index, channel in enumerate(channels, start=1):
+            if (channel.id in protected_ids or channel.id not in originally_public
+                    or not channel.permissions_for(me).manage_channels):
+                skipped += 1
+            else:
+                try:
+                    everyone = channel.overwrites_for(self.guild.default_role)
+                    verified = channel.overwrites_for(role)
+                    if everyone.view_channel is False and verified.view_channel is True:
+                        unchanged += 1
+                    else:
+                        everyone.view_channel = False
+                        verified.view_channel = True
+                        await channel.set_permissions(
+                            self.guild.default_role, overwrite=everyone,
+                            reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
+                        )
+                        await channel.set_permissions(
+                            role, overwrite=verified,
+                            reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
+                        )
+                        changed += 1
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    errors.append(f"{channel.name}: {type(exc).__name__}")
+            # Une seule mise à jour par lot de cinq évite les limites API.
+            if index == total or index % 5 == 0:
+                try:
+                    await progress.edit(content=(
+                        f"⏳ CAPTCHA · Configuration des accès\nRôle : {role.mention}\n"
+                        f"Progression : {index}/{total} · Salon : {channel.name[:60]}\n"
+                        f"Modifiés : {changed} · Déjà corrects : {unchanged} · "
+                        f"Ignorés : {skipped} · Erreurs : {len(errors)}"
+                    ))
+                except discord.HTTPException:
+                    pass
+        await progress.edit(content=(
+            f"✅ CAPTCHA · Configuration terminée\nRôle : {role.mention} · {total}/{total}\n"
+            f"Modifiés : {changed} · Déjà corrects : {unchanged} · "
+            f"Ignorés : {skipped} · Erreurs : {len(errors)}"
+            + ("\nDétails : " + "; ".join(errors[:5]) if errors else "")
+        ))
+
+
+
+async def _open_captcha_channel_access(view, interaction: discord.Interaction) -> None:
+    panel = _CaptchaChannelAccessView(view.bot, interaction.guild, interaction.user.id)
+    await interaction.response.send_message(
+        "**CAPTCHA · Accès aux salons**\n"
+        "Choisis le rôle attribué après vérification, puis confirme.\n"
+        "Le bot refuse alors Voir le salon à @everyone et l'autorise au rôle sélectionné "
+        "sur les salons existants, sans toucher aux autres permissions.\n"
+        "**Attention :** des rôles disposant d'autres autorisations explicites ou "
+        "de la permission Administrateur peuvent conserver l'accès.",
+        view=panel, ephemeral=True,
+    )
+
+
 async def _run_action(view, interaction: discord.Interaction) -> None:
     _ensure_state(view)
     module = MODULE_BY_KEY[view._v116_module]
@@ -515,6 +772,10 @@ async def _run_action(view, interaction: discord.Interaction) -> None:
         return await _open_automation(view, interaction, action.split(":", 1)[1])
     elif action == "music-config":
         return await _open_music_config(view, interaction)
+    elif action == "games-config":
+        return await _open_games_config(view, interaction)
+    elif action == "verification-channel-access":
+        return await _open_captcha_channel_access(view, interaction)
     elif action == "verification":
         _route_to_config(view, "verify_role")
     elif action == "history":

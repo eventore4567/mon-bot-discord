@@ -103,9 +103,8 @@ class UnmuteCogWiringTests(unittest.IsolatedAsyncioTestCase):
         await Moderation.unmute.callback(cog, ctx, target, raison="test")
 
         target.timeout.assert_awaited_once()
-        # Succès : confirmation courte en texte brut, plus de panneau dans le salon.
-        self.assertIsNone(ctx.send.await_args.kwargs.get("view"))
-        self.assertTrue(ctx.send.await_args.kwargs.get("content"))
+        # Succès : confirmation visible en carte native Components V2.
+        self.assertIsNotNone(ctx.send.await_args.kwargs.get("view"))
 
 
 if __name__ == "__main__":

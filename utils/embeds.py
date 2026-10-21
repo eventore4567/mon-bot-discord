@@ -293,12 +293,13 @@ def _base(
 ) -> discord.Embed:
     safe_title = clean_ui_text(title, 90, "Information")
     resolved_kind = kind or _kind_from_text(safe_title, description)
-    # Aucun colour/color sur les embeds SentriX : Discord transforme cette
-    # valeur en liseré vertical coloré sur le côté gauche. Le design officiel
-    # utilise désormais le contenu, les icônes et les composants, jamais ce trait.
+    # Les embeds legacy doivent conserver une couleur sémantique pour les
+    # états success/warning/danger/info et les contrats d'interface.
+    # Les réponses compactes modernes utilisent Components V2 sans liseré.
     embed = discord.Embed(
         title=safe_title,
         description=_panel_description(description, clean=clean_description),
+        colour=_colour(resolved_kind, colour),
         timestamp=datetime.now(timezone.utc) if timestamp else None,
     )
     if thumbnail:

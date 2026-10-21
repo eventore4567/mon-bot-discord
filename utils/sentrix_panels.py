@@ -72,19 +72,12 @@ INTENTIONS_NEUTRES = frozenset({"info", "neutral", "brand"})
 # un numéro stable et lisible ("01 · Identité", "02 · Activité", ...).
 CORE_NAME = "SENTRIX CORE"
 
-#: Les bandeaux décoratifs sont retirés de l'interface. Le premium vient des
-#: composants, des icônes et de la hiérarchie du texte — pas d'une image qui
-#: occupe le tiers du message sans rien apprendre au lecteur.
-#:
-#: Un seul interrupteur, et il gouverne les DEUX côtés : `poser_bandeau`
-#: n'affiche plus de galerie, donc `pieces_jointes_de_famille` ne joint plus
-#: de fichier, puisque les deux consultent la même condition. Les séparer
-#: serait dangereux : une galerie sans sa pièce jointe fait REFUSER le message
-#: entier par Discord, pas afficher une image cassée.
-#:
-#: La plomberie reste en place et testée. Un écran qui aurait réellement
-#: besoin d'un bandeau n'a que cette ligne à changer.
-BANDEAUX_ACTIFS = False
+#: Bannière horizontale compacte commune à tous les panneaux structurés.
+#: 1024 × 72 pixels transparents : le logo central et deux traits lumineux
+#: reprennent la teinte du domaine, sans fond ni effet de carte volumineuse.
+#: La galerie et sa pièce jointe restent gouvernées par le même interrupteur
+#: pour éviter une référence attachment:// absente qui invaliderait le message.
+BANDEAUX_ACTIFS = True
 
 #: Icône de chaque domaine. Toute commande appartient à une famille, donc
 #: toute réponse peut porter son icône — sans qu'on ait à écrire un emoji
@@ -483,15 +476,9 @@ def poser_bandeau(container, famille: str) -> bool:
     Rend ``True`` si le bandeau est posé, pour que l'appelant sache quoi
     joindre.
     """
-    # Les bandeaux sont retirés de l'interface. On rend False AVANT toute
-    # autre chose : c'est ce qui garantit que la pièce jointe disparaît avec
-    # la galerie, puisque `pieces_jointes_de_famille` consulte la même
-    # condition. Retirer la galerie sans la pièce jointe serait sans effet ;
-    # retirer la pièce jointe sans la galerie ferait REFUSER le message entier
-    # par Discord.
-    #
-    # La plomberie est conservée et testée : un écran qui aurait réellement
-    # besoin d'un bandeau n'a qu'une ligne à changer.
+    # L'image n'est affichée que si le même fichier peut être joint au message.
+    # Les deux chemins (galerie et pièce jointe) utilisent famille_joignable :
+    # aucun attachment:// orphelin ne doit empêcher une réponse Discord.
     if not BANDEAUX_ACTIFS:
         return False
     if not famille_joignable(famille):
@@ -584,11 +571,10 @@ class Panneau(discord.ui.LayoutView):
             if str(image or "").startswith("attachment://sentrix_game_")
             else None
         )
-        # Direction produit : aucune bannière décorative, même si un ancien
-        # appelant passe encore banniere=True. On garde l'argument uniquement pour
-        # compatibilité API, mais le rendu et les pièces jointes restent désactivés.
+        # Le choix explicite de chaque écran reste prioritaire ; sinon on suit
+        # l'option globale. L'absence de média n'empêche jamais le message.
         self.avec_banniere = False
-        banniere = False
+        banniere = BANDEAUX_ACTIFS if banniere is None else bool(banniere)
         # La bannière/liseré exprime l'ÉTAT (succès, erreur, attention), tandis que
         # la signature conserve le DOMAINE de la commande. Ainsi une réussite
         # économique reste immédiatement identifiable comme Économie, sans perdre
@@ -712,19 +698,19 @@ class Panneau(discord.ui.LayoutView):
         famille est celle figée à la construction : les deux côtés ne peuvent
         pas diverger.
         """
-        # Pas de bandeau décoratif. Exception métier : GIF du mini-jeu
-        # VALIDÉ et joint au même message que sa MediaGallery. Un fichier neuf
-        # est construit à chaque édition (les discord.File sont consommés).
-        # Le GIF de chaque main reste isolé : pas de cache entre joueurs.
+        # La galerie decor et son attachment:// doivent toujours voyager ensemble.
+        # Un GIF de jeu, s'il existe, s'ajoute au bandeau et ne le remplace pas.
+        fichiers = pieces_jointes_de_famille(self.famille) if self.avec_banniere else []
         animation_locale = getattr(self, "_local_game_animation", None)
         if animation_locale is not None:
             nom, octets = animation_locale
-            return [discord.File(io.BytesIO(octets), filename=nom)]
-        if self._game_gif_attachment:
+            fichiers.append(discord.File(io.BytesIO(octets), filename=nom))
+        elif self._game_gif_attachment:
             from utils.game_visuals import attachment_file_for
             gif = attachment_file_for(self._game_gif_attachment)
-            return [gif] if gif is not None else []
-        return []
+            if gif is not None:
+                fichiers.append(gif)
+        return fichiers
 
 
 def _icone_de_famille(famille: str, titre: str) -> str:

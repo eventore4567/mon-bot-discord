@@ -2916,7 +2916,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             panels.avec_composants(panel, EmergencyView(self, ctx.author.id, ctx.channel.id)),
         )
 
-    @commands.hybrid_command(name="audit", description="Auditer la configuration staff et les permissions SentriX.")
+    @commands.hybrid_command(name="staff-audit", description="Auditer la configuration staff et les permissions SentriX.")
     @checks.is_owner_or_admin_for("configuration")
     async def audit(self, ctx: commands.Context):
         await panels.envoyer(ctx, await self.audit_panel(ctx.guild))

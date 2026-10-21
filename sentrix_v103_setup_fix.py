@@ -81,10 +81,8 @@ def _replace_setup_slash(bot) -> bool:
         return False
 
     tree = bot.tree
-    try:
-        tree.remove_command("setup", type=discord.AppCommandType.chat_input)
-    except TypeError:
-        tree.remove_command("setup")
+    # /setup est la porte d'entrée principale de SentriX : ne jamais la retirer
+    # lors de la reconstruction de /config.
 
     try:
         group = tree.get_command("config", type=discord.AppCommandType.chat_input)
@@ -108,7 +106,6 @@ def _replace_setup_slash(bot) -> bool:
         ("bienvenue", "👋 Messages de bienvenue et autorôles.", "welcome", False),
         ("moderation", "⚖️ Sanctions et autorisations staff.", "moderation", False),
         ("niveaux", "⭐ XP, niveaux et annonces sur activation.", "levels", False),
-        ("diagnostic", "🔧 Analyser les problèmes de configuration.", None, True),
     )
 
     def make_callback(name: str, category: str | None, diagnostic: bool):
@@ -141,6 +138,34 @@ def _replace_setup_slash(bot) -> bool:
         config_callback._sentrix_setup_authority = "configuration-v114"
         return config_callback
 
+    # Discord refuse un groupe possédant plus de 25 enfants directs.
+    # Le diagnostic reste disponible depuis /setup et son panneau interactif.
+    # Éviter une 26e entrée sous /config et préserver les commandes historiques.
+    planned = {name for name, *_ in routes}
+    old_commands = [command for command in group.commands if command.name not in planned]
+    needed = len(old_commands) + len(planned) - 25
+    if needed > 0:
+        advanced = group.get_command("advanced")
+        if advanced is None:
+            advanced = app_commands.Group(
+                name="advanced",
+                description="Réglages complémentaires du serveur.",
+            )
+            needed += 1  # Le nouveau sous-groupe occupe lui-même un emplacement.
+        if not isinstance(advanced, app_commands.Group):
+            logger.error("V103 : /config advanced est occupé par une commande.")
+            return False
+        movable = [command for command in old_commands if command is not advanced]
+        if needed > len(movable) or len(advanced.commands) + needed > 25:
+            logger.error("V103 : impossible de répartir les sous-commandes /config sans perte.")
+            return False
+        for command in movable[-needed:]:
+            group.remove_command(command.name)
+            advanced.add_command(command)
+        if group.get_command("advanced") is None:
+            group.add_command(advanced)
+        logger.info("V103 : %s réglages hérités déplacés dans /config advanced.", needed)
+
     for name, description, category, diagnostic in routes:
         if group.get_command(name) is not None:
             group.remove_command(name)
@@ -150,12 +175,37 @@ def _replace_setup_slash(bot) -> bool:
             callback=make_callback(name, category, diagnostic),
         ))
 
+    # Weather est retirée uniquement du menu slash (la commande +weather reste).
+    # /afk est importante et doit garder sa racine directe.
+    weather = tree.get_command("weather", type=discord.AppCommandType.chat_input)
+    if weather is not None:
+        tree.remove_command("weather", type=discord.AppCommandType.chat_input)
+        logger.info("V103 : /weather retirée du menu slash ; +weather conservée.")
+
+    # Si nécessaire, ranger /translate dans /user pour respecter 100 racines.
+    if len(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)) > 100:
+        destination = tree.get_command("user", type=discord.AppCommandType.chat_input)
+        translate = tree.get_command("translate", type=discord.AppCommandType.chat_input)
+        if (isinstance(destination, app_commands.Group)
+                and isinstance(translate, app_commands.Command)
+                and destination.get_command("translate") is None
+                and len(destination.commands) < 25):
+            tree.remove_command("translate", type=discord.AppCommandType.chat_input)
+            try:
+                destination.add_command(translate)
+            except Exception:
+                tree.add_command(translate)
+                logger.exception("V103 : déplacement de /translate impossible.")
+            else:
+                logger.info("V103 : /translate regroupée sous /user translate.")
+
     roots = list(tree.get_commands(guild=None, type=discord.AppCommandType.chat_input))
     if len(roots) > 100:
-        logger.error("V103 : /config dépasse le budget global : %s/100 racines.", len(roots))
+        logger.error("V103 : budget global dépassé : %s/100 racines ; restantes=%s",
+                     len(roots), ", ".join(sorted(command.name for command in roots)))
         return False
 
-    logger.info("V103 : /config publie 8 centres ; Surveillance accessible via la catégorie de l'accueil.")
+    logger.info("V103 : /config publie 7 centres ; Surveillance accessible via la catégorie de l'accueil.")
     return True
 
 

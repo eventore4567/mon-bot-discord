@@ -24,10 +24,10 @@ GAME_COMMANDS = frozenset({
 })
 
 NORMAL_DIRECT_COMMANDS = frozenset({
-    "help", "setup", "ping", "avatar", "userinfo", "afk", "setprefix", "setmodrole",
+    "help", "setup", "ping", "avatar", "userinfo", "afk", 
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "modview", "clear",
     "snipe", "editsnipe",
-    "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
+    "lock", "unlock", "clearwarnings", "slowmode", "nickname",
     "giverole", "removerole",
     "security", "antiraid", "antinuke", "panic", "syncbl",
     # Les treize bascules AutoMod, et non deux. Mesuré sur le bot booté le
@@ -164,6 +164,9 @@ MERGED_COMMANDS = (
 # Annoncer dans l'aide une commande volontairement retirée est exactement le
 # « vieux nom obsolète affiché » qu'il faut éviter.
 HELP_VISIBLE_EXTRA_COMMANDS = frozenset({
+    # Réglages historiques toujours utilisables et recherchables dans +help,
+    # mais pas des commandes métiers de la surface directe principale.
+    "setprefix", "setmodrole", "resetnick",
     # Interrupteurs de système, 2026-09-26. cogs/feature_systems.py écrit noir
     # sur blanc que « les interrupteurs doivent TOUJOURS rester accessibles aux
     # administrateurs, sinon +level-system off bloquerait lui-même
@@ -278,12 +281,50 @@ def apply_surface(bot: commands.Bot) -> None:
             command.hidden = True
         elif name in PRIVATE_OWNER_COMMANDS:
             command.hidden = True
+        elif name in MERGED_COMMAND_TARGETS and name not in HELP_VISIBLE_EXTRA_COMMANDS:
+            # Les anciennes routes fusionnées restent exécutables avec +nom,
+            # mais leur présence dans le catalogue slash ne doit pas les
+            # réafficher par erreur dans +help.
+            command.hidden = True
         elif name in direct:
             command.hidden = False
         elif name in PURE_DUPLICATE_COMMANDS:
             continue
         else:
             command.hidden = True
+
+    # Préserver les commandes préfixées tout en respectant le plafond de 100
+    # racines slash sur la surface intermédiaire utilisée par les audits.
+    # /afk reste directement accessible, comme demandé.
+    try:
+        from discord import app_commands
+        import discord
+        tree = bot.tree
+        roots = tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)
+        if len(roots) > 100:
+            weather = tree.get_command("weather", type=discord.AppCommandType.chat_input)
+            if weather is not None:
+                tree.remove_command("weather", type=discord.AppCommandType.chat_input)
+                logger.info("Surface intermédiaire : /weather masquée, +weather conservée.")
+        roots = tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)
+        if len(roots) > 100:
+            translation = tree.get_command("translate", type=discord.AppCommandType.chat_input)
+            group = next((tree.get_command(name, type=discord.AppCommandType.chat_input)
+                          for name in ("utility", "user")
+                          if isinstance(tree.get_command(name, type=discord.AppCommandType.chat_input), app_commands.Group)
+                          and len(tree.get_command(name, type=discord.AppCommandType.chat_input).commands) < 25
+                          and tree.get_command(name, type=discord.AppCommandType.chat_input).get_command("translate") is None), None)
+            if isinstance(translation, app_commands.Command) and group is not None:
+                tree.remove_command("translate", type=discord.AppCommandType.chat_input)
+                try:
+                    group.add_command(translation)
+                except Exception:
+                    tree.add_command(translation)
+                    logger.exception("Impossible de regrouper /translate.")
+                else:
+                    logger.info("Surface intermédiaire : /translate déplacée sous /%s.", group.name)
+    except Exception:
+        logger.exception("Normalisation des racines slash ignorée ; les commandes préfixées sont préservées.")
 
     help_command = bot.get_command("help")
     if help_command is not None:

@@ -49,10 +49,10 @@ class DuplicateMessageWindow:
                 break
             self._hits.popitem(last=False)
 
-        # Trois réponses courtes (« mdr », « oui », « lol », « ok ») ne
+        # Trois réponses très courtes (« mdr », « oui », « lol », « ok ») ne
         # constituent pas un spam à elles seules. Le compteur de débit
         # général continue de détecter un véritable flood de ces messages.
-        if len(value) < 12:
+        if len(value) < 8:
             return False
 
         # La troncature aux 300 premiers caractères fusionnait des textes

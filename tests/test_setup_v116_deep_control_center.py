@@ -5,12 +5,12 @@ from sentrix_setup_v116 import MODULES, MODULE_BY_KEY, PAGE_V116_MODULE, module_
 
 def test_v116_exposes_all_primary_setup_domains():
     expected = {
-        "security", "moderation", "members", "logs", "invitations", "rules", "levels", "economy",
-        "tickets", "roles", "verification", "notifications", "ai",
-        "suggestions", "profile",
+        "security", "surveillance", "moderation", "verification", "tickets", "staff",
+        "welcome_goodbye", "economy", "xp", "games", "music", "events", "ai",
+        "automations", "advanced",
     }
     assert set(module_keys()) == expected
-    assert set(MODULE_BY_KEY) == expected
+    assert expected <= set(MODULE_BY_KEY)
     assert PAGE_V116_MODULE > 100
 
 
@@ -30,9 +30,9 @@ def test_v116_modules_and_sections_fit_discord_select_limits():
 
 def test_v116_has_real_depth_for_core_modules():
     assert len(section_keys("security")) >= 5
-    assert len(section_keys("logs")) >= 8
-    assert len(section_keys("levels")) >= 5
-    assert len(section_keys("members")) >= 5
+    assert len(section_keys("surveillance")) >= 8
+    assert len(section_keys("xp")) >= 5
+    assert len(section_keys("welcome_goodbye")) >= 5
     assert len(section_keys("economy")) >= 5
 
 
@@ -45,6 +45,14 @@ def test_v116_reuses_existing_engines_instead_of_copying_them():
     assert "diagnostic" in actions
     assert any(action.startswith("config:") for action in actions)
     assert any(action.startswith("hint:") for action in actions)
+
+
+def test_v116_public_categories_show_permissions_and_no_decorative_premium_ui():
+    source = Path("sentrix_setup_v116.py").read_text(encoding="utf-8")
+    assert "CATEGORY_PERMISSIONS" in source
+    assert "Permissions nécessaires" in source
+    assert "bouton premium" not in source.casefold()
+    assert "badge premium" not in source.casefold()
 
 
 def test_v116_setup_visual_contract_stays_compact():

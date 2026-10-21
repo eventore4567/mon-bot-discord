@@ -155,7 +155,7 @@ def test_help_root_is_preserved_by_final_slash_rebuild():
     assert '"aide"' not in preserved_line
 
 
-def test_final_rebuild_removes_legacy_aide_but_keeps_help():
+def test_final_rebuild_preserves_aide_and_removes_legacy_help_alias():
     source = (ROOT / "sentrix_v95_runtime.py").read_text(encoding="utf-8")
 
     direct_line = source.split("DIRECT_ROOTS =", 1)[1].split("\n", 1)[0]
@@ -163,7 +163,9 @@ def test_final_rebuild_removes_legacy_aide_but_keeps_help():
 
     assert '"help"' in direct_line
     assert '"help"' in preserved_line
-    assert 'for name in ("aide",):' in source
+    # La surface finale française utilise /aide ; /help reste une commande
+    # préfixée et son alias slash historique est retiré.
+    assert 'for name in ("help",):' in source
 
 
 def test_legacy_aide_is_removed_after_all_prepare_layers_before_audit():

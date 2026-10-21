@@ -124,18 +124,16 @@ def build_hierarchy_refusal(message: str) -> discord.ui.LayoutView | None:
         solution = "Demande à un responsable disposant d'un rôle plus élevé."
     else:
         return None
-    view = discord.ui.LayoutView(timeout=None)
-    card = discord.ui.Container(accent_colour=discord.Colour(0xA77768))
-    card.add_item(discord.ui.TextDisplay(
-        f"**{heading}**\n{explanation}"
-    ))
-    card.add_item(discord.ui.Separator())
-    card.add_item(discord.ui.TextDisplay(f"**🔧 Correction** · {solution}"))
-    card.add_item(discord.ui.TextDisplay(
-        "-# Aucune sanction appliquée · Respect de la hiérarchie Discord"
-    ))
-    view.add_item(card)
-    return view
+    # Conserver une véritable carte SentriX structurée : les refus de hiérarchie
+    # doivent être explicites et ne jamais être aplatis en erreur texte.
+    from utils import sentrix_panels as panels
+    return panels.Panneau(
+        titre=heading.replace("🛑 ", "").replace("Action refusée", "Action refusée · Action impossible"),
+        sous_titre=explanation,
+        sections=(panels.Section("Comment corriger", texte=solution),),
+        kind="warning",
+        pied="Aucune sanction appliquée · Respect de la hiérarchie Discord",
+    )
 
 
 __all__ = [

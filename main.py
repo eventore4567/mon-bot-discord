@@ -259,6 +259,10 @@ PUBLIC_COMMANDS = frozenset({
     "bot-status", "server-growth", "command-stats", "latency", "changelog",
     "feedback", "botinfo",
     # Mini-jeux
+    # Jeux sociaux et Fun : alignes avec la source de permissions runtime.
+    "bossfight", "doors", "emojiorder", "fight", "fun", "hug", "kiss",
+    "cuddle", "pat", "poke", "slap", "tickle", "highfive", "wave",
+    "dance", "compliment", "roast", "hack", "scan", "aura", "ship",
     "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
     "blackjack", "slots",
     "coinflip", "dice", "luckyroll", "highlow", "memory", "reaction",
