@@ -699,19 +699,19 @@ class Panneau(discord.ui.LayoutView):
         famille est celle figée à la construction : les deux côtés ne peuvent
         pas diverger.
         """
-        # Pas de bandeau décoratif. Exception métier : GIF du mini-jeu
-        # VALIDÉ et joint au même message que sa MediaGallery. Un fichier neuf
-        # est construit à chaque édition (les discord.File sont consommés).
-        # Le GIF de chaque main reste isolé : pas de cache entre joueurs.
+        # La galerie decor et son attachment:// doivent toujours voyager ensemble.
+        # Un GIF de jeu, s'il existe, s'ajoute au bandeau et ne le remplace pas.
+        fichiers = pieces_jointes_de_famille(self.famille) if self.avec_banniere else []
         animation_locale = getattr(self, "_local_game_animation", None)
         if animation_locale is not None:
             nom, octets = animation_locale
-            return [discord.File(io.BytesIO(octets), filename=nom)]
-        if self._game_gif_attachment:
+            fichiers.append(discord.File(io.BytesIO(octets), filename=nom))
+        elif self._game_gif_attachment:
             from utils.game_visuals import attachment_file_for
             gif = attachment_file_for(self._game_gif_attachment)
-            return [gif] if gif is not None else []
-        return []
+            if gif is not None:
+                fichiers.append(gif)
+        return fichiers
 
 
 def _icone_de_famille(famille: str, titre: str) -> str:
