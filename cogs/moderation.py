@@ -1387,18 +1387,20 @@ class Moderation(commands.Cog):
             except (discord.NotFound, discord.HTTPException, discord.ClientException):
                 pass
 
-        invocation_id = getattr(getattr(ctx, "message", None), "id", None) if is_prefix else None
-        history_limit = requested + (1 if is_prefix else 0) + len(protected_ids)
-        history = [message async for message in ctx.channel.history(limit=history_limit)]
-
+        invocation = getattr(ctx, "message", None) if is_prefix else None
+        invocation_id = getattr(invocation, "id", None)
+        # Les N messages demandés sont distincts du message +clear lui-même.
+        # Cette commande doit toujours être supprimée, même si elle n'apparaît
+        # plus dans la fenêtre d'historique à cause de nouveaux messages.
         candidates: list[discord.Message] = []
-        for message in history:
-            message_id = int(message.id)
-            if message_id in protected_ids:
+        async for message in ctx.channel.history(limit=requested + len(protected_ids) + (1 if is_prefix else 0)):
+            if message.id in protected_ids or message.id == invocation_id:
                 continue
             candidates.append(message)
-            if len(candidates) >= requested + (1 if is_prefix else 0):
+            if len(candidates) >= requested:
                 break
+        if invocation is not None and invocation_id not in protected_ids:
+            candidates.append(invocation)
 
         log_service.mark_purged(int(message.id) for message in candidates)
 
