@@ -1368,6 +1368,11 @@ class Moderation(commands.Cog):
 
         is_prefix = ctx.interaction is None
         protected_ids: set[int] = set()
+        progress = None
+        if is_prefix:
+            # Accusé de réception immédiat pendant les appels API de purge.
+            progress = await ctx.channel.send("Suppression des messages en cours…")
+            protected_ids.add(int(progress.id))
 
         if ctx.interaction is not None:
             # Les wrappers slash SentriX peuvent déjà avoir defer() avant d'entrer ici.
@@ -1383,7 +1388,7 @@ class Moderation(commands.Cog):
                 pass
 
         invocation_id = getattr(getattr(ctx, "message", None), "id", None) if is_prefix else None
-        history_limit = requested + (1 if is_prefix else len(protected_ids))
+        history_limit = requested + (1 if is_prefix else 0) + len(protected_ids)
         history = [message async for message in ctx.channel.history(limit=history_limit)]
 
         candidates: list[discord.Message] = []
@@ -1427,7 +1432,11 @@ class Moderation(commands.Cog):
         texte = f"{len(messages)} message(s) supprimé(s)."
         if is_prefix:
             # Réponse courte, sans embed ni bloc visuel. Elle disparaît rapidement.
-            await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
+            if progress is not None:
+                await progress.edit(content=texte)
+                await progress.delete(delay=4)
+            else:
+                await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
         else:
             # texte_court sait utiliser la réponse différée de /clear et garde la
             # confirmation éphémère, sans dépendre directement de response.send_message.
