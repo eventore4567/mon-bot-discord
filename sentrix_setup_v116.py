@@ -676,38 +676,55 @@ class _CaptchaChannelAccessView(discord.ui.View):
                 "Impossible de vérifier les salons de vérification : aucune permission modifiée.",
                 ephemeral=True,
             )
-        changed, skipped, errors = 0, 0, []
-        for channel in self.guild.channels:
-            if channel.id in protected_ids:
-                skipped += 1
-                continue
-            if not channel.permissions_for(me).manage_channels:
-                skipped += 1
-                continue
-            try:
-                everyone = channel.overwrites_for(self.guild.default_role)
-                verified = channel.overwrites_for(role)
-                if everyone.view_channel is False and verified.view_channel is True:
-                    continue
-                everyone.view_channel = False
-                verified.view_channel = True
-                await channel.set_permissions(
-                    self.guild.default_role, overwrite=everyone,
-                    reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
-                )
-                await channel.set_permissions(
-                    role, overwrite=verified,
-                    reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
-                )
-                changed += 1
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                errors.append(f"{channel.name}: {type(exc).__name__}")
-        await interaction.followup.send(
-            f"Terminé : {changed} salons/catégories modifiés, "
-            f"{skipped} ignorés faute de permission, {len(errors)} erreurs."
-            + (" Erreurs : " + "; ".join(errors[:5]) if errors else ""),
-            ephemeral=True,
+        channels = list(self.guild.channels)
+        total = len(channels)
+        changed, skipped, unchanged, errors = 0, 0, 0, []
+        progress = await interaction.followup.send(
+            f"⏳ CAPTCHA · Configuration des accès\nRôle : {role.mention}\n"
+            f"Progression : 0/{total} salons et catégories.",
+            ephemeral=True, wait=True,
         )
+        for index, channel in enumerate(channels, start=1):
+            if channel.id in protected_ids or not channel.permissions_for(me).manage_channels:
+                skipped += 1
+            else:
+                try:
+                    everyone = channel.overwrites_for(self.guild.default_role)
+                    verified = channel.overwrites_for(role)
+                    if everyone.view_channel is False and verified.view_channel is True:
+                        unchanged += 1
+                    else:
+                        everyone.view_channel = False
+                        verified.view_channel = True
+                        await channel.set_permissions(
+                            self.guild.default_role, overwrite=everyone,
+                            reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
+                        )
+                        await channel.set_permissions(
+                            role, overwrite=verified,
+                            reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
+                        )
+                        changed += 1
+                except (discord.Forbidden, discord.HTTPException) as exc:
+                    errors.append(f"{channel.name}: {type(exc).__name__}")
+            # Une seule mise à jour par lot de cinq évite les limites API.
+            if index == total or index % 5 == 0:
+                try:
+                    await progress.edit(content=(
+                        f"⏳ CAPTCHA · Configuration des accès\nRôle : {role.mention}\n"
+                        f"Progression : {index}/{total} · Salon : {channel.name[:60]}\n"
+                        f"Modifiés : {changed} · Déjà corrects : {unchanged} · "
+                        f"Ignorés : {skipped} · Erreurs : {len(errors)}"
+                    ))
+                except discord.HTTPException:
+                    pass
+        await progress.edit(content=(
+            f"✅ CAPTCHA · Configuration terminée\nRôle : {role.mention} · {total}/{total}\n"
+            f"Modifiés : {changed} · Déjà corrects : {unchanged} · "
+            f"Ignorés : {skipped} · Erreurs : {len(errors)}"
+            + ("\nDétails : " + "; ".join(errors[:5]) if errors else "")
+        ))
+
 
 
 async def _open_captcha_channel_access(view, interaction: discord.Interaction) -> None:
