@@ -211,19 +211,19 @@ async function renderSecurity() {
         <span class="badge ${panic.active ? 'bad' : 'ok'}">${panic.active ? 'URGENCE ACTIVE' : 'URGENCE INACTIVE'}</span>
       </div>
       <div class="toolbar" style="margin-top:12px">
-        <button class="btn ${panic.active ? '' : 'danger'}" type="button" id="securityPanic" ${panic.owner_controls ? '' : 'disabled'}>${panic.active ? 'Restaurer le serveur' : 'Activer le mode urgence'}</button>
+        <button class="btn ${panic.active ? '' : 'danger'}" type="button" id="securityPanic" ${panic.owner_controls ? '' : 'disabled'}>${panic.active ? 'Restaurer le serveur' : 'Activer PANIC'}</button>
         ${panic.active && panic.created_at ? `<small>Actif depuis ${esc(when(panic.created_at))}${panic.created_by ? ' · par ' + esc(panic.created_by) : ''}</small>` : ''}
         ${!panic.owner_controls ? '<small>Réservé au propriétaire du serveur ou du bot.</small>' : ''}
       </div>
     </section>
 
     <section class="card">
-      <div class="card-head"><div><h2>Aperçu sans action</h2><p>Aucune action Discord n’est exécutée : aperçu de ce que SentriX détecterait et pourrait bloquer maintenant.</p></div><span class="badge blue">Lecture seule</span></div>
+      <div class="card-head"><div><h2>Simulation / dry-run</h2><p>Aucune action Discord n’est exécutée : aperçu de ce que SentriX détecterait et pourrait bloquer maintenant.</p></div><span class="badge blue">Lecture seule</span></div>
       <div class="list" style="margin-top:12px">${simulationRows}</div>
     </section>
 
     <section class="card">
-      <div class="card-head"><div><h2>Historique de sécurité</h2><p>Incidents graves, mode urgence, pièces dangereuses et actions automatiques récentes.</p></div><span class="badge">${plural(timeline.length, 'événement')}</span></div>
+      <div class="card-head"><div><h2>Timeline sécurité</h2><p>Incidents graves, mode urgence, pièces dangereuses et actions automatiques récentes.</p></div><span class="badge">${plural(timeline.length, 'événement')}</span></div>
       <div class="list compact" style="margin-top:12px">${timelineRows}</div>
     </section>
 
@@ -284,9 +284,9 @@ async function renderSecurity() {
             <small>Le bypass concerne uniquement <b>${esc(policy.label || policyKey)}</b>.</small>
           </div>
           <div class="field full">
-            <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — contrôle renforcé</label></div>
+            <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — bypass interdit</label></div>
             <select id="securityPolicyStrictChannels" multiple size="7">${policyChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
-            <small>Dans ces salons, la protection s'applique aux membres non exemptés, même si le salon est ignoré ailleurs. Les rôles et membres exemptés gardent leur autorisation.</small>
+            <small>Dans ces salons, la protection normale prévaut : salon strict → rôle bypass → protection normale. Utiliser ce réglage uniquement pour les salons exigeant une protection renforcée.</small>
           </div>
         </div>
         <div class="toolbar">
