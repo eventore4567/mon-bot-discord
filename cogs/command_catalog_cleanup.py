@@ -290,6 +290,39 @@ def apply_surface(bot: commands.Bot) -> None:
         else:
             command.hidden = True
 
+    # Préserver les commandes préfixées tout en respectant le plafond de 100
+    # racines slash sur la surface intermédiaire utilisée par les audits.
+    # /afk reste directement accessible, comme demandé.
+    try:
+        from discord import app_commands
+        import discord
+        tree = bot.tree
+        roots = tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)
+        if len(roots) > 100:
+            weather = tree.get_command("weather", type=discord.AppCommandType.chat_input)
+            if weather is not None:
+                tree.remove_command("weather", type=discord.AppCommandType.chat_input)
+                logger.info("Surface intermédiaire : /weather masquée, +weather conservée.")
+        roots = tree.get_commands(guild=None, type=discord.AppCommandType.chat_input)
+        if len(roots) > 100:
+            translation = tree.get_command("translate", type=discord.AppCommandType.chat_input)
+            group = next((tree.get_command(name, type=discord.AppCommandType.chat_input)
+                          for name in ("utility", "user")
+                          if isinstance(tree.get_command(name, type=discord.AppCommandType.chat_input), app_commands.Group)
+                          and len(tree.get_command(name, type=discord.AppCommandType.chat_input).commands) < 25
+                          and tree.get_command(name, type=discord.AppCommandType.chat_input).get_command("translate") is None), None)
+            if isinstance(translation, app_commands.Command) and group is not None:
+                tree.remove_command("translate", type=discord.AppCommandType.chat_input)
+                try:
+                    group.add_command(translation)
+                except Exception:
+                    tree.add_command(translation)
+                    logger.exception("Impossible de regrouper /translate.")
+                else:
+                    logger.info("Surface intermédiaire : /translate déplacée sous /%s.", group.name)
+    except Exception:
+        logger.exception("Normalisation des racines slash ignorée ; les commandes préfixées sont préservées.")
+
     help_command = bot.get_command("help")
     if help_command is not None:
         help_command.hidden = False
