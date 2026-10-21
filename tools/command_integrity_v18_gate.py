@@ -120,7 +120,7 @@ async def run() -> int:
             errors.append("generateur d'alias dynamiques V16 encore actif")
 
         # Slash : noms uniques et budget Discord global respecté.
-        app_roots = list(bot.tree.get_commands())
+        app_roots = list(bot.tree.get_commands(type=discord.AppCommandType.chat_input))
         app_names = [str(item.name).casefold() for item in app_roots]
         if len(app_names) != len(set(app_names)):
             errors.append("racines slash dupliquees")
