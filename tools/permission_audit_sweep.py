@@ -347,6 +347,10 @@ async def _run_slash(bot, guild, root: str, options: list, persona: dict) -> tup
     text = harness.visible_text(harness.CALLS[since:])
     if _Audit.reached:
         return "autorise", text, False
+    # /poll ouvre un formulaire natif et n'appelle pas Command.callback.
+    # Un modal confirmé par Discord est une réussite du transport, pas un refus.
+    if root == "poll" and interaction.response.type == discord.InteractionResponseType.modal:
+        return "autorise", text, False
     return "refuse", text, bool(reports) or "SXR-CMD-" in text
 
 
@@ -363,6 +367,14 @@ async def audit(
 
     bot = await harness.boot()
     guild = await harness.setup_world(bot)
+    # Le scenario module-on inclut la configuration metier obligatoire.
+    # Sans salon, /suggestions submit refuse legitiment tous les membres.
+    from services import suggestions as suggestion_service
+    await suggestion_service.ensure_schema(bot.db)
+    await suggestion_service.save_settings(
+        bot.db, harness.GID, actor_id=harness.AUTHOR_ID,
+        now=int(time.time()), channel_id=harness.CID,
+    )
     command_sweep._SWEEP_BOT = bot
     PERSONAS["proprietaire-sentrix"]["author_id"] = PRIMARY_CREATOR_ID
     guild._add_member(discord.Member(data=harness.member_payload(PRIMARY_CREATOR_ID, "jayden-owner", [harness.MEMBER_ROLE_ID]), guild=guild, state=bot._connection))
