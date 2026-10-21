@@ -278,6 +278,11 @@ def apply_surface(bot: commands.Bot) -> None:
             command.hidden = True
         elif name in PRIVATE_OWNER_COMMANDS:
             command.hidden = True
+        elif name in MERGED_COMMAND_TARGETS and name not in HELP_VISIBLE_EXTRA_COMMANDS:
+            # Les anciennes routes fusionnées restent exécutables avec +nom,
+            # mais leur présence dans le catalogue slash ne doit pas les
+            # réafficher par erreur dans +help.
+            command.hidden = True
         elif name in direct:
             command.hidden = False
         elif name in PURE_DUPLICATE_COMMANDS:
