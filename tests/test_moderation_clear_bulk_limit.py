@@ -97,7 +97,7 @@ def test_clear_protects_the_slash_original_response_from_deletion():
 
     assert "await ctx.interaction.original_response()" in body
     assert "protected_ids.add(int(original.id))" in body
-    assert "if message_id in protected_ids:" in body
+    assert "message.id in protected_ids" in body
     assert "ctx.channel.purge(" not in body
 
 
