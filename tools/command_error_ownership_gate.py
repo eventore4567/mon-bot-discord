@@ -72,14 +72,16 @@ def main() -> int:
     # le filtre de suggestions de command_response_guard.
     canonical = ROOT / EXPECTED_OWNER
     canonical_text = canonical.read_text(encoding="utf-8") if canonical.exists() else ""
+    # Politique courante : les commandes inconnues restent silencieuses.
+    # Le handler final doit intercepter CommandNotFound avant tout délégué.
     canonical_owns = (
         "isinstance(root, commands.CommandNotFound)" in canonical_text
-        and "await _plain_send(ctx, _unknown_command_text(self, ctx))" in canonical_text
+        and "return None" in canonical_text.split("if isinstance(root, commands.CommandNotFound):", 1)[-1].split("result = base", 1)[0]
         and "bot.on_command_error = MethodType(exact_error, bot)" in canonical_text
     )
     foreign = [(path, line) for path, line in responders if path != EXPECTED_OWNER]
     if not canonical_owns:
-        errors.append("error_experience_v3 ne possède pas entièrement la réponse CommandNotFound")
+        errors.append("le propriétaire final ne neutralise pas CommandNotFound")
     if foreign:
         rendered = ", ".join(f"{path}:{line}" for path, line in foreign)
         errors.append(f"répondant CommandNotFound concurrent détecté: {rendered}")
