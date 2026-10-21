@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import discord
 import inspect
 import os
 import pathlib
@@ -223,7 +224,7 @@ async def run() -> int:
         except Exception as exc:
             errors.append(f"réaffirmation V110 impossible: {type(exc).__name__}: {exc}")
 
-        app_roots = list(bot.tree.get_commands())
+        app_roots = list(bot.tree.get_commands(type=discord.AppCommandType.chat_input))
         app_root_names = {str(command.name).casefold() for command in app_roots}
 
         # V110 est l'autorité sur les racines slash publiques. L'ancien audit comparait
