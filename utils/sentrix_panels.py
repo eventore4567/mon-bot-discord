@@ -476,15 +476,9 @@ def poser_bandeau(container, famille: str) -> bool:
     Rend ``True`` si le bandeau est posé, pour que l'appelant sache quoi
     joindre.
     """
-    # Les bandeaux sont retirés de l'interface. On rend False AVANT toute
-    # autre chose : c'est ce qui garantit que la pièce jointe disparaît avec
-    # la galerie, puisque `pieces_jointes_de_famille` consulte la même
-    # condition. Retirer la galerie sans la pièce jointe serait sans effet ;
-    # retirer la pièce jointe sans la galerie ferait REFUSER le message entier
-    # par Discord.
-    #
-    # La plomberie est conservée et testée : un écran qui aurait réellement
-    # besoin d'un bandeau n'a qu'une ligne à changer.
+    # L'image n'est affichée que si le même fichier peut être joint au message.
+    # Les deux chemins (galerie et pièce jointe) utilisent famille_joignable :
+    # aucun attachment:// orphelin ne doit empêcher une réponse Discord.
     if not BANDEAUX_ACTIFS:
         return False
     if not famille_joignable(famille):
