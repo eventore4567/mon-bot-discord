@@ -16,7 +16,7 @@ from utils import sentrix_panels
 
 logger = logging.getLogger("bot.log-center")
 NO_MENTIONS = discord.AllowedMentions.none()
-PER_PAGE = 3
+PER_PAGE = 2
 
 TYPES = {
     "member_warn": ("Avertissement", "⚠️"),
@@ -225,6 +225,7 @@ def _history_member_header(
         ))
     else:
         panel.add_item(discord.ui.TextDisplay(header))
+    panel.add_item(discord.ui.Separator())
     panel.add_item(discord.ui.TextDisplay(
         "**Modération · Récapitulatif**\n"
         f"{counters['warn']} avert. · {counters['mute']} timeouts · "
@@ -271,6 +272,7 @@ def _history_event_panel(
         f"**{emoji} {title}**   ·   <t:{timestamp}:R>\n"
         f"-# <t:{timestamp}:f> · #{index:02d}"
     ))
+    panel.add_item(discord.ui.Separator())
     if expanded:
         detail = _history_detail(record.get("description"))
         moderator = (
@@ -283,7 +285,7 @@ def _history_event_panel(
     else:
         panel.add_item(discord.ui.TextDisplay(_history_brief(record)))
     button = discord.ui.Button(
-        label="Réduire" if expanded else "Détails",
+        label="Masquer les détails" if expanded else "Voir les détails",
         emoji="🔼" if expanded else "🔎",
         style=discord.ButtonStyle.secondary,
     )
@@ -386,11 +388,12 @@ class MemberHistoryView(discord.ui.LayoutView):
             key: sum(counts.get(event, 0) for event in events)
             for key, events in COUNTERS.items()
         }
-        self._banner_attached = sentrix_panels.poser_bandeau(self, "moderation")
-        self.add_item(_history_member_header(
+        profile = _history_member_header(
             username, counters, total=sum(counts.values()),
             member=member, target_id=self.target_id,
-        ))
+        )
+        self._banner_attached = sentrix_panels.poser_bandeau(profile, "moderation")
+        self.add_item(profile)
 
         names = {
             "journal": ("📋 Journal d'activité", "Tous les événements du membre"),
