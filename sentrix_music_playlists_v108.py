@@ -277,6 +277,13 @@ def _install_playlist_group(bot, music_cog) -> None:
             display, key = normalize_playlist_name(nom)
         except ValueError as exc:
             return await _send(music_cog, ctx, "Nom invalide", str(exc), kind="danger")
+        # Vérifier la destination AVANT une recherche réseau : une playlist
+        # absente ou pleine ne doit pas faire attendre le membre inutilement.
+        row = await _fetch_playlist(bot, ctx.guild.id, ctx.author.id, key)
+        if not row:
+            return await _send(music_cog, ctx, "Playlist introuvable", f"Créez d’abord **{display}** avec la commande de création de playlist.", kind="danger")
+        if len(decode_playlist_items(row["items_json"])) >= _MAX_TRACKS:
+            return await _send(music_cog, ctx, "Playlist pleine", f"Retirez un titre : cette playlist a déjà atteint la limite de {_MAX_TRACKS} titres.", kind="danger")
         if ctx.interaction and not ctx.interaction.response.is_done():
             await ctx.defer()
         _accuser_reception(ctx)
@@ -284,6 +291,9 @@ def _install_playlist_group(bot, music_cog) -> None:
             resolved = await music_cog.manager.resolve(recherche, requested_by=ctx.author.id)
         except MusicEngineError as exc:
             return await panels.envoyer(ctx, panels.depuis_embed(await music_cog._error_embed(ctx.guild.id, exc)))
+
+        if not resolved.tracks:
+            return await _send(music_cog, ctx, "Aucun titre trouvé", "Essayez un autre nom ou un autre lien. La playlist n’a pas été modifiée.", kind="danger")
 
         lock = _LOCKS[(ctx.guild.id, ctx.author.id)]
         async with lock:

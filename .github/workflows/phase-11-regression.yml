@@ -57,6 +57,8 @@ jobs:
               tests/test_free_text_publications.py
               tests/test_automatic_role_rules.py
               tests/test_setup_home_status.py
+              tests/test_configuration_action_feedback.py
+              tests/test_command_wait_feedback.py
               tests/test_setup_roles_rules_page.py
               tests/test_setup_advanced_moderation_ui.py
               tests/test_hierarchy_footer_layout.py
@@ -78,6 +80,7 @@ jobs:
               tests/test_music_audio_buffer.py
               tests/test_music_authorized_fallback.py
               tests/test_music_cog.py
+              tests/test_music_player_experience.py
               tests/test_music_ffmpeg_options.py
               tests/test_music_manager.py
               tests/test_music_matcher.py

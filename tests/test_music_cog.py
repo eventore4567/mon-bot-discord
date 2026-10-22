@@ -173,6 +173,7 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         guild_a, guild_b = 3003, 4004
         ctx_a = _fake_ctx(guild_a, voice_channel=_FakeVoiceChannel(33))
 
+        self.cog.get_queue(guild_a).voice_client = _FakeVoiceClient(ctx_a.author.voice.channel)
         await self.cog.music_volume.callback(self.cog, ctx_a, 20)
         await self.cog.music_loop.callback(self.cog, ctx_a, "queue")
 
@@ -302,7 +303,7 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(queue.current, track)
         self.assertIs(voice.source, source)
 
-    async def test_sentrix_music_card_is_compact_and_has_five_useful_actions(self):
+    async def test_sentrix_music_card_has_live_state_and_real_controls(self):
         queue = self.cog.get_queue(7474)
         queue.current = Track(
             title="Faded",
@@ -334,7 +335,8 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("70 %", text)
         self.assertEqual(
             [button.libelle for button in panel.boutons_source],
-            ["Pause / Reprendre", "Suivant", "Stop", "File", "Playlists"],
+            ["Pause", "Suivant", "Stop", "Lecture auto : non", "File", "Ajouter",
+             "Volume / Position", "Boucle : non", "Mélanger", "Actualiser"],
         )
         self.assertTrue(all(callable(button.callback) for button in panel.boutons_source))
     async def test_pause_resume_freeze_position_clock(self):

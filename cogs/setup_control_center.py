@@ -1006,6 +1006,7 @@ class MusicVoiceSelect(discord.ui.ChannelSelect):
                 "Le module musique n’est pas chargé.",
                 ephemeral=True,
             )
+        await interaction.response.defer()
         current = await music.get_system_settings(self.owner.guild.id)
         try:
             await music.configure_system(
@@ -1015,7 +1016,7 @@ class MusicVoiceSelect(discord.ui.ChannelSelect):
                 actor_id=interaction.user.id,
             )
         except ValueError as exc:
-            return await interaction.response.send_message(str(exc), ephemeral=True)
+            return await interaction.followup.send(str(exc), ephemeral=True)
         await self.owner.audit(interaction.user.id, "music:voice_channel", channel.id)
         await self.owner.refresh(interaction)
 
@@ -1072,10 +1073,24 @@ class SetupView(discord.ui.LayoutView):
         )
 
     async def refresh(self, interaction):
+        # Acquitter avant les lectures DB / recomposition du panneau : le setup
+        # doit fonctionner aussi quand Discord ou PostgreSQL répond lentement.
+        if not interaction.response.is_done():
+            await interaction.response.defer()
         await self.composer()
-        await interaction.response.edit_message(
+        await interaction.edit_original_response(
             content=None, embeds=[], view=self, attachments=self.fichiers()
         )
+
+    async def on_error(self, interaction, error, item):
+        logger.error("Action de configuration échouée guild=%s category=%s item=%s",
+                     self.guild.id, self.category, type(item).__name__,
+                     exc_info=(type(error), error, error.__traceback__))
+        text = "Cette action a rencontré une erreur. Actualisez le panneau pour vérifier le réglage enregistré, puis réessayez."
+        if interaction.response.is_done():
+            await interaction.followup.send(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await interaction.response.send_message(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     def fichiers(self):
         famille = getattr(self, "_famille", None)
@@ -1394,6 +1409,7 @@ class SetupView(discord.ui.LayoutView):
                         "Choisissez d’abord le vocal musique dans le menu ci-dessus.",
                         ephemeral=True,
                     )
+                await interaction.response.defer()
                 try:
                     await music.configure_system(
                         self.guild,
@@ -1402,7 +1418,7 @@ class SetupView(discord.ui.LayoutView):
                         actor_id=interaction.user.id,
                     )
                 except ValueError as exc:
-                    return await interaction.response.send_message(str(exc), ephemeral=True)
+                    return await interaction.followup.send(str(exc), ephemeral=True)
                 await self.audit(interaction.user.id, "music", "on")
                 await self.refresh(interaction)
 
@@ -1413,6 +1429,7 @@ class SetupView(discord.ui.LayoutView):
                         "Le module musique n’est pas chargé.",
                         ephemeral=True,
                     )
+                await interaction.response.defer()
                 settings = await music.get_system_settings(self.guild.id)
                 await music.configure_system(
                     self.guild,

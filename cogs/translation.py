@@ -135,10 +135,19 @@ class Translation(commands.Cog):
 
     @commands.command(name="translate", help="Traduire un texte : +translate <langue> <texte>.")
     async def translate(self, ctx: commands.Context, langue: str, *, texte: str) -> None:
-        result, t = await self._translate(getattr(ctx.guild, "id", None), texte, langue)
-        if isinstance(result, str):
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(result)))
-        await panels.envoyer(ctx, render(result, t))
+        progress = await panels.envoyer(ctx, panels.Panneau(
+            titre="Traduction", sous_titre="Traduction en cours…", kind="info", banniere=False,
+        ))
+        try:
+            result, t = await self._translate(getattr(ctx.guild, "id", None), texte, langue)
+        except Exception:
+            await panels.editer(progress, panels.Panneau(
+                titre="Traduction indisponible", sous_titre="Le service de traduction ne répond pas. Réessayez plus tard.",
+                kind="warning", banniere=False,
+            ))
+            raise
+        panel = panels.depuis_embed(embeds.error(result)) if isinstance(result, str) else render(result, t)
+        await panels.editer(progress, panel)
 
 
 def _native_translate(bot: commands.Bot) -> app_commands.Command:
