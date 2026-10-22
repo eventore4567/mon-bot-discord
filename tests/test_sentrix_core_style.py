@@ -155,7 +155,7 @@ def test_phase7_native_domains_do_not_repeat_sentrix_in_titles():
 
     assert 'titre="SentriX —' not in economy
     assert 'titre="SentriX Music"' not in music
-    assert '"Lecture en cours"' in music
+    assert '"🎵 Lecture en cours"' in music
     assert 'titre=title' in music
     assert 'titre="Ticket ouvert"' in tickets
 
