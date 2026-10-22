@@ -1801,10 +1801,15 @@ class Database:
         # sans écraser une catégorie déjà reconfigurée ou désactivée.
         backups = await self._conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND (name='log_settings_backup' OR name GLOB 'log_settings_backup_[0-9]*') ORDER BY name DESC"
+            "AND (name='log_settings_backup' OR name LIKE 'log_settings_backup_%') ORDER BY name DESC"
         )
         for backup_row in await backups.fetchall():
             table = str(backup_row[0])
+            if table != "log_settings_backup" and not (
+                table.startswith("log_settings_backup_")
+                and table[len("log_settings_backup_"):].isdigit()
+            ):
+                continue
             if not all(char.isalnum() or char == "_" for char in table):
                 continue
             backup_columns = await self._table_columns(table)
