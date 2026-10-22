@@ -41,7 +41,21 @@ def _active(music):
 
 
 def _button(panel, name):
-    return next(button for button in panel.boutons_source if button.custom_id.endswith(":" + name))
+    """Un contrôle direct, ou l'option du menu « Plus d'options » (22/10/2026)."""
+    direct = next((b for b in panel.boutons_source if b.custom_id.endswith(":" + name)), None)
+    if direct is not None:
+        return direct
+    import discord
+    from types import SimpleNamespace
+
+    menu = next(i for i in panel.walk_children() if isinstance(i, discord.ui.Select))
+    assert name in {o.value for o in menu.options}, name
+
+    async def choisir(interaction):
+        menu._values = [name]
+        await menu.callback(interaction)
+
+    return SimpleNamespace(callback=choisir, libelle=name)
 
 
 @pytest.mark.asyncio
@@ -159,8 +173,11 @@ async def test_player_stays_within_discord_component_limits():
     music = _music()
     panel = music._music_player_panel(_active(music))
     assert panel.total_children_count <= 40
-    assert len(panel.boutons_source) == 10
+    # Quatre contrôles directs + un menu pour le reste (22/10/2026).
+    assert len(panel.boutons_source) == 4
     assert all(callable(b.callback) for b in panel.boutons_source)
+    import discord
+    assert sum(isinstance(i, discord.ui.Select) for i in panel.walk_children()) == 1
 
 
 @pytest.mark.asyncio

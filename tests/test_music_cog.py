@@ -15,6 +15,8 @@ commandes elles-mêmes — est le vrai code de cogs/music.py, exécuté normalem
 from __future__ import annotations
 
 import asyncio
+
+import discord
 import os
 import tempfile
 import time
@@ -333,12 +335,18 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Progression", text)
         self.assertIn("Spotify → YouTube", text)
         self.assertIn("70 %", text)
+        # Quatre contrôles directs, le reste dans « Plus d'options » (22/10/2026).
         self.assertEqual(
             [button.libelle for button in panel.boutons_source],
-            ["Pause", "Suivant", "Stop", "Lecture auto : non", "File", "Ajouter",
-             "Volume / Position", "Boucle : non", "Mélanger", "Actualiser"],
+            ["Pause", "Suivant", "Stop", "Ajouter"],
         )
         self.assertTrue(all(callable(button.callback) for button in panel.boutons_source))
+        menus = [item for item in panel.walk_children() if isinstance(item, discord.ui.Select)]
+        self.assertEqual(len(menus), 1)
+        self.assertEqual(
+            {option.value for option in menus[0].options},
+            {"queue", "settings", "loop", "autoplay", "refresh"},
+        )
     async def test_pause_resume_freeze_position_clock(self):
         queue = self.cog.get_queue(7007)
         voice = _FakeVoiceClient(_FakeVoiceChannel(77))

@@ -804,24 +804,42 @@ class Music(commands.Cog, name="Music"):
             return panels.Bouton(label, custom_id=f"sentrix:music:{queue.guild_id}:{name}",
                                  callback=callback, desactive=disabled, style=style, emoji=icons[name])
 
-        return panels.Panneau(
+        panneau = panels.Panneau(
             titre=title,
             sous_titre=discord.utils.escape_markdown(track.display_title())[:180] if track else "Un titre, une file d’attente et tous les contrôles au même endroit.",
             kind="musique", vignette=(track.thumbnail if track and track.thumbnail else str(getattr(getattr(getattr(self.bot, "user", None), "display_avatar", None), "url", "") or "") or None),
             banniere=True, sections=sections,
+            # Quatre contrôles directs ; le reste dans un menu (Jayden, 22/10/2026 :
+            # « pas plein de boutons de partout »). Mêmes actions qu'avant.
             boutons=[
                 button("Reprendre" if paused else "Pause", "pause", disabled=track is None, style=discord.ButtonStyle.primary),
                 button("Suivant", "skip", disabled=track is None),
                 button("Stop", "stop", disabled=not track and not queue.tracks, style=discord.ButtonStyle.danger),
-                button("Lecture auto : oui" if queue.autoplay else "Lecture auto : non", "autoplay"),
-                button("File", "queue"),
                 button("Ajouter", "add", style=discord.ButtonStyle.success),
-                button("Volume / Position", "settings"),
-                button(f"Boucle : {loop.lower()}", "loop"),
-                button("Mélanger", "shuffle", disabled=len(queue.tracks) < 2),
-                button("Actualiser", "refresh"),
             ], pied="SentriX · Contrôles réservés aux membres du même vocal", timeout=15 * 60,
         )
+        options = [
+            discord.SelectOption(label="File d'attente", value="queue", emoji="🎶",
+                                 description=f"{len(queue.tracks)} titre(s) à venir"),
+            discord.SelectOption(label="Volume / position", value="settings", emoji="🎚️"),
+            discord.SelectOption(label=f"Boucle : {loop.lower()}", value="loop", emoji="🔁",
+                                 description="Titre → file → désactivée"),
+            discord.SelectOption(label=f"Lecture auto : {'oui' if queue.autoplay else 'non'}", value="autoplay", emoji="♾️"),
+            discord.SelectOption(label="Actualiser le lecteur", value="refresh", emoji="🔄"),
+        ]
+        if len(queue.tracks) >= 2:
+            options.insert(1, discord.SelectOption(label="Mélanger la file", value="shuffle", emoji="🔀"))
+        menu = discord.ui.Select(placeholder="⚙️ Plus d'options…", options=options,
+                                 custom_id=f"sentrix:music:{queue.guild_id}:plus")
+
+        async def plus(interaction):
+            await action(interaction, menu.values[0])
+
+        menu.callback = plus
+        conteneur = next((e for e in panneau.children if isinstance(e, discord.ui.Container)), None)
+        if conteneur is not None:
+            conteneur.add_item(discord.ui.ActionRow(menu))
+        return panneau
 
     @tasks.loop(seconds=15)
     async def _player_refresher(self):

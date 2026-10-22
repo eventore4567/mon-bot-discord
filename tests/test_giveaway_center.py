@@ -149,8 +149,12 @@ def test_concours_alias_is_removed():
 def test_empty_active_state_has_a_dedicated_message():
     from pathlib import Path
     source = Path(giveaway_center.__file__).read_text(encoding="utf-8")
-    assert "Aucun giveaway actif sur ce serveur." in source
     assert "async def _has_active" in source
+    # Carte dédiée depuis le 22/10/2026 : l'état vide dit comment lancer un concours.
+    carte = giveaway_center.GiveawayCenter._carte_aucun()
+    from utils import sentrix_panels as panels
+    texte = panels.texte_complet(carte)
+    assert "Aucun giveaway en cours" in texte and "+giveaway create" in texte
 
 def test_giveaway_list_no_longer_steals_canonical_giveaways_alias():
     from cogs import common_command_names

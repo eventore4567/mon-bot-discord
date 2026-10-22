@@ -549,6 +549,28 @@ class GiveawayBuilderView(discord.ui.View):
         self.ctx = ctx
         self.state = BuilderState(author_id=ctx.author.id, guild_id=ctx.guild.id)
         self.message: discord.Message | None = None
+        # Les cinq étapes dans un menu, mêmes actions qu'avant (Jayden, 22/10/2026 :
+        # moins de boutons) ; restent Aperçu, Publier, Annuler.
+        etapes = [
+            ("base", "1 · Lot, durée et gagnants", "🎁", self.base),
+            ("salon", "2 · Salon de publication", "📢", self.destination),
+            ("roles", "3 · Rôles, ping et bonus", "🎭", self.roles),
+            ("conditions", "4 · Conditions de participation", "📋", self.conditions),
+            ("media", "5 · Image ou GIF", "🖼️", self.media),
+        ]
+        actions = {cle: item for cle, _l, _e, item in etapes}
+        for *_reste, item in etapes:
+            self.remove_item(item)
+        menu = discord.ui.Select(
+            placeholder="🛠️ Configurer le giveaway…", row=0,
+            options=[discord.SelectOption(label=l, value=cle, emoji=e) for cle, l, e, _i in etapes],
+        )
+
+        async def choisir(interaction: discord.Interaction):
+            await actions[menu.values[0]].callback(interaction)
+
+        menu.callback = choisir
+        self.add_item(menu)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.state.author_id:
@@ -594,7 +616,7 @@ class GiveawayBuilderView(discord.ui.View):
             conditions.append(state.custom_condition)
 
         e = discord.Embed(
-            title="Giveaway — configuration",
+            title="🎉 Giveaway — configuration",
             description=(
                 "Configurez le concours depuis ce panneau. Les changements sont visibles ici immédiatement, "
                 "sans spammer de nouveaux messages."
