@@ -2,6 +2,16 @@ name: SentriX Onboarding and Mention Recovery
 on:
   pull_request:
     paths:
+      - 'utils/sentrix_panels.py'
+      - 'utils/command_visuals.py'
+      - 'utils/sentrix_trace.py'
+      - 'utils/top_command_banners.py'
+      - 'utils/wide_logs.py'
+      - 'cogs/log_history_center.py'
+      - 'cogs/logs.py'
+      - 'cogs/music.py'
+      - 'cogs/setup_experience_v74.py'
+      - 'cogs/setup_components_v73.py'
       - 'database/db.py'
       - 'tests/test_explicit_activation_regressions.py'
       - 'cogs/automod.py'
@@ -39,6 +49,11 @@ jobs:
           tests/test_bienvenue_ping.py
           tests/test_module_cache_coherence.py
           tests/test_soundboard_logs.py
+          tests/test_message_log_transcripts.py
+          tests/test_log_banners.py
+          tests/test_banniere_setup_help.py
+          tests/test_music_player_experience.py
+          tests/test_setup_home_status.py
           tests/test_config_center_level_opt_in.py
           tests/test_automod_cross_channel_spam_v125.py
           tests/test_automod_enforcement_resilience.py

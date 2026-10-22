@@ -54,7 +54,7 @@ class HelpEntry:
     @property
     def name(self) -> str:
         if self.prefix_command is not None:
-            return self.prefix_command.qualified_name
+            return _short_name(self.prefix_command)
         return self.slash_name or self.key
 
 

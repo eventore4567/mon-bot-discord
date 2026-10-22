@@ -73,8 +73,7 @@ INTENTIONS_NEUTRES = frozenset({"info", "neutral", "brand"})
 CORE_NAME = "SENTRIX CORE"
 
 #: Bannière horizontale compacte commune à tous les panneaux structurés.
-#: 1024 × 72 pixels transparents : le logo central et deux traits lumineux
-#: reprennent la teinte du domaine, sans fond ni effet de carte volumineuse.
+#: Bande 1200 × 24 presque transparente, identique aux journaux.
 #: La galerie et sa pièce jointe restent gouvernées par le même interrupteur
 #: pour éviter une référence attachment:// absente qui invaliderait le message.
 BANDEAUX_ACTIFS = True
@@ -422,8 +421,8 @@ def accord_commande(kind: str) -> tuple[int, str]:
 
 
 def nom_banniere(kind: str) -> str:
-    """Fichier de bannière correspondant à l'intention, accordé à la commande."""
-    return nom_fichier(accord_commande(kind)[1])
+    from utils.premium_log_banners import BANNER_FILENAME
+    return BANNER_FILENAME
 
 
 def fichier_banniere(kind: str) -> discord.File | None:
@@ -432,37 +431,15 @@ def fichier_banniere(kind: str) -> discord.File | None:
 
 
 def famille_joignable(famille: str) -> bool:
-    """La bannière de cette famille est-elle réellement joignable ?
-
-    Condition UNIQUE que la galerie et la pièce jointe consultent toutes les
-    deux. Une galerie qui référence ``attachment://banner_X.webp`` sans que le
-    fichier accompagne le message ne « casse » pas l'image — Discord refuse le
-    message ENTIER :
-
-        Invalid Form Body — The referenced attachment was not found.
-
-    C'est arrivé en production sur /setup : la commande ne répondait plus du
-    tout. Les deux décisions étaient prises à deux endroits sans lien, et
-    divergeaient.
-
-    La bannière manquante est GÉNÉRÉE ici. ``.gitignore`` ignore
-    ``assets/log_banners/banner_*.webp`` : aucune n'est versionnée, donc le
-    dossier est vide sur un conteneur fraîchement déployé. Un simple test
-    d'existence aurait servi des écrans sans bandeau.
-    """
-    # Politique produit globale : un ancien appel explicite ne doit plus
-    # pouvoir générer, référencer ou joindre un bandeau décoratif.
+    """La même bande neutre presque transparente que les logs."""
     if not BANDEAUX_ACTIFS:
         return False
-    chemin = BANNER_DIR / nom_fichier(famille)
-    if chemin.exists():
-        return True
     try:
-        ensure_banners(force=True)
-    except Exception:
-        logger.exception("Génération des bannières impossible.")
+        from utils.premium_log_banners import get_premium_log_banner
+        return get_premium_log_banner().is_file()
+    except (OSError, ValueError):
+        logger.exception("Bande neutre indisponible.")
         return False
-    return chemin.exists()
 
 
 def poser_bandeau(container, famille: str) -> bool:
@@ -490,7 +467,7 @@ def poser_bandeau(container, famille: str) -> bool:
         )
         return False
     galerie = discord.ui.MediaGallery()
-    galerie.add_item(media=f"attachment://{nom_fichier(famille)}")
+    galerie.add_item(media=f"attachment://{nom_banniere(famille)}")
     container.add_item(galerie)
     return True
 
@@ -509,30 +486,10 @@ def pieces_jointes_de_famille(famille: str) -> list:
 
 
 def fichier_de_famille(famille: str) -> discord.File | None:
-    """Bannière prête à joindre pour une famille déjà décidée.
-
-    Le panneau décide sa famille à la construction et joint CE fichier-là :
-    ré-décider au moment de l'envoi pourrait renvoyer une autre famille (le
-    contexte de commande est alors parfois déjà retombé) et la galerie
-    référencerait une pièce jointe absente — donc une bannière vide.
-    """
-    if not BANDEAUX_ACTIFS:
+    if not famille_joignable(famille):
         return None
-    nom = nom_fichier(famille)
-    chemin = BANNER_DIR / nom
-    if not chemin.exists():
-        try:
-            ensure_banners(force=True)
-        except Exception:
-            logger.exception("Génération des bannières impossible.")
-            return None
-    if not chemin.exists():
-        return None
-    try:
-        return discord.File(str(chemin), filename=nom)
-    except Exception:
-        logger.exception("Bannière %s illisible.", nom)
-        return None
+    from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
+    return discord.File(str(get_premium_log_banner()), filename=BANNER_FILENAME)
 
 
 class Panneau(discord.ui.LayoutView):
@@ -684,11 +641,6 @@ class Panneau(discord.ui.LayoutView):
             pied_net = ""
         # Le fil SentriX : une action du staff porte sa référence, la même que
         # sur sa carte de log (utils/sentrix_trace.py).
-        from utils.sentrix_trace import visible_ref
-
-        reference = visible_ref()
-        if reference:
-            pied_net = f"{pied_net} · Réf. {reference}" if pied_net else f"Réf. {reference}"
         if pied_net:
             conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(pied_net, 240)}"))
 

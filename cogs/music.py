@@ -734,7 +734,7 @@ class Music(commands.Cog, name="Music"):
             await change(interaction, 1)
         return panels.Panneau(
             titre="File d’attente", sous_titre=f"{len(queue.tracks)} titre(s) · Page {page + 1}/{pages}",
-            kind="musique", sections=sections, banniere=False,
+            kind="musique", sections=sections, banniere=True,
             boutons=[panels.Bouton("Précédent", callback=previous, desactive=page == 0),
                      panels.Bouton("Suivant", callback=following, desactive=page == pages - 1)],
             timeout=15 * 60,
@@ -746,21 +746,24 @@ class Music(commands.Cog, name="Music"):
         paused = bool(queue.paused_by_user)
         channel = getattr(voice, "channel", None)
         loop = "Piste" if queue.loop_track else "File" if queue.loop_queue else "Non"
-        title = "Lecture en pause" if track and paused else "Lecture en cours" if track else "Lecteur prêt"
+        title = "⏸️ Lecture en pause" if track and paused else "🎵 Lecture en cours" if track else "🎧 Votre espace musique"
         details = [notice] if notice else []
         if track:
             if track.requested_by:
                 details.append(f"Ajouté par <@{track.requested_by}>")
-            details.append(f"Source : {_music_source_label(track)}")
+            artist = str(getattr(track, "artist", "") or "").strip()
+            if artist:
+                details.append(f"🎤 {discord.utils.escape_markdown(artist)[:140]}")
+            details.append(f"🔎 {_music_source_label(track)}")
         if channel is not None:
-            details.append(f"Vocal : <#{channel.id}>")
+            details.append(f"🔊 <#{channel.id}>")
         details.append(f"File : **{len(queue.tracks)}** · Volume : **{round(queue.volume * 100)} %** · Boucle : **{loop}**")
         details.append(f"Lecture auto : **{'Oui' if queue.autoplay else 'Non'}**")
-        sections = [panels.Section("Lecture", texte="\n".join(details))]
+        sections = [panels.Section("", texte="\n".join(details))]
         if track:
             sections.append(panels.Section("Progression", texte=_music_progress_text(queue, track)))
         else:
-            sections.append(panels.Section("Choisir un titre", texte="Ajoutez un nom, un artiste ou un lien avec le bouton **Ajouter**."))
+            sections.append(panels.Section("Prêt à écouter", texte="Rejoignez un vocal puis choisissez **➕ Ajouter**.\nRecherchez un artiste, un titre ou collez un lien.\n-# La pochette et la progression s’affichent dès le lancement."))
 
         async def action(interaction, name):
             if name == "add":
@@ -803,9 +806,9 @@ class Music(commands.Cog, name="Music"):
 
         return panels.Panneau(
             titre=title,
-            sous_titre=discord.utils.escape_markdown(track.display_title())[:180] if track else "Votre musique, dans votre vocal.",
-            kind="musique", vignette=track.thumbnail if track else None,
-            banniere=False, sections=sections,
+            sous_titre=discord.utils.escape_markdown(track.display_title())[:180] if track else "Un titre, une file d’attente et tous les contrôles au même endroit.",
+            kind="musique", vignette=(track.thumbnail if track and track.thumbnail else str(getattr(getattr(getattr(self.bot, "user", None), "display_avatar", None), "url", "") or "") or None),
+            banniere=True, sections=sections,
             boutons=[
                 button("Reprendre" if paused else "Pause", "pause", disabled=track is None, style=discord.ButtonStyle.primary),
                 button("Suivant", "skip", disabled=track is None),
