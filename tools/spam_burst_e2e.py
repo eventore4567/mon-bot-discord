@@ -124,11 +124,17 @@ async def coordinated_wave(bot, guild, stats) -> None:
     check(not any(m in gone for m in party), "6 membres qui souhaitent un anniversaire ne sont pas pris pour un raid")
 
 
-async def main(spammers: int, per_member: int) -> int:
+async def main(spammers: int, per_member: int, sans_ligne_module: bool = False) -> int:
     bot = await h.boot(quiet=True)
     sys.modules["cogs.automod"].INCIDENT_LOG_DELAY_SECONDS = 0.2
     guild = await h.setup_world(bot)
     db = bot.db
+    if sans_ligne_module:
+        # Comme la plupart des serveurs de production : personne n'a jamais touché à
+        # l'interrupteur « Sécurité ». Le 22/10/2026, cet état éteignait l'Auto Mode.
+        from cogs import setup_v2_core
+        await db.execute("DELETE FROM module_settings WHERE guild_id=? AND module IN ('security', 'moderation')", (h.GID,))
+        setup_v2_core.invalidate_module_cache(h.GID)
     await db.execute("INSERT INTO automod_settings (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING", (h.GID,))
     await db.execute("UPDATE automod_settings SET antispam=1, escalation=1 WHERE guild_id=?", (h.GID,))
     bot.get_cog("Automod").automod_cache.clear()
@@ -242,9 +248,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--spammers", type=int, default=20)
     parser.add_argument("--messages", type=int, default=12)
+    parser.add_argument("--sans-ligne-module", action="store_true",
+                        help="aucune ligne module_settings pour security/moderation (cas réel)")
     args = parser.parse_args()
     try:
-        asyncio.run(main(args.spammers, args.messages))
+        asyncio.run(main(args.spammers, args.messages, args.sans_ligne_module))
     except BaseException:
         import traceback
 

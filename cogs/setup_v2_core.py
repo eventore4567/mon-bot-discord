@@ -24,8 +24,14 @@ MODULES = (
     "levels", "economy", "notifications", "ai",
 )
 
-# Tous les modules nécessitent un clic explicite sur Activer.
-CONFIGURABLE_MODULES = frozenset(MODULES)
+# Les modules nécessitent un clic explicite sur Activer, sauf les protections.
+#: Protections : actives tant qu'un administrateur ne les coupe pas explicitement.
+#: Le 22/10/2026, « absent = inactif » appliqué aussi à ``security`` avait éteint
+#: l'Auto Mode (anti-spam, anti-raid, sanctions) sur tous les serveurs qui n'avaient
+#: jamais touché au réglage — c'est-à-dire presque tous. Une ligne enabled=0 reste
+#: respectée ; les autres modules (IA comprise) demandent toujours une activation.
+PROTECTION_MODULES = frozenset({"moderation", "security"})
+CONFIGURABLE_MODULES = frozenset(MODULES) - PROTECTION_MODULES
 MODULE_STATE_ENABLED = "enabled"
 MODULE_STATE_DISABLED = "disabled"
 MODULE_STATE_NOT_CONFIGURED = "not_configured"
@@ -228,13 +234,15 @@ async def module_row_value(bot: commands.Bot, guild_id: int, module: str) -> int
     return value
 
 
+
+
 async def module_enabled(bot: commands.Bot, guild_id: int, module: str) -> bool:
     if module not in MODULES:
         return True
     await ensure_schema(bot)
     value = await module_row_value(bot, guild_id, module)
     if value is None:
-        return False
+        return module in PROTECTION_MODULES
     return bool(value)
 
 

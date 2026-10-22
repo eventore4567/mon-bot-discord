@@ -83,8 +83,8 @@ def test_absence_de_ligne_signifie_non_configure_donc_inactif(bot):
     assert run(core.module_enabled(bot, 1, MODULE)) is False
     assert run(core.module_state(bot, 1, MODULE)) == core.MODULE_STATE_NOT_CONFIGURED
     # Les protections restent actives tant qu'on ne les coupe pas.
-    assert run(core.module_enabled(bot, 1, "moderation")) is False
-    assert run(core.module_state(bot, 1, "moderation")) == core.MODULE_STATE_NOT_CONFIGURED
+    assert run(core.module_enabled(bot, 1, "moderation")) is True
+    assert run(core.module_state(bot, 1, "moderation")) == core.MODULE_STATE_ENABLED
 
 
 def test_valeur_enregistree_est_respectee(bot):
