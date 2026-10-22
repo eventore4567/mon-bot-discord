@@ -332,7 +332,8 @@ async def note_guild_config_change(bot: commands.Bot, guild_id: int, field: str,
 _MODULE_DEFAULTS_MIGRATION = "module_defaults_absent_is_off_v1"
 
 _MODULE_EVIDENCE_QUERIES: dict[str, tuple[str, ...]] = {
-    "levels": ("SELECT DISTINCT guild_id FROM levels WHERE xp > 0 OR level > 0",),
+    # De l’XP historique ne prouve pas une activation volontaire.
+    # Seul un réglage explicite peut activer les niveaux.
     "economy": ("SELECT DISTINCT guild_id FROM economy WHERE cash > 0 OR bank > 0",),
     "welcome": ("SELECT guild_id FROM guild_config WHERE welcome_channel IS NOT NULL",),
     "goodbye": ("SELECT guild_id FROM guild_config WHERE goodbye_channel IS NOT NULL",),
@@ -1136,6 +1137,8 @@ def _install_welcome_listeners(bot: commands.Bot) -> None:
         return
 
     async def on_member_join_v2(member: discord.Member):
+        if getattr(member, "bot", False) is True:
+            return
         guild = member.guild
         conf = await bot.db.get_guild_config(guild.id)
 

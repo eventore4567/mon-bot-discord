@@ -223,7 +223,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         )
 
         # Première lecture : ensure_schema + migration.
-        self.assertTrue(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "levels"))
+        self.assertFalse(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "levels"))
         self.assertFalse(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "economy"))
         self.assertTrue(await core.module_enabled(self.bot, OLD_WELCOME_GUILD, "welcome"))
         self.assertFalse(await core.module_enabled(self.bot, OLD_WELCOME_GUILD, "goodbye"))

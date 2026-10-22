@@ -15,7 +15,7 @@ from discord.ext import commands
 
 from utils import checks, embeds, log_service
 from utils import sentrix_panels as panels
-from utils import join_dedup, welcome_autoroles
+from utils import join_dedup, welcome_autoroles, onboarding_recovery
 from utils.member_event_cards import build_member_event_card, EVENT_BACKGROUND_PRESETS, read_member_avatar
 from . import bot_tracker
 from . import control_center_v3
@@ -254,6 +254,8 @@ def _welcome_result(channel, test: bool, dm: bool | None) -> str:
 
 
 async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> tuple[bool, str]:
+    if getattr(member, "bot", False) is True:
+        return False, "Les bots ne reçoivent pas de bienvenue."
     if not test and not await core.module_enabled(bot, member.guild.id, "welcome"):
         return False, "Le module Bienvenue est désactivé."
     conf = await bot.db.get_guild_config(member.guild.id)
@@ -431,23 +433,31 @@ def _replace_welcome_listeners(bot) -> None:
         else: bot.extra_events.pop(event_name, None)
 
     async def on_member_join(member: discord.Member):
+        if getattr(member, "bot", False) is True:
+            return
         # Garde HA : évite un double message/double autorole si le PRIMARY et le standby
         # sont brièvement connectés à Discord en même temps pendant une bascule de lease.
         if not control_center_v3._is_primary_sentrix_service():
-            return
+            return False
+        await onboarding_recovery.ensure_schema(bot.db)
+        roles_ok = True
         if await core.module_enabled(bot, member.guild.id, "roles"):
             # Chaque rôle est revérifié ici (hiérarchie, rôle géré, permissions
             # dangereuses) : la configuration a pu changer depuis le réglage.
-            await welcome_autoroles.apply(bot, member)
+            _given, skipped = await welcome_autoroles.apply(bot, member)
+            roles_ok = not skipped
         # Ne réserve l'événement que si le module Bienvenue est réellement actif.
         # Sinon un autre module d'onboarding pourrait être bloqué alors que SentriX
         # n'enverra finalement aucun message.
         if not await core.module_enabled(bot, member.guild.id, "welcome"):
-            return
+            return roles_ok
+        if await onboarding_recovery.welcomed(bot.db, member):
+            return roles_ok
         if not await join_dedup.reclamer(bot, member.guild.id, member.id, "welcome"):
-            return
+            return False
         ok, _message = await _send_welcome(bot, member)
         if ok:
+            await onboarding_recovery.mark_welcomed(bot.db, member)
             # Filet de sécurité après coup (channel.history, garde même contre un doublon
             # envoyé par un AUTRE processus SentriX) : voir cogs/bot_tracker.py.
             channel, _error = await _welcome_destination(bot, member.guild)
@@ -456,6 +466,8 @@ def _replace_welcome_listeners(bot) -> None:
                     bot_tracker._cleanup_presence_duplicates(bot, channel, member, "join"),
                     name=f"sentrix-dedupe-welcome-{member.guild.id}-{member.id}",
                 )
+
+        return ok and roles_ok
 
     async def on_member_remove(member: discord.Member):
         if not control_center_v3._is_primary_sentrix_service():
@@ -473,6 +485,10 @@ def _replace_welcome_listeners(bot) -> None:
 
     bot.add_listener(on_member_join, "on_member_join")
     bot.add_listener(on_member_remove, "on_member_remove")
+    recovery = onboarding_recovery.Recovery(bot, on_member_join, control_center_v3._is_primary_sentrix_service)
+    bot._sentrix_onboarding_recovery = recovery
+    bot.add_listener(recovery.on_ready, "on_ready")
+    bot.add_listener(recovery.on_ready, "on_resumed")
 
 
 def _options_lues(valeur: str) -> dict[str, bool]:

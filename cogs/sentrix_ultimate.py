@@ -539,7 +539,7 @@ class SentriXUltimate(commands.Cog, name="SentriXUltimate"):
         if await self._enabled(member.guild.id, "auto_lockdown") and len(window) >= 6:
             await self._start_lockdown(member.guild, f"Pic de {len(window)} arrivées en moins de 15 secondes")
             await self._security_alert(member.guild, f"Lockdown automatique activé : {len(window)} arrivées / 15 s.", 0xED4245)
-        if await self._enabled(member.guild.id, "smart_welcome"):
+        if not member.bot and await self._enabled(member.guild.id, "smart_welcome"):
             cid = await self._setting(member.guild.id, "smart_welcome_channel")
             channel = member.guild.get_channel(int(cid)) if cid and cid.isdigit() else None
             # Verrou partage avec la bienvenue standard (Setup) et l'onboarding
