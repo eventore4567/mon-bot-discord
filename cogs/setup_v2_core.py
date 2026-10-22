@@ -24,15 +24,8 @@ MODULES = (
     "levels", "economy", "notifications", "ai",
 )
 
-# Modules qui n'existent que si quelqu'un les a configurés : sans ligne module_settings
-# ils sont NON CONFIGURÉS, donc inactifs. Historiquement l'absence de ligne valait
-# « activé », ce qui faisait envoyer des messages de bienvenue dans le salon système
-# d'un serveur fraîchement rejoint, ou compter de l'XP sans que personne ne l'ait voulu.
-# moderation / security / ai gardent le comportement inverse (actifs tant qu'on ne les
-# coupe pas) : ce sont des protections, pas des fonctionnalités à installer.
-CONFIGURABLE_MODULES = frozenset({
-    "logs", "tickets", "welcome", "goodbye", "roles", "levels", "economy", "notifications",
-})
+# Tous les modules nécessitent un clic explicite sur Activer.
+CONFIGURABLE_MODULES = frozenset(MODULES)
 MODULE_STATE_ENABLED = "enabled"
 MODULE_STATE_DISABLED = "disabled"
 MODULE_STATE_NOT_CONFIGURED = "not_configured"
@@ -83,7 +76,7 @@ async def ensure_schema(bot: commands.Bot) -> None:
             CREATE TABLE IF NOT EXISTS module_settings (
                 guild_id INTEGER NOT NULL,
                 module TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 0,
                 updated_by INTEGER,
                 updated_at INTEGER NOT NULL,
                 PRIMARY KEY (guild_id, module)
@@ -241,12 +234,7 @@ async def module_enabled(bot: commands.Bot, guild_id: int, module: str) -> bool:
     await ensure_schema(bot)
     value = await module_row_value(bot, guild_id, module)
     if value is None:
-        if module == "ai":
-            ai = await bot.db.fetchone("SELECT enabled FROM ai_settings WHERE guild_id=?", (int(guild_id),))
-            if ai is not None:
-                return bool(ai["enabled"])
-        # Aucune ligne : un module configurable n'est pas configuré, donc inactif.
-        return module not in CONFIGURABLE_MODULES
+        return False
     return bool(value)
 
 
@@ -278,9 +266,7 @@ async def reset_module(bot: commands.Bot, guild_id: int, module: str) -> None:
     invalidate_module_cache(guild_id, module)
 
 
-# Configurer une ressource, c'est activer le module : choisir un salon de bienvenue
-# dans /setup ou le Dashboard doit rendre la bienvenue active sans second clic. Un
-# module explicitement DÉSACTIVÉ (ligne enabled=0) n'est jamais rallumé par ce chemin.
+# Association des ressources aux modules ; aucune activation à l’écriture.
 GUILD_CONFIG_FIELD_MODULE: dict[str, str] = {
     "welcome_channel": "welcome",
     "goodbye_channel": "goodbye",
@@ -294,86 +280,21 @@ GUILD_CONFIG_FIELD_MODULE: dict[str, str] = {
 
 
 async def enable_module_if_unset(bot: commands.Bot, guild_id: int, module: str, *, actor_id: int | None = None) -> bool:
-    """Active un module NON CONFIGURÉ (aucune ligne). Retourne True si une ligne a été créée."""
-    if module not in MODULES:
-        return False
-    await ensure_schema(bot)
-    if await module_row_value(bot, guild_id, module) is not None:
-        return False
-    await set_module_enabled(bot, guild_id, module, True, actor_id=actor_id)
-    return True
+    """Compatibilité : enregistrer des réglages ne vaut jamais activation."""
+    return False
 
 
 async def note_guild_config_change(bot: commands.Bot, guild_id: int, field: str, value) -> None:
-    """Appelé par Database.set_guild_config : une ressource posée active son module."""
-    module = GUILD_CONFIG_FIELD_MODULE.get(str(field))
-    if module is None or value in (None, "", 0):
-        return
-    try:
-        await enable_module_if_unset(bot, guild_id, module)
-    except ModuleSetupRequired as exc:
-        # Attendu : la ressource posée ne suffit pas encore (ex. salon des logs de
-        # tickets choisi avant la catégorie). Le module reste non activé, à juste
-        # titre — ce n'est pas une erreur, et la trace complète polluait les logs
-        # de production (plusieurs fois par réglage).
-        logger.info("Module %s pas encore activable guild=%s : %s", module, guild_id, exc)
-    except Exception:
-        logger.exception("Activation implicite du module %s impossible guild=%s", module, guild_id)
+    """Une ressource peut être préparée avant le clic explicite sur Activer."""
+    return None
 
 
 # --------------------------------------------------------------------------
-# Migration : serveurs déjà présents avant le passage à « absent = non configuré »
-#
-# Un serveur qui utilisait déjà un module sans ligne module_settings (l'absence valait
-# « activé ») ne doit pas se retrouver coupé au redémarrage. On matérialise donc une
-# ligne enabled=1 là où il existe une preuve d'usage ou de configuration ; une valeur
-# réellement absente reste absente (non configurée). Idempotent, exécutée une fois.
-# --------------------------------------------------------------------------
-_MODULE_DEFAULTS_MIGRATION = "module_defaults_absent_is_off_v1"
-
-_MODULE_EVIDENCE_QUERIES: dict[str, tuple[str, ...]] = {
-    # De l’XP historique ne prouve pas une activation volontaire.
-    # Seul un réglage explicite peut activer les niveaux.
-    "economy": ("SELECT DISTINCT guild_id FROM economy WHERE cash > 0 OR bank > 0",),
-    "welcome": ("SELECT guild_id FROM guild_config WHERE welcome_channel IS NOT NULL",),
-    "goodbye": ("SELECT guild_id FROM guild_config WHERE goodbye_channel IS NOT NULL",),
-    "tickets": (
-        "SELECT DISTINCT guild_id FROM ticket_panels",
-        "SELECT DISTINCT guild_id FROM ticket_panels_v2",
-        "SELECT DISTINCT guild_id FROM tickets",
-    ),
-    "logs": (
-        "SELECT DISTINCT guild_id FROM log_config WHERE enabled = 1 AND channel_id IS NOT NULL",
-        "SELECT guild_id FROM guild_config WHERE log_channel IS NOT NULL",
-    ),
-    "roles": (
-        "SELECT guild_id FROM guild_config WHERE autorole IS NOT NULL",
-        "SELECT DISTINCT guild_id FROM autorole",
-        "SELECT DISTINCT guild_id FROM reaction_roles",
-        "SELECT DISTINCT guild_id FROM reaction_role_panels",
-        "SELECT DISTINCT guild_id FROM self_role_panels",
-    ),
-    "notifications": ("SELECT DISTINCT guild_id FROM social_notifications",),
-}
-
-
-async def _guild_ids(bot: commands.Bot, query: str) -> set[int]:
-    try:
-        rows = await bot.db.fetchall(query)
-    except Exception:
-        # Table absente sur une base plus ancienne : pas de preuve, pas de ligne.
-        return set()
-    result: set[int] = set()
-    for row in rows or ():
-        try:
-            result.add(int(row["guild_id"]))
-        except (KeyError, IndexError, TypeError, ValueError):
-            continue
-    return result
-
+# Migration : seuls les interrupteurs explicites historiques sont conservés.
+_MODULE_DEFAULTS_MIGRATION = "module_explicit_activation_v2"
 
 async def migrate_module_defaults(bot: commands.Bot) -> dict[str, int]:
-    """Matérialise enabled=1 pour les modules déjà utilisés. Retourne {module: n_lignes}."""
+    """Conserve les anciens interrupteurs explicites, jamais les preuves d’usage."""
     await bot.db.execute(
         "CREATE TABLE IF NOT EXISTS sentrix_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
     )
@@ -397,13 +318,18 @@ async def migrate_module_defaults(bot: commands.Bot) -> dict[str, int]:
         explicit[(int(row["guild_id"]), "economy")] = int(bool(row["economy_enabled"]))
         explicit[(int(row["guild_id"]), "levels")] = int(bool(row["levels_enabled"]))
 
-    # 2. Preuves d'usage / de configuration.
-    evidence: dict[str, set[int]] = {}
-    for module, queries in _MODULE_EVIDENCE_QUERIES.items():
-        ids: set[int] = set()
-        for query in queries:
-            ids |= await _guild_ids(bot, query)
-        evidence[module] = ids
+    # Les anciennes lignes inférées sont identifiables par le timestamp exact
+    # de la migration v1 ; les activations signées par un administrateur restent.
+    inferred = await bot.db.fetchall(
+        "SELECT guild_id,module FROM module_settings WHERE updated_by IS NULL AND enabled=1 "
+        "AND updated_at=(SELECT applied_at FROM sentrix_migrations WHERE name=?)",
+        ("module_defaults_absent_is_off_v1",),
+    )
+    for row in inferred or ():
+        key = (int(row["guild_id"]), str(row["module"]))
+        if key not in explicit:
+            await bot.db.execute("DELETE FROM module_settings WHERE guild_id=? AND module=?", key)
+
 
     existing: set[tuple[int, str]] = set()
     try:
@@ -424,9 +350,6 @@ async def migrate_module_defaults(bot: commands.Bot) -> dict[str, int]:
 
     for (guild_id, module), enabled in explicit.items():
         await _materialise(guild_id, module, enabled)
-    for module, ids in evidence.items():
-        for guild_id in sorted(ids):
-            await _materialise(guild_id, module, 1)
 
     await bot.db.execute(
         "INSERT OR IGNORE INTO sentrix_migrations (name, applied_at) VALUES (?, ?)",
@@ -444,7 +367,7 @@ async def module_activation_issue(
     module: str,
 ) -> str | None:
     """Retourne la ressource manquante qui empêcherait une activation propre."""
-    if module not in CONFIGURABLE_MODULES:
+    if module in {"moderation", "security", "ai", "economy"} or module not in CONFIGURABLE_MODULES:
         return None
     guild = bot.get_guild(int(guild_id))
     if guild is None:
@@ -847,9 +770,11 @@ def _patch_security(bot: commands.Bot) -> None:
         if await module_enabled(bot, guild_id, "security"):
             return conf
         muted = dict(conf or {})
+        muted["security_module_disabled"] = True
         for key in (
             "antispam", "antilink", "antiinvite", "antimention", "anticaps", "antiemoji",
             "antiraid", "antibot", "antiaccount", "antiscam", "antinuke", "escalation",
+            "antiinsult", "join_gate", "risk_engine", "security_vanity", "security_prune", "security_permissions",
         ):
             muted[key] = 0
         return muted

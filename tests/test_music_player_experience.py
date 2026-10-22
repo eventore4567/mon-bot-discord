@@ -15,6 +15,7 @@ def _music():
     music.bot = SimpleNamespace()
     music.queues = {}
     music._player_messages = {}
+    music._player_activity = {}
     return music
 
 
@@ -218,3 +219,29 @@ async def test_stop_waits_for_in_flight_seek_instead_of_racing_playback():
         await task
     assert queue.current is None and not queue.tracks
     assert not queue.voice_client.is_playing()
+
+
+@pytest.mark.asyncio
+async def test_member_players_are_tracked_separately():
+    music = _music()
+    queue = music.get_queue(1)
+    first = SimpleNamespace(id=11, channel=SimpleNamespace(id=10), edit=AsyncMock())
+    second = SimpleNamespace(id=12, channel=SimpleNamespace(id=10), edit=AsyncMock())
+    with patch.object(panels, 'envoyer', AsyncMock(side_effect=[first, second])):
+        await music._show_player(object(), queue)
+        await music._show_player(object(), queue)
+    assert len(music._player_messages) == 2
+
+
+@pytest.mark.asyncio
+async def test_idle_player_receives_final_update_then_stops_refreshing():
+    music = _music()
+    music.get_queue(1)
+    message = SimpleNamespace(edit=AsyncMock())
+    music._player_messages[(1, 11)] = message
+    await Music._player_refresher.coro(music)
+    await Music._player_refresher.coro(music)
+    message.edit.assert_awaited_once()
+    with patch("cogs.music.time.monotonic", return_value=music._player_activity[(1, 11)][0] + 901):
+        await Music._player_refresher.coro(music)
+    assert not music._player_messages

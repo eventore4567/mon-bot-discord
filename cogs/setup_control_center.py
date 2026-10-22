@@ -184,7 +184,8 @@ async def module_statuses(bot, guild, conf):
 
     automod = await bot.db.fetchone("SELECT * FROM automod_settings WHERE guild_id = ?", (guild.id,))
     active_security = sum(bool(_get(automod, field, 0)) for field, _ in AUTOMOD) if automod else 0
-    result["security"] = (
+    result["security"] = await _apply_module_switch(
+        bot, guild.id, "security",
         ConfigState.ACTIVE if active_security else ConfigState.INACTIVE if automod else ConfigState.UNCONFIGURED,
         f"{active_security}/{len(AUTOMOD)} protections actives.",
         (),
@@ -351,7 +352,8 @@ async def module_statuses(bot, guild, conf):
         )
 
     ai = await bot.db.fetchone("SELECT * FROM ai_settings WHERE guild_id = ?", (guild.id,))
-    result["ai"] = (
+    result["ai"] = await _apply_module_switch(
+        bot, guild.id, "ai",
         ConfigState.ACTIVE if _get(ai, "enabled", 1) else ConfigState.INACTIVE,
         "Valeurs par défaut SentriX." if ai is None else f"Cooldown {_get(ai, 'cooldown_seconds', 8)} s • {_get(ai, 'daily_limit', 50)}/jour.",
         (),
@@ -362,6 +364,7 @@ async def module_statuses(bot, guild, conf):
 # Premier écran : un interrupteur par module. « Anti-spam » est le filtre AutoMod du
 # même nom ; les autres sont les modules de module_settings (source unique).
 MODULE_SWITCHES = (
+    ("security", "Sécurité"), ("moderation", "Modération"), ("roles", "Rôles"), ("ai", "IA"),
     ("levels", "Niveaux"), ("economy", "Économie"), ("welcome", "Bienvenue"), ("goodbye", "Départs"),
     ("antispam", "Anti-spam"), ("tickets", "Tickets"), ("logs", "Logs"), ("notifications", "Notifications"),
 )
@@ -376,7 +379,7 @@ async def module_switch_states(bot, guild_id: int) -> dict[str, str]:
     for key, _label in MODULE_SWITCHES:
         if key == "antispam":
             row = await bot.db.fetchone("SELECT antispam FROM automod_settings WHERE guild_id = ?", (guild_id,))
-            states[key] = "enabled" if row and _get(row, "antispam", 0) else ("disabled" if row else "not_configured")
+            states[key] = "enabled" if row and _get(row, "antispam", 0) and await core.module_enabled(bot, guild_id, "security") else ("disabled" if row else "not_configured")
         else:
             states[key] = await core.module_state(bot, guild_id, key)
     return states
@@ -390,6 +393,8 @@ async def toggle_module_switch(bot, guild_id: int, key: str, actor_id: int | Non
     nouveau = states.get(key) != "enabled"
     if key == "antispam":
         await bot.db.set_automod(guild_id, "antispam", 1 if nouveau else 0)
+        if nouveau:
+            await core.set_module_enabled(bot, guild_id, "security", True, actor_id=actor_id)
         automod = bot.get_cog("Automod")
         cache = getattr(automod, "automod_cache", None)
         if isinstance(cache, dict):
@@ -830,18 +835,6 @@ class LogChannelSelect(discord.ui.ChannelSelect):
                     ephemere=True,
                 )
 
-            # Premier salon configuré = module Logs utilisable immédiatement.
-            # Un module explicitement coupé reste coupé : on ne contourne pas le choix
-            # de l'administrateur, on active seulement l'état « non configuré ».
-            if channel_id is not None:
-                from cogs import setup_v2_core as core
-
-                await core.enable_module_if_unset(
-                    self.owner.bot,
-                    self.owner.guild.id,
-                    "logs",
-                    actor_id=interaction.user.id,
-                )
         except Exception:
             logger.exception(
                 "Configuration des logs impossible guild=%s category=%s channel=%s",
@@ -1342,15 +1335,6 @@ class SetupView(discord.ui.LayoutView):
                             channel_id=channel_id,
                             enabled=new_enabled,
                         )
-                        if new_enabled:
-                            from cogs import setup_v2_core as core
-
-                            await core.enable_module_if_unset(
-                                self.bot,
-                                self.guild.id,
-                                "logs",
-                                actor_id=interaction.user.id,
-                            )
                     except Exception:
                         logger.exception(
                             "Bascule du log impossible guild=%s category=%s",
@@ -1450,13 +1434,9 @@ class SetupView(discord.ui.LayoutView):
 
             async def toggle_ai(interaction):
                 await self.ensure_ai()
-                row = await self.bot.db.fetchone(
-                    "SELECT enabled FROM ai_settings WHERE guild_id = ?", (self.guild.id,)
-                )
-                await self.bot.db.execute(
-                    "UPDATE ai_settings SET enabled = ?, updated_at = strftime('%s','now') WHERE guild_id = ?",
-                    (0 if _get(row, "enabled", 1) else 1, self.guild.id),
-                )
+                from cogs import setup_v2_core as core
+                active = await core.module_enabled(self.bot, self.guild.id, "ai")
+                await core.set_module_enabled(self.bot, self.guild.id, "ai", not active, actor_id=interaction.user.id)
                 await self.refresh(interaction)
 
             async def edit_ai(interaction):
@@ -1858,6 +1838,12 @@ class SetupView(discord.ui.LayoutView):
                         [panels.Ligne("Catégories", " · ".join(inactifs))],
                     )
                 )
+            if self.selected_log == "soundboard":
+                sections.append(panels.Section("Soundboard", [
+                    panels.Ligne("Événements", "Ajout, modification et suppression des sons du serveur."),
+                    panels.Ligne("Lectures", "Discord les transmet uniquement dans le vocal où SentriX est connecté. Rejoignez ce vocal avec la commande musique avant le test."),
+                    panels.Ligne("Activation", "Choisissez le salon, activez cette catégorie puis le module Logs dans les interrupteurs."),
+                ]))
             return sections
         if cle == "tickets":
             rows = await self.bot.db.fetchall(

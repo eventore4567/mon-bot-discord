@@ -42,7 +42,7 @@ class FakeDB:
     async def execute(self, query, params=()):
         if "INSERT INTO module_settings" in query:
             self.rows[(int(params[0]), str(params[1]))] = int(params[2])
-        elif "DELETE FROM module_settings" in query:
+        elif "DELETE FROM module_settings" in query and "guild_id=?" in query:
             self.rows.pop((int(params[0]), str(params[1])), None)
         return None
 
@@ -58,7 +58,11 @@ def bot():
     invalidate = getattr(core, "invalidate_module_cache", None)
     if invalidate:
         invalidate()
-    yield instance
+    instance.get_guild = lambda _id: None
+    # Ce test porte sur le cache ; les ressources sont validées par les tests SQLite.
+    from unittest.mock import AsyncMock, patch
+    with patch.object(core, "module_activation_issue", AsyncMock(return_value=None)):
+        yield instance
     if invalidate:
         invalidate()
 
@@ -79,8 +83,8 @@ def test_absence_de_ligne_signifie_non_configure_donc_inactif(bot):
     assert run(core.module_enabled(bot, 1, MODULE)) is False
     assert run(core.module_state(bot, 1, MODULE)) == core.MODULE_STATE_NOT_CONFIGURED
     # Les protections restent actives tant qu'on ne les coupe pas.
-    assert run(core.module_enabled(bot, 1, "moderation")) is True
-    assert run(core.module_state(bot, 1, "moderation")) == core.MODULE_STATE_ENABLED
+    assert run(core.module_enabled(bot, 1, "moderation")) is False
+    assert run(core.module_state(bot, 1, "moderation")) == core.MODULE_STATE_NOT_CONFIGURED
 
 
 def test_valeur_enregistree_est_respectee(bot):
@@ -117,7 +121,7 @@ def test_les_modules_ne_se_melangent_pas(bot):
     assert run(core.module_enabled(bot, 1, "tickets")) is True
 
 
-def test_le_repli_ai_settings_est_conserve(bot):
+def test_un_ancien_reglage_ai_ne_vaut_pas_activation(bot):
     """Sans ligne module_settings, le module ai suit l'ancien reglage ai_settings."""
     bot.db.ai_rows[1] = 0
     assert run(core.module_enabled(bot, 1, "ai")) is False
@@ -125,7 +129,7 @@ def test_le_repli_ai_settings_est_conserve(bot):
     invalidate = getattr(core, "invalidate_module_cache", None)
     if invalidate:
         invalidate(1, "ai")
-    assert run(core.module_enabled(bot, 1, "ai")) is True
+    assert run(core.module_enabled(bot, 1, "ai")) is False
 
 
 def test_la_reinitialisation_du_setup_est_visible(bot):

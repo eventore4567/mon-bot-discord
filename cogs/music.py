@@ -423,6 +423,7 @@ class Music(commands.Cog, name="Music"):
         self.queues: dict[int, GuildMusicQueue] = {}
         self._panel_locks: dict[int, asyncio.Lock] = {}
         self._player_messages: dict[tuple[int, int], discord.Message] = {}
+        self._player_activity: dict[tuple[int, int], tuple[float, bool]] = {}
         self._player_refresher.start()
         # Un seul panneau musique par membre présent dans le vocal configuré.
         # À la sortie on attend 2 s avant suppression : si le membre revient
@@ -698,7 +699,9 @@ class Music(commands.Cog, name="Music"):
         if message is not None and callable(getattr(message, "edit", None)):
             channel_id = getattr(getattr(message, "channel", None), "id", None)
             if channel_id is not None:
-                self._player_messages[(queue.guild_id, int(channel_id))] = message
+                key = (queue.guild_id, int(message.id))
+                self._player_messages[key] = message
+                self._player_activity[key] = (time.monotonic(), False)
         return message
 
     async def _refresh_player(self, interaction, queue):
@@ -819,18 +822,28 @@ class Music(commands.Cog, name="Music"):
 
     @tasks.loop(seconds=15)
     async def _player_refresher(self):
+        now = time.monotonic()
         for key, message in list(self._player_messages.items()):
             queue = self.queues.get(key[0])
-            if queue is None:
+            last_active, idle_rendered = self._player_activity.setdefault(key, (now, False))
+            voice = queue.voice_client if queue else None
+            inactive = queue is None or queue.current is None or voice is None or not voice.is_connected() or voice.is_paused()
+            if queue is None or (inactive and now - last_active >= 15 * 60):
                 self._player_messages.pop(key, None)
+                self._player_activity.pop(key, None)
+                continue
+            if inactive and idle_rendered:
                 continue
             panel = self._music_player_panel(queue)
             try:
                 await message.edit(content=None, embeds=[], view=panel, attachments=panel.fichiers(), allowed_mentions=discord.AllowedMentions.none())
             except (discord.NotFound, discord.Forbidden):
                 self._player_messages.pop(key, None)
+                self._player_activity.pop(key, None)
             except discord.HTTPException:
-                logger.warning("Actualisation du lecteur impossible guild=%s channel=%s", *key)
+                logger.warning("Actualisation du lecteur impossible guild=%s message=%s", *key)
+            else:
+                self._player_activity[key] = (last_active if inactive else now, inactive)
 
     @_player_refresher.before_loop
     async def _before_player_refresher(self):

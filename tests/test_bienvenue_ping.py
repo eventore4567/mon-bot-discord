@@ -67,13 +67,12 @@ class ReglageDuPingTests(unittest.IsolatedAsyncioTestCase):
         assert lu["ping"] is False
         assert lu["goodbye_ping"] is True
 
-    async def test_les_defauts_ne_changent_rien_aux_serveurs_existants(self):
-        """Condition pour que ce lot soit sûr à déployer : un serveur qui n'a
-        jamais touché ce réglage doit se comporter comme avant."""
+    async def test_la_bienvenue_ne_ping_pas_sans_activation(self):
+        """La notification nécessite un choix explicite."""
         from cogs import setup_v2_completion as sv
 
         lu = await sv._welcome_presentation(self.bot, 999)
-        assert lu["ping"] is True, "l'arrivant était notifié avant, il doit l'être encore"
+        assert lu["ping"] is False, "aucune notification sans activation explicite"
         assert lu["goodbye_ping"] is False, (
             "un départ ne notifie personne : la personne est partie, et pinguer "
             "le salon à chaque départ est le meilleur moyen de faire couper le module"
