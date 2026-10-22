@@ -254,19 +254,23 @@ class EmbedDraft:
         return view if view.children else None
 
     def status_summary(self) -> str:
+        def etat(ok: bool, texte: str) -> str:
+            return f"{'✅' if ok else '▫️'} {texte}"
+
         lines = [
-            f"**Titre :** {('configuré (' + str(len(self.title)) + ' car.)') if self.title else 'vide'}",
-            f"**Description :** {('configurée (' + str(len(self.description)) + ' car.)') if self.description else 'vide'}",
-            f"**Couleur :** #{self.colour:06X}" if self.colour is not None else "**Couleur :** aucune",
-            f"**Champs :** {len(self.fields)}/{MAX_FIELDS}",
-            f"**Boutons :** {len(self.buttons)}/{MAX_BUTTONS}",
-            f"**Image :** {yesno(bool(self.image_url))} • **Miniature :** {yesno(bool(self.thumbnail_url))}",
-            f"**Total :** {self.total_chars()}/{MAX_TOTAL} caractères",
+            etat(bool(self.title), f"**Titre** · `{len(self.title)} car.`" if self.title else "**Titre** · *vide*"),
+            etat(bool(self.description),
+                 f"**Description** · `{len(self.description)} car.`" if self.description else "**Description** · *vide*"),
+            f"🎨 **Couleur** · `#{self.colour:06X}`" if self.colour is not None else "🎨 **Couleur** · *aucune*",
+            f"📋 **Champs** · `{len(self.fields)}/{MAX_FIELDS}` · 🔘 **Boutons** · `{len(self.buttons)}/{MAX_BUTTONS}`",
+            f"🖼️ **Image** · {'✅' if self.image_url else '▫️'} · **Miniature** · {'✅' if self.thumbnail_url else '▫️'}",
+            f"🧮 **Total** · `{self.total_chars()}/{MAX_TOTAL}` caractères",
         ]
         if self.template_name:
-            lines.append(f"**Modèle :** 🟢 « {self.template_name} » (enregistré)" if not self.dirty else f"**Modèle :** 🟠 « {self.template_name} » — modifications non enregistrées")
+            lines.append(f"💾 **Modèle** · 🟢 `{self.template_name}` enregistré" if not self.dirty
+                         else f"💾 **Modèle** · 🟠 `{self.template_name}` — modifications non enregistrées")
         else:
-            lines.append("**Modèle :** 🟠 Non sauvegardé")
+            lines.append("💾 **Modèle** · 🟠 non sauvegardé")
         return "\n".join(lines)
 
     # ---------- (dé)sérialisation ----------
@@ -767,6 +771,30 @@ class EmbedBuilderView(discord.ui.View):
         self.draft = draft
         self.author_id = author_id
         self.message: discord.Message | None = None
+        # Moins de boutons (Jayden, 22/10/2026) : les six réglages passent dans UN menu,
+        # qui appelle exactement les mêmes actions ; restent 4 boutons d'action.
+        reglages = [
+            ("texte", "Texte : titre, description, footer", "📝", self.edit_text),
+            ("apparence", "Apparence : couleur, date", "🎨", self.open_appearance),
+            ("images", "Images et miniature", "🖼️", self.edit_images),
+            ("ajout_champ", "Ajouter un champ", "➕", self.add_field),
+            ("champs", "Gérer les champs", "📋", self.manage_fields),
+            ("boutons", "Boutons de lien", "🔘", self.manage_buttons),
+        ]
+        actions = {cle: item for cle, _libelle, _emoji, item in reglages}
+        for *_reste, item in reglages:
+            self.remove_item(item)
+        menu = discord.ui.Select(
+            placeholder="✏️ Modifier l'embed…", row=0,
+            options=[discord.SelectOption(label=libelle, value=cle, emoji=emoji)
+                     for cle, libelle, emoji, _item in reglages],
+        )
+
+        async def choisir(interaction: discord.Interaction):
+            await actions[menu.values[0]].callback(interaction)
+
+        menu.callback = choisir
+        self.add_item(menu)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -852,7 +880,7 @@ class EmbedBuilderView(discord.ui.View):
             return await self.refresh(interaction)
         await interaction.response.send_modal(EmbedSaveModal(self.cog, self))
 
-    @discord.ui.button(label="Envoyer", style=discord.ButtonStyle.success, emoji="📨", row=3)
+    @discord.ui.button(label="Envoyer", style=discord.ButtonStyle.success, emoji="📨", row=2)
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
         errors = self.draft.validate()
         if errors:
@@ -868,7 +896,7 @@ class EmbedBuilderView(discord.ui.View):
             return
         await interaction.response.edit_message(embeds=self.build_panel_embeds(), view=EmbedSendView(self))
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger, emoji="○", row=3)
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger, emoji="○", row=2)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         # BUG CORRIGÉ : ce bouton s'était retrouvé orphelin dans setup() (jamais rattaché à
         # la classe EmbedBuilderView) lors d'une précédente correction — le panneau principal
