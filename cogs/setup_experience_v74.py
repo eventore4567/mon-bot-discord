@@ -239,39 +239,35 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         container.add_item(discord.ui.Separator())
 
+        # Les sections avec bouton comptent trois composants chacune. Un état
+        # compact et un menu gardent tous les interrupteurs accessibles sous
+        # la limite globale de 40 composants, même avec les modules ajoutés.
+        lignes = []
         for key, label in setup_ui.MODULE_SWITCHES:
-            # Le premier écran Components V2 est limité à 40 composants Discord.
-            # Notifications reste disponible dans le menu détaillé ; on réserve sa
-            # ligne directe à Musique, demandée comme réglage principal.
-            if key == "notifications":
-                continue
             etat = switch_states.get(key, "not_configured")
-            actif = etat == "enabled"
-            bouton = discord.ui.Button(
-                label="Désactiver" if actif else "Activer",
-                style=discord.ButtonStyle.secondary if actif else discord.ButtonStyle.success,
-            )
+            texte_etat = "**ON**" if etat == "enabled" else ("OFF" if etat == "disabled" else "OFF · non configuré")
+            lignes.append(f"**{label}** — {texte_etat}")
+        container.add_item(discord.ui.TextDisplay("\n".join(lignes)))
+        interrupteurs = setup_ui.ModuleSwitchSelect(self, switch_states)
 
-            async def basculer(interaction: discord.Interaction, module=key):
-                try:
-                    nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
-                except core.ModuleSetupRequired as exc:
-                    return await panels.envoyer(
-                        interaction.response,
-                        panels.depuis_embed(embeds.warning(str(exc))),
-                        ephemere=True,
-                    )
-                try:
-                    await self.backend.audit(interaction.user.id, f"module:{module}", "on" if nouveau else "off")
-                except Exception:
-                    logger.debug("Audit setup indisponible.", exc_info=True)
-                await self.refresh(interaction)
+        async def basculer(interaction: discord.Interaction):
+            module = interrupteurs.values[0]
+            try:
+                nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
+            except core.ModuleSetupRequired as exc:
+                return await panels.envoyer(
+                    interaction.response,
+                    panels.depuis_embed(embeds.warning(str(exc))),
+                    ephemere=True,
+                )
+            try:
+                await self.backend.audit(interaction.user.id, f"module:{module}", "on" if nouveau else "off")
+            except Exception:
+                logger.debug("Audit setup indisponible.", exc_info=True)
+            await self.refresh(interaction)
 
-            bouton.callback = basculer
-            texte_etat = "**ON**" if actif else ("OFF" if etat == "disabled" else "OFF · non configuré")
-            container.add_item(
-                discord.ui.Section(discord.ui.TextDisplay(f"**{label}** — {texte_etat}"), accessory=bouton)
-            )
+        interrupteurs.callback = basculer
+        container.add_item(discord.ui.ActionRow(interrupteurs))
 
         music = self.bot.get_cog("Music")
         music_settings = await music.get_system_settings(self.guild.id) if music else {}
