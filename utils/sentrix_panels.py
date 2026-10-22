@@ -921,6 +921,67 @@ def _pied_avec_memoire_separee(contenu: str, marque: str, contexte: str) -> str:
     return "\n".join(morceaux)
 
 
+async def _ajouter_suites(panneau: Any, bot: Any, guild: Any, reference: str) -> None:
+    """Les boutons de suite d'une sanction (Exclure 10 min, Lever l'exclusion…) DANS la carte.
+
+    La confirmation de sanction est une carte Components V2 (utils/moderation_feedback) :
+    on ne peut pas y joindre une seconde vue, comme le faisait la réponse en texte.
+    Les boutons rejoignent donc sa rangée d'actions ; « Historique » n'est pas doublé
+    quand la carte a déjà le sien. cogs/trace.py les reconnaît par leur custom_id.
+    """
+    from utils import sentrix_trace
+
+    if bot is None or guild is None or not sentrix_trace.current_is_moderation():
+        return
+    cible = sentrix_trace.current_target()
+    if not cible:
+        return
+    try:
+        from cogs import language_runtime
+
+        english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+    except Exception:  # noqa: BLE001
+        english = False
+    suites = sentrix_trace.suites_view(sentrix_trace.current_command() or "", cible, reference, english=english)
+    if suites is None:
+        return
+    conteneur = next((e for e in list(getattr(panneau, "children", []) or [])
+                      if isinstance(e, discord.ui.Container)), None)
+    if conteneur is None:
+        return
+
+    def boutons(item: Any) -> list[Any]:
+        trouves = []
+        for enfant in list(getattr(item, "children", []) or []):
+            if isinstance(enfant, discord.ui.Button):
+                trouves.append(enfant)
+            else:
+                trouves.extend(boutons(enfant))
+        return trouves
+
+    existants = boutons(conteneur)
+    ids = {str(getattr(b, "custom_id", "") or "") for b in existants}
+    a_un_historique = any(":history:" in i or i.endswith(":history") for i in ids)
+    nouveaux = [b for b in suites.children
+                if str(b.custom_id) not in ids
+                and not (a_un_historique and ":history:" in str(b.custom_id))]
+    if not nouveaux:
+        return
+    rangee = next((e for e in reversed(list(conteneur.children)) if isinstance(e, discord.ui.ActionRow)), None)
+    for bouton in nouveaux:
+        bouton._view = None
+        if rangee is None or len(rangee.children) >= 5:
+            rangee = discord.ui.ActionRow()
+            try:
+                conteneur.add_item(rangee)
+            except (ValueError, TypeError):  # carte pleine : la sanction reste confirmée
+                return
+        try:
+            rangee.add_item(bouton)
+        except (ValueError, TypeError):
+            return
+
+
 async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
     """Sépare proprement le contexte membre et la référence dans le pied du panneau.
 
@@ -935,6 +996,7 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
     parent = getattr(destination, "_parent", None)
     guild = getattr(destination, "guild", None) or getattr(parent, "guild", None)
     bot = getattr(destination, "bot", None) or getattr(destination, "client", None) or getattr(parent, "client", None)
+    await _ajouter_suites(panneau, bot, guild, reference)
     try:
         ligne = await sentrix_trace.memory_line(bot, guild)
     except Exception:  # noqa: BLE001 — la mémoire ne doit jamais bloquer une réponse
