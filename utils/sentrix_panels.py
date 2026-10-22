@@ -538,6 +538,15 @@ def fichier_de_famille(famille: str) -> discord.File | None:
 class Panneau(discord.ui.LayoutView):
     """Panneau SentriX complet : bannière, titre, sections séparées, boutons."""
 
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
+        logger.error("Action du panneau échouée title=%s item=%s", self.titre, type(item).__name__,
+                     exc_info=(type(error), error, error.__traceback__))
+        message = "Cette action a rencontré une erreur. Vérifiez son résultat dans le panneau avant de réessayer."
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await interaction.response.send_message(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
     def __init__(
         self,
         *,
@@ -1366,7 +1375,9 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
         panneau.interaction_check = interaction_check
 
     source_error = getattr(vue, "on_error", None)
-    if source_error is not None:
+    if source_error is not None and getattr(source_error, "__func__", None) not in {
+        discord.ui.View.on_error, discord.ui.LayoutView.on_error,
+    }:
         panneau.on_error = source_error
 
     source_timeout = getattr(vue, "on_timeout", None)
@@ -1490,6 +1501,7 @@ async def editer(cible: Any, panneau: Panneau, **extra: Any):
             )
     extra.pop("attachments", None)
     fichiers = panneau.fichiers() if hasattr(panneau, "fichiers") else []
+    extra.setdefault("allowed_mentions", discord.AllowedMentions.none())
     charge = {"view": panneau, "attachments": fichiers, **extra}
 
     for nom in ("edit_message", "edit_original_response", "edit"):

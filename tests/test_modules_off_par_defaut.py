@@ -117,7 +117,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         # Les protections restent actives.
         for module in ("moderation", "security", "ai"):
             with self.subTest(module=module):
-                self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, module))
+                self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, module))
 
     async def test_un_serveur_neuf_a_l_automod_inactif(self):
         conf = await self.db.get_automod(NEW_GUILD)
@@ -187,13 +187,13 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "goodbye"))
 
     # ------------------------------------------------------------ configurer = activer
-    async def test_poser_une_ressource_active_le_module_non_configure(self):
+    async def test_poser_une_ressource_ne_demarre_aucun_module(self):
         await self.db.set_guild_config(NEW_GUILD, "welcome_channel", 555)
-        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "welcome"), core.MODULE_STATE_ENABLED)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "welcome"), core.MODULE_STATE_NOT_CONFIGURED)
         # Le départ reste non configuré : ce sont deux modules.
         self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "goodbye"), core.MODULE_STATE_NOT_CONFIGURED)
         await self.db.set_guild_config(NEW_GUILD, "goodbye_channel", 556)
-        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "goodbye"), core.MODULE_STATE_ENABLED)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "goodbye"), core.MODULE_STATE_NOT_CONFIGURED)
 
     async def test_un_module_desactive_explicitement_n_est_pas_rallume_par_une_ressource(self):
         await core.set_module_enabled(self.bot, NEW_GUILD, "levels", False)
@@ -225,7 +225,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         # Première lecture : ensure_schema + migration.
         self.assertFalse(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "levels"))
         self.assertFalse(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "economy"))
-        self.assertTrue(await core.module_enabled(self.bot, OLD_WELCOME_GUILD, "welcome"))
+        self.assertFalse(await core.module_enabled(self.bot, OLD_WELCOME_GUILD, "welcome"))
         self.assertFalse(await core.module_enabled(self.bot, OLD_WELCOME_GUILD, "goodbye"))
         self.assertFalse(await core.module_enabled(self.bot, OLD_EXPLICIT_OFF_GUILD, "levels"))
         self.assertTrue(await core.module_enabled(self.bot, OLD_EXPLICIT_OFF_GUILD, "economy"))

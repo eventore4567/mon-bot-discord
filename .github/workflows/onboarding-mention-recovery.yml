@@ -2,6 +2,8 @@ name: SentriX Onboarding and Mention Recovery
 on:
   pull_request:
     paths:
+      - 'database/db.py'
+      - 'tests/test_explicit_activation_regressions.py'
       - 'cogs/automod.py'
       - 'cogs/setup_v2_completion.py'
       - 'cogs/setup_v2_core.py'
@@ -33,6 +35,10 @@ jobs:
           tests/test_welcome_autoroles.py
           tests/test_welcome_single_source_of_truth.py
           tests/test_modules_off_par_defaut.py
+          tests/test_explicit_activation_regressions.py
+          tests/test_bienvenue_ping.py
+          tests/test_module_cache_coherence.py
+          tests/test_soundboard_logs.py
           tests/test_config_center_level_opt_in.py
           tests/test_automod_cross_channel_spam_v125.py
           tests/test_automod_enforcement_resilience.py

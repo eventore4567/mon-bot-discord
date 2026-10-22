@@ -317,6 +317,10 @@ class HoneypotVerification(commands.Cog, name=_COG_NAME):
         self._lock_until: dict[tuple[int, int], float] = {}
 
     async def config(self, guild_id: int, *, enabled_only: bool = True):
+        if enabled_only:
+            from cogs import setup_v2_core as core
+            if not await core.module_enabled(self.bot, guild_id, "security"):
+                return None
         query = "SELECT * FROM honeypot_verification WHERE guild_id = ?"
         if enabled_only:
             query += " AND enabled = 1"

@@ -59,10 +59,9 @@ async def ensure_schema(bot) -> None:
             await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN goodbye_mode TEXT NOT NULL DEFAULT 'embed'")
         # « ping » : le membre est-il NOTIFIÉ ? La mention s'affiche et reste
         # cliquable dans les deux cas — c'est la notification qui se règle ici,
-        # pas la présence du @. Par défaut 1, donc aucun serveur existant ne
-        # change de comportement.
+        # pas la présence du @. Notification désactivée sans choix explicite.
         if "ping" not in names:
-            await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN ping INTEGER NOT NULL DEFAULT 1")
+            await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN ping INTEGER NOT NULL DEFAULT 0")
         if "goodbye_ping" not in names:
             await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN goodbye_ping INTEGER NOT NULL DEFAULT 0")
         # « dm » : copie de la bienvenue en message privé. Off par défaut : un
@@ -71,6 +70,15 @@ async def ensure_schema(bot) -> None:
             await bot.db.execute("ALTER TABLE welcome_presentation_v2 ADD COLUMN dm INTEGER NOT NULL DEFAULT 0")
     except Exception:
         logger.debug("Colonne mode de welcome_presentation_v2 non vérifiable", exc_info=True)
+    migration = "welcome_ping_explicit_optin_v1"
+    done = await bot.db.fetchone("SELECT name FROM sentrix_migrations WHERE name=?", (migration,))
+    if done is None:
+        # L'ancien défaut 1 ne permet pas de prouver un choix volontaire.
+        await bot.db.execute("UPDATE welcome_presentation_v2 SET ping=0 WHERE ping=1")
+        await bot.db.execute(
+            "INSERT OR IGNORE INTO sentrix_migrations (name, applied_at) VALUES (?, ?)",
+            (migration, int(time.time())),
+        )
     await managed_builder.ensure_managed_schema(bot)
 
 
@@ -90,12 +98,12 @@ async def _welcome_presentation(bot, guild_id: int) -> dict:
         (guild_id,),
     )
     if row is None:
-        # ping=True : un serveur existant ne change pas de comportement.
+        # Aucun ping sans activation explicite.
         # goodbye_ping=False : la personne est partie, Discord ne peut plus la
         # notifier, et pinguer le salon à chaque départ est le meilleur moyen
         # de faire couper le module.
         return {"title": WELCOME_DEFAULT_TITLE, "show_avatar": True, "show_member_count": True,
-                "mode": "embed", "goodbye_mode": "embed", "ping": True, "goodbye_ping": False, "dm": False}
+                "mode": "embed", "goodbye_mode": "embed", "ping": False, "goodbye_ping": False, "dm": False}
 
     def _drapeau(key: str, defaut: bool) -> bool:
         """Colonne ajoutée après coup : absente sur les bases non migrées."""
@@ -122,7 +130,7 @@ async def _welcome_presentation(bot, guild_id: int) -> dict:
         # Un littéral ici rendait le réglage illisible — un serveur qui avait
         # coupé le ping était pingué quand même, et « tout personnaliser »
         # devenait faux.
-        "ping": _drapeau("ping", True),
+        "ping": _drapeau("ping", False),
         # La mention s'affiche dans les deux cas et reste cliquable : c'est
         # allowed_mentions qui décide seul de faire sonner le téléphone.
         "goodbye_ping": _drapeau("goodbye_ping", False),
@@ -279,7 +287,7 @@ async def _send_welcome(bot, member: discord.Member, *, test: bool = False) -> t
     # `test`. Un serveur qui avait coupé le ping était pingué quand même.
     mentions = (
         discord.AllowedMentions.none()
-        if test or not presentation.get("ping", True)
+        if test or not presentation.get("ping", False)
         else discord.AllowedMentions(users=[member], roles=False, everyone=False)
     )
     if presentation.get("mode") == "text":
@@ -538,7 +546,7 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
             default=(
                 f"avatar={'on' if presentation['show_avatar'] else 'off'}; "
                 f"membres={'on' if presentation['show_member_count'] else 'off'}; "
-                f"ping={'on' if presentation.get('ping', True) else 'off'}; "
+                f"ping={'on' if presentation.get('ping', False) else 'off'}; "
                 f"ping-depart={'on' if presentation.get('goodbye_ping', False) else 'off'}; "
                 f"mp={'on' if presentation.get('dm', False) else 'off'}"
             ),
@@ -555,7 +563,7 @@ class WelcomeSettingsModal(discord.ui.Modal, title="Bienvenue / départ"):
         # change rien. « ping = True » en dur ici rendait le réglage
         # inconfigurable — Jayden demandait l'inverse, « tout personnaliser,
         # ping pas ping ».
-        ping = _option(lu, "ping", defaut=True)
+        ping = _option(lu, "ping", defaut=False)
         ping_depart = _option(lu, "ping-depart", "ping_depart", "pingdepart", defaut=False)
         dm = _option(lu, "mp", "dm", defaut=False)
         await _save_welcome_presentation(
@@ -901,7 +909,7 @@ def _patch_setup_embed() -> None:
         panel = await current(self)
         if self.category == "welcome":
             p = await _welcome_presentation(self.bot, self.guild.id)
-            panel.add_field(name="Affichage de bienvenue", value=f"**Titre :** {p['title']}\n**Avatar :** {'ACTIF' if p['show_avatar'] else 'INACTIF'}\n**Nombre de membres :** {'ACTIF' if p['show_member_count'] else 'INACTIF'}\n**Notification :** {'ACTIVE' if p.get('ping', True) else 'INACTIVE'}\n**Copie en message privé :** {'ACTIVE' if p.get('dm') else 'INACTIVE'}\n**Aperçu** envoie le vrai message, sans notifier personne.", inline=False)
+            panel.add_field(name="Affichage de bienvenue", value=f"**Titre :** {p['title']}\n**Avatar :** {'ACTIF' if p['show_avatar'] else 'INACTIF'}\n**Nombre de membres :** {'ACTIF' if p['show_member_count'] else 'INACTIF'}\n**Notification :** {'ACTIVE' if p.get('ping', False) else 'INACTIVE'}\n**Copie en message privé :** {'ACTIVE' if p.get('dm') else 'INACTIVE'}\n**Aperçu** envoie le vrai message, sans notifier personne.", inline=False)
         elif self.category == "notifications":
             row = await self.bot.db.fetchone("SELECT COUNT(*) AS n FROM social_notifications WHERE guild_id=?", (self.guild.id,)); count = int(row["n"] if row else 0)
             page = int(getattr(self, "notification_page", 0)) + 1; pages = max(1, (count + 22) // 23)

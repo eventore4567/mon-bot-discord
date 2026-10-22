@@ -926,10 +926,13 @@ DEFAULT_AI_SETTINGS = {
 async def get_settings(bot, guild_id: int) -> dict:
     row = await bot.db.fetchone("SELECT * FROM ai_settings WHERE guild_id = ?", (guild_id,))
     settings = dict(DEFAULT_AI_SETTINGS)
+    from cogs import setup_v2_core as core
+    active = await core.module_enabled(bot, guild_id, "ai")
+    settings["enabled"] = active
     if not row:
         return settings
     settings.update({
-        "enabled": bool(row["enabled"]),
+        "enabled": active and bool(row["enabled"]),
         "default_model": row["default_model"] or MODEL_TERRA,
         "reasoning_effort": row["reasoning_effort"] or "medium",
         "allowed_channel_ids": json.loads(row["allowed_channel_ids"] or "[]"),
@@ -957,6 +960,9 @@ async def ensure_settings_row(bot, guild_id: int):
 async def update_setting(bot, guild_id: int, field: str, value):
     """`field` doit TOUJOURS venir d'un nom de colonne fixe côté code (jamais d'une entrée
     utilisateur brute) — même convention que Database.set_guild_config()."""
+    if field == "enabled":
+        from cogs import setup_v2_core as core
+        await core.set_module_enabled(bot, guild_id, "ai", bool(value))
     await ensure_settings_row(bot, guild_id)
     await bot.db.execute(f"UPDATE ai_settings SET {field} = ?, updated_at = ? WHERE guild_id = ?",
                           (value, int(time.time()), guild_id))

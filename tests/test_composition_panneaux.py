@@ -35,9 +35,8 @@ def _aplatir(items, sortie=None):
 
 class StructureDUnPanneau(unittest.TestCase):
     def setUp(self):
-        # banniere=True explicitement : les bandeaux sont désactivés dans le
-        # produit, mais ces tests vérifient précisément leur STRUCTURE. Sans
-        # cette demande, ils ne testeraient plus rien.
+        # Un bandeau demandé doit référencer une vraie pièce jointe. Les
+        # lecteurs compacts peuvent le désactiver explicitement.
         self.panneau = panels.Panneau(
             banniere=True,
             titre="SentriX — Test",
@@ -53,18 +52,20 @@ class StructureDUnPanneau(unittest.TestCase):
         )
         self.plat = _aplatir(self.panneau.to_components())
 
-    def test_le_contenu_utile_est_le_premier_element(self):
+    def test_la_banniere_demandee_precede_le_contenu(self):
         conteneur = self.panneau.to_components()[0]
         self.assertEqual(conteneur["type"], CONTENEUR)
-        self.assertNotEqual(conteneur["components"][0]["type"], GALERIE)
+        self.assertEqual(conteneur["components"][0]["type"], GALERIE)
 
-    def test_aucune_banniere_ne_part_dans_le_message(self):
-        self.assertFalse(any(i["type"] == GALERIE for i in self.plat))
-        self.assertEqual(self.panneau.fichiers(), [])
+    def test_banniere_et_fichier_sont_toujours_livres_ensemble(self):
+        self.assertTrue(any(i["type"] == GALERIE for i in self.plat))
+        self.assertEqual(len(self.panneau.fichiers()), 1)
 
-    def test_banniere_et_lisere_restent_absents_meme_si_demandes(self):
-        self.assertEqual(self.panneau.fichiers(), [])
-        self.assertIsNone(self.panneau.to_components()[0].get("accent_color"))
+    def test_le_mode_compact_reste_sans_banniere_ni_piece_jointe(self):
+        compact = panels.Panneau(titre="Lecteur", banniere=False)
+        self.assertEqual(compact.fichiers(), [])
+        self.assertFalse(any(i["type"] == GALERIE for i in _aplatir(compact.to_components())))
+        self.assertIsNone(compact.to_components()[0].get("accent_color"))
 
     def test_les_sections_restent_sans_filet_decoratif(self):
         types = [i["type"] for i in self.panneau.to_components()[0]["components"]]

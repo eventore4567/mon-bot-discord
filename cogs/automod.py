@@ -3010,6 +3010,8 @@ class AutoMod(commands.Cog, name="Automod"):
         content_lower = message.content.lower()
         link_content = _normalize_link_text(message.content)
         conf = await self.get_automod_cached(message.guild.id)
+        if conf.get("security_module_disabled"):
+            return
 
         # Immunité personnelle explicite ON : aucun filtre AutoMod ne s'applique.
         # OFF ne court-circuite rien et l'utilisateur est traité comme un membre normal.
@@ -4075,7 +4077,7 @@ class AutoMod(commands.Cog, name="Automod"):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         conf = await self.get_automod_cached(member.guild.id)
-        if not conf:
+        if not conf or conf.get("security_module_disabled"):
             return
 
         # Un événement Discord JOIN dupliqué ne doit jamais être interprété
