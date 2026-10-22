@@ -272,7 +272,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
-                "-# SENTRIX CORE · Configuration · setup\n# 🔒 Sécurité\n"
+                "# 🔒 Sécurité\n"
                 "Choisissez **exactement les protections anti** que vous voulez utiliser. "
                 "Vous pouvez en activer une seule, plusieurs ou toutes.\n\n"
                 "Les permissions **Kick, Ban, Timeout, Gérer les messages, Gérer les rôles, "
@@ -493,6 +493,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
     self.backend.category = "logs"
 
     options = _log_options()
+    options.sort(key=lambda option: (option.value != "soundboard", option.label.casefold()))
     available = [option.value for option in options]
     if not available:
         container = discord.ui.Container()
@@ -500,7 +501,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# 📜 Logs du serveur\nAucune catégorie de logs n'est disponible dans ce runtime."
+                    "# 📜 Logs du serveur\nAucune catégorie de logs n'est disponible dans ce runtime."
                 ),
                 accessory=v74.v73._thumbnail(self.bot),
             )
@@ -582,9 +583,9 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
-                "-# SENTRIX CORE · Configuration · setup\n# 📜 Logs du serveur\n"
+                "# 📜 Logs du serveur\n"
                 "Choisissez une catégorie puis **le salon exact** où SentriX doit envoyer ces logs.\n"
-                "Les deux menus restent visibles en permanence : aucun ancien panneau caché n'est utilisé."
+                "Activez le module Logs, puis choisissez les catégories à recevoir."
             ),
             accessory=v74.v73._thumbnail(self.bot),
         )
@@ -593,9 +594,9 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(
         discord.ui.Section(
             discord.ui.TextDisplay(
-                "### ROUTAGE\n"
+                "### Destinations\n"
                 + "\n".join(route_lines)[:3000]
-                + "\n\n### PERMISSIONS DU BOT\n"
+                + "\n\n"
                 + permission_line
             ),
             accessory=status,

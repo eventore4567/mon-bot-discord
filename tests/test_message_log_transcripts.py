@@ -64,11 +64,11 @@ async def test_persistent_cache_recovery_also_attaches_full_transcript():
 
 
 @pytest.mark.asyncio
-async def test_short_message_has_no_unnecessary_transcript():
+async def test_short_message_also_has_a_complete_transcript():
     cog, message = _setup()
     message.content = "Salut !"
     await cog.on_message_delete(message)
-    assert cog._send.await_args.kwargs["media_files"] == []
+    assert "Salut !" in _text(cog)
 
 
 @pytest.mark.asyncio
@@ -104,3 +104,50 @@ async def test_expanded_markdown_and_many_lines_also_get_a_transcript(content):
     message.content = content
     await cog.on_message_delete(message)
     assert content in _text(cog)
+
+
+@pytest.mark.asyncio
+async def test_transcript_action_reads_actual_attachment_and_returns_download_link():
+    from cogs.log_history_center import PremiumLogAction
+    attachment = SimpleNamespace(filename="sentrix-message-300-transcript.txt",
+                                 url="https://cdn.discordapp.com/attachments/test/transcript.txt")
+    interaction = SimpleNamespace(
+        guild_id=100000000000000100,
+        message=SimpleNamespace(attachments=[attachment]),
+        response=SimpleNamespace(send_message=AsyncMock()),
+    )
+    action = PremiumLogAction("transcript", 100000000000000100, 100000000000000200)
+    await action.callback(interaction)
+    result = interaction.response.send_message.await_args.kwargs
+    assert result["ephemeral"] is True
+    assert result["view"].children[0].url == attachment.url
+
+
+@pytest.mark.asyncio
+async def test_transcript_action_has_explicit_message_for_old_logs():
+    from cogs.log_history_center import PremiumLogAction
+    interaction = SimpleNamespace(
+        guild_id=100000000000000100, message=SimpleNamespace(attachments=[]),
+        response=SimpleNamespace(send_message=AsyncMock()),
+    )
+    await PremiumLogAction("transcript", 100000000000000100, 100000000000000200).callback(interaction)
+    assert "ne contient pas de transcript" in interaction.response.send_message.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_message_log_has_a_transcript_button_beside_the_file():
+    from cogs.log_history_center import PremiumLogAction
+    embed = discord.Embed(title="Message supprimé")
+    media, files = _attach_message_transcript(
+        embed, guild_id=100000000000000100, channel_id=400, message_id=300, author_id=200,
+        sections=[("Contenu", "Salut")],
+    )
+    view = wide_logs.WideLogView(
+        embed, banner_filename="", log_type="message_delete", guild_id=100000000000000100,
+        identity_id=100000000000000200, media_items=media, available_attachments={files[0].filename},
+    )
+    def walk(items):
+        for item in items:
+            yield item
+            yield from walk(getattr(item, "children", ()))
+    assert any(isinstance(item, PremiumLogAction) and item.action == "transcript" for item in walk(view.children))

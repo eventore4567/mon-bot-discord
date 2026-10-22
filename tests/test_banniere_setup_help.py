@@ -54,7 +54,10 @@ def test_le_fichier_joint_porte_le_nom_que_la_galerie_reference():
     simplement une image cassée."""
     from cogs.setup_components_v73 import fichier_banniere
 
-    assert fichier_banniere() is None
+    from utils.premium_log_banners import BANNER_FILENAME
+    fichier = fichier_banniere()
+    assert fichier is not None and fichier.filename == BANNER_FILENAME
+    fichier.close()
 
 
 def test_chaque_appel_rend_un_fichier_neuf():
@@ -65,8 +68,10 @@ def test_chaque_appel_rend_un_fichier_neuf():
 
     premier = fichier_banniere()
     second = fichier_banniere()
-    assert premier is None
-    assert second is None
+    assert premier is not None and second is not None
+    assert premier is not second and premier.fp is not second.fp
+    premier.close()
+    second.close()
 
 
 def test_la_famille_nest_pas_redecidee_depuis_la_commande():
@@ -86,12 +91,12 @@ def test_la_galerie_reference_bien_une_piece_jointe(bandeaux_actifs):
     import discord
 
     from cogs.setup_components_v73 import BANNIERE, entete_banniere
-    from utils.log_banners import nom_fichier
+    from utils.premium_log_banners import BANNER_FILENAME
 
     galerie = entete_banniere()
     assert isinstance(galerie, discord.ui.MediaGallery)
     rendu = str(galerie.to_component_dict())
-    assert f"attachment://{nom_fichier(BANNIERE)}" in rendu
+    assert f"attachment://{BANNER_FILENAME}" in rendu
 
 
 # =============================================================================

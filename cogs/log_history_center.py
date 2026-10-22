@@ -666,7 +666,7 @@ class ConfirmUnban(discord.ui.View):
 
 class PremiumLogAction(
     discord.ui.DynamicItem[discord.ui.Button],
-    template=r"sentrix:premiumlog:(?P<action>history|unban):(?P<guild_id>[0-9]{15,22}):(?P<target_id>[0-9]{15,22})",
+    template=r"sentrix:premiumlog:(?P<action>history|unban|transcript):(?P<guild_id>[0-9]{15,22}):(?P<target_id>[0-9]{15,22})",
 ):
     """Boutons persistants, y compris après un redémarrage Railway."""
 
@@ -675,9 +675,9 @@ class PremiumLogAction(
         self.guild_id = int(guild_id)
         self.target_id = int(target_id)
         super().__init__(discord.ui.Button(
-            label="Historique" if action == "history" else "Débannir",
-            emoji="📜" if action == "history" else "🛡️",
-            style=discord.ButtonStyle.secondary if action == "history" else discord.ButtonStyle.success,
+            label={"history": "Historique", "unban": "Débannir", "transcript": "Transcript"}[action],
+            emoji={"history": "📜", "unban": "🛡️", "transcript": "📄"}[action],
+            style=discord.ButtonStyle.success if action == "unban" else discord.ButtonStyle.secondary,
             custom_id=f"sentrix:premiumlog:{action}:{guild_id}:{target_id}",
         ))
 
@@ -688,6 +688,27 @@ class PremiumLogAction(
     async def callback(self, interaction: discord.Interaction) -> None:
         if interaction.guild_id != self.guild_id:
             await interaction.response.send_message("Ce log appartient à un autre serveur.", ephemeral=True)
+            return
+        if self.action == "transcript":
+            message = getattr(interaction, "message", None)
+            transcript = next((
+                item for item in getattr(message, "attachments", ())
+                if str(getattr(item, "filename", "")).endswith("-transcript.txt")
+            ), None)
+            if transcript is None:
+                await interaction.response.send_message(
+                    "Ce journal ne contient pas de transcript joint. Les nouveaux journaux de messages en proposent un.",
+                    ephemeral=True, allowed_mentions=NO_MENTIONS,
+                )
+                return
+            view = discord.ui.View(timeout=120)
+            view.add_item(discord.ui.Button(
+                label="Télécharger le transcript", emoji="📄", url=transcript.url,
+            ))
+            await interaction.response.send_message(
+                "Texte intégral du message, sans coupure.", view=view,
+                ephemeral=True, allowed_mentions=NO_MENTIONS,
+            )
             return
         denied = await _access(interaction, unban=self.action == "unban")
         if denied:

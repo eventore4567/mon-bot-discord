@@ -118,14 +118,8 @@ def is_traced(command_name: str) -> bool:
 
 
 def visible_ref() -> str | None:
-    """La référence à afficher, seulement si la commande en cours est tracée."""
-    trace = CURRENT.get()
-    if trace is None:
-        return None
-    if trace.transport == AUTOMATIC:
-        return trace.ref  # une action de SentriX lui-même (AutoMod) : toujours signée
-    name = getattr(getattr(trace.ctx, "command", None), "qualified_name", None) or trace.command
-    return trace.ref if is_traced(name) else None
+    """Les identifiants de suivi restent internes, jamais ajoutés aux réponses."""
+    return None
 
 
 def classify(error: BaseException | None) -> tuple[str, str]:
