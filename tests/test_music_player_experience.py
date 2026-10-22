@@ -54,7 +54,7 @@ async def test_pause_and_resume_update_real_audio_clock_and_same_message():
     assert queue.paused_by_user and queue.voice_client.is_paused()
     interaction.response.defer.assert_awaited_once()
     refreshed = interaction.edit_original_response.await_args.kwargs["view"]
-    assert refreshed.titre == "Lecture en pause"
+    assert refreshed.titre == "⏸️ Lecture en pause"
     assert _button(refreshed, "pause").libelle == "Reprendre"
     await _button(refreshed, "pause").callback(_interaction())
     assert not queue.paused_by_user and queue.voice_client.is_playing()

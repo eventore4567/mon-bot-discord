@@ -112,11 +112,11 @@ async def test_transcript_action_reads_actual_attachment_and_returns_download_li
     attachment = SimpleNamespace(filename="sentrix-message-300-transcript.txt",
                                  url="https://cdn.discordapp.com/attachments/test/transcript.txt")
     interaction = SimpleNamespace(
-        guild_id=100,
+        guild_id=100000000000000100,
         message=SimpleNamespace(attachments=[attachment]),
         response=SimpleNamespace(send_message=AsyncMock()),
     )
-    action = PremiumLogAction("transcript", 100, 200)
+    action = PremiumLogAction("transcript", 100000000000000100, 100000000000000200)
     await action.callback(interaction)
     result = interaction.response.send_message.await_args.kwargs
     assert result["ephemeral"] is True
@@ -127,10 +127,10 @@ async def test_transcript_action_reads_actual_attachment_and_returns_download_li
 async def test_transcript_action_has_explicit_message_for_old_logs():
     from cogs.log_history_center import PremiumLogAction
     interaction = SimpleNamespace(
-        guild_id=100, message=SimpleNamespace(attachments=[]),
+        guild_id=100000000000000100, message=SimpleNamespace(attachments=[]),
         response=SimpleNamespace(send_message=AsyncMock()),
     )
-    await PremiumLogAction("transcript", 100, 200).callback(interaction)
+    await PremiumLogAction("transcript", 100000000000000100, 100000000000000200).callback(interaction)
     assert "ne contient pas de transcript" in interaction.response.send_message.await_args.args[0]
 
 
@@ -139,12 +139,12 @@ async def test_message_log_has_a_transcript_button_beside_the_file():
     from cogs.log_history_center import PremiumLogAction
     embed = discord.Embed(title="Message supprimé")
     media, files = _attach_message_transcript(
-        embed, guild_id=100, channel_id=400, message_id=300, author_id=200,
+        embed, guild_id=100000000000000100, channel_id=400, message_id=300, author_id=200,
         sections=[("Contenu", "Salut")],
     )
     view = wide_logs.WideLogView(
-        embed, banner_filename="", log_type="message_delete", guild_id=100,
-        identity_id=200, media_items=media, available_attachments={files[0].filename},
+        embed, banner_filename="", log_type="message_delete", guild_id=100000000000000100,
+        identity_id=100000000000000200, media_items=media, available_attachments={files[0].filename},
     )
     def walk(items):
         for item in items:
