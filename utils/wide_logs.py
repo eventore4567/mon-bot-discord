@@ -1442,6 +1442,14 @@ class WideLogView(discord.ui.LayoutView):
             if event_type == "member_ban":
                 actions.append(PremiumLogAction("unban", guild_id, identity_id))
             container.add_item(discord.ui.ActionRow(*actions))
+        if guild_id and any(
+            str(name).endswith("-transcript.txt")
+            for name in (available_attachments or ())
+        ):
+            from cogs.log_history_center import PremiumLogAction
+            container.add_item(discord.ui.ActionRow(
+                PremiumLogAction("transcript", guild_id, identity_id or guild_id)
+            ))
         self.add_item(container)
 
 

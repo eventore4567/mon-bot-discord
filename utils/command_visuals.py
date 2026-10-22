@@ -349,6 +349,8 @@ class CommandPanelView(discord.ui.LayoutView):
         # « SENTRIX CORE · … » et par l'icône ; le trait ne fait que répéter en
         # couleur ce que le texte dit déjà, et il casse la sobriété recherchée.
         container = discord.ui.Container()
+        from . import sentrix_panels as panels
+        self._neutral_strip_attached = panels.poser_bandeau(container, kind)
 
         visual_family = _resolved_family(kind)
         identity_family = _identity_family(ctx, kind, visual_family)
@@ -410,6 +412,10 @@ class CommandPanelView(discord.ui.LayoutView):
             container.add_item(discord.ui.TextDisplay(f"-# {footer}"))
 
         self.add_item(container)
+
+    def fichiers(self) -> list[discord.File]:
+        from .sentrix_panels import pieces_jointes_de_famille
+        return pieces_jointes_de_famille("info") if self._neutral_strip_attached else []
 
 
 def _native_payload(
@@ -497,6 +503,9 @@ async def _styled_context_send(self: commands.Context, *args: Any, **kwargs: Any
     output.pop("embed", None)
     output.pop("content", None)
     output["view"] = layout
+    neutral_files = layout.fichiers()
+    if neutral_files:
+        output["files"] = neutral_files
 
     try:
         return await _ORIGINAL_CONTEXT_SEND(self, None, **output)

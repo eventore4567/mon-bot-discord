@@ -229,10 +229,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX\n"
+                    "# ⚙️ Configuration\n"
                     f"**{self.guild.name}** · **{actifs}/{len(setup_ui.MODULE_SWITCHES)}** modules activés\n"
-                    "Un module désactivé ou jamais configuré ne fait rien. Activez-le ici, puis "
-                    "ouvrez sa page pour choisir ses salons et rôles."
+                    "Choisissez un module pour ses réglages. L’activation reste un choix séparé."
                 ),
                 accessory=v73._thumbnail(self.bot),
             )
@@ -242,12 +241,15 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         # Les sections avec bouton comptent trois composants chacune. Un état
         # compact et un menu gardent tous les interrupteurs accessibles sous
         # la limite globale de 40 composants, même avec les modules ajoutés.
-        lignes = []
+        actifs_noms = []
+        inactifs_noms = []
         for key, label in setup_ui.MODULE_SWITCHES:
-            etat = switch_states.get(key, "not_configured")
-            texte_etat = "**ON**" if etat == "enabled" else ("OFF" if etat == "disabled" else "OFF · non configuré")
-            lignes.append(f"**{label}** — {texte_etat}")
-        container.add_item(discord.ui.TextDisplay("\n".join(lignes)))
+            (actifs_noms if switch_states.get(key) == "enabled" else inactifs_noms).append(label)
+        resume = (
+            "**Activés**\n" + (" · ".join(actifs_noms) or "Aucun module activé")
+            + "\n\n**Désactivés**\n" + (" · ".join(inactifs_noms) or "Aucun")
+        )
+        container.add_item(discord.ui.TextDisplay(resume))
         interrupteurs = setup_ui.ModuleSwitchSelect(self, switch_states)
 
         async def basculer(interaction: discord.Interaction):
@@ -286,12 +288,17 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await self.refresh(interaction)
 
         music_button.callback = open_music
-        container.add_item(
-            discord.ui.Section(
-                discord.ui.TextDisplay(f"**Musique** — {music_state}"),
-                accessory=music_button,
-            )
-        )
+        music_button.label = "🎵 Musique"
+        soundboard_button = discord.ui.Button(label="Soundboard", emoji="🔊", style=discord.ButtonStyle.secondary)
+
+        async def open_soundboard(interaction: discord.Interaction):
+            self.page = "logs"
+            self.backend = self._new_backend("logs")
+            self.backend.selected_log = "soundboard"
+            await self.refresh(interaction)
+
+        soundboard_button.callback = open_soundboard
+        container.add_item(discord.ui.ActionRow(music_button, soundboard_button))
 
         # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
         options = [
@@ -379,7 +386,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX — paramètres avancés\n"
+                    "# Configuration de SentriX — paramètres avancés\n"
                     f"**{active}/{len(CATEGORY_ORDER)} modules actifs**"
                     + (f" · **{problems} à corriger**" if problems else "")
                     + "\nLes permissions des commandes sont vérifiées directement avec Discord."
@@ -530,7 +537,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# 🏷️ Rôles automatiques\n"
+                    "# 🏷️ Rôles automatiques\n"
                     "Un rôle n'est donné que si vous l'avez choisi ici. SentriX ne crée aucun rôle, "
                     "respecte la hiérarchie, et à la levée d'une sanction ne retire que le rôle "
                     "qu'il a lui-même donné — jamais un rôle posé à la main."
@@ -918,7 +925,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# 🎵 Musique\n"
+                    "# 🎵 Musique\n"
                     "Choisissez le **vocal musique** puis activez le système. "
                     "Quand un membre rejoint ce vocal, SentriX le mentionne dans le chat du vocal "
                     "et affiche le petit lecteur musique.\n\n"
@@ -1086,7 +1093,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# 🔒 Sécurité\n"
+                    "# 🔒 Sécurité\n"
                     "Ici il n’y a plus 15 menus : **un seul bouton**.\n"
                     "Les protections de sécurité sont choisies individuellement dans la couche finale. "
                     "anti-spam, anti-raid, anti-liens, anti-invitations, anti-bot, anti-scam, "
@@ -1137,7 +1144,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# 🎫 Tickets\n"
+                    "# 🎫 Tickets\n"
                     "Activez le module puis choisissez vous-même chaque réglage : "
                     "titre, texte, couleur, image, miniature, salon, rôle support, catégorie, logs, "
                     "formulaire, message d’ouverture et boutons.\n\n"
@@ -1223,7 +1230,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# 🛡️ Modération\n"
+                    "# 🛡️ Modération\n"
                     "Le vieux **« Rôle staff »** n’est plus demandé. SentriX décide l’accès avec "
                     "les permissions Discord réelles : timeout, kick, ban, gérer les messages, "
                     "les salons, les rôles, etc.\n\n"

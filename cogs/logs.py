@@ -67,12 +67,6 @@ def _attach_message_transcript(
     Le TXT ne transforme ni les espaces, ni Unicode, ni les mentions du message.
     """
     items, files = list(media_items or []), list(media_files or [])
-    if not any(
-        len(text) > 900 or len(discord.utils.escape_markdown(text)) > 1200
-        or text.count("\n") > 20
-        for _label, text in sections
-    ):
-        return items, files
     header = (
         "SentriX — Transcript intégral\n"
         f"Serveur : {guild_id}\nSalon : {channel_id}\n"

@@ -77,7 +77,7 @@ def _banner_header(kind: str, body: discord.Embed | None = None) -> discord.Embe
 
 def _stack_for_embed(embed: discord.Embed, kind: str) -> list[discord.Embed]:
     body = _without_bottom_command_banner(embed)
-    return [_banner_header(kind, body), body]
+    return [body]
 
 
 def _stack_for_embeds(values: Iterable[discord.Embed], kind: str | None = None) -> list[discord.Embed]:
@@ -96,7 +96,7 @@ def _stack_for_embeds(values: Iterable[discord.Embed], kind: str | None = None) 
     # that already uses all ten slots just to add decoration.
     if len(cleaned) >= 10:
         return cleaned[:10]
-    return [_banner_header(resolved, cleaned[0]), *cleaned[:9]]
+    return cleaned[:10]
 
 
 def _native_payload_top(
