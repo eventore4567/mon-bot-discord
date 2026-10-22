@@ -2376,7 +2376,7 @@ class AutoMod(commands.Cog, name="Automod"):
     @checks.is_owner_or_admin_for("securite")
     async def antibot_allow(self, ctx: commands.Context, membre: discord.Member):
         if not membre.bot:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce membre n'est pas un bot.")))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"{membre.mention} n'est pas un bot. Cette commande autorise un **bot** à rejoindre le serveur malgré l'anti-bot.")))
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO automod_bot_allowlist (guild_id, bot_id, added_by, created_at) VALUES (?, ?, ?, ?)",
             (ctx.guild.id, membre.id, ctx.author.id, int(time.time())),

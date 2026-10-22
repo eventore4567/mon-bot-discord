@@ -2043,7 +2043,9 @@ class Utility(commands.Cog, name="Utility"):
             (guild_id, ctx.author.id, raison, started),
         )
         self.afk_users[(guild_id, ctx.author.id)] = (raison, started)
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Mode AFK activé', description=f'😴 {ctx.author.mention} est maintenant AFK : {raison}')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Mode AFK activé', description=(f'😴 {ctx.author.mention} est maintenant AFK : **{raison}**\n'
+                f'Ceux qui vous mentionnent verront ce message et depuis quand vous êtes absent.\n'
+                f'-# Votre prochain message dans le serveur retire le statut AFK.'))))
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

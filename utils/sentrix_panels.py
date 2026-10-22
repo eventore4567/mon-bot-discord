@@ -929,7 +929,7 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
     """
     from utils import sentrix_trace
 
-    reference = sentrix_trace.visible_ref()
+    reference = sentrix_trace.active_ref()
     if not reference:
         return
     parent = getattr(destination, "_parent", None)
@@ -943,6 +943,19 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
         return
     marque = f"Réf. {reference}"
 
+    def ajouter_en_pied(item: Any) -> bool:
+        """La référence n'est plus affichée : la mémoire va en dernière ligne du panneau."""
+        conteneur = next((e for e in list(getattr(item, "children", []) or [])
+                          if isinstance(e, discord.ui.Container)), None)
+        cible = conteneur if conteneur is not None else item
+        if any(ligne in str(getattr(e, "content", "")) for e in list(getattr(cible, "children", []) or [])):
+            return True
+        try:
+            cible.add_item(discord.ui.TextDisplay(f"-# {ligne}"))
+        except (ValueError, TypeError, AttributeError):  # panneau plein : la réponse passe sans la mémoire
+            return False
+        return True
+
     def parcourir(item: Any) -> bool:
         for enfant in list(getattr(item, "children", []) or []):
             if isinstance(enfant, discord.ui.TextDisplay) and marque in str(enfant.content):
@@ -955,7 +968,8 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
                 return True
         return False
 
-    parcourir(panneau)
+    if not parcourir(panneau):
+        ajouter_en_pied(panneau)
 
 
 async def envoyer(
@@ -1547,7 +1561,7 @@ async def texte_court(
     # la même que sur la carte de log (utils/sentrix_trace.py).
     from utils import sentrix_trace
 
-    reference = sentrix_trace.visible_ref()
+    reference = sentrix_trace.active_ref()
     if reference and "Réf. SX-" not in texte:
         # La mémoire SentriX : une sanction rappelle ce que le serveur sait déjà
         # du membre visé (sanctions récentes, ancienneté, compte récent).
@@ -1574,7 +1588,9 @@ async def texte_court(
                                                    english=english)
                 if suites is not None:
                     extra = {**extra, "view": suites}
-        texte = f"{texte}\n-# {contexte + ' · ' if contexte else ''}Réf. {reference}"
+        # La référence reste interne (visible_ref) ; la mémoire, elle, s'affiche.
+        if contexte and contexte not in texte:
+            texte = f"{texte}\n-# {contexte}"
     kwargs: dict[str, Any] = {"content": texte, "allowed_mentions": _MENTIONS_AUCUNE}
     kwargs.update(extra)
 

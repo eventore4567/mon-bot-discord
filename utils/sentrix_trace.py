@@ -122,6 +122,23 @@ def visible_ref() -> str | None:
     return None
 
 
+def active_ref() -> str | None:
+    """La référence de la commande en cours si elle est tracée — usage INTERNE.
+
+    Elle n'est plus affichée (``visible_ref``), mais elle décide toujours si la
+    réponse porte la mémoire SentriX (solde, sanctions passées, staff qui se
+    crédite lui-même…) et les boutons de suite. Sans cette distinction, masquer la
+    référence avait fait disparaître la mémoire et les suites avec elle (22/10/2026).
+    """
+    trace = CURRENT.get()
+    if trace is None:
+        return None
+    if trace.transport == AUTOMATIC:
+        return trace.ref
+    name = getattr(getattr(trace.ctx, "command", None), "qualified_name", None) or trace.command
+    return trace.ref if is_traced(name) else None
+
+
 def classify(error: BaseException | None) -> tuple[str, str]:
     """(résultat, détail) d'une invocation à partir de l'erreur levée."""
     if error is None:
@@ -636,7 +653,7 @@ def target_of(ctx: Any) -> int | None:
 __all__ = [
     "ACTOR", "CURRENT", "RETENTION_SECONDS", "Trace", "classify", "ensure_schema", "is_traced", "lookup",
     "SUITES", "SUITE_PREFIX", "current_command", "current_is_moderation", "current_target", "make_ref", "member_context", "normalise_ref", "purge",
-    "economy_context", "memory_line", "parse_suite", "record", "ticket_memory", "suite_command", "suites_view", "target_of", "visible_ref",
+    "active_ref", "economy_context", "memory_line", "parse_suite", "record", "ticket_memory", "suite_command", "suites_view", "target_of", "visible_ref",
     "automod_memory", "join_memory", "levels_context", "XP_COMMANDS", "AUTOMATIC", "ORIGIN", "follow_ups",
     "origin_of",
 ]

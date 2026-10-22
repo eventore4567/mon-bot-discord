@@ -2147,7 +2147,7 @@ class Tickets(commands.Cog):
     async def ticket_reopen(self, ctx: commands.Context):
         ticket = await self.get_ticket_by_channel(ctx.channel.id)
         if not ticket:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket. Lancez la commande dans le salon du ticket concerné.")))
         if ticket["status"] != "ferme":
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce ticket n'est pas fermé.")))
         # Compare-and-set sur le statut : deux +ticket-reopen simultanés passaient
@@ -2647,7 +2647,7 @@ class Tickets(commands.Cog):
     async def tickettranscript(self, ctx: commands.Context):
         ticket = await self.get_ticket_by_channel(ctx.channel.id)
         if not ticket:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket.")))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket. Lancez la commande dans le salon du ticket concerné.")))
         await ctx.defer() if ctx.interaction else None
         file = await self.generate_transcript(ctx.channel)
         await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success('📄 Transcription générée.')), file=file)

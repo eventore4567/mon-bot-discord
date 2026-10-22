@@ -16,6 +16,7 @@ import discord
 from discord.ext import commands
 
 import config
+from utils import command_refs
 from utils import checks, design_system, embeds, stats_service
 from utils import sentrix_panels as panels
 
@@ -626,8 +627,31 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
     async def checkin(self, ctx):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         result = await self.claim_checkin(ctx.guild, ctx.author)
-        if result["claimed"]: await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"**+{_fmt(result['reward'])}** pièces · série **{result['streak']} j**.")))
-        else: await panels.envoyer(ctx, panels.depuis_embed(embeds.warning(f"Déjà récupéré aujourd'hui · série **{result['streak']} j**.")))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._recu_checkin(ctx.guild, ctx.author, result)))
+
+    async def _recu_checkin(self, guild, member, result) -> discord.Embed:
+        """Le gain, la série, le solde et le rendez-vous de demain — avant : une ligne
+        « +50 pièces · série 1 j. » sans dire quand revenir."""
+        serie = int(result["streak"])
+        row = await self.bot.db.fetchone(
+            "SELECT best_streak FROM v2_daily_checkins WHERE guild_id=? AND user_id=?", (guild.id, member.id))
+        record = max(serie, int(row["best_streak"] or 0) if row else 0)
+        solde = await self.bot.db.get_balance(guild.id, member.id)
+        cash = int(solde["cash"] or 0) if solde else 0
+        # Même barème que claim_checkin : 50 + 10 par jour de série, 150 au plus.
+        demain = min(50 + serie * 10, 150)
+        minuit = int(datetime.combine(datetime.now(timezone.utc).date() + timedelta(days=1),
+                                      datetime.min.time(), tzinfo=timezone.utc).timestamp())
+        if result["claimed"]:
+            lignes = [f"Récompense en pièces : **+{_fmt(result['reward'])}**",
+                      f"Jours de série : **{serie}**" + (f" · record **{record}**" if record > serie
+                                                         else " · votre meilleure série" if serie > 1 else ""),
+                      f"Portefeuille : **{_fmt(cash)}** 🪙",
+                      "", f"-# Prochain check-in <t:{minuit}:R> : **+{_fmt(demain)}** pièces si la série continue."]
+            return embeds.success("\n".join(lignes), title="Check-in du jour")
+        lignes = [f"Déjà récupéré aujourd'hui · jours de série : **{serie}** (record {record}).",
+                  f"Prochain check-in <t:{minuit}:R> : **+{_fmt(demain)}** pièces si la série continue."]
+        return embeds.warning("\n".join(lignes))
 
     @commands.hybrid_command(name="market", description="Afficher le marché entre membres.", with_app_command=False)
     async def market(self, ctx):
@@ -658,7 +682,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
     async def market_buy(self, ctx, listing_id: int):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         row = await self.bot.db.fetchone("SELECT * FROM v2_market_listings WHERE id=? AND guild_id=? AND status='active'", (listing_id, ctx.guild.id))
-        if row is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Annonce indisponible.')))
+        if row is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Annonce n°{listing_id} indisponible : déjà vendue, retirée ou inexistante. `{command_refs.reference(ctx, 'market')}` montre les annonces en cours.")))
         if int(row["seller_id"]) == ctx.author.id: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas acheter votre propre annonce.')))
         lock = await self.bot.db.execute("UPDATE v2_market_listings SET status='processing' WHERE id=? AND guild_id=? AND status='active'", (listing_id, ctx.guild.id))
         if getattr(lock, "rowcount", 0) == 0: return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("Cette annonce vient d'être prise.")))

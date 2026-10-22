@@ -34,8 +34,9 @@ async def main() -> int:
 
     shown = await run(f"+give-money <@{h.TARGET_ID}> 500", ADMIN)
     check("500 🪙 ajoutés" in shown, "l'unité 🪙 n'est plus effacée", shown[:160])
-    check("solde 500 🪙" in shown and "1 ajout du staff en 30 j (500 🪙)" in shown and "Réf. SX-" in shown,
-          "+give-money : solde et ajouts du staff rappelés avec la référence", shown[-160:])
+    # Depuis la PR #503 la référence SX- reste interne ; la mémoire, elle, doit rester visible.
+    check("solde 500 🪙" in shown and "1 ajout du staff en 30 j (500 🪙)" in shown and "Réf. SX-" not in shown,
+          "+give-money : solde et ajouts du staff rappelés, sans référence affichée", shown[-160:])
     shown = await run(f"+give-money <@{h.TARGET_ID}> 300", ADMIN)
     check("solde 800 🪙" in shown and "2 ajouts du staff en 30 j (800 🪙)" in shown,
           "le second ajout cumule : 2 ajouts, 800 🪙", shown[-160:])
