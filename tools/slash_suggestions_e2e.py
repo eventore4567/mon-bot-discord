@@ -64,8 +64,8 @@ async def main() -> int:
     # Choix perdus par la surface « / » et repris de la commande d'origine.
     check(choices_of("security antispam", "etat") == ["Activer", "Désactiver"],
           "/security antispam propose de nouveau « Activer / Désactiver »", str(choices_of("security antispam", "etat")))
-    check(choices_of("games quick rps", "choix") == ["Pierre", "Feuille", "Ciseaux"],
-          "/games quick rps propose Pierre / Feuille / Ciseaux", str(choices_of("games quick rps", "choix")))
+    check(choices_of("play rps", "choix") == ["Pierre", "Feuille", "Ciseaux"],
+          "/play rps propose Pierre / Feuille / Ciseaux", str(choices_of("play rps", "choix")))
 
     shown = await suggest("weather", "ville", "mar")
     check(("Marseille", "Marseille") in shown and ("Marrakech", "Marrakech") in shown,

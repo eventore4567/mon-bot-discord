@@ -87,9 +87,9 @@ def test_new_games_are_real_commands_and_in_both_catalogs():
     assert games <= names
     assert games <= set(games_economy.GAME_CATALOG)
     slash = {x.source: x.path for x in slash_catalog.CATALOG}
-    assert slash["doors"] == "games quick doors"
-    assert slash["emojiorder"] == "games quick emojiorder"
-    assert slash["bossfight"] == "games quick bossfight"
+    assert slash["doors"] == "play doors"
+    assert slash["emojiorder"] == "play emojiorder"
+    assert slash["bossfight"] == "play bossfight"
 
 
 @pytest.mark.asyncio

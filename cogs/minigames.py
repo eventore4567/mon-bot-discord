@@ -79,7 +79,7 @@ class Minigames(commands.Cog, name="Minigames"):
         design = await self.bot.db.get_design_settings(guild_id) if guild_id else dict(design_system.DEFAULT_DESIGN_SETTINGS)
         from utils.game_context import pictogramme_de_titre
 
-        # /games quick et + utilisent exactement le même panneau : même titre
+        # /play et + utilisent exactement le même panneau : même titre
         # « Combat — Défaite », jamais le préfixe d'erreur « Action impossible ».
         resolu = str(title)
         embed = design_system.create_embed(
