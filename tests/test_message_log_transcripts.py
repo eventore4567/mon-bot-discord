@@ -135,7 +135,7 @@ async def test_transcript_action_has_explicit_message_for_old_logs():
 
 
 @pytest.mark.asyncio
-async def test_message_log_has_a_transcript_button_beside_the_file():
+async def test_message_log_keeps_downloadable_file_without_duplicate_transcript_button():
     from cogs.log_history_center import PremiumLogAction
     embed = discord.Embed(title="Message supprimé")
     media, files = _attach_message_transcript(
@@ -150,4 +150,6 @@ async def test_message_log_has_a_transcript_button_beside_the_file():
         for item in items:
             yield item
             yield from walk(getattr(item, "children", ()))
-    assert any(isinstance(item, PremiumLogAction) and item.action == "transcript" for item in walk(view.children))
+    children = list(walk(view.children))
+    assert any(isinstance(item, discord.ui.File) for item in children)
+    assert not any(isinstance(item, PremiumLogAction) and item.action == "transcript" for item in children)
