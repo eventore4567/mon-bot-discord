@@ -199,3 +199,22 @@ async def test_music_can_be_disabled_after_configured_voice_was_deleted():
     assert not result["enabled"]
     save.assert_awaited_once()
     music.shutdown_guild_music.assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_stop_waits_for_in_flight_seek_instead_of_racing_playback():
+    import asyncio
+    music = _music()
+    queue = _active(music)
+    queue.tracks = [Track(title="Next")]
+    await queue.advance_lock.acquire()
+    task = asyncio.create_task(music._stop_queue(queue))
+    try:
+        await asyncio.sleep(0)
+        assert queue.current is not None and queue.tracks
+        assert not task.done()
+    finally:
+        queue.advance_lock.release()
+        await task
+    assert queue.current is None and not queue.tracks
+    assert not queue.voice_client.is_playing()

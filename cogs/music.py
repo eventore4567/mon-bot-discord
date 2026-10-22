@@ -1047,34 +1047,36 @@ class Music(commands.Cog, name="Music"):
             return True
 
     async def _skip_queue(self, queue: GuildMusicQueue) -> bool:
-        voice = queue.voice_client
-        if not voice or not (voice.is_playing() or voice.is_paused()):
-            return False
-        queue.loop_track = False
-        queue.paused_by_user = False
-        self._invalidate_playback(queue)
-        voice.stop()
-        await self._advance(queue)
-        return True
+        async with queue.advance_lock:
+            voice = queue.voice_client
+            if not voice or not (voice.is_playing() or voice.is_paused()):
+                return False
+            queue.loop_track = False
+            queue.paused_by_user = False
+            self._invalidate_playback(queue)
+            voice.stop()
+            await self._advance_locked(queue)
+            return True
 
     async def _stop_queue(self, queue: GuildMusicQueue) -> bool:
-        voice = queue.voice_client
-        had_activity = bool(
-            queue.current
-            or queue.tracks
-            or (voice and (voice.is_playing() or voice.is_paused()))
-        )
-        queue.tracks.clear()
-        queue.loop_track = False
-        queue.loop_queue = False
-        queue.autoplay = False
-        queue.paused_by_user = False
-        self._invalidate_playback(queue)
-        if voice and (voice.is_playing() or voice.is_paused()):
-            voice.stop()
-        queue.current = None
-        queue.reset_clock()
-        return had_activity
+        async with queue.advance_lock:
+            voice = queue.voice_client
+            had_activity = bool(
+                queue.current
+                or queue.tracks
+                or (voice and (voice.is_playing() or voice.is_paused()))
+            )
+            queue.tracks.clear()
+            queue.loop_track = False
+            queue.loop_queue = False
+            queue.autoplay = False
+            queue.paused_by_user = False
+            self._invalidate_playback(queue)
+            if voice and (voice.is_playing() or voice.is_paused()):
+                voice.stop()
+            queue.current = None
+            queue.reset_clock()
+            return had_activity
 
     async def _play_track(
         self,
@@ -1852,21 +1854,22 @@ class Music(commands.Cog, name="Music"):
         voice = await self._require_control_voice(ctx, queue)
         if voice is None:
             return
-        if not queue.history:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien avant", description="Aucun titre précédent dans cette session.", kind="danger")))
-        previous_track = queue.history.pop()
-        current = queue.current
-        if current:
-            queue.tracks.insert(0, current)
-        queue.tracks.insert(0, previous_track)
-        queue.loop_track = False
-        queue.paused_by_user = False
-        self._invalidate_playback(queue)
-        if voice.is_playing() or voice.is_paused():
-            voice.stop()
-        queue.current = None
-        queue.reset_clock()
-        await self._advance(queue)
+        async with queue.advance_lock:
+            if not queue.history:
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien avant", description="Aucun titre précédent dans cette session.", kind="danger")))
+            previous_track = queue.history.pop()
+            current = queue.current
+            if current:
+                queue.tracks.insert(0, current)
+            queue.tracks.insert(0, previous_track)
+            queue.loop_track = False
+            queue.paused_by_user = False
+            self._invalidate_playback(queue)
+            if voice.is_playing() or voice.is_paused():
+                voice.stop()
+            queue.current = None
+            queue.reset_clock()
+            await self._advance_locked(queue)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Retour en arrière", description=f"⏮️ **{previous_track.display_title()}**", kind="success")))
 
     @music.command(name="stop", description="Arrêter la musique et vider la file d'attente.")
