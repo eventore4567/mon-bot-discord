@@ -57,7 +57,7 @@ def test_new_menu_is_compact_and_within_discord_limits():
     paths = [entry.path for entry in catalog.CATALOG]
     assert len(paths) == len(set(paths))
     # 382 routes cataloguées moins les 132 routes explicitement masquées.
-    assert len(paths) == 281
+    assert len(paths) == 250
     assert len({path.split()[0] for path in paths}) <= 100
     assert all(len(path.split()) <= 3 for path in paths)
     for name in ("moderation", "security", "staff", "invites", "events"):
