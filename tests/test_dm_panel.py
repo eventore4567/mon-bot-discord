@@ -91,7 +91,11 @@ async def test_la_commande_dm_fonctionne_et_repond_court():
     with patch.object(direct_message, "envoyer_prive", AsyncMock(return_value="envoye")) as envoi:
         await direct_message.DirectMessage.dm.callback(cog, ctx, membre, message="  bonjour ")
     envoi.assert_awaited_once_with(guild, membre, "bonjour")
-    assert ctx.send.await_args.kwargs["content"] == "Message privé envoyé à <@7>."
+    # Petite carte à bande fine depuis le 22/10/2026 : le texte est dans la vue.
+    envoye = ctx.send.await_args.kwargs
+    from utils import sentrix_panels
+    texte = envoye.get("content") or sentrix_panels.texte_complet(envoye["view"]).strip()
+    assert texte == "Message privé envoyé à <@7>."
 
 
 @pytest.mark.asyncio

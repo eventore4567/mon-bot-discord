@@ -122,7 +122,6 @@ def _link_buttons(bot: commands.Bot) -> list[discord.ui.Button]:
     buttons: list[discord.ui.Button] = []
     for label, url in (
         ("Ajouter SentriX", legacy._invite_url(bot)),
-        ("Dashboard", legacy._dashboard_url()),
         ("Serveur support", legacy._support_url()),
     ):
         if url:

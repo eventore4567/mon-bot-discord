@@ -22,7 +22,8 @@ def _literal_assignment(name: str):
 
 def test_help_exposes_discreet_growth_links():
     assert '"Ajouter SentriX"' in HELP_SOURCE
-    assert '"Dashboard"' in HELP_SOURCE
+    # Plus de lien publicitaire vers le dashboard dans l'aide (Jayden, 22/10/2026).
+    assert '"Dashboard"' not in HELP_SOURCE
     assert '"Serveur support"' in HELP_SOURCE
     assert "_add_growth_links(self, bot)" in HELP_SOURCE
     assert "discord.ButtonStyle.link" in HELP_SOURCE

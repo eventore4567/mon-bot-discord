@@ -3559,7 +3559,7 @@ class AutoMod(commands.Cog, name="Automod"):
         }
         title, explanation = titles.get(filter_name, ("🛡️ Message modéré", "Un filtre de sécurité a été appliqué."))
         view = discord.ui.LayoutView(timeout=15)
-        box = discord.ui.Container(accent_colour=discord.Colour(0xE6A64C))
+        box = discord.ui.Container()
         box.add_item(
             discord.ui.TextDisplay(
                 f"### {title}\n"

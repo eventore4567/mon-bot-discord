@@ -93,8 +93,15 @@ def accorder_pluriels(text: str) -> str:
     return _PLURIEL_RE.sub(_accord, text) if "(s)" in text else text
 
 
+#: Décision de Jayden, 22/10/2026 : des émojis partout, « trop stylé ». La couche
+#: « texte sobre » les effaçait de chaque réponse, alors que le code en contient
+#: déjà des centaines. False rétablit l'ancien effacement.
+EMOJIS_VISIBLES = True
+
+
 def strip_emojis(value: Any) -> str:
-    """Retire les pictogrammes décoratifs — sauf dans un mini-jeu.
+    """Retire les pictogrammes décoratifs — sauf dans un mini-jeu, et sauf si
+    ``EMOJIS_VISIBLES`` (le choix actuel : on les garde partout).
 
     Les rouleaux de la machine à sous, les dés, les poissons : les effacer vidait
     littéralement l'écran de jeu (voir utils/game_context.py).
@@ -102,8 +109,8 @@ def strip_emojis(value: Any) -> str:
     text = str(value or "")
     from utils.game_context import commande_de_jeu
 
-    if commande_de_jeu():
-        return text
+    if EMOJIS_VISIBLES or commande_de_jeu():
+        return accorder_pluriels(text)
     # Un emoji juste après un nombre est une UNITÉ, pas une décoration :
     # « 500 🪙 », « **+200** 🪙 ». L'effacer donnait « 500  ajoutés » et
     # « **0 ** au total » dans toute l'économie (mesuré le 09/10/2026).

@@ -133,7 +133,7 @@ class ReportReviewView(discord.ui.LayoutView):
             f"dans <#{r['source_channel_id']}>"
             if r["source_channel_id"] else "sans message associé"
         )
-        card = discord.ui.Container(accent_colour=discord.Colour(0xCD7864))
+        card = discord.ui.Container()
         card.add_item(discord.ui.TextDisplay(
             f"## 🚨 Signalement envers <@{r['target_id']}>\n"
             f"Compte créé {_stamp(discord.utils.snowflake_time(int(r['target_id'])))}"
@@ -314,7 +314,7 @@ class ReportSettingsView(discord.ui.LayoutView):
             "SELECT COUNT(*) AS n FROM member_reports WHERE guild_id=? AND status!='resolved'",
             (self.guild.id,),
         )
-        c = discord.ui.Container(accent_colour=discord.Colour(0xCD7864))
+        c = discord.ui.Container()
         c.add_item(discord.ui.TextDisplay(
             "## 🚨 SentriX · Centre des signalements\n"
             "Recevez des fiches larges et gérez chaque dossier dans Discord."

@@ -33,7 +33,7 @@ class VoiceHistoryConfigView(discord.ui.LayoutView):
         route = await log_service.get_log_setting(self.bot, self.guild.id, "voice")
         channel = self.guild.get_channel(int(route["channel_id"])) if route.get("channel_id") else None
         route_on = bool(route["enabled"] and channel)
-        container = discord.ui.Container(accent_colour=discord.Colour(0x64748B))
+        container = discord.ui.Container()
         container.add_item(discord.ui.TextDisplay(
             "## 👁️ SentriX · Centre de surveillance\n"
             "Suivi privé de l'activité vocale des membres et des sessions.\n"

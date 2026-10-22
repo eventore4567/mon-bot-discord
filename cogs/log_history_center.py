@@ -203,7 +203,7 @@ def _history_member_header(
     Discord peut ne pas résoudre la mention d'un membre ayant quitté le serveur.
     Son pseudo API reste visible, sans remplacer le nom par son seul snowflake.
     """
-    panel = discord.ui.Container(accent_colour=discord.Colour(0x5865F2))
+    panel = discord.ui.Container()
     mention = f"<@{int(target_id)}>" if target_id else ""
     account_name = safe_text(getattr(member, "name", "") or "").strip()
     account_label = (
@@ -266,7 +266,7 @@ def _history_event_panel(
         else 0x798B71 if log_type.startswith("role_") or log_type == "member_roles"
         else 0x7B8199
     )
-    panel = discord.ui.Container(accent_colour=discord.Colour(accent))
+    panel = discord.ui.Container()
     timestamp = int(record["created_at"])
     panel.add_item(discord.ui.TextDisplay(
         f"**{emoji} {title}**   ·   <t:{timestamp}:R>\n"
@@ -402,7 +402,7 @@ class MemberHistoryView(discord.ui.LayoutView):
             "settings": ("⚙️ Surveillance", "Options du suivi privé des membres"),
         }
         title, subtitle = names[self.tab]
-        body = discord.ui.Container(accent_colour=discord.Colour(0x515B70))
+        body = discord.ui.Container()
         body.add_item(discord.ui.TextDisplay(f"**{title}** · {subtitle}"))
 
         voice_summary = None

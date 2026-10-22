@@ -22,11 +22,18 @@ def test_une_unite_apres_un_nombre_est_gardee():
 
 def test_une_decoration_reste_retiree():
     # …et son espace part avec elle : plus de « ##  Titre » ni d'espace pendant.
-    assert embeds.strip_emojis("🎉 Bravo") == "Bravo"
-    assert embeds.strip_emojis("Niveau 5 ✅") == "Niveau 5"
-    assert embeds.strip_emojis("Il a 20 ans 😀 ok") == "Il a 20 ans ok"
-    assert embeds.strip_emojis("## 👤 Profil de Jayden") == "## Profil de Jayden"
-    assert embeds.strip_emojis("Banque : 0 🏦\nTotal : 5 🪙") == "Banque : 0\nTotal : 5 🪙"
+    # Décision du 22/10/2026 : les émojis restent visibles ; l'ancien effacement
+    # est toujours disponible derrière l'interrupteur.
+    assert embeds.strip_emojis("🎉 Bravo") == "🎉 Bravo"
+    embeds.EMOJIS_VISIBLES = False
+    try:
+        assert embeds.strip_emojis("🎉 Bravo") == "Bravo"
+        assert embeds.strip_emojis("Niveau 5 ✅") == "Niveau 5"
+        assert embeds.strip_emojis("Il a 20 ans 😀 ok") == "Il a 20 ans ok"
+        assert embeds.strip_emojis("## 👤 Profil de Jayden") == "## Profil de Jayden"
+        assert embeds.strip_emojis("Banque : 0 🏦\nTotal : 5 🪙") == "Banque : 0\nTotal : 5 🪙"
+    finally:
+        embeds.EMOJIS_VISIBLES = True
 
 
 def test_le_symbole_configure_par_un_serveur_devient_une_unite():
@@ -42,7 +49,11 @@ def test_une_erreur_en_texte_brut_porte_le_signal_pendant_l_envoi():
 
     class Salon:
         async def send(self, **kwargs):
-            vus.append((kwargs.get("content"), panels.TEXTE_BRUT.get()))
+            # Depuis le 22/10/2026 le texte court part en petite carte (bande fine).
+            texte = kwargs.get("content")
+            if texte is None and kwargs.get("view") is not None:
+                texte = panels.texte_complet(kwargs["view"]).strip() or None
+            vus.append((texte, panels.TEXTE_BRUT.get()))
 
     asyncio.run(panels._envoyer_texte_brut_depuis_panneau(
         Salon(), "Vous n'avez pas assez d'argent liquide.", ephemere=False, extra={},

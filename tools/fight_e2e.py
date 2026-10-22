@@ -39,10 +39,15 @@ async def main() -> int:
         await h.settle(idle=0.25, maximum=3)
         return h.visible_text(h.CALLS[since:])
 
+    def _sans_emoji(label):
+        """Les libellés gardent leur émoji depuis le 22/10/2026 (« ✨ Pouvoir (0/3) ») :
+        la clé reste le texte, pour que les vérifications ne dépendent pas de l'habillage."""
+        return str(label or "").split(" ", 1)[-1] if str(label or "")[:1] > "\u2000" else label
+
     def last_panel(since: int):
         for method, path, js in reversed(h.CALLS[since:]):
             if isinstance(js, dict) and js.get("components") and method in ("POST", "PATCH") and "/callback" not in path:
-                return h.visible_text([(method, path, js)]), {b.get("label"): b for b in _buttons({"components": js["components"]})}
+                return h.visible_text([(method, path, js)]), {_sans_emoji(b.get("label")): b for b in _buttons({"components": js["components"]})}
         return "", {}
 
     async def start_fight():

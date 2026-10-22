@@ -49,9 +49,16 @@ def build_sanction_confirmation(
     A failed DB write must NEVER turn a real Discord sanction into a false
     error. The response says so and still links to any available history.
     """
-    title, colour = _ACTIONS.get(action, ("🛡️ Action de modération effectuée", 0x76849B))
+    title, _colour = _ACTIONS.get(action, ("🛡️ Action de modération effectuée", 0x76849B))
     view = discord.ui.LayoutView(timeout=None)
-    card = discord.ui.Container(accent_colour=discord.Colour(colour))
+    # Pas de liseré coloré sur le flanc ; la bande fine des autres commandes en tête.
+    card = discord.ui.Container()
+    from utils import sentrix_panels as _panels
+
+    if _panels.poser_bandeau(card, "moderation"):
+        # Le fichier de la galerie DOIT partir avec le message : panels.envoyer
+        # joint ce que rend fichiers() (sinon Discord refuse tout le message).
+        view.fichiers = lambda: _panels.pieces_jointes_de_famille("moderation")
     target_id = getattr(target, "id", None)
     mention = (
         f"<@{int(target_id)}>" if target_id is not None
