@@ -49,6 +49,47 @@ def _short(value: object, limit: int = 1000) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+def _attach_message_transcript(
+    panel: discord.Embed,
+    *,
+    guild_id: int,
+    channel_id: int,
+    message_id: int,
+    author_id: int,
+    sections: list[tuple[str, str]],
+    media_items: list[tuple[str, str, str]] | None = None,
+    media_files: list[discord.File] | None = None,
+) -> tuple[list[tuple[str, str, str]], list[discord.File]]:
+    """Préserve le texte brut AVANT tout raccourcissement du panneau Discord.
+
+    Le seuil tient aussi compte du Markdown échappé et des nombreuses lignes :
+    un texte de moins de 1024 caractères peut dépasser la place du renderer.
+    Le TXT ne transforme ni les espaces, ni Unicode, ni les mentions du message.
+    """
+    items, files = list(media_items or []), list(media_files or [])
+    if not any(
+        len(text) > 900 or len(discord.utils.escape_markdown(text)) > 1200
+        or text.count("\n") > 20
+        for _label, text in sections
+    ):
+        return items, files
+    header = (
+        "SentriX — Transcript intégral\n"
+        f"Serveur : {guild_id}\nSalon : {channel_id}\n"
+        f"Message : {message_id}\nAuteur : {author_id}\n"
+        f"Lien : https://discord.com/channels/{guild_id}/{channel_id}/{message_id}\n"
+    )
+    body = header + "".join(f"\n===== {label} =====\n{text}\n" for label, text in sections)
+    if items:
+        body += "\n===== Pièces jointes (liens d’origine) =====\n"
+        body += "".join(f"{filename}\n{url}\n" for url, filename, _kind in items)
+    filename = f"sentrix-message-{message_id}-transcript.txt"
+    transcript = discord.File(io.BytesIO(body.encode("utf-8")), filename=filename)
+    panel.add_field(name="Transcript", value="Texte intégral dans le fichier joint, sans coupure.", inline=False)
+    # Premier fichier/composant : jamais sacrifié aux aperçus ou à la bannière.
+    return [(f"attachment://{filename}", filename, "text/plain"), *items], [transcript, *files]
+
+
 _TICKET_SYSTEM_TOPIC_RE = re.compile(
     r"^Opened\s+<t:\d+:[A-Za-z]>\s+by\s+<@!?\d+>"
     r"(?:\s*[•·]\s*Claimed\s+by\s+<@!?\d+>\s+at\s+<t:\d+:[A-Za-z]>)?\s*$",
@@ -230,6 +271,8 @@ def _attachment_summary(items: list[tuple[str, str, str]]) -> str | None:
 def _attachment_links(items: list[tuple[str, str, str]]) -> list[tuple[str, str]]:
     links: list[tuple[str, str]] = []
     for index, (url, _filename, content_type) in enumerate(items[:8], start=1):
+        if not url.startswith(("https://", "http://")):
+            continue  # Les fichiers attachment:// utilisent un composant File, pas un bouton URL.
         if content_type.startswith("image/"):
             label = f"Ouvrir image {index}"
         elif content_type.startswith("video/"):
@@ -522,7 +565,7 @@ class Logs(commands.Cog, name="Logs"):
         row,
         *,
         fallback_channel_id: int | None = None,
-    ) -> None:
+    ) -> bool:
         message_id = int(row["message_id"])
         channel_id = int(row["channel_id"] or fallback_channel_id or 0)
         author_id = int(row["author_id"])
@@ -557,6 +600,10 @@ class Logs(commands.Cog, name="Logs"):
                     display_avatar=None,
                 )
         panel = self._embed("Message supprimé", identity=identity, fields=fields)
+        media_items, transcript_files = _attach_message_transcript(
+            panel, guild_id=guild.id, channel_id=channel_id, message_id=message_id,
+            author_id=author_id, sections=[("Contenu", content)], media_items=media_items,
+        )
         links = [
             ("Accéder au salon", _discord_channel_url(guild.id, channel_id))
         ] if channel_id else []
@@ -574,13 +621,14 @@ class Logs(commands.Cog, name="Logs"):
             target_id=author_id,
             message_id=message_id,
         )
-        await self._send(
+        return await self._send(
             guild,
             "message_delete",
             panel,
             view=view,
             event_key=key,
             media_items=media_items,
+            media_files=transcript_files,
         )
 
     # ---------------------------------------------------------------- MESSAGES
@@ -624,6 +672,12 @@ class Logs(commands.Cog, name="Logs"):
             ("Pièces jointes", _attachment_summary(media_items), False),
         ]
         panel = self._embed("Message supprimé", identity=message.author, fields=fields)
+        preview_items, media_files = _attach_message_transcript(
+            panel, guild_id=message.guild.id, channel_id=message.channel.id,
+            message_id=message.id, author_id=message.author.id,
+            sections=[("Contenu", message.content or "")],
+            media_items=preview_items, media_files=media_files,
+        )
         view = log_service.log_actions(
             ids=[
                 ("Copier l'ID de l'auteur", message.author.id),
@@ -637,7 +691,7 @@ class Logs(commands.Cog, name="Logs"):
             target_id=message.author.id,
             message_id=message.id,
         )
-        await self._send(
+        sent = await self._send(
             message.guild,
             "message_delete",
             panel,
@@ -646,7 +700,8 @@ class Logs(commands.Cog, name="Logs"):
             media_items=preview_items,
             media_files=media_files,
         )
-        await self._forget_cached_message(message.id)
+        if sent:
+            await self._forget_cached_message(message.id)
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
@@ -671,12 +726,13 @@ class Logs(commands.Cog, name="Logs"):
             return
         row = await self._cached_message_row(payload.guild_id, payload.message_id)
         if row is not None:
-            await self._log_deleted_from_row(
+            sent = await self._log_deleted_from_row(
                 guild,
                 row,
                 fallback_channel_id=payload.channel_id,
             )
-            await self._forget_cached_message(payload.message_id)
+            if sent:
+                await self._forget_cached_message(payload.message_id)
             return
         panel = self._embed(
             "Message supprimé",
@@ -716,12 +772,13 @@ class Logs(commands.Cog, name="Logs"):
                 row = await self._cached_message_row(payload.guild_id, message_id)
                 if row is None:
                     continue
-                await self._log_deleted_from_row(
+                sent = await self._log_deleted_from_row(
                     guild,
                     row,
                     fallback_channel_id=payload.channel_id,
                 )
-                await self._forget_cached_message(message_id)
+                if sent:
+                    await self._forget_cached_message(message_id)
             except Exception:
                 # Une entrée de cache invalide ou un échec de log ne doit jamais
                 # empêcher les autres messages du même lot d'être traités.
@@ -751,6 +808,12 @@ class Logs(commands.Cog, name="Logs"):
                 ("Après", _short(after.content, 1024) or "Contenu vide", False),
             ),
         )
+        transcript_media, transcript_files = _attach_message_transcript(
+            panel, guild_id=after.guild.id, channel_id=after.channel.id,
+            message_id=after.id, author_id=after.author.id,
+            sections=[("Avant", before.content or ""), ("Après", after.content or "")],
+            media_items=_attachment_media(getattr(after, "attachments", [])),
+        )
         view = log_service.log_actions(
             jump_url=after.jump_url,
             ids=[
@@ -765,7 +828,10 @@ class Logs(commands.Cog, name="Logs"):
             message_id=after.id,
             discriminator=int(after.edited_at.timestamp()) if after.edited_at else time.time_ns(),
         )
-        await self._send(after.guild, "message_edit", panel, view=view, event_key=key)
+        await self._send(
+            after.guild, "message_edit", panel, view=view, event_key=key,
+            media_items=transcript_media, media_files=transcript_files,
+        )
 
     # ---------------------------------------------------------------- MEMBRES / MODÉRATION
 

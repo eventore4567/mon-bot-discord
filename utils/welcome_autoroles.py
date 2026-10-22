@@ -124,6 +124,8 @@ async def apply(bot: Any, member: discord.Member) -> tuple[list[discord.Role], l
     Renvoie (rôles donnés, raisons des rôles écartés). Un rôle refusé n'empêche
     pas les autres d'être donnés.
     """
+    if getattr(member, "bot", False) is True:
+        return [], []
     given: list[discord.Role] = []
     skipped: list[str] = []
     for role_id in await configured_ids(bot, member.guild.id):

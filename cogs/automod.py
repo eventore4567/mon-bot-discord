@@ -3021,6 +3021,15 @@ class AutoMod(commands.Cog, name="Automod"):
         # Les exemptions de rôles ne sont plus court-circuitées globalement ici :
         # chaque filtre les évalue afin qu'un salon strict puisse reprendre priorité.
 
+        # Les mentions globales doivent être traitées avant les filtres de contenu :
+        # elles ne figurent pas dans message.mentions et une rafale peut sinon
+        # traverser tous les salons avant le troisième incident anti-spam.
+        if conf.get("antimention") and (
+            getattr(message, "mention_everyone", False) is True
+            or len({u.id for u in message.mentions} | {r.id for r in message.role_mentions}) >= 5
+        ) and await self.security_filter_applies_to(message, "antimention"):
+            return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
+
         # Un lien de phishing passe AVANT l'anti-liens générique. Sinon le
         # message est supprimé comme simple lien, la protection anti-arnaque
         # ne voit jamais l'URL et le modérateur perd la vraie cause.
@@ -3185,12 +3194,6 @@ class AutoMod(commands.Cog, name="Automod"):
                     censored_content=_compose_censored_content(message.content, links=True),
                 )
 
-        if (
-            conf["antimention"]
-            and await self.security_filter_applies_to(message, "antimention")
-            and len(message.mentions) >= 5
-        ):
-            return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
 
         if (
             conf["anticaps"]
@@ -3632,7 +3635,8 @@ class AutoMod(commands.Cog, name="Automod"):
             if incident is not None and incident.filter_name in SPAM_FILTERS
             else INCIDENT_WINDOW_SECONDS
         )
-        if incident is not None and now_ts - incident.started < incident_window:
+        if (incident is not None and now_ts - incident.started < incident_window
+                and not (filter_name == "antimention" and incident.filter_name != "antimention")):
             incident.deleted += 1
             await finish_deletion()
             return
@@ -3651,6 +3655,14 @@ class AutoMod(commands.Cog, name="Automod"):
             for candidate, item in list(self.incidents.items()):
                 if item.started < cutoff:
                     self.incidents.pop(candidate, None)
+        # Démarrer le timeout avant d'attendre suppression, SQL ou logs.
+        # L'incident est déjà publié : les messages concurrents restent idempotents.
+        mention_action = None
+        if filter_name == "antimention":
+            try:
+                mention_action = await self._spam_timeout(message.guild, message.author, reason)
+            except Exception:
+                logger.exception("Timeout anti-mentions impossible guild=%s user=%s", message.guild.id, message.author.id)
         await finish_deletion()
 
         await self._record_incident_trace(message, incident)
@@ -3696,7 +3708,11 @@ class AutoMod(commands.Cog, name="Automod"):
         spam_public_text = None
 
         try:
-            if filter_name in SPAM_FILTERS:
+            if filter_name == "antimention":
+                action = mention_action or "mute_failed"
+                spam_duration = SPAM_TIMEOUT_SECONDS
+                incident.action_label = "🔇 Mute anti-mentions" if mention_action else "⚠️ Mute anti-mentions non appliqué"
+            elif filter_name in SPAM_FILTERS:
                 action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
                     message.guild,
                     message.author,
