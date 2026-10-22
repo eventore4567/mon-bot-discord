@@ -117,3 +117,9 @@ async def test_bot_welcome_and_autorole_exit_before_database_or_discord():
     assert not ok
     assert await welcome_autoroles.apply(bot, newcomer) == ([], [])
     bot.db.get_guild_config.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_onboarding_does_not_dm_bots():
+    from cogs.bot_mastery_runtime import BotMasteryRuntime
+    await BotMasteryRuntime._send_onboarding(SimpleNamespace(), SimpleNamespace(bot=True))

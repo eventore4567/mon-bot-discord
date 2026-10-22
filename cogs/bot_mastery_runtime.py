@@ -1461,6 +1461,8 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
         await self._send_onboarding(member)
 
     async def _send_onboarding(self, member: discord.Member):
+        if getattr(member, "bot", False) is True:
+            return
         try:
             conf = await self.bot.db.get_guild_config(member.guild.id)
             if not conf:
