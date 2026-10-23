@@ -312,3 +312,60 @@ def test_un_serveur_en_erreur_ne_stoppe_pas_les_autres():
     resume = next(l for l in journal if "examiné(s)" in l)
     assert sb.ISSUE_ERREUR in resume
     assert sb.ISSUE_PUBLIE in resume, "le second serveur doit avoir été traité"
+
+
+# ------------------------------------- le repli quand « Serveur » n'est pas là
+
+def _cog_par_categorie(constats, categories_qui_acceptent, db=None):
+    """Un cog dont le transport n'accepte QUE certaines catégories de journal."""
+    cog = sb.SecurityBulletin.__new__(sb.SecurityBulletin)
+    cog.bot = type("Bot", (), {"db": db or _Db(), "guilds": []})()
+    envois = []
+
+    async def _analyser(_guild):
+        return list(constats)
+
+    async def _send_log(_bot, _guild, log_type, _embed, **_kwargs):
+        envois.append(log_type)
+        return log_type in categories_qui_acceptent
+
+    sb.security_advisory.analyser_complet = _analyser
+    sb.log_service.send_log = _send_log
+    return cog, envois
+
+
+def test_sans_journal_serveur_le_bulletin_part_en_moderation():
+    # Mesuré en production : 22 serveurs sur 36 avaient des constats et aucun
+    # salon « Serveur » pour les recevoir. Un bulletin dans le journal de
+    # modération vaut mieux qu'un bulletin nulle part.
+    try:
+        cog, envois = _cog_par_categorie([_constat()], {"moderation"})
+        assert asyncio.run(cog.examiner(_Guild())) == sb.ISSUE_PUBLIE
+        assert envois == ["server", "moderation"], envois
+    finally:
+        _restaurer()
+
+
+def test_le_journal_serveur_reste_le_premier_choix():
+    try:
+        cog, envois = _cog_par_categorie([_constat()], {"server", "moderation"})
+        assert asyncio.run(cog.examiner(_Guild())) == sb.ISSUE_PUBLIE
+        assert envois == ["server"], "aucun essai inutile quand le bon journal existe"
+    finally:
+        _restaurer()
+
+
+def test_aucun_journal_du_tout_reste_sans_salon():
+    try:
+        db = _Db()
+        cog, envois = _cog_par_categorie([_constat()], set(), db=db)
+        assert asyncio.run(cog.examiner(_Guild())) == sb.ISSUE_SANS_SALON
+        assert envois == list(sb.CATEGORIES_DE_REPLI), "toutes les pistes doivent être tentées"
+        assert db.valeurs == {}, "rien de mémorisé : le bulletin reste dû"
+    finally:
+        _restaurer()
+
+
+def test_le_premier_choix_est_bien_le_journal_serveur():
+    assert sb.CATEGORIES_DE_REPLI[0] == "server"
+    assert "moderation" in sb.CATEGORIES_DE_REPLI

@@ -43,6 +43,13 @@ _CLE = "security_advisory"
 #: publié » recouvrait quatre situations très différentes, dont « le serveur n'a
 #: pas de salon de journaux » et « le module n'a jamais tourné » — et les
 #: journaux de production ne permettaient pas de les distinguer.
+#: Un bulletin de sécurité vaut mieux dans le journal de modération que nulle
+#: part. Mesuré le 23/10/2026 au premier passage réel : 22 serveurs sur 36
+#: avaient des constats à annoncer et AUCUN salon pour les recevoir, faute de
+#: catégorie « Serveur » configurée. Ordre de préférence, du plus pertinent au
+#: moins ; le premier journal réellement configuré gagne.
+CATEGORIES_DE_REPLI = ("server", "moderation", "automod", "members")
+
 ISSUE_PUBLIE = "publié"
 ISSUE_INCHANGE = "inchangé"
 ISSUE_PREMIER_PASSAGE_SAIN = "sain"
@@ -124,21 +131,29 @@ class SecurityBulletin(commands.Cog, name="SecurityBulletin"):
             await self._retenir(guild.id, empreinte)
             return ISSUE_PREMIER_PASSAGE_SAIN
 
-        envoye = await log_service.send_log(
-            self.bot,
-            guild,
-            "server",
-            construire_le_bulletin(guild, constats),
-            event_key=log_service.make_event_key(
-                guild.id, "server", target_id=guild.id, discriminator=empreinte
-            ),
-        )
-        # N'enregistrer qu'en cas d'envoi réussi : sinon un serveur sans salon
-        # de journaux configuré « consommerait » son bulletin et ne le verrait
-        # jamais le jour où il branche ses logs.
-        if envoye:
-            await self._retenir(guild.id, empreinte)
-            return ISSUE_PUBLIE
+        carte = construire_le_bulletin(guild, constats)
+        for categorie in CATEGORIES_DE_REPLI:
+            envoye = await log_service.send_log(
+                self.bot,
+                guild,
+                categorie,
+                carte,
+                event_key=log_service.make_event_key(
+                    guild.id, categorie, target_id=guild.id, discriminator=empreinte
+                ),
+            )
+            if envoye:
+                if categorie != CATEGORIES_DE_REPLI[0]:
+                    logger.info(
+                        "Bulletin de sécurité guild=%s publié dans « %s » faute de "
+                        "journal « %s » configuré.",
+                        guild.id, categorie, CATEGORIES_DE_REPLI[0],
+                    )
+                # N'enregistrer qu'en cas d'envoi réussi : sinon un serveur sans
+                # salon de journaux « consommerait » son bulletin et ne le verrait
+                # jamais le jour où il en branche un.
+                await self._retenir(guild.id, empreinte)
+                return ISSUE_PUBLIE
         return ISSUE_SANS_SALON
 
     @tasks.loop(hours=INTERVALLE_HEURES)
