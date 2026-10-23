@@ -332,7 +332,7 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
     <div class="hero-meta"><span><i></i>Dashboard web</span><span><i></i>Commandes Discord</span><span><i></i>Réglages par serveur</span><span><i></i>Protections personnalisables</span></div>
     <div class="hero-proof">
       <div class="proof"><b>Sécurité centralisée</b><span>AutoMod, anti-raid, logs et vérification réunis.</span></div>
-      <div class="proof"><b>Service fiable</b><span>Une architecture avec serveur principal et secours.</span></div>
+      <div class="proof"><b>Haute disponibilité</b><span>Une architecture avec serveur principal et secours.</span></div>
       <div class="proof"><b>Personnalisation</b><span>Chaque serveur conserve ses propres réglages.</span></div>
     </div>
   </div>
