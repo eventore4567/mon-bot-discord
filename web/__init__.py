@@ -291,3 +291,7 @@ _brand_avatar_v39.install(_dashboard)
 
 # Dernier filet : URL Railway dynamique + alias /dashboard + fallback web sécurisé.
 _dashboard_recovery_v54.install(_dashboard)
+
+# Catalogue Premium : page isolée, aucun paiement actif ni verrouillage des fonctions Free.
+from . import sentrix_premium_catalog as _sentrix_premium_catalog
+_sentrix_premium_catalog.install(_dashboard)

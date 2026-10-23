@@ -229,6 +229,66 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 @media(max-width:430px){.hero-world{opacity:.64}.holo-core{left:57%;top:36%;transform:translate(-50%,-50%) scale(.60)}.holo-cube.c2,.holo-cube.c3,.holo-beam.b3{display:none}.product-shell{inset:102px 0 16px 10px}.hero-art{min-height:480px}}
 @media(pointer:coarse){.pointer-ring{display:none}.card:hover,.btn:hover{transform:none}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.product-shell,.radar,.spinner,.bars i,.hero-art:before,.holo-core,.holo-core img,.holo-ring,.holo-cube,.holo-beam,.scan-plane,.ambient-orb,.ambient-line,.ambient-code,.section:before,.status-strip:after,.section-head h2:after,.copy h2:after,.faq-copy h2:after,.hero h1 span,.hero:after,.hero-chip,.product-shell:after{animation:none!important}.card,.btn,.hero-art{transition:none!important}.pointer-ring{display:none!important}}
+
+/* SentriX Normal V1 — finition éditoriale : densité, lisibilité et mise en page.
+   Aucun script ni effet existant remplacé ; conserve les options de mouvement réduit. */
+.hero{grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:clamp(24px,3vw,46px);min-height:700px;padding:72px 0 54px}
+.hero-copy{padding:clamp(25px,3vw,38px);border-radius:22px}
+.hero-copy .lead{font-size:clamp(14px,1.14vw,16px);line-height:1.78;max-width:58ch;text-wrap:pretty}
+.hero h1{max-width:15ch}
+.hero-actions{gap:10px 9px;margin-top:26px;align-items:stretch}
+.hero-actions .btn{min-height:44px;padding:11px 15px;line-height:1.35;text-align:center}
+.hero-meta{font-size:11.5px;gap:10px 15px;line-height:1.6}
+.hero-proof{gap:10px;margin-top:23px}
+.proof{min-width:0;padding:14px 12px}
+.proof b{font-size:11.5px;line-height:1.4}
+.proof span{font-size:10.5px;line-height:1.6;color:#b0bdd0;text-wrap:pretty}
+.hero-art{min-width:0}
+.status-strip{border-radius:18px}
+.status-cell{min-width:0}
+.status-cell small{font-size:12px}
+.section{padding:86px 0;margin:20px auto;border-radius:22px}
+.section-head{gap:24px;margin-bottom:26px;align-items:center}
+.section-head p{font-size:14px;line-height:1.75;text-wrap:pretty}
+.section h2{font-size:clamp(29px,3.8vw,46px);line-height:1.12}
+.bento{gap:15px}
+.bento .card{padding:clamp(19px,2.3vw,26px);border-radius:16px}
+.card h3,.step h3{font-size:clamp(15px,1.3vw,18px);line-height:1.35}
+.card p,.step p,.faq-copy p{font-size:13px;line-height:1.72;text-wrap:pretty}
+.faq{gap:clamp(22px,4vw,50px)}
+.faq-list{gap:10px}
+.faq-list details{border-radius:12px;padding:0 17px}
+.faq-list summary{padding:15px 0;font-size:13px;line-height:1.5}
+.faq-list p{font-size:12.5px;line-height:1.75}
+.navlinks a{font-size:12px}
+@media(max-width:1180px){
+ .hero{grid-template-columns:1fr;gap:20px;min-height:auto}
+ .hero-copy{width:100%;max-width:850px}
+ .hero-art{max-width:850px}
+}
+@media(max-width:720px){
+ .hero{padding-top:36px;padding-bottom:30px}
+ .hero-copy{padding:23px 20px;border-radius:18px}
+ .hero-actions .btn{min-height:44px}
+ .hero-meta{gap:9px 13px}
+ .hero-proof{grid-template-columns:1fr;gap:9px}
+ .proof{padding:12px 14px}
+ .section{padding:67px 0;margin:12px auto;border-radius:18px}
+ .section-head{align-items:flex-start;gap:15px;margin-bottom:20px}
+ .section-head p{font-size:13px}
+ .faq-list summary{font-size:13px}
+}
+@media(max-width:430px){
+ .hero-copy{padding:20px 17px}
+ .hero-actions .btn{width:100%}
+ .hero-meta span{font-size:11px}
+ .hero-art{min-height:480px}
+ .section{padding:60px 0}
+ .bento{gap:10px}
+ .bento .card{padding:17px}
+}
+@media(prefers-reduced-motion:reduce){.hero-actions .btn:hover{transform:none}}
+
 </style>
 </head>
 <body>
@@ -262,18 +322,18 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
   <div class="hero-copy">
     <div class="badge"><i></i>SentriX · plateforme Discord</div>
     <h1><span class="hero-line">Moins de chaos.</span><span class="accent">Plus de contrôle.</span></h1>
-    <p class="lead">Modération, sécurité, tickets, logs, niveaux, économie, automatisations et IA dans le même produit. Le site public vous présente SentriX ; le vrai dashboard reste séparé sur <strong>/app</strong>.</p>
+    <p class="lead">Protégez votre communauté, organisez votre staff et personnalisez votre serveur depuis une seule interface. La modération, les tickets, les logs, les niveaux et les automatisations restent à portée de main.</p>
     <div class="hero-actions">
       <a class="btn primary" href="/app" data-dashboard-entry>Ouvrir le dashboard</a>
       <a class="btn" href="__INVITE__" target="_blank" rel="noopener">Ajouter SentriX</a>
       <a class="btn ghost" href="/docs">Documentation</a>
       <a class="btn ghost" href="/support">Support</a>
     </div>
-    <div class="hero-meta"><span><i></i>Dashboard web</span><span><i></i>Slash + préfixe</span><span><i></i>Configuration par serveur</span><span><i></i>Architecture HA</span></div>
+    <div class="hero-meta"><span><i></i>Dashboard web</span><span><i></i>Commandes Discord</span><span><i></i>Réglages par serveur</span><span><i></i>Protections personnalisables</span></div>
     <div class="hero-proof">
       <div class="proof"><b>Sécurité centralisée</b><span>AutoMod, anti-raid, logs et vérification réunis.</span></div>
-      <div class="proof"><b>Haute disponibilité</b><span>Primary et standby pour garder le service disponible.</span></div>
-      <div class="proof"><b>Configuration directe</b><span>Les réglages sont appliqués serveur par serveur.</span></div>
+      <div class="proof"><b>Haute disponibilité</b><span>Une architecture avec serveur principal et secours.</span></div>
+      <div class="proof"><b>Configuration directe</b><span>Chaque serveur conserve ses propres réglages.</span></div>
     </div>
   </div>
 
@@ -342,7 +402,7 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 </section>
 
 <section class="wrap section" id="dashboard">
-  <div class="section-head reveal"><div><span class="eyebrow">Dashboard existant</span><h2>Le vrai panneau d’administration reste sur /app.</h2></div><p>Cette page ne le remplace pas. Elle sert uniquement de vitrine publique et renvoie vers les vraies surfaces SentriX.</p></div>
+  <div class="section-head reveal"><div><span class="eyebrow">Dashboard existant</span><h2>Votre serveur, tous vos réglages au même endroit.</h2></div><p>Cette page ne le remplace pas. Elle sert uniquement de vitrine publique et renvoie vers les vraies surfaces SentriX.</p></div>
   <div class="tour reveal">
     <div class="tour-tabs" role="tablist" aria-label="Aperçus du dashboard">
       <button class="tour-tab active" type="button" data-pane="pane-security"><b>Sécurité</b><span>Protections et règles du serveur.</span></button>
@@ -379,13 +439,13 @@ footer{padding:40px 0;color:var(--muted);font-size:10px;border-top:1px solid rgb
 </section>
 
 <section class="wrap section" id="faq">
-  <div class="faq"><div class="faq-copy reveal"><span class="eyebrow">FAQ</span><h2>Les informations utiles, sans faux chiffres.</h2><p>Les statistiques affichées plus haut viennent uniquement de l’API publique SentriX.</p><a class="btn ghost" href="/support">Ouvrir le support</a></div><div class="faq-list reveal"><details><summary>Le dashboard a-t-il été remplacé ?</summary><p>Non. Le dashboard existant reste sur /app. Cette landing est uniquement la surface publique.</p></details><details><summary>Faut-il se connecter pour voir le site ?</summary><p>Non. La connexion Discord est demandée uniquement pour administrer un serveur.</p></details><details><summary>Où voir les commandes ?</summary><p>La page Commandes liste les interfaces exposées publiquement.</p></details><details><summary>Les réglages sont-ils partagés entre serveurs ?</summary><p>Non. La configuration est isolée par serveur.</p></details></div></div>
+  <div class="faq"><div class="faq-copy reveal"><span class="eyebrow">FAQ</span><h2>Vos questions, nos réponses.</h2><p>Retrouvez les informations utiles sur la configuration, l’accès au dashboard et la gestion de vos serveurs.</p><a class="btn ghost" href="/support">Ouvrir le support</a></div><div class="faq-list reveal"><details><summary>Comment accéder au dashboard ?</summary><p>Cliquez sur « Dashboard », connectez-vous avec Discord, puis choisissez le serveur que vous administrez.</p></details><details><summary>Faut-il se connecter pour voir le site ?</summary><p>Non. La connexion Discord est demandée uniquement pour administrer un serveur.</p></details><details><summary>Où voir les commandes ?</summary><p>La page Commandes liste les interfaces exposées publiquement.</p></details><details><summary>Les réglages sont-ils partagés entre serveurs ?</summary><p>Non. La configuration est isolée par serveur.</p></details></div></div>
 </section>
 
 <section class="wrap final reveal"><span class="eyebrow">SentriX</span><h2>Un bot. Un dashboard. Une configuration cohérente.</h2><p>Ajoutez SentriX à Discord ou ouvrez le dashboard existant pour gérer votre serveur.</p><div class="hero-actions"><a class="btn primary" href="/app" data-dashboard-entry>Ouvrir le dashboard</a><a class="btn" href="__INVITE__" target="_blank" rel="noopener">Ajouter SentriX</a><a class="btn ghost" href="/support">Support</a></div></section>
 </main>
 
-<footer><div class="wrap"><div class="footer-grid"><div class="footer-brand"><a class="brand" href="/"><img src="/sentrix-avatar.png?v=55" width="39" height="39" alt=""><span>SentriX</span></a><p>Plateforme Discord tout-en-un : modération, sécurité, communauté et automatisations.</p></div><div class="footer-col"><b>Produit</b><a href="#platform">Plateforme</a><a href="#security">Sécurité</a><a href="/app">Dashboard</a><a href="/stats">Statistiques</a></div><div class="footer-col"><b>Ressources</b><a href="/docs">Documentation</a><a href="/commands">Commandes</a><a href="/start">Commencer</a><a href="/support">Support</a><a href="/media-kit">Media kit</a></div><div class="footer-col"><b>Légal</b><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></div></div><div class="footer-bottom"><span>SentriX — plateforme Discord tout-en-un.</span><span>Dashboard canonique : /app</span></div></div></footer>
+<footer><div class="wrap"><div class="footer-grid"><div class="footer-brand"><a class="brand" href="/"><img src="/sentrix-avatar.png?v=55" width="39" height="39" alt=""><span>SentriX</span></a><p>Plateforme Discord tout-en-un : modération, sécurité, communauté et automatisations.</p></div><div class="footer-col"><b>Produit</b><a href="#platform">Plateforme</a><a href="#security">Sécurité</a><a href="/app">Dashboard</a><a href="/stats">Statistiques</a><a href="/premium">Offres Premium</a></div><div class="footer-col"><b>Ressources</b><a href="/docs">Documentation</a><a href="/commands">Commandes</a><a href="/start">Commencer</a><a href="/support">Support</a><a href="/media-kit">Media kit</a></div><div class="footer-col"><b>Légal</b><a href="/privacy">Confidentialité</a><a href="/terms">Conditions</a></div></div><div class="footer-bottom"><span>SentriX — plateforme Discord tout-en-un.</span><span>Gestion sécurisée via Discord</span></div></div></footer>
 
 <div class="loader" id="loader" aria-hidden="true"><div class="loader-card"><div class="spinner"></div><b>Ouverture du dashboard</b><span id="loaderText">Vérification de votre session Discord…</span></div></div>
 

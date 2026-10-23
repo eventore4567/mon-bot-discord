@@ -73,13 +73,28 @@ function renderProfile() {
   $('prefLastGuild').onchange = () => { if (!$('prefLastGuild').checked) localStorage.removeItem('sentrix:guild'); else if (state.guildId) localStorage.setItem('sentrix:guild', state.guildId); };
   $('prefMoreTools').onchange = () => { state.navMore = $('prefMoreTools').checked; localStorage.setItem('sentrix:nav:more', state.navMore ? '1' : '0'); renderNav(); };
 }
+const MODULE_VISUAL = {
+  welcome: ['AC', 'Communauté'], levels: ['XP', 'Progression'],
+  economy: ['EC', 'Progression'], automod: ['SE', 'Protection'],
+  tickets: ['TK', 'Assistance'], logs: ['LG', 'Surveillance'],
+  roles: ['RL', 'Communauté'], notifications: ['NT', 'Automatisation'],
+};
 function moduleCard({ key, title, page, info }, m) {
   const code = moduleStatus(m);
   const sw = MODULE_SWITCH[key];
   const off = code === 'missing' || code === 'inactive';
   const toggle = sw ? (off ? `<button class="btn sm" type="button" data-module="${sw}" data-action="enable">Activer</button>` : `<button class="btn sm ghost" type="button" data-module="${sw}" data-action="disable">Désactiver</button>`) : '';
+  const visual = MODULE_VISUAL[key] || ['SX', 'Outil'];
   let line = ''; try { line = info(m) || ''; } catch (_) {}
-  return `<article class="module-card"><div class="card-head"><h3>${esc(title)}</h3>${badge(code)}</div><p class="info">${esc(line)}</p><div class="toolbar"><button class="btn sm primary" type="button" data-go="${page}">${off ? 'Configurer' : 'Gérer'}</button>${toggle}</div></article>`;
+  return `<article class="module-card sx-module-card" data-sx-module="${esc(key)}" data-sx-status="${esc(code)}">
+    <div class="sx-module-heading">
+      <span class="sx-module-icon" aria-hidden="true">${esc(visual[0])}</span>
+      <div class="sx-module-copy"><span class="sx-module-category">${esc(visual[1])}</span><h3>${esc(title)}</h3></div>
+      ${badge(code)}
+    </div>
+    <p class="info">${esc(line)}</p>
+    <div class="toolbar"><button class="btn sm primary" type="button" data-go="${page}">${off ? 'Configurer' : 'Gérer'} <span aria-hidden="true">↗</span></button>${toggle}</div>
+  </article>`;
 }
 /* En-tête de module réutilisé par chaque page : titre + statut + Activer/Désactiver. */
 async function moduleHead(key, copy, title) {
@@ -101,18 +116,22 @@ function overviewServerBar() {
   const icon = g.icon_url
     ? `<img src="${esc(g.icon_url)}" alt="">`
     : esc(String(g.name || 'S').slice(0, 2).toUpperCase());
-  return `<section class="overview-server-bar full" aria-label="Résumé du serveur">
-    <div class="overview-server-main">
-      <span class="server-icon">${icon}</span>
-      <div class="overview-server-copy">
-        <strong>${esc(g.name || 'Serveur')}</strong>
-        <span class="overview-status"><i aria-hidden="true"></i>SentriX actif</span>
+  return `<section class="overview-server-bar sx-control-hero full" aria-label="Résumé du serveur">
+    <div class="sx-control-intro">
+      <span class="sx-control-eyebrow">CENTRE DE CONTRÔLE · SENTRIX</span>
+      <div class="overview-server-main">
+        <span class="server-icon">${icon}</span>
+        <div class="overview-server-copy">
+          <strong>${esc(g.name || 'Serveur')}</strong>
+          <span class="overview-status"><i aria-hidden="true"></i>SentriX actif sur ce serveur</span>
+        </div>
       </div>
+      <p class="sx-control-description">Retrouvez l’essentiel de votre serveur, vos protections et les réglages des modules en un seul endroit.</p>
     </div>
     <div class="overview-server-stats" aria-label="Statistiques rapides">
       <span class="overview-stat"><b>${number(memberCount)}</b><small>membres</small></span>
-      <span class="overview-stat"><b>${number(openTickets)}</b><small>${openTickets === 1 ? 'ticket' : 'tickets'}</small></span>
-      <span class="overview-stat"><b>${number(protectionCount)}</b><small>${protectionCount === 1 ? 'protection' : 'protections'}</small></span>
+      <span class="overview-stat"><b>${number(openTickets)}</b><small>${openTickets === 1 ? 'ticket ouvert' : 'tickets ouverts'}</small></span>
+      <span class="overview-stat"><b>${number(protectionCount)}</b><small>${protectionCount === 1 ? 'protection active' : 'protections actives'}</small></span>
     </div>
   </section>`;
 }
@@ -123,11 +142,36 @@ async function renderOverview() {
   try { guide = await guidanceDiagnostic(); } catch (_) {}
   const mods = d.modules || {};
   const configured = Object.values(mods).some(m => m.configured || m.code === 'active');
-  const cards = OVERVIEW_CARDS.map(c => moduleCard(c, mods[c.key])).join('');
+  const activeCount = OVERVIEW_CARDS.filter(card => moduleStatus(mods[card.key]) === 'active').length;
+  const cards = OVERVIEW_CARDS.map(card => moduleCard(card, mods[card.key])).join('');
   const onboarding = !configured ? `<section class="card full"><div class="card-head"><div><h2>Bienvenue dans SentriX</h2><p>Configurez les fonctions principales de votre serveur en quelques étapes. Rien n’est modifié avant la dernière étape.</p></div><button class="btn primary" type="button" id="startWizard">Commencer</button></div></section>` : '';
   const problems = (d.invalid_resources || []).length;
   const assistant = guide ? guidanceOverviewBlock(guide) : '';
-  content().innerHTML = `<div class="grid">${overviewServerBar()}${assistant}${onboarding}${problems ? `<div class="notice warn full">${plural(problems, 'ressource', 'ressources')} à corriger (salon ou rôle supprimé). <button class="btn link" type="button" data-go="diagnostic">Voir</button></div>` : ''}<div class="module-grid full">${cards}</div></div>`;
+  const shortcuts = [
+    ['security', 'SE', 'Sécurité', 'Protections et exceptions'],
+    ['logs', 'LG', 'Surveillance', 'Événements du serveur'],
+    ['tickets', 'TK', 'Tickets', 'Panneaux et assistance'],
+    ['welcome', 'AC', 'Accueil', 'Arrivées et départs'],
+  ];
+  const quickLinks = shortcuts.map(([page, icon, title, detail]) => `<button class="sx-quick-action" type="button" data-go="${page}">
+    <span class="sx-quick-icon" aria-hidden="true">${icon}</span>
+    <span class="sx-quick-text"><b>${title}</b><small>${detail}</small></span>
+    <span class="sx-quick-arrow" aria-hidden="true">↗</span>
+  </button>`).join('');
+  content().innerHTML = `<div class="grid sx-overview-layout">
+    ${overviewServerBar()}
+    ${assistant}
+    ${onboarding}
+    ${problems ? `<div class="notice warn full">${plural(problems, 'ressource', 'ressources')} à corriger (salon ou rôle supprimé). <button class="btn link" type="button" data-go="diagnostic">Voir</button></div>` : ''}
+    <section class="sx-quick-section full" aria-labelledby="sx-quick-title">
+      <div class="sx-section-heading"><div><span class="sx-section-eyebrow">NAVIGATION RAPIDE</span><h2 id="sx-quick-title">Vos espaces essentiels</h2><p>Accédez directement aux outils que vous utilisez le plus.</p></div></div>
+      <div class="sx-quick-grid">${quickLinks}</div>
+    </section>
+    <section class="sx-module-section full" aria-labelledby="sx-modules-title">
+      <div class="sx-section-heading"><div><span class="sx-section-eyebrow">CONFIGURATION</span><h2 id="sx-modules-title">Modules de votre serveur</h2><p>Consultez l’état des modules, configurez-les et activez seulement ceux dont vous avez besoin.</p></div><span class="sx-section-counter">${number(activeCount)} / ${number(OVERVIEW_CARDS.length)} actifs</span></div>
+      <div class="module-grid">${cards}</div>
+    </section>
+  </div>`;
   bindModuleButtons();
   bindGuidanceOverview();
   renderNav();
