@@ -31,7 +31,7 @@ from utils.v21_rules import (
 logger = logging.getLogger("bot.sentrix-v21")
 
 V21_PUBLIC_COMMANDS = frozenset({
-    "achievements-v21", "challenges", "market-find", "market-history", "market-my",
+    "achievements", "challenges", "market-find", "market-history", "market-my",
 })
 V21_DIRECT_COMMANDS = V21_PUBLIC_COMMANDS | {"systemstatus"}
 
@@ -324,11 +324,11 @@ class SentriXV21(commands.Cog):
             joined_days = max(0, (datetime.now(timezone.utc) - member.joined_at).days)
         return stats, row, joined_days
 
-    # name="achievements-v21" (pas "achievements") : cogs.v17_ai_economy_games enregistre
-    # deja une commande +achievements, vivante et distincte. add_cog() abandonne TOUT le
-    # cog des la premiere collision de nom (CommandRegistrationError) — SentriXV21 entier
-    # (marche, defis, tout) echouait donc a charger silencieusement, a chaque demarrage.
-    @commands.hybrid_command(name="achievements-v21", aliases=["badges"], description="Afficher tous vos succès débloqués.", with_app_command=False)
+    # Le nom est redevenu `achievements` : la commande homonyme de
+    # cogs.v17_ai_economy_games a été retirée, car celle-ci montre tout ce
+    # qu'elle montrait et 25 succès de plus. Plus de collision, donc plus de
+    # suffixe « -v21 » dans un nom vu par les membres.
+    @commands.hybrid_command(name="achievements", aliases=["badges"], description="Afficher tous vos succès débloqués.", with_app_command=False)
     @commands.cooldown(2, 5, commands.BucketType.user)
     async def achievements(self, ctx: commands.Context, membre: discord.Member = None):
         if ctx.guild is None:
@@ -355,6 +355,27 @@ class SentriXV21(commands.Cog):
             value="\n".join(f"**{a['name']}** — {a['description']}" for a in unlocked[-10:]) or "Aucun succès pour le moment.",
             inline=False,
         )
+        # Les succès à récompense de v17 : ils sont persistés et payés en
+        # pièces. Les laisser de côté aurait rendu invisibles des gains déjà
+        # acquis — c'est pour ça que l'ancienne commande n'est pas simplement
+        # supprimée mais absorbée ici.
+        try:
+            payes = await self.bot.db.fetchall(
+                "SELECT achievement_key, reward, unlocked_at FROM v17_achievements "
+                "WHERE guild_id=? AND user_id=? ORDER BY unlocked_at DESC LIMIT 8",
+                (ctx.guild.id, member.id),
+            )
+        except Exception:
+            payes = []
+        if payes:
+            embed.add_field(
+                name="Récompensés",
+                value="\n".join(
+                    f"**{r['achievement_key']}** — +{r['reward']} 🪙 — <t:{int(r['unlocked_at'])}:R>"
+                    for r in payes
+                )[:1024],
+                inline=False,
+            )
         embed.add_field(
             name="À débloquer",
             value="\n".join(f"**{a['name']}** — {a['description']}" for a in locked[:7]) or "Tous les succès sont débloqués.",

@@ -770,21 +770,17 @@ class V17AIEconomyGames(commands.Cog, name="V17AIEconomyGames"):
         )
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f"Promotion sur **{item['name']}** : **{prix}** jusqu'à <t:{now() + seconds}:R>.")))
 
-    @commands.hybrid_command(name="achievements", description="Afficher les succès débloqués.", with_app_command=False)
-    async def achievements(self, ctx: commands.Context, membre: discord.Member | None = None):
-        target = membre or ctx.author
-        rows = await self.bot.db.fetchall(
-            "SELECT * FROM v17_achievements WHERE guild_id=? AND user_id=? ORDER BY unlocked_at DESC",
-            (ctx.guild.id, target.id),
-        )
-        labels = {
-            "first_command": "Première commande",
-            "commander_100": "100 commandes",
-            "gamer_10": "10 actions de mini-jeu",
-            "wealth_1000": "1000 pièces de patrimoine",
-        }
-        text = "\n".join(f"• **{labels.get(r['achievement_key'], r['achievement_key'])}** — +{r['reward']} 🪙 — <t:{r['unlocked_at']}:R>" for r in rows) or "Aucun succès débloqué."
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.info(text, title=f'Succès — {target.display_name}')))
+    # `+achievements` de ce cog a été RETIRÉE le 23/10/2026. Deux systèmes de
+    # succès coexistaient : celui-ci (quelques clés à récompense, persistées
+    # dans v17_achievements) et celui de cogs/sentrix_v21 (25 succès calculés
+    # sur les vraies statistiques). Aucun des deux n'avait jamais servi, et la
+    # collision de nom forçait le suffixe « -v21 » dans un nom vu par les
+    # membres.
+    #
+    # Le plus complet a gagné le nom. Rien n'est perdu : `+achievements`
+    # affiche désormais AUSSI les récompenses enregistrées ici, et la table
+    # continue d'être alimentée par _unlock plus haut (ligne ~585). Seule
+    # l'ancienne vue partielle disparaît.
 
     @commands.hybrid_command(name="missions", description="Voir et réclamer automatiquement les missions quotidiennes/hebdomadaires.")
     async def missions(self, ctx: commands.Context):

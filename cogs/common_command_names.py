@@ -125,7 +125,7 @@ PREFERRED_COMMAND_NAMES: dict[str, str] = {
     # seul le nom conseillé/affiché et l'alias tapé par les membres sont courts.
     "economyleaderboard": "topeco",
     "repleaderboard": "toprep",
-    "achievements-v21": "badges",
+    "achievements": "badges",
     "server-managed": "maintenance",
     "server-health": "checkup",
     "server-audit": "saudit",

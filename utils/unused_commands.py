@@ -34,7 +34,7 @@ PERIODE = ("2026-08-05", "2026-10-16")
 
 MASQUEES: frozenset[str] = frozenset({
     # Masquées du menu slash, jamais supprimées de leurs commandes préfixées +.
-    "achievements-v21",
+    "achievements",
     "add-xp",
     "addbonusinvites",
     "adventure",

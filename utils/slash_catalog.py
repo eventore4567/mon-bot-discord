@@ -297,7 +297,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("profile bio", "set-bio", "Set your profile bio."),
     _e("profile voice", "voice-time", "Show time spent in voice channels."),
     _e("profile badges", "sentrixpro badges", "Show unlocked badges."),
-    _e("profile achievements", "achievements-v21", "Show your achievements."),
+    _e("profile achievements", "achievements", "Show your achievements."),
     _e("profile challenges", "challenges", "Show your active challenges."),
     _e("profile progress", "progress", "Show your overall progress."),
     _e("profile season", "sentrixpro season", "Show your season progress."),

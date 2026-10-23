@@ -122,7 +122,7 @@ PUBLIC_COMMANDS = frozenset({
     "permissions",
     # Hubs et profils membre (anciennement fail-closed par oubli)
     "progress", "profilecard",
-    "achievements", "achievements-v21", "challenges", "missions", "gamelobby", "matchmake",
+    "achievements", "challenges", "missions", "gamelobby", "matchmake",
     "market", "market-buy", "market-sell", "market-cancel", "market-find",
     "market-history", "market-my", "transactions", "shopwindow",
     "sentrix-plus", "sentrixpro",
@@ -628,7 +628,7 @@ def module_for_command(name: str) -> str | None:
         # niveaux configurés (« absent = non configuré = inactif »).
         if name in {"me", "level", "rank", "leaderboard-levels",
                     "level-roles", "profile", "set-bio", "rep", "reputation",
-                    "repleaderboard", "voice-time", "progress", "achievements", "achievements-v21",
+                    "repleaderboard", "voice-time", "progress", "achievements",
                     "profilecard"}:
             return "levels"
         if name in {"sentrix", "ask", "chat", "chat-reset", "summarize",
