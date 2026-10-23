@@ -1284,6 +1284,125 @@ def _trace_time_text(embed: discord.Embed) -> str:
         return ""
 
 
+
+# ---------------------------------------------------------------------------
+# SENTRIX TICKET CENTER V2 — présentation structurée dans Discord Components V2.
+# Ne modifie aucune permission ni action métier. Les champs du log viennent du
+# journal durable des tickets ; aucune identité / durée n'est inventée.
+# ---------------------------------------------------------------------------
+def _ticket_one_line(value: object, *, max_chars: int = 400) -> str:
+    """Préserve les mentions et timestamps Discord, neutralise les faux titres."""
+    content = " ".join(str(value or "").split()).strip()
+    if len(content) > max_chars:
+        content = content[:max_chars - 1] + "…"
+    return content or "Non renseigné"
+
+
+def ticket_close_blocks(embed: discord.Embed) -> list[str]:
+    """Blocs Discord épurés : dossier, acteurs, temps, motif, chronologie."""
+    exact = lambda *names: _field_value_exact(embed, *names)
+    ticket = _ticket_one_line(exact("Ticket"), max_chars=100)
+    salon = _ticket_one_line(exact("Salon"), max_chars=190)
+    demandeur = _ticket_one_line(exact("Membre concerné"), max_chars=160)
+    ferme_par = _ticket_one_line(exact("Fermé par"), max_chars=160)
+    ouvert = _ticket_one_line(exact("Ouverture"), max_chars=100)
+    ferme = _ticket_one_line(exact("Fermeture"), max_chars=100)
+    titulaire = _ticket_one_line(exact("Pris en charge"), max_chars=230)
+    equipe = _ticket_one_line(exact("Équipe ayant pris en charge"), max_chars=310)
+    delai = _ticket_one_line(exact("Avant première prise en charge"), max_chars=90)
+    duree = _ticket_one_line(exact("Durée totale"), max_chars=90)
+    motif = _ticket_one_line(exact("Motif"), max_chars=390)
+    historique = str(exact("Historique") or "").strip()[:940]
+    reference = _ticket_one_line(exact("Référence"), max_chars=75)
+
+    blocs = [
+        "\n".join((
+            "**🎫  Dossier du ticket**",
+            f"{ticket}  ·  {salon}",
+            "",
+            f"**Ouvert par**  {demandeur}",
+            f"**Fermé par**  {ferme_par}",
+        )),
+        "\n".join((
+            "**🕒  Horaires & durée**",
+            f"**Ouverture :** {ouvert}",
+            f"**Fermeture :** {ferme}",
+            f"**Durée totale :** {duree}",
+            f"**Avant prise en charge :** {delai}",
+        )),
+        "\n".join((
+            "**👥  Équipe de support**",
+            f"**Responsable à la clôture :** {titulaire}",
+            f"**Intervenants :** {equipe}",
+        )),
+        "**📝  Motif de fermeture**\n" + discord.utils.escape_markdown(motif),
+    ]
+    if historique:
+        blocs.append("**🧭  Dernières actions**\n" + historique)
+    if reference:
+        blocs.append(f"-# Référence de suivi : {reference}")
+    return blocs
+
+
+def _ticket_general_blocks(
+    embed: discord.Embed, *, event_type: str, identity_name: str | None,
+    identity_id: int | None,
+) -> list[str]:
+    """Toutes les autres actions de ticket bénéficient du même rythme visuel."""
+    text = narrative_body(
+        embed, log_type=event_type, identity_name=identity_name,
+        identity_id=identity_id,
+    ).strip()
+    if not text:
+        return ["Action de ticket enregistrée."]
+    parts = [line.strip() for line in text.splitlines() if line.strip()]
+    if not parts:
+        return ["Action de ticket enregistrée."]
+    introduction = parts[0][:1600]
+    remaining = "\n".join(parts[1:])[:2600]
+    return [introduction] + ([remaining] if remaining else [])
+
+
+def _add_ticket_log_content(
+    container: discord.ui.Container, embed: discord.Embed, *,
+    event_type: str, identity_name: str | None,
+    identity_id: int | None, transcript_filename: str | None,
+) -> None:
+    """Un seul conteneur : informations, déroulé et transcript téléchargeable."""
+    if event_type == "ticket_close" and _field_value_exact(embed, "Fermeture"):
+        parts = ticket_close_blocks(embed)
+        # Regrouper l'identité / temps / support, puis motif / historique.
+        for index, part in enumerate(parts):
+            if index in {1, 3, 4}:
+                container.add_item(_sep())
+            container.add_item(discord.ui.TextDisplay(part[:1900]))
+    else:
+        for index, part in enumerate(_ticket_general_blocks(
+            embed, event_type=event_type, identity_name=identity_name,
+            identity_id=identity_id,
+        )):
+            if index:
+                container.add_item(_sep())
+            container.add_item(discord.ui.TextDisplay(part[:2600]))
+
+    if transcript_filename:
+        filename = str(transcript_filename).strip()
+        # Le composant natif rend le fichier DANS la carte au lieu de
+        # le laisser dans un grand rectangle Discord détaché en dessous.
+        if filename.startswith("sentrix-ticket-") and filename.endswith("-transcript.txt"):
+            container.add_item(_sep())
+            container.add_item(discord.ui.TextDisplay(
+                "**📄  Transcript complet**\n"
+                "-# Messages et actions du ticket · fichier TXT à ouvrir ou télécharger."
+            ))
+            file_cls = getattr(discord.ui, "File", None)
+            if file_cls is not None:
+                try:
+                    container.add_item(file_cls(media=f"attachment://{filename}"))
+                except (TypeError, ValueError, discord.HTTPException):
+                    logger.exception("Le composant du transcript ticket est indisponible.")
+
+
 class WideLogView(discord.ui.LayoutView):
     """SentriX Trace V7 — une lecture en trois zones : identité, événement, actions."""
 
@@ -1302,6 +1421,7 @@ class WideLogView(discord.ui.LayoutView):
         *,
         guild_id: int | None = None,
         available_attachments: set[str] | None = None,
+        ticket_attachment_filename: str | None = None,
     ) -> None:
         super().__init__(timeout=None)
         # Format neutre : image de 1200x24 presque transparente.
@@ -1392,13 +1512,20 @@ class WideLogView(discord.ui.LayoutView):
         if not event_type.startswith("message_"):
             summary = _bold_log_labels_as_badges(summary)
             details = _bold_log_labels_as_badges(details)
-        if summary:
-            # Pas de grand encadré ni de barre de citation grise sur une action
-            # standard. Les citations existantes de messages utilisateur
-            # restent inchangées (elles sont créées par narrative_body).
-            container.add_item(discord.ui.TextDisplay(summary[:1600]))
-        if details:
-            container.add_item(discord.ui.TextDisplay(details[:2200]))
+        if event_type.startswith("ticket_"):
+            _add_ticket_log_content(
+                container, embed, event_type=event_type,
+                identity_name=identity_name, identity_id=identity_id,
+                transcript_filename=ticket_attachment_filename,
+            )
+        else:
+            if summary:
+                # Pas de grand encadré ni de barre de citation grise sur une action
+                # standard. Les citations existantes de messages utilisateur
+                # restent inchangées (elles sont créées par narrative_body).
+                container.add_item(discord.ui.TextDisplay(summary[:1600]))
+            if details:
+                container.add_item(discord.ui.TextDisplay(details[:2200]))
 
         # Médias seulement après le contexte métier.
         if media_items:
@@ -1768,6 +1895,11 @@ async def send_wide_log(
                 for f in ([extra_file] if extra_file is not None else []) + list(extra_files or [])
                 if getattr(f, "filename", None)
             },
+            ticket_attachment_filename=(
+                str(getattr(extra_file, "filename", "") or "")
+                if event_type == "ticket_close" and extra_file is not None
+                else None
+            ),
         )
     except Exception as exc:
         logger.error(
