@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import io
 import logging
+import time
 from types import SimpleNamespace
 
 import discord
@@ -755,6 +756,27 @@ class BoutonRouvrirTicket(discord.ui.DynamicItem[discord.ui.Button],
 
 
 
+async def _ticket_action_reply(
+    interaction: discord.Interaction, *,
+    ticket_id: int, action: str, explanation: str, deferred: bool = False,
+) -> None:
+    """Une erreur de ticket mérite une carte claire, sans message brut disgracieux."""
+    from services import ticket_panels_v3
+    panel = ticket_panels_v3.ticket_action_failure(
+        ticket_id=ticket_id, action=action, explanation=explanation,
+    )
+    payload = {
+        "view": panel,
+        "files": panel.fichiers(),
+        "ephemeral": True,
+        "allowed_mentions": discord.AllowedMentions.none(),
+    }
+    if deferred:
+        await interaction.followup.send(**payload)
+    else:
+        await interaction.response.send_message(**payload)
+
+
 class ConfirmerSuppressionTicket(discord.ui.Modal, title="🗑️ Supprimer définitivement le ticket"):
     """La suppression est irréversible : demander motif + confirmation explicite."""
 
@@ -781,9 +803,11 @@ class ConfirmerSuppressionTicket(discord.ui.Modal, title="🗑️ Supprimer déf
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if str(self.confirmation.value or "").strip().upper() != "SUPPRIMER":
-            return await interaction.response.send_message(
-                "Suppression annulée : vous devez écrire exactement SUPPRIMER.",
-                ephemeral=True,
+            return await _ticket_action_reply(
+                interaction,
+                ticket_id=self.ticket_id,
+                action="Suppression annulée",
+                explanation="Pour confirmer, écrivez exactement SUPPRIMER. Aucun salon n'a été supprimé.",
             )
         await supprimer_ticket_apres_confirmation(
             interaction, ticket_id=self.ticket_id,
@@ -794,16 +818,19 @@ class ConfirmerSuppressionTicket(discord.ui.Modal, title="🗑️ Supprimer déf
 async def supprimer_ticket_apres_confirmation(
     interaction: discord.Interaction, *, ticket_id: int, raison: str,
 ) -> None:
-    """Ne supprime que SON salon, un ticket fermé, par un staff autorisé.
+    """Supprime uniquement ce ticket fermé et journalise l'auteur + le motif.
 
-    L'état DB est remis à 'ferme' si Discord refuse la suppression, et les logs
-    indiquent le motif réellement saisi. Le transcript archivé à la fermeture
-    reste dans le salon Logs → Tickets.
+    Le salon n'est jamais supprimé sans avoir vérifié les permissions, le lien
+    ticket/salon/serveur, le statut fermé et le changement atomique en base.
+    En cas d'erreur API Discord, le ticket revient à l'état fermé.
     """
+    from services import ticket_panels_v3
+
     guild, salon = interaction.guild, interaction.channel
     if guild is None or not isinstance(salon, discord.TextChannel):
-        return await interaction.response.send_message(
-            "Action indisponible en dehors du salon du ticket.", ephemeral=True,
+        return await _ticket_action_reply(
+            interaction, ticket_id=ticket_id, action="Suppression refusée",
+            explanation="Cette action n'est possible que dans le salon du ticket.",
         )
     perms = getattr(interaction.user, "guild_permissions", None)
     autorise = bool(
@@ -811,23 +838,22 @@ async def supprimer_ticket_apres_confirmation(
         or interaction.user.id == guild.owner_id
     )
     if not autorise:
-        return await interaction.response.send_message(
-            "Seul le staff autorisé peut supprimer définitivement un ticket.",
-            ephemeral=True,
+        return await _ticket_action_reply(
+            interaction, ticket_id=ticket_id, action="Accès refusé",
+            explanation="Seuls les membres du staff autorisés à gérer les salons peuvent supprimer un ticket.",
         )
 
     data = await interaction.client.db.fetchone(
-        "SELECT id, guild_id, channel_id, status FROM tickets "
-        "WHERE id=? AND guild_id=? AND channel_id=?",
+        "SELECT id, guild_id, channel_id, status, user_id, claimed_by, created_at, closed_at "
+        "FROM tickets WHERE id=? AND guild_id=? AND channel_id=?",
         (int(ticket_id), int(guild.id), int(salon.id)),
     )
     if not data or str(data["status"]) != "ferme":
-        return await interaction.response.send_message(
-            "Le ticket n'est pas fermé ou n'appartient pas à ce salon.",
-            ephemeral=True,
+        return await _ticket_action_reply(
+            interaction, ticket_id=ticket_id, action="Suppression impossible",
+            explanation="Le ticket n'est pas fermé ou ce salon ne correspond plus au dossier.",
         )
 
-    # L'interaction est acquittée avant l'appel API Discord (qui peut durer).
     await interaction.response.defer(ephemeral=True)
     updated = await interaction.client.db.execute(
         "UPDATE tickets SET status='supprime' "
@@ -835,38 +861,66 @@ async def supprimer_ticket_apres_confirmation(
         (int(ticket_id), int(guild.id), int(salon.id)),
     )
     if getattr(updated, "rowcount", 0) != 1:
-        return await interaction.followup.send(
-            "Le ticket a déjà été modifié par un autre membre du staff.",
-            ephemeral=True,
+        return await _ticket_action_reply(
+            interaction, ticket_id=ticket_id, action="Ticket déjà modifié",
+            explanation="Un autre membre du staff a modifié ce ticket. Aucune suppression supplémentaire.",
+            deferred=True,
         )
+
+    old_name = str(salon.name)
+    event_time = int(time.time())
     try:
-        await salon.delete(reason=f"SentriX ticket #{ticket_id} supprimé par {interaction.user}: {raison[:300]}")
+        await salon.delete(
+            reason=f"SentriX ticket #{ticket_id} supprimé par {interaction.user}: {raison[:300]}"
+        )
     except discord.HTTPException:
         await interaction.client.db.execute(
             "UPDATE tickets SET status='ferme' WHERE id=? AND status='supprime'",
             (int(ticket_id),),
         )
-        return await interaction.followup.send(
-            "Discord a refusé de supprimer le salon. Le ticket reste fermé et conservé.",
-            ephemeral=True,
+        return await _ticket_action_reply(
+            interaction, ticket_id=ticket_id, action="Échec de suppression",
+            explanation="Discord a refusé de supprimer le salon. Le dossier reste fermé et conservé.",
+            deferred=True,
         )
 
+    # La piste d'audit est plus utile que « Ticket supprimé » tout seul.
+    # Le salon n'existe plus, donc ne jamais construire un bouton mort vers lui.
     try:
         await journaliser_evenement(
             interaction.client, guild, "ticket_delete",
             ticket_id=int(ticket_id), channel=salon,
             acteur=interaction.user, raison=raison[:500],
+            cible=guild.get_member(int(data["user_id"])) if data["user_id"] else None,
+            extra={
+                "📌 Ancien salon": f"#{old_name}",
+                "👤 Demandeur": f"<@{int(data['user_id'])}>" if data["user_id"] else "Non renseigné",
+                "👥 Pris en charge": (
+                    f"<@{int(data['claimed_by'])}>" if data["claimed_by"]
+                    else "Non attribué"
+                ),
+                "🕒 Date de suppression": f"<t:{event_time}:F>",
+                "📁 Résultat": "Salon supprimé définitivement",
+            },
             avec_bouton=False,
         )
     except Exception:
         logger.exception("Journal de suppression ticket #%s indisponible.", ticket_id)
+
     try:
+        card = ticket_panels_v3.ticket_deleted_confirmation(
+            ticket_id=int(ticket_id), deleted_by=interaction.user,
+            reason=raison, channel_name=old_name, event_time=event_time,
+        )
         await interaction.followup.send(
-            f"Ticket #{int(ticket_id)} supprimé. Le motif a été enregistré dans le journal.",
-            ephemeral=True,
+            view=card, files=card.fichiers(), ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
     except discord.HTTPException:
-        pass
+        logger.warning(
+            "Suppression ticket #%s réussie, mais la confirmation n'a pas pu être envoyée.",
+            ticket_id, exc_info=True,
+        )
 
 
 class BoutonSupprimerTicket(discord.ui.DynamicItem[discord.ui.Button],
