@@ -85,6 +85,146 @@ function bindModeSwitch(root = content()) {
   });
 }
 
+
+/* SentriX MultiPicker V2 — navigation claire pour roles et salons Discord.
+   Le <select multiple> reste la source de vérité utilisée par /security/filter-policies.
+   Aucune exemption n'est enregistrée tant que l'utilisateur n'a pas cliqué Enregistrer. */
+function mountSecurityMultiPicker(id, kind) {
+  const select = $(id);
+  if (!select || !select.multiple || select.dataset.sxPickerMounted) return;
+  const options = Array.from(select.options).filter(option => !option.disabled && option.value);
+  const role = kind === 'roles';
+  const term = role ? 'rôle' : 'salon';
+  const pluralTerm = role ? 'rôles' : 'salons';
+  const prefix = role ? '@' : '#';
+  select.dataset.sxPickerMounted = '1';
+  select.classList.add('sx-picker-native');
+  select.tabIndex = -1;
+  select.setAttribute('aria-hidden', 'true');
+
+  const root = document.createElement('div');
+  root.className = 'sx-multi-picker';
+  root.setAttribute('role', 'group');
+  root.setAttribute('aria-label', role ? 'Choisir les rôles autorisés' : 'Choisir les salons stricts');
+
+  const top = document.createElement('div');
+  top.className = 'sx-picker-top';
+  const count = document.createElement('span');
+  count.className = 'sx-picker-count';
+  count.setAttribute('aria-live', 'polite');
+  const editState = document.createElement('span');
+  editState.className = 'sx-picker-edited';
+  editState.textContent = 'À enregistrer';
+  editState.hidden = true;
+  top.append(count, editState);
+
+  const chips = document.createElement('div');
+  chips.className = 'sx-picker-chips';
+  chips.setAttribute('aria-label', role ? 'Rôles sélectionnés' : 'Salons sélectionnés');
+
+  const details = document.createElement('details');
+  details.className = 'sx-picker-details';
+  const summary = document.createElement('summary');
+  summary.textContent = role ? 'Choisir les rôles' : 'Choisir les salons';
+  const inside = document.createElement('div');
+  inside.className = 'sx-picker-inside';
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.autocomplete = 'off';
+  search.className = 'sx-picker-search';
+  search.setAttribute('aria-label', role ? 'Rechercher un rôle' : 'Rechercher un salon');
+  search.placeholder = role ? 'Rechercher un rôle…' : 'Rechercher un salon…';
+
+  const list = document.createElement('div');
+  list.className = 'sx-picker-options';
+  list.setAttribute('role', 'group');
+  list.setAttribute('aria-label', role ? 'Rôles disponibles' : 'Salons disponibles');
+
+  const rows = [];
+  const itemByValue = new Map();
+  options.forEach(option => {
+    const label = document.createElement('label');
+    label.className = 'sx-picker-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = option.selected;
+    checkbox.value = option.value;
+    const name = document.createElement('span');
+    name.textContent = option.textContent.trim();
+    label.append(checkbox, name);
+    list.append(label);
+    const entry = { option, checkbox, label, name: name.textContent };
+    rows.push(entry);
+    itemByValue.set(option.value, entry);
+    checkbox.addEventListener('change', () => {
+      option.selected = checkbox.checked;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      refresh(true);
+    });
+  });
+
+  const empty = document.createElement('p');
+  empty.className = 'sx-picker-empty';
+  empty.setAttribute('role', 'status');
+  empty.hidden = true;
+  inside.append(search, list, empty);
+  details.append(summary, inside);
+  root.append(top, chips, details);
+  select.insertAdjacentElement('afterend', root);
+
+  const normalized = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr');
+  const filter = () => {
+    const query = normalized(search.value.trim());
+    let visible = 0;
+    rows.forEach(item => {
+      const show = !query || normalized(item.name).includes(query);
+      item.label.hidden = !show;
+      if (show) visible += 1;
+    });
+    empty.hidden = visible !== 0;
+    if (!visible) empty.textContent = options.length
+      ? 'Aucun résultat. Essayez un autre nom.'
+      : 'Aucun ' + term + ' disponible sur ce serveur.';
+  };
+  const refresh = (edited) => {
+    const selected = options.filter(option => option.selected);
+    count.textContent = selected.length === 0
+      ? 'Aucun ' + term + ' sélectionné'
+      : selected.length + ' ' + (selected.length === 1 ? term : pluralTerm) + ' sélectionné' + (selected.length > 1 ? 's' : '');
+    if (edited) editState.hidden = false;
+    chips.replaceChildren();
+    if (!selected.length) {
+      const note = document.createElement('span');
+      note.className = 'sx-picker-placeholder';
+      note.textContent = 'Aucune exception enregistrée pour cette sélection.';
+      chips.append(note);
+    } else {
+      selected.forEach(option => {
+        const item = itemByValue.get(option.value);
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'sx-picker-chip';
+        chip.textContent = (item ? item.name : prefix + option.textContent.trim()) + ' ×';
+        chip.setAttribute('aria-label', 'Retirer ' + option.textContent.trim());
+        chip.addEventListener('click', () => {
+          option.selected = false;
+          if (item) item.checkbox.checked = false;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          refresh(true);
+        });
+        chips.append(chip);
+      });
+    }
+  };
+  search.addEventListener('input', filter);
+  details.addEventListener('toggle', () => {
+    if (details.open) search.focus({ preventScroll: true });
+  });
+  filter();
+  refresh(false);
+}
+/* fin SentriX MultiPicker V2 */
+
 /* Sécurité : protections / vérification / sanctions */
 const securityOverview = (force = false) => cached('security-overview', () => gget('/security/overview'), { force, ttl: 15000 });
 const forbiddenWordsData = (force = false) => cached('forbidden-words', () => gget('/forbidden-words'), { force, ttl: 5000 });
@@ -280,13 +420,13 @@ async function renderSecurity() {
           </div>
           <div class="field full">
             <div class="label-row"><label for="securityPolicyBypassRoles">Rôles autorisés à contourner (facultatif)</label></div>
-            <select id="securityPolicyBypassRoles" multiple size="6">${policyRoleOptions || '<option disabled>Aucun rôle disponible</option>'}</select>
+            <select id="securityPolicyBypassRoles" multiple>${policyRoleOptions || '<option disabled>Aucun rôle disponible</option>'}</select>
             <small>Le bypass concerne uniquement <b>${esc(policy.label || policyKey)}</b>.</small>
           </div>
           <div class="field full">
-            <div class="label-row"><label for="securityPolicyStrictChannels">Salons stricts — bypass interdit</label></div>
-            <select id="securityPolicyStrictChannels" multiple size="7">${policyChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
-            <small>Dans ces salons, la protection normale prévaut : salon strict → rôle bypass → protection normale. Utiliser ce réglage uniquement pour les salons exigeant une protection renforcée.</small>
+            <div class="label-row"><label for="securityPolicyStrictChannels">Salons à surveillance stricte</label></div>
+            <select id="securityPolicyStrictChannels" multiple>${policyChannelOptions || '<option disabled>Aucun salon textuel disponible</option>'}</select>
+            <small>Les filtres sont appliqués aux membres non exemptés. Les exemptions de membres et de rôles restent valables, même dans ces salons.</small>
           </div>
         </div>
         <div class="toolbar">
@@ -326,6 +466,9 @@ async function renderSecurity() {
 
   bindEditable();
   bindModuleButtons();
+
+  mountSecurityMultiPicker('securityPolicyBypassRoles', 'roles');
+  mountSecurityMultiPicker('securityPolicyStrictChannels', 'channels');
 
   const selectedValues = select => [...(select?.selectedOptions || [])].map(option => option.value).filter(Boolean);
 
