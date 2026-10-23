@@ -378,6 +378,10 @@ def compact_fields(embed: discord.Embed, *, limit: int = 2200) -> str:
     }
     ignored.add("membre concerné")
     ignored.add("membre concerne")
+    # Les champs courts/longs du dossier de fermeture sont affichés une seule fois
+    # dans la narration dédiée (motif) ou la synthèse détaillée (historique).
+    if "fermeture du ticket" in (embed.title or "").casefold():
+        ignored.add("📝 motif")
     # La mémoire d'arrivée est déjà narrée par narrative_body.
     ignored |= {"mémoire", "memoire", "memory"}
     for name, value in _field_map(embed):
@@ -805,6 +809,25 @@ def narrative_body(
                 details.append(f"{libelle} : {valeur}")
         if details:
             lines.append(" · ".join(details))
+        # Ticket fermé : restituer tous les champs courts importants. Sans ce bloc,
+        # compact_fields() les écarte (<70 caractères) et les logs n'affichent
+        # jamais qui a pris le ticket, les heures ni la durée. Ne pas répéter
+        # la ligne de référence ni l'historique long (rendus plus bas).
+        if event_type == "ticket_close":
+            for title, name in (
+                ("Ouverture", "Ouverture"),
+                ("Fermeture", "Fermeture"),
+                ("Pris en charge", "Pris en charge"),
+                ("Équipe ayant pris en charge", "Équipe ayant pris en charge"),
+                ("Avant première prise en charge", "Avant première prise en charge"),
+                ("Durée totale", "Durée totale"),
+            ):
+                value = _field_value_exact(embed, name)
+                if value:
+                    lines.append(f"**{title} :** {value}")
+            motif = _field_value_exact(embed, "Motif")
+            if motif:
+                lines.append(f"**Motif :** {motif}")
         raison_ticket = _field_value(embed, "raison", "reason")
         if raison_ticket and raison_ticket not in (base or ""):
             lines.append(f"**Raison :** {raison_ticket}")
