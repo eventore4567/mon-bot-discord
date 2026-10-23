@@ -402,7 +402,10 @@ class CloseReasonModal(discord.ui.Modal, title="🔒 Fermer le ticket"):
         self.add_item(self.reason)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        # La confirmation de clôture concerne uniquement l'auteur de l'action.
+        # Une réponse différée publique était laissée « en chargement » car
+        # le gestionnaire n'envoyait pas d'accusé de fermeture.
+        await interaction.response.defer(ephemeral=True)
         await self.cog.close_ticket(interaction, self.ticket_id, self.reason.value or "Non précisée")
 
 
