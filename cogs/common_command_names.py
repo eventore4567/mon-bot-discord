@@ -370,6 +370,25 @@ FRENCH_COMMAND_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+def _sans_tiret(racine: str, command: commands.Command) -> str:
+    """La forme sans tiret, mais SEULEMENT si elle répond réellement.
+
+    `bot_v16_commands._register_compact_aliases` ajoute `securitycheck` à côté
+    de `security-check` — 66 alias en production. L'aide affichait pourtant
+    encore la forme avec tirets.
+
+    La condition est stricte : on ne montre le nom compact que s'il est dans
+    les alias de la commande. Afficher un nom qui ne répond pas serait pire
+    que le tiret, et c'est exactement ce qui arriverait sur les commandes où
+    l'alias a été refusé pour cause de collision.
+    """
+    compact = racine.replace("-", "")
+    if compact == racine:
+        return racine
+    alias = {str(a).casefold() for a in (getattr(command, "aliases", None) or ())}
+    return compact if compact.casefold() in alias else racine
+
+
 def preferred_name(command: commands.Command) -> str:
     extras = getattr(command, "extras", {}) or {}
     saved = extras.get("sentrix_preferred_name")
@@ -380,6 +399,7 @@ def preferred_name(command: commands.Command) -> str:
         return str(getattr(command, "name", "") or "")
     root, *rest = qualified.split(" ")
     root = PREFERRED_COMMAND_NAMES.get(root, root)
+    root = _sans_tiret(root, command if not rest else command)
     if not rest:
         return root
     # Feuilles raccourcies (music playlist -> music pl) ; un niveau intermédiaire
