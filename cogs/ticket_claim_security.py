@@ -545,6 +545,31 @@ def install(bot: commands.Bot) -> None:
                 except (discord.Forbidden, discord.HTTPException):
                     pass
 
+        # Le panneau public (Rouvrir/Supprimer + transcript) est déjà envoyé.
+        # Accuser aussi le clic du staff, en privé, avec le motif et la durée.
+        # Sinon la réponse au formulaire reste indéfiniment sur « chargement ».
+        try:
+            await panels.envoyer(
+                interaction,
+                ticket_panels_v3.ticket_closed_confirmation(
+                    ticket_id=ticket_id,
+                    closer=interaction.user,
+                    reason=reason_text,
+                    duration=duree,
+                    guild_id=guild.id,
+                    channel_id=channel.id,
+                    channel_name=channel.name,
+                    closed_at=closed_at,
+                ),
+                ephemere=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except (discord.HTTPException, discord.NotFound):
+            logger.warning(
+                "Confirmation privée de fermeture ticket #%s indisponible.",
+                ticket_id, exc_info=True,
+            )
+
     async def secure_claim(self, interaction: discord.Interaction, ticket):
         channel = interaction.channel
         guild = interaction.guild
