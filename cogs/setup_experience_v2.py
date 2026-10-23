@@ -22,6 +22,16 @@ import config
 from utils import embeds
 from utils import sentrix_panels as panels
 
+# Un panneau de configuration AFFICHE des rôles — « Avertissement → @En prison »,
+# « Vérification → @HABITANT ». Sans allowed_mentions explicite, c'est le défaut
+# du bot qui s'applique (main.py : roles=True), et chaque rafraîchissement du
+# panneau notifiait réellement tous les membres portant ces rôles.
+#
+# Les pastilles bleues restent : elles sont lisibles et utiles. Seule la
+# notification part.
+_SANS_PING = discord.AllowedMentions.none()
+
+
 logger = logging.getLogger("bot.setup-experience-v2")
 
 PROFILE_LABELS = {
@@ -422,7 +432,7 @@ def install() -> bool:
             self.page = -1
             self.render_page()
             await self.persist_session()
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await interaction.response.edit_message(embed=await self.build_embed(), view=self, allowed_mentions=_SANS_PING)
 
         refresh.callback = refresh_callback
         self.add_item(refresh)

@@ -16,6 +16,16 @@ import sentrix_setup_v116 as v116
 from utils import log_service
 from utils import sentrix_panels as panels
 
+# Un panneau de configuration AFFICHE des rôles — « Avertissement → @En prison »,
+# « Vérification → @HABITANT ». Sans allowed_mentions explicite, c'est le défaut
+# du bot qui s'applique (main.py : roles=True), et chaque rafraîchissement du
+# panneau notifiait réellement tous les membres portant ces rôles.
+#
+# Les pastilles bleues restent : elles sont lisibles et utiles. Seule la
+# notification part.
+_SANS_PING = discord.AllowedMentions.none()
+
+
 logger = logging.getLogger("bot.setup-v118")
 _INSTALLED = False
 
@@ -47,7 +57,7 @@ class InviteTrackerSetupView(discord.ui.View):
             await tracker.set_feed_setting(
                 self.bot, self.guild_id, channel_id=channel.id, enabled=True
             )
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await interaction.response.edit_message(embed=await self.build_embed(), view=self, allowed_mentions=_SANS_PING)
 
         feed_select.callback = feed_cb
         self.add_item(feed_select)
@@ -74,7 +84,7 @@ class InviteTrackerSetupView(discord.ui.View):
                 channel_id=channel.id,
                 enabled=True,
             )
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await interaction.response.edit_message(embed=await self.build_embed(), view=self, allowed_mentions=_SANS_PING)
 
         log_select.callback = log_cb
         self.add_item(log_select)
@@ -98,7 +108,7 @@ class InviteTrackerSetupView(discord.ui.View):
                 channel_id=int(channel_id),
                 enabled=not bool(current.get("feed_enabled")),
             )
-            await interaction.response.edit_message(embed=await self.build_embed(), view=self)
+            await interaction.response.edit_message(embed=await self.build_embed(), view=self, allowed_mentions=_SANS_PING)
 
         toggle_btn.callback = toggle_cb
         self.add_item(toggle_btn)
@@ -281,7 +291,7 @@ class VerificationSetupView(discord.ui.View):
         if self.panneau:
             await panels.editer(interaction, panels.avec_composants(panels.depuis_embed(embed), self))
         else:
-            await interaction.edit_original_response(embed=embed, view=self)
+            await interaction.edit_original_response(embed=embed, view=self, allowed_mentions=_SANS_PING)
 
     async def build_embed(self) -> discord.Embed:
         guild = self.bot.get_guild(self.guild_id)

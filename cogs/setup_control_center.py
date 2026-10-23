@@ -17,6 +17,16 @@ from discord.ext import commands
 from utils import ai_service
 from utils import checks, embeds, log_service, sentrix_panels as panels
 
+# Un panneau de configuration AFFICHE des rôles — « Avertissement → @En prison »,
+# « Vérification → @HABITANT ». Sans allowed_mentions explicite, c'est le défaut
+# du bot qui s'applique (main.py : roles=True), et chaque rafraîchissement du
+# panneau notifiait réellement tous les membres portant ces rôles.
+#
+# Les pastilles bleues restent : elles sont lisibles et utiles. Seule la
+# notification part.
+_SANS_PING = discord.AllowedMentions.none()
+
+
 logger = logging.getLogger("bot.setup-control-center")
 
 
@@ -982,9 +992,7 @@ class AiModal(discord.ui.Modal, title="Limites IA"):
             (*values, self.owner.guild.id),
         )
         await self.owner.composer()
-        await interaction.response.edit_message(
-            content=None, embeds=[], view=self.owner, attachments=self.owner.fichiers()
-        )
+        await interaction.response.edit_message(content=None, embeds=[], view=self.owner, attachments=self.owner.fichiers(), allowed_mentions=_SANS_PING)
 
 
 class MusicVoiceSelect(discord.ui.ChannelSelect):
@@ -1073,9 +1081,7 @@ class SetupView(discord.ui.LayoutView):
 
     async def refresh(self, interaction):
         await self.composer()
-        await interaction.response.edit_message(
-            content=None, embeds=[], view=self, attachments=self.fichiers()
-        )
+        await interaction.response.edit_message(content=None, embeds=[], view=self, attachments=self.fichiers(), allowed_mentions=_SANS_PING)
 
     def fichiers(self):
         famille = getattr(self, "_famille", None)
@@ -1206,9 +1212,7 @@ class SetupView(discord.ui.LayoutView):
                 kind="configuration",
                 pied="SentriX • Configuration",
             )
-            await interaction.response.edit_message(
-                content=None, embeds=[], view=ferme, attachments=ferme.fichiers()
-            )
+            await interaction.response.edit_message(content=None, embeds=[], view=ferme, attachments=ferme.fichiers(), allowed_mentions=_SANS_PING)
             self.stop()
 
         home.callback, refresh.callback, close.callback = go_home, do_refresh, do_close

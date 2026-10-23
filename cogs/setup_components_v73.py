@@ -18,6 +18,16 @@ from utils import sentrix_panels as panels
 from . import setup_control_center as setup_ui
 from . import setup_ticket_autoconfig_v72 as v72
 
+# Un panneau de configuration AFFICHE des rôles — « Avertissement → @En prison »,
+# « Vérification → @HABITANT ». Sans allowed_mentions explicite, c'est le défaut
+# du bot qui s'applique (main.py : roles=True), et chaque rafraîchissement du
+# panneau notifiait réellement tous les membres portant ces rôles.
+#
+# Les pastilles bleues restent : elles sont lisibles et utiles. Seule la
+# notification part.
+_SANS_PING = discord.AllowedMentions.none()
+
+
 logger = logging.getLogger("bot.setup-components-v73")
 
 RUNTIME_MARKER = "SentriX Setup Components V2 V73"
@@ -448,12 +458,10 @@ class SentriXSetupV73(discord.ui.LayoutView):
         # valide ; s'il l'a été, le fichier est là. Les deux ne peuvent plus
         # diverger — et une galerie sans sa pièce jointe ne « casse » pas
         # l'image, elle fait REFUSER le message entier par Discord.
-        await interaction.edit_original_response(
-            content=None,
+        await interaction.edit_original_response(content=None,
             embed=None,
             attachments=pieces_jointes_banniere(),
-            view=self,
-        )
+            view=self, allowed_mentions=_SANS_PING)
 
     async def rebuild(self) -> None:
         self.clear_items()
@@ -667,12 +675,10 @@ class SentriXSetupV73(discord.ui.LayoutView):
         # valide ; s'il l'a été, le fichier est là. Les deux ne peuvent plus
         # diverger — et une galerie sans sa pièce jointe ne « casse » pas
         # l'image, elle fait REFUSER le message entier par Discord.
-        await interaction.edit_original_response(
-            content=None,
+        await interaction.edit_original_response(content=None,
             embed=None,
             attachments=pieces_jointes_banniere(),
-            view=self,
-        )
+            view=self, allowed_mentions=_SANS_PING)
         self.stop()
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item=None) -> None:
