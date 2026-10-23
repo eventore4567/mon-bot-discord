@@ -91,7 +91,13 @@ def test_ticket_and_role_panels_do_not_duplicate_sentrix_brand():
 
     assert 'titre="SentriX — Ticket ouvert"' not in tickets
     assert 'titre="SentriX — Tickets"' not in tickets
-    assert 'titre="Ticket ouvert"' in tickets
+    # Depuis la V3, la confirmation d'ouverture est un panneau Components V2
+    # avec sa propre bannière et un bouton lien — plus l'ancien embed vert.
+    assert "ticket_panels_v3.ticket_created_confirmation(" in tickets
+    assert 'titre="Ticket ouvert"' not in tickets
+    card_source = _source("services/ticket_panels_v3.py")
+    assert 'label=navigation_label[:80]' in card_source
+    assert "discord.ButtonStyle.link" in card_source
     assert 'titre="Tickets"' in tickets
     assert 'f"SentriX — {titre}"' not in roles
 
