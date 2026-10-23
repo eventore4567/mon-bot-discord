@@ -474,15 +474,6 @@ NATIVE_ANTISCAM_CUSTOM_MESSAGE = "Ce message ressemble à une arnaque interdite 
 NATIVE_ANTIMENTION_RULE_NAME = "SentriX • Anti-mentions"
 NATIVE_ANTIMENTION_CUSTOM_MESSAGE = "Ce message contient trop de mentions."
 NATIVE_HARMFUL_RULE_NAME = "SentriX • Contenu sensible"
-#: Les deux derniers déclencheurs natifs de Discord, jusqu'ici inutilisés.
-#: `spam` est la détection de spam de Discord lui-même : elle tourne sur leur
-#: infrastructure, avant que le message n'arrive, donc elle attrape des rafales
-#: qu'un bot ne voit qu'après coup. `member_profile` filtre le PSEUDO à
-#: l'arrivée — un compte de raid nommé pour insulter est bloqué avant d'avoir
-#: pu écrire une seule ligne.
-NATIVE_SPAM_RULE_NAME = "SentriX • Anti-spam Discord"
-NATIVE_SPAM_CUSTOM_MESSAGE = "Ce message a été détecté comme du spam."
-NATIVE_PROFILE_RULE_NAME = "SentriX • Pseudos interdits"
 NATIVE_HARMFUL_CUSTOM_MESSAGE = "Ce contenu est bloqué par la modération du serveur."
 NATIVE_INVITE_REGEX_PATTERNS = (
     r"(?i)\bdiscord\.gg/[^\s<]+",
@@ -1419,10 +1410,6 @@ class AutoMod(commands.Cog, name="Automod"):
             await self._sync_native_antimention_rule(guild)
         elif field == "antiinsult":
             await self._sync_native_harmful_rule(guild)
-        elif field == "antispam":
-            await self._sync_native_spam_rule(guild)
-        if field in {"antiscam", "blacklist"}:
-            await self._sync_native_profile_rule(guild)
 
     async def _native_policy_exemptions(
         self,
@@ -1651,53 +1638,6 @@ class AutoMod(commands.Cog, name="Automod"):
             custom_message=NATIVE_HARMFUL_CUSTOM_MESSAGE,
         )
 
-    async def _sync_native_spam_rule(self, guild: discord.Guild) -> bool:
-        """La détection de spam de Discord, en renfort du moteur local.
-
-        Elle s'exécute chez Discord AVANT que le message n'arrive au bot : elle
-        attrape donc des rafales que SentriX ne voit qu'après coup, et elle
-        tient même si le bot est saturé ou déconnecté. Le moteur local garde la
-        main sur la sanction et l'escalade ; celle-ci ne fait que supprimer.
-        """
-        conf = await self.bot.db.get_automod(guild.id)
-        enabled = bool(conf and conf["antispam"])
-        return await self._upsert_native_rule(
-            guild,
-            name=NATIVE_SPAM_RULE_NAME,
-            enabled=enabled,
-            trigger=discord.AutoModTrigger(type=discord.AutoModRuleTriggerType.spam),
-            custom_message=NATIVE_SPAM_CUSTOM_MESSAGE,
-            policy_filter="antispam",
-        )
-
-    async def _sync_native_profile_rule(self, guild: discord.Guild) -> bool:
-        """Les mots interdits appliqués au PSEUDO, pas seulement aux messages.
-
-        Discord refuse l'arrivée ou force le changement de pseudo. Un compte de
-        raid nommé pour insulter ou usurper est donc arrêté avant d'avoir écrit
-        la moindre ligne — ce qu'aucune règle sur les messages ne peut faire.
-
-        Pas de `custom_message` ici : Discord n'en accepte pas sur un
-        déclencheur de profil, et en passer un fait refuser la règle entière.
-        """
-        conf = await self.bot.db.get_automod(guild.id)
-        enabled = bool(conf and conf["antiscam"])
-        # Discord plafonne un keyword_filter à 1000 entrées de 60 caractères.
-        mots = [m[:60] for m in await self.get_blacklist_words_cached(guild.id) if m][:1000]
-        if not mots:
-            # Sans mot interdit, la règle n'a rien à filtrer : la laisser
-            # active créerait une règle vide dans les réglages du serveur.
-            enabled = False
-        return await self._upsert_native_rule(
-            guild,
-            name=NATIVE_PROFILE_RULE_NAME,
-            enabled=enabled,
-            trigger=discord.AutoModTrigger(
-                type=discord.AutoModRuleTriggerType.member_profile,
-                keyword_filter=mots,
-            ),
-        )
-
     async def _sync_native_suite(self, guild: discord.Guild) -> dict[str, int] | None:
         """Nettoyage groupé : 1 appel HTTP par serveur au lieu de 7.
 
@@ -1713,8 +1653,6 @@ class AutoMod(commands.Cog, name="Automod"):
             NATIVE_ANTISCAM_RULE_NAME,
             NATIVE_ANTIMENTION_RULE_NAME,
             NATIVE_HARMFUL_RULE_NAME,
-            NATIVE_SPAM_RULE_NAME,
-            NATIVE_PROFILE_RULE_NAME,
         })
         return await self._remove_owned_native_rules(guild, names)
 
