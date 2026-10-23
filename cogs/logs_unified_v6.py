@@ -503,12 +503,36 @@ def _patch_tickets(bot: commands.Bot) -> None:
 
         owner = guild.get_member(opener_id)
         if owner:
+            # Fermer, c'est RETIRER LE SALON DE LA VUE du membre, pas seulement
+            # l'empêcher d'écrire. Jusqu'ici seul send_messages tombait : le
+            # membre continuait de voir le salon et de lire la suite des
+            # échanges entre staff.
             overwrite = channel.overwrites_for(owner)
+            overwrite.view_channel = False
             overwrite.send_messages = False
+            overwrite.read_message_history = False
             try:
-                await channel.set_permissions(owner, overwrite=overwrite)
+                await channel.set_permissions(
+                    owner, overwrite=overwrite,
+                    reason=f"Ticket fermé par {interaction.user}",
+                )
             except discord.HTTPException:
-                pass
+                # Ne jamais annoncer un ticket fermé si Discord n'a pas appliqué
+                # l'isolation : on remet l'état précédent plutôt que de laisser
+                # un ticket « fermé » que le membre lit encore.
+                await bot.db.execute(
+                    "UPDATE tickets SET status='ouvert', closed_at=NULL, locked=0 "
+                    "WHERE id=? AND status='ferme'",
+                    (ticket_id,),
+                )
+                try:
+                    await interaction.followup.send(
+                        "Impossible de fermer le ticket : Discord a refusé de masquer le salon au membre.",
+                        ephemeral=True,
+                    )
+                except (discord.HTTPException, AttributeError):
+                    pass
+                return
 
         try:
             transcript_text = await _self._fetch_transcript_text(channel)
@@ -524,16 +548,17 @@ def _patch_tickets(bot: commands.Bot) -> None:
             text=transcript_text,
         )
 
-        try:
-            delay = int((conf["ticket_delete_delay"] if conf else 30) or 30)
-        except (KeyError, TypeError, ValueError):
-            delay = 30
-        asyncio.create_task(_self._auto_delete(channel, ticket_id, delay))
-
+        # Fermer n'est PAS supprimer. Cette version programmait une suppression
+        # automatique (30 s par défaut) : le salon, la transcription lisible et
+        # tout le fil disparaissaient d'un coup, sans retour possible. Le ticket
+        # reste désormais en base avec son statut « ferme », le salon reste là,
+        # simplement invisible pour le membre. Un staff décide ensuite de
+        # rouvrir (+ticket-reopen) ou de supprimer le salon.
         close_embed = embeds.warning(
             f"Ticket fermé par {interaction.user.mention}.\n"
             f"Raison : {reason}\n\n"
-            f"Suppression automatique dans **{max(1, delay)} seconde(s)**."
+            "Le salon est masqué au membre et conservé. "
+            "`+ticket-reopen` le rend au membre ; supprimez le salon quand vous n'en avez plus besoin."
         )
         try:
             await channel.send(
