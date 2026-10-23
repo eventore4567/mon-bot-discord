@@ -1,0 +1,38 @@
+name: SentriX normal visual polish guard
+
+on:
+  pull_request:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'web/public_home_v3.py'
+      - 'web/dashboard_ui/**'
+      - 'tests/test_sentrix_normal_visual_polish.py'
+      - '.github/workflows/sentrix-normal-polish.yml'
+  push:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'web/public_home_v3.py'
+      - 'web/dashboard_ui/**'
+      - 'tests/test_sentrix_normal_visual_polish.py'
+      - '.github/workflows/sentrix-normal-polish.yml'
+
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DISCORD_TOKEN: ci.fake.token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Dependencies
+        run: pip install --disable-pip-version-check -r requirements.txt pytest pytest-asyncio
+      - name: Python compilation
+        run: python -m py_compile web/public_home_v3.py web/dashboard_unified_v2.py
+      - name: Normal site and dashboard regressions
+        run: python -m pytest -q tests/test_sentrix_normal_visual_polish.py tests/test_dashboard_unified_v2.py tests/test_public_home_v3.py
