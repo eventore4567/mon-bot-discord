@@ -158,7 +158,13 @@ def test_phase7_native_domains_do_not_repeat_sentrix_in_titles():
     assert 'titre="SentriX Music"' not in music
     assert '"🎵 Lecture en cours"' in music
     assert 'titre=title' in music
-    assert 'titre="Ticket ouvert"' in tickets
+    # La confirmation ticket utilise désormais le panneau V3 natif avec bannière
+    # et bouton de navigation, pas l'ancien titre du grand bloc vert.
+    assert "ticket_panels_v3.ticket_created_confirmation(" in tickets
+    assert 'titre="Ticket ouvert"' not in tickets
+    cards = (ROOT / "services" / "ticket_panels_v3.py").read_text(encoding="utf-8")
+    assert "def ticket_created_confirmation(" in cards
+    assert 'navigation_label="Ouvrir mon ticket"' in cards
 
 def test_cross_module_stability_guards_block_resource_recreation():
     tickets = (ROOT / "cogs" / "setup_ticket_autoconfig_v72.py").read_text(encoding="utf-8")
