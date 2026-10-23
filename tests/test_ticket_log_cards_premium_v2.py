@@ -122,8 +122,12 @@ def test_other_message_and_moderation_logs_keep_their_original_render_path():
         embed = discord.Embed(title="Journal test", description="Événement enregistré.")
         view = wide_logs.WideLogView(embed, "", log_type=event)
         body = contents(view)
-        assert "Événement enregistré." in body
+        # Les événements hors tickets gardent leur narrateur métier : un
+        # message supprimé sans cache affiche son fallback au lieu de reprendre
+        # la description de test, ce qui est le comportement attendu.
+        assert f"### {wide_logs._trace_title(event)}" in body
         assert "Dossier du ticket" not in body
+        assert "Horaires & durée" not in body
 
 
 def test_ticket_close_short_fields_are_sourced_from_audit_without_fake_values():
