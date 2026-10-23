@@ -394,3 +394,11 @@ if __name__ == "__main__":
         asyncio.run(run())
     except KeyboardInterrupt:
         logger.info("Arrêt de SentriX HA.")
+    except asyncio.CancelledError:
+        # `wait_for_leadership` lève CancelledError quand l'arrêt gracieux
+        # survient pendant l'attente du lease : c'est un SIGNAL d'arrêt voulu,
+        # pas une panne. Sans cette branche il remontait jusqu'à asyncio.run et
+        # imprimait une pile complète en ERROR à CHAQUE déploiement, sur les
+        # deux services — de quoi faire passer un redéploiement normal pour un
+        # crash, et surtout de quoi noyer les vraies erreurs dans les journaux.
+        logger.info("Arrêt de SentriX HA pendant l'attente du bail : instance passive remplacée.")
