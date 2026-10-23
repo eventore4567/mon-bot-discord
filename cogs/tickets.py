@@ -45,6 +45,7 @@ from cogs.ticket_constants import (
 )
 from services.tickets import count_genuinely_open_tickets
 from services import tickets as tickets_service
+from services import ticket_panels_v3
 from utils import embeds, checks, helpers, design_system
 from utils import cluster
 from utils import sentrix_panels as sx_panels
@@ -1502,23 +1503,10 @@ class Tickets(commands.Cog):
                     label,
                 )
 
-        # Fiche d'ouverture de ticket (Phase 3, design premium/sombre) — n'affecte QUE ce
-        # message d'accueil, jamais TicketControlView ni les custom_id des boutons
-        # persistants (ceux-ci restent inchangés pour ne rien casser après un redémarrage).
-        style = design_system.CATEGORY_STYLES["tickets"]
-        e = design_system.create_embed(
-            title=f"{ticket_type['emoji'] or style['emoji']} {ticket_type['name']} — Ticket #{number}",
-            description=ticket_type["open_message"] or f"Bonjour {user.mention}, le staff vous répondra bientôt.",
-            colour=style["colour"],
-            user=user,
-            thumbnail=user.display_avatar.url,
-            footer="SentriX",
-        )
-        e.add_field(name="👤 Ouvert par", value=user.mention, inline=True)
-        e.add_field(name="📂 Type", value=ticket_type["name"], inline=True)
-        for label, value in answers:
-            if value:
-                e.add_field(name=label[:256], value=helpers.truncate(value, 1024), inline=False)
+        # Le panneau ticket utilise la même famille de composants que les
+        # logs, avec une vraie bannière et une seule carte structurée.
+        # Discord refuse content + Components V2 dans un même message :
+        # les mentions sont intégrées au texte et autorisées explicitement.
         try:
             button_settings = await get_button_settings(self.bot, guild.id)
         except Exception:
@@ -1528,17 +1516,32 @@ class Tickets(commands.Cog):
             )
             button_settings = default_button_settings()
 
-        content = user.mention
-        if ticket_type["mention_staff"] and staff_role:
-            content += f" {staff_role.mention}"
-        # Ce message DOIT pinguer le membre et le role support : Discord refuse un
-        # `content` sur un message Components V2, donc il reste un embed. Le ping
-        # prime sur la banniere — c'est une exception assumee, pas un oubli.
+        intro = (
+            ticket_type["open_message"]
+            or f"Bonjour {user.mention}, un membre du staff vous répondra ici."
+        )
+        staff_ping = staff_role if (ticket_type["mention_staff"] and staff_role) else None
+        control_card = sx_panels.avec_composants(
+            ticket_panels_v3.opening_card(
+                ticket_number=number,
+                ticket_type=str(ticket_type["name"]),
+                opener=user,
+                description=intro,
+                staff_role=staff_ping,
+                answers=answers,
+            ),
+            TicketControlView(button_settings),
+        )
         try:
             await channel.send(
-                content=content,
-                embed=e,
-                view=TicketControlView(button_settings),
+                view=control_card,
+                files=control_card.fichiers(),
+                allowed_mentions=discord.AllowedMentions(
+                    users=[user],
+                    roles=[staff_ping] if staff_ping else [],
+                    everyone=False,
+                    replied_user=False,
+                ),
             )
         except discord.HTTPException:
             # Sans message de contrôle, le ticket est inutilisable. On revient à un
