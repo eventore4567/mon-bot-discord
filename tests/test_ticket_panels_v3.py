@@ -233,9 +233,10 @@ def test_delete_button_requires_real_confirmation_form():
 
 
 def fake_interaction(*, status="ferme", permission=True, db_error=False):
-    guild = SimpleNamespace(id=999, owner_id=987654321098765432)
+    guild = SimpleNamespace(id=999, owner_id=987654321098765432, get_member=lambda _: None)
     channel = Mock(spec=discord.TextChannel)
     channel.id = 555555555555555555
+    channel.name = "ticket-test"
     channel.delete = AsyncMock(side_effect=discord.HTTPException(
         Mock(status=403, reason="Forbidden"), "Forbidden"
     ) if db_error else None)
@@ -243,7 +244,9 @@ def fake_interaction(*, status="ferme", permission=True, db_error=False):
     actor.guild_permissions.manage_channels = permission
     response = SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
-    row = {"id": 9, "guild_id": 999, "channel_id": channel.id, "status": status}
+    row = {"id": 9, "guild_id": 999, "channel_id": channel.id, "status": status,
+           "user_id": 123456789012345678, "claimed_by": 222222222222222222,
+           "created_at": 1700000000, "closed_at": 1700003600}
     db = SimpleNamespace(
         fetchone=AsyncMock(return_value=row),
         execute=AsyncMock(return_value=SimpleNamespace(rowcount=1)),
