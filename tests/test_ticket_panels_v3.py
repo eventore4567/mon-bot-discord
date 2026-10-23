@@ -92,6 +92,8 @@ def test_closed_ticket_has_native_downloadable_file_reopen_and_delete():
         reason="Demande résolue", duration="34 min",
         transcript_filename="transcript-ticket-9.txt",
         avatar_url=str(opener.display_avatar.url),
+        claimed_by_id=444444444444444444,
+        closed_at=1700003600,
     )
     panel = sx_panels.avec_composants(panel, service_tickets.vue_ticket_ferme(9))
     body = contents(panel)
@@ -99,6 +101,8 @@ def test_closed_ticket_has_native_downloadable_file_reopen_and_delete():
     assert "Ticket #9 · Fermé" in body
     assert opener.mention in body and closer.mention in body
     assert "Demande résolue" in body and "34 min" in body
+    assert "<@444444444444444444>" in body
+    assert "<t:1700003600:F>" in body
     assert "Transcription du ticket" in body
     assert "Rouvrir" in [getattr(x, "label", "") for x in children] or \
         "Rouvrir" in [getattr(getattr(x, "item", None), "label", "") for x in children]
