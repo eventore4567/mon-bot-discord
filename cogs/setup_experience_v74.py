@@ -1112,6 +1112,26 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         container.add_item(discord.ui.Section(discord.ui.TextDisplay(perm_text), accessory=status))
 
+        # Le bulletin de sécurité, ici plutôt que seulement dans les journaux.
+        # Mesuré le 23/10/2026 : 22 serveurs sur 36 n'ont AUCUN salon de
+        # journaux configuré, donc la carte poussée ne les atteint jamais. Cet
+        # écran, lui, est forcément ouvert par un admin — c'est la seule voie
+        # qui marche partout. Deux composants seulement : le panneau plafonne
+        # à 40, et l'écran avancé en frôle déjà la limite.
+        try:
+            from utils import security_advisory
+
+            constats = await security_advisory.analyser_complet(self.guild)
+            container.add_item(discord.ui.Separator())
+            container.add_item(
+                discord.ui.TextDisplay(security_advisory.texte_compact(constats))
+            )
+        except Exception:
+            # Un bulletin indisponible ne doit jamais empêcher d'ouvrir la page
+            # Sécurité : sans ce garde, un serveur illisible rendait le réglage
+            # de la sécurité inaccessible.
+            logger.exception("Bulletin de sécurité indisponible guild=%s", self.guild.id)
+
         toggle = discord.ui.Button(
             label="Désactiver la sécurité" if enabled else "Activer la sécurité",
             style=discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success,

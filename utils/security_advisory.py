@@ -473,6 +473,29 @@ def champs(
     return champs_rendus
 
 
+def texte_compact(constats: Sequence[Constat], *, limite: int = 4) -> str:
+    """Le bulletin en quelques lignes, pour un écran déjà chargé.
+
+    Destiné à la page Sécurité de /setup : un panneau Discord plafonne à 40
+    composants, donc pas question d'y poser un champ par constat. On garde le
+    relevé, les titres les plus graves avec leur marqueur, et on renvoie au
+    diagnostic pour le détail — qui, lui, dit la conséquence et quoi faire.
+    """
+    if not constats:
+        return (
+            "### Exposition du serveur\n"
+            "✅ Aucune exposition détectée par les contrôles SentriX."
+        )
+    lignes = [f"### Exposition du serveur\n{resume(constats)}"]
+    for constat in constats[:limite]:
+        lignes.append(f"{constat.marqueur} **{constat.titre}** — {constat.constat}")
+    reste = len(constats) - min(len(constats), limite)
+    if reste > 0:
+        lignes.append(f"-# {reste} autre(s) point(s) de moindre gravité.")
+    lignes.append("-# Détail et marche à suivre : `+security-check`")
+    return "\n".join(lignes)
+
+
 async def analyser_complet(guild) -> list[Constat]:
     """Analyse d'un serveur, webhooks compris quand Discord nous les donne.
 
@@ -506,4 +529,5 @@ __all__ = [
     "gravite_dominante",
     "permissions_manquantes",
     "resume",
+    "texte_compact",
 ]
