@@ -165,13 +165,15 @@ def opening_card(*, ticket_number: int, ticket_type: str, opener: discord.abc.Us
 
 
 def closed_card(*, ticket_id: int, opener_id: int, closer: discord.abc.User,
-                reason: str, duration: str | None, transcript_filename: str,
-                avatar_url: str | None = None) -> TicketCardV3:
+                reason: str, duration: str | None, transcript_filename: str | None,
+                avatar_url: str | None = None, claimed_by_id: int | None = None,
+                closed_at: int | None = None) -> TicketCardV3:
     values = [
         f"**Créé par :** <@{int(opener_id)}>",
+        f"**Pris en charge par :** <@{int(claimed_by_id)}>" if claimed_by_id else "**Prise en charge :** Non attribuée",
         f"**Fermé par :** {closer.mention}",
         f"**Durée :** {duration or 'Indisponible'}",
-        f"**Fermeture :** <t:{int(discord.utils.utcnow().timestamp())}:F>",
+        f"**Fermeture :** <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>",
     ]
     reason_display = discord.utils.escape_mentions(
         discord.utils.escape_markdown(_safe(reason, 650))
