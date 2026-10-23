@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+import dataclasses
 from dataclasses import dataclass, field
 
 
@@ -25,6 +26,12 @@ class ModuleState:
     circuit_reason: str | None = None
     in_flight: int = 0
     in_flight_since: float | None = None
+    #: Invocations en cours, par clé (identifiant du message ou de
+    #: l'interaction) → horodatage. Un simple compteur ne savait pas qu'une
+    #: commande hybride traverse DEUX gardes — celle du préfixe et celle du
+    #: slash — et comptait la même invocation deux fois. La clé rend le double
+    #: comptage impossible, et permet de réclamer une entrée jamais refermée.
+    appels_en_cours: dict[object, float] = dataclasses.field(default_factory=dict)
     last_runtime_error: str | None = None
     last_runtime_error_at: float | None = None
     _started_at: float | None = field(default=None, repr=False)

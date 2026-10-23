@@ -107,11 +107,11 @@ class ModuleKernel:
     def contains(self, name: str) -> bool:
         return name in self._states
 
-    def enter_runtime(self, name: str) -> None:
-        self._resilience.enter(name)
+    def enter_runtime(self, name: str, cle: object = None) -> None:
+        self._resilience.enter(name, cle)
 
-    def exit_runtime(self, name: str) -> None:
-        self._resilience.exit(name)
+    def exit_runtime(self, name: str, cle: object = None) -> None:
+        self._resilience.exit(name, cle)
 
     def in_flight(self, name: str) -> int:
         return self._resilience.in_flight(name)

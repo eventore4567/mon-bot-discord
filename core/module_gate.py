@@ -73,13 +73,33 @@ def module_unavailable(bot, module: str | None) -> bool:
     return circuit_open(bot, module) or bool(dependency_blockers(bot, module))
 
 
+def cle_dinvocation(source: object) -> object | None:
+    """Ce qui identifie UNE invocation, des deux côtés de la même commande.
+
+    Pour un hybride lancé en slash, le Context porte l'interaction : la garde
+    préfixe et la garde slash rendent donc la même clé, et l'invocation n'est
+    comptée qu'une fois. En préfixe pur, c'est l'identifiant du message.
+    """
+    interaction = getattr(source, "interaction", None) or (
+        source if hasattr(source, "response") else None
+    )
+    identifiant = getattr(interaction, "id", None)
+    if identifiant is not None:
+        return ("i", int(identifiant))
+    message = getattr(source, "message", None)
+    identifiant = getattr(message, "id", None)
+    return ("m", int(identifiant)) if identifiant is not None else None
+
+
 async def prefix_gate(ctx: commands.Context) -> bool:
     module = prefix_command_module(ctx)
     if module_unavailable(ctx.bot, module):
         raise ModuleTemporarilyUnavailable(module or "inconnu")
     kernel = getattr(ctx.bot, "module_kernel", None)
     if module and kernel is not None and hasattr(kernel, "enter_runtime"):
-        kernel.enter_runtime(module)
+        # La clé de l'INVOCATION, pas du module : une commande hybride lancée
+        # en slash passe ici ET par la garde slash, avec la même interaction.
+        kernel.enter_runtime(module, cle_dinvocation(ctx))
     return True
 
 
@@ -90,7 +110,7 @@ def app_gate_for(command):
             raise AppModuleTemporarilyUnavailable(module or "inconnu")
         kernel = getattr(interaction.client, "module_kernel", None)
         if module and kernel is not None and hasattr(kernel, "enter_runtime"):
-            kernel.enter_runtime(module)
+            kernel.enter_runtime(module, cle_dinvocation(interaction))
         return True
     check.__name__ = f"sentrix_module_gate_{str(getattr(command, 'name', 'command')).replace('-', '_')}"
     return check

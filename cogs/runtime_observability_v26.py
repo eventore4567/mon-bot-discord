@@ -160,9 +160,19 @@ def _record_module_runtime_success(bot: commands.Bot, module_name: str | None) -
         kernel.record_runtime_success(module_name)
 
 
-def _exit_module_runtime(bot: commands.Bot, module_name: str | None) -> None:
+def _exit_module_runtime(
+    bot: commands.Bot, module_name: str | None, source: object = None
+) -> None:
     kernel = getattr(bot, "module_kernel", None)
-    if module_name and kernel is not None and hasattr(kernel, "exit_runtime"):
+    if not (module_name and kernel is not None and hasattr(kernel, "exit_runtime")):
+        return
+    # La même clé qu'à l'entrée : refermer sans clé viserait l'invocation la
+    # plus ancienne, pas forcément celle qui se termine.
+    try:
+        from core.module_gate import cle_dinvocation
+
+        kernel.exit_runtime(module_name, cle_dinvocation(source))
+    except Exception:
         kernel.exit_runtime(module_name)
 
 
@@ -262,7 +272,7 @@ def install(bot: commands.Bot) -> None:
         module_name = _prefix_module_name(ctx)
         _record_command_duration(bot, str(name), time.perf_counter() - started, failed=False)
         _record_module_runtime_success(bot, module_name)
-        _exit_module_runtime(bot, module_name)
+        _exit_module_runtime(bot, module_name, ctx)
 
     async def prefix_error(ctx: commands.Context, error: commands.CommandError):
         key = _command_key(ctx)
@@ -274,7 +284,7 @@ def install(bot: commands.Bot) -> None:
         if started is not None:
             _record_command_duration(bot, str(name), time.perf_counter() - started, failed=True)
         _record_module_runtime_error(bot, module_name, original)
-        _exit_module_runtime(bot, module_name)
+        _exit_module_runtime(bot, module_name, ctx)
         record_error(
             bot,
             command=str(name),
@@ -301,7 +311,7 @@ def install(bot: commands.Bot) -> None:
         module_name = _slash_module_name(command)
         _record_command_duration(bot, str(name), time.perf_counter() - started, failed=False)
         _record_module_runtime_success(bot, module_name)
-        _exit_module_runtime(bot, module_name)
+        _exit_module_runtime(bot, module_name, interaction)
 
     bot.add_listener(prefix_start, "on_command")
     bot.add_listener(prefix_complete, "on_command_completion")

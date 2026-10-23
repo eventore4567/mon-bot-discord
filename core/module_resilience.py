@@ -20,21 +20,59 @@ class ModuleResilience:
         self._states = states
         self._event = event
 
-    def enter(self, name: str) -> None:
-        state = self._states.get(name)
-        if state is None:
-            return
-        if state.in_flight == 0:
-            state.in_flight_since = time.time()
-        state.in_flight += 1
+    #: Aucune commande ne tourne légitimement un quart d'heure. Au-delà, une
+    #: entrée n'a pas été refermée — le processus a redémarré en plein appel,
+    #: une tâche a été annulée, un chemin de sortie manquait. On la réclame
+    #: plutôt que de laisser le module marqué « dégradé » pour toujours.
+    DUREE_MAX_APPEL_SECONDES = 900
 
-    def exit(self, name: str) -> None:
+    def _reclamer_les_oublies(self, state: ModuleState, maintenant: float) -> None:
+        perimes = [
+            cle for cle, depuis in state.appels_en_cours.items()
+            if maintenant - depuis > self.DUREE_MAX_APPEL_SECONDES
+        ]
+        for cle in perimes:
+            state.appels_en_cours.pop(cle, None)
+
+    @staticmethod
+    def _rafraichir(state: ModuleState) -> None:
+        """Le compteur et l'horodatage suivent les invocations vivantes."""
+        state.in_flight = len(state.appels_en_cours)
+        state.in_flight_since = min(state.appels_en_cours.values(), default=None)
+
+    def enter(self, name: str, cle: object = None) -> None:
+        """Marque une invocation en cours.
+
+        `cle` identifie l'invocation : identifiant du message en préfixe, de
+        l'interaction en slash. Une commande hybride lancée en slash traverse
+        DEUX gardes — celle du préfixe et celle du slash — avec la MÊME
+        interaction : sans clé, elle était comptée deux fois et une seule
+        sortie la refermait, donc le compteur ne revenait jamais à zéro. Le
+        module finissait marqué « dégradé » sans que rien ne soit bloqué.
+        """
         state = self._states.get(name)
         if state is None:
             return
-        state.in_flight = max(0, state.in_flight - 1)
-        if state.in_flight == 0:
-            state.in_flight_since = None
+        maintenant = time.time()
+        self._reclamer_les_oublies(state, maintenant)
+        state.appels_en_cours.setdefault(
+            cle if cle is not None else ("anonyme", maintenant), maintenant
+        )
+        self._rafraichir(state)
+
+    def exit(self, name: str, cle: object = None) -> None:
+        state = self._states.get(name)
+        if state is None:
+            return
+        if cle is not None:
+            state.appels_en_cours.pop(cle, None)
+        elif state.appels_en_cours:
+            # Sans clé, on referme la PLUS ANCIENNE : c'est elle qui ferait
+            # croire à un appel bloqué si elle restait.
+            plus_ancienne = min(state.appels_en_cours, key=state.appels_en_cours.get)
+            state.appels_en_cours.pop(plus_ancienne, None)
+        self._reclamer_les_oublies(state, time.time())
+        self._rafraichir(state)
 
     def in_flight(self, name: str) -> int:
         state = self._states.get(name)

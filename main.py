@@ -1222,7 +1222,14 @@ class BotAllInOne(commands.Bot):
         kernel = getattr(self, "module_kernel", None)
         module_name = app_command_module(getattr(interaction, "command", None))
         if module_name and kernel is not None and hasattr(kernel, "exit_runtime"):
-            kernel.exit_runtime(module_name)
+            # Même clé qu'à l'entrée (core.module_gate) : sans elle, on
+            # refermerait l'invocation la plus ancienne, pas celle qui échoue.
+            try:
+                from core.module_gate import cle_dinvocation
+
+                kernel.exit_runtime(module_name, cle_dinvocation(interaction))
+            except Exception:
+                kernel.exit_runtime(module_name)
 
         if isinstance(original, BotPermissionError):
             message = f"Permission manquante : `{original.message}`."
