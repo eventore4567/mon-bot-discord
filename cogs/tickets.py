@@ -2101,6 +2101,8 @@ class Tickets(commands.Cog):
                     duration=duration,
                     transcript_filename=transcript.filename if transcript else None,
                     avatar_url=str(owner.display_avatar.url) if owner else None,
+                    claimed_by_id=int(row["claimed_by"]) if row["claimed_by"] else None,
+                    closed_at=int(now()),
                 ),
                 tickets_service.vue_ticket_ferme(row["id"]),
             )
