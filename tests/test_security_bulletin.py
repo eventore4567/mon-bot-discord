@@ -68,7 +68,7 @@ def test_un_premier_passage_sain_ne_publie_rien():
     # Personne n'a demandé une carte « rien à signaler » au démarrage.
     try:
         cog, cartes = _cog([])
-        assert asyncio.run(cog.examiner(_Guild())) is False
+        assert asyncio.run(cog.examiner(_Guild())) == sb.ISSUE_PREMIER_PASSAGE_SAIN
         assert cartes == []
         # Mais l'état est mémorisé : une dégradation future sera publiée.
         assert cog.bot.db.valeurs
@@ -79,7 +79,7 @@ def test_un_premier_passage_sain_ne_publie_rien():
 def test_un_constat_declenche_une_carte():
     try:
         cog, cartes = _cog([_constat()])
-        assert asyncio.run(cog.examiner(_Guild())) is True
+        assert asyncio.run(cog.examiner(_Guild())) == sb.ISSUE_PUBLIE
         assert len(cartes) == 1
         log_type, embed, _ = cartes[0]
         assert log_type == "server"
@@ -110,7 +110,7 @@ def test_une_degradation_republie():
 
         cog2, cartes2 = _cog([_constat(mesure=5)], db=db)
         cog2.bot.db = db
-        assert asyncio.run(cog2.examiner(guild)) is True
+        assert asyncio.run(cog2.examiner(guild)) == sb.ISSUE_PUBLIE
         assert len(cartes2) == 1
     finally:
         _restaurer()
@@ -126,7 +126,7 @@ def test_un_retour_a_la_normale_est_annonce():
 
         cog2, cartes2 = _cog([], db=db)
         cog2.bot.db = db
-        assert asyncio.run(cog2.examiner(guild)) is True
+        assert asyncio.run(cog2.examiner(guild)) == sb.ISSUE_PUBLIE
         assert "rien à signaler" in (cartes2[0][1].title or "")
     finally:
         _restaurer()
@@ -139,13 +139,13 @@ def test_un_envoi_rate_ne_consomme_pas_le_bulletin():
         db = _Db()
         cog, cartes = _cog([_constat()], db=db, envoi=False)
         guild = _Guild()
-        assert asyncio.run(cog.examiner(guild)) is False
+        assert asyncio.run(cog.examiner(guild)) == sb.ISSUE_SANS_SALON
         assert cartes, "la carte a bien été proposée au transport"
         assert db.valeurs == {}, "rien ne doit être mémorisé si rien n'est parti"
 
         cog2, cartes2 = _cog([_constat()], db=db, envoi=True)
         cog2.bot.db = db
-        assert asyncio.run(cog2.examiner(guild)) is True
+        assert asyncio.run(cog2.examiner(guild)) == sb.ISSUE_PUBLIE
     finally:
         _restaurer()
 
@@ -178,7 +178,7 @@ def test_un_serveur_hors_cache_est_ignore_sans_erreur():
         cog, cartes = _cog([_constat()])
         guild = _Guild()
         guild.me = None
-        assert asyncio.run(cog.examiner(guild)) is False
+        assert asyncio.run(cog.examiner(guild)) == sb.ISSUE_HORS_CACHE
         assert cartes == []
     finally:
         _restaurer()
@@ -211,3 +211,104 @@ def test_le_module_ne_declare_aucune_commande_ni_ecouteur():
     assert not getattr(sb.SecurityBulletin, "__cog_commands__", ())
     assert not getattr(sb.SecurityBulletin, "__cog_listeners__", ())
     assert isinstance(sb.SecurityBulletin.passage, discord.ext.tasks.Loop)
+
+
+def test_un_passage_muet_laisse_quand_meme_une_trace():
+    """Sans cette ligne, « rien publié » et « la boucle n'a jamais démarré »
+    s'écrivent pareil dans les journaux : exactement le doute qu'on ne peut
+    pas lever après coup. Constaté le 23/10/2026 sur le premier déploiement.
+    """
+    import logging
+
+    cog, _ = _cog([])
+    cog.bot.guilds = [_Guild(guild_id=i) for i in range(3)]
+    journal = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            journal.append(record.getMessage())
+
+    handler = _Capture()
+    niveau = sb.logger.level
+    sb.logger.addHandler(handler)
+    sb.logger.setLevel(logging.INFO)
+    try:
+        asyncio.run(sb.SecurityBulletin.passage.coro(cog))
+    finally:
+        sb.logger.removeHandler(handler)
+        sb.logger.setLevel(niveau)
+        _restaurer()
+
+    resume = next((l for l in journal if "examiné(s)" in l), None)
+    assert resume, "un passage sans publication doit tout de même se journaliser"
+    assert "3 serveur(s) examiné(s)" in resume
+    assert sb.ISSUE_PREMIER_PASSAGE_SAIN in resume
+
+
+def test_le_passage_compte_chaque_issue_separement():
+    import logging
+
+    cog, _ = _cog([])
+    cog.bot.guilds = [_Guild(guild_id=1), _Guild(guild_id=2)]
+    issues = []
+
+    async def _examiner(guild, **_):
+        resultat = sb.ISSUE_PUBLIE if guild.id == 1 else sb.ISSUE_SANS_SALON
+        issues.append(resultat)
+        return resultat
+
+    cog.examiner = _examiner
+    journal = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            journal.append(record.getMessage())
+
+    handler = _Capture()
+    niveau = sb.logger.level
+    sb.logger.addHandler(handler)
+    sb.logger.setLevel(logging.INFO)
+    try:
+        asyncio.run(sb.SecurityBulletin.passage.coro(cog))
+    finally:
+        sb.logger.removeHandler(handler)
+        sb.logger.setLevel(niveau)
+        _restaurer()
+
+    resume = next(l for l in journal if "examiné(s)" in l)
+    assert "2 serveur(s)" in resume
+    assert sb.ISSUE_PUBLIE in resume and sb.ISSUE_SANS_SALON in resume
+
+
+def test_un_serveur_en_erreur_ne_stoppe_pas_les_autres():
+    import logging
+
+    cog, _ = _cog([])
+    cog.bot.guilds = [_Guild(guild_id=1), _Guild(guild_id=2)]
+
+    async def _examiner(guild, **_):
+        if guild.id == 1:
+            raise RuntimeError("Discord indisponible")
+        return sb.ISSUE_PUBLIE
+
+    cog.examiner = _examiner
+    journal = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):
+            journal.append(record.getMessage())
+
+    handler = _Capture()
+    niveau = sb.logger.level
+    sb.logger.addHandler(handler)
+    sb.logger.setLevel(logging.INFO)
+    try:
+        asyncio.run(sb.SecurityBulletin.passage.coro(cog))
+    finally:
+        sb.logger.removeHandler(handler)
+        sb.logger.setLevel(niveau)
+        _restaurer()
+
+    resume = next(l for l in journal if "examiné(s)" in l)
+    assert sb.ISSUE_ERREUR in resume
+    assert sb.ISSUE_PUBLIE in resume, "le second serveur doit avoir été traité"

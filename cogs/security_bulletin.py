@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import Counter
 
 import discord
 from discord.ext import commands, tasks
@@ -37,6 +38,17 @@ INTERVALLE_HEURES = 6
 DELAI_AVANT_PREMIER_PASSAGE_SECONDES = 300
 
 _CLE = "security_advisory"
+
+#: Ce qu'un passage a fait sur un serveur. Nommé plutôt que booléen : « rien
+#: publié » recouvrait quatre situations très différentes, dont « le serveur n'a
+#: pas de salon de journaux » et « le module n'a jamais tourné » — et les
+#: journaux de production ne permettaient pas de les distinguer.
+ISSUE_PUBLIE = "publié"
+ISSUE_INCHANGE = "inchangé"
+ISSUE_PREMIER_PASSAGE_SAIN = "sain"
+ISSUE_SANS_SALON = "sans journal"
+ISSUE_HORS_CACHE = "hors cache"
+ISSUE_ERREUR = "erreur"
 
 
 def construire_le_bulletin(guild, constats) -> discord.Embed:
@@ -98,19 +110,19 @@ class SecurityBulletin(commands.Cog, name="SecurityBulletin"):
         puisqu'une situation stable ne mérite pas de carte.
         """
         if guild.me is None:
-            return False
+            return ISSUE_HORS_CACHE
         constats = await security_advisory.analyser_complet(guild)
         empreinte = security_advisory.empreinte(constats)
         connue = await self._empreinte_connue(guild.id)
         if not forcer and empreinte == connue:
-            return False
+            return ISSUE_INCHANGE
 
         # Le tout premier passage sur un serveur sain n'a rien à annoncer : on
         # mémorise l'état sans écrire une carte « rien à signaler » que
         # personne n'a demandée. Une dégradation future, elle, sera publiée.
         if connue is None and not constats:
             await self._retenir(guild.id, empreinte)
-            return False
+            return ISSUE_PREMIER_PASSAGE_SAIN
 
         envoye = await log_service.send_log(
             self.bot,
@@ -126,18 +138,29 @@ class SecurityBulletin(commands.Cog, name="SecurityBulletin"):
         # jamais le jour où il branche ses logs.
         if envoye:
             await self._retenir(guild.id, empreinte)
-        return bool(envoye)
+            return ISSUE_PUBLIE
+        return ISSUE_SANS_SALON
 
     @tasks.loop(hours=INTERVALLE_HEURES)
     async def passage(self):
-        publies = 0
+        """Un passage sur tous les serveurs, et UNE ligne de journal, toujours.
+
+        La version précédente ne journalisait que si elle avait publié. Un
+        passage muet était donc indistinguable d'une boucle qui n'a jamais
+        démarré — exactement le doute qu'on ne peut pas lever après coup.
+        """
+        issues: Counter[str] = Counter()
         for guild in list(self.bot.guilds):
             try:
-                publies += bool(await self.examiner(guild))
+                issues[await self.examiner(guild)] += 1
             except Exception:
+                issues[ISSUE_ERREUR] += 1
                 logger.exception("Bulletin de sécurité impossible guild=%s", guild.id)
-        if publies:
-            logger.info("Bulletin de sécurité publié sur %s serveur(s).", publies)
+        logger.info(
+            "Bulletin de sécurité : %s serveur(s) examiné(s) — %s",
+            sum(issues.values()),
+            ", ".join(f"{n} {issue}" for issue, n in issues.most_common()) or "aucun",
+        )
 
     @passage.before_loop
     async def _attendre(self):
