@@ -4316,6 +4316,27 @@ class AutoMod(commands.Cog, name="Automod"):
                                        "Restauration seulement si aucune modification manuelle n'est détectée.",
                             ),
                         )
+                    elif should_log:
+                        # `protect` rend False quand le serveur est DÉJÀ au niveau
+                        # maximal — un choix de l'administrateur, que SentriX ne
+                        # s'approprie pas. Mais alors la seule réponse automatique
+                        # au raid ne fait rien, et jusqu'ici elle ne le disait pas :
+                        # le propriétaire croyait SentriX en train d'agir pendant
+                        # qu'il n'agissait pas. Le silence était le vrai défaut.
+                        await self.log_action(
+                            member.guild,
+                            embeds.log_entry(
+                                "⚠️ Raid détecté : aucune hausse possible",
+                                config.COLOR_WARNING,
+                                raison=(
+                                    "La vérification du serveur est déjà au maximum, SentriX ne peut "
+                                    "pas la relever davantage. Les arrivées continuent d'être notées "
+                                    "comme suspectes, mais la protection automatique s'arrête là.\n"
+                                    "À faire maintenant : `+lockdown-server` pour verrouiller les "
+                                    "salons, puis `+unlock-server` une fois la vague passée."
+                                ),
+                            ),
+                        )
                 # Évite de redéclencher la même alerte à chaque nouvel arrivant tant que le raid dure.
                 self.join_tracker.reinitialiser(member.guild.id)
                 if raid_lent:
