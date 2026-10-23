@@ -232,6 +232,64 @@ def emoji_alerte() -> list[Image.Image]:
     return images
 
 
+def emoji_musique() -> list[Image.Image]:
+    """Une double croche dont les notes montent et descendent en boucle.
+
+    Les deux têtes bougent en décalé : en phase, le mouvement se lit comme un
+    simple glissement vertical de tout le symbole, pas comme de la musique.
+    """
+    images = []
+    for i in range(IMAGES):
+        img, d = _toile()
+        c = TAILLE * ECHELLE / 2
+        r = TAILLE * ECHELLE * 0.30
+        trait = int(TAILLE * ECHELLE * 0.065)
+        for rang, decalage in ((0, 0.0), (1, 0.5)):
+            t = _adoucir(((i / IMAGES) + decalage) % 1.0)
+            monte = (t - 0.5) * r * 0.30
+            x = c - r * 0.45 + rang * r * 0.95
+            y = c + r * 0.55 + monte
+            tete = r * 0.26
+            d.ellipse([x - tete, y - tete * 0.78, x + tete, y + tete * 0.78],
+                      fill=VIOLET if rang == 0 else BLEU)
+            d.line([(x + tete * 0.92, y), (x + tete * 0.92, y - r * 1.05)],
+                   fill=VIOLET if rang == 0 else BLEU, width=trait)
+        # La barre qui relie les deux hampes : c'est elle qui fait « double croche ».
+        haut = c + r * 0.55 - r * 1.05
+        d.line([(c - r * 0.45 + r * 0.24, haut), (c + r * 0.50 + r * 0.24, haut)],
+               fill=BLEU, width=trait)
+        images.append(_reduire(_halo(img, VIOLET, 0.35)))
+    return images
+
+
+def emoji_notification() -> list[Image.Image]:
+    """Une cloche qui sonne : elle oscille, le battant suit avec un retard.
+
+    Un battant synchrone donnerait une cloche rigide ; c'est le retard qui
+    donne l'impression du son.
+    """
+    images = []
+    for i in range(IMAGES):
+        img, d = _toile()
+        c = TAILLE * ECHELLE / 2
+        r = TAILLE * ECHELLE * 0.30
+        phase = math.sin(2 * math.pi * i / IMAGES)
+        incline = phase * r * 0.16
+        # Corps : un arc fermé par une base droite.
+        d.pieslice([c - r + incline, c - r * 0.95, c + r + incline, c + r * 0.95],
+                   180, 360, fill=AMBRE)
+        d.rectangle([c - r + incline, c, c + r + incline, c + r * 0.42], fill=AMBRE)
+        d.rounded_rectangle(
+            [c - r * 1.12 + incline, c + r * 0.42, c + r * 1.12 + incline, c + r * 0.62],
+            radius=r * 0.1, fill=AMBRE,
+        )
+        retard = math.sin(2 * math.pi * (i - 2) / IMAGES) * r * 0.22
+        d.ellipse([c - r * 0.17 + retard, c + r * 0.66,
+                   c + r * 0.17 + retard, c + r * 1.00], fill=AMBRE)
+        images.append(_reduire(_halo(img, AMBRE, 0.40)))
+    return images
+
+
 EMOJIS = {
     "sentrix_bouclier": emoji_bouclier,
     "sentrix_valide": emoji_valide,
@@ -239,6 +297,8 @@ EMOJIS = {
     "sentrix_fleche": emoji_fleche,
     "sentrix_chargement": emoji_chargement,
     "sentrix_alerte": emoji_alerte,
+    "sentrix_musique": emoji_musique,
+    "sentrix_notification": emoji_notification,
 }
 
 

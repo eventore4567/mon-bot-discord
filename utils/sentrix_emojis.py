@@ -44,7 +44,7 @@ ANIMES_AUTORISES = frozenset({
     "sentrix_loading", "sentrix_scan", "sentrix_live", "sentrix_success",
     "sentrix_alert", "sentrix_lock", "sentrix_unlock", "sentrix_upload",
     "sentrix_download", "sentrix_sync", "sentrix_typing", "sentrix_processing",
-    "sentrix_ai",
+    "sentrix_ai", "sentrix_musique", "sentrix_notification",
     # Dessinés par tools/generer_emojis_animes.py plutôt que téléchargés : le
     # trait, la palette et le poids sont maîtrisés, et rien ne dépend d'un CDN.
     # Chaque image est tracée à 4× puis réduite en LANCZOS — sans ce
@@ -81,6 +81,12 @@ REPLIS: dict[str, str] = {
 #: Ne s'applique QU'À l'habillage SentriX : un journal qui cite un message
 #: supprimé contenant « 🎁 » doit le montrer tel quel, pas le réécrire.
 EQUIVALENCES: dict[str, str] = {
+    # Vus sur la carte Configuration de /setup, sans équivalent jusqu'ici.
+    "🎵": "sentrix_musique",
+    "🎶": "sentrix_musique",
+    "🎼": "sentrix_musique",
+    "🔔": "sentrix_notification",
+    "🔕": "sentrix_notification",
     "🎫": "ticket", "🎟": "ticket", "🎟️": "ticket",
     "🛡": "security", "🛡️": "security",
     "🔨": "ban", "👢": "kick", "🔇": "mute", "🔊": "voice",
