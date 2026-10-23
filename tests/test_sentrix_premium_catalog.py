@@ -76,3 +76,17 @@ async def test_catalog_is_read_only_with_safe_response_headers():
     assert "no-store" in response.headers["Cache-Control"]
     assert "form-action 'none'" in response.headers["Content-Security-Policy"]
     assert "SentriX Premium" in response.text
+
+
+def test_unified_dashboard_keeps_one_script_and_one_style_and_links_to_premium():
+    root = Path(__file__).resolve().parents[1] / "web" / "dashboard_ui"
+    html = (root / "index.html").read_text(encoding="utf-8")
+    css = (root / "app.css").read_text(encoding="utf-8")
+    assert html.count('id="navigation"') == 1
+    assert 'class="sx-premium-entry" href="/premium"' in html
+    assert 'href="/premium">Découvrir Premium</a>' in html
+    assert html.count('/*__CSS__*/') == 1
+    assert html.count('/*__JS__*/') == 1
+    assert ".sx-premium-entry{" in css
+    assert "var(--blue2)" in css
+    assert "--accent:#77bcff" in premium.PAGE_HTML
