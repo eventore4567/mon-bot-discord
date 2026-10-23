@@ -20,9 +20,22 @@ from database.db import PRIMARY_CREATOR_ID
 from utils import checks, embeds
 from utils import sentrix_panels as panels
 from . import language_runtime
+from utils import security_advisory
 from .security_runtime_hardening import apply_recommended_security
 
 logger = logging.getLogger("bot.security-command-center")
+
+#: La couleur du panneau suit la PIRE gravité relevée, jamais une moyenne :
+#: diluer l'unique constat critique dans cinq constats mineurs effacerait
+#: exactement l'information à faire passer.
+_APPARENCE_GRAVITE = {
+    security_advisory.CRITIQUE: "danger",
+    security_advisory.ELEVE: "danger",
+    security_advisory.MOYEN: "warning",
+    security_advisory.INFO: "success",
+}
+
+
 
 
 SECURITY_FILTERS: dict[str, tuple[str, str]] = {
@@ -419,52 +432,42 @@ class SecurityCommandCenter(commands.Cog, name="SecurityCommandCenter"):
     @security.command(name="scan", aliases=["check", "diagnostic", "audit"])
     @checks.is_owner_or_admin_for("securite")
     async def security_scan(self, ctx: commands.Context):
-        """Analyse les protections et permissions nécessaires."""
+        """Bulletin de sécurité : ce qui expose réellement le serveur."""
         conf = await self._conf(ctx.guild.id)
-        me = ctx.guild.me
-        if me is None:
+        if ctx.guild.me is None:
             return await ctx.send("SentriX n'est pas disponible dans le cache du serveur.")
 
-        perms = me.guild_permissions
-        required = {
-            "Manage Messages": perms.manage_messages,
-            "View Audit Log": perms.view_audit_log,
-            "Kick Members": perms.kick_members,
-            "Ban Members": perms.ban_members,
-            "Moderate Members": perms.moderate_members,
-            "Manage Roles": perms.manage_roles,
-            "Manage Channels": perms.manage_channels,
-        }
-        missing = [name for name, allowed in required.items() if not allowed]
-        active = sum(1 for key in SECURITY_FILTERS if conf.get(key, 0))
-        score = round(
-            (active / len(SECURITY_FILTERS)) * 70
-            + ((len(required) - len(missing)) / len(required)) * 30
-        )
-        kind = "success" if score >= 85 else "warning" if score >= 60 else "danger"
+        constats = await security_advisory.analyser_complet(ctx.guild)
+        gravite = security_advisory.gravite_dominante(constats)
+        actifs = sum(1 for key in SECURITY_FILTERS if conf.get(key, 0))
 
-        embed = _embed_securite(await self._t(ctx, 'SENTRIX / ANALYSE SÉCURITÉ', 'SENTRIX / SECURITY SCAN'), await self._t(ctx, f'Score estimé : **{score}/100**', f'Estimated score: **{score}/100**'), kind=kind)
+        embed = _embed_securite(
+            "SENTRIX / BULLETIN DE SÉCURITÉ",
+            security_advisory.resume(constats),
+            kind=_APPARENCE_GRAVITE.get(gravite, "securite"),
+        )
         embed.add_field(
-            name=await self._t(ctx, "Modules actifs", 'Activez modules'),
-            value=f"{active}/{len(SECURITY_FILTERS)}",
+            name="Protections SentriX",
+            value=f"{actifs}/{len(SECURITY_FILTERS)} filtre(s) actif(s)",
             inline=True,
         )
         embed.add_field(
-            name=await self._t(ctx, "Permissions manquantes", "Missing permissions"),
-            value=str(len(missing)),
+            name="Points relevés",
+            value=str(len(constats)) if constats else "Aucun",
             inline=True,
         )
-        if missing:
+        for nom, valeur, inline in security_advisory.champs(constats):
+            embed.add_field(name=nom, value=valeur, inline=inline)
+        if not constats:
             embed.add_field(
-                name=await self._t(ctx, "À corriger", "Needs attention"),
-                value="\n".join(f"- {item}" for item in missing),
+                name="Ce qui a été vérifié",
+                value=(
+                    "Membres administrateurs, permissions du rôle par défaut, "
+                    "hiérarchie des rôles, bots privilégiés, webhooks, réglages "
+                    "Discord et permissions de SentriX."
+                ),
                 inline=False,
             )
-        embed.add_field(
-            name=await self._t(ctx, "Audit avancé", "Advanced audit"),
-            value="`+security permissions`",
-            inline=False,
-        )
         await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
     @security.command(name="repair", aliases=["fix", "reparer", "réparer"])

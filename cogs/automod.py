@@ -2742,6 +2742,30 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         e.add_field(name="Protections", value="\n".join(filter_lines), inline=False)
         e.add_field(name="Permissions du bot", value="\n".join(permission_lines), inline=False)
+
+        # Jusqu'ici le diagnostic ne regardait que SentriX : ses protections et
+        # ses permissions. Il disait si le bot peut travailler, jamais si le
+        # serveur est exposé. Un serveur avec quatorze administrateurs et six
+        # webhooks ouverts passait le diagnostic sans une remarque.
+        try:
+            from utils import security_advisory
+
+            constats = [
+                constat
+                for constat in await security_advisory.analyser_complet(ctx.guild)
+                # Déjà détaillé juste au-dessus, champ par champ.
+                if constat.code != "permissions_bot"
+            ]
+            e.add_field(
+                name="Exposition du serveur",
+                value=security_advisory.resume(constats),
+                inline=False,
+            )
+            for nom, valeur, inline in security_advisory.champs(constats, limite=4):
+                e.add_field(name=nom, value=valeur, inline=inline)
+        except Exception:
+            logger.exception("Bulletin de sécurité indisponible guild=%s", ctx.guild.id)
+
         e.add_field(
             name="Test conseillé",
             value=(

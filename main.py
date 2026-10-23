@@ -95,6 +95,11 @@ EXTENSIONS = [
     "cogs.smart_creation_guard_v47",
     "cogs.owner_sanction_immunity",
     "cogs.security_tools",
+    # Publie le bulletin de sécurité dans les journaux quand la surface
+    # d'exposition du serveur change. Aucune commande, aucun écouteur : une
+    # boucle périodique. Après security_command_center, dont il réutilise
+    # l'analyse (webhooks compris).
+    "cogs.security_bulletin",
     "cogs.tickets",
     # Fournit +logs, +logevent et +logsearch, que HELP_VISIBLE_EXTRA_COMMANDS
     # déclare visibles dans l'aide, plus le pipeline de journalisation V17. Il
