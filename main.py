@@ -114,6 +114,7 @@ EXTENSIONS = [
     "cogs.snipe",
     "cogs.soundboard_logs",
     "cogs.utility",
+    "cogs.salon_permissions",
     "cogs.suggestions",
     "cogs.poll_ui",
     "cogs.translation",
@@ -265,6 +266,15 @@ PUBLIC_COMMANDS = frozenset({
     "dance", "compliment", "roast", "hack", "scan", "aura", "ship",
     "rps", "guess-number", "trivia", "tictactoe", "hangman", "math-quiz",
     "blackjack", "slots",
+    # Jeux et commandes sociales publiques chargés par cogs.fun_social et les
+    # suites arcade. La matrice canonique (utils/access_matrix.py) les classait
+    # déjà publiques, mais cette copie utilisée par l'audit de frontière ne les
+    # connaissait pas encore : elles étaient donc signalées comme 21 accès
+    # publics « non classés » alors que la décision runtime était correcte.
+    "bossfight", "doors", "emojiorder", "fight",
+    "fun", "hug", "kiss", "cuddle", "pat", "poke", "slap", "tickle",
+    "highfive", "wave", "dance", "compliment", "roast", "hack", "scan",
+    "aura", "ship",
     "coinflip", "dice", "luckyroll", "highlow", "memory", "reaction",
     "scramble", "wordgame", "emojiquiz", "colorquiz", "fasttype", "minesweeper", "duel",
     "connect4", "numberduel", "reactionduel", "quizduel", "triviastart",
