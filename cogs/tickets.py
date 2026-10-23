@@ -1594,39 +1594,20 @@ class Tickets(commands.Cog):
                 ephemere=True,
             )
 
+        # L'ancienne réponse « Ticket ouvert » contenait beaucoup de texte
+        # générique et une mention de salon parfois rendue « # inconnu ».
+        # Même identité visuelle que le ticket lui-même, avec navigation native.
         await sx_panels.envoyer(
             interaction,
-            sx_panels.Panneau(
-                titre="Ticket ouvert",
-                sous_titre=f"Votre ticket est prêt dans {channel.mention}.",
-                kind="success",
-                sections=[
-                    sx_panels.Section(
-                        "Votre ticket",
-                        [
-                            sx_panels.Ligne("Salon", channel.mention),
-                            sx_panels.Ligne("Numéro", f"#{number}"),
-                            sx_panels.Ligne("Type", str(ticket_type["name"])),
-                        ],
-                    ),
-                    sx_panels.Section(
-                        "Ce qui suit",
-                        [
-                            sx_panels.Ligne(
-                                "Le support a été prévenu",
-                                "Décrivez votre demande dans le salon, un membre du staff répondra",
-                            ),
-                            sx_panels.Ligne(
-                                "Fermeture",
-                                "Le bouton **Fermer** du salon met fin au ticket",
-                                indice="Un transcript peut vous être envoyé en message privé.",
-                            ),
-                        ],
-                    ),
-                ],
-                pied="Tickets",
+            ticket_panels_v3.ticket_created_confirmation(
+                ticket_number=number,
+                ticket_type=str(ticket_type["name"]),
+                guild_id=int(guild.id),
+                channel_id=int(channel.id),
+                channel_name=str(channel.name),
             ),
             ephemere=True,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
         ticket_extra = {
