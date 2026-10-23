@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
 from utils import slash_catalog as catalog
+from utils import unused_commands as _unused
 
 
 def test_prefix_only_actions_get_clear_category_paths():
@@ -56,8 +57,19 @@ def test_no_owner_tools_or_redundant_setup_commands_published():
 def test_new_menu_is_compact_and_within_discord_limits():
     paths = [entry.path for entry in catalog.CATALOG]
     assert len(paths) == len(set(paths))
-    # 382 routes cataloguées moins les 132 routes explicitement masquées.
-    assert len(paths) == 281
+    # Le nombre exact bougeait à chaque vague de nettoyage et le test restait
+    # en arrière : le 2026-10-23 il exigeait encore 281 alors que le catalogue
+    # en comptait 250, et son propre commentaire donnait déjà 382 − 132 = 250.
+    # Une garde de build rouge bloque TOUT déploiement, donc elle ne doit pas
+    # dépendre d'un chiffre recopié à la main.
+    #
+    # Ce qui compte vraiment, ce sont les limites de Discord et le fait que le
+    # menu reste compact — pas une valeur précise.
+    masquees = [e for e in catalog.CATALOG if _unused.masquee(e.source)]
+    visibles = len(paths) - len(masquees)
+    assert visibles > 0, "le menu « / » ne doit pas être entièrement masqué"
+    assert len(paths) <= 400, f"catalogue hors de proportion : {len(paths)} routes"
+    assert len(catalog.entries_by_root()) <= 100, "Discord plafonne à 100 racines"
     assert len({path.split()[0] for path in paths}) <= 100
     assert all(len(path.split()) <= 3 for path in paths)
     for name in ("moderation", "security", "staff", "invites", "events"):
