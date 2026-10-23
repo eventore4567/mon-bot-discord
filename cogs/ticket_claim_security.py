@@ -477,8 +477,8 @@ def install(bot: commands.Bot) -> None:
         log_embed = discord.Embed(
             title="🔒 Fermeture du ticket",
             description=(
-                f"Ticket **#{ticket_id}** fermé par {interaction.user.mention}. "
-                "Le récapitulatif et le transcript sont conservés dans le journal Tickets."
+                f"Dossier du ticket **#{ticket_id}** · fermeture enregistrée. "
+                "Le récapitulatif et le transcript sont disponibles ci-dessous."
             ),
             colour=discord.Colour(0x4385DF),
             timestamp=discord.utils.utcnow(),
