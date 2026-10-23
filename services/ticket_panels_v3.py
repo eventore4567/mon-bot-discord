@@ -254,7 +254,7 @@ def _safe_reason(reason: str | None, limit: int = 480) -> str:
 def ticket_closed_confirmation(
     *, ticket_id: int, closer: discord.abc.User,
     reason: str, duration: str | None, guild_id: int, channel_id: int,
-    channel_name: str,
+    channel_name: str, closed_at: int | None = None,
 ) -> TicketCardV3:
     """Retour du formulaire Fermer : informatif, privé et jamais « en attente »."""
     return TicketCardV3(
@@ -266,7 +266,7 @@ def ticket_closed_confirmation(
             ("📋 Détails de fermeture",
              f"**Salon :** \`#{discord.utils.escape_markdown(_safe(channel_name, 72))}\`\n"
              f"**Fermé par :** {closer.mention}\n"
-             f"**Heure :** <t:{int(discord.utils.utcnow().timestamp())}:F>\n"
+             f"**Heure :** <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>\n"
              f"**Durée :** {duration or 'Indisponible'}"),
             ("📝 Motif enregistré", _safe_reason(reason)),
             ("🔓 Actions disponibles",
