@@ -135,6 +135,16 @@ SECURITY_MERGED_COMMANDS = frozenset({
 LOW_VALUE_HIDDEN_COMMANDS = frozenset({
     "aidiag", "diagnostic", "bot-status", "command-stats", "levelcheck",
     "levelrepair", "weekly", "rewrite", "shop", "resume", "queue", "profile",
+    # Ajoutées le 23/10/2026 après mesure sur la production : les trois
+    # DERNIÈRES commandes encore visibles en préfixe sans route « / » et
+    # jamais utilisées depuis le début des journaux d'usage.
+    #
+    # Masquées, pas supprimées. Elles fonctionnent, et `market` ouvre toute
+    # une famille (market-buy, market-sell, market-find…) : la retirer serait
+    # retirer une fonctionnalité entière, pas faire le ménage. Masquer les
+    # sort de l'aide sans rien casser, et ça se défait en une ligne le jour
+    # où l'une d'elles trouve son public.
+    "challenges", "market", "systemstatus",
 })
 
 MERGED_COMMANDS = (
