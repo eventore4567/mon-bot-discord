@@ -1072,6 +1072,50 @@ RAID_JOIN_THRESHOLD = 8  # arrivées dans la fenêtre avant alerte de raid
 # fenêtre, large, attrape le raid patient sans gêner un serveur qui grandit.
 RAID_SLOW_WINDOW = 600  # dix minutes
 RAID_SLOW_THRESHOLD = 60  # arrivées sur dix minutes avant alerte
+
+# Les deux seuils ci-dessus sont PLATS : huit arrivées en dix secondes
+# déclenchent la même alerte sur un serveur de vingt membres et sur un serveur
+# de vingt mille. Pour le petit, huit inconnus d'un coup EST le raid ; pour le
+# gros, c'est une journée ordinaire. Un seuil unique est donc forcément trop
+# laxiste d'un côté et trop nerveux de l'autre.
+#
+# Deux corrections, dans l'esprit des bots dédiés à l'anti-raid :
+#
+# 1. le seuil suit la taille du serveur, borné pour ne jamais devenir absurde ;
+# 2. un compte créé il y a trois jours pèse plus qu'un compte de trois ans.
+#    Vingt comptes neufs d'un coup, c'est un raid ; vingt vétérans après une
+#    vidéo, non. C'est ce poids qui rend la détection réellement plus stricte
+#    sans multiplier les fausses alertes.
+RAID_SEUIL_MINIMAL = 4          # jamais plus laxiste que ça, même tout petit serveur
+RAID_SEUIL_MAXIMAL = 25         # ni plus nerveux que ça sur un très gros serveur
+RAID_PART_DES_MEMBRES = 0.012   # ~1,2 % des membres arrivant en dix secondes
+RAID_COMPTE_NEUF_JOURS = 7      # en-deçà, le compte est « neuf »
+RAID_POIDS_COMPTE_NEUF = 2.0    # un compte neuf compte double dans la vélocité
+
+
+def seuil_raid_rapide(nombre_de_membres: int | None) -> int:
+    """Seuil d'afflux adapté à la taille du serveur.
+
+    Borné des deux côtés : en dessous de RAID_SEUIL_MINIMAL on sanctionnerait
+    une arrivée d'amis, au-dessus de RAID_SEUIL_MAXIMAL on laisserait passer
+    un vrai raid sur un gros serveur.
+    """
+    try:
+        membres = int(nombre_de_membres or 0)
+    except (TypeError, ValueError):
+        membres = 0
+    proportionnel = round(membres * RAID_PART_DES_MEMBRES)
+    return max(RAID_SEUIL_MINIMAL, min(RAID_SEUIL_MAXIMAL, proportionnel))
+
+
+def velocite_ponderee(arrivees: int, arrivees_neuves: int) -> float:
+    """Vélocité où un compte fraîchement créé pèse double.
+
+    Un afflux de comptes neufs est le signe le plus fiable d'un raid, et c'est
+    précisément ce qu'un comptage brut ignore.
+    """
+    anciennes = max(0, int(arrivees) - int(arrivees_neuves))
+    return anciennes + int(arrivees_neuves) * RAID_POIDS_COMPTE_NEUF
 NUKE_ACTION_WINDOW = 30  # secondes
 NUKE_ACTION_THRESHOLD = 3  # actions destructrices avant déclenchement
 RISK_DECAY_SECONDS = 900
@@ -1118,6 +1162,7 @@ class AutoMod(commands.Cog, name="Automod"):
         )
         self.join_tracker = FenetreGlissante(fenetre=RAID_JOIN_WINDOW, purge_toutes=100)
         self.slow_join_tracker = FenetreGlissante(fenetre=RAID_SLOW_WINDOW, purge_toutes=100)
+        self.new_account_tracker = FenetreGlissante(fenetre=RAID_JOIN_WINDOW, purge_toutes=100)
         self._recent_raid_joins = RaidJoinDeduplicator(ttl_seconds=20, max_entries=8192)
         self._raid_alert_last: dict[int, float] = {}
         self._raid_recovery = RaidVerificationRecovery(bot)
@@ -4098,6 +4143,14 @@ class AutoMod(commands.Cog, name="Automod"):
         track_joins = bool(conf.get("join_gate") or conf.get("antiraid"))
         fast_count = self.join_tracker.ajouter(member.guild.id) if track_joins else 0
         slow_count = self.slow_join_tracker.ajouter(member.guild.id) if track_joins else 0
+        # Fenêtre parallèle réservée aux comptes récents : c'est leur
+        # proportion, pas le nombre brut d'arrivées, qui distingue un raid
+        # d'une vague de nouveaux membres après une vidéo.
+        neufs_count = (
+            self.new_account_tracker.ajouter(member.guild.id)
+            if track_joins and account_age < RAID_COMPTE_NEUF_JOURS
+            else 0
+        )
 
         if conf.get("join_gate"):
             join_points = 0
@@ -4153,7 +4206,12 @@ class AutoMod(commands.Cog, name="Automod"):
         if conf["antiraid"]:
             arrivees = fast_count
             arrivees_lentes = slow_count
-            raid_rapide = arrivees >= RAID_JOIN_THRESHOLD
+            seuil = seuil_raid_rapide(getattr(member.guild, "member_count", None))
+            velocite = velocite_ponderee(arrivees, neufs_count)
+            # Le seuil historique reste un PLAFOND : on ne devient jamais plus
+            # laxiste qu'avant, seulement plus strict quand le serveur est petit
+            # ou quand les arrivants sont des comptes fraîchement créés.
+            raid_rapide = velocite >= min(seuil, RAID_JOIN_THRESHOLD) or arrivees >= RAID_JOIN_THRESHOLD
             raid_lent = arrivees_lentes >= RAID_SLOW_THRESHOLD
             if raid_rapide or raid_lent:
                 # On ne journalise pas 100 alertes identiques pendant un afflux
@@ -4177,6 +4235,12 @@ class AutoMod(commands.Cog, name="Automod"):
                     extra={
                         f"📊 Arrivées en {RAID_JOIN_WINDOW}s": str(arrivees),
                         f"📈 Arrivées en {RAID_SLOW_WINDOW // 60} min": str(arrivees_lentes),
+                        "🆕 Comptes de moins de "
+                        f"{RAID_COMPTE_NEUF_JOURS} j": f"{neufs_count} sur {arrivees}",
+                        "🎚️ Seuil du serveur": (
+                            f"{min(seuil, RAID_JOIN_THRESHOLD)} "
+                            f"(vélocité pondérée {velocite:.0f})"
+                        ),
                     },
                 )
                 if should_log:
