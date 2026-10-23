@@ -243,6 +243,83 @@ def closed_card(*, ticket_id: int, opener_id: int, closer: discord.abc.User,
     )
 
 
+
+def _safe_reason(reason: str | None, limit: int = 480) -> str:
+    """Le motif est saisi par un utilisateur : pas de mentions ni de faux champs."""
+    return discord.utils.escape_mentions(
+        discord.utils.escape_markdown(_safe(reason or "Non précisé", limit))
+    )
+
+
+def ticket_closed_confirmation(
+    *, ticket_id: int, closer: discord.abc.User,
+    reason: str, duration: str | None, guild_id: int, channel_id: int,
+    channel_name: str,
+) -> TicketCardV3:
+    """Retour du formulaire Fermer : informatif, privé et jamais « en attente »."""
+    return TicketCardV3(
+        title=f"Ticket #{int(ticket_id)} fermé",
+        status="fermé",
+        description="La fermeture est enregistrée. Le membre ne peut plus "
+                    "consulter le salon, mais le staff conserve son historique.",
+        sections=(
+            ("📋 Détails de fermeture",
+             f"**Salon :** \`#{discord.utils.escape_markdown(_safe(channel_name, 72))}\`\n"
+             f"**Fermé par :** {closer.mention}\n"
+             f"**Heure :** <t:{int(discord.utils.utcnow().timestamp())}:F>\n"
+             f"**Durée :** {duration or 'Indisponible'}"),
+            ("📝 Motif enregistré", _safe_reason(reason)),
+            ("🔓 Actions disponibles",
+             "Le staff peut **rouvrir** le ticket ou le **supprimer** depuis "
+             "les boutons du panneau de clôture."),
+        ),
+        navigation_url=f"https://discord.com/channels/{int(guild_id)}/{int(channel_id)}",
+        navigation_label="Voir le ticket fermé",
+    )
+
+
+def ticket_deleted_confirmation(
+    *, ticket_id: int, deleted_by: discord.abc.User,
+    reason: str, channel_name: str,
+    event_time: int | None = None,
+) -> TicketCardV3:
+    """Accusé privé après suppression ; aucun bouton vers le salon disparu."""
+    stamp = int(event_time or discord.utils.utcnow().timestamp())
+    return TicketCardV3(
+        title=f"Ticket #{int(ticket_id)} supprimé",
+        status="supprimé",
+        description="Le salon a été supprimé définitivement de Discord.",
+        sections=(
+            ("🗑️ Suppression effectuée",
+             f"**Ancien salon :** \`#{discord.utils.escape_markdown(_safe(channel_name, 70))}\`\n"
+             f"**Supprimé par :** {deleted_by.mention}\n"
+             f"**Heure :** <t:{stamp}:F>"),
+            ("📝 Motif", _safe_reason(reason)),
+            ("📁 Historique",
+             "Les logs et transcripts déjà archivés restent accessibles "
+             "dans le salon de suivi du staff, s'ils ont été enregistrés."),
+        ),
+    )
+
+
+def ticket_action_failure(
+    *, ticket_id: int, action: str, explanation: str,
+) -> TicketCardV3:
+    """Même vocabulaire visuel pour un refus, sans simuler une action réussie."""
+    return TicketCardV3(
+        title=f"Ticket #{int(ticket_id)} · {str(action)[:70]}",
+        status="non effectué",
+        description=discord.utils.escape_mentions(
+            discord.utils.escape_markdown(_safe(explanation, 350))
+        ),
+        sections=(
+            ("⚠️ Aucune modification",
+             "Le ticket n'a pas été supprimé. Vérifiez les permissions "
+             "ou son état, puis réessayez si nécessaire."),
+        ),
+    )
+
+
 def reopened_card(*, ticket_id: int, by: discord.abc.User) -> TicketCardV3:
     return TicketCardV3(
         title=f"Ticket #{int(ticket_id)} · Rouvert",
