@@ -1234,6 +1234,18 @@ async def envoyer(
 
     # Toute vue exposant fichiers() est acceptee, pas seulement Panneau : les
     # panneaux interactifs (aide, setup) sont des LayoutView batis sur mesure.
+    # Les icônes SentriX sur TOUT ce qui part par cette voie : jeux, musique,
+    # économie, niveaux… Ces écrans bâtissent leurs TextDisplay et leurs Button
+    # à la main, donc la traduction posée dans `Panneau` ne les atteignait pas.
+    # Les cartes de journaux passent par wide_logs, pas par ici : un message
+    # cité reste donc montré tel qu'il était.
+    try:
+        from utils import sentrix_emojis
+
+        sentrix_emojis.appliquer_a_la_vue(panneau)
+    except Exception:
+        logger.debug("Icônes SentriX non posées sur ce panneau.", exc_info=True)
+
     fabrique = getattr(panneau, "fichiers", None)
     fichiers = fabrique() if callable(fabrique) else []
     autorisees = _MENTIONS_SURES
