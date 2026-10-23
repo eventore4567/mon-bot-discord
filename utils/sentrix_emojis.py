@@ -81,6 +81,38 @@ REPLIS: dict[str, str] = {
 #: Ne s'applique QU'À l'habillage SentriX : un journal qui cite un message
 #: supprimé contenant « 🎁 » doit le montrer tel quel, pas le réécrire.
 EQUIVALENCES: dict[str, str] = {
+    # ------------------------------------------------------------ 23/10/2026
+    # Marqueurs d'en-tête des journaux (log_categories.EVENT_EMOJI). Vingt-huit
+    # d'entre eux n'avaient AUCUN équivalent déclaré : c'est pour ça que les
+    # cartes de journaux gardaient leurs emojis Unicode alors que titres et
+    # noms de champs portaient déjà les icônes. Chaque cible existe dans le
+    # pack — les emojis sans correspondance honnête (🔗, ➕, ➖) restent en
+    # Unicode plutôt que de recevoir une icône qui dit autre chose.
+    "📘": "sentrix_channel",     # salon modifié
+    "📗": "sentrix_channel",     # salon créé
+    "📕": "sentrix_trash",       # salon supprimé
+    "🐢": "sentrix_clock",       # mode lent
+    "🎙️": "sentrix_voice",
+    "🎚️": "sentrix_tools",
+    "🎭": "sentrix_role",
+    "🗳️": "sentrix_chart",       # sondage
+    "😀": "sentrix_image",       # émojis du serveur
+    "🙋": "sentrix_user",
+    "🚨": "sentrix_alerte",
+    "🚫": "sentrix_ban",
+    "🛑": "sentrix_error",
+    "🧩": "sentrix_tools",
+    "🧹": "sentrix_trash",
+    "📌": "sentrix_priority",
+    "📎": "sentrix_file",
+    "📣": "sentrix_notification",
+    "💡": "sentrix_info",
+    "✨": "sentrix_success",
+    "⛔": "sentrix_close",
+    "▶️": "sentrix_live",
+    "↩️": "sentrix_return",
+    "↔️": "sentrix_sync",
+    "🔀": "sentrix_sync",
     # Vus sur la carte Configuration de /setup, sans équivalent jusqu'ici.
     "🎵": "sentrix_musique",
     "🎶": "sentrix_musique",

@@ -1164,7 +1164,17 @@ def _trace_meta(event_type: str, *, emoji: str = "") -> str:
         # Icône explicite : un lien d'invitation ne doit pas hériter de
         # l'icône « Paramètres » utilisée pour les autres Ressources.
         prefix = "🔗 "
-    return f"-# {prefix}{category_label}"
+    # L'en-tête d'une carte de journal est de l'HABILLAGE SentriX : son marqueur
+    # de famille (📘, 📕, 📗…) venait de log_categories et ne passait par aucune
+    # traduction. C'est lui qu'on voyait encore en Unicode alors que le titre et
+    # les noms de champs portaient déjà les icônes.
+    # La ligne ne contient aucun contenu rapporté : traduire ici est sans risque.
+    try:
+        from utils.sentrix_emojis import traduire as _icones
+
+        return _icones(f"-# {prefix}{category_label}")
+    except Exception:
+        return f"-# {prefix}{category_label}"
 
 
 def _trace_footer(event_type: str, footer: str = "") -> str:
