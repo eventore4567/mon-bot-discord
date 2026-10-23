@@ -814,6 +814,15 @@ def narrative_body(
         # jamais qui a pris le ticket, les heures ni la durée. Ne pas répéter
         # la ligne de référence ni l'historique long (rendus plus bas).
         if event_type == "ticket_close":
+            opener = _field_value_exact(embed, "Membre concerné")
+            closer = _field_value_exact(embed, "Fermé par")
+            if opener or closer:
+                parts = []
+                if opener:
+                    parts.append(f"**Ouvert par :** {opener}")
+                if closer:
+                    parts.append(f"**Fermé par :** {closer}")
+                lines.append(" · ".join(parts))
             for title, name in (
                 ("Ouverture", "Ouverture"),
                 ("Fermeture", "Fermeture"),
