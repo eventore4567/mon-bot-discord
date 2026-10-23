@@ -264,7 +264,7 @@ def ticket_closed_confirmation(
                     "consulter le salon, mais le staff conserve son historique.",
         sections=(
             ("📋 Détails de fermeture",
-             f"**Salon :** \`#{discord.utils.escape_markdown(_safe(channel_name, 72))}\`\n"
+             f"**Salon :** `#{discord.utils.escape_markdown(_safe(channel_name, 72))}`\n"
              f"**Fermé par :** {closer.mention}\n"
              f"**Heure :** <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>\n"
              f"**Durée :** {duration or 'Indisponible'}"),
@@ -291,7 +291,7 @@ def ticket_deleted_confirmation(
         description="Le salon a été supprimé définitivement de Discord.",
         sections=(
             ("🗑️ Suppression effectuée",
-             f"**Ancien salon :** \`#{discord.utils.escape_markdown(_safe(channel_name, 70))}\`\n"
+             f"**Ancien salon :** `#{discord.utils.escape_markdown(_safe(channel_name, 70))}`\n"
              f"**Supprimé par :** {deleted_by.mention}\n"
              f"**Heure :** <t:{stamp}:F>"),
             ("📝 Motif", _safe_reason(reason)),
