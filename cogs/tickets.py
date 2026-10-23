@@ -390,13 +390,15 @@ class CloseReasonModal(discord.ui.Modal, title="🔒 Fermer le ticket"):
         self.cog = cog
         self.ticket_id = ticket_id
         self.reason = discord.ui.TextInput(
-            label="Raison de la fermeture (optionnel)", style=discord.TextStyle.paragraph, required=False, max_length=500,
+            label="Motif de fermeture (recommandé)",
+            placeholder="Ex. : demande résolue, assistance terminée",
+            style=discord.TextStyle.paragraph, required=False, max_length=500,
         )
         self.add_item(self.reason)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        await self.cog.close_ticket(interaction, self.ticket_id, self.reason.value or "Aucune raison fournie")
+        await self.cog.close_ticket(interaction, self.ticket_id, self.reason.value or "Non précisée")
 
 
 class TicketNoteModal(discord.ui.Modal, title="📝 Note interne"):
@@ -2087,20 +2089,26 @@ class Tickets(commands.Cog):
             transcript = None
 
         try:
-            kwargs = {}
-            if transcript is not None:
-                kwargs["file"] = transcript
+            # Même interface que les fermetures manuelles, sans ancienne carte
+            # verte "Vérification nécessaire" ni boutons de copie inutiles.
+            duration = tickets_service.duree_du_ticket(row)
             panel = sx_panels.avec_composants(
-                sx_panels.depuis_embed(
-                    embeds.warning(
-                        "Ticket fermé automatiquement pour inactivité.\n\n"
-                        "Le membre ne peut plus voir le salon. "
-                        "Le staff peut le **rouvrir** ou le **supprimer définitivement**."
-                    )
+                ticket_panels_v3.closed_card(
+                    ticket_id=int(row["id"]),
+                    opener_id=int(row["user_id"]),
+                    closer=self.bot.user,
+                    reason="Inactivité : délai configuré dépassé.",
+                    duration=duration,
+                    transcript_filename=transcript.filename if transcript else None,
+                    avatar_url=str(owner.display_avatar.url) if owner else None,
                 ),
                 tickets_service.vue_ticket_ferme(row["id"]),
             )
-            await sx_panels.envoyer(channel, panel, **kwargs)
+            kwargs = {"file": transcript} if transcript else {}
+            await sx_panels.envoyer(
+                channel, panel, allowed_mentions=discord.AllowedMentions.none(),
+                **kwargs,
+            )
         except discord.HTTPException:
             logger.warning(
                 "Message d'auto-fermeture non envoyé pour le ticket #%s.",
