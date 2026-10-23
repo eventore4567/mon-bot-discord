@@ -183,7 +183,8 @@ def build_report(ticket, events, *, closed_at, closed_by, reason, legacy_claims=
                 history.append(("ticket_claim", actor, stamp))
     claims.sort(key=lambda x: x[1] or 0)
     history.sort(key=lambda x: x[2] or 0)
-    history.append(("ticket_close", positive(closed_by), positive(closed_at)))
+    if not any(kind == "ticket_close" and actor == int(closed_by) and stamp is not None and abs(stamp - int(closed_at)) <= 2 for kind, actor, stamp in history):
+        history.append(("ticket_close", positive(closed_by), positive(closed_at)))
     return ClosureReport(
         ticket_id=positive(val(ticket, "id")) or 0,
         owner_id=positive(val(ticket, "user_id")) or 0,
