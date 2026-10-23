@@ -1520,7 +1520,11 @@ class WideLogView(discord.ui.LayoutView):
             _add_ticket_log_content(
                 container, embed, event_type=event_type,
                 identity_name=identity_name, identity_id=identity_id,
-                transcript_filename=ticket_attachment_filename,
+                transcript_filename=(
+                    ticket_attachment_filename
+                    if ticket_attachment_filename in set(available_attachments or ())
+                    else None
+                ),
             )
         else:
             if summary:
