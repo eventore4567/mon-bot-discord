@@ -84,6 +84,50 @@ def test_new_ticket_open_panel_contains_banner_answers_and_two_main_actions():
     assert panel.fichiers()[0].filename == cards.BANNER_FILENAME
 
 
+def test_ticket_creation_receipt_is_navigable_and_never_says_inconnu():
+    receipt = cards.ticket_created_confirmation(
+        ticket_number=9,
+        ticket_type="Support SentriX",
+        guild_id=123456789012345678,
+        channel_id=987654321098765432,
+        channel_name="ticket-tomioka",
+    )
+    children = list(walk(receipt.children))
+    text = contents(receipt)
+    assert "Ticket #9 créé" in text
+    assert "Support SentriX" in text
+    assert "`#ticket-tomioka`" in text
+    assert "# inconnu" not in text
+    assert "Ce qui suit" not in text
+    assert "Votre ticket est prêt" not in text
+    assert "en attente de prise en charge" in text
+    assert any(isinstance(item, discord.ui.MediaGallery) for item in children)
+    assert receipt.fichiers()[0].filename == cards.BANNER_FILENAME
+    links = [
+        item for item in children
+        if isinstance(item, discord.ui.Button)
+        and item.style == discord.ButtonStyle.link
+    ]
+    assert len(links) == 1
+    assert links[0].label == "Ouvrir mon ticket"
+    assert links[0].url == (
+        "https://discord.com/channels/123456789012345678/987654321098765432"
+    )
+    assert not links[0].custom_id
+
+
+def test_ticket_creation_confirmation_uses_real_destination_in_runtime():
+    source = (ROOT / "cogs/tickets.py").read_text(encoding="utf-8")
+    assert "ticket_panels_v3.ticket_created_confirmation(" in source
+    assert "guild_id=int(guild.id)" in source
+    assert "channel_id=int(channel.id)" in source
+    assert "channel_name=str(channel.name)" in source
+    assert "ephemere=True" in source
+    # Do not silently regress to the former oversized response.
+    assert 'titre="Ticket ouvert"' not in source
+    assert 'sous_titre=f"Votre ticket est prêt dans {channel.mention}."' not in source
+
+
 def test_closed_ticket_has_native_downloadable_file_reopen_and_delete():
     opener = user(123456789012345678)
     closer = user(222222222222222222)
