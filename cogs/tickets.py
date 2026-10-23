@@ -56,6 +56,11 @@ from database.db import now
 # de temps le traitement a pris avant/après la réponse à Discord).
 logger = logging.getLogger("bot.tickets")
 
+#: Référence forte sur les écritures de journal lancées en fond. Sans elle, le
+#: ramasse-miettes peut annuler la tâche avant la fin : le journal disparaîtrait
+#: sans la moindre trace, et personne ne saurait qu'il manque.
+_TACHES_JOURNAL: set[asyncio.Task] = set()
+
 
 def parse_component_emoji(value: str | None, bot=None):
     """Valide un emoji Unicode ou personnalisé Discord, animé ou non.
@@ -1635,27 +1640,40 @@ class Tickets(commands.Cog):
         # « 📌 Salon » et « 🆔 Ticket » sont retirés d'ici : la primitive les
         # pose elle-même, à l'identique pour les quatorze événements. Les laisser
         # les aurait dupliqués dans l'embed.
-        try:
-            await tickets_service.journaliser_evenement(
-                self.bot,
-                guild,
-                "ticket_open",
-                ticket_id=ticket_id,
-                channel=channel,
-                # Pas de `cible` : sur une ouverture, l'auteur EST le membre
-                # concerné, et le renseigner deux fois afficherait la même personne
-                # sur deux champs côte à côte.
-                acteur=user,
-                extra=ticket_extra,
-            )
-        except Exception:
-            # Le ticket et son message de contrôle existent déjà : une panne du
-            # journal ne doit pas faire croire que l'ouverture a échoué.
-            logger.exception(
-                "Journal d'ouverture ticket indisponible guild=%s ticket=%s.",
-                guild.id,
-                ticket_id,
-            )
+        # Le journal part EN FOND. Personne n'attend son résultat : le ticket,
+        # son salon et sa carte de contrôle existent déjà, et le membre a reçu
+        # sa confirmation plus haut. L'attendre ici ajoutait son aller-retour
+        # Discord au temps d'ouverture — mesuré 2,35 s en production, assez
+        # lent pour que le bot le signale lui-même.
+        #
+        # La tâche garde une référence forte : sans elle, le ramasse-miettes
+        # peut l'annuler avant la fin et le journal disparaîtrait en silence.
+        async def _journaliser_en_fond() -> None:
+            try:
+                await tickets_service.journaliser_evenement(
+                    self.bot,
+                    guild,
+                    "ticket_open",
+                    ticket_id=ticket_id,
+                    channel=channel,
+                    # Pas de `cible` : sur une ouverture, l'auteur EST le membre
+                    # concerné, et le renseigner deux fois afficherait la même
+                    # personne sur deux champs côte à côte.
+                    acteur=user,
+                    extra=ticket_extra,
+                )
+            except Exception:
+                # Le ticket et son message de contrôle existent déjà : une panne
+                # du journal ne doit pas faire croire que l'ouverture a échoué.
+                logger.exception(
+                    "Journal d'ouverture ticket indisponible guild=%s ticket=%s.",
+                    guild.id,
+                    ticket_id,
+                )
+
+        tache = asyncio.create_task(_journaliser_en_fond())
+        _TACHES_JOURNAL.add(tache)
+        tache.add_done_callback(_TACHES_JOURNAL.discard)
 
     # ---------------------------------------------------------------- BOUTONS STAFF
 
