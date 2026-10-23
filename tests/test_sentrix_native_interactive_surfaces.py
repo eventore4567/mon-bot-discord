@@ -91,7 +91,39 @@ def test_ticket_and_role_panels_do_not_duplicate_sentrix_brand():
 
     assert 'titre="SentriX — Ticket ouvert"' not in tickets
     assert 'titre="SentriX — Tickets"' not in tickets
-    assert 'titre="Ticket ouvert"' in tickets
+    # Ce test interrogeait le TEXTE SOURCE de cogs/tickets.py et cherchait
+    # `titre="Ticket ouvert"`. La confirmation d'ouverture a déménagé dans
+    # services/ticket_panels_v3.ticket_created_confirmation : la chaîne a
+    # disparu, le test est devenu rouge, et une garde de build rouge bloque
+    # TOUT déploiement — alors que le comportement visé n'avait pas changé.
+    #
+    # Ce qui compte vraiment : le titre ne répète pas la marque. On le vérifie
+    # donc sur le panneau RÉELLEMENT construit.
+    from services import ticket_panels_v3
+
+    panneau = ticket_panels_v3.ticket_created_confirmation(
+        ticket_number=42, ticket_type="Support",
+        guild_id=1, channel_id=2, channel_name="ticket-42",
+    )
+    # TicketCardV3 est une LayoutView : son titre vit dans un TextDisplay.
+    morceaux = []
+
+    def _lire(item):
+        contenu = getattr(item, "content", None)
+        if isinstance(contenu, str):
+            morceaux.append(contenu)
+        for enfant in list(getattr(item, "children", ()) or ()):
+            _lire(enfant)
+
+    _lire(panneau)
+    # Le TITRE seul : la ligne « ## … ». La marque a sa place dans le
+    # surtitre et le pied (« SENTRIX / CENTRE DE SUPPORT »), pas dans le titre.
+    titre = next(
+        (ligne[3:].strip() for bloc in morceaux for ligne in bloc.split("\n")
+         if ligne.startswith("## ")),
+        "",
+    )
+    assert titre and "SentriX" not in titre, f"marque répétée : {titre!r}"
     assert 'titre="Tickets"' in tickets
     assert 'f"SentriX — {titre}"' not in roles
 
