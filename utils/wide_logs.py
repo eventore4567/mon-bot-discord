@@ -464,7 +464,9 @@ def narrative_body(
     moderator = _with_id(
         _first_user_ref(_field_value(embed, *_MODERATOR_LABELS))
     )
-    channel = _first_channel_ref(_field_value(embed, "salon", "channel"))
+    # « catégorie » en dernier : pour un salon, le champ « Salon » arrive avant
+    # et gagne ; pour une catégorie, son champ d'identité s'appelle « Catégorie ».
+    channel = _first_channel_ref(_field_value(embed, "salon", "channel", "catégorie", "categorie"))
     role = _first_role_ref(_field_value(embed, "rôle", "role"))
     reason = _field_value(embed, "raison", "reason")
     content = _field_value(embed, "contenu", "content")
@@ -579,11 +581,29 @@ def narrative_body(
         verb = {"channel_create": "créé", "channel_delete": "supprimé", "channel_update": "modifié"}[event_type]
         entity = identity_name or channel or "Un salon"
         actor = _first_user_ref(moderator) or moderator
+        # Une catégorie passe par le même événement. L'annoncer comme « Le salon »
+        # envoyait chercher un salon qui n'existe pas.
+        categorie = "catégorie" in (embed.title or "").casefold()
         lines.append(
-            f"Le salon **{entity}** a été {verb}"
+            f"{'La catégorie' if categorie else 'Le salon'} **{entity}** a été "
+            + (verb + "e" if categorie and verb.endswith("é") else verb)
             + (f" par {actor}" if actor else "")
             + "."
         )
+        if event_type == "channel_update":
+            # Mêmes raisons que role_update : compact_fields() écarte les valeurs
+            # courtes, donc « Salon modifié » ne disait jamais CE QUI avait changé.
+            # Les permissions ne sont pas reprises ici : leur champ est
+            # multi-ligne, compact_fields le rend déjà en entier.
+            for libelle, cle in (
+                ("Nom", "nom"),
+                ("Catégorie", "dans la catégorie"),
+                ("Sujet", "sujet"),
+                ("Slowmode", "slowmode"),
+            ):
+                valeur = _field_value_exact(embed, cle)
+                if valeur:
+                    lines.append(f"**{libelle} :** {valeur}")
     elif event_type in {"role_create", "role_delete", "role_update"}:
         verb = {"role_create": "créé", "role_delete": "supprimé", "role_update": "modifié"}[event_type]
         # Un mention de rôle (<@&id>) reste toujours cliquable et lisible ; un

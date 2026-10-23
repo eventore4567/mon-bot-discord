@@ -60,3 +60,9 @@ database/backups/
 
 # Rapports locaux du balayage des commandes (tools/command_sweep.py)
 reports/
+
+# La bande fine des journaux est régénérée à la demande par
+# utils/premium_log_banners.get_premium_log_banner : c'est un cache disque,
+# pas une source. Elle est recréée si elle manque, donc Discord ne peut pas
+# refuser la carte faute d'image.
+assets/premium_log_banners/

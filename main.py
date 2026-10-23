@@ -114,7 +114,6 @@ EXTENSIONS = [
     "cogs.snipe",
     "cogs.soundboard_logs",
     "cogs.utility",
-    "cogs.salon_permissions",
     "cogs.suggestions",
     "cogs.poll_ui",
     "cogs.translation",

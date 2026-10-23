@@ -151,10 +151,52 @@ def test_deleted_message_logs_link_to_channel_while_edits_link_to_message():
 
 
 def test_deleted_channel_and_role_cards_do_not_repeat_raw_id_field():
-    logs = (ROOT / "cogs" / "logs.py").read_text(encoding="utf-8")
+    """Un salon supprimé n'est plus mentionnable : la carte doit donner son NOM.
 
-    assert 'fields = [("Salon", f"`{channel.name}`", True)]' in logs
-    assert 'fields = [("Rôle", f"`{role.name}`", True)]' in logs
+    Ce test interrogeait le texte source de cogs/logs.py. Il tombait au premier
+    refactor sans que le comportement ait changé — il vérifie maintenant la
+    carte réellement construite.
+    """
+    import asyncio
+
+    from cogs.logs import Logs
+
+    cog = Logs(object())
+    cartes = []
+
+    async def _capture(guild, log_type, embed, **_):
+        cartes.append((log_type, embed))
+        return True
+
+    async def _pas_dacteur(*_args, **_kwargs):
+        return None, None
+
+    cog._send = _capture
+    cog._audit_actor = _pas_dacteur
+
+    class _Guild:
+        id = 123456789012345678
+
+    class _Salon:
+        id = 222222222222222222
+        name = "salon-prive"
+        guild = _Guild()
+
+    class _Role:
+        id = 333333333333333333
+        name = "Modérateur"
+        guild = _Guild()
+
+    asyncio.run(cog.on_guild_channel_delete(_Salon()))
+    asyncio.run(cog.on_guild_role_delete(_Role()))
+
+    assert [log_type for log_type, _ in cartes] == ["channel_delete", "role_delete"]
+    for attendu, (_type, embed) in zip(("salon-prive", "Modérateur"), cartes):
+        valeurs = [field.value for field in embed.fields]
+        assert any(attendu in (valeur or "") for valeur in valeurs), valeurs
+        # Aucun champ ne doit être un snowflake nu : l'identifiant vit sur le
+        # bouton « Copier l'ID », pas dans le corps de la carte.
+        assert not any((valeur or "").strip().isdigit() for valeur in valeurs), valeurs
 
 
 

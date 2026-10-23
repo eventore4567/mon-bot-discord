@@ -107,6 +107,132 @@ def _role_ref(role_id: int) -> str:
     return f"<@&{int(role_id)}>"
 
 
+#: Un champ d'embed Discord s'arrête à 1024 caractères. On tronque en le
+#: disant, plutôt que de laisser l'API refuser la carte entière. La marge
+#: couvre la mention de fin (« N autre(s) cible(s) modifiée(s) »).
+_BUDGET_PERMS = 900
+_MAX_PERMS_PAR_CIBLE = 8
+
+
+def _est_categorie(salon) -> bool:
+    """Le type déclaré, pas un isinstance.
+
+    Les objets partiels que sert le cache de Discord ne sont pas toujours des
+    CategoryChannel, alors qu'ils portent bien leur type.
+    """
+    return getattr(salon, "type", None) == discord.ChannelType.category
+
+
+#: Modifier les permissions d'une catégorie synchronise ses salons : Discord
+#: émet alors un CHANNEL_UPDATE pour la catégorie PUIS un par salon synchronisé.
+#: Sans ce mémo, une seule édition produisait une carte par salon — exactement
+#: la rafale illisible qu'on reproche aux autres bots. On ne retient que la
+#: propagation : un « synchroniser ce salon » isolé n'a pas de carte de
+#: catégorie récente, donc il garde la sienne. Le biais est volontaire : jamais
+#: perdre un événement, quitte à en afficher un de trop.
+_FENETRE_PROPAGATION_SECONDES = 15.0
+_CATEGORIES_PERMS_RECENTES: dict[tuple[int, int], float] = {}
+
+
+def _noter_perms_de_categorie(guild_id: int, categorie_id: int) -> None:
+    maintenant = time.monotonic()
+    for cle, vu in list(_CATEGORIES_PERMS_RECENTES.items()):
+        if maintenant - vu > _FENETRE_PROPAGATION_SECONDES:
+            del _CATEGORIES_PERMS_RECENTES[cle]
+    _CATEGORIES_PERMS_RECENTES[(int(guild_id), int(categorie_id))] = maintenant
+
+
+def _est_propagation_de_categorie(salon) -> bool:
+    """Le salon ne fait que recevoir les permissions de sa catégorie ?"""
+    categorie_id = getattr(salon, "category_id", None)
+    if not categorie_id:
+        return False
+    vu = _CATEGORIES_PERMS_RECENTES.get((int(salon.guild.id), int(categorie_id)))
+    if vu is None or time.monotonic() - vu > _FENETRE_PROPAGATION_SECONDES:
+        return False
+    # `permissions_synced` compare les dérogations du salon à celles de sa
+    # catégorie : si elles diffèrent, le salon a sa propre configuration et ce
+    # qui vient de changer lui est propre.
+    return bool(getattr(salon, "permissions_synced", False))
+
+
+def _nom_derogation(cible) -> str:
+    """@everyone est écrit en toutes lettres : le mentionner pingerait tout le serveur."""
+    # Les clés d'overwrites sont des rôles ou des membres. `is_default` n'existe
+    # que sur un rôle : c'est ce qui les sépare, pas un isinstance (les objets
+    # partiels servis par le cache de Discord ne passent pas toujours le test).
+    defaut = getattr(cible, "is_default", None)
+    if callable(defaut):
+        return "@everyone" if defaut() else _role_ref(cible.id)
+    return _user_ref(getattr(cible, "id", 0))
+
+
+def _diff_derogations(avant, apres) -> list[tuple[object, list[str], list[str], list[str]]]:
+    """Ce qui a changé dans les permissions d'un salon, cible par cible.
+
+    Un PermissionOverwrite a trois états : autorisé, refusé, et non défini.
+    Seules les TRANSITIONS sont intéressantes — afficher les 59 permissions
+    inchangées noierait les deux qui ont bougé.
+
+    Discord émet un évènement par dérogation modifiée. Les regrouper ici donne
+    UNE carte par édition au lieu d'une carte par permission.
+    """
+    from utils.access_matrix import permission_label
+
+    change: list[tuple[object, list[str], list[str], list[str]]] = []
+    cibles = {c: None for c in list(avant.keys()) + list(apres.keys())}
+    for cible in cibles:
+        a_avant = dict(iter(avant.get(cible, discord.PermissionOverwrite())))
+        a_apres = dict(iter(apres.get(cible, discord.PermissionOverwrite())))
+        autorises, refuses, neutres = [], [], []
+        for nom in set(a_avant) | set(a_apres):
+            if a_avant.get(nom) == a_apres.get(nom):
+                continue
+            nouvelle = a_apres.get(nom)
+            libelle = permission_label(nom)
+            if nouvelle is True:
+                autorises.append(libelle)
+            elif nouvelle is False:
+                refuses.append(libelle)
+            else:
+                neutres.append(libelle)
+        if autorises or refuses or neutres:
+            change.append((cible, sorted(autorises), sorted(refuses), sorted(neutres)))
+    return change
+
+
+def _texte_derogations(change) -> str:
+    """Rend le diff en lignes lisibles, en restant dans le budget de Discord.
+
+    Le budget est tenu en caractères, pas en nombre de cibles : six rôles aux
+    libellés longs dépassaient les 1024 caractères d'un champ et la coupe
+    tombait au milieu d'un mot. Ce qui ne rentre pas est compté, jamais perdu
+    en silence.
+    """
+    lignes: list[str] = []
+    budget = _BUDGET_PERMS
+    for rang, (cible, autorises, refuses, neutres) in enumerate(change):
+        morceaux = []
+        for prefixe, valeurs in (("✅", autorises), ("❌", refuses), ("⬜", neutres)):
+            if not valeurs:
+                continue
+            visibles = valeurs[:_MAX_PERMS_PAR_CIBLE]
+            reste = len(valeurs) - len(visibles)
+            morceaux.append(f"{prefixe} " + ", ".join(visibles) + (f" (+{reste})" if reste else ""))
+        bloc = f"{_nom_derogation(cible)}\n" + "\n".join(morceaux)
+        # Toujours garder la première cible : une carte qui ne nomme personne
+        # ne vaudrait rien, même si son bloc dépasse à lui seul le budget.
+        if rang and len(bloc) + 2 > budget:
+            break
+        budget -= len(bloc) + 2
+        lignes.append(bloc)
+    texte = "\n\n".join(lignes)
+    reste_cibles = len(change) - len(lignes)
+    if reste_cibles > 0:
+        texte += f"\n\n*{reste_cibles} autre(s) cible(s) modifiée(s).*"
+    return texte
+
+
 def _channel_ref(channel_id: int) -> str:
     return f"<#{int(channel_id)}>"
 
@@ -1150,11 +1276,13 @@ class Logs(commands.Cog, name="Logs"):
             discord.AuditLogAction.channel_create,
             channel.id,
         )
-        fields = [("Salon", _channel_ref(channel.id), True), ("Type", str(channel.type), True)]
+        est_categorie = _est_categorie(channel)
+        nom = "Catégorie" if est_categorie else "Salon"
+        fields = [(nom, _channel_ref(channel.id), True), ("Type", str(channel.type), True)]
         if actor:
             fields.append(("Responsable", _user_ref(actor.id), True))
-        panel = self._embed("Salon créé", fields=fields)
-        ids = [("Copier l'ID du salon", channel.id)]
+        panel = self._embed("Catégorie créée" if est_categorie else "Salon créé", fields=fields)
+        ids = [("Copier l'ID de la catégorie" if est_categorie else "Copier l'ID du salon", channel.id)]
         if actor:
             ids.append(("Copier l'ID du responsable", actor.id))
         key = log_service.make_event_key(
@@ -1182,11 +1310,14 @@ class Logs(commands.Cog, name="Logs"):
             discord.AuditLogAction.channel_delete,
             channel.id,
         )
-        fields = [("Salon", f"`{channel.name}`", True)]
+        est_categorie = _est_categorie(channel)
+        fields = [("Catégorie" if est_categorie else "Salon", f"`{channel.name}`", True)]
         if actor:
             fields.append(("Responsable", _user_ref(actor.id), True))
-        panel = self._embed("Salon supprimé", fields=fields)
-        ids = [("Copier l'ID du salon", channel.id)]
+        panel = self._embed(
+            "Catégorie supprimée" if est_categorie else "Salon supprimé", fields=fields
+        )
+        ids = [("Copier l'ID de la catégorie" if est_categorie else "Copier l'ID du salon", channel.id)]
         if actor:
             ids.append(("Copier l'ID du responsable", actor.id))
         key = log_service.make_event_key(
@@ -1210,13 +1341,18 @@ class Logs(commands.Cog, name="Logs"):
         before: discord.abc.GuildChannel,
         after: discord.abc.GuildChannel,
     ):
-        fields = [("Salon", _channel_ref(after.id), True)]
+        # Une catégorie passe par le même évènement qu'un salon. L'annoncer comme
+        # un « salon » ferait chercher un salon qui n'existe pas.
+        est_categorie = _est_categorie(after)
+        fields = [("Catégorie" if est_categorie else "Salon", _channel_ref(after.id), True)]
         if before.name != after.name:
             fields.append(("Nom", f"`{before.name}` → `{after.name}`", False))
         if before.category_id != after.category_id:
             before_category = _channel_ref(before.category_id) if before.category_id else "Aucune"
             after_category = _channel_ref(after.category_id) if after.category_id else "Aucune"
-            fields.append(("Catégorie", f"{before_category} → {after_category}", False))
+            # Libellé distinct du champ d'identité : sur la carte d'une catégorie,
+            # deux champs « Catégorie » rendaient la lecture ambiguë.
+            fields.append(("Dans la catégorie", f"{before_category} → {after_category}", False))
         if getattr(before, "topic", None) != getattr(after, "topic", None):
             before_topic = getattr(before, "topic", None)
             after_topic = getattr(after, "topic", None)
@@ -1244,17 +1380,62 @@ class Logs(commands.Cog, name="Logs"):
                     False,
                 )
             )
+        # Les permissions : jusqu'ici un changement de dérogation ne produisait
+        # AUCUN log. Un staff pouvait ouvrir un salon privé à un rôle sans
+        # qu'il en reste la moindre trace, alors que renommer le salon en
+        # laissait une.
+        try:
+            change_perms = _diff_derogations(
+                getattr(before, "overwrites", {}) or {},
+                getattr(after, "overwrites", {}) or {},
+            )
+        except Exception:
+            logger.exception("Comparaison des dérogations impossible (salon=%s).", after.id)
+            change_perms = []
+        if change_perms and est_categorie:
+            _noter_perms_de_categorie(after.guild.id, after.id)
+        if change_perms and len(fields) == 1 and not est_categorie:
+            if _est_propagation_de_categorie(after):
+                logger.debug(
+                    "Permissions propagées depuis la catégorie %s : carte du salon %s "
+                    "inutile, celle de la catégorie la porte déjà.",
+                    getattr(after, "category_id", None), after.id,
+                )
+                return
+        if change_perms:
+            fields.append(
+                ("Permissions", _short(_texte_derogations(change_perms), 1000), False)
+            )
+            if est_categorie and getattr(after, "channels", None):
+                synchronises = sum(
+                    1 for salon in after.channels
+                    if getattr(salon, "permissions_synced", False)
+                )
+                if synchronises:
+                    fields.append(
+                        (
+                            "Propagation",
+                            f"Appliqué aux {synchronises} salon(s) synchronisé(s) "
+                            "de cette catégorie.",
+                            False,
+                        )
+                    )
+
         if len(fields) == 1:
             return
         actor, audit = await self._audit_actor(
             after.guild,
-            discord.AuditLogAction.channel_update,
+            discord.AuditLogAction.channel_update
+            if len(fields) > 2 or not change_perms
+            else discord.AuditLogAction.overwrite_update,
             after.id,
         )
         if actor:
             fields.append(("Responsable", _user_ref(actor.id), True))
-        panel = self._embed("Salon modifié", fields=fields)
-        ids = [("Copier l'ID du salon", after.id)]
+        panel = self._embed(
+            "Catégorie modifiée" if est_categorie else "Salon modifié", fields=fields
+        )
+        ids = [("Copier l'ID de la catégorie" if est_categorie else "Copier l'ID du salon", after.id)]
         if actor:
             ids.append(("Copier l'ID du responsable", actor.id))
         key = log_service.make_event_key(

@@ -323,6 +323,12 @@ def canonical_event_type(log_type: str, title: str = "", description: str = "") 
         ("salon créé", "channel_create"),
         ("salon supprim", "channel_delete"),
         ("salon modifi", "channel_update"),
+        # Une catégorie emprunte les mêmes événements qu'un salon, avec un
+        # intitulé au féminin : sans ces trois lignes, le repli par titre
+        # renvoyait la carte vers le journal par défaut.
+        ("catégorie créé", "channel_create"),
+        ("catégorie supprim", "channel_delete"),
+        ("catégorie modifi", "channel_update"),
         ("rôle créé", "role_create"),
         ("rôle supprim", "role_delete"),
         ("rôle modifi", "role_update"),
