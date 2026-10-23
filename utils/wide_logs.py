@@ -1440,6 +1440,10 @@ class WideLogView(discord.ui.LayoutView):
             embed.description or "",
         )
         title = _trace_title(event_type, embed.title or "")
+        if event_type.startswith("ticket_"):
+            ticket_number = re.search(r"#(\d+)", _field_value_exact(embed, "Ticket"))
+            if ticket_number:
+                title += f" · #{ticket_number.group(1)}"
         title = re.sub(r"(?i)\bDossier\s*#\d+\s*(?:[—:\-]\s*)?", "", title)
         title = re.sub(r"(?i)\b(?:SX-[A-Z0-9]+|(?:BAN|WARN|MUTE|KICK)-\d+)\b", "", title).strip(" —:-") or "Événement"
         meta = _trace_meta(event_type, emoji=emoji)
