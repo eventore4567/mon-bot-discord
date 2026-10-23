@@ -58,6 +58,48 @@ _CASE_NUMBER_UNSET = object()
 #: eux au premier essai.
 _TACHES_TYPING: set[asyncio.Task] = set()
 
+#: La confirmation d'une sanction est un accusé de réception, pas une archive :
+#: le dossier numéroté vit dans les journaux et y reste. La laisser dans le
+#: salon de commande empile des cartes que personne ne relit. Assez long pour
+#: être lu, assez court pour ne pas encombrer.
+DELAI_RETRAIT_CONFIRMATION_SECONDES = 20
+
+#: Une carte de sanction nomme le membre visé ET le staff qui agit. Avec le
+#: défaut de panels (`users=True`), les deux recevaient une notification à
+#: chaque sanction — y compris le modérateur pour sa propre action. La mention
+#: reste cliquable et lisible ; elle ne sonne plus.
+_SANS_PING = discord.AllowedMentions.none()
+
+_TACHES_RETRAIT: set[asyncio.Task] = set()
+
+
+async def _retirer_la_confirmation(ctx, message, delai: float) -> None:
+    """Efface l'accusé de réception après coup, sans jamais faire échouer la sanction.
+
+    Deux surfaces, deux façons de supprimer : un message classique se supprime
+    lui-même, une réponse d'interaction différée passe par l'interaction. On
+    tente la première et on retombe sur la seconde.
+    """
+    try:
+        await asyncio.sleep(delai)
+        if message is not None:
+            try:
+                await message.delete()
+                return
+            except discord.NotFound:
+                return
+            except (discord.Forbidden, discord.HTTPException, AttributeError):
+                pass
+        interaction = getattr(ctx, "interaction", None)
+        if interaction is not None:
+            await interaction.delete_original_response()
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        pass
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.debug("Confirmation de sanction non retirée.", exc_info=True)
+
 # Cooldown métier explicite : le runtime SentriX supprime volontairement les
 # decorators cooldown Discord globaux. Celui-ci protège seulement clear contre
 # les doubles purges / 429 et est partagé entre +clear et /clear.
@@ -479,7 +521,13 @@ class Moderation(commands.Cog):
             reason=reason, case_number=case_number,
             suffix=suffix, duration=duration,
         )
-        return await panels.envoyer(ctx, view)
+        message = await panels.envoyer(ctx, view, allowed_mentions=_SANS_PING)
+        tache = asyncio.create_task(
+            _retirer_la_confirmation(ctx, message, DELAI_RETRAIT_CONFIRMATION_SECONDES)
+        )
+        _TACHES_RETRAIT.add(tache)
+        tache.add_done_callback(_TACHES_RETRAIT.discard)
+        return message
 
     async def _ack(self, ctx: commands.Context):
         """Accuse réception IMMÉDIATEMENT, avant tout appel API/DB. Corrige la lenteur

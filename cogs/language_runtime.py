@@ -310,6 +310,38 @@ SETUP_EN_REPLACEMENTS = (
 # Traductions de surface communes. Elles restent ciblées sur le texte d'interface
 # SentriX ; blocs de code, URLs et mentions Discord sont protégés.
 SURFACE_EN_REPLACEMENTS = (
+    # ------------------------------------------------------------------ 23/10/2026
+    # Cartes de sanction (utils/moderation_feedback.py). EN PREMIER, et avant
+    # ("Bannissement", "Ban") plus bas : la traduction est une substitution de
+    # sous-chaînes, donc la règle courte gagnait et produisait du franglais —
+    # mesuré « Bannissement effectué » → « Ban effectué », « Action de
+    # modération effectuée » → « Action de modération completed ».
+    #
+    # Les marqueurs gras font partie de l'ancre : ils rendent ces fragments
+    # impossibles à confondre avec le texte d'un membre, ce qui autorise des
+    # ancres courtes comme « Motif » sans mordre dans une donnée utilisateur.
+    ("**🚪 Expulsion effectuée**", "**🚪 Member kicked**"),
+    ("**🔨 Bannissement effectué**", "**🔨 Member banned**"),
+    ("**⏳ Bannissement temporaire effectué**", "**⏳ Member temporarily banned**"),
+    ("**🔨 Bannissement par identifiant**", "**🔨 Banned by ID**"),
+    ("**🔇 Timeout appliqué**", "**🔇 Timeout applied**"),
+    ("**🔊 Timeout retiré**", "**🔊 Timeout removed**"),
+    ("**⚠️ Avertissement enregistré**", "**⚠️ Warning recorded**"),
+    ("**🔓 Bannissement levé**", "**🔓 Ban lifted**"),
+    ("**🛡️ Action de modération effectuée**", "**🛡️ Moderation action completed**"),
+    ("**📝 Motif**", "**📝 Reason**"),
+    ("**⏱️ Durée**", "**⏱️ Duration**"),
+    # « Par » seul mordrait dans « Paris » ou « Partage » ; l'ancre inclut donc
+    # le préfixe de ligne discrète. Elle s'arrête AVANT la mention : le garde
+    # anti-données découpe le texte sur les mentions Discord, donc une ancre
+    # qui chevauche « <@ » ne rencontre jamais son fragment.
+    ("-# Par ", "-# By "),
+    ("Dossier non enregistré", "Case not recorded"),
+    ("Dossier #", "Case #"),
+    # Connu de EXACT_EN, mais EXACT_EN ne s'applique qu'à une chaîne ENTIÈRE :
+    # au milieu du bloc « Motif », la phrase restait française.
+    ("Aucune raison fournie", "No reason given"),
+
     ("Commande introuvable. Merci de consulter les commandes avec /help.", "Unknown command. Use /help to view available commands."),
     ("Commande introuvable", "Unknown command"),
     ("Merci de consulter les commandes avec /help", "Use /help to view available commands"),
@@ -1074,6 +1106,14 @@ def translate_view_in_place(view, *, setup: bool = False, protect: tuple[str, ..
         accessory = getattr(item, "accessory", None)
         if accessory is not None:
             walk(accessory)
+        # Un DynamicItem (boutons persistants : historique, débannissement)
+        # n'EST pas le bouton, il l'enveloppe dans ``.item``. Son propre
+        # ``label`` vaut None, donc la boucle ci-dessus ne voyait rien et ces
+        # boutons restaient en français au milieu d'une carte anglaise —
+        # mesuré sur « Historique » d'une carte de sanction.
+        interne = getattr(item, "item", None)
+        if interne is not None and interne is not item:
+            walk(interne)
 
     walk(view)
     return view
