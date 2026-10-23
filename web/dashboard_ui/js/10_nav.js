@@ -115,6 +115,10 @@ function setHead() {
   const [title, sub] = pageMeta(state.page);
   $('pageTitle').textContent = title;
   $('pageSubtitle').textContent = sub;
+  const kicker = $('workspaceKicker');
+  if (kicker) kicker.textContent = state.guild?.guild?.name
+    ? 'SERVEUR / ' + state.guild.guild.name
+    : 'SENTRIX / MON ESPACE';
   document.title = `${title} · SentriX`;
 }
 function syncUrl() {
