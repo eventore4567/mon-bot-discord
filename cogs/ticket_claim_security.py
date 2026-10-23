@@ -19,11 +19,13 @@ from discord.ext import commands
 
 from services import tickets as tickets_service
 from services import ticket_log_report
+from services import ticket_panels_v3
 from utils import log_service
 from utils import sentrix_panels as panels
 
 logger = logging.getLogger("bot.tickets.claim-security")
 _INSTALLED = False
+_SECURE_CLOSE_HANDLER = None
 _CREATING: set[tuple[int, int, int]] = set()
 
 _STAFF_ONLY_KEYS = {"claim", "unclaim", "add", "remove", "rename", "transfer", "note", "bump"}
@@ -424,6 +426,18 @@ def install(bot: commands.Bot) -> None:
         except discord.HTTPException:
             transcript_text = "Transcription indisponible (erreur lors de la lecture du salon)."
 
+        # Préserver aussi l'archive durable de l'ancien module Logs V6 :
+        # les contrôles d'historique déjà publiés continuent d'y accéder.
+        try:
+            from cogs import logs_unified_v6
+            await logs_unified_v6._store_transcript(
+                self.bot, ticket_id=ticket_id, guild_id=guild.id,
+                channel_id=int(channel.id), channel_name=channel.name,
+                text=transcript_text,
+            )
+        except Exception:
+            logger.warning("Archive historique V6 ticket #%s indisponible.", ticket_id, exc_info=True)
+
         # Nouveau contrat tickets :
         # - Close masque le salon au membre, sans le supprimer.
         # - Rouvrir restaure la visibilité.
@@ -431,28 +445,37 @@ def install(bot: commands.Bot) -> None:
         # Aucun ticket fermé manuellement n'est donc programmé pour auto-delete.
         duree = tickets_service.duree_du_ticket(ticket, fin=closed_at)
         reason_text = (reason or "Non précisée").strip()[:1200]
-        suite = (
-            "Le membre ne peut plus voir ce salon. "
-            "Le staff peut le **rouvrir** ou le **supprimer définitivement**."
-        )
+        # Le membre reste masqué, le staff conserve la conversation.
+        # Les boutons Rouvrir / Supprimer sont ceux de la vue persistante :
+        # leur custom_id survit aux redémarrages.
         vue_fermeture = tickets_service.vue_ticket_ferme(ticket_id)
-
-        ligne_duree = f"\nOuvert pendant : **{duree}**" if duree else ""
+        transcript_file = self._transcript_file(channel, transcript_text)
+        closure_card = panels.avec_composants(
+            ticket_panels_v3.closed_card(
+                ticket_id=ticket_id,
+                opener_id=int(ticket["user_id"]),
+                closer=interaction.user,
+                reason=reason_text,
+                duration=duree,
+                transcript_filename=transcript_file.filename,
+                avatar_url=str(owner.display_avatar.url) if owner else None,
+                claimed_by_id=int(ticket["claimed_by"]) if ticket["claimed_by"] else None,
+                closed_at=closed_at,
+            ),
+            vue_fermeture,
+        )
         try:
             await panels.envoyer(
                 channel,
-                panels.avec_composants(
-                    panels.depuis_embed(tickets.embeds.warning(
-                        f'🔒 Ticket fermé par {interaction.user.mention}.'
-                        f'\nRaison : {reason_text}{ligne_duree}\n\n{suite}'
-                    )),
-                    vue_fermeture,
-                ),
-                file=self._transcript_file(channel, transcript_text),
+                closure_card,
+                file=transcript_file,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException:
-            pass
+            logger.warning(
+                "Fiche de fermeture ticket #%s refusée, archivage maintenu.",
+                ticket_id, exc_info=True,
+            )
 
         participants = [
             f"{member.display_name} (`{member.id}`)"
@@ -711,12 +734,28 @@ def install(bot: commands.Bot) -> None:
     tickets.Tickets.handle_control_button = secure_handle_control_button
     tickets.Tickets.create_ticket = secure_create_ticket
     tickets.Tickets.close_ticket = secure_close_ticket
+    global _SECURE_CLOSE_HANDLER
+    _SECURE_CLOSE_HANDLER = secure_close_ticket
     tickets.Tickets.btn_claim = secure_claim
     tickets.Tickets.btn_unclaim = secure_unclaim
     _INSTALLED = True
     logger.info(
         "Sécurité tickets activée : claims, anti-double ouverture, priorité masquée et logs-tickets canoniques."
     )
+
+
+async def close_ticket_via_security(cog, interaction: discord.Interaction,
+                                    ticket_id: int, reason: str):
+    """Point d'entrée officiel pour toutes les anciennes surcharges du cog.
+
+    Sans ce pont, logs_unified_v6 attribue close_ticket sur l'instance et
+    masque la fermeture sûre, la bannière et les boutons actuels.
+    """
+    if _SECURE_CLOSE_HANDLER is None:
+        install(cog.bot)
+    if _SECURE_CLOSE_HANDLER is None:
+        raise RuntimeError("Le gestionnaire de fermeture sécurisé est indisponible.")
+    return await _SECURE_CLOSE_HANDLER(cog, interaction, ticket_id, reason)
 
 
 async def setup(bot: commands.Bot) -> None:

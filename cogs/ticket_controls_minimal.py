@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 import discord
 
@@ -56,7 +57,8 @@ async def _migrate_open_ticket_messages(bot) -> None:
 
         try:
             rows = await bot.db.fetchall(
-                "SELECT guild_id, channel_id FROM tickets WHERE status = 'ouvert' ORDER BY id DESC"
+                "SELECT id, guild_id, channel_id, user_id, type_id, category FROM tickets "
+                "WHERE status = 'ouvert' ORDER BY id DESC"
             )
         except Exception:
             logger.warning("Migration des boutons de tickets : lecture DB impossible.", exc_info=True)
@@ -81,7 +83,60 @@ async def _migrate_open_ticket_messages(bot) -> None:
                 if control_message is None:
                     continue
                 settings = await tickets_mod.get_button_settings(bot, guild.id)
-                await control_message.edit(view=tickets_mod.TicketControlView(settings))
+                # Un message V2 ne peut être ramené à une vieille View sans
+                # risquer HTTP 400. Il est déjà fonctionnel et ne se migre pas.
+                flags = int(getattr(getattr(control_message, "flags", None), "value", 0) or 0)
+                if flags & 32768:
+                    continue
+
+                # Migrer aussi les tickets encore ouverts AVANT ce déploiement.
+                # Envoyer d'abord la nouvelle carte, et ne supprimer l'ancienne
+                # qu'après succès : aucun ticket ne perd ses boutons en cas d'erreur.
+                old_embed = control_message.embeds[0] if control_message.embeds else None
+                opener = guild.get_member(int(row["user_id"])) if row["user_id"] else None
+                if old_embed is not None and opener is not None:
+                    from services import ticket_panels_v3
+                    from utils import sentrix_panels as sx_panels
+
+                    type_row = await bot.db.fetchone(
+                        "SELECT name, open_message, staff_role_id, mention_staff "
+                        "FROM ticket_types WHERE id=? AND guild_id=?",
+                        (int(row["type_id"]), int(guild.id)),
+                    ) if row["type_id"] else None
+                    staff = guild.get_role(int(type_row["staff_role_id"])) if (
+                        type_row and type_row["staff_role_id"] and type_row["mention_staff"]
+                    ) else None
+                    answers = await bot.db.fetchall(
+                        "SELECT question_label, answer FROM ticket_answers WHERE ticket_id=? ORDER BY id",
+                        (int(row["id"]),),
+                    )
+                    match = re.search(r"#(\d+)", str(old_embed.title or ""))
+                    number = int(match.group(1)) if match else int(row["id"])
+                    card = sx_panels.avec_composants(
+                        ticket_panels_v3.opening_card(
+                            ticket_number=number,
+                            ticket_type=str(type_row["name"] if type_row else row["category"]),
+                            opener=opener,
+                            description=str(old_embed.description or "")[:420],
+                            staff_role=staff,
+                            answers=[(x["question_label"], x["answer"]) for x in answers],
+                        ),
+                        tickets_mod.TicketControlView(settings),
+                    )
+                    await channel.send(
+                        view=card,
+                        files=card.fichiers(),
+                        # Migration silencieuse : pas de nouveau ping user/staff.
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    try:
+                        await control_message.delete()
+                    except discord.HTTPException:
+                        logger.warning("Ancien panneau ticket non supprimé salon=%s", channel.id)
+                else:
+                    # Les messages historiques sans membre trouvé restent
+                    # opérationnels : ne jamais les effacer sans remplacement.
+                    await control_message.edit(view=tickets_mod.TicketControlView(settings))
                 updated += 1
                 await asyncio.sleep(0.08)
             except (discord.Forbidden, discord.NotFound):
