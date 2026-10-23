@@ -1276,3 +1276,10 @@ html[data-theme="oled"] body.dashboard-locked::after{
 .guidance-progress{height:8px;border-radius:999px;background:var(--panel3);overflow:hidden;margin-bottom:14px}.guidance-progress i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--blue),var(--green))}
 .guidance-step{grid-template-columns:38px minmax(0,1fr) auto}.guidance-step-num{width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--line2);border-radius:10px;background:var(--panel);font-weight:800}.guidance-step.done{border-color:#285440}.guidance-step.done .guidance-step-num{border-color:#2c634b;background:#123225;color:#8be0bd}.guidance-step h3{font-size:13px}.guidance-step p{margin-top:3px;color:var(--muted);font-size:11px}
 @media(max-width:760px){.guidance-hero-main,.guidance-diagnostic-head{align-items:flex-start;flex-direction:column}.guidance-score{width:100%;height:64px}.guidance-quick{grid-template-columns:1fr}.guidance-issue{grid-template-columns:1fr}.guidance-step{grid-template-columns:38px minmax(0,1fr)}.guidance-step .btn{grid-column:2;justify-self:start}}
+
+/* Lien Premium discret dans la navigation unifiée, mêmes couleurs que SentriX. */
+.sx-premium-entry{display:flex;align-items:center;justify-content:space-between;gap:8px;max-width:calc(100% - 20px);margin:12px 10px 6px;padding:11px 12px;border:1px solid var(--line2);border-radius:11px;background:var(--blue-bg);color:var(--blue2);font-size:12px;font-weight:750;line-height:1.35;text-decoration:none}
+.sx-premium-entry:hover{background:var(--hover-bg);color:var(--text);border-color:var(--blue)}
+.sx-premium-entry:focus-visible{outline:2px solid var(--blue2);outline-offset:2px}
+.sx-premium-entry span{font-size:14px;font-weight:650;opacity:.85}
+@media(max-width:700px){.sx-premium-entry{margin:10px 9px 15px}}
