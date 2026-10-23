@@ -723,12 +723,10 @@ class BoutonRouvrirTicket(discord.ui.DynamicItem[discord.ui.Button],
             from cogs.tickets import TicketControlView, get_button_settings
 
             settings = await get_button_settings(interaction.client, guild.id)
+            from services import ticket_panels_v3
             panel = _panels.avec_composants(
-                _panels.depuis_embed(
-                    _embeds.success(
-                        f"Ticket **#{self.ticket_id}** rouvert par {interaction.user.mention}. "
-                        "Le membre peut de nouveau voir et utiliser le salon."
-                    )
+                ticket_panels_v3.reopened_card(
+                    ticket_id=self.ticket_id, by=interaction.user,
                 ),
                 TicketControlView(settings),
             )
@@ -754,6 +752,121 @@ class BoutonRouvrirTicket(discord.ui.DynamicItem[discord.ui.Button],
             cible=owner,
             raison="Réouverture manuelle depuis le panneau du ticket.",
         )
+
+
+
+class ConfirmerSuppressionTicket(discord.ui.Modal, title="🗑️ Supprimer définitivement le ticket"):
+    """La suppression est irréversible : demander motif + confirmation explicite."""
+
+    def __init__(self, ticket_id: int):
+        super().__init__(timeout=300)
+        self.ticket_id = int(ticket_id)
+        self.reason = discord.ui.TextInput(
+            label="Raison de la suppression (facultatif)",
+            placeholder="Ex. : ticket traité, archive conservée",
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+            required=False,
+        )
+        self.confirmation = discord.ui.TextInput(
+            label="Écrire SUPPRIMER pour confirmer",
+            placeholder="SUPPRIMER",
+            style=discord.TextStyle.short,
+            min_length=9,
+            max_length=9,
+            required=True,
+        )
+        self.add_item(self.reason)
+        self.add_item(self.confirmation)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if str(self.confirmation.value or "").strip().upper() != "SUPPRIMER":
+            return await interaction.response.send_message(
+                "Suppression annulée : vous devez écrire exactement SUPPRIMER.",
+                ephemeral=True,
+            )
+        await supprimer_ticket_apres_confirmation(
+            interaction, ticket_id=self.ticket_id,
+            raison=str(self.reason.value or "").strip() or "Suppression demandée par le staff.",
+        )
+
+
+async def supprimer_ticket_apres_confirmation(
+    interaction: discord.Interaction, *, ticket_id: int, raison: str,
+) -> None:
+    """Ne supprime que SON salon, un ticket fermé, par un staff autorisé.
+
+    L'état DB est remis à 'ferme' si Discord refuse la suppression, et les logs
+    indiquent le motif réellement saisi. Le transcript archivé à la fermeture
+    reste dans le salon Logs → Tickets.
+    """
+    guild, salon = interaction.guild, interaction.channel
+    if guild is None or not isinstance(salon, discord.TextChannel):
+        return await interaction.response.send_message(
+            "Action indisponible en dehors du salon du ticket.", ephemeral=True,
+        )
+    perms = getattr(interaction.user, "guild_permissions", None)
+    autorise = bool(
+        (perms and (perms.manage_channels or perms.administrator))
+        or interaction.user.id == guild.owner_id
+    )
+    if not autorise:
+        return await interaction.response.send_message(
+            "Seul le staff autorisé peut supprimer définitivement un ticket.",
+            ephemeral=True,
+        )
+
+    data = await interaction.client.db.fetchone(
+        "SELECT id, guild_id, channel_id, status FROM tickets "
+        "WHERE id=? AND guild_id=? AND channel_id=?",
+        (int(ticket_id), int(guild.id), int(salon.id)),
+    )
+    if not data or str(data["status"]) != "ferme":
+        return await interaction.response.send_message(
+            "Le ticket n'est pas fermé ou n'appartient pas à ce salon.",
+            ephemeral=True,
+        )
+
+    # L'interaction est acquittée avant l'appel API Discord (qui peut durer).
+    await interaction.response.defer(ephemeral=True)
+    updated = await interaction.client.db.execute(
+        "UPDATE tickets SET status='supprime' "
+        "WHERE id=? AND guild_id=? AND channel_id=? AND status='ferme'",
+        (int(ticket_id), int(guild.id), int(salon.id)),
+    )
+    if getattr(updated, "rowcount", 0) != 1:
+        return await interaction.followup.send(
+            "Le ticket a déjà été modifié par un autre membre du staff.",
+            ephemeral=True,
+        )
+    try:
+        await salon.delete(reason=f"SentriX ticket #{ticket_id} supprimé par {interaction.user}: {raison[:300]}")
+    except discord.HTTPException:
+        await interaction.client.db.execute(
+            "UPDATE tickets SET status='ferme' WHERE id=? AND status='supprime'",
+            (int(ticket_id),),
+        )
+        return await interaction.followup.send(
+            "Discord a refusé de supprimer le salon. Le ticket reste fermé et conservé.",
+            ephemeral=True,
+        )
+
+    try:
+        await journaliser_evenement(
+            interaction.client, guild, "ticket_delete",
+            ticket_id=int(ticket_id), channel=salon,
+            acteur=interaction.user, raison=raison[:500],
+            avec_bouton=False,
+        )
+    except Exception:
+        logger.exception("Journal de suppression ticket #%s indisponible.", ticket_id)
+    try:
+        await interaction.followup.send(
+            f"Ticket #{int(ticket_id)} supprimé. Le motif a été enregistré dans le journal.",
+            ephemeral=True,
+        )
+    except discord.HTTPException:
+        pass
 
 
 class BoutonSupprimerTicket(discord.ui.DynamicItem[discord.ui.Button],
@@ -809,42 +922,10 @@ class BoutonSupprimerTicket(discord.ui.DynamicItem[discord.ui.Button],
                 ephemere=True,
             )
 
-        ligne = await interaction.client.db.fetchone(
-            "SELECT status FROM tickets WHERE id = ?", (self.ticket_id,)
-        )
-        if ligne is not None and str(ligne["status"]) == "ouvert":
-            return await _panels.envoyer(
-                interaction.response,
-                _panels.depuis_embed(_embeds.warning(
-                    "Ce ticket a été rouvert. Fermez-le d'abord."
-                )),
-                ephemere=True,
-            )
-
-        await interaction.client.db.execute(
-            "UPDATE tickets SET status = 'supprime' WHERE id = ? AND status <> 'supprime'",
-            (self.ticket_id,),
-        )
-        await journaliser_evenement(
-            interaction.client, guild, "ticket_delete",
-            ticket_id=self.ticket_id, channel=salon,
-            acteur=interaction.user,
-            raison="Suppression demandée par le staff.",
-            avec_bouton=False,
-        )
-        try:
-            await interaction.response.send_message(
-                "🗑️ Suppression du salon…", ephemeral=True
-            )
-        except discord.HTTPException:
-            pass
-        try:
-            await salon.delete(reason=f"Ticket supprimé par {interaction.user}.")
-        except discord.HTTPException:
-            logger.warning(
-                "Suppression manuelle du ticket %s refusée par Discord (salon=%s).",
-                self.ticket_id, getattr(salon, "id", None),
-            )
+        # Ne plus supprimer instantanément au clic : ouvrir un modal explicite
+        # avec motif libre et confirmation SUPPRIMER. Le traitement irréversible
+        # reste dans supprimer_ticket_apres_confirmation().
+        await interaction.response.send_modal(ConfirmerSuppressionTicket(self.ticket_id))
 
 
 def vue_ticket_ferme(ticket_id: int) -> discord.ui.View:

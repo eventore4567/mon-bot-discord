@@ -27,15 +27,15 @@ import pytest
 
 from cogs import logs_unified_v6 as v6
 from cogs import tickets
+from cogs import ticket_claim_security
 
 
 def _source_fermeture() -> str:
-    """La fermeture réellement installée, pas celle de tickets.py."""
-    src = inspect.getsource(v6)
-    debut = src.index("async def close_ticket_v6")
-    fin = src.index("\ndef ", debut)
+    """Lis le VRAI gestionnaire sécurisé, appelé par le pont V6."""
+    src = inspect.getsource(ticket_claim_security)
+    debut = src.index("async def secure_close_ticket")
+    fin = src.index("\n    async def secure_claim", debut)
     return src[debut:fin]
-
 
 def test_la_fermeture_retire_le_salon_de_la_vue_du_membre():
     src = _source_fermeture()
@@ -53,7 +53,7 @@ def test_la_fermeture_ne_programme_plus_de_suppression():
 
 def test_le_ticket_reste_en_base_avec_son_statut():
     src = _source_fermeture()
-    assert "status = 'ferme'" in src
+    assert "status='ferme'" in src
     assert "closed_at" in src
 
 
@@ -66,7 +66,8 @@ def test_un_refus_de_discord_annule_la_fermeture():
 
 def test_le_message_dit_quoi_faire_ensuite():
     src = _source_fermeture()
-    assert "ticket-reopen" in src, "le staff doit savoir comment rendre le salon"
+    assert "vue_ticket_ferme(ticket_id)" in src
+    assert "ticket_panels_v3.closed_card(" in src
 
 
 def test_la_commande_de_reouverture_existe_toujours():
@@ -74,6 +75,12 @@ def test_la_commande_de_reouverture_existe_toujours():
 
 
 def test_c_est_bien_la_version_v6_qui_est_installee():
-    """Garde contre le piège : corriger tickets.py seul ne servirait à rien."""
+    """Le patch V6 sur l'instance doit maintenant DELEGUER au code sûr."""
     src = inspect.getsource(v6)
     assert "tickets_cog.close_ticket = types.MethodType(close_ticket_v6, tickets_cog)" in src
+    assert "ticket_claim_security.close_ticket_via_security(" in src
+    assert "embed=close_embed" not in src
+    assert "view=_ticket_actions(" not in inspect.getsource(v6)[
+        inspect.getsource(v6).index("async def close_ticket_v6"):
+        inspect.getsource(v6).index("canonical_log_action._sentrix_unified_v6")
+    ]

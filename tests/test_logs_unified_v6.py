@@ -76,16 +76,24 @@ def test_deleted_attachments_are_archived_in_logs_dossiers():
     assert "media_items=media_items" in source
 
 
-def test_ticket_transcript_is_a_button_not_a_permanent_gray_attachment():
+def test_ticket_transcript_stays_archived_and_is_visible_inside_the_new_card():
+    """Les vieux boutons V6 sont conservés pour l'historique, pas recréés."""
     source = read(V6)
+    secure = read(ROOT / "cogs" / "ticket_claim_security.py")
+    cards = read(ROOT / "services" / "ticket_panels_v3.py")
     assert "CREATE TABLE IF NOT EXISTS ticket_transcripts" in source
-    assert 'label="Télécharger la transcript"' in source
     assert 'custom_id=f"sentrix:ticket-transcript:{int(ticket_id)}"' in source
     assert 'prefix = "sentrix:ticket-transcript:"' in source
-    assert '"Transcript", "Disponible avec le bouton ci-dessous."' in source
-    # Le fichier est généré uniquement à la demande/DM ; l'envoi du log passe par send_log + view.
+    # Plus de panneau vert ni de boutons Copier-ID/Transcript sur une fermeture
+    # neuve : c'est désormais le fichier TXT de la carte Components V2.
     close_block = source[source.index("async def close_ticket_v6"):source.index("def _patch_raw_file_recovery")]
-    assert '"tickets",\n            panel,\n            view=_ticket_actions' in close_block
+    assert "ticket_claim_security.close_ticket_via_security(" in close_block
+    assert 'view=_ticket_actions(' not in close_block
+    assert "ticket_panels_v3.closed_card(" in secure
+    assert "file=transcript_file" in secure
+    assert "await logs_unified_v6._store_transcript(" in secure
+    assert 'component(media=f"attachment://{transcript_filename}")' in cards
+    assert "vue_ticket_ferme(ticket_id)" in secure
 
 
 def test_reset_moves_all_ticket_types_and_preserves_unrelated_staff_channels():
@@ -105,7 +113,7 @@ if __name__ == "__main__":
     test_separator_is_longer_and_shared()
     test_channel_name_survives_channel_deletion()
     test_deleted_attachments_are_archived_in_logs_dossiers()
-    test_ticket_transcript_is_a_button_not_a_permanent_gray_attachment()
+    test_ticket_transcript_stays_archived_and_is_visible_inside_the_new_card()
     test_reset_moves_all_ticket_types_and_preserves_unrelated_staff_channels()
     print("logs unified v6 contracts: ok")
 

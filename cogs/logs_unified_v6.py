@@ -476,164 +476,21 @@ def _patch_tickets(bot: commands.Bot) -> None:
         )
 
     async def close_ticket_v6(
-        _self,
-        interaction: discord.Interaction,
-        ticket_id: int,
-        reason: str,
+        _self, interaction: discord.Interaction, ticket_id: int, reason: str,
     ):
-        ticket = await bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
-        if not ticket or interaction.guild is None:
-            return
-        guild = interaction.guild
-        channel = guild.get_channel(ticket["channel_id"])
-        if not isinstance(channel, discord.TextChannel):
-            return
+        """Compatibilité V6 : utilise la fermeture sécurisée canonique.
 
-        _remember_channel(channel)
-        channel_id = int(channel.id)
-        channel_name = _clean_channel_name(channel.name)
-        opener_id = int(ticket["user_id"] or 0)
-        closer_id = int(interaction.user.id)
-        conf = await bot.db.get_guild_config(guild.id)
-
-        await bot.db.execute(
-            "UPDATE tickets SET status = 'ferme', closed_at = ?, locked = 1 WHERE id = ?",
-            (int(time.time()), ticket_id),
+        Ne plus réécrire un embed vert et un panneau de boutons historiques.
+        Le module cogs.ticket_claim_security sait masquer le salon avec rollback,
+        générer le transcript, envoyer la nouvelle carte Components V2 et les
+        actions persistantes Rouvrir / Supprimer avec confirmation. Ce pont
+        conserve les installations où V6 modifie close_ticket SUR l'instance
+        après que la classe Tickets a déjà été corrigée.
+        """
+        from . import ticket_claim_security
+        return await ticket_claim_security.close_ticket_via_security(
+            _self, interaction, ticket_id, reason,
         )
-
-        owner = guild.get_member(opener_id)
-        if owner:
-            # Fermer, c'est RETIRER LE SALON DE LA VUE du membre, pas seulement
-            # l'empêcher d'écrire. Jusqu'ici seul send_messages tombait : le
-            # membre continuait de voir le salon et de lire la suite des
-            # échanges entre staff.
-            overwrite = channel.overwrites_for(owner)
-            overwrite.view_channel = False
-            overwrite.send_messages = False
-            overwrite.read_message_history = False
-            try:
-                await channel.set_permissions(
-                    owner, overwrite=overwrite,
-                    reason=f"Ticket fermé par {interaction.user}",
-                )
-            except discord.HTTPException:
-                # Ne jamais annoncer un ticket fermé si Discord n'a pas appliqué
-                # l'isolation : on remet l'état précédent plutôt que de laisser
-                # un ticket « fermé » que le membre lit encore.
-                await bot.db.execute(
-                    "UPDATE tickets SET status='ouvert', closed_at=NULL, locked=0 "
-                    "WHERE id=? AND status='ferme'",
-                    (ticket_id,),
-                )
-                try:
-                    await interaction.followup.send(
-                        "Impossible de fermer le ticket : Discord a refusé de masquer le salon au membre.",
-                        ephemeral=True,
-                    )
-                except (discord.HTTPException, AttributeError):
-                    pass
-                return
-
-        try:
-            transcript_text = await _self._fetch_transcript_text(channel)
-        except discord.HTTPException:
-            transcript_text = "Transcription indisponible (erreur lors de la lecture du salon)."
-
-        await _store_transcript(
-            bot,
-            ticket_id=ticket_id,
-            guild_id=guild.id,
-            channel_id=channel_id,
-            channel_name=channel_name,
-            text=transcript_text,
-        )
-
-        # Fermer n'est PAS supprimer. Cette version programmait une suppression
-        # automatique (30 s par défaut) : le salon, la transcription lisible et
-        # tout le fil disparaissaient d'un coup, sans retour possible. Le ticket
-        # reste désormais en base avec son statut « ferme », le salon reste là,
-        # simplement invisible pour le membre. Un staff décide ensuite de
-        # rouvrir (+ticket-reopen) ou de supprimer le salon.
-        close_embed = embeds.warning(
-            f"Ticket fermé par {interaction.user.mention}.\n"
-            f"Raison : {reason}\n\n"
-            "Le salon est masqué au membre et conservé. "
-            "`+ticket-reopen` le rend au membre ; supprimez le salon quand vous n'en avez plus besoin."
-        )
-        try:
-            await channel.send(
-                embed=close_embed,
-                view=_ticket_actions(
-                    ticket_id=ticket_id,
-                    channel_id=channel_id,
-                    opener_id=opener_id,
-                    closer_id=closer_id,
-                ),
-                allowed_mentions=log_service.LOG_ALLOWED_MENTIONS,
-            )
-        except discord.HTTPException:
-            pass
-
-        panel = embeds.canonical_log_embed(
-            "Ticket fermé",
-            fields=(
-                ("Ticket", f"`#{ticket_id}`", True),
-                ("Salon", _channel_value(channel), False),
-                ("Ouvert par", f"<@{opener_id}>" if opener_id else "Utilisateur indisponible", True),
-                ("Fermé par", interaction.user.mention, True),
-                ("Raison", reason or "Aucune raison fournie", False),
-                ("Transcript", "Disponible avec le bouton ci-dessous.", False),
-            ),
-        )
-        event_key = log_service.make_event_key(
-            guild.id,
-            "ticket_close",
-            target_id=opener_id or None,
-            executor_id=closer_id,
-            discriminator=ticket_id,
-        )
-        await log_service.send_log(
-            bot,
-            guild,
-            "tickets",
-            panel,
-            view=_ticket_actions(
-                ticket_id=ticket_id,
-                channel_id=channel_id,
-                opener_id=opener_id,
-                closer_id=closer_id,
-            ),
-            event_key=event_key,
-        )
-
-        if owner:
-            try:
-                transcript_dm = True if not conf else bool(conf["ticket_transcript_dm"])
-            except (KeyError, TypeError):
-                transcript_dm = True
-            if transcript_dm:
-                try:
-                    await owner.send(
-                        embed=embeds.info(
-                            f"Voici la transcription de votre ticket sur **{guild.name}**."
-                        ),
-                        file=_self._transcript_file(channel, transcript_text),
-                    )
-                except (discord.Forbidden, discord.HTTPException):
-                    pass
-            try:
-                rating_enabled = True if not conf else bool(conf["ticket_rating_enabled"])
-            except (KeyError, TypeError):
-                rating_enabled = True
-            if rating_enabled:
-                try:
-                    from .tickets import RatingView
-                    await owner.send(
-                        content="Pouvez-vous noter le support reçu ?",
-                        view=RatingView(_self, ticket_id),
-                    )
-                except (discord.Forbidden, discord.HTTPException):
-                    pass
 
     canonical_log_action._sentrix_unified_v6 = True
     close_ticket_v6._sentrix_unified_v6 = True

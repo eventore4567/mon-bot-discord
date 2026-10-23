@@ -45,6 +45,7 @@ from cogs.ticket_constants import (
 )
 from services.tickets import count_genuinely_open_tickets
 from services import tickets as tickets_service
+from services import ticket_panels_v3
 from utils import embeds, checks, helpers, design_system
 from utils import cluster
 from utils import sentrix_panels as sx_panels
@@ -394,13 +395,15 @@ class CloseReasonModal(discord.ui.Modal, title="🔒 Fermer le ticket"):
         self.cog = cog
         self.ticket_id = ticket_id
         self.reason = discord.ui.TextInput(
-            label="Raison de la fermeture (optionnel)", style=discord.TextStyle.paragraph, required=False, max_length=500,
+            label="Motif de fermeture (recommandé)",
+            placeholder="Ex. : demande résolue, assistance terminée",
+            style=discord.TextStyle.paragraph, required=False, max_length=500,
         )
         self.add_item(self.reason)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        await self.cog.close_ticket(interaction, self.ticket_id, self.reason.value or "Aucune raison fournie")
+        await self.cog.close_ticket(interaction, self.ticket_id, self.reason.value or "Non précisée")
 
 
 class TicketNoteModal(discord.ui.Modal, title="📝 Note interne"):
@@ -1507,23 +1510,10 @@ class Tickets(commands.Cog):
                     label,
                 )
 
-        # Fiche d'ouverture de ticket (Phase 3, design premium/sombre) — n'affecte QUE ce
-        # message d'accueil, jamais TicketControlView ni les custom_id des boutons
-        # persistants (ceux-ci restent inchangés pour ne rien casser après un redémarrage).
-        style = design_system.CATEGORY_STYLES["tickets"]
-        e = design_system.create_embed(
-            title=f"{ticket_type['emoji'] or style['emoji']} {ticket_type['name']} — Ticket #{number}",
-            description=ticket_type["open_message"] or f"Bonjour {user.mention}, le staff vous répondra bientôt.",
-            colour=style["colour"],
-            user=user,
-            thumbnail=user.display_avatar.url,
-            footer="SentriX",
-        )
-        e.add_field(name="👤 Ouvert par", value=user.mention, inline=True)
-        e.add_field(name="📂 Type", value=ticket_type["name"], inline=True)
-        for label, value in answers:
-            if value:
-                e.add_field(name=label[:256], value=helpers.truncate(value, 1024), inline=False)
+        # Le panneau ticket utilise la même famille de composants que les
+        # logs, avec une vraie bannière et une seule carte structurée.
+        # Discord refuse content + Components V2 dans un même message :
+        # les mentions sont intégrées au texte et autorisées explicitement.
         try:
             button_settings = await get_button_settings(self.bot, guild.id)
         except Exception:
@@ -1533,17 +1523,32 @@ class Tickets(commands.Cog):
             )
             button_settings = default_button_settings()
 
-        content = user.mention
-        if ticket_type["mention_staff"] and staff_role:
-            content += f" {staff_role.mention}"
-        # Ce message DOIT pinguer le membre et le role support : Discord refuse un
-        # `content` sur un message Components V2, donc il reste un embed. Le ping
-        # prime sur la banniere — c'est une exception assumee, pas un oubli.
+        intro = (
+            ticket_type["open_message"]
+            or f"Bonjour {user.mention}, un membre du staff vous répondra ici."
+        )
+        staff_ping = staff_role if (ticket_type["mention_staff"] and staff_role) else None
+        control_card = sx_panels.avec_composants(
+            ticket_panels_v3.opening_card(
+                ticket_number=number,
+                ticket_type=str(ticket_type["name"]),
+                opener=user,
+                description=intro,
+                staff_role=staff_ping,
+                answers=answers,
+            ),
+            TicketControlView(button_settings),
+        )
         try:
             await channel.send(
-                content=content,
-                embed=e,
-                view=TicketControlView(button_settings),
+                view=control_card,
+                files=control_card.fichiers(),
+                allowed_mentions=discord.AllowedMentions(
+                    users=[user],
+                    roles=[staff_ping] if staff_ping else [],
+                    everyone=False,
+                    replied_user=False,
+                ),
             )
         except discord.HTTPException:
             # Sans message de contrôle, le ticket est inutilisable. On revient à un
@@ -2102,20 +2107,28 @@ class Tickets(commands.Cog):
             transcript = None
 
         try:
-            kwargs = {}
-            if transcript is not None:
-                kwargs["file"] = transcript
+            # Même interface que les fermetures manuelles, sans ancienne carte
+            # verte "Vérification nécessaire" ni boutons de copie inutiles.
+            duration = tickets_service.duree_du_ticket(row)
             panel = sx_panels.avec_composants(
-                sx_panels.depuis_embed(
-                    embeds.warning(
-                        "Ticket fermé automatiquement pour inactivité.\n\n"
-                        "Le membre ne peut plus voir le salon. "
-                        "Le staff peut le **rouvrir** ou le **supprimer définitivement**."
-                    )
+                ticket_panels_v3.closed_card(
+                    ticket_id=int(row["id"]),
+                    opener_id=int(row["user_id"]),
+                    closer=self.bot.user,
+                    reason="Inactivité : délai configuré dépassé.",
+                    duration=duration,
+                    transcript_filename=transcript.filename if transcript else None,
+                    avatar_url=str(owner.display_avatar.url) if owner else None,
+                    claimed_by_id=int(row["claimed_by"]) if row["claimed_by"] else None,
+                    closed_at=int(now()),
                 ),
                 tickets_service.vue_ticket_ferme(row["id"]),
             )
-            await sx_panels.envoyer(channel, panel, **kwargs)
+            kwargs = {"file": transcript} if transcript else {}
+            await sx_panels.envoyer(
+                channel, panel, allowed_mentions=discord.AllowedMentions.none(),
+                **kwargs,
+            )
         except discord.HTTPException:
             logger.warning(
                 "Message d'auto-fermeture non envoyé pour le ticket #%s.",
