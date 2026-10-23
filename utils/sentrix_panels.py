@@ -796,26 +796,57 @@ def _rangees(boutons: Sequence[Bouton]) -> list[discord.ui.ActionRow]:
     return [r for r in rangees if r is not None]
 
 
+def _icone_de_bouton(libelle: str, emoji_pose: object) -> tuple[str, object]:
+    """Sort l'emoji de tête d'un libellé et le rend comme icône SentriX.
+
+    Un libellé de bouton ne peut PAS porter de marquage `<:nom:id>` : Discord
+    l'afficherait tel quel. L'icône d'un bouton passe par `emoji=`, qui attend
+    un objet. On déplace donc l'emoji Unicode de tête du libellé vers ce
+    paramètre, converti en icône SentriX quand elle existe.
+
+    Trois refus volontaires : on ne touche pas à un bouton qui a déjà son
+    emoji, on laisse le libellé intact si l'icône n'est pas disponible (un
+    bouton sans emoji reste valide, un libellé amputé non), et on ne déplace
+    jamais un emoji qui est le libellé ENTIER — « 🔁 » seul deviendrait un
+    bouton sans texte ni image.
+    """
+    if emoji_pose is not None:
+        return libelle, emoji_pose
+    texte = str(libelle or "")
+    from utils.sentrix_emojis import EQUIVALENCES, partiel
+
+    for unicode_ in sorted(EQUIVALENCES, key=len, reverse=True):
+        if not texte.startswith(unicode_):
+            continue
+        reste = texte[len(unicode_):].strip()
+        if not reste:
+            return texte, None
+        icone = partiel(EQUIVALENCES[unicode_])
+        return (reste, icone) if icone is not None else (texte, None)
+    return texte, emoji_pose
+
+
 def _rangee(boutons: Sequence[Bouton]) -> discord.ui.ActionRow | None:
     rangee = discord.ui.ActionRow()
     pose = 0
     for bouton in boutons:
         try:
+            libelle, icone = _icone_de_bouton(_texte(bouton.libelle, 80), bouton.emoji)
             if bouton.url:
                 rangee.add_item(
                     discord.ui.Button(
-                        label=_texte(bouton.libelle, 80),
+                        label=libelle,
                         url=bouton.url,
-                        emoji=bouton.emoji,
+                        emoji=icone,
                         disabled=bouton.desactive,
                     )
                 )
             else:
                 item = discord.ui.Button(
-                    label=_texte(bouton.libelle, 80),
+                    label=libelle,
                     custom_id=bouton.custom_id or f"sentrix:panel:{pose}",
                     style=bouton.style,
-                    emoji=bouton.emoji,
+                    emoji=icone,
                     disabled=bouton.desactive,
                 )
                 if callable(bouton.callback):
