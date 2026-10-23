@@ -1283,3 +1283,91 @@ html[data-theme="oled"] body.dashboard-locked::after{
 .sx-premium-entry:focus-visible{outline:2px solid var(--blue2);outline-offset:2px}
 .sx-premium-entry span{font-size:14px;font-weight:650;opacity:.85}
 @media(max-width:700px){.sx-premium-entry{margin:10px 9px 15px}}
+
+
+/* SentriX Normal V1 — mise en page unifiée sans changement de runtime.
+   Les variables restent compatibles avec les thèmes et le mode compact. */
+html:not([data-density="compact"]) .workspace{
+  padding:clamp(21px,2.35vw,34px) clamp(17px,2.5vw,38px) 50px;
+}
+.workspace-head{
+  align-items:center;gap:18px;min-height:70px;
+  padding-bottom:19px;margin-bottom:21px;border-bottom:1px solid var(--line);
+}
+.workspace-head .head-copy{min-width:0}
+.workspace-head h1{font-size:clamp(22px,2.15vw,29px);font-weight:760;letter-spacing:-.035em;line-height:1.2}
+.workspace-head p{font-size:13px;line-height:1.7;max-width:76ch;overflow-wrap:anywhere}
+.head-actions{align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.topbar{gap:14px}
+.top-search{min-width:0;width:clamp(176px,23vw,340px);height:37px}
+.top-search span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sidebar{padding:15px 12px 20px;gap:14px}
+.server-head{padding:11px 10px;border-radius:12px;min-width:0}
+.server-head .server-copy{flex:1;min-width:0}
+.nav{gap:3px}
+.nav-group{padding:15px 10px 5px;letter-spacing:.11em;line-height:1.5}
+.nav button,.nav a.nav-link{min-height:37px;padding:9px 11px;line-height:1.4}
+.nav button.active{font-weight:740;box-shadow:inset 3px 0 0 var(--blue)}
+.nav details{margin-top:10px}
+#content{max-width:1600px;margin-inline:auto}
+.grid{gap:16px}
+.card{padding:clamp(16px,1.6vw,23px);gap:14px;box-shadow:inset 0 1px 0 rgb(255 255 255 / .018)}
+.card-head{align-items:flex-start;gap:16px}
+.card-head>div{min-width:0}
+.card > h2,.card-head h2{font-size:16px;line-height:1.4;overflow-wrap:anywhere}
+.card > p,.card-head p{font-size:13px;line-height:1.7;overflow-wrap:anywhere}
+.card-head .toolbar{gap:7px;flex-wrap:wrap;max-width:100%}
+.module-grid{gap:14px;grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr))}
+.module-card{padding:17px 18px;gap:11px;min-width:0;border-radius:var(--radius);box-shadow:inset 0 1px 0 rgb(255 255 255 / .02)}
+.module-card .card-head h3{font-size:15px;line-height:1.4;overflow-wrap:anywhere}
+.module-card .info{min-height:2.6em;line-height:1.6;overflow-wrap:anywhere}
+.module-card .toolbar{margin-top:auto;padding-top:3px}
+.overview-server-bar{padding:14px 17px;gap:15px}
+.overview-server-copy strong{font-size:15px;max-width:100%;overflow-wrap:anywhere}
+.overview-stat{padding:7px 10px}
+.row{padding:12px 14px;gap:14px;min-width:0}
+.row-main{min-width:0;gap:3px}
+.row-main b{font-size:13px;line-height:1.55}
+.row-main small{font-size:12px;line-height:1.5}
+.row-actions{max-width:100%;flex-wrap:wrap;justify-content:flex-end}
+.kpis{gap:12px}
+.kpi{padding:13px 15px;gap:5px;min-width:0}
+.kpi strong{font-size:23px;line-height:1.25}
+.subnav{gap:8px;margin-bottom:21px}
+.subnav button{min-height:39px;padding:9px 13px;line-height:1.4}
+.btn{min-height:35px;padding-inline:13px;line-height:1.25;text-align:center}
+.btn.sm{min-height:28px}
+.field label,.field>.label{font-size:12.5px;line-height:1.5}
+.field small{line-height:1.55}
+.notice{padding:12px 14px;line-height:1.65;overflow-wrap:anywhere}
+.empty{padding:29px 18px;line-height:1.6}
+.sx-premium-entry{max-width:100%;margin:9px 1px 6px;padding:12px 13px;border-radius:10px}
+@media(max-width:1000px){
+  html:not([data-density="compact"]) .workspace{padding:22px 19px 40px}
+  .module-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))}
+}
+@media(max-width:700px){
+  .workspace-head{align-items:flex-start;flex-direction:column;gap:13px;padding-bottom:15px}
+  .workspace-head h1{font-size:24px}
+  .head-actions{width:100%;justify-content:flex-start}
+  .grid{gap:12px}
+  .card{padding:16px;gap:11px}
+  .card-head{gap:10px;flex-wrap:wrap}
+  .card-head .toolbar{flex:1 1 100%}
+  .module-grid{grid-template-columns:1fr;gap:10px}
+  .module-card{padding:15px}
+  .module-card .info{min-height:0}
+  .overview-server-bar{padding:13px}
+  .row{align-items:flex-start;flex-wrap:wrap;padding:11px 12px}
+  .row-actions{justify-content:flex-start}
+  .top-search{width:auto;min-width:0;flex:1}
+}
+@media(max-width:420px){
+  .topbar{padding:0 10px;gap:9px}
+  .head-actions .btn{min-width:120px}
+  .subnav button{padding:9px 11px}
+  .overview-stat{white-space:normal}
+}
+@media(prefers-reduced-motion:reduce){
+  .card,.module-card,.row,.nav button{transition:none!important}
+}
