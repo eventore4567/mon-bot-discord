@@ -1828,7 +1828,21 @@ class Music(commands.Cog, name="Music"):
         queue = await self._ensure_voice(ctx)
         if queue is None:
             return
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Salon rejoint", description=f"J'ai rejoint **{queue.voice_client.channel.name}**.", kind="success")))
+        # Avant : « J'ai rejoint #vocal. » et rien d'autre — une impasse. Les
+        # chiffres de production le disaient : `music join` servait, `play`
+        # jamais. Le membre faisait venir SentriX en vocal puis restait devant
+        # un message qui ne dit pas quoi faire ensuite.
+        #
+        # On répond maintenant avec le LECTEUR lui-même : il porte déjà le
+        # bouton « ➕ Ajouter » et explique quoi faire. Aucun nouveau composant,
+        # aucune nouvelle commande — juste la bonne réponse au bon moment.
+        await panels.envoyer(
+            ctx,
+            self._music_player_panel(
+                queue,
+                notice=f"J'ai rejoint **{queue.voice_client.channel.name}**.",
+            ),
+        )
 
     @music.command(name="leave", description="Faire quitter le bot du salon vocal.")
     async def music_leave(self, ctx: commands.Context):
