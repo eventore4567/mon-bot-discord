@@ -18,6 +18,7 @@ import discord
 from discord.ext import commands
 
 from services import tickets as tickets_service
+from services import ticket_log_report
 from utils import log_service
 from utils import sentrix_panels as panels
 
@@ -459,26 +460,8 @@ def install(bot: commands.Bot) -> None:
             if not member.bot
         ][:30]
         participant_text = "\n".join(participants) or "Aucun participant disponible."
-        member_ref = f"<@{int(ticket['user_id'])}> (`{int(ticket['user_id'])}`)"
-        moderator_ref = f"<@{interaction.user.id}> (`{interaction.user.id}`)"
-        log_embed = discord.Embed(
-            title="🔒 Fermeture du ticket",
-            description=(
-                f"**Modérateur :** {moderator_ref}\n"
-                f"**Membre :** {member_ref}\n"
-                f"**Création du ticket :** <t:{int(ticket['created_at'] or closed_at)}:R>\n"
-                f"**Raison :** {reason_text}\n\n"
-                f"**Participants :**\n{participant_text}"
-            )[:3900],
-            colour=discord.Colour(0xA05CFF),
-            timestamp=discord.utils.utcnow(),
-        )
-        log_embed.set_footer(text="SentriX")
-        # Ligne d'audit + référence citable. Cet embed-ci est construit à la main
-        # plutôt que par journaliser_evenement() parce qu'il porte des champs que
-        # lui seul a : les participants et la date de création. Les perdre pour
-        # uniformiser serait une régression — on lui ajoute donc ce qui manque
-        # au lieu de le remplacer.
+        # L'audit de fermeture est persistant. Le rapport relit aussi l'historique
+        # des claims/transferts/réouvertures et préserve l'identité du membre.
         ligne_id = await tickets_service.enregistrer_evenement(
             self.bot, guild.id, "ticket_close",
             ticket_id=ticket_id, channel_id=channel.id,
@@ -486,12 +469,25 @@ def install(bot: commands.Bot) -> None:
             details=reason_text,
         )
         reference = tickets_service.reference_incident(ticket_id, ligne_id)
-        if duree:
-            # Demandé par Jayden : combien de temps le ticket est resté ouvert.
-            # Deux horodatages qu'il faut soustraire de tête ne disent rien ;
-            # « 2 h 14 min » se lit d'un coup d'œil et montre ce qui a traîné.
-            log_embed.add_field(name="⏳ Ouvert pendant", value=f"**{duree}**", inline=True)
-        log_embed.add_field(name="🔖 Référence", value=f"`{reference}`", inline=False)
+        report = await ticket_log_report.load_report(
+            self.bot, guild.id, ticket,
+            closed_at=closed_at, closed_by=interaction.user.id,
+            reason=reason_text,
+        )
+        log_embed = discord.Embed(
+            title="🔒 Fermeture du ticket",
+            description=(
+                f"Ticket **#{ticket_id}** fermé par {interaction.user.mention}. "
+                "Le récapitulatif et le transcript sont conservés dans le journal Tickets."
+            ),
+            colour=discord.Colour(0x4385DF),
+            timestamp=discord.utils.utcnow(),
+        )
+        log_embed.set_footer(text="SentriX · Historique du ticket")
+        ticket_log_report.add_fields(
+            log_embed, report, channel_name=channel.name,
+            participant_text=participant_text, reference=reference,
+        )
         event_key = log_service.make_event_key(
             guild.id,
             "ticket_close",
@@ -504,7 +500,7 @@ def install(bot: commands.Bot) -> None:
             guild,
             "ticket_close",
             log_embed,
-            file=self._transcript_file(channel, transcript_text),
+            file=report.transcript_file(transcript_text),
             view=tickets_service.vue_voir_le_ticket(guild.id, channel.id),
             event_key=event_key,
             identity_name=(owner.display_name if owner else f"Membre {ticket['user_id']}"),
