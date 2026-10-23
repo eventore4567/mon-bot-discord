@@ -299,6 +299,14 @@ def _base(
     clean_description: bool = True,
 ) -> discord.Embed:
     safe_title = clean_ui_text(title, 90, "Information")
+    # Les icônes SentriX sur le titre, comme sur les panneaux. `traduire` rend
+    # le texte inchangé quand l'icône n'est pas disponible : jamais de perte.
+    try:
+        from utils.sentrix_emojis import traduire as _traduire_icones
+
+        safe_title = _traduire_icones(safe_title)
+    except Exception:
+        pass
     resolved_kind = kind or _kind_from_text(safe_title, description)
     # Les embeds legacy doivent conserver une couleur sémantique pour les
     # états success/warning/danger/info et les contrats d'interface.

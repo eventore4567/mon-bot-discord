@@ -583,7 +583,7 @@ class Panneau(discord.ui.LayoutView):
         titre_rendu = _icones(_texte(self.titre, 200))
         entete = f"## {_icone_de_famille(self.identite_famille, titre_rendu)}"
         if sous_titre:
-            entete += f"\n{_en_citation(commandes_en_code(_texte(sous_titre, 400)))}"
+            entete += f"\n{_en_citation(commandes_en_code(_icones(_texte(sous_titre, 400))))}"
         pose = False
         if vignette:
             try:
