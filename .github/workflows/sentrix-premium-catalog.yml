@@ -1,0 +1,33 @@
+name: SentriX Premium catalogue safety
+
+on:
+  pull_request:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'web/sentrix_premium_catalog.py'
+      - 'web/__init__.py'
+      - 'tests/test_sentrix_premium_catalog.py'
+      - '.github/workflows/sentrix-premium-catalog.yml'
+  push:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'web/sentrix_premium_catalog.py'
+      - 'web/__init__.py'
+      - 'tests/test_sentrix_premium_catalog.py'
+      - '.github/workflows/sentrix-premium-catalog.yml'
+
+jobs:
+  premium-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated test dependencies
+        run: python -m pip install --disable-pip-version-check aiohttp pytest pytest-asyncio
+      - name: Compile integration and page
+        run: python -m py_compile web/sentrix_premium_catalog.py web/__init__.py
+      - name: Verify Free dashboard and non-transactional Premium page
+        run: python -m pytest -q tests/test_sentrix_premium_catalog.py
