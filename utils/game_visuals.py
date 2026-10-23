@@ -73,6 +73,15 @@ VARIANTES: dict[str, tuple[str, ...]] = {
     "arcade": ("doors", "emojiorder"),
     "race": ("arcade",),
     "think": ("doors",),
+    # Les scènes du combat de boss n'avaient AUCUNE variante : une seule URL
+    # possible, donc le même GIF à chaque tour — le reproche exact de Jayden.
+    # Le numéro de tour est déjà passé en graine par `_phase`, il ne manquait
+    # que de quoi choisir. Mêmes URL déjà vérifiées, aucune inventée.
+    "boss-attack": ("boss-power", "boss-counter", "fight", "slap"),
+    "boss-power": ("boss-attack", "boss-counter-alt", "fight"),
+    "boss-guard": ("boss-counter", "loss", "slap"),
+    "boss-counter": ("boss-counter-alt", "boss-attack", "slap"),
+    "boss-counter-alt": ("boss-counter", "boss-power", "fight"),
 }
 
 

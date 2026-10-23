@@ -411,6 +411,15 @@ def add_fields(embed: discord.Embed, fields: Iterable[tuple[str, Any, bool | Non
         if value is None or str(value).strip() == "":
             continue
         safe_name = clean_ui_text(name, 256, "Information")
+        # Les icônes SentriX sur le NOM du champ, jamais sur sa valeur : un
+        # journal qui cite un message supprimé doit le montrer tel qu'il était,
+        # emojis d'origine compris. Le nom, lui, est de l'habillage SentriX.
+        try:
+            from utils.sentrix_emojis import traduire as _traduire_icones
+
+            safe_name = _traduire_icones(safe_name)
+        except Exception:
+            pass
         raw_value = clip(value, 1024)
         if not raw_value:
             continue
