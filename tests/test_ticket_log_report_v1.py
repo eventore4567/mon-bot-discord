@@ -80,6 +80,8 @@ def test_wide_log_shows_short_dates_claimants_and_reason(ticket, events):
                    "Équipe ayant pris en charge", "Avant première prise en charge",
                    "Durée totale", "Motif", "TK-0425-33"):
         assert marker in body, marker
+    assert f"**Ouvert par :** <@{OWNER}>" in body
+    assert f"**Fermé par :** <@{CLOSER}>" in body
     compact = wide_logs.compact_fields(embed)
     assert "**📝 Motif :**" not in compact
     assert "🧭 Historique" in compact
