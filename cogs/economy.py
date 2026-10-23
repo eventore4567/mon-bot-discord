@@ -361,15 +361,22 @@ class Economy(commands.Cog, name="Economy"):
         )
         await sx_panels.envoyer(ctx, panneau)
 
-    @commands.hybrid_command(name="balance", description="Afficher votre solde ou celui d'un membre.")
+    # `+economy` était une SECONDE commande au corps strictement identique à
+    # `+balance` (mesuré : même AST), déclarée « demandée explicitement ». Les
+    # journaux d'usage de la production disent qu'elle n'a JAMAIS servi depuis
+    # le début, alors que `+balance` si.
+    #
+    # Elle devient un alias plutôt qu'une suppression : `+economy` continue de
+    # répondre exactement pareil pour qui l'avait demandé, mais il n'y a plus
+    # deux entrées à maintenir dans l'aide, le catalogue et les audits. Elle
+    # était déjà `with_app_command=False`, donc le « / » ne change pas.
+    @commands.hybrid_command(
+        name="balance",
+        aliases=["economy"],
+        description="Afficher votre solde ou celui d'un membre.",
+    )
     @app_commands.describe(membre="Le membre visé (optionnel)")
     async def balance(self, ctx: commands.Context, membre: discord.Member = None):
-        await self._send_balance(ctx, membre or ctx.author)
-
-    @commands.hybrid_command(name="economy", description="Afficher le résumé économique d'un membre.", with_app_command=False)
-    @app_commands.describe(membre="Le membre visé (optionnel)")
-    async def economy_cmd(self, ctx: commands.Context, membre: discord.Member = None):
-        """Alias de /balance avec le même format, demandé explicitement (+economy)."""
         await self._send_balance(ctx, membre or ctx.author)
 
     @commands.hybrid_command(name="daily", description="Récupérer votre récompense quotidienne.")
