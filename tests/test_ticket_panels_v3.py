@@ -155,6 +155,60 @@ def test_closed_ticket_has_native_downloadable_file_reopen_and_delete():
     assert sum(isinstance(x, discord.ui.Container) for x in children) == 1
 
 
+def test_close_modal_has_private_defer_and_real_acknowledgement():
+    source = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
+    handler = (ROOT / "cogs" / "ticket_claim_security.py").read_text(encoding="utf-8")
+    block = source[source.index("class CloseReasonModal"):source.index("class TicketNoteModal")]
+    assert "await interaction.response.defer(ephemeral=True)" in block
+    assert "ticket_panels_v3.ticket_closed_confirmation(" in handler
+    assert "ephemere=True" in handler[handler.index("ticket_panels_v3.ticket_closed_confirmation("):handler.index("async def secure_claim")]
+    card = cards.ticket_closed_confirmation(
+        ticket_id=9, closer=user(222222222222222222),
+        reason="Problème traité", duration="42 min",
+        guild_id=123456789012345678, channel_id=987654321098765432,
+        channel_name="ticket-tomioka", closed_at=1700003600,
+    )
+    body = contents(card)
+    assert "Ticket #9 fermé" in body
+    assert "Problème traité" in body and "42 min" in body
+    assert "<t:1700003600:F>" in body
+    assert "Le staff peut **rouvrir**" in body
+    links = [x for x in walk(card.children) if isinstance(x, discord.ui.Button) and x.style == discord.ButtonStyle.link]
+    assert len(links) == 1
+    assert links[0].label == "Voir le ticket fermé"
+    assert links[0].url == "https://discord.com/channels/123456789012345678/987654321098765432"
+    assert card.fichiers()[0].filename == cards.BANNER_FILENAME
+
+
+def test_deleted_ticket_receipt_is_compact_and_has_no_dead_channel_link():
+    receipt = cards.ticket_deleted_confirmation(
+        ticket_id=9, deleted_by=user(222222222222222222),
+        reason="Ticket résolu", channel_name="ticket-tomioka",
+        event_time=1700003650,
+    )
+    body = contents(receipt)
+    for expected in ("Ticket #9 supprimé", "Ticket résolu", "ticket-tomioka",
+                     "<t:1700003650:F>", "<@222222222222222222>",
+                     "salon a été supprimé définitivement"):
+        assert expected in body, expected
+    assert "archives" not in body.casefold() or "archivés" in body.casefold()
+    children = list(walk(receipt.children))
+    assert any(isinstance(x, discord.ui.MediaGallery) for x in children)
+    assert not any(isinstance(x, discord.ui.Button) for x in children)
+    assert len(receipt.fichiers()) == 1
+
+
+def test_failure_receipt_does_not_falsely_claim_deletion():
+    view = cards.ticket_action_failure(
+        ticket_id=9, action="Suppression refusée",
+        explanation="Impossible de supprimer le salon.",
+    )
+    assert "Aucune modification" in contents(view)
+    assert "Impossible de supprimer" in contents(view)
+    assert "NON EFFECTUÉ" in contents(view)
+    assert "Ticket #9" in contents(view)
+
+
 def test_reopened_card_restores_complete_buttons_and_banner():
     moderator = user()
     panel = sx_panels.avec_composants(
@@ -240,6 +294,15 @@ async def test_confirmed_delete_logs_real_staff_reason_and_deletes_closed_channe
     audit.assert_awaited_once()
     assert audit.await_args.kwargs["raison"] == "Assistance terminée"
     assert audit.await_args.kwargs["avec_bouton"] is False
+    extra = audit.await_args.kwargs["extra"]
+    assert extra["📌 Ancien salon"] == f"#{interaction.channel.name}"
+    assert extra["👤 Demandeur"].startswith("<@")
+    assert extra["📁 Résultat"] == "Salon supprimé définitivement"
+    notice = interaction.followup.send.await_args.kwargs
+    assert notice["ephemeral"] is True
+    assert isinstance(notice["view"], cards.TicketCardV3)
+    assert "Ticket #9 supprimé" in contents(notice["view"])
+    assert notice["files"][0].filename == cards.BANNER_FILENAME
 
 
 @pytest.mark.asyncio
