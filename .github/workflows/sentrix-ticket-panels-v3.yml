@@ -10,6 +10,7 @@ on:
       - 'cogs/ticket_claim_security.py'
       - 'cogs/logs_unified_v6.py'
       - 'tests/test_fermeture_ticket_masque.py'
+      - 'tests/test_logs_unified_v6.py'
       - 'cogs/ticket_controls_minimal.py'
       - 'tests/test_ticket_panels_v3.py'
       - '.github/workflows/sentrix-ticket-panels-v3.yml'
@@ -22,6 +23,7 @@ on:
       - 'cogs/ticket_claim_security.py'
       - 'cogs/logs_unified_v6.py'
       - 'tests/test_fermeture_ticket_masque.py'
+      - 'tests/test_logs_unified_v6.py'
       - 'cogs/ticket_controls_minimal.py'
       - 'tests/test_ticket_panels_v3.py'
       - '.github/workflows/sentrix-ticket-panels-v3.yml'
@@ -56,4 +58,5 @@ jobs:
             tests/test_ticket_journalisation.py \
             tests/test_ticket_reopen_after_channel_deleted.py \
             tests/test_ticket_reopen_commands_consistency.py \
-            tests/test_fermeture_ticket_masque.py
+            tests/test_fermeture_ticket_masque.py \
+            tests/test_logs_unified_v6.py
