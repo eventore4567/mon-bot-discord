@@ -424,6 +424,16 @@ class SentriXSetupV73(discord.ui.LayoutView):
             await self._build_home()
         else:
             await self._build_page(self.page)
+        # Les écrans de /setup posent leurs TextDisplay et leurs Button
+        # directement : la traduction côté Panneau ne les atteignait pas et ils
+        # gardaient les emojis Unicode d'origine. Un seul passage ici les couvre
+        # tous. Sans pack téléversé, la fonction rend la vue inchangée.
+        try:
+            from utils import sentrix_emojis
+
+            sentrix_emojis.appliquer_a_la_vue(self)
+        except Exception:
+            logger.debug("Icônes SentriX non posées sur /setup.", exc_info=True)
 
     async def _effective_states(self) -> dict[str, str]:
         effective, _statuses = await v72._effective_states(self.backend)

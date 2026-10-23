@@ -291,6 +291,56 @@ def traduire(texte: str) -> str:
     return valeur
 
 
+def appliquer_a_la_vue(vue: object) -> object:
+    """Pose les icônes SentriX sur une vue Components V2 déjà construite.
+
+    Les écrans de /setup construisent leurs `TextDisplay` et leurs `Button`
+    directement, sans passer par `Panneau` : la traduction posée côté panneaux
+    ne les atteignait donc jamais, et ils gardaient les emojis Unicode d'origine.
+    Ce parcours les rattrape en un seul endroit.
+
+    Un libellé de bouton ne peut PAS porter de marquage `<:nom:id>` — Discord
+    l'afficherait tel quel. L'emoji de tête quitte donc le libellé pour le
+    paramètre `emoji=`, et seulement si l'icône existe vraiment.
+    """
+    if not _RESOLUS:
+        return vue
+    vus: set[int] = set()
+
+    def parcourir(item: object) -> None:
+        if item is None or id(item) in vus:
+            return
+        vus.add(id(item))
+        contenu = getattr(item, "content", None)
+        if isinstance(contenu, str) and contenu:
+            try:
+                item.content = traduire(contenu)
+            except Exception:
+                pass
+        libelle = getattr(item, "label", None)
+        if isinstance(libelle, str) and libelle and getattr(item, "emoji", None) is None:
+            for unicode_ in sorted(EQUIVALENCES, key=len, reverse=True):
+                if not libelle.startswith(unicode_):
+                    continue
+                reste = libelle[len(unicode_):].strip()
+                icone = partiel(EQUIVALENCES[unicode_]) if reste else None
+                if icone is not None:
+                    try:
+                        item.label, item.emoji = reste, icone
+                    except Exception:
+                        pass
+                break
+        for enfant in list(getattr(item, "children", ()) or ()):
+            parcourir(enfant)
+        for nom in ("accessory", "item"):
+            interne = getattr(item, nom, None)
+            if interne is not None and interne is not item:
+                parcourir(interne)
+
+    parcourir(vue)
+    return vue
+
+
 def est_sentrix(valeur: object) -> bool:
     """Ce marquage est-il une icône SentriX ?
 
@@ -433,6 +483,7 @@ __all__ = [
     "DOSSIER",
     "PREFIXE",
     "REPLIS",
+    "appliquer_a_la_vue",
     "amorcer",
     "emoji",
     "est_sentrix",
