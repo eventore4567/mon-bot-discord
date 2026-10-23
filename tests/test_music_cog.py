@@ -15,6 +15,8 @@ commandes elles-mêmes — est le vrai code de cogs/music.py, exécuté normalem
 from __future__ import annotations
 
 import asyncio
+
+import discord
 import os
 import tempfile
 import time
@@ -173,6 +175,7 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         guild_a, guild_b = 3003, 4004
         ctx_a = _fake_ctx(guild_a, voice_channel=_FakeVoiceChannel(33))
 
+        self.cog.get_queue(guild_a).voice_client = _FakeVoiceClient(ctx_a.author.voice.channel)
         await self.cog.music_volume.callback(self.cog, ctx_a, 20)
         await self.cog.music_loop.callback(self.cog, ctx_a, "queue")
 
@@ -302,7 +305,7 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(queue.current, track)
         self.assertIs(voice.source, source)
 
-    async def test_sentrix_music_card_is_compact_and_has_five_useful_actions(self):
+    async def test_sentrix_music_card_has_live_state_and_real_controls(self):
         queue = self.cog.get_queue(7474)
         queue.current = Track(
             title="Faded",
@@ -332,11 +335,18 @@ class TwoGuildsSimultaneousMusicTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Progression", text)
         self.assertIn("Spotify → YouTube", text)
         self.assertIn("70 %", text)
+        # Quatre contrôles directs, le reste dans « Plus d'options » (22/10/2026).
         self.assertEqual(
             [button.libelle for button in panel.boutons_source],
-            ["Pause / Reprendre", "Suivant", "Stop", "File", "Playlists"],
+            ["Pause", "Suivant", "Stop", "Ajouter"],
         )
         self.assertTrue(all(callable(button.callback) for button in panel.boutons_source))
+        menus = [item for item in panel.walk_children() if isinstance(item, discord.ui.Select)]
+        self.assertEqual(len(menus), 1)
+        self.assertEqual(
+            {option.value for option in menus[0].options},
+            {"queue", "settings", "loop", "autoplay", "refresh"},
+        )
     async def test_pause_resume_freeze_position_clock(self):
         queue = self.cog.get_queue(7007)
         voice = _FakeVoiceClient(_FakeVoiceChannel(77))

@@ -129,7 +129,8 @@ def test_state_panel_keeps_domain_metadata_without_rendering_it_as_noise(monkeyp
     assert panel.identite_famille == "economy"
     assert panel.titre == "Récompense"
     assert "SENTRIX CORE" not in text
-    assert "## Récompense" in text
+    # Titre précédé de l'icône du domaine depuis le 22/10/2026 (émojis partout).
+    assert "Récompense" in text and text.lstrip().startswith("##")
 
 
 def test_error_panel_keeps_security_domain_metadata_without_top_signature(monkeypatch):
@@ -155,7 +156,8 @@ def test_phase7_native_domains_do_not_repeat_sentrix_in_titles():
 
     assert 'titre="SentriX —' not in economy
     assert 'titre="SentriX Music"' not in music
-    assert 'titre="Lecture en cours"' in music
+    assert '"🎵 Lecture en cours"' in music
+    assert 'titre=title' in music
     assert 'titre="Ticket ouvert"' in tickets
 
 def test_cross_module_stability_guards_block_resource_recreation():

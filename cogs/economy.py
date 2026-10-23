@@ -23,6 +23,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from utils import command_refs
 from utils import embeds, checks, helpers, stats_service, design_system, temporary_boosts
 from utils.audit_trail import journaliser
 # « panels » designe deja les panneaux de roles/boutique ici.
@@ -917,7 +918,7 @@ class Economy(commands.Cog, name="Economy"):
     async def buy(self, ctx: commands.Context, id: int):
         item = await self.bot.db.fetchone("SELECT * FROM shop_items WHERE id = ? AND guild_id = ?", (id, ctx.guild.id))
         if not item:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Article introuvable.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error(f"Aucun article n°{id} dans cette boutique. `{command_refs.reference(ctx, 'shop')}` montre les articles et leur numéro.")))
         await self._purchase_item(ctx, item)
 
     @commands.command(name="buyrole", aliases=["acheterrole"])
@@ -1075,7 +1076,7 @@ class Economy(commands.Cog, name="Economy"):
             )
         if status in {"missing", "changed"}:
             return await sx_panels.envoyer(
-                ctx, sx_panels.depuis_embed(embeds.error("Vous ne possédez pas cet objet."))
+                ctx, sx_panels.depuis_embed(embeds.error(f"Vous ne possédez pas cet objet. `{command_refs.reference(ctx, 'inventory')}` montre ce que vous avez."))
             )
         return await sx_panels.envoyer(
             ctx, sx_panels.depuis_embed(embeds.error("Vente temporairement indisponible."))
@@ -1158,6 +1159,36 @@ class Economy(commands.Cog, name="Economy"):
             title=titre, description=description,
             colour=couleur, footer=design.get("footer"),
         )
+    async def _montant_refuse(self, ctx: commands.Context):
+        """Montant refusé : dire ce que le membre possède vraiment, et la forme « all »."""
+        row = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
+        cash = int(row["cash"] or 0) if row else 0
+        bank = int(row["bank"] or 0) if row else 0
+        fmt = stats_service.format_number
+        return embeds.error(
+            "Montant invalide ou solde insuffisant.\n"
+            f"Portefeuille : **{fmt(cash)}** 🪙 · Banque : **{fmt(bank)}** 🪙\n"
+            "-# Indiquez un nombre entier positif, ou « all » pour tout transférer."
+        )
+
+    async def _recu_banque(self, ctx: commands.Context, amount: int, *, depot: bool):
+        """Reçu d'un dépôt ou d'un retrait : le montant ET les soldes qui en résultent.
+
+        Avant : « 10 🪙 déposés en banque. » — sans dire ce qu'il reste."""
+        row = await self.bot.db.get_balance(ctx.guild.id, ctx.author.id)
+        cash = int(row["cash"] or 0) if row else 0
+        bank = int(row["bank"] or 0) if row else 0
+        fmt = stats_service.format_number
+        lignes = [
+            f"{'Déposé' if depot else 'Retiré'} : **{fmt(amount)}** 🪙",
+            f"Portefeuille : **{fmt(cash)}** 🪙 · Banque : **{fmt(bank)}** 🪙 · Total : **{fmt(cash + bank)}** 🪙",
+            "",
+            # services/economy.atomic_rob ne prend que le portefeuille.
+            "-# L'argent en banque ne peut pas être volé avec rob."
+            if depot else "-# L'argent du portefeuille peut être volé : redéposez ce que vous ne dépensez pas.",
+        ]
+        return embeds.success("\n".join(lignes), title="Dépôt effectué" if depot else "Retrait effectué")
+
     async def _deposit_to_bank(self, ctx: commands.Context, montant: str):
         if ctx.guild is None:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Disponible uniquement sur un serveur.')))
@@ -1165,14 +1196,9 @@ class Economy(commands.Cog, name="Economy"):
             self.bot.db, ctx.guild.id, ctx.author.id, montant, deposit=True
         )
         if status == "ok":
-            return await sx_panels.envoyer(
-                ctx,
-                sx_panels.depuis_embed(
-                    embeds.success(f'**{stats_service.format_number(amount)}** 🪙 déposés en banque.')
-                ),
-            )
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(await self._recu_banque(ctx, amount, depot=True)))
         if status in {"invalid", "changed"}:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(await self._montant_refuse(ctx)))
         return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
 
     @commands.hybrid_command(name="deposit", description="Déposer de l'argent à la banque (ou 'all').", with_app_command=False)
@@ -1189,14 +1215,9 @@ class Economy(commands.Cog, name="Economy"):
             self.bot.db, ctx.guild.id, ctx.author.id, montant, deposit=False
         )
         if status == "ok":
-            return await sx_panels.envoyer(
-                ctx,
-                sx_panels.depuis_embed(
-                    embeds.success(f'**{stats_service.format_number(amount)}** 🪙 retirés de la banque.')
-                ),
-            )
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(await self._recu_banque(ctx, amount, depot=False)))
         if status in {"invalid", "changed"}:
-            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Montant invalide ou solde insuffisant.')))
+            return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(await self._montant_refuse(ctx)))
         return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error('Banque temporairement indisponible.')))
 
     @commands.hybrid_command(

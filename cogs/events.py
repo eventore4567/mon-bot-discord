@@ -14,6 +14,7 @@ from discord.ext import commands, tasks
 from cogs.automatic_role_rules import sync_giveaway_blacklist
 
 import config
+from utils import command_refs
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as panels
 from database.db import now
@@ -452,7 +453,7 @@ class Events(commands.Cog, name="Events"):
             "SELECT * FROM events WHERE guild_id = ? AND name = ? AND status != 'termine'", (ctx.guild.id, nom)
         )
         if not event:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement introuvable.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Événement introuvable. `{command_refs.reference(ctx, 'event-list')}` montre les événements et leur nom exact.")))
         await self.bot.db.execute(
             "INSERT OR IGNORE INTO event_participants (event_id, user_id) VALUES (?, ?)", (event["id"], ctx.author.id)
         )
@@ -463,7 +464,7 @@ class Events(commands.Cog, name="Events"):
     async def event_leave(self, ctx: commands.Context, *, nom: str):
         event = await self.bot.db.fetchone("SELECT * FROM events WHERE guild_id = ? AND name = ?", (ctx.guild.id, nom))
         if not event:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement introuvable.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Événement introuvable. `{command_refs.reference(ctx, 'event-list')}` montre les événements et leur nom exact.")))
         await self.bot.db.execute(
             "DELETE FROM event_participants WHERE event_id = ? AND user_id = ?", (event["id"], ctx.author.id)
         )
@@ -485,7 +486,7 @@ class Events(commands.Cog, name="Events"):
     async def event_cancel(self, ctx: commands.Context, *, nom: str):
         event = await self.bot.db.fetchone("SELECT * FROM events WHERE guild_id = ? AND name = ?", (ctx.guild.id, nom))
         if not event:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Événement introuvable.')))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Événement introuvable. `{command_refs.reference(ctx, 'event-list')}` montre les événements et leur nom exact.")))
         await self.bot.db.execute("UPDATE events SET status = 'annule' WHERE id = ?", (event["id"],))
         await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'Événement **{nom}** annulé.')))
 

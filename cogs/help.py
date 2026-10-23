@@ -475,8 +475,9 @@ def _support_url() -> str | None:
 
 def _add_growth_links(view: discord.ui.View, bot: commands.Bot) -> None:
     for label, url in (
+        # Pas de lien publicitaire vers le dashboard dans l'aide (Jayden, 22/10/2026) :
+        # +dashboard reste la commande pour l'ouvrir.
         ("Ajouter SentriX", _invite_url(bot)),
-        ("Dashboard", _dashboard_url()),
         ("Serveur support", _support_url()),
     ):
         if url:
@@ -811,7 +812,6 @@ class VueAide(discord.ui.LayoutView):
         boutons: list[discord.ui.Button] = []
         for libelle, url in (
             ("Ajouter SentriX", _invite_url(self.bot)),
-            ("Tableau de bord", _dashboard_url()),
             ("Support", _support_url()),
         ):
             if url:

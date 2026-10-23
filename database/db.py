@@ -1402,7 +1402,7 @@ CREATE INDEX IF NOT EXISTS idx_log_config_guild ON log_config (guild_id);
 
 LOG_CATEGORIES: tuple[str, ...] = (
     "moderation", "messages", "members", "channels", "roles", "voice",
-    "server", "tickets", "automod", "spam", "raid", "resources", "files",
+    "server", "tickets", "automod", "spam", "raid", "resources", "files", "soundboard",
 )
 DEFAULT_LOG_CATEGORY = "server"
 
@@ -1412,6 +1412,9 @@ DEFAULT_LOG_CATEGORY = "server"
 LEGACY_LOG_TYPE_TO_CATEGORY: dict[str, str] = {
     **{key: key for key in LOG_CATEGORIES},
     # Anciennes clés préfixées écrites par les versions successives du +setup.
+    "log_soundboard": "soundboard",
+    "soundboard_create": "soundboard", "soundboard_update": "soundboard",
+    "soundboard_delete": "soundboard", "soundboard_play": "soundboard",
     "log_moderation": "moderation",
     "log_messages": "messages",
     "log_members": "members",
@@ -1791,6 +1794,35 @@ class Database:
             logger.warning(
                 "MIGRATION LOGS %s valeurs log_type non résolues routées vers '%s' : %s",
                 len(unresolved), DEFAULT_LOG_CATEGORY, sorted(set(unresolved)),
+            )
+
+        # Les premières migrations ignoraient Soundboard et l'envoyaient vers
+        # server. Restaurer uniquement sa route explicite depuis les archives,
+        # sans écraser une catégorie déjà reconfigurée ou désactivée.
+        backups = await self._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND (name='log_settings_backup' OR name LIKE 'log_settings_backup_%') ORDER BY name DESC"
+        )
+        for backup_row in await backups.fetchall():
+            table = str(backup_row[0])
+            if table != "log_settings_backup" and not (
+                table.startswith("log_settings_backup_")
+                and table[len("log_settings_backup_"):].isdigit()
+            ):
+                continue
+            if not all(char.isalnum() or char == "_" for char in table):
+                continue
+            backup_columns = await self._table_columns(table)
+            if not {"guild_id", "log_type", "channel_id"}.issubset(backup_columns):
+                continue
+            enabled_column = "enabled" if "enabled" in backup_columns else "1"
+            updated_column = "updated_at" if "updated_at" in backup_columns else "0"
+            await self._conn.execute(
+                f"INSERT OR IGNORE INTO log_config (guild_id,category,channel_id,enabled,updated_at) "
+                f"SELECT guild_id, 'soundboard', channel_id, {enabled_column}, {updated_column} "
+                f"FROM {table} WHERE log_type IN ('soundboard','log_soundboard',"
+                "'soundboard_create','soundboard_update','soundboard_delete','soundboard_play') "
+                f"ORDER BY {updated_column if updated_column != '0' else 'guild_id'} DESC"
             )
 
         # --- Archivage de log_settings -------------------------------------------

@@ -72,10 +72,20 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
         except Exception:
             return False
 
-    async def _no_active(self, ctx: commands.Context):
-        return await ctx.send(
-            embed=embeds.info("Aucun giveaway actif sur ce serveur.", title="Giveaway")
+    @staticmethod
+    def _carte_aucun() -> panels.Panneau:
+        """Aucun concours : la carte dit comment en lancer un (avant : deux titres empilés)."""
+        return panels.Panneau(
+            titre="🎉 Giveaways",
+            sous_titre="Aucun giveaway en cours sur ce serveur.",
+            sections=(panels.Section("Lancer un concours", texte=(
+                "`+giveaway create` ouvre l'assistant : lot, durée, gagnants, salon et conditions,\n"
+                "avec un aperçu avant de publier.")),),
+            kind="events",
         )
+
+    async def _no_active(self, ctx: commands.Context):
+        return await panels.envoyer(ctx, self._carte_aucun())
 
     async def _list_active(self, ctx: commands.Context):
         """Point unique pour `+giveaway` et `+giveaway list`.
@@ -102,14 +112,21 @@ class GiveawayCenter(commands.Cog, name="GiveawayCenter"):
             rows_old = []
         rows = [("V2", row) for row in rows_v2] + [("historique", row) for row in rows_old]
         if not rows:
-            return await ctx.send(embed=embeds.info("Aucun giveaway actif sur ce serveur.", title="Giveaways"))
+            return await panels.envoyer(ctx, self._carte_aucun())
         lines = []
         for engine, row in rows[:25]:
             lines.append(
-                f"• **{row['prize']}** — <#{row['channel_id']}> — <t:{int(row['end_at'])}:R> "
-                f"· `{row['message_id']}` · {engine}"
+                f"🎁 **{discord.utils.escape_markdown(str(row['prize']))}** · <#{row['channel_id']}>\n"
+                f"-# ⏰ fin <t:{int(row['end_at'])}:R> · 🆔 `{row['message_id']}`"
+                + (" · ancien moteur" if engine != "V2" else "")
             )
-        await ctx.send(embed=embeds.info("\n".join(lines), title="Giveaways actifs"))
+        await panels.envoyer(ctx, panels.Panneau(
+            titre="🎉 Giveaways en cours",
+            sous_titre=f"{len(rows)} concours actif{'s' if len(rows) > 1 else ''} sur ce serveur.",
+            sections=(panels.Section("Concours", texte="\n".join(lines)[:3800]),),
+            kind="events",
+            pied="+giveaway end <id> termine un concours · +giveaway reroll <id> retire un gagnant",
+        ))
 
     @commands.group(name="giveaway", aliases=["giveaways"], invoke_without_command=True)
     @commands.guild_only()

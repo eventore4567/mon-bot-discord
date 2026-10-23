@@ -17,6 +17,7 @@ from discord.ext import commands, tasks
 
 from discord import app_commands
 
+from utils import command_refs
 from utils import checks, design_system, embeds, stats_service
 from utils.game_context import pictogrammes_porteurs
 from utils import sentrix_panels as panels
@@ -339,10 +340,9 @@ class MoneyDrops(commands.Cog, name="MoneyDrops"):
     async def _afficher_autodrop(self, ctx, reglage, emoji: str, titre: str = "Drops automatiques") -> None:
         actif = bool(reglage["enabled"]) and reglage["channel_id"]
         salon = ctx.guild.get_channel(int(reglage["channel_id"] or 0))
-        prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
         lignes = [
             panels.Ligne("État", "**● ACTIF**" if actif else "**○ INACTIF**",
-                         indice=None if actif else f"`{prefixe}autodrop #salon` pour démarrer"),
+                         indice=None if actif else f"`{command_refs.reference(ctx, 'autodrop', '#salon')}` pour démarrer"),
             panels.Ligne("Salon", salon.mention if salon else "**Aucun**",
                          indice=None if salon else "Choisissez un salon visible par tout le monde."),
             panels.Ligne(
@@ -361,10 +361,10 @@ class MoneyDrops(commands.Cog, name="MoneyDrops"):
             sections=[
                 panels.Section("Réglages", lignes),
                 panels.Section("Commandes", texte=(
-                    f"`{prefixe}autodrop #salon` — choisir le salon et démarrer\n"
-                    f"`{prefixe}autodrop #salon 50 500 30` — salon, min, max, délai en minutes\n"
-                    f"`{prefixe}autodrop-off` — arrêter sans perdre les réglages\n"
-                    f"`{prefixe}drop 1000` — lancer un drop tout de suite"
+                    f"`{command_refs.reference(ctx, 'autodrop', '#salon')}` — choisir le salon et démarrer\n"
+                    f"`{command_refs.reference(ctx, 'autodrop', '#salon 50 500 30')}` — salon, min, max, délai en minutes\n"
+                    f"`{command_refs.reference(ctx, 'autodrop-off')}` — arrêter sans perdre les réglages\n"
+                    f"`{command_refs.reference(ctx, 'drop', '1000')}` — lancer un drop tout de suite"
                 )),
             ],
             kind="economie",

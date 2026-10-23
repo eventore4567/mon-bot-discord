@@ -55,10 +55,11 @@ async def main() -> int:
     since = await prefix(f"+warn <@{h.SECOND_ID}> spam répété", ADMIN)
     reply = texts(since, h.CID)
     log = texts(since, h.LOGCID)
-    found = REF.search(reply)
-    check(found is not None, "+warn : la réponse porte sa référence", reply[-160:])
-    ref = found.group(1) if found else ((await rows()) or [{}])[-1].get("ref", "")
-    check(bool(ref) and ref in log, "+warn : la carte de log porte LA MÊME référence", log[-200:])
+    # Depuis la PR #503, la référence SX- reste interne : la trace la garde, les
+    # messages ne l'affichent plus.
+    check(REF.search(reply) is None, "+warn : la réponse n'affiche pas la référence interne", reply[-160:])
+    ref = ((await rows()) or [{}])[-1].get("ref", "")
+    check(bool(ref) and bool(log.strip()), "+warn : la trace a sa référence et la carte de log part", log[-200:])
     row = (await rows())[-1] if await rows() else {}
     check(row.get("ref") == ref and row.get("command") == "warn" and row.get("outcome") == "ok"
           and row.get("actor_id") == h.ADMIN_ID and row.get("target_id") == h.SECOND_ID
@@ -84,23 +85,22 @@ async def main() -> int:
                                               {"name": "reason", "type": 3, "value": "flood"}], **ADMIN)
     await asyncio.wait_for(bot.tree._call(inter), 15)
     await h.settle(idle=0.4, maximum=3)
-    slash_ref = REF.search(texts(since))
     last = (await rows())[-1]
-    check(slash_ref is not None and last["ref"] == slash_ref.group(1) and last["transport"] == "slash",
-          "/warn : référence affichée et trace slash", str(last))
+    check(REF.search(texts(since)) is None and bool(last["ref"]) and last["transport"] == "slash",
+          "/warn : trace slash avec référence interne, non affichée", str(last))
 
     # 4 bis — La mémoire : la troisième sanction rappelle les deux premières et l'ancienneté.
     since = await prefix(f"+warn <@{h.SECOND_ID}> encore", ADMIN)
     reply = texts(since, h.CID)
-    check("3 sanctions en 30 j" in reply and "sur le serveur depuis" in reply and REF.search(reply),
+    check("3 sanctions en 30 j" in reply and "sur le serveur depuis" in reply,
           "3e avertissement : la réponse rappelle 3 sanctions en 30 j et l'ancienneté", reply[-200:])
     cards = [c for c in h.CALLS[since:] if c[1] == f"/channels/{h.LOGCID}/messages"]
     check(len(cards) == 1, "3e avertissement en quelques secondes : sa carte de log part quand même",
           f"{len(cards)} carte(s)")
     since = await prefix(f"+giverole <@{h.SECOND_ID}> <@&{h.PING_ROLE_ID}>", ADMIN)
     reply = texts(since, h.CID)
-    check(REF.search(reply) is not None and "sanction" not in reply,
-          "+giverole : référence, mais pas de compte de sanctions (ce n'est pas une sanction)", reply[-200:])
+    check("sanction" not in reply,
+          "+giverole : pas de compte de sanctions (ce n'est pas une sanction)", reply[-200:])
 
     # 5 — +trace reconstitue l'action ; /logs trace accepte une saisie approximative.
     since = await prefix(f"+trace {ref}", ADMIN)

@@ -42,7 +42,7 @@ def test_final_security_setup_never_bootstraps_honeypot_resources():
     assert "def _honeypot_resources_ready" in source
     assert "SentriX ne crée rien automatiquement" in source
     assert "v74.v73.poser_banniere(container)" in source
-    assert "SENTRIX CORE · Configuration · setup" in source
+    assert "SENTRIX CORE · Configuration · setup" not in source
 
 
 def test_ticket_setup_activation_does_not_create_default_configuration():
@@ -78,10 +78,10 @@ def test_setup_core_keeps_current_clean_components_layout():
     v73 = _source("cogs/setup_components_v73.py")
     v75 = _source("cogs/setup_security_choice_v75.py")
 
-    assert "SENTRIX CORE · Configuration · setup" in v73
+    assert "SENTRIX CORE · Configuration · setup" not in v73
     assert "discord.ui.Container" in v73
     assert "poser_banniere(" in v73
-    assert "SENTRIX CORE · Configuration · setup" in v75
+    assert "SENTRIX CORE · Configuration · setup" not in v75
     assert "poser_banniere(" in v75
 
 

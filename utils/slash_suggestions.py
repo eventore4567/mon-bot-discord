@@ -6,7 +6,7 @@ suggestion. Deux causes :
 1. La surface « / » est reconstruite par utils/slash_catalog.py à partir des
    commandes préfixées (sentrix_v95_runtime._make_callback). Les choix déclarés
    sur la commande d'origine (« Activer / Désactiver » de /security antispam,
-   « Pierre / Feuille / Ciseaux » de /games quick rps…) se perdaient en route :
+   « Pierre / Feuille / Ciseaux » de /play rps…) se perdaient en route :
    il fallait taper « on » ou « pierre » à la main. Ils sont repris tels quels.
 2. Les autres options n'avaient jamais rien proposé : ville de /weather, raison
    d'une sanction, durée, commande de /help, giveaway en cours, embed

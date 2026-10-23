@@ -56,7 +56,7 @@ class WarningSettingsView(discord.ui.LayoutView):
         count = int(recent["n"] if recent else 0)
         role = self.guild.get_role(int(role_id)) if role_id else None
 
-        card = discord.ui.Container(accent_colour=discord.Colour(0xD27A68))
+        card = discord.ui.Container()
         card.add_item(discord.ui.TextDisplay(
             "## ⚠️ SentriX · Centre des avertissements\n"
             "Configurez les sanctions et les notifications depuis Discord."

@@ -73,8 +73,7 @@ INTENTIONS_NEUTRES = frozenset({"info", "neutral", "brand"})
 CORE_NAME = "SENTRIX CORE"
 
 #: Bannière horizontale compacte commune à tous les panneaux structurés.
-#: 1024 × 72 pixels transparents : le logo central et deux traits lumineux
-#: reprennent la teinte du domaine, sans fond ni effet de carte volumineuse.
+#: Bande 1200 × 24 presque transparente, identique aux journaux.
 #: La galerie et sa pièce jointe restent gouvernées par le même interrupteur
 #: pour éviter une référence attachment:// absente qui invaliderait le message.
 BANDEAUX_ACTIFS = True
@@ -422,8 +421,8 @@ def accord_commande(kind: str) -> tuple[int, str]:
 
 
 def nom_banniere(kind: str) -> str:
-    """Fichier de bannière correspondant à l'intention, accordé à la commande."""
-    return nom_fichier(accord_commande(kind)[1])
+    from utils.premium_log_banners import BANNER_FILENAME
+    return BANNER_FILENAME
 
 
 def fichier_banniere(kind: str) -> discord.File | None:
@@ -432,37 +431,15 @@ def fichier_banniere(kind: str) -> discord.File | None:
 
 
 def famille_joignable(famille: str) -> bool:
-    """La bannière de cette famille est-elle réellement joignable ?
-
-    Condition UNIQUE que la galerie et la pièce jointe consultent toutes les
-    deux. Une galerie qui référence ``attachment://banner_X.webp`` sans que le
-    fichier accompagne le message ne « casse » pas l'image — Discord refuse le
-    message ENTIER :
-
-        Invalid Form Body — The referenced attachment was not found.
-
-    C'est arrivé en production sur /setup : la commande ne répondait plus du
-    tout. Les deux décisions étaient prises à deux endroits sans lien, et
-    divergeaient.
-
-    La bannière manquante est GÉNÉRÉE ici. ``.gitignore`` ignore
-    ``assets/log_banners/banner_*.webp`` : aucune n'est versionnée, donc le
-    dossier est vide sur un conteneur fraîchement déployé. Un simple test
-    d'existence aurait servi des écrans sans bandeau.
-    """
-    # Politique produit globale : un ancien appel explicite ne doit plus
-    # pouvoir générer, référencer ou joindre un bandeau décoratif.
+    """La même bande neutre presque transparente que les logs."""
     if not BANDEAUX_ACTIFS:
         return False
-    chemin = BANNER_DIR / nom_fichier(famille)
-    if chemin.exists():
-        return True
     try:
-        ensure_banners(force=True)
-    except Exception:
-        logger.exception("Génération des bannières impossible.")
+        from utils.premium_log_banners import get_premium_log_banner
+        return get_premium_log_banner().is_file()
+    except (OSError, ValueError):
+        logger.exception("Bande neutre indisponible.")
         return False
-    return chemin.exists()
 
 
 def poser_bandeau(container, famille: str) -> bool:
@@ -490,7 +467,7 @@ def poser_bandeau(container, famille: str) -> bool:
         )
         return False
     galerie = discord.ui.MediaGallery()
-    galerie.add_item(media=f"attachment://{nom_fichier(famille)}")
+    galerie.add_item(media=f"attachment://{nom_banniere(famille)}")
     container.add_item(galerie)
     return True
 
@@ -509,34 +486,23 @@ def pieces_jointes_de_famille(famille: str) -> list:
 
 
 def fichier_de_famille(famille: str) -> discord.File | None:
-    """Bannière prête à joindre pour une famille déjà décidée.
-
-    Le panneau décide sa famille à la construction et joint CE fichier-là :
-    ré-décider au moment de l'envoi pourrait renvoyer une autre famille (le
-    contexte de commande est alors parfois déjà retombé) et la galerie
-    référencerait une pièce jointe absente — donc une bannière vide.
-    """
-    if not BANDEAUX_ACTIFS:
+    if not famille_joignable(famille):
         return None
-    nom = nom_fichier(famille)
-    chemin = BANNER_DIR / nom
-    if not chemin.exists():
-        try:
-            ensure_banners(force=True)
-        except Exception:
-            logger.exception("Génération des bannières impossible.")
-            return None
-    if not chemin.exists():
-        return None
-    try:
-        return discord.File(str(chemin), filename=nom)
-    except Exception:
-        logger.exception("Bannière %s illisible.", nom)
-        return None
+    from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
+    return discord.File(str(get_premium_log_banner()), filename=BANNER_FILENAME)
 
 
 class Panneau(discord.ui.LayoutView):
     """Panneau SentriX complet : bannière, titre, sections séparées, boutons."""
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item) -> None:
+        logger.error("Action du panneau échouée title=%s item=%s", self.titre, type(item).__name__,
+                     exc_info=(type(error), error, error.__traceback__))
+        message = "Cette action a rencontré une erreur. Vérifiez son résultat dans le panneau avant de réessayer."
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await interaction.response.send_message(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     def __init__(
         self,
@@ -617,7 +583,7 @@ class Panneau(discord.ui.LayoutView):
         titre_rendu = _icones(_texte(self.titre, 200))
         entete = f"## {_icone_de_famille(self.identite_famille, titre_rendu)}"
         if sous_titre:
-            entete += f"\n{_texte(sous_titre, 400)}"
+            entete += f"\n{_en_citation(commandes_en_code(_texte(sous_titre, 400)))}"
         pose = False
         if vignette:
             try:
@@ -647,7 +613,7 @@ class Panneau(discord.ui.LayoutView):
             rendu = section.rendu(None)
             if not rendu:
                 continue
-            conteneur.add_item(discord.ui.TextDisplay(rendu[:_LIMITE_BLOC]))
+            conteneur.add_item(discord.ui.TextDisplay(commandes_en_code(rendu)[:_LIMITE_BLOC]))
 
         # 4 — pied de page en petit, comme la signature d'un document.
         if image:
@@ -675,11 +641,6 @@ class Panneau(discord.ui.LayoutView):
             pied_net = ""
         # Le fil SentriX : une action du staff porte sa référence, la même que
         # sur sa carte de log (utils/sentrix_trace.py).
-        from utils.sentrix_trace import visible_ref
-
-        reference = visible_ref()
-        if reference:
-            pied_net = f"{pied_net} · Réf. {reference}" if pied_net else f"Réf. {reference}"
         if pied_net:
             conteneur.add_item(discord.ui.TextDisplay(f"-# {_texte(pied_net, 240)}"))
 
@@ -713,6 +674,64 @@ class Panneau(discord.ui.LayoutView):
         return fichiers
 
 
+#: Mise en forme Discord demandée le 22/10/2026 : les commandes citées en `code`,
+#: le texte principal en citation (la ligne sur le côté). False : texte tel quel.
+MISE_EN_FORME = True
+
+_COMMANDE_CITEE = _re.compile(
+    r"(?<![\w`/:<.@#&+])([+/][a-z][a-z0-9-]{1,31})((?: [a-z][a-z0-9-]{1,31}){0,2})(?![\w/])"
+)
+_CHEMINS_SLASH: set[str] | None = None
+
+
+def _chemins_slash() -> set[str]:
+    global _CHEMINS_SLASH
+    if _CHEMINS_SLASH is None:
+        try:
+            from utils import slash_catalog
+
+            _CHEMINS_SLASH = {e.path for e in slash_catalog.CATALOG}
+        except Exception:  # noqa: BLE001
+            _CHEMINS_SLASH = set()
+    return _CHEMINS_SLASH
+
+
+def _citer(match: "_re.Match[str]") -> str:
+    """`/play trivia` en entier quand c'est un chemin publié ; sinon le premier mot."""
+    tete, suite = match.group(1), match.group(2) or ""
+    if tete.startswith("/") and suite:
+        mots = suite.split()
+        for n in range(len(mots), 0, -1):
+            chemin = " ".join([tete[1:], *mots[:n]])
+            if chemin in _chemins_slash():
+                reste = " ".join(mots[n:])
+                return f"`/{chemin}`" + (f" {reste}" if reste else "")
+    return f"`{tete}`{suite}"
+
+
+def commandes_en_code(texte: str) -> str:
+    """« tapez +help » -> « tapez `+help` », hors des blocs déjà en code.
+
+    Ni lien (https://…/app), ni fraction (0/100), ni montant (+50), ni mention :
+    seule une commande isolée, précédée d'un blanc ou d'une ponctuation."""
+    if not MISE_EN_FORME or ("+" not in texte and "/" not in texte):
+        return texte
+    morceaux = str(texte).split("`")
+    for i in range(0, len(morceaux), 2):  # indices pairs : hors des `…`
+        morceaux[i] = _COMMANDE_CITEE.sub(_citer, morceaux[i])
+    return "`".join(morceaux)
+
+
+def _en_citation(texte: str) -> str:
+    """Le texte principal sous le titre, avec la ligne de citation Discord."""
+    if not MISE_EN_FORME or not texte.strip():
+        return texte
+    lignes = texte.split("\n")
+    if any(l.lstrip().startswith(("#", ">", "```", "-#")) for l in lignes) or len(lignes) > 6:
+        return texte
+    return "\n".join(f"> {l}" if l.strip() else ">" for l in lignes)
+
+
 def _icone_de_famille(famille: str, titre: str) -> str:
     """Pose l'icône du domaine devant le titre, s'il n'en a pas déjà une.
 
@@ -726,11 +745,30 @@ def _icone_de_famille(famille: str, titre: str) -> str:
         return titre
     nom = ICONES_FAMILLES.get(str(famille or ""))
     icone = _emoji(nom) if nom else ""
-    # Seulement une VRAIE icône : le repli texte (« ✓ », « … ») devant un
-    # titre de panneau serait du bruit, pas de l'identité.
-    if not icone.startswith("<"):
+    if icone.startswith("<"):
+        return f"{icone} {titre}".strip()
+    # Pas d'icône SentriX importée sur ce bot : un émoji standard du domaine
+    # (choix du 22/10/2026 : des émojis partout). Jamais deux à la suite.
+    from utils import embeds as _embeds
+
+    repli = ICONES_UNICODE.get(str(famille or ""))
+    if not repli or not _embeds.EMOJIS_VISIBLES or _commence_par_un_emoji(titre):
         return titre
-    return f"{icone} {titre}".strip()
+    return f"{repli} {titre}".strip()
+
+
+#: Repli quand les icônes SentriX (émojis d'application) ne sont pas disponibles.
+ICONES_UNICODE: dict[str, str] = {
+    "moderation": "🛡️", "security": "🔒", "tickets": "🎫", "economy": "💰",
+    "levels": "⭐", "music": "🎵", "games": "🎮", "ai": "🤖", "config": "⚙️",
+    "welcome": "👋", "goodbye": "🚪", "events": "🎉", "info": "ℹ️",
+    "success": "✅", "error": "❌", "warning": "⚠️", "special": "✨",
+}
+
+
+def _commence_par_un_emoji(titre: str) -> bool:
+    premier = str(titre or "").lstrip()[:1]
+    return bool(premier) and (premier == "<" or ord(premier) >= 0x2190)
 
 
 def _icones(texte: str) -> str:
@@ -868,6 +906,52 @@ def _texte_erreur_depuis_panneau(panneau: Panneau) -> str:
     return texte[:1900] or "Une erreur est survenue. Merci de réessayer."
 
 
+#: Décision de Jayden, 22/10/2026 : TOUTES les commandes portent la bande fine,
+#: y compris les confirmations et erreurs courtes, qui partaient en texte brut.
+#: False rétablit le texte brut.
+CARTES_COURTES = True
+
+
+def _en_carte_courte(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Un texte court devient une petite carte : bande fine, le texte, et les
+    boutons éventuels dans la carte — sans liseré coloré sur le flanc."""
+    texte = str(kwargs.get("content") or "").strip()
+    if not CARTES_COURTES or not texte:
+        return kwargs
+    charge = dict(kwargs)
+    charge.pop("content", None)
+    charge.pop("embed", None)
+    charge.pop("embeds", None)
+    ancienne_vue = charge.pop("view", None)
+    vue = discord.ui.LayoutView(timeout=getattr(ancienne_vue, "timeout", None) if ancienne_vue else None)
+    carte = discord.ui.Container()
+    famille = famille_de_la_commande() or "special"
+    pose = poser_bandeau(carte, famille)
+    carte.add_item(discord.ui.TextDisplay(commandes_en_code(texte)[:3900]))
+    if ancienne_vue is not None:
+        boutons = [e for e in list(getattr(ancienne_vue, "children", []) or [])
+                   if isinstance(e, (discord.ui.Button, discord.ui.Select))]
+        rangee = None
+        for bouton in boutons[:25]:
+            if rangee is None or len(rangee.children) >= 5 or isinstance(bouton, discord.ui.Select):
+                rangee = discord.ui.ActionRow()
+                carte.add_item(rangee)
+            bouton._view = None
+            rangee.add_item(bouton)
+            if isinstance(bouton, discord.ui.Select):
+                rangee = None
+    vue.add_item(carte)
+    charge["view"] = vue
+    fichiers = [*(charge.pop("files", None) or [])]
+    if charge.get("file") is not None:
+        fichiers.append(charge.pop("file"))
+    if pose:
+        fichiers.extend(pieces_jointes_de_famille(famille))
+    if fichiers:
+        charge["files"] = fichiers
+    return charge
+
+
 async def _envoyer_texte_brut_depuis_panneau(
     destination: Any,
     texte: str,
@@ -905,6 +989,7 @@ async def _envoyer_texte_brut_sans_signal(
     # « Un modèle nommé « <@&rôle> » existe déjà » faisait sonner un rôle non
     # mentionnable (tools/mention_injection_sweep.py, 08/10/2026).
     kwargs.setdefault("allowed_mentions", _MENTIONS_AUCUNE)
+    kwargs = _en_carte_courte(kwargs)
 
     if isinstance(destination, discord.InteractionResponse):
         if ephemere:
@@ -925,13 +1010,14 @@ async def _envoyer_texte_brut_sans_signal(
             return _message_envoye(await interaction.response.send_message(**kwargs))
         if reponse_differee_a_finaliser(interaction):
             try:
-                result = await interaction.edit_original_response(
-                    content=texte[:1900],
-                    embeds=[],
-                    view=None,
-                    attachments=[],
-                    allowed_mentions=kwargs["allowed_mentions"],
-                )
+                if "content" in kwargs:
+                    result = await interaction.edit_original_response(
+                        content=texte[:1900], embeds=[], view=None, attachments=[],
+                        allowed_mentions=kwargs["allowed_mentions"],
+                    )
+                else:
+                    result = await interaction.edit_original_response(
+                        **{"embeds": [], **kwargs_edition_reponse_differee(kwargs)})
                 marquer_reponse_differee_finalisee(interaction)
                 return result
             except (discord.NotFound, discord.HTTPException):
@@ -960,6 +1046,78 @@ def _pied_avec_memoire_separee(contenu: str, marque: str, contexte: str) -> str:
     return "\n".join(morceaux)
 
 
+async def _ajouter_suites(panneau: Any, bot: Any, guild: Any, reference: str) -> None:
+    """Les boutons de suite d'une sanction (Exclure 10 min, Lever l'exclusion…) DANS la carte.
+
+    La confirmation de sanction est une carte Components V2 (utils/moderation_feedback) :
+    on ne peut pas y joindre une seconde vue, comme le faisait la réponse en texte.
+    Les boutons rejoignent donc sa rangée d'actions ; « Historique » n'est pas doublé
+    quand la carte a déjà le sien. cogs/trace.py les reconnaît par leur custom_id.
+    """
+    from utils import sentrix_trace
+
+    if bot is None or guild is None or not sentrix_trace.current_is_moderation():
+        return
+    cible = sentrix_trace.current_target()
+    if not cible:
+        return
+    try:
+        from cogs import language_runtime
+
+        english = await language_runtime.get_language(bot, guild.id) == language_runtime.LANG_EN
+    except Exception:  # noqa: BLE001
+        english = False
+    suites = sentrix_trace.suites_view(sentrix_trace.current_command() or "", cible, reference, english=english)
+    if suites is None:
+        return
+    conteneur = next((e for e in list(getattr(panneau, "children", []) or [])
+                      if isinstance(e, discord.ui.Container)), None)
+    if conteneur is None:
+        return
+
+    def boutons(item: Any) -> list[Any]:
+        """Tout ce qui porte un custom_id, pas seulement les Button.
+
+        Le bouton « Historique » des cartes de sanction est un
+        ``DynamicItem`` : il ENVELOPPE un Button, il n'en est pas un. Le test
+        ``isinstance(..., discord.ui.Button)`` ne le voyait donc pas, la garde
+        ``a_un_historique`` restait fausse, et la vue de suites ajoutait un
+        SECOND bouton d'historique à côté du premier — mesuré le 23/10/2026 sur
+        une carte +kick : « Historique » et « History » côte à côte.
+        """
+        trouves = []
+        for enfant in list(getattr(item, "children", []) or []):
+            if getattr(enfant, "custom_id", None):
+                trouves.append(enfant)
+            trouves.extend(boutons(enfant))
+            interne = getattr(enfant, "item", None)
+            if interne is not None and interne is not enfant:
+                trouves.extend(boutons(interne))
+        return trouves
+
+    existants = boutons(conteneur)
+    ids = {str(getattr(b, "custom_id", "") or "") for b in existants}
+    a_un_historique = any(":history:" in i or i.endswith(":history") for i in ids)
+    nouveaux = [b for b in suites.children
+                if str(b.custom_id) not in ids
+                and not (a_un_historique and ":history:" in str(b.custom_id))]
+    if not nouveaux:
+        return
+    rangee = next((e for e in reversed(list(conteneur.children)) if isinstance(e, discord.ui.ActionRow)), None)
+    for bouton in nouveaux:
+        bouton._view = None
+        if rangee is None or len(rangee.children) >= 5:
+            rangee = discord.ui.ActionRow()
+            try:
+                conteneur.add_item(rangee)
+            except (ValueError, TypeError):  # carte pleine : la sanction reste confirmée
+                return
+        try:
+            rangee.add_item(bouton)
+        except (ValueError, TypeError):
+            return
+
+
 async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
     """Sépare proprement le contexte membre et la référence dans le pied du panneau.
 
@@ -968,12 +1126,13 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
     """
     from utils import sentrix_trace
 
-    reference = sentrix_trace.visible_ref()
+    reference = sentrix_trace.active_ref()
     if not reference:
         return
     parent = getattr(destination, "_parent", None)
     guild = getattr(destination, "guild", None) or getattr(parent, "guild", None)
     bot = getattr(destination, "bot", None) or getattr(destination, "client", None) or getattr(parent, "client", None)
+    await _ajouter_suites(panneau, bot, guild, reference)
     try:
         ligne = await sentrix_trace.memory_line(bot, guild)
     except Exception:  # noqa: BLE001 — la mémoire ne doit jamais bloquer une réponse
@@ -981,6 +1140,19 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
     if not ligne:
         return
     marque = f"Réf. {reference}"
+
+    def ajouter_en_pied(item: Any) -> bool:
+        """La référence n'est plus affichée : la mémoire va en dernière ligne du panneau."""
+        conteneur = next((e for e in list(getattr(item, "children", []) or [])
+                          if isinstance(e, discord.ui.Container)), None)
+        cible = conteneur if conteneur is not None else item
+        if any(ligne in str(getattr(e, "content", "")) for e in list(getattr(cible, "children", []) or [])):
+            return True
+        try:
+            cible.add_item(discord.ui.TextDisplay(f"-# {ligne}"))
+        except (ValueError, TypeError, AttributeError):  # panneau plein : la réponse passe sans la mémoire
+            return False
+        return True
 
     def parcourir(item: Any) -> bool:
         for enfant in list(getattr(item, "children", []) or []):
@@ -994,7 +1166,8 @@ async def _completer_par_la_memoire(destination: Any, panneau: Any) -> None:
                 return True
         return False
 
-    parcourir(panneau)
+    if not parcourir(panneau):
+        ajouter_en_pied(panneau)
 
 
 async def envoyer(
@@ -1260,7 +1433,10 @@ def depuis_embed(
         sections=sections,
         boutons=boutons,
         pied=pied or pied_embed or None,
-        banniere=False,
+        # Le bandeau fin suit le réglage du produit (BANDEAUX_ACTIFS), comme /setup et
+        # /ping. Forcé à False depuis le retrait global des bannières (03/10/2026), il
+        # privait toutes les réponses venues d'un embed de la bande réactivée depuis.
+        banniere=banniere,
         image=image_url if image_url else None,
     )
 
@@ -1366,7 +1542,9 @@ def avec_composants(panneau: Panneau, vue: discord.ui.View) -> Panneau:
         panneau.interaction_check = interaction_check
 
     source_error = getattr(vue, "on_error", None)
-    if source_error is not None:
+    if source_error is not None and getattr(source_error, "__func__", None) not in {
+        discord.ui.View.on_error, discord.ui.LayoutView.on_error,
+    }:
         panneau.on_error = source_error
 
     source_timeout = getattr(vue, "on_timeout", None)
@@ -1490,6 +1668,7 @@ async def editer(cible: Any, panneau: Panneau, **extra: Any):
             )
     extra.pop("attachments", None)
     fichiers = panneau.fichiers() if hasattr(panneau, "fichiers") else []
+    extra.setdefault("allowed_mentions", discord.AllowedMentions.none())
     charge = {"view": panneau, "attachments": fichiers, **extra}
 
     for nom in ("edit_message", "edit_original_response", "edit"):
@@ -1583,7 +1762,7 @@ async def texte_court(
     # la même que sur la carte de log (utils/sentrix_trace.py).
     from utils import sentrix_trace
 
-    reference = sentrix_trace.visible_ref()
+    reference = sentrix_trace.active_ref()
     if reference and "Réf. SX-" not in texte:
         # La mémoire SentriX : une sanction rappelle ce que le serveur sait déjà
         # du membre visé (sanctions récentes, ancienneté, compte récent).
@@ -1610,7 +1789,9 @@ async def texte_court(
                                                    english=english)
                 if suites is not None:
                     extra = {**extra, "view": suites}
-        texte = f"{texte}\n-# {contexte + ' · ' if contexte else ''}Réf. {reference}"
+        # La référence reste interne (visible_ref) ; la mémoire, elle, s'affiche.
+        if contexte and contexte not in texte:
+            texte = f"{texte}\n-# {contexte}"
     kwargs: dict[str, Any] = {"content": texte, "allowed_mentions": _MENTIONS_AUCUNE}
     kwargs.update(extra)
 
@@ -1622,6 +1803,7 @@ async def texte_court(
 
 
 async def _envoyer_texte(destination: Any, kwargs: dict[str, Any], *, ephemere: bool, supprimer_apres: float | None):
+    kwargs = _en_carte_courte(kwargs)
     if isinstance(destination, discord.InteractionResponse):
         if ephemere:
             kwargs["ephemeral"] = True

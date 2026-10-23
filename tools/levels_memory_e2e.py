@@ -38,7 +38,8 @@ async def main() -> int:
     await bot.db.execute("UPDATE levels SET level = 50, xp = 0 WHERE guild_id = ? AND user_id = ?", (h.GID, h.SECOND_ID))
 
     shown = await run(f"+add-xp <@{h.TARGET_ID}> 300", ADMIN)
-    check("300 XP" in shown and "Réf. SX-" in shown, "+add-xp répond et porte sa référence", shown[-200:])
+    # Référence SX- interne depuis la PR #503 : elle n'est plus affichée.
+    check("300 XP" in shown and "Réf. SX-" not in shown, "+add-xp répond, sans référence affichée", shown[-200:])
     row = await bot.db.fetchone("SELECT level FROM levels WHERE guild_id = ? AND user_id = ?", (h.GID, h.TARGET_ID))
     check(f"niveau {row['level']} · 2e du serveur" in shown,
           "le niveau et le rang réels après l'ajout sont rappelés (un autre membre est plus haut)", shown[-200:])

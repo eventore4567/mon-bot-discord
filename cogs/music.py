@@ -234,6 +234,16 @@ def _classify_engine_error(exc: MusicEngineError) -> tuple[str, str]:
     return "Lecture impossible", "Une erreur est survenue pendant la résolution de ce morceau."
 
 
+async def _music_control_error(interaction, error):
+    logger.error("Contrôle musique échoué guild=%s", interaction.guild_id,
+                 exc_info=(type(error), error, error.__traceback__))
+    text = "Le lecteur a rencontré une erreur. Actualisez-le pour vérifier la lecture, puis réessayez."
+    if interaction.response.is_done():
+        await interaction.followup.send(text, ephemeral=True)
+    else:
+        await interaction.response.send_message(text, ephemeral=True)
+
+
 class MusicSearchModal(discord.ui.Modal, title="Choisir une musique"):
     recherche = discord.ui.TextInput(
         label="Titre, artiste ou lien",
@@ -246,6 +256,9 @@ class MusicSearchModal(discord.ui.Modal, title="Choisir une musique"):
         self.bot = bot
         self.guild_id = int(guild_id)
         self.voice_channel_id = int(voice_channel_id)
+
+    async def on_error(self, interaction, error):
+        await _music_control_error(interaction, error)
 
     async def on_submit(self, interaction: discord.Interaction):
         music = self.bot.get_cog("Music")
@@ -268,6 +281,51 @@ class MusicSearchModal(discord.ui.Modal, title="Choisir une musique"):
             ephemere=True,
             supprimer_apres=6,
         )
+
+
+class MusicControlsModal(discord.ui.Modal, title="Régler le lecteur"):
+    def __init__(self, music, guild_id):
+        super().__init__()
+        self.music, self.guild_id = music, guild_id
+        self.volume_input = discord.ui.TextInput(label="Volume (0 à 100)", default=str(round(music.get_queue(guild_id).volume * 100)), max_length=3)
+        self.position_input = discord.ui.TextInput(label="Position (secondes ou minutes:secondes)", placeholder="Ex. 90 ou 1:30 — laisser vide pour ne pas déplacer", required=False, max_length=8)
+        self.add_item(self.volume_input)
+        self.add_item(self.position_input)
+
+    async def on_error(self, interaction, error):
+        await _music_control_error(interaction, error)
+
+    async def on_submit(self, interaction):
+        queue = await self.music._interaction_music_queue(interaction, self.guild_id)
+        if queue is None:
+            return
+        try:
+            volume = int(self.volume_input.value)
+            if not 0 <= volume <= 100:
+                raise ValueError
+            position = None
+            raw = str(self.position_input.value or "").strip()
+            if raw:
+                parts = raw.split(":")
+                if len(parts) > 2 or any(not p.isdigit() for p in parts):
+                    raise ValueError
+                if len(parts) == 2 and int(parts[1]) >= 60:
+                    raise ValueError
+                position = int(parts[0]) * 60 + int(parts[1]) if len(parts) == 2 else int(parts[0])
+                if not queue.current or queue.current.is_live or position < 0 or position > 36000:
+                    raise ValueError
+                if queue.current.duration and position > queue.current.duration:
+                    raise ValueError
+        except (TypeError, ValueError):
+            return await interaction.response.send_message("Volume : 0 à 100. La position doit être dans la durée du titre (ex. 1:30), hors direct.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if position is not None and not await self.music._seek_queue(queue, position):
+            return await interaction.followup.send("Le déplacement a échoué : la source audio est indisponible. Le volume n’a pas été modifié.", ephemeral=True)
+        queue.volume = volume / 100
+        source = getattr(queue.voice_client, "source", None)
+        if source is not None and hasattr(source, "volume"):
+            source.volume = queue.volume
+        await interaction.followup.send("Réglages appliqués au lecteur." + (f" Position : {premium_style.format_duration(position)}." if position is not None else ""), ephemeral=True)
 
 
 class MusicVoicePanel(discord.ui.View):
@@ -364,6 +422,9 @@ class Music(commands.Cog, name="Music"):
         self.manager = ProviderManager()
         self.queues: dict[int, GuildMusicQueue] = {}
         self._panel_locks: dict[int, asyncio.Lock] = {}
+        self._player_messages: dict[tuple[int, int], discord.Message] = {}
+        self._player_activity: dict[tuple[int, int], tuple[float, bool]] = {}
+        self._player_refresher.start()
         # Un seul panneau musique par membre présent dans le vocal configuré.
         # À la sortie on attend 2 s avant suppression : si le membre revient
         # immédiatement, on garde le même panneau et on évite le spam.
@@ -373,6 +434,7 @@ class Music(commands.Cog, name="Music"):
 
     def cog_unload(self):
         self._inactivity_checker.cancel()
+        self._player_refresher.cancel()
         for task in list(self._join_panel_delete_tasks.values()):
             if not task.done():
                 task.cancel()
@@ -398,9 +460,11 @@ class Music(commands.Cog, name="Music"):
         if voice_channel_id:
             channel = guild.get_channel(int(voice_channel_id))
             if not isinstance(channel, discord.VoiceChannel):
-                raise ValueError("Choisissez un salon vocal valide.")
+                if enabled:
+                    raise ValueError("Choisissez un salon vocal valide.")
+                channel = None
             me = guild.me
-            if me is not None:
+            if enabled and channel is not None and me is not None:
                 perms = channel.permissions_for(me)
                 missing = []
                 if not perms.view_channel:
@@ -532,9 +596,9 @@ class Music(commands.Cog, name="Music"):
         if not query:
             return False, "Entre un titre, un artiste ou un lien."
         settings = await self.get_system_settings(guild.id)
-        if not settings["enabled"]:
-            return False, "Le système musique est désactivé."
-        if settings["voice_channel_id"] != int(voice_channel_id):
+        if settings.get("configured", True) and not settings["enabled"]:
+            return False, "La musique est désactivée. Choisissez un vocal puis activez-la dans +setup → Musique."
+        if settings.get("configured", True) and settings["voice_channel_id"] != int(voice_channel_id):
             return False, "Ce vocal n'est plus le salon musique configuré."
         member_voice = getattr(member, "voice", None)
         if member_voice is None or member_voice.channel is None or member_voice.channel.id != int(voice_channel_id):
@@ -545,12 +609,17 @@ class Music(commands.Cog, name="Music"):
 
         lock = self._panel_locks.setdefault(guild.id, asyncio.Lock())
         async with lock:
+            active_voice = self.get_queue(guild.id).voice_client or guild.voice_client
+            if (active_voice and active_voice.is_connected() and active_voice.channel.id != channel.id
+                    and (active_voice.is_playing() or active_voice.is_paused())):
+                return False, "SentriX joue déjà dans un autre vocal. Rejoignez-le pour ajouter un titre."
             try:
                 queue = await self._connect_configured_voice(
                     guild,
                     channel,
                     text_channel=text_channel,
                 )
+                queue.keep_connected = bool(settings.get("enabled"))
                 resolved = await self.manager.resolve(query, requested_by=member.id)
             except MusicEngineError as exc:
                 _title, description = _classify_engine_error(exc)
@@ -565,7 +634,10 @@ class Music(commands.Cog, name="Music"):
             if not (queue.voice_client.is_playing() or queue.voice_client.is_paused()) and not queue.current:
                 await self._advance(queue)
                 started = queue.current is not None
+            if not queue.current and not queue.tracks:
+                return False, "Aucune source audio n’a pu être lue. Essayez un autre titre ou un autre lien."
             if started and queue.current:
+                await self._show_player(text_channel or channel, queue)
                 return True, f"Lecture démarrée : **{queue.current.display_title()}**."
             return True, f"{len(resolved.tracks)} titre(s) ajouté(s) à la file."
 
@@ -622,161 +694,181 @@ class Music(commands.Cog, name="Music"):
         queue.voice_client = voice
         return queue
 
-    def _music_player_panel(self, queue: GuildMusicQueue) -> panels.Panneau:
-        track = queue.current
-        if track is None:
-            return panels.Panneau(
-                titre="Musique",
-                sous_titre="Aucune musique n'est en lecture.",
-                kind="musique",
-                sections=[
-                    panels.Section(
-                        "Démarrer",
-                        [panels.Ligne("/musique jouer", "Lancer un titre ou un lien")],
-                    ),
-                ],
-                pied="Lecteur",
-                timeout=15 * 60,
-            )
+    async def _show_player(self, destination, queue: GuildMusicQueue, *, notice: str | None = None):
+        message = await panels.envoyer(destination, self._music_player_panel(queue, notice=notice))
+        if message is not None and callable(getattr(message, "edit", None)):
+            channel_id = getattr(getattr(message, "channel", None), "id", None)
+            if channel_id is not None:
+                key = (queue.guild_id, int(message.id))
+                self._player_messages[key] = message
+                self._player_activity[key] = (time.monotonic(), False)
+        return message
 
-        guild_id = int(queue.guild_id)
+    async def _refresh_player(self, interaction, queue):
+        if not interaction.response.is_done():
+            await interaction.response.defer()
+        panel = self._music_player_panel(queue)
+        await interaction.edit_original_response(
+            content=None, embeds=[], view=panel, attachments=panel.fichiers(),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
-        async def pause_resume(interaction: discord.Interaction):
-            active = await self._interaction_music_queue(interaction, guild_id)
-            if active is None:
-                return
-            if self._pause_queue(active):
-                text = "Musique mise en pause."
-            elif self._resume_queue(active):
-                text = "Lecture reprise."
-            else:
-                text = "Aucune musique n'est en lecture."
-            await interaction.response.send_message(text, ephemeral=True)
-
-        async def skip(interaction: discord.Interaction):
-            active = await self._interaction_music_queue(interaction, guild_id)
-            if active is None:
-                return
-            if await self._skip_queue(active):
-                text = "Passage au titre suivant."
-            else:
-                text = "Aucune musique à passer."
-            await interaction.response.send_message(text, ephemeral=True)
-
-        async def stop(interaction: discord.Interaction):
-            active = await self._interaction_music_queue(interaction, guild_id)
-            if active is None:
-                return
-            await self._stop_queue(active)
-            await interaction.response.send_message(
-                "Lecture arrêtée et file vidée.",
-                ephemeral=True,
-            )
-
-        async def show_queue(interaction: discord.Interaction):
-            active = await self._interaction_music_queue(interaction, guild_id)
-            if active is None:
-                return
-            lines = []
-            if active.current:
-                lines.append(f"En cours : **{active.current.display_title()}**")
-            for index, item in enumerate(active.tracks[:10], 1):
-                lines.append(f"{index}. {item.display_title()}")
-            if len(active.tracks) > 10:
-                lines.append(f"… et {len(active.tracks) - 10} autre(s).")
-            await interaction.response.send_message(
-                "\n".join(lines) if lines else "La file d'attente est vide.",
-                ephemeral=True,
-            )
-
-        async def show_playlists(interaction: discord.Interaction):
-            active = await self._interaction_music_queue(interaction, guild_id)
-            if active is None:
-                return
-            try:
-                rows = await self.bot.db.fetchall(
-                    "SELECT name, items_json FROM music_playlists "
-                    "WHERE guild_id=? AND user_id=? ORDER BY updated_at DESC LIMIT 10",
-                    (guild_id, int(interaction.user.id)),
-                )
-            except Exception:
-                rows = []
-            if not rows:
-                text = (
-                    "Aucune playlist personnelle. Utilise /musique playlist sauvegarder "
-                    "ou /musique playlist importer."
-                )
-            else:
-                import json
-                lines = []
-                for row in rows:
-                    try:
-                        count = len(json.loads(row["items_json"] or "[]"))
-                    except Exception:
-                        count = 0
-                    lines.append(f"**{row['name']}** · {count} titre(s)")
-                text = "\n".join(lines)
-            await interaction.response.send_message(text[:1900], ephemeral=True)
-
-        details = [
-            panels.Ligne("Titre", track.title),
-            panels.Ligne("Artiste", track.artist or "Artiste inconnu"),
-        ]
-        if track.album:
-            details.append(panels.Ligne("Album", track.album))
-        if track.duration:
-            details.append(
-                panels.Ligne("Durée", premium_style.format_duration(track.duration))
-            )
-
-        lecture = [
-            panels.Ligne("Progression", _music_progress_text(queue, track)),
-            panels.Ligne("Source", _music_source_label(track)),
-            panels.Ligne("Volume", f"{round(queue.volume * 100)} %"),
-            panels.Ligne("File", f"{len(queue.tracks)} titre(s) en attente"),
-        ]
-
+    def _music_queue_panel(self, queue: GuildMusicQueue, page: int = 0):
+        pages = max(1, (len(queue.tracks) + 7) // 8)
+        page = max(0, min(page, pages - 1))
+        sections = []
+        if queue.current:
+            sections.append(panels.Section("En cours", texte=discord.utils.escape_markdown(queue.current.display_title())[:300]))
+        start = page * 8
+        lines = [panels.Ligne(str(index), discord.utils.escape_markdown(track.display_title())[:150])
+                 for index, track in enumerate(queue.tracks[start:start + 8], start + 1)]
+        sections.append(panels.Section("À suivre", lignes=lines, texte=None if lines else "La file est vide. Ajoutez un titre depuis le lecteur."))
+        async def change(interaction, delta):
+            if interaction.guild_id != queue.guild_id:
+                return await interaction.response.send_message("Cette file appartient à un autre serveur.", ephemeral=True)
+            panel = self._music_queue_panel(queue, page + delta)
+            await interaction.response.edit_message(view=panel, attachments=panel.fichiers())
+        async def previous(interaction):
+            await change(interaction, -1)
+        async def following(interaction):
+            await change(interaction, 1)
         return panels.Panneau(
-            titre="Lecture en cours",
-            sous_titre=track.display_title()[:180],
-            kind="musique",
-            vignette=track.thumbnail,
-            sections=[
-                panels.Section("Piste", details),
-                panels.Section("Lecture", lecture),
-            ],
-            boutons=[
-                panels.Bouton(
-                    "Pause / Reprendre",
-                    custom_id=f"sentrix:music:{guild_id}:pause",
-                    style=discord.ButtonStyle.primary,
-                    callback=pause_resume,
-                ),
-                panels.Bouton(
-                    "Suivant",
-                    custom_id=f"sentrix:music:{guild_id}:skip",
-                    callback=skip,
-                ),
-                panels.Bouton(
-                    "Stop",
-                    custom_id=f"sentrix:music:{guild_id}:stop",
-                    style=discord.ButtonStyle.danger,
-                    callback=stop,
-                ),
-                panels.Bouton(
-                    "File",
-                    custom_id=f"sentrix:music:{guild_id}:queue",
-                    callback=show_queue,
-                ),
-                panels.Bouton(
-                    "Playlists",
-                    custom_id=f"sentrix:music:{guild_id}:playlists",
-                    callback=show_playlists,
-                ),
-            ],
-            pied="Lecteur",
+            titre="File d’attente", sous_titre=f"{len(queue.tracks)} titre(s) · Page {page + 1}/{pages}",
+            kind="musique", sections=sections, banniere=True,
+            boutons=[panels.Bouton("Précédent", callback=previous, desactive=page == 0),
+                     panels.Bouton("Suivant", callback=following, desactive=page == pages - 1)],
             timeout=15 * 60,
         )
+
+    def _music_player_panel(self, queue: GuildMusicQueue, *, notice: str | None = None) -> panels.Panneau:
+        track = queue.current
+        voice = queue.voice_client
+        paused = bool(queue.paused_by_user)
+        channel = getattr(voice, "channel", None)
+        loop = "Piste" if queue.loop_track else "File" if queue.loop_queue else "Non"
+        title = "⏸️ Lecture en pause" if track and paused else "🎵 Lecture en cours" if track else "🎧 Votre espace musique"
+        details = [notice] if notice else []
+        if track:
+            if track.requested_by:
+                details.append(f"Ajouté par <@{track.requested_by}>")
+            artist = str(getattr(track, "artist", "") or "").strip()
+            if artist:
+                details.append(f"🎤 {discord.utils.escape_markdown(artist)[:140]}")
+            details.append(f"🔎 {_music_source_label(track)}")
+        if channel is not None:
+            details.append(f"🔊 <#{channel.id}>")
+        details.append(f"File : **{len(queue.tracks)}** · Volume : **{round(queue.volume * 100)} %** · Boucle : **{loop}**")
+        details.append(f"Lecture auto : **{'Oui' if queue.autoplay else 'Non'}**")
+        sections = [panels.Section("", texte="\n".join(details))]
+        if track:
+            sections.append(panels.Section("Progression", texte=_music_progress_text(queue, track)))
+        else:
+            sections.append(panels.Section("Prêt à écouter", texte="Rejoignez un vocal puis choisissez **➕ Ajouter**.\nRecherchez un artiste, un titre ou collez un lien.\n-# La pochette et la progression s’affichent dès le lancement."))
+
+        async def action(interaction, name):
+            if name == "add":
+                channel = getattr(getattr(interaction.user, "voice", None), "channel", None)
+                if interaction.guild_id != queue.guild_id or channel is None:
+                    return await interaction.response.send_message("Rejoignez le vocal musique avant d’ajouter un titre.", ephemeral=True)
+                return await interaction.response.send_modal(MusicSearchModal(self.bot, queue.guild_id, channel.id))
+            active = await self._interaction_music_queue(interaction, queue.guild_id)
+            if active is None:
+                return
+            if name == "settings":
+                return await interaction.response.send_modal(MusicControlsModal(self, active.guild_id))
+            if name == "queue":
+                return await panels.envoyer(interaction, self._music_queue_panel(active), ephemere=True)
+            await interaction.response.defer()
+            if name == "pause":
+                if not self._pause_queue(active):
+                    self._resume_queue(active)
+            elif name == "skip":
+                await self._skip_queue(active)
+            elif name == "stop":
+                await self._stop_queue(active)
+            elif name == "autoplay":
+                active.autoplay = not active.autoplay
+            elif name == "loop":
+                active.loop_track, active.loop_queue = (False, True) if active.loop_track else (False, False) if active.loop_queue else (True, False)
+            elif name == "shuffle":
+                import random
+                random.shuffle(active.tracks)
+            await self._refresh_player(interaction, active)
+
+        def button(label, name, *, disabled=False, style=discord.ButtonStyle.secondary):
+            async def callback(interaction):
+                await action(interaction, name)
+            icons = {"pause": "▶️" if paused else "⏸️", "skip": "⏭️", "stop": "⏹️",
+                     "autoplay": "♾️", "queue": "🎶", "add": "➕", "settings": "🎚️",
+                     "loop": "🔁", "shuffle": "🔀", "refresh": "🔄"}
+            return panels.Bouton(label, custom_id=f"sentrix:music:{queue.guild_id}:{name}",
+                                 callback=callback, desactive=disabled, style=style, emoji=icons[name])
+
+        panneau = panels.Panneau(
+            titre=title,
+            sous_titre=discord.utils.escape_markdown(track.display_title())[:180] if track else "Un titre, une file d’attente et tous les contrôles au même endroit.",
+            kind="musique", vignette=(track.thumbnail if track and track.thumbnail else str(getattr(getattr(getattr(self.bot, "user", None), "display_avatar", None), "url", "") or "") or None),
+            banniere=True, sections=sections,
+            # Quatre contrôles directs ; le reste dans un menu (Jayden, 22/10/2026 :
+            # « pas plein de boutons de partout »). Mêmes actions qu'avant.
+            boutons=[
+                button("Reprendre" if paused else "Pause", "pause", disabled=track is None, style=discord.ButtonStyle.primary),
+                button("Suivant", "skip", disabled=track is None),
+                button("Stop", "stop", disabled=not track and not queue.tracks, style=discord.ButtonStyle.danger),
+                button("Ajouter", "add", style=discord.ButtonStyle.success),
+            ], pied="SentriX · Contrôles réservés aux membres du même vocal", timeout=15 * 60,
+        )
+        options = [
+            discord.SelectOption(label="File d'attente", value="queue", emoji="🎶",
+                                 description=f"{len(queue.tracks)} titre(s) à venir"),
+            discord.SelectOption(label="Volume / position", value="settings", emoji="🎚️"),
+            discord.SelectOption(label=f"Boucle : {loop.lower()}", value="loop", emoji="🔁",
+                                 description="Titre → file → désactivée"),
+            discord.SelectOption(label=f"Lecture auto : {'oui' if queue.autoplay else 'non'}", value="autoplay", emoji="♾️"),
+            discord.SelectOption(label="Actualiser le lecteur", value="refresh", emoji="🔄"),
+        ]
+        if len(queue.tracks) >= 2:
+            options.insert(1, discord.SelectOption(label="Mélanger la file", value="shuffle", emoji="🔀"))
+        menu = discord.ui.Select(placeholder="⚙️ Plus d'options…", options=options,
+                                 custom_id=f"sentrix:music:{queue.guild_id}:plus")
+
+        async def plus(interaction):
+            await action(interaction, menu.values[0])
+
+        menu.callback = plus
+        conteneur = next((e for e in panneau.children if isinstance(e, discord.ui.Container)), None)
+        if conteneur is not None:
+            conteneur.add_item(discord.ui.ActionRow(menu))
+        return panneau
+
+    @tasks.loop(seconds=15)
+    async def _player_refresher(self):
+        now = time.monotonic()
+        for key, message in list(self._player_messages.items()):
+            queue = self.queues.get(key[0])
+            last_active, idle_rendered = self._player_activity.setdefault(key, (now, False))
+            voice = queue.voice_client if queue else None
+            inactive = queue is None or queue.current is None or voice is None or not voice.is_connected() or voice.is_paused()
+            if queue is None or (inactive and now - last_active >= 15 * 60):
+                self._player_messages.pop(key, None)
+                self._player_activity.pop(key, None)
+                continue
+            if inactive and idle_rendered:
+                continue
+            panel = self._music_player_panel(queue)
+            try:
+                await message.edit(content=None, embeds=[], view=panel, attachments=panel.fichiers(), allowed_mentions=discord.AllowedMentions.none())
+            except (discord.NotFound, discord.Forbidden):
+                self._player_messages.pop(key, None)
+                self._player_activity.pop(key, None)
+            except discord.HTTPException:
+                logger.warning("Actualisation du lecteur impossible guild=%s message=%s", *key)
+            else:
+                self._player_activity[key] = (last_active if inactive else now, inactive)
+
+    @_player_refresher.before_loop
+    async def _before_player_refresher(self):
+        await self.bot.wait_until_ready()
 
     # ------------------------------------------------------------ VOIX / LECTURE
 
@@ -802,6 +894,9 @@ class Music(commands.Cog, name="Music"):
             voice = queue.voice_client or getattr(ctx.guild, "voice_client", None)
             if voice and voice.is_connected():
                 if getattr(getattr(voice, "channel", None), "id", None) != getattr(channel, "id", None):
+                    if voice.is_playing() or voice.is_paused():
+                        await panels.texte_court(ctx, "SentriX joue déjà dans un autre vocal. Rejoignez-le pour ajouter un titre.", ephemere=bool(ctx.interaction))
+                        return None
                     await voice.move_to(channel)
             else:
                 try:
@@ -964,35 +1059,58 @@ class Music(commands.Cog, name="Music"):
             return True
         return False
 
+    async def _seek_queue(self, queue, seconds):
+        async with queue.advance_lock:
+            voice, track = queue.voice_client, queue.current
+            if not voice or not voice.is_connected() or track is None or track.is_live:
+                return False
+            if seconds < 0 or (track.duration and seconds > track.duration):
+                return False
+            paused = queue.paused_by_user
+            self._invalidate_playback(queue)
+            if voice.is_playing() or voice.is_paused():
+                voice.stop()
+            queue.paused_by_user = False
+            started = await self._play_track(queue, track, seek_seconds=float(seconds))
+            if not started:
+                queue.current = None
+                queue.reset_clock()
+                return False
+            if paused:
+                self._pause_queue(queue)
+            return True
+
     async def _skip_queue(self, queue: GuildMusicQueue) -> bool:
-        voice = queue.voice_client
-        if not voice or not (voice.is_playing() or voice.is_paused()):
-            return False
-        queue.loop_track = False
-        queue.paused_by_user = False
-        self._invalidate_playback(queue)
-        voice.stop()
-        await self._advance(queue)
-        return True
+        async with queue.advance_lock:
+            voice = queue.voice_client
+            if not voice or not (voice.is_playing() or voice.is_paused()):
+                return False
+            queue.loop_track = False
+            queue.paused_by_user = False
+            self._invalidate_playback(queue)
+            voice.stop()
+            await self._advance_locked(queue)
+            return True
 
     async def _stop_queue(self, queue: GuildMusicQueue) -> bool:
-        voice = queue.voice_client
-        had_activity = bool(
-            queue.current
-            or queue.tracks
-            or (voice and (voice.is_playing() or voice.is_paused()))
-        )
-        queue.tracks.clear()
-        queue.loop_track = False
-        queue.loop_queue = False
-        queue.autoplay = False
-        queue.paused_by_user = False
-        self._invalidate_playback(queue)
-        if voice and (voice.is_playing() or voice.is_paused()):
-            voice.stop()
-        queue.current = None
-        queue.reset_clock()
-        return had_activity
+        async with queue.advance_lock:
+            voice = queue.voice_client
+            had_activity = bool(
+                queue.current
+                or queue.tracks
+                or (voice and (voice.is_playing() or voice.is_paused()))
+            )
+            queue.tracks.clear()
+            queue.loop_track = False
+            queue.loop_queue = False
+            queue.autoplay = False
+            queue.paused_by_user = False
+            self._invalidate_playback(queue)
+            if voice and (voice.is_playing() or voice.is_paused()):
+                voice.stop()
+            queue.current = None
+            queue.reset_clock()
+            return had_activity
 
     async def _play_track(
         self,
@@ -1496,26 +1614,8 @@ class Music(commands.Cog, name="Music"):
 
         try:
             target = await self._voice_chat_target(member.guild.id, channel.id)
-            embed = await self._embed(
-                member.guild.id,
-                title="Lecteur musique",
-                description=(
-                    "Bienvenue dans le vocal musique.\n"
-                    "Choisissez un titre avec le lecteur ci-dessous."
-                ),
-                kind="primary",
-            )
-            message = await target.send(
-                content=member.mention,
-                embed=embed,
-                view=MusicVoicePanel(self.bot, member.guild.id, channel.id),
-                allowed_mentions=discord.AllowedMentions(
-                    users=[member],
-                    roles=False,
-                    everyone=False,
-                    replied_user=False,
-                ),
-            )
+            queue = self.get_queue(member.guild.id)
+            message = await self._show_player(target, queue)
             self._join_panel_messages[key] = message
             await self._save_member_panel(
                 member.guild.id,
@@ -1670,41 +1770,46 @@ class Music(commands.Cog, name="Music"):
     # ------------------------------------------------------------ RÉSOLUTION + AJOUT
 
     async def _resolve_and_queue(self, ctx: commands.Context, query: str) -> None:
+        if ctx.interaction:
+            await ctx.defer()
         queue = await self._ensure_voice(ctx)
         if queue is None:
             return
-        if ctx.interaction:
-            await ctx.defer()
 
         try:
             result: ResolvedRequest = await self.manager.resolve(query, requested_by=ctx.author.id)
         except MusicEngineError as exc:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._error_embed(ctx.guild.id, exc)))
 
+        if not result.tracks:
+            return await panels.texte_court(ctx, "Aucun titre jouable trouvé. Essayez un autre titre ou un lien direct.")
         queue.tracks.extend(result.tracks)
         started_now = False
         if not (queue.voice_client.is_playing() or queue.voice_client.is_paused()) and not queue.current:
             await self._advance(queue)
             started_now = queue.current is not None
 
+        if not queue.current and not queue.tracks:
+            return await panels.texte_court(ctx, "Aucune source audio n’a pu être lue. Essayez un autre titre ou un autre lien.")
+
         if result.is_playlist:
             description = f"➕ **{len(result.tracks)}** titre(s) ajoutés depuis la playlist."
             if result.skipped:
                 description += f"\n⚠️ {len(result.skipped)} titre(s) non trouvé(s), ignoré(s)."
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Playlist ajoutée", description=description, kind="success")))
+            return await self._show_player(ctx, queue, notice=description)
 
         track = result.tracks[0]
         if started_now:
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Lecture en cours", description=f"▶️ **{track.display_title()}**", kind="success")))
+            await self._show_player(ctx, queue)
         else:
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Ajouté à la file", description=f"➕ **{track.display_title()}** ajouté à la file d'attente.", kind="success")))
+            await self._show_player(ctx, queue, notice=f"Ajouté à la file : **{discord.utils.escape_markdown(track.display_title())[:180]}**")
 
     # ------------------------------------------------------------ COMMANDES
 
     @commands.hybrid_group(name="music", description="Commandes musique de SentriX.")
     async def music(self, ctx: commands.Context):
         if ctx.invoked_subcommand is None:
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Musique", description="Utilisez `/music play <titre ou lien>` pour commencer.", kind="primary")))
+            await self._show_player(ctx, self.get_queue(ctx.guild.id))
 
     @music.command(name="play", description="Jouer un titre (nom, artiste, ou lien YouTube/Spotify/Deezer/SoundCloud).")
     @app_commands.describe(recherche="Titre + artiste, ou un lien YouTube/YouTube Music/Spotify/Deezer/SoundCloud/audio direct")
@@ -1783,21 +1888,22 @@ class Music(commands.Cog, name="Music"):
         voice = await self._require_control_voice(ctx, queue)
         if voice is None:
             return
-        if not queue.history:
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien avant", description="Aucun titre précédent dans cette session.", kind="danger")))
-        previous_track = queue.history.pop()
-        current = queue.current
-        if current:
-            queue.tracks.insert(0, current)
-        queue.tracks.insert(0, previous_track)
-        queue.loop_track = False
-        queue.paused_by_user = False
-        self._invalidate_playback(queue)
-        if voice.is_playing() or voice.is_paused():
-            voice.stop()
-        queue.current = None
-        queue.reset_clock()
-        await self._advance(queue)
+        async with queue.advance_lock:
+            if not queue.history:
+                return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien avant", description="Aucun titre précédent dans cette session.", kind="danger")))
+            previous_track = queue.history.pop()
+            current = queue.current
+            if current:
+                queue.tracks.insert(0, current)
+            queue.tracks.insert(0, previous_track)
+            queue.loop_track = False
+            queue.paused_by_user = False
+            self._invalidate_playback(queue)
+            if voice.is_playing() or voice.is_paused():
+                voice.stop()
+            queue.current = None
+            queue.reset_clock()
+            await self._advance_locked(queue)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Retour en arrière", description=f"⏮️ **{previous_track.display_title()}**", kind="success")))
 
     @music.command(name="stop", description="Arrêter la musique et vider la file d'attente.")
@@ -1811,46 +1917,12 @@ class Music(commands.Cog, name="Music"):
     @music.command(name="queue", description="Afficher la file d'attente musicale.")
     async def music_queue(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
-        if not queue.tracks and not queue.current:
-            return await panels.envoyer(
-                ctx,
-                panels.Panneau(
-                    titre="SentriX — File d'attente", sous_titre="Rien n'est en lecture et la file est vide.", kind="info",
-                    sections=[panels.Section("Lancer la musique", [
-                        panels.Ligne("`/music play <titre ou lien>`", "Ajoute un titre et démarre la lecture"),
-                    ])],
-                    pied="SentriX • Musique",
-                ),
-            )
-        sections = []
-        if queue.current:
-            en_cours = [panels.Ligne("Titre", queue.current.display_title())]
-            if queue.current.duration:
-                en_cours.append(panels.Ligne("Position", f"{premium_style.format_duration(int(queue.position_seconds()))} / {premium_style.format_duration(queue.current.duration)}"))
-            en_cours.append(panels.Ligne("Source", queue.current.playback_provider or queue.current.provider))
-            en_cours.append(panels.Ligne("Boucle", "piste" if queue.loop_track else ("file" if queue.loop_queue else "désactivée")))
-            sections.append(panels.Section("En lecture", en_cours))
-        if queue.tracks:
-            sections.append(panels.Section(
-                f"À suivre ({len(queue.tracks)})",
-                [panels.Ligne(f"{i}", piste.display_title()[:70]) for i, piste in enumerate(queue.tracks[:8], 1)],
-                aligne=True,
-            ))
-            restants = max(0, len(queue.tracks) - 8)
-            duree = sum(int(p.duration or 0) for p in queue.tracks)
-            recap = []
-            if restants:
-                recap.append(panels.Ligne("Non affichés", f"{restants} titre{'s' if restants > 1 else ''}"))
-            if duree:
-                recap.append(panels.Ligne("Durée totale", premium_style.format_duration(duree)))
-            if recap:
-                sections.append(panels.Section("Résumé", recap))
-        await panels.envoyer(ctx, panels.Panneau(titre="SentriX — File d'attente", sous_titre=f"**{len(queue.tracks)}** titre(s) en attente.", kind="info", sections=sections, pied="SentriX • Musique"))
+        await panels.envoyer(ctx, self._music_queue_panel(queue))
 
     @music.command(name="nowplaying", description="Afficher la musique en cours.")
     async def music_nowplaying(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
-        await panels.envoyer(ctx, self._music_player_panel(queue))
+        await self._show_player(ctx, queue)
 
     @music.command(name="volume", description="Régler le volume (0 à 100).")
     @app_commands.describe(niveau="Le niveau de volume entre 0 et 100")
@@ -1858,6 +1930,8 @@ class Music(commands.Cog, name="Music"):
         # commands.Range (pas app_commands.Range) : le transformer slash n'a pas de
         # convertisseur préfixe, `+music volume 50` répondait « Argument invalide ».
         queue = self.get_queue(ctx.guild.id)
+        if await self._require_control_voice(ctx, queue) is None:
+            return
         queue.volume = niveau / 100
         if queue.voice_client and queue.voice_client.source:
             queue.voice_client.source.volume = queue.volume
@@ -1877,6 +1951,8 @@ class Music(commands.Cog, name="Music"):
     ])
     async def music_loop(self, ctx: commands.Context, mode: str):
         queue = self.get_queue(ctx.guild.id)
+        if await self._require_control_voice(ctx, queue) is None:
+            return
         # `str` + @app_commands.choices : le slash garde ses trois choix, le préfixe
         # accepte les mêmes valeurs et leurs équivalents français.
         raw = (mode.value if isinstance(mode, app_commands.Choice) else str(mode)).casefold().strip()
@@ -1894,6 +1970,10 @@ class Music(commands.Cog, name="Music"):
     async def music_shuffle(self, ctx: commands.Context):
         import random
         queue = self.get_queue(ctx.guild.id)
+        if await self._require_control_voice(ctx, queue) is None:
+            return
+        if len(queue.tracks) < 2:
+            return await panels.texte_court(ctx, "Ajoutez au moins deux titres à la file pour pouvoir les mélanger.")
         random.shuffle(queue.tracks)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="File d'attente mélangée", kind="success")))
 
@@ -1901,14 +1981,20 @@ class Music(commands.Cog, name="Music"):
     @app_commands.describe(position="Position dans la file (voir /music queue)")
     async def music_remove(self, ctx: commands.Context, position: int):
         queue = self.get_queue(ctx.guild.id)
+        if await self._require_control_voice(ctx, queue) is None:
+            return
         if position < 1 or position > len(queue.tracks):
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Position invalide", kind="danger")))
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Position invalide", description=f"Choisissez un numéro entre 1 et {len(queue.tracks)} avec la commande de file d’attente." if queue.tracks else "La file est vide. Ajoutez un titre avant d’en retirer un.", kind="danger")))
         removed = queue.tracks.pop(position - 1)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Retiré de la file", description=f"🗑️ **{removed.display_title()}** retiré de la file d'attente.", kind="success")))
 
     @music.command(name="clear", description="Vider la file d'attente sans arrêter la musique en cours.")
     async def music_clear(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
+        if await self._require_control_voice(ctx, queue) is None:
+            return
+        if not queue.tracks:
+            return await panels.texte_court(ctx, "La file est déjà vide. Le morceau en cours n’est pas interrompu.")
         queue.tracks.clear()
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="File d'attente vidée", kind="success")))
 
@@ -1921,21 +2007,15 @@ class Music(commands.Cog, name="Music"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Rien à avancer", description="Aucune musique en cours de lecture.", kind="danger")))
         if queue.current.duration and secondes > queue.current.duration:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Position invalide", description=f"Cette piste dure {premium_style.format_duration(queue.current.duration)}.", kind="danger")))
-        track = queue.current
-        self._invalidate_playback(queue)
-        if voice.is_playing() or voice.is_paused():
-            voice.stop()
-        queue.paused_by_user = False
-        started = await self._play_track(queue, track, seek_seconds=float(secondes))
-        if not started:
-            queue.current = None
-            queue.reset_clock()
-            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Lecture impossible", description="La source de cette piste n'est plus disponible.", kind="danger")))
+        if not await self._seek_queue(queue, secondes):
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Lecture impossible", description="Cette source est indisponible ou ne permet pas le déplacement (direct).", kind="danger")))
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Position modifiée", description=f"⏩ Lecture reprise à **{premium_style.format_duration(secondes)}**.", kind="success")))
 
     @music.command(name="autoplay", description="Activer ou désactiver la lecture automatique quand la file se vide.")
     async def music_autoplay(self, ctx: commands.Context):
         queue = self.get_queue(ctx.guild.id)
+        if await self._require_control_voice(ctx, queue) is None:
+            return
         queue.autoplay = not queue.autoplay
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title="Autoplay", description=f"Autoplay {('activé' if queue.autoplay else 'désactivé')}.", kind="success")))
 

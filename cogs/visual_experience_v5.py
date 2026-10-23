@@ -79,7 +79,7 @@ def build_about_embed(bot: commands.Bot) -> discord.Embed:
     embed = _base(
         bot,
         "À propos",
-        "Bot tout-en-un : modération, sécurité, tickets, IA et automatisations. Gérez SentriX depuis le dashboard ou utilisez SentriX Hosting pour vos projets.",
+        "Bot tout-en-un : modération, sécurité, tickets, IA et automatisations.",
     )
     embed.add_field(name="Version", value=f"V{VERSION} • Expérience visuelle", inline=True)
     embed.add_field(name="Créateur", value=PRIMARY_CREATOR_DISPLAY_NAME, inline=True)
@@ -90,7 +90,6 @@ def build_about_embed(bot: commands.Bot) -> discord.Embed:
     embed.add_field(
         name="Liens",
         value=(
-            "[Dashboard SentriX](https://mon-bot-discord-production-8944.up.railway.app/app) • "
             "[SentriX Hosting](https://sentrix-hosting-control-plane-production.up.railway.app/)"
         ),
         inline=False,

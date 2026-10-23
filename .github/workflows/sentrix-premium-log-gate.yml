@@ -11,6 +11,7 @@ on:
       - 'cogs/ai.py'
       - 'main.py'
       - 'tests/test_premium_log_center.py'
+      - 'tests/test_message_log_transcripts.py'
       - 'tests/test_sentrix_trace_style.py'
       - '.github/workflows/sentrix-premium-log-gate.yml'
   workflow_dispatch:
@@ -34,4 +35,4 @@ jobs:
         run: python -m py_compile main.py cogs/ai.py cogs/logs.py cogs/log_history_center.py utils/wide_logs.py utils/premium_log_banners.py
       - name: Premium Logs and Natural Conversation Contracts
         run: |
-          python -m pytest -q             tests/test_sentrix_trace_style.py             tests/test_premium_log_center.py             tests/test_logs_narratifs.py             tests/test_log_subject_and_actor.py             tests/test_log_markdown_readability.py             tests/test_logs_salon_inaccessible.py             tests/test_log_reveal_id_persistence.py             tests/test_ai_explicit_wake_ha.py             tests/test_plain_text_mentions.py             tests/test_natural_plan_ephemeral_ux.py
+          python -m pytest -q             tests/test_message_log_transcripts.py             tests/test_deleted_log_media_previews.py             tests/test_logs_bulk_delete_resilience.py             tests/test_sentrix_trace_style.py             tests/test_premium_log_center.py             tests/test_logs_narratifs.py             tests/test_log_subject_and_actor.py             tests/test_log_markdown_readability.py             tests/test_logs_salon_inaccessible.py             tests/test_log_reveal_id_persistence.py             tests/test_ai_explicit_wake_ha.py             tests/test_plain_text_mentions.py             tests/test_natural_plan_ephemeral_ux.py

@@ -82,7 +82,10 @@ async def main() -> int:
     ref = warn.rsplit(":", 1)[-1] if warn else "?"
     check(warn and any(":history:" in i for i in ids) and any(":timeout:" in i for i in ids),
           "la carte AutoMod propose Historique, Avertir et Exclure 10 min", str(ids))
-    check(f"Réf. {ref}" in shown, "la carte AutoMod est signée de la référence de l'incident", shown[-120:])
+    # La référence de l'incident reste dans les boutons (custom_id) et la trace,
+    # plus dans le texte (PR #503).
+    check(ref.startswith("SX-") and f"Réf. {ref}" not in shown,
+          "l'incident AutoMod a sa référence interne, non affichée", shown[-120:])
 
     async def warns() -> list:
         return [dict(r) for r in await db.fetchall(

@@ -86,8 +86,19 @@ async def click(bot, custom_id: str, message_id: int, who: str) -> int:
     data = _base(p["author_id"], p["author_roles"], kind=3,
                  data={"custom_id": custom_id, "component_type": 2}, message=message)
     inter = discord.Interaction(data=data, state=bot._connection)
-    bot._connection._view_store  # noqa: B018 — garanti initialisé
+    store = bot._connection._view_store
     bot.dispatch("interaction", inter)
+    # Comme discord.py à la réception : les boutons DynamicItem (ex.
+    # sentrix:premiumlog:…, enregistrés par add_dynamic_items) passent par le
+    # magasin de vues, pas par l'événement « interaction ».
+    for pattern, item_cls in getattr(store, "_dynamic_items", {}).items():
+        match = pattern.fullmatch(custom_id)
+        if match is None:
+            continue
+        item = await item_cls.from_custom_id(inter, discord.ui.Button(custom_id=custom_id), match)
+        if await item.interaction_check(inter):
+            await item.callback(inter)
+        break
     await h.settle(idle=0.3, maximum=2.0)
     return since
 
@@ -141,7 +152,8 @@ async def main() -> int:
     check(bot.get_cog("Suggestions") is not None, "le cog Suggestions est chargé")
     group = bot.tree.get_command("suggestions")
     leaves = {c.name: c for c in getattr(group, "commands", [])}
-    check(set(leaves) >= {"submit", "setup", "panel", "status"}, "/suggestions publie submit, setup, panel, status",
+    # « status » : masqué du « / » par utils/unused_commands.py (fec7301d), resté en +.
+    check(set(leaves) >= {"submit", "setup", "panel"}, "/suggestions publie submit, setup, panel",
           str(sorted(leaves)))
     submit = leaves.get("submit")
     check(submit is not None and submit.callback.__module__ == "cogs.suggestions",

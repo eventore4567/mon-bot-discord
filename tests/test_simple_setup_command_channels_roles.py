@@ -238,10 +238,10 @@ def test_event_backgrounds_are_limited_to_three_presets_and_pings_are_configurab
     # un serveur qui avait coupé le ping était pingué quand même, et la colonne
     # en base ne servait à rien.
     #
-    # Ce qui est vérifié maintenant : la lecture passe par la colonne, et le
-    # départ vaut off par défaut (la personne est partie, Discord ne peut plus
+    # La lecture passe par la colonne et les deux notifications valent off
+    # par défaut. Le départ reste silencieux (la personne est partie, Discord ne peut plus
     # la notifier, et pinguer le salon à chaque départ fait couper le module).
-    assert '_drapeau("ping", True)' in setup, (
+    assert '_drapeau("ping", False)' in setup, (
         "le ping de bienvenue n'est plus lu depuis la colonne"
     )
     assert '_drapeau("goodbye_ping", False)' in setup, (

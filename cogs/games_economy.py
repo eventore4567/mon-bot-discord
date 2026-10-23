@@ -63,6 +63,7 @@ from cogs.games_catalog import (
     valeur_objet,
 )
 from services import game_stakes
+from utils import command_refs
 from utils import checks, design_system, game_rewards, game_visuals, stats_service, temporary_boosts
 from utils import sentrix_panels as panels
 from utils.game_duel_invites import DuelInvitation
@@ -3181,13 +3182,12 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         target = membre or ctx.author
         rows = await self.bot.db.get_game_history(guild_id, target.id, limit=10)
         if not rows:
-            prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
             qui = "Vous n'avez" if target.id == ctx.author.id else f"{target.mention} n'a"
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
                 self.bot, guild_id, title='Historique des jeux',
                 description=(
                     f"📜 {qui} pas encore joué ici.\n"
-                    f"`{prefixe}jeuxjour` montre les 39 jeux disponibles sur ce serveur."
+                    f"`{command_refs.reference(ctx, 'dailygames', nom_prefixe='jeuxjour')}` montre les 39 jeux disponibles sur ce serveur."
                 ),
             )))
         lines = []
@@ -3296,7 +3296,6 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
     async def gameprofile(self, ctx: commands.Context, membre: discord.Member = None):
         guild_id = ctx.guild.id if ctx.guild else None
         target = membre or ctx.author
-        prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
         stats = await self.bot.db.get_game_stats(guild_id, target.id)
         recent = await self.bot.db.get_game_history(guild_id, target.id, limit=5)
         joues = stats["games_played"]
@@ -3310,10 +3309,10 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
                     "Aucune manche jouée",
                     texte=(
                         f"{target.mention} n'a pas encore joué ici.\n"
-                        f"`{prefixe}jeuxjour` montre les 39 jeux disponibles sur ce serveur."
+                        f"`{command_refs.reference(ctx, 'dailygames', nom_prefixe='jeuxjour')}` montre les 39 jeux disponibles sur ce serveur."
                         if target.id != ctx.author.id else
                         "Vous n'avez pas encore joué ici.\n"
-                        f"`{prefixe}jeuxjour` montre les 39 jeux disponibles sur ce serveur."
+                        f"`{command_refs.reference(ctx, 'dailygames', nom_prefixe='jeuxjour')}` montre les 39 jeux disponibles sur ce serveur."
                     ),
                 )],
                 kind="jeux",
@@ -3395,12 +3394,11 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         rows = await self.bot.db.get_game_leaderboard(guild_id, limit=10)
         if not rows:
             # Un écran vide qui ne dit pas quoi faire ensuite est un cul-de-sac.
-            prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(
                 self.bot, guild_id, title='Classement des jeux',
                 description=(
                     "🏆 Personne n'a encore joué sur ce serveur.\n"
-                    f"`{prefixe}jeuxjour` montre les 39 jeux disponibles — "
+                    f"`{command_refs.reference(ctx, 'dailygames', nom_prefixe='jeuxjour')}` montre les 39 jeux disponibles — "
                     "la première manche jouée ouvre le classement."
                 ),
             )))
@@ -3418,7 +3416,6 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
             return await panels.envoyer(ctx, panels.depuis_embed(await _embed(self.bot, guild_id, title='Mini-jeux du jour', description='🎮 Disponible uniquement sur un serveur.', kind='warning')))
         _allowed, played, limit = await game_rewards.check_daily_limit(self.bot, guild_id, ctx.author.id)
         limit_text = f"**{played} / {limit}**" if limit > 0 else f"**{played}** (illimité)"
-        prefixe = ctx.clean_prefix if isinstance(getattr(ctx, "clean_prefix", None), str) else "+"
 
         # Cet écran ne disait que le quota et les cooldowns : rien n'indiquait
         # quels jeux existent. C'est pourtant le seul endroit où un membre
@@ -3460,7 +3457,7 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
                 etat, marque = f"encore {reste}s", "⏳"
             else:
                 etat, marque = "prêt", "·"
-            rangs[famille].append(f"{marque} {libelle} — `{prefixe}{game_name}` · {etat}")
+            rangs[famille].append(f"{marque} {libelle} — `{command_refs.reference(ctx, game_name)}` · {etat}")
 
         sections = [panels.Section("Aujourd'hui", [
             panels.Ligne("Manches récompensées", limit_text,

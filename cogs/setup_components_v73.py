@@ -188,53 +188,8 @@ def fichier_banniere() -> "discord.File | None":
 
 
 def banniere_disponible() -> bool:
-    """La bannière est-elle réellement joignable ? Condition UNIQUE.
-
-    La galerie et la pièce jointe doivent être décidées ensemble. Une galerie
-    qui référence ``attachment://banner_config.webp`` sans que le fichier
-    accompagne le message ne dégrade pas l'affichage — Discord refuse le
-    message ENTIER :
-
-        Invalid Form Body
-        In data.components.0.components.0.items.0.media.url:
-        The referenced attachment ("attachment://banner_config.webp") was not found.
-
-    C'est arrivé en production sur /setup. Les commentaires voisins disaient
-    « Discord affiche une image cassée » : c'est faux, et c'est pour ça que la
-    porte est restée ouverte. La commande ne répond plus du tout.
-
-    Cette fonction GÉNÈRE la bannière manquante avant de répondre, au lieu de
-    se contenter d'un test d'existence. ``.gitignore`` ignore
-    ``assets/log_banners/banner_*.webp`` : aucune bannière n'est versionnée,
-    donc le dossier est VIDE sur un conteneur fraîchement déployé. Un simple
-    test aurait répondu « non » au premier /setup et l'écran serait parti sans
-    bandeau — valide, mais nu.
-
-    ``force=True`` est nécessaire : le cache ``_READY`` d'``ensure_banners``
-    peut être vrai alors que le fichier a disparu du disque. C'est aussi le
-    chemin que ``fichier_de_famille`` suit pour la pièce jointe, donc les deux
-    côtés de la décision ne peuvent pas diverger.
-    """
-    from utils.sentrix_panels import BANDEAUX_ACTIFS
-
-    # Les écrans de configuration n'ouvrent plus sur une image. Même règle et
-    # même interrupteur que les panneaux : ce `False` fait disparaître la
-    # galerie ET la pièce jointe ensemble, puisque la pose comme l'envoi
-    # consultent cette fonction. Les séparer ferait refuser le message entier.
-    if not BANDEAUX_ACTIFS:
-        return False
-
-    from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
-
-    chemin = BANNER_DIR / nom_fichier(BANNIERE)
-    if chemin.exists():
-        return True
-    try:
-        ensure_banners(force=True)
-    except Exception:
-        logger.exception("Génération de la bannière %s impossible.", BANNIERE)
-        return False
-    return chemin.exists()
+    from utils.sentrix_panels import famille_joignable
+    return famille_joignable(BANNIERE)
 
 
 def entete_banniere() -> "discord.ui.MediaGallery | None":
@@ -242,7 +197,7 @@ def entete_banniere() -> "discord.ui.MediaGallery | None":
 
     Préférer ``poser_banniere(container)``, qui ne peut pas poser ``None``.
     """
-    from utils.log_banners import nom_fichier
+    from utils.premium_log_banners import BANNER_FILENAME
 
     if not banniere_disponible():
         # Pas d'avertissement quand les bandeaux sont DÉSACTIVÉS : c'est l'état
@@ -257,7 +212,7 @@ def entete_banniere() -> "discord.ui.MediaGallery | None":
             )
         return None
     galerie = discord.ui.MediaGallery()
-    galerie.add_item(media=f"attachment://{nom_fichier(BANNIERE)}")
+    galerie.add_item(media=f"attachment://{BANNER_FILENAME}")
     return galerie
 
 
@@ -493,7 +448,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    "-# SENTRIX CORE · Configuration · setup\n# Configuration de SentriX\n"
+                    "# Configuration de SentriX\n"
                     f"**Bienvenue dans le panneau de configuration de SentriX !** "
                     f"Sélectionnez une catégorie pour configurer les fonctionnalités du bot sur **{self.guild.name}**.\n"
                     f"{active}/{len(CATEGORY_ORDER)} modules actifs"
@@ -559,7 +514,7 @@ class SentriXSetupV73(discord.ui.LayoutView):
         container.add_item(
             discord.ui.Section(
                 discord.ui.TextDisplay(
-                    f"-# SENTRIX CORE · Configuration · setup\n# {emoji} {label}\n{description}\nConfiguration sur **{self.guild.name}**."
+                    f"# {emoji} {label}\n{description}\nConfiguration sur **{self.guild.name}**."
                 ),
                 accessory=_thumbnail(self.bot),
             )

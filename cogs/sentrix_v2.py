@@ -16,6 +16,7 @@ import discord
 from discord.ext import commands
 
 import config
+from utils import command_refs
 from utils import checks, design_system, embeds, stats_service
 from utils import sentrix_panels as panels
 
@@ -663,7 +664,7 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
     async def market_buy(self, ctx, listing_id: int):
         if ctx.guild is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Utilisez cette commande sur un serveur.')))
         row = await self.bot.db.fetchone("SELECT * FROM v2_market_listings WHERE id=? AND guild_id=? AND status='active'", (listing_id, ctx.guild.id))
-        if row is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Annonce indisponible.')))
+        if row is None: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"Annonce n°{listing_id} indisponible : déjà vendue, retirée ou inexistante. `{command_refs.reference(ctx, 'market')}` montre les annonces en cours.")))
         if int(row["seller_id"]) == ctx.author.id: return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas acheter votre propre annonce.')))
         lock = await self.bot.db.execute("UPDATE v2_market_listings SET status='processing' WHERE id=? AND guild_id=? AND status='active'", (listing_id, ctx.guild.id))
         if getattr(lock, "rowcount", 0) == 0: return await panels.envoyer(ctx, panels.depuis_embed(embeds.warning("Cette annonce vient d'être prise.")))

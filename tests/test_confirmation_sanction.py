@@ -214,3 +214,39 @@ def test_un_serveur_francais_garde_sa_carte_francaise():
     texte = _textes(_carte())
     assert "Expulsion effectuée" in texte
     assert "Motif" in texte and "Dossier #2" in texte
+
+
+# ------------------------------------------- le bouton d'historique en double
+
+def test_un_seul_bouton_dhistorique_sur_la_carte():
+    """Mesuré le 23/10/2026 : « Historique » ET « History » côte à côte.
+
+    `_ajouter_suites` ne doublait pas l'historique… en théorie. Sa garde
+    cherchait des `discord.ui.Button`, or le bouton persistant est un
+    `DynamicItem` qui ENVELOPPE un Button sans en être un. Elle ne voyait donc
+    aucun bouton, se croyait sur une carte vierge, et ajoutait le sien.
+    """
+    import discord
+
+    from utils import sentrix_panels as sp
+
+    conteneur = next(
+        e for e in _carte().children if isinstance(e, discord.ui.Container)
+    )
+    source = __import__("inspect").getsource(sp._ajouter_suites)
+    assert "custom_id" in source, "la garde doit reposer sur le custom_id, pas sur isinstance"
+
+    def boutons(item):
+        trouves = []
+        for enfant in list(getattr(item, "children", []) or []):
+            if getattr(enfant, "custom_id", None):
+                trouves.append(enfant)
+            trouves.extend(boutons(enfant))
+            interne = getattr(enfant, "item", None)
+            if interne is not None and interne is not enfant:
+                trouves.extend(boutons(interne))
+        return trouves
+
+    ids = {str(getattr(b, "custom_id", "") or "") for b in boutons(conteneur)}
+    assert ids, "le bouton persistant doit être visible de la garde"
+    assert any(":history:" in i for i in ids), f"historique non détecté : {ids}"

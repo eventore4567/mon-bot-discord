@@ -2421,7 +2421,7 @@ class AutoMod(commands.Cog, name="Automod"):
     @checks.is_owner_or_admin_for("securite")
     async def antibot_allow(self, ctx: commands.Context, membre: discord.Member):
         if not membre.bot:
-            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error("Ce membre n'est pas un bot.")))
+            return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(f"{membre.mention} n'est pas un bot. Cette commande autorise un **bot** à rejoindre le serveur malgré l'anti-bot.")))
         await self.bot.db.execute(
             "INSERT OR REPLACE INTO automod_bot_allowlist (guild_id, bot_id, added_by, created_at) VALUES (?, ?, ?, ?)",
             (ctx.guild.id, membre.id, ctx.author.id, int(time.time())),
@@ -3079,6 +3079,8 @@ class AutoMod(commands.Cog, name="Automod"):
         content_lower = message.content.lower()
         link_content = _normalize_link_text(message.content)
         conf = await self.get_automod_cached(message.guild.id)
+        if conf.get("security_module_disabled"):
+            return
 
         # Immunité personnelle explicite ON : aucun filtre AutoMod ne s'applique.
         # OFF ne court-circuite rien et l'utilisateur est traité comme un membre normal.
@@ -3089,6 +3091,15 @@ class AutoMod(commands.Cog, name="Automod"):
             return
         # Les exemptions de rôles ne sont plus court-circuitées globalement ici :
         # chaque filtre les évalue afin qu'un salon strict puisse reprendre priorité.
+
+        # Les mentions globales doivent être traitées avant les filtres de contenu :
+        # elles ne figurent pas dans message.mentions et une rafale peut sinon
+        # traverser tous les salons avant le troisième incident anti-spam.
+        if conf.get("antimention") and (
+            getattr(message, "mention_everyone", False) is True
+            or len({u.id for u in message.mentions} | {r.id for r in message.role_mentions}) >= 5
+        ) and await self.security_filter_applies_to(message, "antimention"):
+            return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
 
         # Un lien de phishing passe AVANT l'anti-liens générique. Sinon le
         # message est supprimé comme simple lien, la protection anti-arnaque
@@ -3254,12 +3265,6 @@ class AutoMod(commands.Cog, name="Automod"):
                     censored_content=_compose_censored_content(message.content, links=True),
                 )
 
-        if (
-            conf["antimention"]
-            and await self.security_filter_applies_to(message, "antimention")
-            and len(message.mentions) >= 5
-        ):
-            return await self._delete_and_warn(message, "Mention massive détectée.", "antimention")
 
         if (
             conf["anticaps"]
@@ -3623,7 +3628,7 @@ class AutoMod(commands.Cog, name="Automod"):
         }
         title, explanation = titles.get(filter_name, ("🛡️ Message modéré", "Un filtre de sécurité a été appliqué."))
         view = discord.ui.LayoutView(timeout=15)
-        box = discord.ui.Container(accent_colour=discord.Colour(0xE6A64C))
+        box = discord.ui.Container()
         box.add_item(
             discord.ui.TextDisplay(
                 f"### {title}\n"
@@ -3701,7 +3706,8 @@ class AutoMod(commands.Cog, name="Automod"):
             if incident is not None and incident.filter_name in SPAM_FILTERS
             else INCIDENT_WINDOW_SECONDS
         )
-        if incident is not None and now_ts - incident.started < incident_window:
+        if (incident is not None and now_ts - incident.started < incident_window
+                and not (filter_name == "antimention" and incident.filter_name != "antimention")):
             incident.deleted += 1
             await finish_deletion()
             return
@@ -3720,6 +3726,14 @@ class AutoMod(commands.Cog, name="Automod"):
             for candidate, item in list(self.incidents.items()):
                 if item.started < cutoff:
                     self.incidents.pop(candidate, None)
+        # Démarrer le timeout avant d'attendre suppression, SQL ou logs.
+        # L'incident est déjà publié : les messages concurrents restent idempotents.
+        mention_action = None
+        if filter_name == "antimention":
+            try:
+                mention_action = await self._spam_timeout(message.guild, message.author, reason)
+            except Exception:
+                logger.exception("Timeout anti-mentions impossible guild=%s user=%s", message.guild.id, message.author.id)
         await finish_deletion()
 
         await self._record_incident_trace(message, incident)
@@ -3765,7 +3779,11 @@ class AutoMod(commands.Cog, name="Automod"):
         spam_public_text = None
 
         try:
-            if filter_name in SPAM_FILTERS:
+            if filter_name == "antimention":
+                action = mention_action or "mute_failed"
+                spam_duration = SPAM_TIMEOUT_SECONDS
+                incident.action_label = "🔇 Mute anti-mentions" if mention_action else "⚠️ Mute anti-mentions non appliqué"
+            elif filter_name in SPAM_FILTERS:
                 action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
                     message.guild,
                     message.author,
@@ -4128,7 +4146,7 @@ class AutoMod(commands.Cog, name="Automod"):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         conf = await self.get_automod_cached(member.guild.id)
-        if not conf:
+        if not conf or conf.get("security_module_disabled"):
             return
 
         # Un événement Discord JOIN dupliqué ne doit jamais être interprété

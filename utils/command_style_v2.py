@@ -86,6 +86,10 @@ def _is_emoji_codepoint(char: str) -> bool:
 
 
 def _strip_emojis(value: Any) -> str:
+    from utils import embeds as _embeds
+
+    if _embeds.EMOJIS_VISIBLES:  # même choix que utils/embeds.strip_emojis
+        return _SPACE_RE.sub(" ", str(value or "")).strip()
     text = _CUSTOM_EMOJI_RE.sub("", str(value or ""))
     text = "".join(char for char in text if not _is_emoji_codepoint(char))
     return _SPACE_RE.sub(" ", text).strip()

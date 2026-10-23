@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import commands
 
+from utils import command_refs
 from utils import checks
 from utils import design_system, embeds, stats_service
 from utils import sentrix_panels as panels
@@ -216,7 +217,9 @@ class SentriXV21(commands.Cog):
                 (listing_id, ctx.guild.id),
             )
             if row is None:
-                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Annonce indisponible.')))
+                return await panels.envoyer(ctx, panels.depuis_embed(embeds.error(
+                    f"Annonce n°{listing_id} indisponible : déjà vendue, retirée ou inexistante. "
+                    f"`{command_refs.reference(ctx, 'market')}` montre les annonces en cours.")))
             if int(row["seller_id"]) == ctx.author.id:
                 return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Vous ne pouvez pas acheter votre propre annonce.')))
             try:

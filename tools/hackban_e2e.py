@@ -58,7 +58,7 @@ async def main() -> int:
     check(len(rows) == 1 and rows[0]["action"] == "ban" and rows[0]["moderator_id"] == h.MOD_ID,
           "le dossier de sanction est enregistré au nom du modérateur", str(rows))
     logs = [c for c in h.CALLS[since:] if c[1] == f"/channels/{h.LOGCID}/messages"]
-    check(len(logs) == 1 and "Réf. SX-" in shown, "une carte de log, et la réponse porte sa référence",
+    check(len(logs) == 1 and "Réf. SX-" not in shown, "une carte de log, et la réponse sans référence affichée",
           f"{len(logs)} carte(s) | {shown[-120:]}")
 
     # Une VRAIE mention d'un compte absent du serveur (capture d'un admin, 10/10/2026 :

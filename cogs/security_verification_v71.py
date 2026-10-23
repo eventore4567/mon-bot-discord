@@ -657,6 +657,9 @@ class SecurityVerificationRuntimeV71:
             return
         if self.bot.user is not None and message.author.id == self.bot.user.id:
             return
+        from cogs import setup_v2_core as core
+        if not await core.module_enabled(self.bot, message.guild.id, "security"):
+            return
         conf = await self._legacy_config(message.guild.id)
         if not conf or not _get(conf, "trap_channel_id"):
             return
@@ -721,6 +724,9 @@ class SecurityVerificationRuntimeV71:
                 logger.exception("V71: log honeypot impossible")
 
     async def on_member_join(self, member: discord.Member) -> None:
+        from cogs import setup_v2_core as core
+        if not await core.module_enabled(self.bot, member.guild.id, "security"):
+            return
         row = await _automod_row(self.bot, member.guild.id)
         if not row or not bool(_get(row, "antiraid", 0)):
             return

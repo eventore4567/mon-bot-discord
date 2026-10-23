@@ -96,7 +96,9 @@ async def main() -> int:
     since = len(h.CALLS)
     await asyncio.wait_for(h.run_prefix(bot, guild, f"+ban <@{h.SECOND_ID}> raid", **ADMIN), 15)
     await h.settle(idle=0.6, maximum=4)
-    unban = next((i for i in ids_anywhere(since) if ":unban:" in i), None)
+    # Le bouton de SUITE (sx:suite:…) : la carte de log a aussi un « Débannir »
+    # premium, qui demande une confirmation (cogs/log_history_center.ConfirmUnban).
+    unban = next((i for i in ids_anywhere(since) if ":unban:" in i and i.startswith("sx:suite:")), None)
     check(unban is not None, "+ban : bouton « Débannir »", str(ids_anywhere(since)))
     since = await click(bot, unban or "", h.next_id(), "admin")
     await h.settle(idle=0.6, maximum=4)
@@ -107,7 +109,9 @@ async def main() -> int:
     since = await click(bot, history or "", h.next_id(), "admin")
     await h.settle(idle=0.4, maximum=3)
     shown = h.visible_text(h.CALLS[since:])
-    check("Avertissement" in shown or "avertissement" in shown, "Historique montre le dossier du membre", shown[:200])
+    # Dossier premium (PR #503) : « 1 avert. · 1 timeouts · 1 bans… ».
+    check(any(mot in shown for mot in ("Avertissement", "avertissement", "avert.")),
+          "Historique montre le dossier du membre", shown[:200])
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

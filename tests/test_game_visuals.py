@@ -69,10 +69,11 @@ def test_animation_is_in_same_components_v2_panel_as_content_and_buttons():
         assert "Choisissez votre attaque" in content
         assert "Duel" in content
         files = panel.fichiers()
-        assert len(files) == 1
-        assert files[0].filename == "sentrix_game_fight.gif"
-        assert files[0].fp.read() == data
-        files[0].close()
+        # Le GIF du combat ET la bande fine commune (22/10/2026 : toutes les commandes).
+        gif = next(f for f in files if f.filename == "sentrix_game_fight.gif")
+        assert len(files) == 2 and gif.fp.read() == data
+        for f in files:
+            f.close()
         # Les discord.File doivent être créés à neuf pour chaque édition.
         again = panel.fichiers()
         assert again[0].fp is not files[0].fp
@@ -198,12 +199,13 @@ def test_panel_edit_sends_validated_gif_as_attachment_not_remote_link():
             await panels.editer(target, panel)
             kwargs = target.edit.await_args.kwargs
             assert kwargs["view"] is panel
-            assert len(kwargs["attachments"]) == 1
-            file = kwargs["attachments"][0]
-            assert file.filename == "sentrix_game_think.gif"
+            # Le GIF validé en pièce jointe, avec la bande fine commune.
+            assert len(kwargs["attachments"]) == 2
+            file = next(f for f in kwargs["attachments"] if f.filename == "sentrix_game_think.gif")
             assert file.fp.read() == raw
             assert "giphy" not in repr(panel.to_components())
-            file.close()
+            for f in kwargs["attachments"]:
+                f.close()
         finally:
             game_visuals._MEDIA_BYTES.pop("think", None)
 
