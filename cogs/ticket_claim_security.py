@@ -459,6 +459,8 @@ def install(bot: commands.Bot) -> None:
                 duration=duree,
                 transcript_filename=transcript_file.filename,
                 avatar_url=str(owner.display_avatar.url) if owner else None,
+                claimed_by_id=int(ticket["claimed_by"]) if ticket["claimed_by"] else None,
+                closed_at=closed_at,
             ),
             vue_fermeture,
         )
