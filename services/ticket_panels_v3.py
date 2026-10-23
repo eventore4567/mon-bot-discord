@@ -90,6 +90,8 @@ class TicketCardV3(discord.ui.LayoutView):
         avatar_url: str | None = None,
         status: str = "ouvert",
         transcript_filename: str | None = None,
+        navigation_url: str | None = None,
+        navigation_label: str = "Ouvrir mon ticket",
     ) -> None:
         super().__init__(timeout=None)
         self._ticket_banner = True
@@ -129,11 +131,58 @@ class TicketCardV3(discord.ui.LayoutView):
             if component:
                 container.add_item(component(media=f"attachment://{transcript_filename}"))
 
+        if navigation_url:
+            container.add_item(discord.ui.Separator())
+            # Le bouton lien est natif et fonctionne sans callback, même si
+            # le message privé/éphémère a été affiché avant le cache Discord.
+            row = discord.ui.ActionRow()
+            row.add_item(discord.ui.Button(
+                style=discord.ButtonStyle.link,
+                label=navigation_label[:80],
+                emoji="🔗",
+                url=navigation_url,
+            ))
+            container.add_item(row)
+
         container.add_item(discord.ui.TextDisplay("-# SentriX · Gestion des tickets"))
         self.add_item(container)
 
     def fichiers(self) -> list[discord.File]:
         return [discord.File(io.BytesIO(banner_bytes()), filename=BANNER_FILENAME)]
+
+
+def ticket_created_confirmation(
+    *, ticket_number: int, ticket_type: str,
+    guild_id: int, channel_id: int, channel_name: str,
+) -> TicketCardV3:
+    """Accusé de création court et navigable, sans mention « # inconnu ».
+
+    Les mentions <#channel> ne sont pas toujours résolues dans les réponses
+    éphémères, surtout après modification des permissions ou suppression d'un
+    ancien ticket. Le nom lisible et l'URL Discord restent utilisables.
+    """
+    safe_channel = discord.utils.escape_markdown(_safe(channel_name, 90))
+    safe_type = discord.utils.escape_mentions(
+        discord.utils.escape_markdown(_safe(ticket_type, 90))
+    )
+    link = f"https://discord.com/channels/{int(guild_id)}/{int(channel_id)}"
+    return TicketCardV3(
+        title=f"Ticket #{int(ticket_number)} créé",
+        description="Votre demande a bien été enregistrée. "
+                    "Le salon privé est accessible avec le bouton ci-dessous.",
+        status="ouvert",
+        sections=(
+            ("📋 Votre ticket",
+             f"**Salon :** `#{safe_channel}`\n"
+             f"**Catégorie :** {safe_type}\n"
+             "**État :** en attente de prise en charge"),
+            ("💬 Prochaine étape",
+             "Ouvrez le salon pour expliquer votre demande. "
+             "Le staff pourra prendre en charge le ticket et le fermer avec un motif."),
+        ),
+        navigation_url=link,
+        navigation_label="Ouvrir mon ticket",
+    )
 
 
 def opening_card(*, ticket_number: int, ticket_type: str, opener: discord.abc.User,
