@@ -45,6 +45,13 @@ ANIMES_AUTORISES = frozenset({
     "sentrix_alert", "sentrix_lock", "sentrix_unlock", "sentrix_upload",
     "sentrix_download", "sentrix_sync", "sentrix_typing", "sentrix_processing",
     "sentrix_ai",
+    # Dessinés par tools/generer_emojis_animes.py plutôt que téléchargés : le
+    # trait, la palette et le poids sont maîtrisés, et rien ne dépend d'un CDN.
+    # Chaque image est tracée à 4× puis réduite en LANCZOS — sans ce
+    # sur-échantillonnage les diagonales sortent crénelées à 128 px, et c'est
+    # exactement ce qui faisait « émoji moche ».
+    "sentrix_bouclier", "sentrix_valide", "sentrix_croix",
+    "sentrix_fleche", "sentrix_chargement", "sentrix_alerte",
 })
 
 #: Repli affiché tant que l'icône n'est pas disponible. Volontairement sobre :
