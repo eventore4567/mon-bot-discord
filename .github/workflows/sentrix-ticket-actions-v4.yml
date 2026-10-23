@@ -1,0 +1,53 @@
+name: SentriX Ticket Actions V4
+
+on:
+  pull_request:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'cogs/tickets.py'
+      - 'cogs/ticket_claim_security.py'
+      - 'services/tickets.py'
+      - 'services/ticket_panels_v3.py'
+      - 'tests/test_ticket_panels_v3.py'
+      - '.github/workflows/sentrix-ticket-actions-v4.yml'
+  push:
+    branches: [dashboard-refonte-2026-09]
+    paths:
+      - 'cogs/tickets.py'
+      - 'cogs/ticket_claim_security.py'
+      - 'services/tickets.py'
+      - 'services/ticket_panels_v3.py'
+      - 'tests/test_ticket_panels_v3.py'
+      - '.github/workflows/sentrix-ticket-actions-v4.yml'
+
+jobs:
+  actions-v4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DISCORD_TOKEN: ci.fake.token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt pytest pytest-asyncio
+      - name: Validate Python syntax
+        run: python -m py_compile services/ticket_panels_v3.py services/tickets.py cogs/tickets.py cogs/ticket_claim_security.py
+      - name: Run ticket action and existing security/regression tests
+        run: |
+          python -m pytest -q \
+            tests/test_ticket_panels_v3.py \
+            tests/test_ticket_log_cards_premium_v2.py \
+            tests/test_ticket_log_report_v1.py \
+            tests/test_ticket_claim_security_safe_log.py \
+            tests/test_ticket_controls_compact_and_log_quality.py \
+            tests/test_ticket_fermer_nest_pas_supprimer.py \
+            tests/test_fermeture_ticket_masque.py \
+            tests/test_ticket_journalisation.py \
+            tests/test_ticket_events_registry.py \
+            tests/test_ticket_atomic_actions.py \
+            tests/test_ticket_reopen_after_channel_deleted.py \
+            tests/test_ticket_reopen_commands_consistency.py \
+            tests/test_services_tickets.py
