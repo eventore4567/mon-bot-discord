@@ -433,12 +433,25 @@ class BotAllInOne(commands.Bot):
 
         _install_slash_command_budget(self)
 
+        # Le healthcheck doit comparer les extensions VRAIMENT chargées à
+        # l'inventaire attendu, pas au nombre déjà chargé (test tautologique).
+        # Railway complète EXTENSIONS avant ce setup_hook.
+        self.expected_extension_count = len(set(EXTENSIONS))
+        self._sentrix_extension_load_failures = {}
         for ext in EXTENSIONS:
             try:
                 await self.load_extension(ext)
-                logger.info(f"Module chargé : {ext}")
-            except Exception:
-                logger.error(f"Échec du chargement du module {ext} :\n{traceback.format_exc()}")
+                logger.info("Module chargé : %s", ext)
+            except Exception as exc:
+                self._sentrix_extension_load_failures[ext] = type(exc).__name__
+                logger.exception("Échec du chargement du module %s", ext)
+        if self._sentrix_extension_load_failures:
+            logger.error(
+                "Démarrage dégradé : %s/%s extension(s) ont échoué au chargement : %s",
+                len(self._sentrix_extension_load_failures),
+                self.expected_extension_count,
+                ", ".join(sorted(self._sentrix_extension_load_failures)),
+            )
 
         self._prune_redundant_commands()
         self._audit_command_permissions()
