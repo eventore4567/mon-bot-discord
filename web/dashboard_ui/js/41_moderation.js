@@ -363,30 +363,24 @@ function experienceModuleForPage(page) {
   return state.cache.get(state.guildId + ':diagnostics')?.value?.modules?.[key] || null;
 }
 
-function experienceCommandBar() {
-  const meta = EXPERIENCE_META[state.page] || pageMeta(state.page);
+/* Les raccourcis de la page vivent dans l'en-tête (#headExtras) : la barre
+   « Serveur / Page » répétait le titre et l'eyebrow juste au-dessus. */
+function experienceHeadExtras() {
   const module = experienceModuleForPage(state.page);
   const quick = EXPERIENCE_QUICK[state.page] || [];
-  return `<section class="experience-command full">
-    <div class="experience-command-main">
-      <div class="experience-breadcrumb">
-        <button type="button" class="crumb" data-go="overview">${esc(state.guild?.guild?.name || 'Serveur')}</button>
-        <span>/</span><strong>${esc(meta[0])}</strong>
-      </div>
-      <p>${esc(meta[1] || '')}</p>
-    </div>
-    <div class="experience-command-actions">
-      ${module ? experienceHealth(moduleStatus(module)) : ''}
-      ${quick.slice(0,4).map(([page,label,sub]) => `<button class="btn sm ghost" type="button" data-go="${esc(page)}" ${sub ? `data-go-sub="${esc(sub)}"` : ''}>${esc(label)}</button>`).join('')}
-      <button class="btn sm" type="button" data-experience-search>Filtrer la page</button>
-    </div>
-  </section>`;
+  return `${module ? experienceHealth(moduleStatus(module)) : ''}
+    ${quick.slice(0,3).map(([page,label,sub]) => `<button class="btn sm ghost" type="button" data-go="${esc(page)}" ${sub ? `data-go-sub="${esc(sub)}"` : ''}>${esc(label)}</button>`).join('')}
+    <button class="btn sm ghost" type="button" data-experience-search title="Filtrer cette page">Filtrer</button>`;
+}
+function setHeadExtras(html = '') {
+  const box = $('headExtras'); if (!box) return;
+  box.innerHTML = html;
+  box.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go, b.dataset.goSub || ''));
 }
 
 function experienceSummary(title, copy, stats, actions = []) {
   return `<section class="experience-summary full">
     <div class="experience-summary-copy">
-      <span class="eyebrow">SentriX Control</span>
       <h2>${esc(title)}</h2>
       <p>${esc(copy || '')}</p>
       ${actions.length ? `<div class="toolbar">${actions.map(a => `<button class="btn ${a.primary ? 'primary' : ''}" type="button" data-go="${esc(a.page)}" ${a.sub ? `data-go-sub="${esc(a.sub)}"` : ''}>${esc(a.label)}</button>`).join('')}</div>` : ''}
@@ -400,22 +394,20 @@ function experienceSummary(title, copy, stats, actions = []) {
 function experienceInsertAfterCommand(html) {
   const grid = content().querySelector('.grid');
   if (!grid) return;
-  const command = grid.querySelector('.experience-command');
-  if (command) command.insertAdjacentHTML('afterend', html);
-  else grid.insertAdjacentHTML('afterbegin', html);
+  grid.insertAdjacentHTML('afterbegin', html);
 }
 
 function bindExperienceFilter() {
-  const trigger = content().querySelector('[data-experience-search]');
+  const trigger = document.querySelector('#headExtras [data-experience-search]');
   if (!trigger) return;
   trigger.onclick = () => {
     if ($('experienceFilter')) { $('experienceFilter').focus(); return; }
-    const bar = content().querySelector('.experience-command');
+    const grid = content().querySelector('.grid');
     const wrap = document.createElement('div');
     wrap.className = 'experience-filter';
     wrap.innerHTML = '<input id="experienceFilter" class="search-input" type="search" placeholder="Rechercher dans cette page…" autocomplete="off"><small id="experienceFilterCount"></small><button class="btn sm ghost" type="button" id="experienceFilterClose">Fermer</button>';
-    bar.insertAdjacentElement('afterend', wrap);
-    const targets = [...content().querySelectorAll('.card, .module-card, .row')].filter(x => !x.closest('.experience-command') && !x.closest('.experience-summary'));
+    if (grid) grid.insertAdjacentElement('afterbegin', wrap); else content().prepend(wrap);
+    const targets = [...content().querySelectorAll('.card, .module-card, .row')].filter(x => !x.closest('.experience-summary'));
     const apply = () => {
       const q = $('experienceFilter').value.trim().toLocaleLowerCase('fr');
       let visible = 0;
@@ -433,48 +425,6 @@ function bindExperienceFilter() {
     };
     $('experienceFilter').focus();
   };
-}
-
-async function enhanceOverviewExperience() {
-  let d; try { d = await diagnostics(); } catch (_) { return; }
-  const mods = d.modules || {};
-  const active = Object.values(mods).filter(m => m?.code === 'active').length;
-  const errors = Object.values(mods).filter(m => m?.code === 'error').length;
-  const partial = Object.values(mods).filter(m => m?.code === 'partial' || (m?.code === 'active' && m?.configured === false)).length;
-  const invalid = (d.invalid_resources || []).length;
-  const g = state.guild?.guild || {};
-  experienceInsertAfterCommand(experienceSummary(
-    g.name || 'Votre serveur',
-    'Vue instantanée de la configuration réelle du serveur.',
-    [
-      { label:'Membres', value:number(g.members || 0), note:plural(g.channels_count || 0, 'salon') },
-      { label:'Modules actifs', value:number(active), note:partial + ' à compléter' },
-      { label:'Problèmes', value:number(errors + invalid), note:invalid ? invalid + ' ressource(s) cassée(s)' : 'aucune ressource cassée' },
-      { label:'Santé', value:Number(d.score || 0) + ' %', note:errors ? errors + ' erreur(s)' : 'stable' },
-    ],
-    [
-      { page:'welcome', label:'Configurer l’accueil', primary:true },
-      { page:'security', label:'Sécuriser' },
-      { page:'tickets', label:'Tickets' },
-    ]
-  ));
-  const problems = [];
-  for (const [key, mod] of Object.entries(mods)) {
-    const code = moduleStatus(mod);
-    if (code === 'error' || code === 'partial') {
-      const ref = OVERVIEW_CARDS.find(x => x.key === key);
-      problems.push({ page:ref?.page || 'diagnostic', label:ref?.title || key, detail:mod?.detail || 'Configuration à compléter.', code });
-    }
-  }
-  for (const item of (d.invalid_resources || []).slice(0,5)) problems.push({ page:'diagnostic', label:item.field || item.type || 'Ressource', detail:item.reason || 'Ressource inaccessible.', code:'error' });
-  if (problems.length) {
-    const grid = content().querySelector('.grid');
-    const section = document.createElement('section');
-    section.className = 'card full experience-attention';
-    section.innerHTML = `<div class="card-head"><div><h2>À corriger en priorité</h2><p>Les points qui peuvent réellement bloquer SentriX.</p></div><span class="badge warn">${number(problems.length)}</span></div><div class="list">${problems.slice(0,8).map(x => `<div class="row"><div class="row-main"><b>${esc(x.label)}</b><small>${esc(x.detail)}</small></div><div class="row-actions">${experienceHealth(x.code)}<button class="btn sm" type="button" data-go="${esc(x.page)}">Ouvrir</button></div></div>`).join('')}</div>`;
-    const modules = grid.querySelector('.module-grid');
-    if (modules) modules.insertAdjacentElement('beforebegin', section); else grid.appendChild(section);
-  }
 }
 
 async function enhanceLevelsExperience() {
@@ -708,6 +658,7 @@ function enhanceAIExperience() {
 }
 
 async function enhanceSentrixExperience() {
+  setHeadExtras('');
   if(!state.guildId||!state.guild)return;
   // La sous-page Actions staff de Tickets est volontairement une page d'édition
   // compacte. Aucun hero/KPI ne doit être injecté au-dessus.
@@ -716,10 +667,9 @@ async function enhanceSentrixExperience() {
   // la barre et le résumé injectés ici les répétaient avec d'autres chiffres.
   if(state.page==='overview')return;
   const grid=content().querySelector('.grid');if(!grid)return;
-  if(!grid.querySelector('.experience-command'))grid.insertAdjacentHTML('afterbegin',experienceCommandBar());
+  setHeadExtras(experienceHeadExtras());
   try{
-    if(state.page==='overview')await enhanceOverviewExperience();
-    else if(state.page==='welcome')enhanceWelcomeExperience();
+    if(state.page==='welcome')enhanceWelcomeExperience();
     else if(state.page==='levels')await enhanceLevelsExperience();
     else if(state.page==='economy')await enhanceEconomyExperience();
     else if(state.page==='roles')await enhanceRolesExperience();

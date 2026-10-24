@@ -1794,3 +1794,20 @@ html:not([data-density="compact"]) .workspace{
   .cc-actions .btn{flex:1 1 auto}
 }
 @media (prefers-reduced-motion:reduce){.cc-hero-glow,.cc-live.on i,.cc-pulse,.cc-event{animation:none}.cc-ring-value{transition:none}}
+
+/* ---------- En-tête de page unique ----------
+   Titre, état du module et raccourcis sur une seule ligne ; le résumé de page
+   devient une rangée de chiffres compacte au lieu d'un second en-tête. */
+.head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.head-extras{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.head-extras:empty{display:none}
+.head-extras .badge{margin-right:4px}
+.experience-summary{grid-template-columns:minmax(200px,.7fr) minmax(0,2fr);gap:18px;padding:16px 18px;align-items:center;border-radius:16px}
+.experience-summary-copy h2{font-size:18px;margin:0 0 4px}
+.experience-summary-copy p{margin:0;font-size:13px}
+.experience-summary-copy .toolbar{margin-top:12px}
+.experience-stat-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.experience-stat{min-height:0;padding:11px 12px}
+.experience-stat strong{font-size:20px}
+@media (max-width:1100px){.experience-summary{grid-template-columns:1fr}}
+@media (max-width:700px){.experience-stat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.head-actions{justify-content:flex-start}.head-extras{justify-content:flex-start}}
