@@ -3615,7 +3615,7 @@ class AutoMod(commands.Cog, name="Automod"):
     def _content_notice_view(member_mention: str, filter_name: str) -> discord.ui.LayoutView:
         """Avertissement AutoMod compact, sans bannière blanche ni embed générique.
 
-        Components V2 est dessiné dans un seul conteneur avec un accent coloré.
+        Components V2 est dessiné dans un seul conteneur, sans liseré coloré.
         Aucun lien suspect n'y est réaffiché ; le contenu a déjà été supprimé.
         """
         titles = {

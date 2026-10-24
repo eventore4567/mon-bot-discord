@@ -44,14 +44,17 @@ def test_blackjack_panel_attaches_local_cards_not_coinflip_gif():
     components = repr(panneau.to_components())
     assert "attachment://sentrix_blackjack.gif" in components
     assert "sentrix_game_coin.gif" not in components
+    # La bande fine de la carte (7aea328) est jointe à côté de la table.
     files = panneau.fichiers()
-    assert len(files) == 1
-    assert files[0].filename == "sentrix_blackjack.gif"
-    assert files[0].fp.read(6) in (b"GIF87a", b"GIF89a")
-    files[0].close()
+    tables = [f for f in files if f.filename == "sentrix_blackjack.gif"]
+    assert len(tables) == 1
+    assert not any(f.filename == "sentrix_game_coin.gif" for f in files)
+    assert tables[0].fp.read(6) in (b"GIF87a", b"GIF89a")
     another = panneau.fichiers()
-    assert another[0].fp is not files[0].fp
-    another[0].close()
+    autre_table = next(f for f in another if f.filename == "sentrix_blackjack.gif")
+    assert autre_table.fp is not tables[0].fp
+    for f in [*files, *another]:
+        f.close()
 
 
 def test_blackjack_aces_and_valid_deck():

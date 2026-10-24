@@ -59,8 +59,9 @@ def test_security_dashboard_exposes_full_center_and_per_filter_exceptions():
         "Arrivées",
         "Serveur",
         "Rôles autorisés à contourner",
-        "Salons stricts — bypass interdit",
-        "salon strict → rôle bypass → protection normale",
+        # Depuis b371b7e, les exemptions restent valables en salon strict.
+        "Salons à surveillance stricte",
+        "membre ou rôle exempté → salon strict → protection normale",
         "/security/filter-policies",
     ):
         assert marker in UI

@@ -176,6 +176,21 @@ async def test_second_appel_immediat_ne_sanctionne_pas_deux_fois():
     assert service.await_count == 1
 
 
+def _texte_envoye(kwargs) -> str:
+    """Le texte d'un envoi, qu'il parte en texte brut ou en carte courte
+    (CARTES_COURTES, 22/10/2026 : le texte est alors dans un TextDisplay)."""
+    morceaux = [str(kwargs.get("content") or "")]
+    pile = [kwargs.get("view")]
+    while pile:
+        element = pile.pop()
+        if element is None:
+            continue
+        if isinstance(element, discord.ui.TextDisplay):
+            morceaux.append(element.content)
+        pile.extend(getattr(element, "children", []) or [])
+    return "\n".join(m for m in morceaux if m)
+
+
 # ------------------------------------------------------------------ texte_court
 
 @pytest.mark.asyncio
@@ -183,7 +198,7 @@ async def test_texte_court_ne_notifie_jamais_et_suit_la_surface():
     ctx = SimpleNamespace(interaction=None, send=AsyncMock())
     await panels.texte_court(ctx, "<@7> a été banni.", supprimer_apres=4)
     kwargs = ctx.send.await_args.kwargs
-    assert kwargs["content"] == "<@7> a été banni."
+    assert _texte_envoye(kwargs) == "<@7> a été banni."
     assert kwargs["allowed_mentions"].users is False
     assert kwargs["delete_after"] == 4.0
 

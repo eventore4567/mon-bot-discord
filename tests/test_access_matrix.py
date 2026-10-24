@@ -433,7 +433,8 @@ if __name__ == "__main__":
 class RemainingRuntimeClassificationTests(unittest.TestCase):
     def test_runtime_commands_are_no_longer_fail_closed(self):
         expected = {
-            "achievements-v21": "public",
+            # Renommée `achievements` (57edce9) : un seul système de succès.
+            "achievements": "public",
             "antilink-strict": "categorie:securite",
             "automod-native-sync": "categorie:securite",
             "immunity": "guild-owner",

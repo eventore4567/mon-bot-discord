@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from unittest.mock import AsyncMock, Mock
 
 os.environ.setdefault("DISCORD_TOKEN", "x")
@@ -68,8 +69,9 @@ async def _journalise(inviter_id, code, breakdown=None):
 
 
 def _champs(embed) -> dict:
-    # log_entry retire les emojis de tete des noms de champs.
-    return {f.name: f.value for f in embed.fields}
+    # Les emojis restent visibles dans les noms de champs (EMOJIS_VISIBLES) :
+    # on compare donc le libellé, sans le pictogramme de tête.
+    return {re.sub(r"^\W+", "", f.name): f.value for f in embed.fields}
 
 
 def test_l_arrivee_part_dans_la_route_configurable():
