@@ -1,7 +1,7 @@
 """`+security-check` doit parler du SERVEUR, pas seulement du bot.
 
 C'est le point d'entrée réellement servi : `utils/slash_catalog.py` fait
-pointer `/security tools scan` dessus, et le relevé d'usage de production le
+pointer `/security scan` dessus, et le relevé d'usage de production le
 liste (contrairement à `+security scan`, qui n'y apparaît pas).
 
 Le diagnostic listait les protections SentriX et les permissions de SentriX.

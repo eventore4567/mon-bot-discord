@@ -109,9 +109,9 @@ async def main() -> int:
     automod = bot.get_cog("Automod")
     await db.execute("INSERT INTO blacklist_words (guild_id, word) VALUES (?, ?)", (h.GID, "arnaque-test"))
     automod.blacklist_words_cache.pop(h.GID, None)
-    shown = await suggest("security words remove", "mot", "arn")
+    shown = await suggest("protection word-remove", "mot", "arn")
     check(any(value == "arnaque-test" for _, value in shown),
-          "/security words remove : les mots interdits enregistrés sont proposés", str(shown))
+          "/protection word-remove : les mots interdits enregistrés sont proposés", str(shown))
 
     # Un membre qui tape ne déclenche rien d'autre qu'une liste (aucun message, aucune action).
     since = len(h.CALLS)
