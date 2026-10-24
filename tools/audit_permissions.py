@@ -229,6 +229,25 @@ def auditer(noms: list[str]) -> int:
     return 1
 
 
+# Contrat produit indépendant de la taille de registre (qui évolue
+# naturellement) : ces commandes sont indispensables et doivent exister.
+# Une extension peut charger sans erreur mais retirer silencieusement ses
+# commandes via une passe de nettoyage finale.
+REQUIRED_COMMANDS = frozenset({"help", "ban", "kick", "clear", "wipe-server"})
+
+
+def auditer_commandes_critiques(noms: list[str]) -> int:
+    present = {M.normalise(nom) for nom in noms}
+    missing = sorted(REQUIRED_COMMANDS - present)
+    if not missing:
+        print("\\nOK : commandes critiques présentes dans le registre.")
+        return 0
+    print(f"\\nECHEC : {len(missing)} commande(s) critiques disparue(s)")
+    for name in missing:
+        print(f"   COMMANDE CRITIQUE ABSENTE   {name}")
+    return 1
+
+
 def auditer_configuration_hostile(noms: list[str]) -> int:
     """Et si le serveur s'est configure contre lui-meme ?
 
@@ -320,6 +339,7 @@ def main() -> int:
         | auditer_configuration_hostile(noms)
         | auditer_affichage_slash(bot)
         | auditer_chargement(bot)
+        | auditer_commandes_critiques(noms)
     )
 
 
