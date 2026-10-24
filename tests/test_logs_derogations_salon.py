@@ -401,3 +401,47 @@ def test_une_autre_modification_nest_jamais_avalee():
 
     assert len(cartes) == 1
     assert any(f.name == "Nom" for f in cartes[0][1].fields)
+
+
+# --------------------------------------- une permission par ligne, encadrée
+
+def test_chaque_permission_a_sa_propre_ligne_dans_un_cadre():
+    from utils.access_matrix import permission_label
+
+    # Avant : « ⬜ Envoyer des messages, Joindre des fichiers, … » sur une seule
+    # ligne, et le ⬜ s'affichait comme un carré vide sur Discord.
+    role = _RoleFactice(950)
+    change = _diff_derogations(
+        {role: discord.PermissionOverwrite(send_messages=True, attach_files=True)},
+        {role: discord.PermissionOverwrite(view_channel=True, attach_files=False)},
+    )
+    texte = _texte_derogations(change)
+
+    assert "⬜" not in texte
+    assert texte.count("```diff") == 1 and texte.count("```") == 2
+    lignes = texte.splitlines()
+    assert lignes[0] == "<@&950> · 3 permissions"
+    assert any(l.startswith("+ " + permission_label("view_channel")) and l.endswith("autorisée") for l in lignes)
+    assert any(l.startswith("- " + permission_label("attach_files")) and l.endswith("refusée") for l in lignes)
+    assert any(l.startswith("  " + permission_label("send_messages")) and l.endswith("par défaut") for l in lignes)
+
+
+def test_les_etats_sont_alignes_en_colonne():
+    role = _RoleFactice(951)
+    change = _diff_derogations(
+        {}, {role: discord.PermissionOverwrite(view_channel=True, manage_webhooks=False)}
+    )
+    lignes = [l for l in _texte_derogations(change).splitlines() if l[:2] in {"+ ", "- "}]
+    assert len(lignes) == 2
+    positions = {l.rstrip().rfind("  ") for l in lignes}
+    assert len(positions) == 1, "les mots d'état doivent tomber dans la même colonne"
+
+
+def test_un_cadre_nest_jamais_coupe_par_le_budget():
+    roles = [_RoleFactice(960 + i) for i in range(30)]
+    tout = discord.PermissionOverwrite(**{nom: True for nom, _ in discord.PermissionOverwrite()})
+    texte = _texte_derogations(_diff_derogations({}, {r: tout for r in roles}))
+
+    assert texte.count("```") % 2 == 0, "un ``` orphelin casserait la carte"
+    assert "et " in texte and "autre(s)" in texte
+    assert len(texte) < 1000
