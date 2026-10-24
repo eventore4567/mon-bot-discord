@@ -45,7 +45,9 @@ def test_guided_setup_hides_advanced_by_default_and_has_no_smart_setup():
     assert 'ESSENTIAL_MODULE_KEYS' in source
     assert 'ADVANCED_MODULE_KEYS' in source
     assert '"security",\n    "logs",\n    "tickets",\n    "members",' in source
-    assert 'label="Afficher les réglages avancés"' in source
+    # Le libellé bascule entre « Afficher » et « Masquer » selon l'état.
+    assert '"Afficher les réglages avancés"' in source
+    assert '"Masquer les réglages avancés"' in source
     assert 'label="Smart Setup"' not in source
     assert 'Setup manuel guidé' in source
 

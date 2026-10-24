@@ -55,7 +55,7 @@ class SetupComponentsV73Tests(unittest.TestCase):
         source = INIT_PATH.read_text(encoding="utf-8")
         self.assertIn("install_setup_components_v73", source)
         v72 = source.index('"Tickets auto-configurables et états Setup V72"')
-        v73 = source.index('"Control Center Components V2 V73"')
+        v73 = source.index('"SentriX Setup Components V2 V73"')
         finalized = source.index("bot._sentrix_runtime_finalized_clean = True")
         self.assertLess(v72, v73)
         self.assertLess(v73, finalized)

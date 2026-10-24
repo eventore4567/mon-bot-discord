@@ -25,10 +25,10 @@ def test_v78_replaces_legacy_verification_commands_with_zero_argument_setup():
         return None
 
     assert install(bot)
+    # Tout passe par +setup / /setup : les anciennes commandes disparaissent
+    # toutes, y compris verify-setup (un seul chemin par réglage).
     assert bot.get_command("verify-panel") is None
-    command = bot.get_command("verify-setup")
-    assert command is not None
-    assert list(command.clean_params) == []
+    assert bot.get_command("verify-setup") is None
 
 
 def test_v78_contains_the_complete_discord_configuration_flow():

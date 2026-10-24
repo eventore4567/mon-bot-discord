@@ -120,7 +120,7 @@ class SecurityVerificationV71Tests(unittest.TestCase):
     def test_v71_is_final_runtime_layer(self):
         self.assertIn("install_security_verification_v71", INIT)
         self.assertLess(
-            INIT.index('await _run_installer("Finition Control Center V70"'),
+            INIT.index('await _run_installer("Finition SentriX Setup V70"'),
             INIT.index('await _run_installer("Sécurité avancée et vérification V71"'),
         )
 

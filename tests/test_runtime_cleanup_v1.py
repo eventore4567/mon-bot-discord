@@ -132,10 +132,11 @@ def test_single_setup_style_chain_is_documented_and_mobile_legacy_is_absent():
     # sert plus que de table de metadonnees (STEP_META) a language_setup_finalizer.
     assert "install_language_setup_finalizer" in setup_section
     assert "setup_mobile_cleanup" not in setup_section
-    # Un seul installateur de style de setup dans tout le chargeur.
-    style_installers = [
-        line for line in COGS_INIT.splitlines()
-        if "_run_installer(" in line and "oxyde" in line.casefold()
-    ]
-    assert len(style_installers) == 1, style_installers
-    assert "install_setup_oxyde_v69" in style_installers[0]
+    # Un seul installateur de style de setup dans tout le chargeur : SentriX
+    # Setup Core, qui a remplacé setup_oxyde_v69 (991f6b43).
+    assert not any(
+        "_run_installer(" in line and "oxyde" in line.casefold()
+        for line in COGS_INIT.splitlines()
+    )
+    core = [line for line in COGS_INIT.splitlines() if "_run_installer(" in line and "install_setup_core_v119" in line]
+    assert len(core) == 1, core

@@ -24,17 +24,20 @@ def _function(name: str):
 class SetupPolishV70Tests(unittest.TestCase):
     def test_v70_compiles_and_is_visual_only(self):
         ast.parse(SOURCE, filename=str(MODULE))
-        self.assertIn("Control Center V70", SOURCE)
+        self.assertIn("SentriX V70", SOURCE)
         self.assertNotIn("matrix.evaluate =", SOURCE)
         self.assertNotIn("DELETE FROM command_role_permissions", SOURCE)
         self.assertNotIn("INSERT INTO command_role_permissions", SOURCE)
 
     def test_v70_loads_after_v69(self):
+        # V69 a été remplacée par SentriX Setup Core (991f6b43) : V70 finit
+        # désormais la page APRÈS le cœur du setup.
         self.assertIn("install_setup_polish_v70", INIT)
+        self.assertNotIn("install_setup_oxyde_v69", INIT)
         final = INIT.index("async def finalize_runtime")
-        v69 = INIT.index("install_setup_oxyde_v69", final)
+        core = INIT.index("install_setup_core_v119", final)
         v70 = INIT.index("install_setup_polish_v70", final)
-        self.assertLess(v69, v70)
+        self.assertLess(core, v70)
 
     def test_home_is_compact_and_scannable(self):
         fn = _function("_home")
@@ -64,8 +67,11 @@ class SetupPolishV70Tests(unittest.TestCase):
         security = ast.unparse(_function("_security"))
         self.assertIn("SÉCURITÉ DISCORD", permissions)
         self.assertIn("permissions Discord réelles", permissions)
-        self.assertIn("PROFIL", security)
-        self.assertIn("AUTOMATIQUE", security)
+        # Les protections se choisissent une par une (V75) : plus de profil
+        # automatique unique.
+        self.assertIn("MODE", security)
+        self.assertIn("MANUEL", security)
+        self.assertIn("une par une", security)
         self.assertIn("Activer / Désactiver", SOURCE)
 
     def test_generic_pages_share_one_structure(self):
