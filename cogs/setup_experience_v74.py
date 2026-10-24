@@ -144,6 +144,78 @@ async def _set_optional_role(view: "SentriXSetupV74", field: str, role: discord.
     await view.bot.db.set_guild_config(view.guild.id, field, role.id if role else None)
 
 
+class IdentiteBotModal(discord.ui.Modal, title="Identité de SentriX"):
+    """Nom, avatar et bannière du bot — globaux, donc propriétaire uniquement.
+
+    Les trois champs sont facultatifs : on n'applique que ceux qui sont
+    remplis. Une URL invalide ou un refus de Discord n'empêche pas les autres
+    de passer, et le résultat dit précisément ce qui a changé et ce qui a
+    échoué — une réponse « ça n'a pas marché » sans détail serait inutilisable
+    pour une image hébergée ailleurs.
+    """
+
+    nom = discord.ui.TextInput(
+        label="Nom (laisser vide pour ne pas changer)", required=False, max_length=32,
+    )
+    avatar = discord.ui.TextInput(
+        label="URL de l'avatar", required=False, placeholder="https://…", max_length=500,
+    )
+    banniere = discord.ui.TextInput(
+        label="URL de la bannière", required=False, placeholder="https://…", max_length=500,
+    )
+
+    def __init__(self, vue):
+        super().__init__()
+        self.vue = vue
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from cogs.owner import fetch_image_bytes
+
+        faits, echecs = [], []
+        if str(self.nom.value or "").strip():
+            try:
+                await interaction.client.user.edit(username=str(self.nom.value).strip())
+                faits.append("nom")
+            except discord.HTTPException as exc:
+                # Discord limite fortement les changements de nom d'un bot.
+                echecs.append(f"nom ({exc.text or exc})")
+        for champ, saisie in (("avatar", self.avatar), ("bannière", self.banniere)):
+            url = str(saisie.value or "").strip()
+            if not url:
+                continue
+            donnees = await fetch_image_bytes(url)
+            if not donnees:
+                echecs.append(f"{champ} (image introuvable à cette adresse)")
+                continue
+            try:
+                if champ == "avatar":
+                    await interaction.client.user.edit(avatar=donnees)
+                else:
+                    await interaction.client.user.edit(banner=donnees)
+                faits.append(champ)
+            except discord.HTTPException as exc:
+                echecs.append(f"{champ} ({exc.text or exc})")
+
+        if not faits and not echecs:
+            texte = "Aucun champ rempli : rien n'a été changé."
+        else:
+            lignes = []
+            if faits:
+                lignes.append("✅ Mis à jour : " + ", ".join(faits))
+            if echecs:
+                lignes.append("❌ Échec : " + " · ".join(echecs))
+                lignes.append(
+                    "-# Une bannière de bot demande parfois le Developer Portal "
+                    "selon le niveau du compte."
+                )
+            texte = "\n".join(lignes)
+        await panels.envoyer(
+            interaction.response,
+            panels.depuis_embed(embeds.info(texte, title="Identité de SentriX")),
+            ephemere=True,
+        )
+
+
 class SentriXSetupV74(v73.SentriXSetupV73):
     """Dernière façade du Setup : simple pour la sécurité, complète pour les tickets."""
 
@@ -207,6 +279,24 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             )
         states.pop("permissions", None)
         return states
+
+    async def _est_proprietaire_du_bot(self) -> bool:
+        """Le propriétaire de SentriX, pas l'administrateur du serveur.
+
+        Rendre False en cas de doute : mieux vaut ne pas afficher le bouton
+        que de laisser un admin changer l'apparence globale du bot.
+        """
+        try:
+            from config import OWNER_IDS
+            from database.db import PRIMARY_CREATOR_ID
+
+            uid = int(self.author_id)
+            if uid == PRIMARY_CREATOR_ID or uid in OWNER_IDS:
+                return True
+            return bool(await self.bot.db.is_bot_creator(uid))
+        except Exception:
+            logger.debug("Propriétaire du bot indéterminé.", exc_info=True)
+            return False
 
     async def _build_home(self) -> None:
         """Premier écran : les modules et leur interrupteur, rien d'autre.
@@ -299,6 +389,23 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
         soundboard_button.callback = open_soundboard
         container.add_item(discord.ui.ActionRow(music_button, soundboard_button))
+
+        # Identité du bot : réservée au PROPRIÉTAIRE de SentriX, jamais aux
+        # administrateurs de serveur. L'avatar et la bannière d'un bot sont
+        # globaux : un seul admin sur l'un des serveurs changerait l'apparence
+        # de SentriX pour tous les autres. Le bouton n'apparaît donc que pour
+        # le propriétaire — et `+set-bot`, qui fait déjà ce travail, garde sa
+        # propre vérification côté commande.
+        if await self._est_proprietaire_du_bot():
+            identite = discord.ui.Button(
+                label="Identité de SentriX", emoji="🪪", style=discord.ButtonStyle.secondary,
+            )
+
+            async def ouvrir_identite(interaction: discord.Interaction):
+                await interaction.response.send_modal(IdentiteBotModal(self))
+
+            identite.callback = ouvrir_identite
+            container.add_item(discord.ui.ActionRow(identite))
 
         # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
         options = [
