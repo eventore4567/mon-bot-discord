@@ -12,17 +12,18 @@ DIR = Path(__file__).resolve().parents[1] / "web" / "dashboard_ui"
 def test_real_unified_dashboard_uses_richer_overview_not_fake_cards():
     html = ui.INDEX_HTML
     for marker in (
-        'class="overview-server-bar sx-control-hero full"',
-        'class="sx-quick-section full"',
+        # Centre de commande : résumé vivant, activité réelle, fil en direct.
+        'class="cc-hero full"',
+        'class="card cc-activity"',
+        'class="card cc-feed"',
         'class="sx-module-section full"',
-        'class="sx-quick-grid"',
         'class="module-grid"',
         'data-action="enable"',
         'data-action="disable"',
-        "const d = await diagnostics()",
+        "diagnostics(),",
         "const g = state.guild?.guild || {}",
-        "number(memberCount)",
-        "const openTickets = Number(metrics().open_tickets || 0)",
+        "gget('/activity')",
+        "/live/metrics",
         "function renderNav()",
         "async function selectGuild(value)",
         "const kicker = $('workspaceKicker')",
