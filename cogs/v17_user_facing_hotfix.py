@@ -118,7 +118,14 @@ def _patch_duplicate_mention() -> None:
 
     from . import common_command_names
 
-    current = common_command_names._mention_help
+    # common_command_names a retiré ce listener : l'IA est désormais le seul
+    # gestionnaire des mentions. Son absence est l'état NORMAL, pas une erreur.
+    # Le vieux patch faisait planter install() et répétait l'erreur à chaque boot.
+    current = getattr(common_command_names, "_mention_help", None)
+    if current is None:
+        _MENTION_PATCHED = True
+        logger.debug("Ancien listener de mention absent : aucune duplication à corriger.")
+        return
     if getattr(current, "_sentrix_compact_home_guard", False):
         _MENTION_PATCHED = True
         return
