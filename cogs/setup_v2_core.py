@@ -31,7 +31,26 @@ MODULES = (
 #: jamais touché au réglage — c'est-à-dire presque tous. Une ligne enabled=0 reste
 #: respectée ; les autres modules (IA comprise) demandent toujours une activation.
 PROTECTION_MODULES = frozenset({"moderation", "security"})
-CONFIGURABLE_MODULES = frozenset(MODULES) - PROTECTION_MODULES
+#: Fonctions des membres : actives sans réglage. Le 24/10/2026 Jayden : « personne
+#: peut lancer des commandes » — +balance, +daily, +level refusés à tous sur chaque
+#: serveur où personne n'avait cliqué « Activer » (885c1ec3). Une ligne enabled=0
+#: (coupé par un admin) reste toujours respectée. L'IA reste un choix explicite :
+#: chaque réponse consomme la clé payante du bot.
+MEMBER_FEATURE_MODULES = frozenset({"economy", "levels"})
+DEFAULT_ON_MODULES = PROTECTION_MODULES | MEMBER_FEATURE_MODULES
+CONFIGURABLE_MODULES = frozenset(MODULES) - DEFAULT_ON_MODULES
+
+#: Un module qui demande une ressource est actif dès qu'elle EXISTE : un panel de
+#: tickets publié, un salon de logs, de bienvenue ou de départ, un rôle automatique.
+#: Rien n'est créé ici ; on constate seulement ce que l'admin a déjà configuré.
+_PREUVES_DE_CONFIGURATION: dict[str, str] = {
+    "tickets": "SELECT 1 AS ok FROM ticket_panels_v2 WHERE guild_id=? AND enabled=1 LIMIT 1",
+    "logs": "SELECT 1 AS ok FROM log_config WHERE guild_id=? AND enabled=1 AND channel_id IS NOT NULL LIMIT 1",
+    "welcome": "SELECT 1 AS ok FROM guild_config WHERE guild_id=? AND welcome_channel IS NOT NULL LIMIT 1",
+    "goodbye": "SELECT 1 AS ok FROM guild_config WHERE guild_id=? AND goodbye_channel IS NOT NULL LIMIT 1",
+    "roles": "SELECT 1 AS ok FROM guild_config WHERE guild_id=? AND autorole IS NOT NULL LIMIT 1",
+}
+_PREUVE_CACHE: dict[tuple[int, str], tuple[float, bool]] = {}
 MODULE_STATE_ENABLED = "enabled"
 MODULE_STATE_DISABLED = "disabled"
 MODULE_STATE_NOT_CONFIGURED = "not_configured"
@@ -204,11 +223,14 @@ def invalidate_module_cache(guild_id: int | None = None, module: str | None = No
     """Purge le cache. Sans argument : tout. Avec : la seule entree concernee."""
     if guild_id is None:
         _MODULE_ROW_CACHE.clear()
+        _PREUVE_CACHE.clear()
         return
     if module is None:
-        for key in [k for k in _MODULE_ROW_CACHE if k[0] == int(guild_id)]:
-            _MODULE_ROW_CACHE.pop(key, None)
+        for cache in (_MODULE_ROW_CACHE, _PREUVE_CACHE):
+            for key in [k for k in cache if k[0] == int(guild_id)]:
+                cache.pop(key, None)
         return
+    _PREUVE_CACHE.pop((int(guild_id), str(module)), None)
     _MODULE_ROW_CACHE.pop((int(guild_id), str(module)), None)
 
 
@@ -242,8 +264,28 @@ async def module_enabled(bot: commands.Bot, guild_id: int, module: str) -> bool:
     await ensure_schema(bot)
     value = await module_row_value(bot, guild_id, module)
     if value is None:
-        return module in PROTECTION_MODULES
+        if module in DEFAULT_ON_MODULES:
+            return True
+        return await _module_deja_configure(bot, guild_id, module)
     return bool(value)
+
+
+async def _module_deja_configure(bot: commands.Bot, guild_id: int, module: str) -> bool:
+    requete = _PREUVES_DE_CONFIGURATION.get(module)
+    if requete is None:
+        return False
+    key = (int(guild_id), module)
+    cached = _PREUVE_CACHE.get(key)
+    if cached is not None and (time.monotonic() - cached[0]) < _MODULE_CACHE_TTL:
+        return cached[1]
+    try:
+        trouve = await bot.db.fetchone(requete, (int(guild_id),)) is not None
+    except Exception:  # noqa: BLE001 — table absente sur une base neuve : non configuré
+        trouve = False
+    if len(_PREUVE_CACHE) > 5000:
+        _PREUVE_CACHE.clear()
+    _PREUVE_CACHE[key] = (time.monotonic(), trouve)
+    return trouve
 
 
 async def module_state(bot: commands.Bot, guild_id: int, module: str) -> str:
@@ -257,9 +299,8 @@ async def module_state(bot: commands.Bot, guild_id: int, module: str) -> str:
     await ensure_schema(bot)
     value = await module_row_value(bot, guild_id, module)
     if value is None:
-        if module in CONFIGURABLE_MODULES:
-            return MODULE_STATE_NOT_CONFIGURED
-        return MODULE_STATE_ENABLED if await module_enabled(bot, guild_id, module) else MODULE_STATE_DISABLED
+        # Actif par défaut (protections, fonctions des membres) ou déjà configuré.
+        return MODULE_STATE_ENABLED if await module_enabled(bot, guild_id, module) else MODULE_STATE_NOT_CONFIGURED
     return MODULE_STATE_ENABLED if value else MODULE_STATE_DISABLED
 
 

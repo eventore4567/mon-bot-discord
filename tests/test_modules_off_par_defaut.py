@@ -110,10 +110,16 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
 
     # ------------------------------------------------------------ serveur neuf
     async def test_un_serveur_neuf_a_tout_de_configurable_inactif(self):
-        for module in ("levels", "economy", "welcome", "goodbye", "tickets", "logs", "roles", "notifications"):
+        # Ce qui demande une ressource reste non configuré tant qu'elle n'existe pas.
+        for module in ("welcome", "goodbye", "tickets", "logs", "roles", "notifications"):
             with self.subTest(module=module):
                 self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, module))
                 self.assertEqual(await core.module_state(self.bot, NEW_GUILD, module), core.MODULE_STATE_NOT_CONFIGURED)
+        # Les fonctions des membres marchent sans réglage (24/10/2026 : « personne
+        # peut lancer des commandes » quand elles étaient coupées par défaut).
+        for module in ("levels", "economy"):
+            with self.subTest(module=module):
+                self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, module))
         # Les protections restent actives (l'Auto Mode s'éteignait partout sinon) ;
         # l'IA demande une activation.
         for module in ("moderation", "security"):
@@ -128,7 +134,9 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
 
     # ------------------------------------------------------------ trois états
     async def test_les_trois_etats_sont_distingues(self):
-        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "levels"), core.MODULE_STATE_NOT_CONFIGURED)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "logs"), core.MODULE_STATE_NOT_CONFIGURED)
+        # Niveaux : actif sans réglage, et un choix explicite reste respecté.
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "levels"), core.MODULE_STATE_ENABLED)
         await self._configurer("levels")
         await self._configurer("levels")
         await core.set_module_enabled(self.bot, NEW_GUILD, "levels", True)
@@ -136,7 +144,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         await core.set_module_enabled(self.bot, NEW_GUILD, "levels", False)
         self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "levels"), core.MODULE_STATE_DISABLED)
         await core.reset_module(self.bot, NEW_GUILD, "levels")
-        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "levels"), core.MODULE_STATE_NOT_CONFIGURED)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "levels"), core.MODULE_STATE_ENABLED)
 
     # ------------------------------------------------------------ niveaux / économie
     async def test_niveaux_et_economie_sont_independants(self):
@@ -156,7 +164,7 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
     async def test_la_facade_system_features_ecrit_dans_module_settings(self):
         await system_features.set_system_feature(self.db, NEW_GUILD, "economy", True)
         self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, "economy"))
-        self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "levels"))
+        self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, "levels"))  # actif sans réglage
         await self._configurer("levels")
         await system_features.set_system_feature(self.db, NEW_GUILD, "levels", True)
         await system_features.set_system_feature(self.db, NEW_GUILD, "economy", False)
@@ -189,13 +197,17 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "goodbye"))
 
     # ------------------------------------------------------------ configurer = activer
-    async def test_poser_une_ressource_ne_demarre_aucun_module(self):
+    async def test_poser_une_ressource_active_seulement_son_module(self):
+        # 24/10/2026 : un module configuré marche, sans second clic « Activer »
+        # (les panels de tickets publiés ne répondaient plus). Rien n'est créé.
         await self.db.set_guild_config(NEW_GUILD, "welcome_channel", 555)
-        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "welcome"), core.MODULE_STATE_NOT_CONFIGURED)
+        core.invalidate_module_cache(NEW_GUILD)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "welcome"), core.MODULE_STATE_ENABLED)
         # Le départ reste non configuré : ce sont deux modules.
         self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "goodbye"), core.MODULE_STATE_NOT_CONFIGURED)
         await self.db.set_guild_config(NEW_GUILD, "goodbye_channel", 556)
-        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "goodbye"), core.MODULE_STATE_NOT_CONFIGURED)
+        core.invalidate_module_cache(NEW_GUILD)
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "goodbye"), core.MODULE_STATE_ENABLED)
 
     async def test_un_module_desactive_explicitement_n_est_pas_rallume_par_une_ressource(self):
         await core.set_module_enabled(self.bot, NEW_GUILD, "levels", False)
@@ -225,14 +237,15 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
         )
 
         # Première lecture : ensure_schema + migration.
-        self.assertFalse(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "levels"))
-        self.assertFalse(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "economy"))
-        self.assertFalse(await core.module_enabled(self.bot, OLD_WELCOME_GUILD, "welcome"))
+        self.assertTrue(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "levels"))
+        self.assertTrue(await core.module_enabled(self.bot, OLD_LEVELS_GUILD, "economy"))
+        self.assertTrue(await core.module_enabled(self.bot, OLD_WELCOME_GUILD, "welcome"))  # salon configuré
         self.assertFalse(await core.module_enabled(self.bot, OLD_WELCOME_GUILD, "goodbye"))
+        # Un choix explicite « coupé » reste respecté.
         self.assertFalse(await core.module_enabled(self.bot, OLD_EXPLICIT_OFF_GUILD, "levels"))
         self.assertTrue(await core.module_enabled(self.bot, OLD_EXPLICIT_OFF_GUILD, "economy"))
-        self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "levels"))
-        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "economy"), core.MODULE_STATE_NOT_CONFIGURED)
+        self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, "levels"))
+        self.assertEqual(await core.module_state(self.bot, NEW_GUILD, "economy"), core.MODULE_STATE_ENABLED)
 
         # Idempotente : une seconde exécution ne réécrit rien.
         self.assertEqual(await core.migrate_module_defaults(self.bot), {})
