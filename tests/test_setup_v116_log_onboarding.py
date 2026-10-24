@@ -67,7 +67,14 @@ async def test_home_embed_affiche_etat_logs(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_home_button_opens_logs_without_writing_configuration():
+async def test_home_button_opens_logs_without_writing_configuration(monkeypatch):
+    # V116 reçoit la classe SetupNavButton lors du bootstrap V4 réel ; dans ce
+    # test isolé le module d'interface n'est pas encore initialisé.
+    monkeypatch.setattr(
+        v116.v4, "_CONFIG_MODULE",
+        SimpleNamespace(SetupNavButton=lambda action, message_id, **kwargs:
+                        SimpleNamespace(label=kwargs["label"])),
+    )
     view, db = _view([])
     view.message_id = 456
     view.page = v116.v4.PAGE_HOME
