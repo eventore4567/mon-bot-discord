@@ -100,7 +100,12 @@ class TicketCardV3(discord.ui.LayoutView):
         cover.add_item(media=f"attachment://{BANNER_FILENAME}")
         container.add_item(cover)
 
-        intro = f"-# SENTRIX  /  CENTRE DE SUPPORT  ·  {status.upper()}\n## {_safe(title, 180)}"
+        # Un état lisible au lieu du surtitre technique en majuscules (22/10/2026).
+        pastille = {"ouvert": "🟢 Ouvert", "fermé": "🔒 Fermé", "ferme": "🔒 Fermé",
+                    "pris en charge": "🟡 Pris en charge", "en attente": "⏳ En attente",
+                    "non effectué": "⚠️ Non effectué", "rouvert": "🔓 Rouvert", "supprimé": "🗑️ Supprimé"}.get(
+            str(status or "").casefold(), f"🎫 {str(status or '').capitalize()}")
+        intro = f"-# 🎫 Support · {pastille}\n## {_safe(title, 180)}"
         if description:
             intro += "\n" + _safe(description, 550)
         if avatar_url:
@@ -185,6 +190,14 @@ def ticket_created_confirmation(
     )
 
 
+def _emoji_categorie(ticket_type: str) -> str:
+    try:
+        from cogs.tickets import emoji_de_categorie
+    except Exception:  # noqa: BLE001
+        return "🎫"
+    return emoji_de_categorie(ticket_type, None)
+
+
 def opening_card(*, ticket_number: int, ticket_type: str, opener: discord.abc.User,
                  description: str, staff_role: discord.Role | None = None,
                  answers: Iterable[tuple[str, str]] = ()) -> TicketCardV3:
@@ -207,7 +220,7 @@ def opening_card(*, ticket_number: int, ticket_type: str, opener: discord.abc.Us
                      "Un membre du staff peut la prendre en charge, puis fermer "
                      "le ticket avec une raison."))
     return TicketCardV3(
-        title=f"Ticket #{int(ticket_number)} · {_safe(ticket_type, 70)}",
+        title=f"{_emoji_categorie(ticket_type)} Ticket #{int(ticket_number)} · {_safe(ticket_type, 70)}",
         description=_safe(description, 430),
         sections=sections, avatar_url=str(opener.display_avatar.url),
     )

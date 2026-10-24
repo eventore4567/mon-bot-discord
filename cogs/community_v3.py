@@ -489,8 +489,14 @@ def _install_ticket_intelligence(bot: commands.Bot) -> None:
     async def smart_create(this, interaction: discord.Interaction, ticket_type, answers: list):
         summary, priority = ticket_summary(str(ticket_type["name"]), list(answers or []))
         enriched = list(answers or [])
-        enriched.append(("🧠 Résumé automatique", summary))
-        enriched.append(("⚡ Priorité détectée", "Haute — à regarder rapidement" if priority == "haute" else "Normale"))
+        # Sans formulaire, le « résumé » répétait la catégorie (« Aide — Aucun détail
+        # supplémentaire fourni ») et « Priorité : Normale » ne disait rien au staff :
+        # du bruit en tête de chaque ticket. Seulement s'il y a de vraies réponses, et
+        # la priorité seulement quand elle est haute.
+        if any(str(value or "").strip() for _key, value in enriched):
+            enriched.append(("🧠 Résumé automatique", summary))
+            if priority == "haute":
+                enriched.append(("⚡ Priorité détectée", "Haute — à regarder rapidement"))
         result = await original(interaction, ticket_type, enriched)
         if interaction.guild and interaction.user:
             try:
