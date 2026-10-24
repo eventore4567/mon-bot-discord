@@ -155,6 +155,33 @@ def is_owner_or_admin():
     return commands.check(_mark(predicate, "Administrateur"))
 
 
+def is_owner_or_manager():
+    """Propriétaire SentriX, Administrateur, ou « Gérer le serveur ».
+
+    Même exigence que la catégorie « configuration » de la matrice centrale
+    (`permission_setup_hardening_v65.CATEGORY_REQUIRED_PERMISSION`), donc la
+    même que pour ouvrir /setup. Sans ça, un gestionnaire franchissait la
+    première porte — le panneau s'ouvrait — puis butait sur « Permission
+    manquante : Administrateur » dès qu'il configurait quoi que ce soit.
+
+    Qui peut déjà faire ce travail à la main : « Gérer le serveur » permet de
+    modifier les salons et les réglages du serveur. Exiger Administrateur ici
+    n'ajoutait donc pas de protection, seulement une incohérence.
+    """
+    async def predicate(ctx: commands.Context) -> bool:
+        if await is_verified_bot_owner(ctx):
+            return True
+        if isinstance(ctx.author, discord.Member):
+            perms = ctx.author.guild_permissions
+            if perms.administrator or perms.manage_guild:
+                return True
+        raise BotPermissionError(
+            "Vous devez avoir la permission **Gérer le serveur** pour utiliser cette commande."
+        )
+
+    return commands.check(_mark(predicate, "Gérer le serveur"))
+
+
 def is_owner_or_admin_for(category: str):
     """Compatibilité des anciens appels, sans privilège de gestionnaire de serveur."""
     async def predicate(ctx: commands.Context) -> bool:

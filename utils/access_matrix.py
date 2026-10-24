@@ -230,14 +230,26 @@ DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
     # « configuration », la décision centrale disait « Gérer le serveur » et un
     # gestionnaire passait la première porte pour buter sur la seconde avec un
     # autre message (mesuré le 08/10/2026). Une seule décision : Administrateur.
-    "verification": "administrator",
-    "verify-setup": "administrator",
-    # Ajoutées le 12/10/2026 sans classement (fail-closed) : outils d'administration.
-    "verify-repair": "administrator",
+    # 24/10/2026 — ALIGNÉES SUR « Gérer le serveur », à la demande de Jayden.
+    # L'état précédent produisait exactement le défaut qu'il a constaté : un
+    # gestionnaire ouvrait /setup (qui accepte manage_guild) puis se faisait
+    # refuser « Permission manquante : Administrateur » dès qu'il configurait
+    # le règlement. Les deux portes disaient des choses différentes.
+    #
+    # Exiger Administrateur ici n'ajoutait pas de protection : « Gérer le
+    # serveur » permet déjà de modifier salons et réglages à la main. La
+    # catégorie « configuration » demande manage_guild ; la famille
+    # vérification la rejoint, et cogs/verification.py est aligné du même
+    # coup — sinon on recrée le double message que ce bloc évitait.
+    "verification": "manage_guild",
+    "verify-setup": "manage_guild",
+    "verify-repair": "manage_guild",
+    "verify-panel": "manage_guild",
+    "verify-config": "manage_guild",
+    "verification-config": "manage_guild",
+    # `manage` RESTE Administrateur : rollback, sanctions, instantanés — ce
+    # n'est pas de la configuration, c'est de l'administration.
     "manage": "administrator",
-    "verify-panel": "administrator",
-    "verify-config": "administrator",
-    "verification-config": "administrator",
     "ban": "ban_members",
     "hackban": "ban_members",
     "tempban": "ban_members",

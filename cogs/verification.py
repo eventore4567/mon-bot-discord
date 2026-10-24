@@ -5,6 +5,12 @@ Cog VÉRIFICATION / RÔLES.
 /giverole /removerole /roleall /massrole
 """
 
+# 24/10/2026 — ces commandes acceptent désormais « Gérer le serveur », pas
+# seulement Administrateur. /setup s'ouvre déjà avec manage_guild : exiger
+# plus ici faisait buter le gestionnaire sur « Permission manquante » après
+# avoir franchi la première porte. utils/access_matrix est aligné du même
+# coup — changer un seul des deux recrée le double message.
+
 import asyncio
 import io
 import logging
@@ -767,13 +773,13 @@ class Verification(commands.Cog, name="Verification"):
 
     @commands.hybrid_command(name="verify-setup", description="Définir le rôle attribué lors de la vérification.")
     @app_commands.describe(role="Le rôle à attribuer aux membres vérifiés")
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def verify_setup(self, ctx: commands.Context, role: discord.Role):
         await self.bot.db.set_guild_config(ctx.guild.id, "verify_role", role.id)
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle défini', description=f'Rôle de vérification défini sur {role.mention}.', kind='success')))
 
     @commands.hybrid_command(name="verify-panel", description="Poster le panneau de vérification dans ce salon.")
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def verify_panel(self, ctx: commands.Context):
         if ctx.guild is None:
             return await ctx.send("Cette commande fonctionne uniquement dans un serveur.")
@@ -815,7 +821,7 @@ class Verification(commands.Cog, name="Verification"):
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(e), VerifyView()))
 
     @commands.command(name="verify-repair", aliases=["verification-repair"])
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def verify_repair(self, ctx: commands.Context):
         """Répare les panneaux web existants sans créer de salon ou de rôle.
 
@@ -1013,18 +1019,18 @@ class Verification(commands.Cog, name="Verification"):
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Rôle ajouté au panneau', description=f'{emoji_display} donnera ou retirera automatiquement {role.mention}.', kind='success')))
 
     @commands.group(name="rolepanel", aliases=["rolespanel", "role-menu"], invoke_without_command=True)
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def rolepanel(self, ctx: commands.Context):
         """Crée un panneau public limité aux rôles de notification."""
         await self._create_self_role_panel(ctx, "Choisissez vos notifications")
 
     @rolepanel.command(name="create", aliases=["creer"])
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def rolepanel_create(self, ctx: commands.Context, *, title: str = "Choisissez vos notifications"):
         await self._create_self_role_panel(ctx, title)
 
     @commands.command(name="rolepanel-refresh", aliases=["rolespanel-refresh"])
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def rolepanel_refresh(self, ctx: commands.Context):
         """Actualise les panneaux après la création ou le renommage d'une notification."""
         panels = await self.bot.db.fetchall(
@@ -1036,7 +1042,7 @@ class Verification(commands.Cog, name="Verification"):
         await ctx.channel.send("Panneaux de notifications actualisés.", delete_after=10)
 
     @rolepanel.command(name="add", aliases=["ajouter"])
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def rolepanel_add(
         self,
         ctx: commands.Context,
@@ -1054,7 +1060,7 @@ class Verification(commands.Cog, name="Verification"):
         await self._add_reaction_role(ctx, message, emoji, role, label)
 
     @rolepanel.command(name="remove", aliases=["retirer"])
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def rolepanel_remove(self, ctx: commands.Context, message_id: int, emoji: str):
         try:
             emoji_key, emoji_display, parsed_emoji = _emoji_parts(emoji)
@@ -1079,7 +1085,7 @@ class Verification(commands.Cog, name="Verification"):
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Association retirée', kind='success')))
 
     @rolepanel.command(name="list", aliases=["liste"])
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def rolepanel_list(self, ctx: commands.Context):
         panneaux = await self.bot.db.fetchall(
             "SELECT p.*, COUNT(r.message_id) AS role_count FROM reaction_role_panels p "
@@ -1096,7 +1102,7 @@ class Verification(commands.Cog, name="Verification"):
         await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Panneaux de rôles', description='\n'.join(lines))))
 
     @rolepanel.command(name="delete", aliases=["supprimer"])
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def rolepanel_delete(self, ctx: commands.Context, message_id: int):
         panel, message = await self._panel_and_message(ctx.guild, message_id)
         if not panel:
@@ -1118,7 +1124,7 @@ class Verification(commands.Cog, name="Verification"):
 
     @commands.hybrid_command(name="reactionrole-add", description="Ajouter un rôle sur réaction à un message.")
     @app_commands.describe(message_id="L'identifiant du message", emoji="L'emoji à utiliser", role="Le rôle à attribuer")
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def reactionrole_add(self, ctx: commands.Context, message_id: str, emoji: str, role: discord.Role):
         try:
             mid = int(message_id)
@@ -1132,7 +1138,7 @@ class Verification(commands.Cog, name="Verification"):
 
     @commands.hybrid_command(name="reactionrole-remove", description="Retirer une association rôle/réaction.", with_app_command=False)
     @app_commands.describe(message_id="L'identifiant du message", emoji="L'emoji concerné")
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def reactionrole_remove(self, ctx: commands.Context, message_id: str, emoji: str):
         try:
             mid = int(message_id)
@@ -1271,7 +1277,7 @@ class Verification(commands.Cog, name="Verification"):
 
     @commands.hybrid_command(name="roleall", description="Donner un rôle à tous les membres du serveur.", with_app_command=False)
     @app_commands.describe(role="Le rôle à attribuer à tout le monde")
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def roleall(self, ctx: commands.Context, role: discord.Role):
         # Sur un très gros serveur (ex: 200 000 membres), traiter les membres un par un,
         # en attendant chaque requête l'une après l'autre, prendrait des HEURES (chaque
@@ -1318,7 +1324,7 @@ class Verification(commands.Cog, name="Verification"):
     @commands.hybrid_command(name="massrole", description="Ajouter ou retirer un rôle sur une liste de membres.", with_app_command=False)
     @app_commands.describe(role="Le rôle concerné", action="add ou remove", membres="Membres séparés par des espaces (mentions)")
     @app_commands.choices(action=[app_commands.Choice(name="Ajouter", value="add"), app_commands.Choice(name="Retirer", value="remove")])
-    @checks.is_owner_or_admin()
+    @checks.is_owner_or_manager()
     async def massrole(self, ctx: commands.Context, role: discord.Role, action: str, membres: commands.Greedy[discord.Member]):
         if not membres:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id, title='Membres manquants', description='Mentionnez au moins un membre.', kind='danger')))
