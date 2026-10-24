@@ -50,8 +50,22 @@ _KIND_BY_MODULE = {
 }
 
 
+#: Interrupteur explicite, prioritaire sur la détection : sans lui, recréer ou
+#: renommer le service Railway coupait EN SILENCE toutes les réponses naturelles
+#: (« sentrix … », mention) — l'identifiant du service principal est figé ici.
+PRIMARY_OVERRIDE_ENV = "SENTRIX_PASSIVE_AI_PRIMARY"
+_VRAI = {"1", "true", "yes", "on", "oui"}
+_FAUX = {"0", "false", "no", "off", "non"}
+
+
 def _is_primary_service() -> bool:
     """Un seul service Railway conserve les réponses naturelles SentriX."""
+    forcage = (os.getenv(PRIMARY_OVERRIDE_ENV) or "").strip().casefold()
+    if forcage in _VRAI:
+        return True
+    if forcage in _FAUX:
+        return False
+
     service_id = (os.getenv("RAILWAY_SERVICE_ID") or "").strip()
     if service_id:
         return service_id == PRIMARY_RAILWAY_SERVICE_ID
@@ -321,6 +335,15 @@ def install(bot: commands.Bot) -> None:
         # ne doit pas répondre aux messages naturels SentriX. Cette fois TOUS les chemins
         # passifs sont retirés, pas seulement Ai.on_message.
         hotfix_removed = counts.get("api_fallback", 0)
+        if counts:
+            logger.error(
+                "IA passive COUPÉE sur ce service (RAILWAY_SERVICE_ID=%r, RAILWAY_SERVICE_NAME=%r) : "
+                "SentriX ne répondra ni aux mentions ni aux messages « sentrix … ». "
+                "Si ce service est le bot principal, définissez %s=1 dans ses variables Railway.",
+                (os.getenv("RAILWAY_SERVICE_ID") or "").strip(),
+                (os.getenv("RAILWAY_SERVICE_NAME") or "").strip(),
+                PRIMARY_OVERRIDE_ENV,
+            )
 
     durable = getattr(bot, "sentrix_durable_store", None)
     postgres_available = bool(getattr(durable, "pool", None))

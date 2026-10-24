@@ -155,12 +155,12 @@ async def _direct_reply(
     if result.ok and (result.text or "").strip():
         text = (result.text or "").strip()
     elif result.ok:
-        text = "Je n'ai pas reçu de texte de l'IA. Réessaie ta question."
+        text = "Je n'ai pas reçu de texte de l'IA. Réessayez votre question."
     else:
         try:
             text = ai_service.error_message(result.error)
         except Exception:
-            text = "L'IA a rencontré une erreur temporaire. Réessaie dans quelques secondes."
+            text = "L'IA a rencontré une erreur temporaire. Réessayez dans quelques secondes."
 
     await _send_text(destination, text, reply_to=reply_to)
     _mark(bot, "recovery_completed_at")

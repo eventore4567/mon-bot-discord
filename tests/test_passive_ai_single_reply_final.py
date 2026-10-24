@@ -33,6 +33,27 @@ def test_secondary_service_identity(monkeypatch):
     assert guard._is_primary_service() is False
 
 
+def test_override_forces_primary_even_with_unknown_service(monkeypatch):
+    # Service recréé ou renommé sur Railway : l'ID figé ne correspond plus.
+    monkeypatch.setenv("RAILWAY_SERVICE_ID", "11111111-2222-3333-4444-555555555555")
+    monkeypatch.setenv("RAILWAY_SERVICE_NAME", "sentrix-prod")
+    assert guard._is_primary_service() is False
+    monkeypatch.setenv(guard.PRIMARY_OVERRIDE_ENV, "1")
+    assert guard._is_primary_service() is True
+
+
+def test_override_can_switch_off_the_primary(monkeypatch):
+    monkeypatch.setenv("RAILWAY_SERVICE_ID", guard.PRIMARY_RAILWAY_SERVICE_ID)
+    monkeypatch.setenv(guard.PRIMARY_OVERRIDE_ENV, "off")
+    assert guard._is_primary_service() is False
+
+
+def test_unrecognised_override_keeps_detection(monkeypatch):
+    monkeypatch.setenv("RAILWAY_SERVICE_ID", guard.PRIMARY_RAILWAY_SERVICE_ID)
+    monkeypatch.setenv(guard.PRIMARY_OVERRIDE_ENV, "peut-être")
+    assert guard._is_primary_service() is True
+
+
 def test_identity_detects_all_four_ai_responder_sources():
     expected = {
         "cogs.ai": ("on_message", "primary"),
