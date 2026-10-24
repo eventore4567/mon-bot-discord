@@ -57,11 +57,13 @@ from core.module_supervisor import ModuleSupervisor
 from web.dashboard import start_dashboard
 import web.dashboard as dashboard_module
 from web.dashboard_api_forbidden_words import register as register_forbidden_words_routes
+from web.dashboard_activity import register as register_activity_routes
 
 _dashboard_build_app = dashboard_module.build_app
 def _build_app_with_forbidden_words(bot):
     app = _dashboard_build_app(bot)
     register_forbidden_words_routes(app, dashboard_module)
+    register_activity_routes(app, dashboard_module)
     return app
 
 dashboard_module.build_app = _build_app_with_forbidden_words

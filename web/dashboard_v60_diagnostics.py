@@ -7,6 +7,7 @@ les KPI opérationnels. Les permissions restent revérifiées côté serveur ava
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import asyncio
 import json
 import logging
@@ -312,7 +313,7 @@ async def _live_metrics(dashboard, bot, guild: discord.Guild) -> dict:
     )
     return {
         "online": bool(bot.is_ready()),
-        "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
+        "latency_ms": latence_ms(bot, None) if bot.is_ready() else None,
         "members": int(guild.member_count or 0),
         "warnings": int(row["warnings"] or 0) if row else 0,
         "open_tickets": int(row["open_tickets"] or 0) if row else 0,

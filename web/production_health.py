@@ -1,6 +1,7 @@
 """Renforce /health pour une surveillance externe réelle de SentriX."""
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import json
 import time
 
@@ -254,7 +255,7 @@ def install(dashboard_module) -> None:
             "health_level": health_level,
             "discord_ready": discord_ready,
             "database_ok": db_ok,
-            "latency_ms": round(bot.latency * 1000) if discord_ready else None,
+            "latency_ms": latence_ms(bot, None) if discord_ready else None,
             "uptime_seconds": uptime,
             "shards": int(getattr(bot, "shard_count", 1) or 1),
             "runtime_observability": runtime_observability,

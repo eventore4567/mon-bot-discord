@@ -6,6 +6,7 @@ installed before aiohttp freezes the dashboard routes.
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import asyncio
 import json
 import logging
@@ -393,7 +394,7 @@ def install(dashboard, ops) -> bool:
                 primary, standby = await asyncio.gather(_probe_url(primary_url), _probe_url(standby_url))
                 return web.json_response({
                     "ok": True,
-                    "discord": {"ok": bot.is_ready(), "detail": f"{round(bot.latency*1000)} ms" if bot.is_ready() else "non prêt"},
+                    "discord": {"ok": bot.is_ready(), "detail": f"{latence_ms(bot)} ms" if bot.is_ready() else "non prêt"},
                     "database": database, "redis": redis, "primary": primary, "standby": standby,
                     "release": os.getenv("SENTRIX_RELEASE_SHA") or "", "role": os.getenv("SENTRIX_FAILOVER_ROLE") or "",
                 })

@@ -6,6 +6,7 @@ HA entrypoint after the existing product layers.
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import json
 import logging
 import time
@@ -285,7 +286,7 @@ def install(dashboard) -> bool:
                 if error:return error
                 db=bot.db;await _ensure_tables(db)
                 guild_data=await dashboard._assemble_guild_payload(db,guild)
-                return web.json_response({"ok":True,"status":{"discord_ready":bot.is_ready(),"latency_ms":round(bot.latency*1000) if bot.is_ready() else None,"bot_permissions":_critical_permissions(guild)},"diagnostics":await _diagnostics(dashboard,db,guild),"history":await _history(db,guild_id),"staff":await _staff_activity(db,guild_id),"maintenance":await _maintenance(db,guild_id),"policies":await _policies(db,guild_id),"guild_data":guild_data})
+                return web.json_response({"ok":True,"status":{"discord_ready":bot.is_ready(),"latency_ms":latence_ms(bot, None) if bot.is_ready() else None,"bot_permissions":_critical_permissions(guild)},"diagnostics":await _diagnostics(dashboard,db,guild),"history":await _history(db,guild_id),"staff":await _staff_activity(db,guild_id),"maintenance":await _maintenance(db,guild_id),"policies":await _policies(db,guild_id),"guild_data":guild_data})
 
             async def export_config(request):
                 guild_id,session,guild,error=await _require_manageable(dashboard,request)

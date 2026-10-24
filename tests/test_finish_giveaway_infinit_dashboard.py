@@ -53,7 +53,9 @@ def test_dashboard_uses_single_canonical_switch_loader():
     l'identité du contrôleur après l'attente réseau. Le runtime tardif ne doit ajouter aucun
     second système de token/loader.
     """
-    html = dashboard.INDEX_HTML
+    # Le document réellement servi (posé au démarrage par dashboard_frontend_freeze_v55) :
+    # web.dashboard.INDEX_HTML n'est remplacé que si un autre test l'a installé avant.
+    from web.dashboard_unified_v2 import INDEX_HTML as html
     runtime_source = (ROOT / "cogs/dashboard_runtime_patch.py").read_text(encoding="utf-8")
 
     assert "new AbortController()" in html

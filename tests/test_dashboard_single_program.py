@@ -78,16 +78,24 @@ def test_no_periodic_dom_loop():
 
 
 def test_overview_keeps_a_compact_server_summary():
+    """Centre de commande : UN résumé, UNE santé, des chiffres d'une seule source.
+
+    Avant, quatre blocs empilés répétaient le nom du serveur et se contredisaient
+    (santé 73 % puis 68 %, « 9 modules actifs » puis « 6 / 8 »)."""
     program = _program()
     css = (unified.UI_DIR / "app.css").read_text(encoding="utf-8")
-    assert "overviewServerBar()" in program
-    assert "overview-server-bar" in program
-    assert "open_tickets" in program
-    assert "protectionCount" in program
-    assert "SentriX actif" in program
-    assert ".overview-server-bar" in css
-    assert ".overview-server-stats" in css
-    assert "overview-hero" not in program
+    overview = program.split("async function renderOverview()", 1)[1].split("\nasync function ", 1)[0]
+    assert overview.count('class="cc-hero full"') == 1
+    assert overview.count("healthRing(") == 1
+    assert "guide?.score ?? d.score" in overview, "la santé vient d'une seule source"
+    assert "activeCount" in overview and "OVERVIEW_CARDS.length" in overview
+    assert "guidanceOverviewBlock(" not in overview and "overviewServerBar(" not in program
+    assert "gget('/activity')" in program
+    # La couche d'enrichissement ne réinjecte plus de résumé sur la vue d'ensemble.
+    enhance = program.split("async function enhanceSentrixExperience()", 1)[1]
+    assert "if(state.page==='overview')return;" in enhance
+    assert ".cc-hero" in css and ".cc-ring" in css
+    assert "prefers-reduced-motion" in css.split("/* ---------- Centre de commande", 1)[1]
 
 
 def test_navigation_is_short_and_grouped():
