@@ -248,7 +248,7 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     if failures:
         logger.error("SentriX V17 : %s installateur(s) en échec : %s", len(failures), ", ".join(failures))
     else:
-        logger.info("SentriX V17 : %s installateur(s) confirmés actifs.", len(report))
+        logger.info("SentriX V17 : %s installateur(s) terminés sans exception (activation à vérifier séparément).", len(report))
     if not runtime.get("v17_announced"):
         runtime["v17_announced"] = True
         logger.info(
