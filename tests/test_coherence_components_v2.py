@@ -80,7 +80,10 @@ def test_editer_refuse_ce_que_discord_refuse():
     assert "embed" not in cible.recu
     assert "content" not in cible.recu
     assert cible.recu["view"] is panneau
-    assert cible.recu["attachments"] == []
+    # L'édition joint les pièces du panneau : ici, la bande fine (7aea328).
+    from utils.premium_log_banners import BANNER_FILENAME
+
+    assert [f.filename for f in cible.recu["attachments"]] == [BANNER_FILENAME]
 
 
 def test_avec_composants_preserves_original_business_view_for_callbacks():

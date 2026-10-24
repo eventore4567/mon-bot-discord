@@ -68,10 +68,19 @@ class PanneauDeComposant(unittest.TestCase):
         composants = panneau.to_components()
         self.assertIsNone(composants[0].get("accent_color"))
         texte = panels.texte_complet(panneau)
-        self.assertIn("## Action interrompue", texte)
+        # Les emojis restent visibles (EMOJIS_VISIBLES) : « ## ❌ Action interrompue ».
+        titre = texte.splitlines()[0]
+        self.assertTrue(titre.startswith("## ") and titre.endswith("Action interrompue"), titre)
         self.assertGreaterEqual(texte.count("### "), 2, "il faut au moins deux sections")
-        self.assertIn("sentrix", texte.casefold())
-        self.assertEqual(panneau.fichiers(), [])
+        # Pied commun aux autres erreurs (« -# … »), sans publicité de marque.
+        self.assertIn("\n-# ", texte)
+        # Seule pièce jointe possible : la bande fine commune (7aea328).
+        from utils.premium_log_banners import BANNER_FILENAME
+
+        fichiers = panneau.fichiers()
+        self.assertIn([f.filename for f in fichiers], ([], [BANNER_FILENAME]))
+        for f in fichiers:
+            f.close()
 
 
 class AutresRenderers(unittest.TestCase):

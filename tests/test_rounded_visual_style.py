@@ -20,7 +20,12 @@ from utils import command_style_v2, embeds, sentrix_panels as panels, stats_serv
 
 class SectionBulletTests(unittest.TestCase):
     def test_chevron_est_la_puce_arrondie(self):
-        self.assertEqual(panels.CHEVRON, "●")
+        # SentriX Core (d70b6237) : ni chevron ni puce, des sections numérotées.
+        # Aucun glyphe anguleux ne doit revenir dans un titre de section.
+        rendu = panels.Section("Identité", texte="x").rendu(0)
+        self.assertTrue(rendu.startswith("### 00 · "), rendu)
+        self.assertNotIn("◢", rendu)
+        self.assertFalse(hasattr(panels, "CHEVRON"))
 
 
 class ProgressBarTests(unittest.TestCase):

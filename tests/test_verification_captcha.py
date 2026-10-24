@@ -96,6 +96,10 @@ class _FakeBot:
     def __init__(self, db):
         self.db = db
 
+    def get_cog(self, _name):
+        # Serveur sans piège anti-bot (honeypot) : le parcours CAPTCHA seul.
+        return None
+
 
 async def _session_lifecycle():
     db = Database(":memory:")

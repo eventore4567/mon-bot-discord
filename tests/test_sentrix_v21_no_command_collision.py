@@ -24,13 +24,16 @@ def _hybrid_command_names(module, cls_name: str) -> set[str]:
 
 
 def test_sentrix_v21_n_utilise_plus_le_nom_achievements():
-    assert "achievements-v21" in sentrix_v21.V21_PUBLIC_COMMANDS
-    assert "achievements" not in sentrix_v21.V21_PUBLIC_COMMANDS
+    # 57edce9 : un seul système de succès. Le plus complet (v21, 25 succès)
+    # garde le nom, le suffixe -v21 disparaît.
+    assert "achievements" in sentrix_v21.V21_PUBLIC_COMMANDS
+    assert "achievements-v21" not in sentrix_v21.V21_PUBLIC_COMMANDS
 
 
 def test_aucune_collision_de_nom_entre_v17_et_v21():
     noms_v17 = _hybrid_command_names(v17_ai_economy_games, "V17AIEconomyGames")
     noms_v21 = _hybrid_command_names(sentrix_v21, "SentriXV21")
-    assert "achievements" in noms_v17, "le test suppose que v17 garde +achievements"
+    assert "achievements" in noms_v21, "v21 porte désormais +achievements"
+    assert "achievements" not in noms_v17, "v17 ne doit plus enregistrer +achievements"
     collision = noms_v17 & noms_v21
     assert not collision, f"Collision de nom de commande entre v17 et v21 : {collision}"
