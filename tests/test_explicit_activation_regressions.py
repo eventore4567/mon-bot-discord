@@ -61,7 +61,8 @@ def test_old_inferred_enables_are_removed_but_signed_choices_survive(tmp_path):
             await db.execute("INSERT INTO module_settings VALUES (42,'welcome',1,NULL,123),(42,'economy',1,NULL,123),(43,'welcome',1,99,123),(44,'logs',0,NULL,123)")
             await core.ensure_schema(bot)
             assert not await core.module_enabled(bot, 42, 'welcome')
-            assert not await core.module_enabled(bot, 42, 'economy')
+            # Économie : fonction des membres, active sans réglage depuis le 24/10/2026.
+            assert await core.module_enabled(bot, 42, 'economy')
             assert await core.module_enabled(bot, 43, 'welcome')
             assert await core.module_state(bot, 44, 'logs') == core.MODULE_STATE_DISABLED
             await core.migrate_module_defaults(bot)
