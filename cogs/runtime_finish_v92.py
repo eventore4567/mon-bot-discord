@@ -33,8 +33,12 @@ async def _refresh_panel(cog, guild: discord.Guild | None, panel_id: int | None)
             return
         message = await channel.fetch_message(int(panel["message_id"]))
         types = await cog.get_panel_types(int(panel_id))
-        view = _tickets().TicketPanelView(panel, types) if types else None
-        await message.edit(embed=cog.build_panel_embed(panel), view=view)
+        if not types:
+            return
+        from utils import sentrix_panels as panels
+
+        # build_panel_embed n'existe plus depuis le 30/09/2026 : même rendu que la publication.
+        await panels.editer(message, await cog.build_public_panel(panel, types))
     except (discord.NotFound, discord.Forbidden):
         return
     except Exception:

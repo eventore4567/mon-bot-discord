@@ -2268,7 +2268,7 @@ class Tickets(commands.Cog):
 
         if len(available) == 1:
             panel, types = available[0]
-            return await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemeral=True if ctx.interaction else False)
+            return await sx_panels.envoyer(ctx, await self.build_public_panel(panel, types), ephemere=bool(ctx.interaction))
 
         # Plusieurs panels actifs sur ce serveur : on laisse d'abord choisir la catégorie
         # (les options du menu viennent toutes de la DB, jamais du code).
@@ -2283,7 +2283,9 @@ class Tickets(commands.Cog):
         async def on_pick(inter: discord.Interaction):
             panel_id = int(select.values[0])
             panel, types = next((p, t) for p, t in available if p["id"] == panel_id)
-            await inter.response.edit_message(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
+            # build_panel_embed n'existe plus depuis le 30/09 (build_public_panel) :
+            # chaque choix de catégorie échouait en production (23/10/2026).
+            await sx_panels.editer(inter.response, await self.build_public_panel(panel, types))
 
         select.callback = on_pick
         view.add_item(select)
@@ -2403,7 +2405,7 @@ class Tickets(commands.Cog):
         types = await self.get_panel_types(panel["id"])
         if not types:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning("Ce panel n'a aucun type de ticket.")))
-        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemeral=True if ctx.interaction else False)
+        await sx_panels.envoyer(ctx, await self.build_public_panel(panel, types), ephemere=bool(ctx.interaction))
 
     @ticketpanel.command(name="send", description="Envoyer (ou mettre à jour) un panel dans son salon configuré.")
     @app_commands.describe(nom="Le nom du panel à envoyer")
@@ -2421,7 +2423,7 @@ class Tickets(commands.Cog):
             if not types:
                 return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce panel n'a aucun type de ticket.")))
             channel = ctx.guild.get_channel(panel["channel_id"])
-            msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
+            msg = await sx_panels.envoyer(channel, await self.build_public_panel(panel, types))
             await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ? WHERE id = ?", (msg.id, panel["id"]))
             await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')))
 

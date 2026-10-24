@@ -1649,7 +1649,9 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
 
         panel = await ticket_cog.get_panel(panel_id)
         ticket_types = await ticket_cog.get_panel_types(panel_id)
-        view = TicketPanelView(panel, ticket_types)
+        # build_panel_embed n'existe plus depuis le 30/09/2026 : la carte publique
+        # complète (texte + boutons) vient de build_public_panel.
+        public = await ticket_cog.build_public_panel(panel, ticket_types)
         old_message = None
         old_channel = guild.get_channel(previous_channel_id) if previous_channel_id else None
         if previous_message_id and isinstance(old_channel, discord.TextChannel):
@@ -1659,7 +1661,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                 old_message = None
 
         if old_message and old_channel.id == panel_channel.id:
-            await old_message.edit(embed=ticket_cog.build_panel_embed(panel), view=view)
+            await panels.editer(old_message, public)
             message = old_message
         else:
             if old_message:
@@ -1667,7 +1669,7 @@ class ServerBuilder(commands.Cog, name="ServerBuilder"):
                     await old_message.delete()
                 except discord.HTTPException:
                     pass
-            message = await panels.envoyer(panel_channel, panels.avec_composants(panels.depuis_embed(ticket_cog.build_panel_embed(panel)), view))
+            message = await panels.envoyer(panel_channel, public)
         await self.bot.db.execute(
             "UPDATE ticket_panels_v2 SET message_id = ?, channel_id = ? WHERE id = ?",
             (message.id, panel_channel.id, panel_id),
