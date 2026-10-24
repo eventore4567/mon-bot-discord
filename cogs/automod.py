@@ -1162,6 +1162,45 @@ def _dangerous_perm_names(perms: discord.Permissions) -> list[str]:
     return [name for name in DANGEROUS_PERMS if bool(getattr(perms, name, False))]
 
 
+class _MessageDApplication:
+    """Le message d'une application externe, vu comme celui du membre qui l'a lancée.
+
+    Tout est délégué au vrai message (suppression, salon, pièces jointes…),
+    sauf l'auteur — le membre qui a tapé la commande — et le contenu, qui
+    inclut le texte des embeds : une application cache souvent son message
+    dans un embed. Chaque filtre d'AutoMod s'applique donc tel quel, avec ses
+    sanctions progressives, au vrai responsable.
+    """
+
+    _sentrix_external_app = True
+
+    def __init__(self, message: discord.Message, invoker: discord.Member, content: str):
+        object.__setattr__(self, "_message", message)
+        object.__setattr__(self, "author", invoker)
+        object.__setattr__(self, "content", content)
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_message"), name)
+
+    def __eq__(self, other):
+        return getattr(other, "id", None) == self.id
+
+    def __hash__(self):
+        return hash(self.id)
+
+
+class _MessageModifie(_MessageDApplication):
+    """Un message MODIFIÉ, filtré comme un nouveau message.
+
+    Sans cela, poster « salut » puis le transformer en lien d'arnaque ou en
+    invitation passait toutes les protections. Il n'est pas compté par
+    l'anti-spam : ce n'est pas un message de plus.
+    """
+
+    _sentrix_external_app = False
+    _sentrix_edit = True
+
+
 class AutoMod(commands.Cog, name="Automod"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -3218,10 +3257,34 @@ class AutoMod(commands.Cog, name="Automod"):
         return True
 
     @commands.Cog.listener()
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        # Discord émet aussi une modification quand il ajoute l'aperçu d'un lien :
+        # seul un CHANGEMENT de texte est filtré.
+        if not after.guild or getattr(after.author, "bot", False):
+            return
+        if (before.content or "") == (after.content or ""):
+            return
+        try:
+            await self.on_message(_MessageModifie(after, after.author, after.content or ""))
+        except Exception:
+            logger.exception("Filtrage d'un message modifié impossible guild=%s", after.guild.id)
+
+    @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.guild and message.author.bot:
             try:
-                await self._handle_external_app_message(message)
+                if await self._handle_external_app_message(message):
+                    return
+                invoker = self._external_app_invoker(message)
+                if isinstance(invoker, discord.Member):
+                    # Pas de raid évident : le message suit TOUS les filtres
+                    # (arnaques, mots interdits, insultes, spam, majuscules…),
+                    # sanctions progressives comprises, au nom du membre lanceur.
+                    proxy = _MessageDApplication(message, invoker, self._external_app_text(message))
+                    await self.on_message(proxy)
+                    hardening = self.bot.get_cog("SecurityHardening")
+                    if hardening is not None:
+                        await hardening.on_message(proxy)
             except Exception:
                 logger.exception("Contrôle d'application externe en échec guild=%s", message.guild.id)
             return
@@ -3449,7 +3512,12 @@ class AutoMod(commands.Cog, name="Automod"):
             if emoji_count > 10:
                 return await self._delete_and_warn(message, "Spam d'émojis détecté.", "antiemoji")
 
-        if conf["antispam"] and await self.security_filter_applies_to(message, "antispam"):
+        # Une modification n'est pas un nouveau message : la compter ferait passer
+        # une simple correction de faute pour une rafale.
+        if (
+            conf["antispam"] and not getattr(message, "_sentrix_edit", False)
+            and await self.security_filter_applies_to(message, "antispam")
+        ):
             key = (message.guild.id, message.author.id)
             seuils = await self._spam_seuils(message.guild.id)
             group = self._coordinated_copies(message, link_content, seuils.comptes_coordonnes)
@@ -3864,7 +3932,10 @@ class AutoMod(commands.Cog, name="Automod"):
             # Republication contrôlée SentriX : seulement APRÈS suppression réussie, et
             # uniquement si le texte a pu être censuré de manière sûre. Sans Gérer les
             # webhooks, on garde automatiquement le comportement suppression + avertissement.
-            if await deletion and censored_content and filter_name not in NO_REPOST_FILTERS:
+            if (
+                await deletion and censored_content and filter_name not in NO_REPOST_FILTERS
+                and not getattr(message, "_sentrix_external_app", False)
+            ):
                 await self._repost_censored(message, censored_content)
 
         key = (message.guild.id, message.author.id)
