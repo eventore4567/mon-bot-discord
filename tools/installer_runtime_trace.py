@@ -43,11 +43,12 @@ async def trace() -> dict:
     observed: set[str] = set()
     profiler = make_profiler(observed)
     bot = None
+    previous_profiler = sys.getprofile()
     sys.setprofile(profiler)
     try:
         bot = await harness.boot(quiet=False)
     finally:
-        sys.setprofile(None)
+        sys.setprofile(previous_profiler)
 
     try:
         manual = set(inventory["install_without_setup"])
