@@ -19,7 +19,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools import installer_inventory
-from tools import sentrix_e2e_harness as harness
 
 COGS = (ROOT / "cogs").resolve()
 
@@ -39,6 +38,11 @@ def make_profiler(seen: set[str]):
 
 
 async def trace() -> dict:
+    # Ce harnais modifie intentionnellement les variables d'environnement pour
+    # simuler Railway sans réseau. Son import DOIT rester ici, jamais au niveau
+    # module : importer make_profiler depuis pytest ne doit rien contaminer.
+    from tools import sentrix_e2e_harness as harness
+
     inventory = installer_inventory.inventory(ROOT)
     observed: set[str] = set()
     profiler = make_profiler(observed)
