@@ -39,7 +39,13 @@ def _fake_bot(*, ai_enabled: bool):
         "language": None,
         "logs_enabled": 0,
     }
-    return SimpleNamespace(db=SimpleNamespace(fetchone=AsyncMock(return_value=row)))
+    # get_settings() lit aussi l'état du MODULE « ai » (setup_v2_core.module_enabled),
+    # qui prépare son schéma puis lit module_settings.enabled : la même ligne y répond.
+    return SimpleNamespace(db=SimpleNamespace(
+        fetchone=AsyncMock(return_value=row),
+        fetchall=AsyncMock(return_value=[]),
+        execute=AsyncMock(),
+    ))
 
 
 def _fake_openai_response(payload: str):
@@ -48,7 +54,12 @@ def _fake_openai_response(payload: str):
 
 class ProofServiceRespectsAiDisableGuardTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        from cogs import setup_v2_core
+
         self._original_generate = ai_service.generate
+        # L'état du module est mis en cache par serveur : chaque test change
+        # l'état de l'IA sur le même serveur factice.
+        setup_v2_core._MODULE_ROW_CACHE.clear()
 
     def tearDown(self):
         ai_service.generate = self._original_generate

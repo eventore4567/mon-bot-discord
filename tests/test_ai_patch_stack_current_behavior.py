@@ -59,8 +59,15 @@ class DisableGuardSurvivesReapplicationTests(unittest.IsolatedAsyncioTestCase):
         ai_service.generate = self._original_generate
 
     async def test_bloque_openai_meme_reapplique_par_dessus_une_autre_couche(self):
+        from cogs import setup_v2_core
+
+        setup_v2_core._MODULE_ROW_CACHE.clear()
+        # get_settings() lit aussi l'état du module « ai » : même ligne, et le
+        # schéma préparé au passage demande un execute().
         bot = SimpleNamespace(db=SimpleNamespace(
-            fetchone=AsyncMock(return_value=_fake_ai_settings_row(enabled=False))
+            fetchone=AsyncMock(return_value=_fake_ai_settings_row(enabled=False)),
+            fetchall=AsyncMock(return_value=[]),
+            execute=AsyncMock(),
         ))
         ai_disable_guard._install_service_guard(bot)  # 1ère application
 
