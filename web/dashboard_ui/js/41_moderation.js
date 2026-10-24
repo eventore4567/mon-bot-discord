@@ -712,6 +712,9 @@ async function enhanceSentrixExperience() {
   // La sous-page Actions staff de Tickets est volontairement une page d'édition
   // compacte. Aucun hero/KPI ne doit être injecté au-dessus.
   if(state.page==='tickets')return;
+  // Le centre de commande porte déjà identité, santé et points à corriger :
+  // la barre et le résumé injectés ici les répétaient avec d'autres chiffres.
+  if(state.page==='overview')return;
   const grid=content().querySelector('.grid');if(!grid)return;
   if(!grid.querySelector('.experience-command'))grid.insertAdjacentHTML('afterbegin',experienceCommandBar());
   try{
