@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import os
 import pathlib
 import sys
@@ -26,7 +27,8 @@ CRITICAL_CONTRACTS = {
     "deposit": ("montant",),
     "withdraw": ("montant",),
     "rps": ("choix",),
-    "ban": ("membre", "raison"),
+    # supprimer_messages : option ajoutée pour purger les messages du banni.
+    "ban": ("membre", "raison", "supprimer_messages"),
     "kick": ("membre", "raison"),
     "mute": ("membre", "duree", "raison"),
     "tempban": ("membre", "duree", "raison"),
@@ -135,26 +137,22 @@ async def _runtime_checks(errors: list[str]) -> None:
         os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
         os.environ["DATABASE_PATH"] = str(pathlib.Path(temp_dir) / "sentrix-v25.db")
 
-        import main
-        from cogs import command_catalog_cleanup, slash_command_budget, user_facing_hygiene
+        # Démarrage IDENTIQUE à la production : chaîne d'installs du Procfile puis
+        # BotAllInOne.setup_hook(), via le harnais e2e. La boucle de chargement
+        # manuelle d'avant sautait la gestion du budget slash de setup_hook : elle
+        # comptait 102 racines au lieu des ~50 réelles et voyait cogs.staff_suite
+        # échouer alors qu'il se charge en production.
+        from tools import sentrix_e2e_harness as harness
+        from cogs import slash_command_budget, user_facing_hygiene
         from utils.v22_rules import parse_friendly_amount, parse_friendly_duration
 
-        bot = main.BotAllInOne()
-        await bot.db.connect()
+        bot = await harness.boot(quiet=True)
+        logging.disable(logging.NOTSET)
+        import main
 
         for extension in main.EXTENSIONS:
-            try:
-                await bot.load_extension(extension)
-            except Exception as exc:
-                errors.append(f"chargement {extension}: {type(exc).__name__}: {exc}")
-
-        try:
-            bot._prune_redundant_commands()
-            command_catalog_cleanup.apply_surface(bot)
-            slash_command_budget.finalize(bot)
-            user_facing_hygiene.apply(bot)
-        except Exception as exc:
-            errors.append(f"finalisation runtime: {type(exc).__name__}: {exc}")
+            if extension not in bot.extensions:
+                errors.append(f"chargement {extension}: extension absente après le démarrage")
 
         active = list(bot.walk_commands())
         if not active:
@@ -222,8 +220,16 @@ async def _runtime_checks(errors: list[str]) -> None:
         roots = {str(command.name).casefold() for command in bot.tree.get_commands()}
         if len(roots) > slash_command_budget.GLOBAL_CHAT_INPUT_BUDGET:
             errors.append(f"budget slash dépassé: {len(roots)}/100")
-        for name in ("help", "balance", "rps", "ban", "mute"):
-            if name not in roots:
+        # Surface canonique : certaines commandes vivent dans un groupe.
+        def _chemins(commande, parent=""):
+            chemin = f"{parent} {commande.name}".strip()
+            yield chemin
+            for enfant in getattr(commande, "commands", None) or ():
+                yield from _chemins(enfant, chemin)
+
+        chemins = {c for racine in bot.tree.get_commands() for c in _chemins(racine)}
+        for name in ("help", "economy balance", "play rps", "ban", "timeout"):
+            if name not in chemins:
                 errors.append(f"commande slash critique absente: /{name}")
 
         amount_cases = {
