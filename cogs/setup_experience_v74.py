@@ -144,24 +144,35 @@ async def _set_optional_role(view: "SentriXSetupV74", field: str, role: discord.
     await view.bot.db.set_guild_config(view.guild.id, field, role.id if role else None)
 
 
-class IdentiteBotModal(discord.ui.Modal, title="Identité de SentriX"):
-    """Nom, avatar et bannière du bot — globaux, donc propriétaire uniquement.
+class IdentiteBotModal(discord.ui.Modal, title="SentriX sur ce serveur"):
+    """Avatar, bannière et bio de SentriX **pour ce serveur uniquement**.
 
-    Les trois champs sont facultatifs : on n'applique que ceux qui sont
-    remplis. Une URL invalide ou un refus de Discord n'empêche pas les autres
-    de passer, et le résultat dit précisément ce qui a changé et ce qui a
-    échoué — une réponse « ça n'a pas marché » sans détail serait inutilisable
+    Discord distingue deux identités pour une application :
+
+    - l'identité GLOBALE (`bot.user.edit`), partagée par les 37 serveurs. Un
+      administrateur ne doit pas pouvoir la changer : il modifierait
+      l'apparence de SentriX chez tous les autres. Elle reste réservée au
+      propriétaire, via `+set-bot` ;
+    - le PROFIL DE SERVEUR (`guild.me.edit`), propre à ce serveur seul. Les
+      autres continuent de voir l'original. C'est celui-ci qu'on édite ici,
+      et c'est pour ça que l'administrateur du serveur y a droit.
+
+    Les trois champs sont facultatifs : seuls ceux qui sont remplis sont
+    appliqués. Un échec sur l'un n'empêche pas les autres, et le compte rendu
+    nomme la cause — une réponse « ça n'a pas marché » serait inutilisable
     pour une image hébergée ailleurs.
     """
 
-    nom = discord.ui.TextInput(
-        label="Nom (laisser vide pour ne pas changer)", required=False, max_length=32,
-    )
     avatar = discord.ui.TextInput(
-        label="URL de l'avatar", required=False, placeholder="https://…", max_length=500,
+        label="URL de l'avatar (vide = inchangé)",
+        required=False, placeholder="https://…", max_length=500,
     )
     banniere = discord.ui.TextInput(
         label="URL de la bannière", required=False, placeholder="https://…", max_length=500,
+    )
+    bio = discord.ui.TextInput(
+        label="Bio affichée sur ce serveur",
+        required=False, style=discord.TextStyle.paragraph, max_length=190,
     )
 
     def __init__(self, vue):
@@ -171,14 +182,18 @@ class IdentiteBotModal(discord.ui.Modal, title="Identité de SentriX"):
     async def on_submit(self, interaction: discord.Interaction):
         from cogs.owner import fetch_image_bytes
 
+        moi = interaction.guild.me if interaction.guild else None
+        if moi is None:
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embeds.error("Cette action s'utilise sur un serveur.")),
+                ephemere=True,
+            )
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
         faits, echecs = [], []
-        if str(self.nom.value or "").strip():
-            try:
-                await interaction.client.user.edit(username=str(self.nom.value).strip())
-                faits.append("nom")
-            except discord.HTTPException as exc:
-                # Discord limite fortement les changements de nom d'un bot.
-                echecs.append(f"nom ({exc.text or exc})")
+        changements = {}
         for champ, saisie in (("avatar", self.avatar), ("bannière", self.banniere)):
             url = str(saisie.value or "").strip()
             if not url:
@@ -187,31 +202,36 @@ class IdentiteBotModal(discord.ui.Modal, title="Identité de SentriX"):
             if not donnees:
                 echecs.append(f"{champ} (image introuvable à cette adresse)")
                 continue
+            changements["avatar" if champ == "avatar" else "banner"] = donnees
+        texte_bio = str(self.bio.value or "").strip()
+        if texte_bio:
+            changements["bio"] = texte_bio
+
+        for cle, valeur in changements.items():
+            nom = {"avatar": "avatar", "banner": "bannière", "bio": "bio"}[cle]
             try:
-                if champ == "avatar":
-                    await interaction.client.user.edit(avatar=donnees)
-                else:
-                    await interaction.client.user.edit(banner=donnees)
-                faits.append(champ)
+                await moi.edit(**{cle: valeur})
+                faits.append(nom)
             except discord.HTTPException as exc:
-                echecs.append(f"{champ} ({exc.text or exc})")
+                echecs.append(f"{nom} ({exc.text or exc})")
 
         if not faits and not echecs:
             texte = "Aucun champ rempli : rien n'a été changé."
         else:
             lignes = []
             if faits:
-                lignes.append("✅ Mis à jour : " + ", ".join(faits))
+                lignes.append(
+                    "✅ Mis à jour **sur ce serveur uniquement** : " + ", ".join(faits)
+                )
+                lignes.append(
+                    "-# Les autres serveurs continuent de voir l'apparence d'origine."
+                )
             if echecs:
                 lignes.append("❌ Échec : " + " · ".join(echecs))
-                lignes.append(
-                    "-# Une bannière de bot demande parfois le Developer Portal "
-                    "selon le niveau du compte."
-                )
             texte = "\n".join(lignes)
         await panels.envoyer(
-            interaction.response,
-            panels.depuis_embed(embeds.info(texte, title="Identité de SentriX")),
+            interaction.followup,
+            panels.depuis_embed(embeds.info(texte, title="SentriX sur ce serveur")),
             ephemere=True,
         )
 
@@ -492,22 +512,21 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         soundboard_button.callback = open_soundboard
         container.add_item(discord.ui.ActionRow(music_button, soundboard_button))
 
-        # Identité du bot : réservée au PROPRIÉTAIRE de SentriX, jamais aux
-        # administrateurs de serveur. L'avatar et la bannière d'un bot sont
-        # globaux : un seul admin sur l'un des serveurs changerait l'apparence
-        # de SentriX pour tous les autres. Le bouton n'apparaît donc que pour
-        # le propriétaire — et `+set-bot`, qui fait déjà ce travail, garde sa
-        # propre vérification côté commande.
-        if await self._est_proprietaire_du_bot():
-            identite = discord.ui.Button(
-                label="Identité de SentriX", emoji="🪪", style=discord.ButtonStyle.secondary,
-            )
+        # Le PROFIL DE SERVEUR de SentriX (guild.me.edit) : avatar, bannière et
+        # bio visibles sur CE serveur seulement. Les autres gardent l'original,
+        # donc l'administrateur du serveur y a légitimement droit — il ne décide
+        # que de ce qu'il voit chez lui.
+        # L'identité GLOBALE (bot.user.edit) reste, elle, réservée au
+        # propriétaire via `+set-bot` : la changer toucherait les 37 serveurs.
+        identite = discord.ui.Button(
+            label="SentriX sur ce serveur", emoji="🪪", style=discord.ButtonStyle.secondary,
+        )
 
-            async def ouvrir_identite(interaction: discord.Interaction):
-                await interaction.response.send_modal(IdentiteBotModal(self))
+        async def ouvrir_identite(interaction: discord.Interaction):
+            await interaction.response.send_modal(IdentiteBotModal(self))
 
-            identite.callback = ouvrir_identite
-            container.add_item(discord.ui.ActionRow(identite))
+        identite.callback = ouvrir_identite
+        container.add_item(discord.ui.ActionRow(identite))
 
         # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
         options = [

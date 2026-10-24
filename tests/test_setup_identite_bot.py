@@ -1,9 +1,16 @@
-"""Changer l'avatar ou la bannière de SentriX depuis /setup — propriétaire SEUL.
+"""L'apparence de SentriX se change PAR SERVEUR, jamais globalement.
 
-L'avatar et la bannière d'un bot sont GLOBAUX : ils valent pour les 36
-serveurs à la fois. Si le bouton apparaissait à tout administrateur, un seul
-d'entre eux changerait l'apparence de SentriX pour tous les autres. C'est la
-raison d'être de la garde testée ici.
+Discord distingue deux identités pour une application :
+
+- globale (`bot.user.edit`) — partagée par les 37 serveurs. Un administrateur
+  ne doit pas pouvoir la toucher : il changerait SentriX chez tout le monde.
+  Elle reste au propriétaire, via `+set-bot` ;
+- profil de serveur (`guild.me.edit`) — propre à ce serveur. Les autres voient
+  l'original. C'est celui que /setup édite, et c'est pour ça que l'admin du
+  serveur y a droit.
+
+Ce fichier verrouille cette séparation : une erreur ici ferait changer
+l'apparence du bot chez 36 serveurs qui n'ont rien demandé.
 """
 import asyncio
 import os
@@ -15,117 +22,88 @@ import discord  # noqa: E402
 from cogs import setup_experience_v74 as v74  # noqa: E402
 
 
-class _Db:
-    def __init__(self, createurs=()):
-        self._createurs = set(createurs)
+def _executer(avatar="", banniere="", bio="", image=b"octets"):
+    appels_membre, appels_globaux = [], []
 
-    async def is_bot_creator(self, uid):
-        return uid in self._createurs
-
-
-def _vue(author_id, createurs=()):
-    vue = v74.SentriXSetupV74.__new__(v74.SentriXSetupV74)
-    vue.author_id = author_id
-    vue.bot = type("Bot", (), {"db": _Db(createurs)})()
-    return vue
-
-
-def test_un_createur_enregistre_est_reconnu():
-    assert asyncio.run(_vue(4242, createurs={4242})._est_proprietaire_du_bot()) is True
-
-
-def test_un_simple_administrateur_ne_l_est_pas():
-    # Le cas qui compte : un admin de serveur ne doit pas voir le bouton.
-    assert asyncio.run(_vue(999)._est_proprietaire_du_bot()) is False
-
-
-def test_une_base_en_panne_refuse_plutot_que_d_ouvrir():
-    # En cas de doute on ferme : mieux vaut cacher le bouton au propriétaire
-    # que de l'offrir à un administrateur.
-    vue = _vue(999)
-
-    class _Casse:
-        async def is_bot_creator(self, _uid):
-            raise RuntimeError("base indisponible")
-
-    vue.bot.db = _Casse()
-    assert asyncio.run(vue._est_proprietaire_du_bot()) is False
-
-
-def test_la_modale_ne_change_que_les_champs_remplis():
-    modale = v74.IdentiteBotModal.__new__(v74.IdentiteBotModal)
-    champs = {"username": None, "avatar": None, "banner": None}
+    class _Moi:
+        async def edit(self, **kwargs):
+            appels_membre.append(kwargs)
 
     class _User:
         async def edit(self, **kwargs):
-            champs.update(kwargs)
+            appels_globaux.append(kwargs)
 
     class _Reponse:
-        async def send_message(self, *a, **k):
+        def is_done(self):
+            return True
+
+        async def defer(self, **k):
             pass
 
     class _Interaction:
+        guild = type("G", (), {"me": _Moi()})()
         client = type("C", (), {"user": _User()})()
         response = _Reponse()
+        followup = object()
 
-    modale.nom = type("T", (), {"value": "NouveauNom"})()
-    modale.avatar = type("T", (), {"value": ""})()
-    modale.banniere = type("T", (), {"value": ""})()
-
-    envoyes = []
-    origine = v74.panels.envoyer
-
-    async def _envoyer(_cible, panneau, **_k):
-        envoyes.append(panneau)
-
-    v74.panels.envoyer = _envoyer
-    try:
-        asyncio.run(modale.on_submit(_Interaction()))
-    finally:
-        v74.panels.envoyer = origine
-
-    assert champs["username"] == "NouveauNom"
-    assert champs["avatar"] is None and champs["banner"] is None, (
-        "un champ laissé vide ne doit RIEN écraser"
-    )
-    assert envoyes, "le propriétaire doit recevoir un compte rendu"
-
-
-def test_une_url_invalide_ne_bloque_pas_les_autres_champs():
     modale = v74.IdentiteBotModal.__new__(v74.IdentiteBotModal)
-    vus = {}
-
-    class _User:
-        async def edit(self, **kwargs):
-            vus.update(kwargs)
-
-    class _Interaction:
-        client = type("C", (), {"user": _User()})()
-        response = type("R", (), {})()
-
-    modale.nom = type("T", (), {"value": "Nom"})()
-    modale.avatar = type("T", (), {"value": "https://exemple.invalide/x.png"})()
-    modale.banniere = type("T", (), {"value": ""})()
+    modale.vue = None
+    modale.avatar = type("T", (), {"value": avatar})()
+    modale.banniere = type("T", (), {"value": banniere})()
+    modale.bio = type("T", (), {"value": bio})()
 
     import cogs.owner as owner_mod
 
-    origine_fetch = owner_mod.fetch_image_bytes
-    origine_envoyer = v74.panels.envoyer
-    textes = []
+    o_fetch, o_env = owner_mod.fetch_image_bytes, v74.panels.envoyer
+    rendus = []
 
-    async def _rien(_url):
-        return None
+    async def _fetch(_url):
+        return image
 
     async def _envoyer(_cible, panneau, **_k):
-        textes.append(str(getattr(panneau, "titre", "")) + str(panneau))
+        rendus.append(panneau)
 
-    owner_mod.fetch_image_bytes = _rien
+    owner_mod.fetch_image_bytes = _fetch
     v74.panels.envoyer = _envoyer
     try:
         asyncio.run(modale.on_submit(_Interaction()))
     finally:
-        owner_mod.fetch_image_bytes = origine_fetch
-        v74.panels.envoyer = origine_envoyer
+        owner_mod.fetch_image_bytes = o_fetch
+        v74.panels.envoyer = o_env
+    return appels_membre, appels_globaux, rendus
 
-    assert vus.get("username") == "Nom", "le nom devait passer malgré l'avatar en échec"
-    assert textes, "le compte rendu doit dire ce qui a échoué"
+
+def test_l_identite_globale_n_est_jamais_touchee():
+    # LE test qui compte : sinon un admin change SentriX chez 36 autres serveurs.
+    membre, globaux, _ = _executer(avatar="https://x/a.png", banniere="https://x/b.png", bio="Salut")
+    assert globaux == [], "bot.user.edit ne doit JAMAIS être appelé depuis /setup"
+    assert membre, "le profil de serveur doit bien être modifié"
+
+
+def test_les_trois_champs_passent_par_le_profil_de_serveur():
+    membre, _, _ = _executer(avatar="https://x/a.png", banniere="https://x/b.png", bio="Salut")
+    cles = {c for appel in membre for c in appel}
+    assert cles == {"avatar", "banner", "bio"}
+
+
+def test_un_champ_vide_ne_change_rien():
+    membre, _, rendus = _executer(bio="Seulement la bio")
+    assert [c for appel in membre for c in appel] == ["bio"]
+    assert rendus
+
+
+def test_aucun_champ_rempli_ne_declenche_aucun_appel():
+    membre, globaux, rendus = _executer()
+    assert membre == [] and globaux == []
+    assert rendus, "le membre doit quand même recevoir une réponse"
+
+
+def test_une_image_introuvable_n_empeche_pas_la_bio():
+    membre, _, rendus = _executer(avatar="https://x/a.png", bio="Texte", image=None)
+    assert [c for appel in membre for c in appel] == ["bio"]
+    assert rendus, "l'échec de l'avatar doit être rapporté"
+
+
+def test_le_compte_rendu_dit_que_c_est_local():
+    _, _, rendus = _executer(bio="Texte")
+    assert rendus, "un compte rendu est attendu"
