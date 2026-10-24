@@ -43,16 +43,33 @@ def _install_rate_limit_compatibility() -> None:
     RuntimeRateLimitError.__init__ = init_v17
 
 
+def _installer_report(bot: commands.Bot) -> dict[str, dict[str, str]]:
+    """Rapport borné sur le bot courant, accessible au diagnostic après boot.
+
+    Ne stocke ni trace, ni arguments, ni texte d'exception potentiellement sensible.
+    """
+    report = getattr(bot, "_sentrix_v17_install_report", None)
+    if not isinstance(report, dict):
+        report = {}
+        bot._sentrix_v17_install_report = report
+    return report
+
+
 async def _install_one(label: str, installer, bot: commands.Bot, extension_name: str) -> None:
     try:
         result = installer(bot, extension_name)
         if inspect.isawaitable(result):
             await result
-    except Exception:
+    except Exception as exc:
+        _installer_report(bot)[label] = {
+            "status": "failed", "error_type": type(exc).__name__,
+        }
         logger.exception(
             "V17 : le module %s n'a pas pu être appliqué ; poursuite du démarrage.",
             label,
         )
+    else:
+        _installer_report(bot)[label] = {"status": "ok"}
 
 
 async def _install_extras_deterministic(bot: commands.Bot, extension_name: str) -> None:
@@ -110,15 +127,23 @@ def _fix_group_invocation(bot: commands.Bot) -> None:
 
 
 async def install(bot: commands.Bot, extension_name: str = "") -> None:
+    # Chaque passe conserve son propre résultat final. L'absence du rapport ne
+    # sera plus confondue avec « tous les installateurs ont réussi ».
+    _installer_report(bot).clear()
     try:
         await ensure_schema(bot)
         install_config_invalidation(bot)
         install_permission_cache(bot)
         _install_rate_limit_compatibility()
-    except Exception:
+    except Exception as exc:
+        _installer_report(bot)["socle partagé V17"] = {
+            "status": "failed", "error_type": type(exc).__name__,
+        }
         logger.exception(
             "V17 : socle partagé partiellement indisponible ; poursuite du démarrage."
         )
+    else:
+        _installer_report(bot)["socle partagé V17"] = {"status": "ok"}
 
     from .v17_moderation_security import install as install_moderation_security
     from .v17_ai_economy_games import install as install_ai_economy_games
@@ -218,6 +243,12 @@ async def install(bot: commands.Bot, extension_name: str = "") -> None:
     # utils.embeds/cogs.logs et envoyé uniquement par utils.log_service.
 
     runtime = state(bot)
+    report = _installer_report(bot)
+    failures = [name for name, result in report.items() if result.get("status") == "failed"]
+    if failures:
+        logger.error("SentriX V17 : %s installateur(s) en échec : %s", len(failures), ", ".join(failures))
+    else:
+        logger.info("SentriX V17 : %s installateur(s) confirmés actifs.", len(report))
     if not runtime.get("v17_announced"):
         runtime["v17_announced"] = True
         logger.info(
