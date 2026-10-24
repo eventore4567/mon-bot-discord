@@ -135,7 +135,10 @@ def auditer(noms: list[str]) -> int:
         # Contrat INDEPENDANT : l'attendu vient de la revue de securite et non
         # de la table dont on veut justement detecter les erreurs.
         racine = M.resolve_name(nom)
-        attendu = MINIMUM_SENSITIVE_TIERS.get(racine)
+        # Verifier aussi le nom complet : si SUBCOMMAND_TIERS perd une regle,
+        # resolve_name rabat la commande sur sa racine publique ('season start'
+        # devient 'season'). L'audit doit conserver l'intention de securite.
+        attendu = MINIMUM_SENSITIVE_TIERS.get(M.normalise(nom)) or MINIMUM_SENSITIVE_TIERS.get(racine)
         if attendu is not None:
             if niveau != attendu:
                 anomalies.append(
