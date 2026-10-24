@@ -68,10 +68,23 @@ async def _database_probe(bot) -> tuple[bool, float | None]:
     return ok, round((time.perf_counter() - started) * 1000, 2)
 
 
+def _installer_failures(bot) -> tuple[int, int]:
+    """Compte les erreurs sans publier les chemins ou détails d'exceptions."""
+    extension_failures = getattr(bot, "_sentrix_extension_load_failures", None)
+    v17_statuses = getattr(bot, "_sentrix_v17_install_report", None)
+    extension_count = len(extension_failures) if isinstance(extension_failures, dict) else 0
+    v17_count = (
+        sum(1 for row in v17_statuses.values() if isinstance(row, dict) and row.get("status") == "failed")
+        if isinstance(v17_statuses, dict) else 0
+    )
+    return extension_count, v17_count
+
+
 def _extension_state(bot) -> tuple[int, int, bool]:
     loaded = len(getattr(bot, "extensions", {}) or {})
     expected = int(getattr(bot, "expected_extension_count", loaded) or loaded)
-    return loaded, expected, loaded >= expected
+    extension_failures, v17_failures = _installer_failures(bot)
+    return loaded, expected, loaded >= expected and extension_failures == 0 and v17_failures == 0
 
 
 def _command_policy_state(bot) -> tuple[bool, int, int]:
@@ -148,6 +161,8 @@ async def _snapshot(bot, dashboard) -> dict:
         "extensions_ok": extensions_ok,
         "extensions_loaded": loaded_extensions,
         "extensions_expected": expected_extensions,
+        "extension_load_failure_count": _installer_failures(bot)[0],
+        "v17_install_failure_count": _installer_failures(bot)[1],
         "command_policy_ok": command_policy_ok,
         "unknown_command_policy_count": unknown_commands,
         "dangerous_public_command_count": dangerous_public_commands,
