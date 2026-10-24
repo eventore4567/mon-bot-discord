@@ -71,7 +71,8 @@ def test_new_ticket_open_panel_contains_banner_answers_and_two_main_actions():
     assert "Ticket #9" in body
     assert "Votre question" in body
     assert maker.mention in body and staff.mention in body
-    assert "CENTRE DE SUPPORT" in body
+    # Surtitre lisible depuis le 22/10/2026 : « 🎫 Support · 🟢 Ouvert ».
+    assert "🎫 Support ·" in body
     assert "Résumé automatique" not in body
     assert any(isinstance(child, discord.ui.MediaGallery) for child in children)
     buttons = [
@@ -205,7 +206,7 @@ def test_failure_receipt_does_not_falsely_claim_deletion():
     )
     assert "Aucune modification" in contents(view)
     assert "Impossible de supprimer" in contents(view)
-    assert "NON EFFECTUÉ" in contents(view)
+    assert "Non effectué" in contents(view)
     assert "Ticket #9" in contents(view)
 
 

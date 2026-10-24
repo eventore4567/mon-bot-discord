@@ -498,12 +498,41 @@ class TicketRenameModal(discord.ui.Modal, title="✏️ Renommer le ticket"):
 # VUES — panel d'ouverture, contrôle du ticket, éditeurs de panel/type, hub /ticketsetup
 # =============================================================================
 
+#: Un émoji parlant par catégorie quand l'admin a gardé le 🎫 par défaut
+#: (Jayden, 22/10/2026 : « ticket plus premium »). Un émoji choisi reste prioritaire.
+_EMOJIS_DE_CATEGORIE: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("signal", "report", "plainte", "abus"), "🚨"),
+    (("partenar", "partner", "collab"), "🤝"),
+    (("achat", "commande", "boutique", "shop", "payer", "paiement", "order"), "🛒"),
+    (("rembours", "refund"), "💸"),
+    (("candidat", "recrut", "postul", "staff", "apply"), "📝"),
+    (("bug", "erreur", "probl", "technique"), "🐛"),
+    (("question", "aide", "help", "support", "info"), "❓"),
+    (("unban", "débann", "deban", "appel", "contest", "sanction"), "⚖️"),
+    (("giveaway", "concours", "lot", "gain", "récompense"), "🎁"),
+    (("event", "évén", "tournoi"), "🎉"),
+)
+
+
+def emoji_de_categorie(nom: object, emoji: object) -> str:
+    """L'émoji de la catégorie : celui choisi par l'admin, sinon un émoji d'après le nom."""
+    choisi = str(emoji or "").strip()
+    if choisi and choisi != "🎫":
+        return choisi
+    texte = str(nom or "").casefold()
+    for mots, rendu in _EMOJIS_DE_CATEGORIE:
+        if any(mot in texte for mot in mots):
+            return rendu
+    return "🎫"
+
+
 class TicketOpenSelect(discord.ui.Select):
     def __init__(self, panel_id: int, types: list, language: str = language_runtime.LANG_FR):
         options = [
             discord.SelectOption(
                 label=(t["name"] or "Ticket")[:100], value=str(t["id"]),
-                emoji=parse_component_emoji(t["emoji"]), description=(t["description"] or "")[:100] or None,
+                emoji=parse_component_emoji(emoji_de_categorie(t["name"], t["emoji"])),
+                description=(t["description"] or "")[:100] or None,
             )
             for t in types[:25]
         ]
@@ -525,7 +554,8 @@ class TicketOpenButton(discord.ui.Button):
     def __init__(self, ticket_type):
         style = BUTTON_STYLES.get(ticket_type["button_style"], discord.ButtonStyle.primary)
         label = (ticket_type["button_label"] or ticket_type["name"] or "Ticket")[:80]
-        super().__init__(label=label, emoji=parse_component_emoji(ticket_type["emoji"]), style=style, custom_id=f"ticket_open_btn:{ticket_type['id']}")
+        super().__init__(label=label, emoji=parse_component_emoji(emoji_de_categorie(ticket_type["name"], ticket_type["emoji"])),
+                         style=style, custom_id=f"ticket_open_btn:{ticket_type['id']}")
         self.ticket_type_id = ticket_type["id"]
 
     async def callback(self, interaction: discord.Interaction):
@@ -1188,7 +1218,7 @@ class Tickets(commands.Cog):
 
         lines = []
         for ticket_type in list(types)[:12]:
-            emoji = str(ticket_type["emoji"] or "🎫")
+            emoji = emoji_de_categorie(ticket_type["name"], ticket_type["emoji"])
             name = str(ticket_type["name"] or "Ticket")
             detail = str(ticket_type["description"] or "").strip()
             lines.append(f"{emoji} **{name}**" + (f" — {detail}" if detail else ""))
@@ -2268,7 +2298,7 @@ class Tickets(commands.Cog):
 
         if len(available) == 1:
             panel, types = available[0]
-            return await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemeral=True if ctx.interaction else False)
+            return await sx_panels.envoyer(ctx, await self.build_public_panel(panel, types), ephemere=bool(ctx.interaction))
 
         # Plusieurs panels actifs sur ce serveur : on laisse d'abord choisir la catégorie
         # (les options du menu viennent toutes de la DB, jamais du code).
@@ -2283,7 +2313,9 @@ class Tickets(commands.Cog):
         async def on_pick(inter: discord.Interaction):
             panel_id = int(select.values[0])
             panel, types = next((p, t) for p, t in available if p["id"] == panel_id)
-            await inter.response.edit_message(embed=self.build_panel_embed(panel), view=TicketPanelView(panel, types))
+            # build_panel_embed n'existe plus depuis le 30/09 (build_public_panel) :
+            # chaque choix de catégorie échouait en production (23/10/2026).
+            await sx_panels.editer(inter.response, await self.build_public_panel(panel, types))
 
         select.callback = on_pick
         view.add_item(select)
@@ -2403,7 +2435,7 @@ class Tickets(commands.Cog):
         types = await self.get_panel_types(panel["id"])
         if not types:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.warning("Ce panel n'a aucun type de ticket.")))
-        await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)), ephemeral=True if ctx.interaction else False)
+        await sx_panels.envoyer(ctx, await self.build_public_panel(panel, types), ephemere=bool(ctx.interaction))
 
     @ticketpanel.command(name="send", description="Envoyer (ou mettre à jour) un panel dans son salon configuré.")
     @app_commands.describe(nom="Le nom du panel à envoyer")
@@ -2421,7 +2453,7 @@ class Tickets(commands.Cog):
             if not types:
                 return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce panel n'a aucun type de ticket.")))
             channel = ctx.guild.get_channel(panel["channel_id"])
-            msg = await sx_panels.envoyer(channel, sx_panels.avec_composants(sx_panels.depuis_embed(self.build_panel_embed(panel)), TicketPanelView(panel, types)))
+            msg = await sx_panels.envoyer(channel, await self.build_public_panel(panel, types))
             await self.bot.db.execute("UPDATE ticket_panels_v2 SET message_id = ? WHERE id = ?", (msg.id, panel["id"]))
             await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success(f'📤 Panel envoyé dans {channel.mention}.')))
 

@@ -182,9 +182,13 @@ async def _sync_panel_message(bot, guild: discord.Guild, panel_id: int) -> str:
         return "unavailable"
     types = await cog.get_panel_types(panel_id)
     try:
-        from cogs.tickets import TicketPanelView
-        view = TicketPanelView(panel, types) if types else None
-        await message.edit(embed=cog.build_panel_embed(panel), view=view)
+        from utils import sentrix_panels as panels
+
+        if not types:
+            return "unavailable"
+        # Même rendu que la publication (Tickets.build_public_panel) ; l'ancien
+        # build_panel_embed n'existe plus depuis le 30/09/2026.
+        await panels.editer(message, await cog.build_public_panel(panel, types))
         return "updated"
     except discord.HTTPException:
         logger.exception("Impossible de synchroniser le panel #%s.", panel_id)

@@ -36,7 +36,9 @@ _CRITICAL_CONTRACTS: dict[str, tuple[str, ...]] = {
     "rps": ("choix",),
     "mute": ("membre", "duree", "raison"),
     "tempban": ("membre", "duree", "raison"),
-    "ban": ("membre", "raison"),
+    # supprimer_messages : option ajoutée à +ban (messages envoyés avant le ban) ;
+    # l'ancien contrat la signalait en [ERROR] à chaque démarrage de production.
+    "ban": ("membre", "raison", "supprimer_messages"),
     "kick": ("membre", "raison"),
 }
 

@@ -275,10 +275,10 @@ PAR_COMMANDE: dict[tuple[str, str], Provider] = {
     ("giveaway end", "message_id"): _vivant("giveaways-actifs", lambda i: _giveaways(i, True)),
     ("giveaway cancel", "message_id"): _vivant("giveaways-actifs", lambda i: _giveaways(i, True)),
     ("giveaway reroll", "message_id"): _vivant("giveaways-finis", lambda i: _giveaways(i, False)),
-    ("security rules deny", "domaine"): _vivant("domaines", _domaines_autorises),
-    ("security rules allow", "domaine"): _statique([(d, d) for d in DOMAINES_COURANTS], garder_saisie=True),
-    ("security rules remove", "mot"): _vivant("mots", _mots_interdits),
-    ("security words remove", "mot"): _vivant("mots", _mots_interdits),
+    ("protection link-deny", "domaine"): _vivant("domaines", _domaines_autorises),
+    ("protection link-allow", "domaine"): _statique([(d, d) for d in DOMAINES_COURANTS], garder_saisie=True),
+    ("protection blacklist-remove", "mot"): _vivant("mots", _mots_interdits),
+    ("protection word-remove", "mot"): _vivant("mots", _mots_interdits),
     ("unban", "user_id"): _vivant("bannis", _bannis),
     ("server emoji-remove", "emoji"): _vivant("emojis", _emojis),
     ("suggestions status", "status"): _statuts_suggestion,
@@ -309,7 +309,7 @@ PAR_COMMANDE[("embeds rename", "ancien_nom")] = _vivant("embeds", _embeds)
 _SANCTIONS = (
     "ban", "unban", "kick", "warn", "timeout", "untimeout",
     "moderation hackban", "moderation tempban", "moderation lock",
-    "security tools isolate", "security rules block",
+    "security isolate", "protection block",
 )
 for _chemin in _SANCTIONS:
     PAR_COMMANDE[(_chemin, "raison")] = _statique([(r, r) for r in RAISONS], garder_saisie=True)

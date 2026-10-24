@@ -40,7 +40,7 @@ def test_la_regle_generale_sur_le_nom_d_option_a_disparu():
 @pytest.mark.parametrize("chemin", [
     "ban", "unban", "kick", "warn", "timeout", "untimeout",
     "moderation hackban", "moderation tempban", "moderation lock",
-    "security tools isolate", "security rules block",
+    "security isolate", "protection block",
 ])
 def test_les_commandes_qui_sanctionnent_gardent_les_motifs(chemin):
     suggestions = _suggestions(chemin)
