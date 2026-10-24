@@ -56,3 +56,15 @@ async def test_chargement_dedoublonne_extensions():
     bot = SimpleNamespace(load_extension=AsyncMock())
     assert not await audit._charger_extensions(bot, ["cogs.a", "cogs.a"])
     bot.load_extension.assert_awaited_once_with("cogs.a")
+
+
+def test_critical_commands_present_independent_of_total_count(capsys):
+    commands = ["help", "ban", "kick", "clear", "wipe-server", "one_more_command"]
+    assert audit.auditer_commandes_critiques(commands) == 0
+    assert "critiques présentes" in capsys.readouterr().out
+
+
+def test_critical_missing_command_must_fail_without_hardcoded_registry_size(capsys):
+    commands = ["help", "ban", "kick", "clear", "harmless", "another_one"]
+    assert audit.auditer_commandes_critiques(commands) == 1
+    assert "COMMANDE CRITIQUE ABSENTE   wipe-server" in capsys.readouterr().out
