@@ -35,6 +35,38 @@ PROFILS = [
 ]
 
 
+# Contrat de securite independant de utils.access_matrix : NE PAS generer
+# cette table depuis les ensembles PUBLIC_COMMANDS / CATEGORY_COMMANDS.
+# Sinon une regression qui declare une commande destructrice publique change a
+# la fois le resultat et l'attendu : l'audit afficherait faussement 0 anomalie.
+# Les commandes de cette liste peuvent etre masquees dans la surface Discord ;
+# si elles existent dans le registre, leur niveau minimal doit rester garanti.
+MINIMUM_SENSITIVE_TIERS = {
+    "setup": "categorie:configuration",
+    "ticketsetup": "categorie:tickets",
+    "antiraid": "categorie:securite",
+    "antinuke": "categorie:securite",
+    "ban": "discord:ban_members",
+    "kick": "discord:kick_members",
+    "clear": "discord:manage_messages",
+    "wipe-server": "guild-owner",
+    "server-restore": "guild-owner",
+    "config-reset": "guild-owner",
+    "reset-economy": "guild-owner",
+    "reset-levels": "guild-owner",
+    "represet": "guild-owner",
+    "proofreset": "guild-owner",
+    "immunity": "guild-owner",
+    "dm": "guild-owner",
+    "bl": "owner-global",
+    "unbl": "owner-global",
+    "sync": "owner-global",
+    "syncguild": "owner-global",
+    "season start": "categorie:economie",
+    "season end": "categorie:economie",
+}
+
+
 class _Bot:
     def __init__(self, backend):
         self.sentrix_access_backend = backend
@@ -99,6 +131,24 @@ def auditer(noms: list[str]) -> int:
                 autorises.append(etiquette)
                 par_profil[etiquette] += 1
         ouverture[nom] = autorises
+
+        # Contrat INDEPENDANT : l'attendu vient de la revue de securite et non
+        # de la table dont on veut justement detecter les erreurs.
+        racine = M.resolve_name(nom)
+        attendu = MINIMUM_SENSITIVE_TIERS.get(racine)
+        if attendu is not None:
+            if niveau != attendu:
+                anomalies.append(
+                    f"NIVEAU SENSIBLE INCORRECT   {nom}: attendu {attendu}, obtenu {niveau}"
+                )
+            if "membre" in autorises:
+                anomalies.append(f"ESCALADE SENSIBLE MEMBRE   {nom}")
+            if attendu == "guild-owner" and "administrateur" in autorises:
+                anomalies.append(f"ESCALADE SENSIBLE ADMIN > OWNER SERVEUR   {nom}")
+            if attendu == "owner-global" and (
+                "administrateur" in autorises or "proprietaire du serveur" in autorises
+            ):
+                anomalies.append(f"ESCALADE SENSIBLE > OWNER GLOBAL   {nom}")
 
         # 1. Une commande inconnue de la matrice retombe en fail-closed : elle
         #    n'est cassee pour personne, mais personne ne l'a classee non plus.
