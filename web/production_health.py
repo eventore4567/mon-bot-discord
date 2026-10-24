@@ -7,6 +7,7 @@ import time
 from aiohttp import web
 
 from .production_observability import build_runtime_snapshot
+from .health_runtime_v45 import _extension_state, _installer_failures
 
 _INSTALLED = False
 _SHARED_RUNTIME_PREFIX = "sentrix:v177:ai-runtime:"
@@ -235,11 +236,15 @@ def install(dashboard_module) -> None:
 
         runtime_observability = await build_runtime_snapshot(bot)
         production_v9 = getattr(bot, "production_v9_health_snapshot", None)
+        loaded_extensions, expected_extensions, modules_ok = _extension_state(bot)
+        extension_failures, v17_failures = _installer_failures(bot)
         uptime = int(time.time() - dashboard_module.START_TIME)
-        healthy = db_ok and discord_ready
+        healthy = bool(db_ok and discord_ready and modules_ok)
         status = 200 if healthy or uptime < 90 else 503
-        if not healthy:
+        if not db_ok or not discord_ready:
             health_level = "starting" if uptime < 90 else "unavailable"
+        elif not modules_ok:
+            health_level = "degraded"
         elif isinstance(production_v9, dict) and production_v9.get("status") == "unavailable":
             health_level = "degraded"
         elif runtime_observability.get("available") and runtime_observability.get("status") in {"degraded", "stale"}:
@@ -254,6 +259,11 @@ def install(dashboard_module) -> None:
             "health_level": health_level,
             "discord_ready": discord_ready,
             "database_ok": db_ok,
+            "extensions_ok": modules_ok,
+            "extensions_loaded": loaded_extensions,
+            "extensions_expected": expected_extensions,
+            "extension_load_failure_count": extension_failures,
+            "v17_install_failure_count": v17_failures,
             "latency_ms": round(bot.latency * 1000) if discord_ready else None,
             "uptime_seconds": uptime,
             "shards": int(getattr(bot, "shard_count", 1) or 1),
