@@ -24,7 +24,7 @@ GAME_COMMANDS = frozenset({
 })
 
 NORMAL_DIRECT_COMMANDS = frozenset({
-    "help", "setup", "ping", "avatar", "userinfo", "afk", "setprefix", "setmodrole",
+    "help", "setup", "ping", "avatar", "userinfo", "translate", "timestamp", "afk", "setprefix", "setmodrole",
     "ban", "unban", "kick", "mute", "unmute", "warn", "warnings", "clear",
     "lock", "unlock", "clearwarnings", "slowmode", "nickname", "resetnick",
     "giverole", "removerole",
