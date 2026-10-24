@@ -79,6 +79,35 @@ def _decider(backend, auteur, nom):
     )
 
 
+async def _charger_extensions(bot, extensions: list[str], *, timeout: float = 20) -> dict[str, str]:
+    """Retourne les échecs de chargement au lieu de les masquer.
+
+    Ne conserve que le nom du module et le type d'exception : les détails
+    d'erreur peuvent contenir des informations d'environnement sensibles.
+    """
+    failures: dict[str, str] = {}
+    for extension in dict.fromkeys(extensions):
+        try:
+            await asyncio.wait_for(bot.load_extension(extension), timeout=timeout)
+        except Exception as exc:
+            failures[extension] = type(exc).__name__
+    return failures
+
+
+def auditer_chargement(bot) -> int:
+    failures = getattr(bot, "_sentrix_audit_load_failures", None)
+    if failures is None:
+        print("\\nECHEC : état de chargement non fourni au contrôle.")
+        return 1
+    if not failures:
+        print("\\nOK : toutes les extensions attendues ont chargé.")
+        return 0
+    print(f"\\nECHEC : {len(failures)} extension(s) absente(s) de l'audit")
+    for name, error_type in sorted(failures.items()):
+        print(f"   EXTENSION NON CHARGEE   {name} ({error_type})")
+    return 1
+
+
 async def _commandes_reelles(retourner_bot: bool = False):
     """Les noms qualifies effectivement enregistres par le bot."""
     import config
@@ -101,11 +130,10 @@ async def _commandes_reelles(retourner_bot: bool = False):
         if module not in extensions:
             extensions.append(module)
 
-    for extension in extensions:
-        try:
-            await asyncio.wait_for(bot.load_extension(extension), timeout=20)
-        except Exception:
-            pass
+    # L'ancien audit avalait les erreurs de chargement. Une extension cassée
+    # retirait ses commandes du registre, puis les contrôles annonçaient 0
+    # anomalie. Garder l'inventaire des échecs ET auditer ce qui a chargé.
+    bot._sentrix_audit_load_failures = await _charger_extensions(bot, extensions)
     noms = sorted({c.qualified_name for c in bot.walk_commands()})
     if retourner_bot:
         return noms, bot
@@ -291,6 +319,7 @@ def main() -> int:
         auditer(noms)
         | auditer_configuration_hostile(noms)
         | auditer_affichage_slash(bot)
+        | auditer_chargement(bot)
     )
 
 
