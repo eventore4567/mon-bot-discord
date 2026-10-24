@@ -6,6 +6,7 @@ already-broken, reversible states and never creates Discord channels, roles or p
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import json
 import logging
 import time
@@ -249,7 +250,7 @@ async def _diagnostic(bot, guild: discord.Guild) -> dict:
     welcome_ready = bool(welcome_id and guild.get_channel(welcome_id))
     logs_ready = logs["configured"] > 0
     tickets_ready = bool(tickets["ready"])
-    latency_ms = max(0, round(float(getattr(bot, "latency", 0) or 0) * 1000))
+    latency_ms = latence_ms(bot)
 
     issues = []
 

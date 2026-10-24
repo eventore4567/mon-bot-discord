@@ -6,6 +6,7 @@ principal et réutilise uniquement les primitives sûres du Centre Setup.
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import json
 import logging
 import time
@@ -247,7 +248,7 @@ def install(dashboard, setup_center) -> None:
             "antinuke_enabled": bool(conf and conf["antinuke"]),
             "incidents_24h": int(count_row["n"] if count_row else 0),
             "rollback_events_24h": int(rollback_row["n"] if rollback_row else 0),
-            "latency_ms": max(0, round(float(bot.latency or 0) * 1000)),
+            "latency_ms": latence_ms(bot),
             "is_owner": user_id == int(guild.owner_id),
             "incidents": incidents,
             "last_backup": ({"id": int(backup["id"]), "when": f"<t:{int(backup['created_at'])}:R>"} if backup else None),

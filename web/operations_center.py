@@ -6,6 +6,7 @@ cogs.operations_center, qui reste la source des opérations Discord/SQLite.
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import json
 import logging
 import time
@@ -107,7 +108,7 @@ async def api_summary(dashboard, request: web.Request):
         "ok": True,
         "runtime": {
             "online": request.app["bot"].is_ready(),
-            "latency_ms": round(request.app["bot"].latency * 1000) if request.app["bot"].is_ready() else None,
+            "latency_ms": latence_ms(request.app["bot"], None) if request.app["bot"].is_ready() else None,
             "guild_members": guild.member_count or 0,
         },
         "metrics": metrics,

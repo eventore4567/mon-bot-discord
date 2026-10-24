@@ -14,6 +14,7 @@ dont V15 dépend, sont conservées à l'identique.
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import json
 import logging
 import re
@@ -230,7 +231,7 @@ def install(dashboard) -> bool:
                         "roles": max(0, len(getattr(guild, "roles", []) or []) - 1),
                         "staff_actions_24h": sum(int(x.get("actions") or 0) for x in staff),
                         "discord_ready": bool(bot.is_ready()),
-                        "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
+                        "latency_ms": latence_ms(bot, None) if bot.is_ready() else None,
                     }
                 )
 

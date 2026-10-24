@@ -5,6 +5,7 @@ raccourci compact y est injecté. Toutes les écritures passent par OAuth admin 
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import json
 import logging
 import time
@@ -140,7 +141,7 @@ async def api_get(dashboard, request: web.Request):
                     + [{"id": str(c.id), "name": c.name, "kind": "category"} for c in guild.categories],
         "roles": [{"id": str(r.id), "name": r.name} for r in guild.roles if not r.is_default() and not r.managed],
         "health": {
-            "latency_ms": max(0, round(float(bot.latency or 0) * 1000)),
+            "latency_ms": latence_ms(bot),
             "dangerous_admin_roles": len(dangerous_roles),
             "admin_bots": len(admin_bots),
             "text_channels": len(guild.text_channels),

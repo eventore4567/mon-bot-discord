@@ -14,6 +14,7 @@ All mutating routes are CSRF-protected and every Discord action is permission/hi
 """
 from __future__ import annotations
 
+from utils.helpers import latence_ms
 import json
 import logging
 import time
@@ -836,7 +837,7 @@ def install(dashboard) -> bool:
                         "open_tickets": int(data.get("open_tickets") or 0),
                         "warnings": int(data.get("warnings_total") or 0),
                         "online": bool(bot.is_ready()),
-                        "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
+                        "latency_ms": latence_ms(bot, None) if bot.is_ready() else None,
                         "sanctions_revision": revision,
                     }
                 )

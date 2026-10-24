@@ -1,3 +1,4 @@
+from utils.helpers import latence_ms
 """
 Application web SentriX.
 
@@ -377,7 +378,7 @@ async def handle_health(request: web.Request):
     return web.json_response({
         "ok": ok,
         "discord_ready": ready,
-        "latency_ms": round(bot.latency * 1000) if ready else None,
+        "latency_ms": latence_ms(bot, None) if ready else None,
         "extensions": extension_health or {
             "expected": None,
             "loaded": None,
@@ -419,7 +420,7 @@ def _public_champs_vivants(bot) -> dict:
     pret = bot.is_ready()
     return {
         "online": pret,
-        "latency_ms": round(bot.latency * 1000) if pret else None,
+        "latency_ms": latence_ms(bot, None) if pret else None,
         "uptime_seconds": int(time.time() - START_TIME),
     }
 
