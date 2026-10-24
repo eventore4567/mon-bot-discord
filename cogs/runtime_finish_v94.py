@@ -54,7 +54,14 @@ def _schedule_ticket_snapshot(bot: commands.Bot) -> None:
                     continue
                 try:
                     result = await durable.snapshot(reason="ticket_config_write", clean_shutdown=False)
-                    if not result.get("stored"):
+                    # « postgres_primary » n'est PAS un échec : depuis la bascule,
+                    # les données vivent dans PostgreSQL et l'instantané SQLite est
+                    # volontairement sauté — le réenregistrer écraserait la vraie
+                    # dernière sauvegarde SQLite. Avertir là-dessus faisait croire à
+                    # une perte de réglages de tickets à chaque écriture.
+                    # cogs/member_data_retention_v17 filtrait déjà cette raison ;
+                    # ici elle ne l'était pas.
+                    if not result.get("stored") and result.get("reason") != "postgres_primary":
                         logger.warning("Snapshot ticket non stocké : %s", result)
                 except Exception:
                     logger.exception("Snapshot durable des réglages tickets impossible.")
