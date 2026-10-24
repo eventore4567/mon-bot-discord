@@ -43,7 +43,7 @@ PUBLIC_COMMANDS = frozenset({
     # Aide et utilitaires
     "help", "ping", "avatar", "info", "userinfo", "status", "about", "profile-card",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
-    "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
+    "reminder-list", "reminder-cancel", "translate", "timestamp", "weather", "suggest",
     "report-bug", "afk", "roll", "choose", "privacy-policy",
     # Preuve
     "proof", "proofstatus",
