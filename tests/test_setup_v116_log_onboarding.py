@@ -64,3 +64,24 @@ async def test_home_embed_affiche_etat_logs(monkeypatch):
     embed = await v116._home_embed(view)
     assert "Journaux : à configurer" in embed.description
     assert "Configurer les logs" in embed.description
+
+
+@pytest.mark.asyncio
+async def test_home_button_opens_logs_without_writing_configuration():
+    view, db = _view([])
+    view.message_id = 456
+    view.page = v116.v4.PAGE_HOME
+    view.items = []
+    view.clear_items = lambda: view.items.clear()
+    view.add_item = lambda item: view.items.append(item)
+    view.render_page = lambda: None
+    view.persist_session = AsyncMock()
+    view._refresh_message = AsyncMock()
+    v116._render_home(view)
+    button = next(item for item in view.items if getattr(item, "label", None) == "Configurer les logs")
+    interaction = SimpleNamespace()
+    await button.callback(interaction)
+    assert view.page == v116.v4.PAGE_LOGS
+    view.persist_session.assert_awaited_once()
+    view._refresh_message.assert_awaited_once_with(interaction)
+    assert not hasattr(db, "execute")
