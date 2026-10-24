@@ -44,11 +44,12 @@ async def main() -> int:
     check("Portefeuille : **440**" in t and "Banque : **60**" in t, "retrait : les soldes qui en résultent", t[:200])
     t = await say("+deposit 99999")
     check("Portefeuille : **440**" in t and "all" in t, "montant refusé : ce que le membre possède vraiment", t[:200])
-    t = await say("+checkin")
-    check("**+50**" in t and "Jours de série : **1**" in t and "<t:" in t and "**+60**" in t,
-          "check-in : gain, série et rendez-vous de demain avec son gain", t[:240])
-    t = await say("+checkin")
-    check("Déjà récupéré" in t and "<t:" in t, "check-in déjà fait : quand revenir", t[:200])
+    # +checkin a été retirée le 17/10 (doublon de +daily, jamais utilisée).
+    t = await say("+daily")
+    check("**+200**" in t and "Streak quotidien : 1 jour" in t and "<t:" in t,
+          "daily : gain, série et rendez-vous de demain", t[:240])
+    t = await say("+daily")
+    check("pas encore disponible" in t and "<t:" in t, "daily déjà pris : quand revenir", t[:200])
     t = await say("+buy 999")
     check("n°999" in t and "+shop" in t, "article inconnu : la commande qui liste les articles", t[:200])
     t = await say("+mbuy 999")

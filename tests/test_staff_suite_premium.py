@@ -19,7 +19,8 @@ def test_staff_suite_exposes_the_premium_entry_points():
         'name="staff"',
         'name="handover"',
         'name="urgence"',
-        'name="audit"',
+        # staff-audit (82612cb) : « audit » était déjà enregistrée ailleurs.
+        'name="staff-audit"',
         # staff-diagnostic : « diagnostic » appartient a cogs/stats.py. Le
         # doublon faisait echouer add_cog et la suite ENTIERE disparaissait.
         'name="staff-diagnostic"',

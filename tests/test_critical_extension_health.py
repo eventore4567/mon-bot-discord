@@ -21,7 +21,10 @@ def _literal_assignment(source: str, name: str):
 def test_critical_extensions_are_real_extensions():
     source = (ROOT / "main.py").read_text(encoding="utf-8")
     extensions = set(_literal_assignment(source, "EXTENSIONS"))
-    critical = set(_literal_assignment(source, "CRITICAL_EXTENSIONS"))
+    # La liste vit dans core/module_policy.py ; main.py l'importe.
+    assert "CRITICAL_EXTENSIONS" in source
+    policy = (ROOT / "core" / "module_policy.py").read_text(encoding="utf-8")
+    critical = set(_literal_assignment(policy, "CRITICAL_EXTENSIONS"))
 
     assert critical
     assert critical <= extensions
