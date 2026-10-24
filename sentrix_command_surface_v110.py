@@ -58,6 +58,8 @@ STANDARD_DIRECT_SLASH: dict[str, str] = {
     # Informations — userinfo/serverinfo sont déjà des noms très répandus.
     "avatar": "avatar",
     "userinfo": "userinfo",
+    "translate": "translate",
+    "timestamp": "timestamp",
     "serverinfo": "serverinfo",
     "channelinfo": "channelinfo",
     "membercount": "membercount",
