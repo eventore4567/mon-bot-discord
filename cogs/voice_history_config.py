@@ -129,7 +129,7 @@ class VoiceHistoryConfigView(discord.ui.LayoutView):
         channel_id = route.get("channel_id")
         if not route["enabled"] and not channel_id:
             return await interaction.response.send_message(
-                "Choisis d'abord un salon textuel pour les logs vocaux.", ephemeral=True,
+                "Choisissez d'abord un salon textuel pour les logs vocaux.", ephemeral=True,
             )
         if not route["enabled"]:
             valid, explanation = log_service.validate_channel(self.guild, channel_id)

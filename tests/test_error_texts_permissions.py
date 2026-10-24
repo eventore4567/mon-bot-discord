@@ -39,14 +39,14 @@ def test_missing_permissions_names_the_exact_permission():
     from cogs import final_error_embed_v5 as v5
 
     error = commands.MissingPermissions(["manage_messages"])
-    expected = "Il te faut la permission **Gérer les messages** pour utiliser cette commande."
+    expected = "Il vous faut la permission **Gérer les messages** pour utiliser cette commande."
     assert error_texts.user_error_text(error) == expected
     assert grouped._short_error(error) == expected
     ctx = SimpleNamespace(clean_prefix="+", command=None, invoked_with="clear", bot=None, current_parameter=None)
     assert v5._texte_erreur_prefix(ctx, error) == expected
 
     app_error = discord.app_commands.MissingPermissions(["ban_members"])
-    assert v5._texte_erreur_slash(app_error) == "Il te faut la permission **Bannir des membres** pour utiliser cette commande."
+    assert v5._texte_erreur_slash(app_error) == "Il vous faut la permission **Bannir des membres** pour utiliser cette commande."
 
 
 def test_bot_missing_permissions_names_the_exact_permission():

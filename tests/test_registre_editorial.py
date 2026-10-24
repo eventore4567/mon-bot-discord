@@ -17,7 +17,7 @@ import unittest
 
 RACINE = pathlib.Path(__file__).resolve().parent.parent
 
-PRONOM_TU = re.compile(r"(?<![\wà-ÿ'])(tu|ton|ta|tes|toi)(?![\wà-ÿ])")
+PRONOM_TU = re.compile(r"(?<![\wà-ÿ'])(tu|te|ton|ta|tes|toi)(?![\wà-ÿ'])")
 # Un imperatif a la 2e personne du singulier, en tete de phrase ou apres un connecteur.
 IMPERATIF_TU = re.compile(
     r"(?:^|[.!?:]\s+|\n\s*|\*\*|\b(?:puis|et|ou|alors|ensuite)\s+)"

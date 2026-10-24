@@ -178,7 +178,7 @@ def has_permission(permission: str):
         if getattr(ctx.author.guild_permissions, permission, False):
             return True
         label = permission_label(permission)
-        raise BotPermissionError(f"Il te faut la permission **{label}** pour utiliser cette commande.")
+        raise BotPermissionError(f"Il vous faut la permission **{label}** pour utiliser cette commande.")
 
     return commands.check(_mark(predicate, permission_label(permission)))
 
@@ -204,7 +204,7 @@ def has_permission_or_modrole(permission: str):
             return True
         label = permission_label(permission)
         raise BotPermissionError(
-            f"Il te faut la permission **{label}** (ou le rôle staff configuré dans Setup) "
+            f"Il vous faut la permission **{label}** (ou le rôle staff configuré dans Setup) "
             "pour utiliser cette commande."
         )
 

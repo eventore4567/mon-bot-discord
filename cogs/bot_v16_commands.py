@@ -219,7 +219,7 @@ def _prefix_special_error(error: commands.CommandError):
     if isinstance(raw, commands.MissingRole):
         return "Rôle requis", f"Il te manque {_role_text(raw.missing_role)} pour utiliser cette commande."
     if isinstance(raw, commands.MissingAnyRole):
-        return "Rôle requis", f"Il te faut au moins un de ces rôles : {_roles_text(raw.missing_roles)}."
+        return "Rôle requis", f"Il vous faut au moins un de ces rôles : {_roles_text(raw.missing_roles)}."
     if isinstance(raw, commands.BotMissingRole):
         return "Rôle du bot manquant", f"SentriX doit posséder {_role_text(raw.missing_role)} pour terminer cette action."
     if isinstance(raw, commands.BotMissingAnyRole):
