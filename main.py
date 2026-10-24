@@ -128,7 +128,7 @@ PUBLIC_COMMANDS = frozenset({
     # dont les cibles sont deja publiques, mais qui n'avaient jamais ete classees.
     "serverinfo",
     "channelinfo", "membercount", "emoji-list", "poll", "remind",
-    "reminder-list", "reminder-cancel", "translate", "weather", "suggest",
+    "reminder-list", "reminder-cancel", "translate", "timestamp", "weather", "suggest",
     "report-bug", "afk", "roll", "choose",
     # Intelligence artificielle
     "sentrix", "ask", "chat-reset", "summarize", "image-prompt", "image",
