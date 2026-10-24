@@ -8,12 +8,14 @@ Cog UTILITAIRES.
 """
 
 import asyncio
+import datetime as _datetime
 import io
 import ipaddress
 import logging
 import re
 import socket
 from urllib.parse import urljoin, urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 import discord
@@ -274,6 +276,47 @@ def _encode_animated_emoji(data: bytes) -> bytes:
 
 def _normalise_emoji_asset(data: bytes, animated: bool) -> bytes:
     return _encode_animated_emoji(data) if animated else _encode_static_emoji(data)
+
+
+
+
+def _discord_timestamp(date_text: str, heure: str = "00:00", fuseau: str = "UTC") -> int:
+    """Convertit une date locale en epoch UTC pour les balises Discord <t:...>.
+
+    Accepte JJ/MM/AAAA ou AAAA-MM-JJ, éventuellement suivis de HH:MM.
+    La validation aller-retour rejette les heures inexistantes au changement d'heure.
+    """
+    raw = (date_text or "").strip()
+    if raw.casefold() in {"maintenant", "now", "today", "aujourd'hui"}:
+        return int(_datetime.datetime.now(_datetime.timezone.utc).timestamp())
+    if len(raw) > 60 or not raw:
+        raise ValueError("Date invalide. Exemple : 25/10/2026")
+    if len(fuseau) > 64:
+        raise ValueError("Fuseau horaire trop long.")
+    try:
+        zone = ZoneInfo((fuseau or "UTC").strip())
+    except (ZoneInfoNotFoundError, ValueError, KeyError) as exc:
+        raise ValueError("Fuseau invalide. Exemples : UTC, Europe/Paris, Africa/Casablanca.") from exc
+    with_hour = raw.replace("T", " ")
+    if " " not in with_hour:
+        with_hour += " " + (heure or "00:00").strip()
+    formats = ("%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M", "%d-%m-%Y %H:%M")
+    naive = None
+    for date_format in formats:
+        try:
+            naive = _datetime.datetime.strptime(with_hour, date_format)
+            break
+        except ValueError:
+            continue
+    if naive is None:
+        raise ValueError("Format invalide. Utilise JJ/MM/AAAA et HH:MM (ex. 25/10/2026, 18:30).")
+    aware = naive.replace(tzinfo=zone)
+    result = int(aware.timestamp())
+    back = _datetime.datetime.fromtimestamp(result, zone).replace(tzinfo=None)
+    if back != naive:
+        raise ValueError("Cette heure n'existe pas dans ce fuseau (changement d'heure).")
+    return result
+
 
 
 # Ordre volontaire : catégories utiles à tout le monde en premier, catégories staff/technique
@@ -1093,6 +1136,16 @@ class Utility(commands.Cog, name="Utility"):
         « compte créé il y a trois jours » d'un nom d'utilisateur. Chaque famille
         a maintenant sa section, son filet, et son ordre de lecture.
         """
+        if ctx.guild is None:
+            return await panels.envoyer(
+                ctx,
+                panels.depuis_embed(await self._embed(
+                    None,
+                    title="Informations membre",
+                    description="Cette fiche est disponible uniquement sur un serveur.",
+                    kind="warning",
+                )),
+            )
         membre = membre or ctx.author
         maintenant = discord.utils.utcnow()
         cree = int(membre.created_at.timestamp())
@@ -1125,6 +1178,26 @@ class Utility(commands.Cog, name="Utility"):
             )
         if membre.bot:
             identite.append(panels.Ligne("Nature", "Ce compte est un **bot**"))
+        identite.append(panels.Ligne("Nom affiché", discord.utils.escape_markdown(membre.display_name)))
+        # Badges publics fournis par Discord, sans inventer de statut ou d'ancienneté.
+        libelles_badges = {
+            "staff": "Équipe Discord", "partner": "Partenaire", "hypesquad": "HypeSquad",
+            "bug_hunter": "Bug Hunter", "bug_hunter_level_2": "Bug Hunter niveau 2",
+            "hypesquad_bravery": "HypeSquad Bravery",
+            "hypesquad_brilliance": "HypeSquad Brilliance",
+            "hypesquad_balance": "HypeSquad Balance",
+            "early_supporter": "Early Supporter",
+            "verified_bot_developer": "Développeur de bot vérifié",
+            "early_verified_bot_developer": "Développeur de bot vérifié",
+            "active_developer": "Développeur actif",
+            "verified_bot": "Bot vérifié",
+        }
+        badges = membre.public_flags.all()
+        if badges:
+            identite.append(panels.Ligne(
+                "Badges Discord",
+                " · ".join(libelles_badges.get(b, b.replace("_", " ").title()) for b in badges),
+            ))
         sections.append(panels.Section("Identité", identite))
 
         # --- SERVEUR ----------------------------------------------------------
@@ -1871,15 +1944,97 @@ class Utility(commands.Cog, name="Utility"):
         e = await self._embed(ctx.guild.id if ctx.guild else None, title=titre, description=description)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
-    @commands.hybrid_command(name="translate", description="Traduire un texte vers une autre langue.")
-    @app_commands.describe(langue="Code langue cible (ex: en, es, de)", texte="Le texte à traduire")
+    @commands.hybrid_command(name="translate", description="Traduire un texte dans une autre langue.")
+    @app_commands.describe(langue="Langue cible (fr, en, es, allemand…)", texte="Texte à traduire, 1800 caractères maximum")
     async def translate(self, ctx: commands.Context, langue: str, *, texte: str):
+        cible = langue.strip().casefold()
+        message = texte.strip()
+        guild_id = ctx.guild.id if ctx.guild else None
+        if not message or len(message) > 1800 or not cible or len(cible) > 32:
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                guild_id, title="Traduction", kind="warning",
+                description="Indique une langue et un texte de 1 à 1800 caractères.",
+            )))
         try:
             from deep_translator import GoogleTranslator
-            result = GoogleTranslator(source="auto", target=langue).translate(texte)
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title=f'Traduction ({langue})', description=result)))
+            # deep-translator est synchrone : ne jamais bloquer l'event loop Discord.
+            resultat = await asyncio.wait_for(
+                asyncio.to_thread(
+                    lambda: GoogleTranslator(source="auto", target=cible).translate(message)
+                ),
+                timeout=18,
+            )
+            if not resultat:
+                raise ValueError("Traduction vide")
         except Exception:
-            await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Traduction échouée', description='Vérifiez le code de langue.', kind='danger')))
+            logger.warning("Traduction indisponible (langue=%s)", cible, exc_info=True)
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                guild_id, title="Traduction indisponible", kind="danger",
+                description="Impossible de traduire ce texte pour l'instant. Vérifie la langue (fr, en, es...) et réessaie.",
+            )))
+
+        # Texte externe : aucune mention ni mise en forme arbitraire ne doit être injectée.
+        original = discord.utils.escape_mentions(discord.utils.escape_markdown(message))
+        traduit = discord.utils.escape_mentions(discord.utils.escape_markdown(str(resultat)))
+        panneau = panels.Panneau(
+            titre="SentriX — Traduction",
+            sous_titre="Détection automatique de la langue d'origine.",
+            kind="info",
+            sections=[
+                panels.Section("Original", texte=original),
+                panels.Section("Traduction", texte=traduit),
+                panels.Section("Langue cible", [panels.Ligne("Destination", cible.upper())]),
+            ],
+            pied="SentriX • Traduction",
+        )
+        await panels.envoyer(ctx, panneau)
+
+    @commands.hybrid_command(name="timestamp", description="Créer un horodatage Discord selon la date et le fuseau.")
+    @app_commands.describe(
+        date="JJ/MM/AAAA ou AAAA-MM-JJ (défaut : maintenant)",
+        heure="Heure locale HH:MM (défaut : 00:00)",
+        fuseau="Fuseau IANA : UTC, Europe/Paris, Africa/Casablanca...",
+        style="F : complet, f : court, D/d : date, T/t : heure, R : relatif",
+    )
+    async def timestamp(
+        self,
+        ctx: commands.Context,
+        date: str = "maintenant",
+        heure: str = "00:00",
+        fuseau: str = "UTC",
+        style: str = "F",
+    ):
+        affichage = (style or "F").strip()
+        if affichage not in {"t", "T", "d", "D", "f", "F", "R"}:
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                ctx.guild.id if ctx.guild else None,
+                title="Format inconnu", kind="warning",
+                description="Choisis t, T, d, D, f, F ou R.",
+            )))
+        try:
+            epoch = _discord_timestamp(date, heure, fuseau)
+        except ValueError as exc:
+            return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
+                ctx.guild.id if ctx.guild else None,
+                title="Date invalide", description=str(exc), kind="warning",
+            )))
+        code = "<t:" + str(epoch) + ":" + affichage + ">"
+        panneau = panels.Panneau(
+            titre="SentriX — Horodatage Discord",
+            sous_titre="L'heure s'adapte automatiquement au fuseau de chaque membre.",
+            kind="info",
+            sections=[
+                panels.Section("Aperçu", [panels.Ligne("Date", code)]),
+                panels.Section("Code à copier", texte="`" + code + "`"),
+                panels.Section("Autres formats", [
+                    panels.Ligne("Complet", "<t:" + str(epoch) + ":F>"),
+                    panels.Ligne("Court", "<t:" + str(epoch) + ":f>"),
+                    panels.Ligne("Relatif", "<t:" + str(epoch) + ":R>"),
+                ]),
+            ],
+            pied="SentriX • Dates · fuseau source : " + fuseau,
+        )
+        await panels.envoyer(ctx, panneau)
 
     @commands.hybrid_command(name="weather", description="Afficher la météo d'une ville.")
     @app_commands.describe(ville="Le nom de la ville")
