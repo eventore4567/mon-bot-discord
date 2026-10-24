@@ -538,6 +538,11 @@ ABUS_PRIVILEGIE_SEUIL = max(seuil for seuil, _ in ESCALATION_RULES)
 # et plusieurs escalades pour la même séquence.
 INCIDENT_WINDOW_SECONDS = 30.0
 INCIDENT_LOG_DELAY_SECONDS = 4.0
+#: Applications installées par un utilisateur (badge « APP ») : un raid typique
+#: poste plusieurs fois en quelques secondes depuis la même commande.
+EXTERNAL_APP_BURST_WINDOW = 10.0
+EXTERNAL_APP_BURST_COUNT = 3
+EXTERNAL_APP_TIMEOUT_SECONDS = 3600
 SPAM_FILTERS = frozenset({"antispam", "antispam_duplicate", "antiemoji", "antimention"})
 # Le contenu contenant un lien interdit est SUPPRIMÉ, jamais republié sous
 # le nom/avatar du membre via un webhook (même avec une URL censurée).
@@ -1213,6 +1218,10 @@ class AutoMod(commands.Cog, name="Automod"):
         self._native_block_last_seen: dict[tuple[int, int, int], float] = {}
         self._local_block_last_seen: dict[tuple[int, int, str], float] = {}
         self._admin_link_last_seen: dict[tuple[int, int], float] = {}
+        # Applications externes : rafales par (serveur, membre) et dernier
+        # dernière exclusion posée, pour ne sanctionner qu'une fois par raid.
+        self._external_app_bursts: dict[tuple[int, int], list[float]] = {}
+        self._external_app_sanctioned: dict[tuple[int, int], float] = {}
         self._native_rule_details: dict[tuple[int, int], tuple[str, int | None]] = {}
 
         # Toute écriture AutoMod venant des commandes, du Dashboard ou de l'IA passe
@@ -3065,8 +3074,157 @@ class AutoMod(commands.Cog, name="Automod"):
 
     # ---------------------------------------------------------------- ÉCOUTEURS
 
+    # ---------------------------------------------------------- APPS EXTERNES
+    #
+    # Une application installée PAR UN UTILISATEUR (badge « APP ») publie la
+    # réponse à sa commande au nom de l'application : message.author est un bot,
+    # et le filtre « on ignore les bots » laissait passer les raids entiers
+    # (@everyone/@here, invitations, liens) alors que toutes les protections
+    # étaient actives. Le vrai responsable est le membre qui a lancé la commande
+    # (interaction_metadata.user) : c'est lui que SentriX sanctionne.
+
+    def _external_app_invoker(self, message: discord.Message):
+        meta = getattr(message, "interaction_metadata", None)
+        if meta is None or not message.guild:
+            return None
+        try:
+            user_integration = bool(meta.is_user_integration())
+        except Exception:
+            user_integration = False
+        if not user_integration:
+            return None  # bot installé sur le serveur : sous le contrôle des admins
+        user = getattr(meta, "user", None)
+        if user is None:
+            return None
+        return message.guild.get_member(user.id) or user
+
+    @staticmethod
+    def _external_app_text(message: discord.Message) -> str:
+        parts = [message.content or ""]
+        for embed in getattr(message, "embeds", None) or ():
+            parts.extend(str(x or "") for x in (embed.title, embed.description, embed.url))
+            parts.extend(f"{f.name} {f.value}" for f in getattr(embed, "fields", None) or ())
+        return "\n".join(parts)
+
+    def _external_app_reason(self, message: discord.Message, conf: dict) -> str | None:
+        text = self._external_app_text(message)
+        lowered = text.casefold()
+        link_text = _normalize_link_text(text)
+        if (conf.get("antimention") or conf.get("antiraid") or conf.get("antispam")) and (
+            message.mention_everyone or "@everyone" in lowered or "@here" in lowered
+            or len(getattr(message, "role_mentions", ()) or ()) >= 3
+        ):
+            return "Mention @everyone/@here envoyée par une application externe."
+        if (conf.get("antiinvite") or conf.get("antiraid") or conf.get("antilink")) and (
+            INVITE_RE.search(link_text) or INVITE_RE.search(_recoller_hotes_invitation(text_normalization.normaliser(text)))
+        ):
+            return "Invitation Discord envoyée par une application externe."
+        if conf.get("antilink") and LINK_RE.search(link_text):
+            return "Lien envoyé par une application externe."
+        key = (message.guild.id, message.interaction_metadata.user.id)
+        bursts = self._external_app_bursts.setdefault(key, [])
+        now = time.monotonic()
+        bursts[:] = [t for t in bursts if now - t < EXTERNAL_APP_BURST_WINDOW]
+        bursts.append(now)
+        if (conf.get("antispam") or conf.get("antiraid")) and len(bursts) >= EXTERNAL_APP_BURST_COUNT:
+            return "Rafale de messages d'application externe."
+        return None
+
+    async def _lock_external_apps(self, guild: discord.Guild, reason: str) -> bool:
+        """Retire « Utiliser des applications externes » à @everyone : coupe le raid à la source."""
+        everyone = guild.default_role
+        me = guild.me
+        if not getattr(everyone.permissions, "use_external_apps", False):
+            return False
+        if me is None or not me.guild_permissions.manage_roles:
+            return False
+        permissions = discord.Permissions(everyone.permissions.value)
+        permissions.use_external_apps = False
+        try:
+            await everyone.edit(permissions=permissions, reason=f"SentriX anti-raid : {reason}")
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Verrou des applications externes impossible guild=%s", guild.id, exc_info=True)
+            return False
+        return True
+
+    async def _handle_external_app_message(self, message: discord.Message) -> bool:
+        invoker = self._external_app_invoker(message)
+        if invoker is None:
+            return False
+        conf = await self.get_automod_cached(message.guild.id)
+        if not conf:
+            return False
+        if isinstance(invoker, discord.Member) and (
+            _is_discord_administrator(invoker) or await self.is_automod_exempt(invoker)
+        ):
+            return False
+        reason = self._external_app_reason(message, conf)
+        if reason is None:
+            return False
+        self._mark_xp_skip(message.id)
+        try:
+            await message.delete()
+        except discord.NotFound:
+            pass
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Message d'application externe non supprimé guild=%s", message.guild.id, exc_info=True)
+
+        guild = message.guild
+        key = (guild.id, invoker.id)
+        now = time.monotonic()
+        if now - self._external_app_sanctioned.get(key, -9999.0) < EXTERNAL_APP_BURST_WINDOW * 6:
+            return True  # même raid : un seul timeout, une seule carte
+        self._external_app_sanctioned[key] = now
+
+        action = "message supprimé"
+        if isinstance(invoker, discord.Member) and guild.me and guild.me.guild_permissions.moderate_members:
+            try:
+                await invoker.timeout(
+                    discord.utils.utcnow() + timedelta(seconds=EXTERNAL_APP_TIMEOUT_SECONDS),
+                    reason=f"SentriX anti-raid : {reason}",
+                )
+                action = f"exclu {helpers.format_duration(EXTERNAL_APP_TIMEOUT_SECONDS)}"
+            except (discord.Forbidden, discord.HTTPException):
+                action = "message supprimé (exclusion refusée par Discord : rôle trop haut)"
+        locked = False
+        if conf.get("antiraid"):
+            locked = await self._lock_external_apps(guild, reason)
+
+        app = message.author
+        embed = embeds.log_entry(
+            "🛡️ Raid par application externe bloqué",
+            config.COLOR_WARNING,
+            cible=invoker,
+            cible_label="👤 Lancé par",
+            extra={
+                "🤖 Application": f"{getattr(app, 'name', 'Application')} (`{getattr(app, 'id', '?')}`)",
+                "📍 Salon": message.channel.mention,
+                "⚖️ Sanction": action,
+                "🔒 Applications externes": (
+                    "désactivées pour @everyone (réactivez-les dans Paramètres du serveur → Rôles → @everyone)"
+                    if locked else "inchangées"
+                ),
+            },
+            raison=reason,
+        )
+        try:
+            await self.log_action(guild, embed)
+        except Exception:
+            logger.exception("Log anti-raid application externe impossible guild=%s", guild.id)
+        try:
+            await self.bot.db.log_automod_action(guild.id, invoker.id, "external_app", action, reason)
+        except Exception:
+            logger.debug("Historique AutoMod application externe non écrit", exc_info=True)
+        return True
+
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
+        if message.guild and message.author.bot:
+            try:
+                await self._handle_external_app_message(message)
+            except Exception:
+                logger.exception("Contrôle d'application externe en échec guild=%s", message.guild.id)
+            return
         if message.author.bot or not message.guild:
             return
         # Le bypass admin s'applique AVANT la blacklist, le spam, l'anti-arnaque,
