@@ -191,10 +191,14 @@ class AiGroupTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(decision.allowed)
 
     async def test_ai_ask_reste_public_pour_tout_le_monde(self):
+        from cogs.setup_v2_core import set_module_enabled
         from utils import access_matrix
 
         member = SimpleNamespace(id=1, guild_permissions=SimpleNamespace(administrator=False))
         guild = SimpleNamespace(id=1, owner_id=999)
+        # L'IA est un module à activation explicite (module_explicit_activation_v2) :
+        # une fois activé par le staff, /ai ask est ouvert à tous les membres.
+        await set_module_enabled(self.bot, guild.id, "ai", True)
         decision = await access_matrix.evaluate(self.bot, command_name="ai ask", author=member, guild=guild)
         self.assertTrue(decision.allowed)
 

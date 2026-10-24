@@ -38,6 +38,9 @@ def _cog(*, conf: dict) -> AutoMod:
         db=SimpleNamespace(
             log_automod_action=AsyncMock(),
             fetchone=AsyncMock(return_value=None),
+            fetchall=AsyncMock(return_value=[]),
+            # Palier anti-spam, références d'incident : écrits en base.
+            execute=AsyncMock(),
         )
     )
     cog = AutoMod(bot)
@@ -80,6 +83,7 @@ def _message(member: Mock, index: int, content: str = "spam") -> Mock:
     message.author = member
     message.guild = member.guild
     message.channel = Mock(id=55, mention="<#55>")
+    message.channel.send = AsyncMock()
     message.content = f"{content} {index}"
     message.mentions = []
     message.role_mentions = []
@@ -89,32 +93,63 @@ def _message(member: Mock, index: int, content: str = "spam") -> Mock:
     return message
 
 
-@pytest.mark.asyncio
-async def test_une_rafale_de_30_messages_produit_une_seule_sanction_un_avertissement_un_log():
-    cog = _cog(conf={"antispam": 1, "escalation": 1})
-    member = _member()
-    messages = [_message(member, i) for i in range(30)]
+def _palier_spam(precedent: int):
+    """Base factice où le membre est déjà au palier anti-spam ``precedent``."""
+    import time
 
+    async def fetchone(sql, *_args, **_kwargs):
+        if "sentrix_spam_escalation" in sql and precedent:
+            return {"stage": precedent, "updated_at": int(time.time())}
+        return None
+
+    return fetchone
+
+
+async def _rafale(cog, member, nombre: int):
+    messages = [_message(member, i) for i in range(nombre)]
+    # Délai de carte plus long que la rafale : la carte compte TOUTE la rafale.
     with patch.object(panels, "texte_court", AsyncMock()) as court, \
-         patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
+         patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.2):
         for message in messages:
             await cog.on_message(message)
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.3)
+    return messages, court
 
-    # Une seule exclusion temporaire, un seul avertissement public, une seule carte de log.
+
+@pytest.mark.asyncio
+async def test_une_rafale_de_30_messages_produit_une_seule_sanction_un_avertissement_un_log():
+    # Anti-spam progressif : rappel -> warn -> mute 10 min, 30 min… Une première
+    # rafale ne vaut qu'un rappel, mais reste UN seul incident.
+    cog = _cog(conf={"antispam": 1, "escalation": 1})
+    member = _member()
+    messages, court = await _rafale(cog, member, 30)
+
+    member.timeout.assert_not_awaited()
+    assert court.await_count == 1
+    assert cog.log_action.await_count == 1
+    # Toute la rafale disparaît, y compris les messages d'avant le déclenchement.
+    assert sum(1 for m in messages if m.delete.await_count) == 30
+    fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
+    assert fields["Messages supprimés"] == "30", fields
+    assert "Rappel anti-spam" in fields["Sanction"], fields
+    note = court.await_args.args[1]
+    assert "<@7>" in note and "spam" in note
+
+
+@pytest.mark.asyncio
+async def test_la_recidive_de_spam_mute_une_seule_fois():
+    cog = _cog(conf={"antispam": 1, "escalation": 1})
+    cog.bot.db.fetchone = _palier_spam(2)
+    member = _member()
+    _, court = await _rafale(cog, member, 30)
+
     assert member.timeout.await_count == 1
     assert court.await_count == 1
     assert cog.log_action.await_count == 1
-    # Le 5e message déclenche l'incident ; TOUS les suivants sont supprimés sans bruit.
-    deleted = sum(1 for m in messages if m.delete.await_count)
-    assert deleted == 26
-    # La carte de log est compacte et porte le compteur réel.
-    embed = cog.log_action.await_args.args[1]
-    fields = {f.name: f.value for f in embed.fields}
-    assert any("26" in v for v in fields.values()), fields
-    assert any("Mute" in v for v in fields.values()), fields
-    note = court.await_args.args[1]
-    assert "<@7>" in note and "Exclusion temporaire" in note
+    fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
+    assert "Mute" in fields["Sanction"], fields
+    assert fields["Niveau anti-spam"] == "3"
+    assert "mute" in court.await_args.args[1]
 
 
 @pytest.mark.asyncio
@@ -122,14 +157,15 @@ async def test_le_flood_de_copies_identiques_rejoint_le_meme_incident():
     """security_runtime_hardening appelle _delete_and_warn pour les copiés-collés :
     pendant l'incident, il ne rajoute ni avertissement ni log."""
     cog = _cog(conf={"antispam": 1, "escalation": 1})
+    cog.bot.db.fetchone = _palier_spam(2)
     member = _member()
     with patch.object(panels, "texte_court", AsyncMock()) as court, \
-         patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
+         patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.2):
         for i in range(5):
             await cog.on_message(_message(member, i))
         await cog._delete_and_warn(_message(member, 50, "copie"), "Flood de messages identiques détecté.", "antispam_duplicate")
         await cog._delete_and_warn(_message(member, 51, "copie"), "Flood de messages identiques détecté.", "antispam_duplicate")
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.3)
     assert court.await_count == 1
     assert cog.log_action.await_count == 1
     assert member.timeout.await_count == 1
@@ -153,44 +189,51 @@ async def test_un_nouvel_incident_apres_la_fenetre_est_de_nouveau_traite():
 
 @pytest.mark.asyncio
 async def test_avertissement_lien_est_un_embed_compact_temporaire():
+    # Une phrase lisible qui s'efface après 8 s : ni carte, ni webhook, ni
+    # republication du message (NO_REPOST_FILTERS), et aucun ping.
     cog = _cog(conf={"antilink": 1, "escalation": 0})
     member = _member()
     message = _message(member, 1, "regarde https://exemple.com")
     cog._repost_censored = AsyncMock(return_value=True)
-    fake_notice = SimpleNamespace(delete=AsyncMock())
     with patch.object(panels, "texte_court", AsyncMock()) as court, \
-         patch.object(panels, "envoyer", AsyncMock(return_value=fake_notice)) as envoyer, \
          patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
         await cog.on_message(message)
         await asyncio.sleep(0.05)
     court.assert_not_awaited()
-    assert envoyer.await_count == 1
-    fake_notice.delete.assert_awaited_once_with(delay=8)
-    cog._repost_censored.assert_awaited_once()
-    censored = cog._repost_censored.await_args.args[1]
-    assert "https://exemple.com" not in censored
-    assert "lien censuré" in censored
+    message.delete.assert_awaited_once()
+    message.channel.send.assert_awaited_once()
+    envoi = message.channel.send.await_args
+    assert "<@7>" in envoi.args[0] and "liens" in envoi.args[0]
+    assert "https://exemple.com" not in envoi.args[0]
+    assert envoi.kwargs["delete_after"] == 8
+    assert envoi.kwargs["allowed_mentions"].users is False
+    cog._repost_censored.assert_not_awaited()
     member.timeout.assert_not_awaited()  # un lien n'est pas du spam : pas de mute direct
 
 
 
 @pytest.mark.asyncio
 async def test_antilink_strict_ignore_whitelist_et_salon_ignore():
+    # Le mode strict bloque même les domaines de la liste blanche…
     cog = _cog(conf={"antilink": 1, "antilink_strict": 1, "escalation": 0})
     member = _member()
     message = _message(member, 1, "https://exemple.com")
-    # Le mode strict doit passer AVANT ces exemptions.
-    cog.ignored_channels_cache[1] = {55}
     cog.whitelist_domains_cache[1] = ["exemple.com"]
-
-    note = SimpleNamespace(delete=AsyncMock())
     with patch.object(panels, "texte_court", AsyncMock()), \
-         patch.object(panels, "envoyer", AsyncMock(return_value=note)), \
          patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
         await cog.on_message(message)
         await asyncio.sleep(0.03)
-
     assert message.delete.await_count == 1
+
+    # …mais un salon ignoré reste ignoré (security_filter_applies_to, priorité 6).
+    cog = _cog(conf={"antilink": 1, "antilink_strict": 1, "escalation": 0})
+    cog.ignored_channels_cache[1] = {55}
+    ignore = _message(member, 2, "https://exemple.com")
+    with patch.object(panels, "texte_court", AsyncMock()), \
+         patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
+        await cog.on_message(ignore)
+        await asyncio.sleep(0.03)
+    ignore.delete.assert_not_awaited()
 
 
 def test_automod_schema_persists_strict_link_mode():
@@ -321,7 +364,8 @@ async def test_antiinvite_catches_repeated_discord_invites_without_spaces():
     with patch.object(panels, "envoyer", AsyncMock(return_value=fake_notice)):
         await cog.on_message(message)
     message.delete.assert_awaited_once()
-    cog._repost_censored.assert_awaited_once()
+    # Une invitation n'est jamais republiée, même censurée (NO_REPOST_FILTERS).
+    cog._repost_censored.assert_not_awaited()
 
 def test_native_antilink_patterns_fit_discord_limits_and_avoid_unsupported_lookaround():
     assert 1 <= len(automod_module.NATIVE_ANTILINK_REGEX_PATTERNS) <= 10
@@ -333,56 +377,49 @@ def test_native_antilink_patterns_fit_discord_limits_and_avoid_unsupported_looka
         assert "(?!" not in pattern
 
 
-@pytest.mark.asyncio
-async def test_native_antilink_rule_is_created_with_block_message_action():
-    db = SimpleNamespace(
-        get_automod=AsyncMock(return_value={"antilink": 1}),
-        fetchone=AsyncMock(return_value=None),
-    )
-    bot = SimpleNamespace(db=db)
-    cog = AutoMod(bot)
+# Les règles AutoMod natives de Discord ne savent pas exempter un administrateur
+# ni un rôle de staff : SentriX filtre tout localement (aceb2db) et ne fait plus
+# que RETIRER ses anciennes règles natives. Il n'en crée jamais.
 
+_BOT_ID = 4242
+
+
+def _regle(nom: str, *, createur: int = _BOT_ID):
+    return SimpleNamespace(name=nom, id=hash(nom) % 1000, creator_id=createur, delete=AsyncMock())
+
+
+def _cog_natif(regles, **db):
+    bot = SimpleNamespace(
+        user=SimpleNamespace(id=_BOT_ID),
+        db=SimpleNamespace(fetchone=AsyncMock(return_value=None), **db),
+    )
     guild = SimpleNamespace(
         id=123,
-        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
-        fetch_automod_rules=AsyncMock(return_value=[]),
+        me=SimpleNamespace(id=_BOT_ID, guild_permissions=SimpleNamespace(manage_guild=True)),
+        fetch_automod_rules=AsyncMock(return_value=regles),
         create_automod_rule=AsyncMock(),
     )
+    return AutoMod(bot), guild
 
+
+@pytest.mark.asyncio
+async def test_native_antilink_rule_is_created_with_block_message_action():
+    # Filtre actif ou non : aucune règle native n'est créée.
+    cog, guild = _cog_natif([], get_automod=AsyncMock(return_value={"antilink": 1}))
     assert await cog._sync_native_antilink_rule(guild) is True
-    guild.create_automod_rule.assert_awaited_once()
-    kwargs = guild.create_automod_rule.await_args.kwargs
-    assert kwargs["name"] == automod_module.NATIVE_ANTILINK_RULE_NAME
-    assert kwargs["event_type"] == discord.AutoModRuleEventType.message_send
-    assert kwargs["enabled"] is True
-    assert kwargs["exempt_roles"] == []
-    assert kwargs["exempt_channels"] == []
-    assert kwargs["trigger"].regex_patterns == list(automod_module.NATIVE_ANTILINK_REGEX_PATTERNS)
-    assert len(kwargs["actions"]) == 1
-    assert kwargs["actions"][0].custom_message == automod_module.NATIVE_ANTILINK_CUSTOM_MESSAGE
+    guild.create_automod_rule.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_native_antilink_rule_is_deleted_when_filter_is_off():
-    existing = SimpleNamespace(
-        name=automod_module.NATIVE_ANTILINK_RULE_NAME,
-        id=777,
-        delete=AsyncMock(),
-    )
-    db = SimpleNamespace(
-        get_automod=AsyncMock(return_value={"antilink": 0}),
-        fetchone=AsyncMock(return_value=None),
-    )
-    bot = SimpleNamespace(db=db)
-    cog = AutoMod(bot)
-    guild = SimpleNamespace(
-        id=123,
-        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
-        fetch_automod_rules=AsyncMock(return_value=[existing]),
-    )
+    ancienne = _regle(automod_module.NATIVE_ANTILINK_RULE_NAME)
+    etrangere = _regle(automod_module.NATIVE_ANTILINK_RULE_NAME, createur=1)
+    cog, guild = _cog_natif([ancienne, etrangere], get_automod=AsyncMock(return_value={"antilink": 0}))
 
     assert await cog._sync_native_antilink_rule(guild) is True
-    existing.delete.assert_awaited_once()
+    ancienne.delete.assert_awaited_once()
+    # Une règle homonyme créée par quelqu'un d'autre n'est jamais touchée.
+    etrangere.delete.assert_not_awaited()
 
 
 def test_main_enables_discord_automod_gateway_intents():
@@ -393,88 +430,44 @@ def test_main_enables_discord_automod_gateway_intents():
 
 @pytest.mark.asyncio
 async def test_native_blacklist_rule_is_created_for_blocked_words():
-    db = SimpleNamespace(
-        fetchall=AsyncMock(return_value=[{"word": "spamword"}, {"word": "autre"}]),
-        fetchone=AsyncMock(return_value=None),
-    )
-    bot = SimpleNamespace(db=db)
-    cog = AutoMod(bot)
-    guild = SimpleNamespace(
-        id=321,
-        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
-        fetch_automod_rules=AsyncMock(return_value=[]),
-        create_automod_rule=AsyncMock(),
-    )
-
+    # Les mots interdits restent filtrés localement, avec le bypass des admins.
+    cog, guild = _cog_natif([], fetchall=AsyncMock(return_value=[{"word": "spamword"}]))
     assert await cog._sync_native_blacklist_rule(guild) is True
-    guild.create_automod_rule.assert_awaited_once()
-    kwargs = guild.create_automod_rule.await_args.kwargs
-    assert kwargs["name"] == automod_module.NATIVE_BLACKLIST_RULE_NAME
-    assert kwargs["trigger"].keyword_filter == ["autre", "spamword"]
-    assert kwargs["actions"][0].custom_message == automod_module.NATIVE_BLACKLIST_CUSTOM_MESSAGE
-    assert kwargs["exempt_roles"] == []
-    assert kwargs["exempt_channels"] == []
+    guild.create_automod_rule.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_native_blacklist_rule_is_removed_when_no_words_remain():
-    existing = SimpleNamespace(
-        name=automod_module.NATIVE_BLACKLIST_RULE_NAME,
-        id=778,
-        delete=AsyncMock(),
-    )
-    db = SimpleNamespace(
-        fetchall=AsyncMock(return_value=[]),
-        fetchone=AsyncMock(return_value=None),
-    )
-    bot = SimpleNamespace(db=db)
-    cog = AutoMod(bot)
-    guild = SimpleNamespace(
-        id=321,
-        me=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
-        fetch_automod_rules=AsyncMock(return_value=[existing]),
-    )
-
+    ancienne = _regle(automod_module.NATIVE_BLACKLIST_RULE_NAME)
+    cog, guild = _cog_natif([ancienne], fetchall=AsyncMock(return_value=[]))
     assert await cog._sync_native_blacklist_rule(guild) is True
-    existing.delete.assert_awaited_once()
+    ancienne.delete.assert_awaited_once()
 
 @pytest.mark.asyncio
 async def test_native_suite_uses_real_sentrix_features_instead_of_duplicate_badge_rules():
-    db = SimpleNamespace(
-        get_automod=AsyncMock(return_value={
-            "antilink": 0,
-            "antiinvite": 1,
-            "antiscam": 1,
-            "antimention": 1,
-            "antiinsult": 1,
-        }),
-        fetchall=AsyncMock(side_effect=[
-            [],  # blacklist_words
-            [],  # blacklist_links
-        ]),
-        fetchone=AsyncMock(return_value=None),
-    )
-    bot = SimpleNamespace(db=db)
-    cog = AutoMod(bot)
+    # Nettoyage groupé : UNE lecture des règles pour tout le serveur, et seules
+    # les règles SentriX de la suite sont retirées.
+    noms = [
+        automod_module.NATIVE_ANTILINK_RULE_NAME,
+        automod_module.NATIVE_BLACKLIST_RULE_NAME,
+        automod_module.NATIVE_TARGET_LINKS_RULE_NAME,
+        automod_module.NATIVE_ANTIINVITE_RULE_NAME,
+        automod_module.NATIVE_ANTISCAM_RULE_NAME,
+        automod_module.NATIVE_ANTIMENTION_RULE_NAME,
+        automod_module.NATIVE_HARMFUL_RULE_NAME,
+    ]
+    sentrix = [_regle(nom) for nom in noms]
+    autre = _regle("Règle du staff")
+    cog, guild = _cog_natif([*sentrix, autre])
 
-    cog._sync_native_antilink_rule = AsyncMock(return_value=True)
-    cog._sync_native_blacklist_rule = AsyncMock(return_value=True)
-    cog._sync_native_target_links_rule = AsyncMock(return_value=True)
-    cog._sync_native_antiinvite_rule = AsyncMock(return_value=True)
-    cog._sync_native_antiscam_rule = AsyncMock(return_value=True)
-    cog._sync_native_antimention_rule = AsyncMock(return_value=True)
-    cog._sync_native_harmful_rule = AsyncMock(return_value=True)
+    resultat = await cog._sync_native_suite(guild)
 
-    guild = SimpleNamespace(id=123)
-    await cog._sync_native_suite(guild)
-
-    cog._sync_native_antilink_rule.assert_awaited_once_with(guild)
-    cog._sync_native_blacklist_rule.assert_awaited_once_with(guild)
-    cog._sync_native_target_links_rule.assert_awaited_once_with(guild)
-    cog._sync_native_antiinvite_rule.assert_awaited_once_with(guild)
-    cog._sync_native_antiscam_rule.assert_awaited_once_with(guild)
-    cog._sync_native_antimention_rule.assert_awaited_once_with(guild)
-    cog._sync_native_harmful_rule.assert_awaited_once_with(guild)
+    guild.fetch_automod_rules.assert_awaited_once()
+    guild.create_automod_rule.assert_not_awaited()
+    assert resultat["removed"] == len(noms)
+    for regle in sentrix:
+        regle.delete.assert_awaited_once()
+    autre.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -527,7 +520,9 @@ async def test_native_antiscam_mentions_and_harmful_follow_real_module_state():
 
     await cog._sync_native_harmful_rule(guild)
     harmful = cog._upsert_native_rule.await_args.kwargs
-    assert harmful["enabled"] is True
+    # Le preset natif bloque des phrases neutres avant la détection contextuelle :
+    # il reste désactivé, le matcher multilingue local fait le travail.
+    assert harmful["enabled"] is False
     assert harmful["trigger"].presets.profanity
     assert harmful["trigger"].presets.sexual_content
     assert harmful["trigger"].presets.slurs

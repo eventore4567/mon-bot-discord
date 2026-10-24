@@ -93,7 +93,8 @@ def _controler(libelle: str, panneau) -> list[str]:
     rendu = panels.texte_complet(panneau)
     if not rendu.startswith("## "):
         problemes.append(f"{libelle} : pas de titre de panneau")
-    if "### ● " not in rendu:
+    # Sections SentriX Core : « ### 01 · Titre » ou « ### Titre », sans puce.
+    if "\n### " not in rendu:
         problemes.append(f"{libelle} : aucune section — l'erreur n'explique rien")
     if "\n-# " not in rendu:
         problemes.append(f"{libelle} : pas de pied d'identite")

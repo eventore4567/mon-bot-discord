@@ -30,10 +30,12 @@ def _async_function(name: str) -> ast.AsyncFunctionDef:
 
 class SetupOxydeV69Tests(unittest.TestCase):
     def test_v69_is_loaded_after_v68(self):
-        self.assertIn("install_setup_oxyde_v69", INIT)
+        # V69 n'est plus installée : SentriX Setup Core (991f6b43) a pris sa
+        # place, juste après V68.
+        self.assertNotIn("install_setup_oxyde_v69", INIT)
         self.assertLess(
             INIT.index('await _run_installer("Setup simple et help V68"'),
-            INIT.index('await _run_installer("Control Center visuel V69"'),
+            INIT.index('await _run_installer("SentriX Setup Core"'),
         )
 
     def test_wide_control_center_contract(self):

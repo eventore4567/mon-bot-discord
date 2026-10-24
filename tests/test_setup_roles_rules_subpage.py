@@ -75,14 +75,16 @@ def _probe() -> dict:
 
 def test_rules_subpage_title_survives_the_full_render_chain():
     data = _probe()
-    assert data["rules_title"] == "SentriX — Rôles — Règles & CAPTCHA"
+    # Titres épurés : plus de préfixe « SentriX — », mais la sous-page garde
+    # SON titre au lieu de retomber sur le libellé nu « Rôles ».
+    assert data["rules_title"] == "Rôles — Règles & CAPTCHA"
     assert {"salon des règles", "rôle donné", "captcha", "tentatives max."} <= set(data["rules_fields"])
 
 
 def test_roles_panel_subpage_title_also_survives_the_full_render_chain():
     """Régression : le même bug de titre touchait déjà l'ancienne page panel de rôles."""
     data = _probe()
-    assert data["panel_title"] == "SentriX — Rôles — Panel de choix"
+    assert data["panel_title"] == "Rôles — Panel de choix"
 
 
 def test_v70_page_select_offers_and_routes_the_roles_rules_option():

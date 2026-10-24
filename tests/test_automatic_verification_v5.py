@@ -129,7 +129,9 @@ class AutomaticVerificationV5Tests(unittest.TestCase):
         self.assertTrue(callable(getattr(AutomaticVerificationV5, "start_human_verification", None)))
         source = Path("cogs/automatic_verification_v5.py").read_text(encoding="utf-8")
         manual = source.split("async def start_human_verification", 1)[1].split("async def evaluate_member", 1)[0]
-        self.assertIn('reason="manual-button"', manual)
+        # Les anciens boutons Discord ouvrent désormais le vérificateur web
+        # (public_verification_v120) : plus aucun défi rejoué dans Discord.
+        self.assertIn("verification_url", manual)
         self.assertNotIn("_challenges", manual)
 
 

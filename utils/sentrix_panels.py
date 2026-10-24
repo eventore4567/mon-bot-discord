@@ -908,6 +908,14 @@ def _panneau_est_erreur_simple(panneau: Any) -> bool:
         for section in getattr(panneau, "sections_source", ())
     ):
         return False
+    # Même règle pour une échéance : « Disponible · <t:…:R> » est LA réponse à
+    # « quand revenir ». Réduite au sous-titre, une récompense en attente ne
+    # disait plus que « pas encore disponible », sans dire quand.
+    if any(
+        "<t:" in (section.rendu() if hasattr(section, "rendu") else str(section))
+        for section in getattr(panneau, "sections_source", ())
+    ):
+        return False
     if getattr(panneau, "kind", "") not in {"danger", "warning"}:
         return False
     nom, _ = _commande_en_cours()

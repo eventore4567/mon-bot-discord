@@ -104,10 +104,14 @@ async def main() -> int:
     except Exception as exc:  # schéma différent : le dire plutôt que masquer
         check(False, "/embeds send : les embeds enregistrés sont proposés", repr(exc))
 
+    # /security rules a quitté le menu « / » ; les mots interdits gardent leur
+    # retrait avec suggestions.
     automod = bot.get_cog("Automod")
-    automod.whitelist_domains_cache[h.GID] = ["exemple.fr"]
-    shown = await suggest("security rules deny", "domaine", "")
-    check(("exemple.fr", "exemple.fr") in shown, "/security rules deny : les domaines autorisés sont proposés", str(shown))
+    await db.execute("INSERT INTO blacklist_words (guild_id, word) VALUES (?, ?)", (h.GID, "arnaque-test"))
+    automod.blacklist_words_cache.pop(h.GID, None)
+    shown = await suggest("security words remove", "mot", "arn")
+    check(any(value == "arnaque-test" for _, value in shown),
+          "/security words remove : les mots interdits enregistrés sont proposés", str(shown))
 
     # Un membre qui tape ne déclenche rien d'autre qu'une liste (aucun message, aucune action).
     since = len(h.CALLS)

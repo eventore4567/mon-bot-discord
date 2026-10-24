@@ -14,7 +14,10 @@ def test_new_setup_is_real_runtime_owner():
     assert "install_setup_control_center" in init_source
     assert 'bot._sentrix_setup_owner = "cogs.setup_control_center"' in setup_source
     assert '@commands.command(name="setup"' in setup_source  # description ajoutée depuis
-    assert '@app_commands.command(name="setup"' in setup_source
+    # Le slash /setup est publié UNE fois, par sentrix_v97_reliability (f5bac28f),
+    # et ouvre ce même centre : pas de second /setup concurrent ici.
+    assert '@app_commands.command(name="setup"' not in setup_source
+    assert 'name="setup",' in _source("sentrix_v97_reliability.py")
 
 
 def test_setup_has_requested_categories_and_states():

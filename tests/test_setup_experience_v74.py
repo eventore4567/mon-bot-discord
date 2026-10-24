@@ -32,12 +32,15 @@ class SetupExperienceV74Tests(unittest.TestCase):
 
     def test_tickets_have_quick_and_full_configuration(self):
         source = V74_PATH.read_text(encoding="utf-8")
-        self.assertIn("ensure_ticket_configuration", source)
+        # Plus de création automatique des tickets (acf87496) : V74 vérifie
+        # que la configuration est prête au lieu de la fabriquer d'office.
+        self.assertNotIn("ensure_ticket_configuration", source)
+        self.assertIn("ticket_configuration_ready", source)
         self.assertIn("TicketSetupHubView", source)
-        self.assertIn("Configuration rapide / réparer", source)
+        self.assertIn("Configuration complète des tickets", source)
         self.assertIn("Tout personnaliser", source)
         self.assertIn("25 options par panel", source)
-        self.assertIn("interaction.user.add_roles", source)
+        self.assertIn(".add_roles(", source)
 
     def test_moderation_role_is_clear_and_sanction_badges_are_real(self):
         source = V74_PATH.read_text(encoding="utf-8")
@@ -54,7 +57,7 @@ class SetupExperienceV74Tests(unittest.TestCase):
     def test_v74_is_installed_after_v73(self):
         source = INIT_PATH.read_text(encoding="utf-8")
         self.assertIn("install_setup_experience_v74", source)
-        v73 = source.index('"Control Center Components V2 V73"')
+        v73 = source.index('"SentriX Setup Components V2 V73"')
         v74 = source.index('"Setup Experience V74"')
         finalized = source.index("bot._sentrix_runtime_finalized_clean = True")
         self.assertLess(v73, v74)

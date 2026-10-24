@@ -25,7 +25,8 @@ def test_link_notice_is_a_compact_colored_native_v2_card():
     assert len(view.children) == 1
     container = view.children[0]
     assert isinstance(container, discord.ui.Container)
-    assert container.accent_colour is not None
+    # Plus de liseré coloré sur le côté (7aea328, demande du 22/10/2026).
+    assert container.accent_colour is None
     assert len(container.children) == 1
     text = container.children[0]
     assert isinstance(text, discord.ui.TextDisplay)

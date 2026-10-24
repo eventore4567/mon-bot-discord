@@ -39,7 +39,11 @@ async def test_translation_failure_replaces_waiting_message():
 
 @pytest.mark.asyncio
 async def test_playlist_destination_is_checked_before_network_resolution():
-    bot = commands.Bot(command_prefix="+", intents=discord.Intents.none(), help_command=None)
+    # La classe d'origine : railway_boot remplace commands.Bot par un bot sharded
+    # dès qu'un autre test l'importe, et ce faux bot non connecté plantait à close().
+    from discord.ext.commands.bot import Bot as BotOrigine
+
+    bot = BotOrigine(command_prefix="+", intents=discord.Intents.none(), help_command=None)
     bot.db = SimpleNamespace(fetchone=AsyncMock(return_value=None))
     async def root(ctx):
         pass

@@ -20,7 +20,7 @@ def test_security_protections_are_individually_selectable():
 def test_command_permissions_are_not_manual_security_options():
     assert "Les permissions **Kick, Ban, Timeout" in SOURCE
     assert "permissions Discord réelles" in SOURCE
-    assert "Aucun rôle `kick`, `ban` ou autre n'est à configurer" in SOURCE
+    assert "Aucun rôle `kick`, `ban` ou autre n'est créé par ce panneau" in SOURCE
 
 
 def test_module_state_tracks_selected_protections():

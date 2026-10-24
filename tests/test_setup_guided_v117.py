@@ -23,7 +23,8 @@ def test_v117_removes_intermediate_and_external_command_language():
     assert "assistant dédié" not in source.lower()
     assert "lance **`+" not in source.lower()
     assert "hint:+" not in source
-    assert "Que veux-tu configurer ?" in source
+    # Le bot vouvoie partout (test_registre_editorial) : plus de « Que veux-tu ».
+    assert "Que veux-tu" not in source
     assert "Étape **" in source
     assert 'label="Précédent"' in source
     assert 'label="Suivant"' in source
@@ -95,7 +96,7 @@ def test_v117_is_kept_in_repo_but_not_installed_as_public_setup():
     assert "install_setup_v116(bot)" in prepare
     assert "install_setup_v117" not in prepare
     assert "configuration-v116" in source
-    assert "moteur unique" in source
+    assert "n'est plus installée au runtime" in source
 
 
 def test_v117_does_not_reintroduce_visual_bars_or_technical_status_blocks():

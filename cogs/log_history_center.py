@@ -454,7 +454,7 @@ class MemberHistoryView(discord.ui.LayoutView):
                 ))
             else:
                 body.add_item(discord.ui.TextDisplay(
-                    "Statut indisponible. Essaie /config accueil → Surveillance."
+                    "Statut indisponible. Essayez /config accueil → Surveillance."
                 ))
 
         if self.tab != "settings" and not records:

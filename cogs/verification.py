@@ -540,10 +540,20 @@ class Verification(commands.Cog, name="Verification"):
 
             # Le rôle Non vérifié et un ancien rôle final renforcé ne doivent jamais
             # rester en même temps que le rôle final choisi dans +setup.
-            security_row = await self.bot.db.fetchone(
-                "SELECT unverified_role_id,verified_role_id FROM honeypot_verification WHERE guild_id=?",
-                (interaction.guild.id,),
-            )
+            # Nettoyage facultatif : la table n'existe que si la vérification
+            # renforcée (honeypot) a été chargée. Son absence ne doit pas faire
+            # échouer une vérification dont le rôle vient d'être donné.
+            try:
+                security_row = await self.bot.db.fetchone(
+                    "SELECT unverified_role_id,verified_role_id FROM honeypot_verification WHERE guild_id=?",
+                    (interaction.guild.id,),
+                )
+            except Exception:
+                logger.warning(
+                    "Rôles de vérification renforcée illisibles guild=%s : nettoyage ignoré.",
+                    interaction.guild.id, exc_info=True,
+                )
+                security_row = None
             roles_to_remove = []
             if security_row:
                 unverified = interaction.guild.get_role(int(security_row["unverified_role_id"] or 0))

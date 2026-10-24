@@ -47,7 +47,16 @@ def test_le_reste_du_bot_reste_sobre():
     jeton = _contexte_de_jeu("ban", "Moderation")
     try:
         assert commande_de_jeu() is False
-        assert "🔨" not in embeds.strip_emojis("🔨 Membre banni")
+        # Hors jeu, la règle générale s'applique : avec EMOJIS_VISIBLES (choix
+        # du 22/10/2026) les emojis restent, sinon ils sont retirés.
+        attendu = "🔨 Membre banni" if embeds.EMOJIS_VISIBLES else "Membre banni"
+        assert embeds.strip_emojis("🔨 Membre banni") == attendu
+        ancien = embeds.EMOJIS_VISIBLES
+        embeds.EMOJIS_VISIBLES = False
+        try:
+            assert "🔨" not in embeds.strip_emojis("🔨 Membre banni")
+        finally:
+            embeds.EMOJIS_VISIBLES = ancien
     finally:
         policy._COMMAND_CONTEXT.reset(jeton)
     assert commande_de_jeu() is False  # hors commande

@@ -16,7 +16,9 @@ def test_social_notification_uses_components_v2_without_embed_or_accent_bar():
 
 
 def test_social_monitor_does_not_send_the_old_embed_card():
-    source = inspect.getsource(notifications.Notifications._check_subscription)
+    # L'envoi vit dans _send_social_event, appelé par _check_subscription.
+    assert "_send_social_event(" in inspect.getsource(notifications.Notifications._check_subscription)
+    source = inspect.getsource(notifications.Notifications._send_social_event)
     assert "embed=notification" not in source
     assert "SocialNotificationPanel(" in source
     assert "delete_after=5" in source
@@ -38,6 +40,9 @@ def test_thumbnail_prefers_configured_media_but_falls_back_to_real_item_thumbnai
 
 
 def test_new_social_item_is_enriched_before_rendering():
-    source = inspect.getsource(notifications.Notifications._check_subscription)
+    # L'enrichissement vit dans _item_event, appelé avant l'envoi.
+    check = inspect.getsource(notifications.Notifications._check_subscription)
+    assert check.index("_item_event(") < check.index("_send_social_event(")
+    source = inspect.getsource(notifications.Notifications._item_event)
     assert "_extract_details(link)" in source
-    assert "_best_thumbnail(item, row[\"image_url\"])" in source
+    assert "_best_thumbnail(" in source and 'row["image_url"]' in source

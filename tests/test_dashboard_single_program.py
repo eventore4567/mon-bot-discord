@@ -99,15 +99,21 @@ def test_navigation_is_short_and_grouped():
     assert re.findall(r"\['([^']+)', \[\[", global_nav) == ["Mon espace"]
 
     pages = re.findall(r"\['([a-z]+)', '", server_nav)
+    # Refonte 2026-09 : groupes Administration et Assistant SentriX ajoutés.
     assert pages == [
         "overview", "welcome", "roles", "levels", "economy", "moderation", "security",
-        "logs", "tickets", "games", "music", "notifications", "automation", "embeds", "ai",
+        "logs", "tickets", "access", "settings", "backups", "games", "music",
+        "notifications", "automation", "embeds", "ai", "diagnostic", "onboarding", "feedback",
     ]
     groups = re.findall(r"\['([^']+)', \[\[", server_nav)
     assert groups == [
-        "Accueil", "Communauté", "Progression", "Modération", "Jeux", "Musique",
-        "Automatisation", "Création & personnalisation",
+        "Accueil", "Communauté", "Progression", "Modération", "Administration", "Jeux",
+        "Musique", "Automatisation", "Création & personnalisation", "Assistant SentriX",
     ]
+    # Chaque page de la navigation a son titre et sa description.
+    meta = re.search(r"const META = \{(.*?)\n\};", program, re.S).group(1)
+    for page in pages:
+        assert re.search(rf"\b{page}: \[", meta), page
 
     tools = re.search(r"const TOOL_GROUPS = \[(.*?)\n\];", program, re.S).group(1)
     assert len(re.findall(r"\['([a-z]+)', '", tools)) <= 10

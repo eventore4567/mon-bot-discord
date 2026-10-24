@@ -549,9 +549,9 @@ class Invites(commands.Cog, name="Invites"):
                 ctx,
                 panels.depuis_embed(
                     embeds.error(
-                        "Il te faut la permission **Gérer le serveur** (ou le rôle staff "
+                        "Il vous faut la permission **Gérer le serveur** (ou le rôle staff "
                         "configuré dans Setup) pour consulter l'historique d'invitations "
-                        "de quelqu'un d'autre. Sans argument, tu vois le tien."
+                        "de quelqu'un d'autre. Sans argument, vous voyez le vôtre."
                     )
                 ),
             )

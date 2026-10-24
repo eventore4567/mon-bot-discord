@@ -128,7 +128,10 @@ async def main() -> int:
     check(re.search(r"A=<t:\d+:D>", text) and re.search(r"J=<t:\d+:D>", text) and "{" not in text,
           "{created_at} et {joined_at} deviennent des dates Discord", text[:300])
     allowed = (sent[0].get("allowed_mentions") or {}) if sent else {}
-    check(str(uid) in [str(u) for u in allowed.get("users", [])], "le membre accueilli est notifié", str(allowed))
+    # Aucun ping sans activation explicite (885c1ec3) : la mention reste
+    # visible mais ne notifie personne tant que l'option « ping » est coupée.
+    check(str(uid) not in [str(u) for u in allowed.get("users", [])],
+          "sans réglage, le membre accueilli n'est pas notifié", str(allowed))
     check(role_puts(since, uid) == [h.MEMBER_ROLE_ID], "le rôle d'arrivée historique est toujours donné",
           str(role_puts(since, uid)))
     check(not posts(since, DM_CHANNEL), "pas de message privé tant que l'option est coupée")
@@ -192,6 +195,7 @@ async def main() -> int:
 
     # 5 — Option « mp » par la vraie modale : copie privée de la bienvenue.
     presentation = await completion._welcome_presentation(bot, h.GID)
+    ping_avant = presentation["ping"]
     modal = completion.WelcomeSettingsModal(view.backend, conf=await bot.db.get_guild_config(h.GID), presentation=presentation)
     check("mp=off" in modal.options_input.default, "la modale affiche l'option mp", modal.options_input.default)
     modal.options_input._value = modal.options_input.default.replace("mp=off", "mp=on")
@@ -199,7 +203,7 @@ async def main() -> int:
         field._value = field.default
     await modal.on_submit(admin_interaction(bot))
     check((await completion._welcome_presentation(bot, h.GID))["dm"] is True, "mp=on est enregistré")
-    check((await completion._welcome_presentation(bot, h.GID))["ping"] is True, "le ping n'est pas écrasé au passage")
+    check((await completion._welcome_presentation(bot, h.GID))["ping"] is ping_avant, "le ping n'est pas écrasé au passage")
 
     uid, since = await join(bot, "prive")
     check(len(posts(since, h.CID)) == 1 and len(posts(since, DM_CHANNEL)) == 1,

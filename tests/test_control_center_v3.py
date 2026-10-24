@@ -98,8 +98,8 @@ def test_final_runtime_installs_v3_after_official_help_and_then_language():
     assert "install_control_center_v3" in source
     assert "install_control_center_v3_language" in source
     help_pos = source.index("await _load_official_help(bot)")
-    control_pos = source.index('await _run_installer("Control Center V3"', help_pos)
-    language_pos = source.index('await _run_installer("langue Control Center V3"', control_pos)
+    control_pos = source.index('await _run_installer("Setup V3"', help_pos)
+    language_pos = source.index('await _run_installer("langue Setup V3"', control_pos)
     assert help_pos < control_pos < language_pos
 
 

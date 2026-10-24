@@ -146,7 +146,7 @@ def _role_ref(role_id: int) -> str:
 #: disant, plutôt que de laisser l'API refuser la carte entière. La marge
 #: couvre la mention de fin (« N autre(s) cible(s) modifiée(s) »).
 _BUDGET_PERMS = 900
-_MAX_PERMS_PAR_CIBLE = 8
+_MAX_PERMS_PAR_CIBLE = 10
 
 
 def _est_categorie(salon) -> bool:
@@ -236,35 +236,60 @@ def _diff_derogations(avant, apres) -> list[tuple[object, list[str], list[str], 
     return change
 
 
+#: Une ligne par permission, dans un bloc `diff` : Discord colore en vert les
+#: lignes « + » et en rouge les lignes « - ». Sur mobile, où la coloration
+#: n'existe pas, le mot d'état aligné en fin de ligne garde la lecture claire.
+_ETATS_DEROGATION = (
+    ("+", "autorisée"),
+    ("-", "refusée"),
+    (" ", "par défaut"),
+)
+
+
+def _bloc_derogation(cible, autorises, refuses, neutres) -> str:
+    """Une cible : sa mention, puis ses permissions une par une dans un cadre."""
+    entrees = [
+        (signe, etat, libelle)
+        for (signe, etat), valeurs in zip(_ETATS_DEROGATION, (autorises, refuses, neutres))
+        for libelle in valeurs
+    ]
+    visibles = entrees[:_MAX_PERMS_PAR_CIBLE]
+    largeur = max(len(libelle) for _, _, libelle in visibles)
+    lignes = [
+        f"{signe} {libelle.replace('`', '').ljust(largeur)}  {etat}"
+        for signe, etat, libelle in visibles
+    ]
+    reste = len(entrees) - len(visibles)
+    if reste:
+        lignes.append(f"  … et {reste} autre(s)")
+    total = len(entrees)
+    entete = f"{_nom_derogation(cible)} · {total} permission{'s' if total > 1 else ''}"
+    return entete + "\n```diff\n" + "\n".join(lignes) + "\n```"
+
+
 def _texte_derogations(change) -> str:
-    """Rend le diff en lignes lisibles, en restant dans le budget de Discord.
+    """Rend le diff en blocs lisibles, en restant dans le budget de Discord.
 
     Le budget est tenu en caractères, pas en nombre de cibles : six rôles aux
     libellés longs dépassaient les 1024 caractères d'un champ et la coupe
     tombait au milieu d'un mot. Ce qui ne rentre pas est compté, jamais perdu
-    en silence.
+    en silence. Un bloc n'est jamais coupé : couper au milieu d'un ```diff
+    casserait tout le Markdown de la carte.
     """
     lignes: list[str] = []
     budget = _BUDGET_PERMS
     for rang, (cible, autorises, refuses, neutres) in enumerate(change):
-        morceaux = []
-        for prefixe, valeurs in (("✅", autorises), ("❌", refuses), ("⬜", neutres)):
-            if not valeurs:
-                continue
-            visibles = valeurs[:_MAX_PERMS_PAR_CIBLE]
-            reste = len(valeurs) - len(visibles)
-            morceaux.append(f"{prefixe} " + ", ".join(visibles) + (f" (+{reste})" if reste else ""))
-        bloc = f"{_nom_derogation(cible)}\n" + "\n".join(morceaux)
+        bloc = _bloc_derogation(cible, autorises, refuses, neutres)
         # Toujours garder la première cible : une carte qui ne nomme personne
         # ne vaudrait rien, même si son bloc dépasse à lui seul le budget.
-        if rang and len(bloc) + 2 > budget:
+        if rang and len(bloc) + 1 > budget:
             break
-        budget -= len(bloc) + 2
+        budget -= len(bloc) + 1
         lignes.append(bloc)
-    texte = "\n\n".join(lignes)
+    texte = "\n".join(lignes)
     reste_cibles = len(change) - len(lignes)
     if reste_cibles > 0:
-        texte += f"\n\n*{reste_cibles} autre(s) cible(s) modifiée(s).*"
+        texte += f"\n*{reste_cibles} autre(s) cible(s) modifiée(s).*"
     return texte
 
 

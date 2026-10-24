@@ -74,6 +74,25 @@ def _make_cog(*, case_number=9):
     return cog
 
 
+def _texte_envoye(kwargs) -> str:
+    """Le texte d'un envoi, en texte brut ou en carte courte (CARTES_COURTES)."""
+    import discord
+
+    morceaux = [str(kwargs.get("content") or "")]
+    embed = kwargs.get("embed")
+    if embed is not None:
+        morceaux.append(str(embed.description or ""))
+    pile = [kwargs.get("view")]
+    while pile:
+        element = pile.pop()
+        if element is None:
+            continue
+        if isinstance(element, discord.ui.TextDisplay):
+            morceaux.append(element.content)
+        pile.extend(getattr(element, "children", []) or [])
+    return "\n".join(m for m in morceaux if m)
+
+
 class MuteCogWiringTests(unittest.IsolatedAsyncioTestCase):
     async def test_mute_reussi_appelle_le_service_et_confirme_en_une_ligne(self):
         cog = _make_cog(case_number=9)
@@ -104,7 +123,7 @@ class MuteCogWiringTests(unittest.IsolatedAsyncioTestCase):
 
         target.timeout.assert_not_awaited()
         ctx.send.assert_awaited()
-        self.assertIn("28 jours", ctx.send.await_args.kwargs.get("content"))
+        self.assertIn("28 jours", _texte_envoye(ctx.send.await_args.kwargs))
 
     async def test_echec_de_persistance_n_empeche_pas_la_confirmation_de_succes(self):
         cog = _make_cog()

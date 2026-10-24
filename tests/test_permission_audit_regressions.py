@@ -73,7 +73,7 @@ def test_local_permission_checks_let_the_verified_bot_owner_through():
     try:
         asyncio.run(predicate(member_ctx))
     except checks.BotPermissionError as exc:
-        assert "Gérer le serveur" in str(exc) and "Il te faut la permission" in str(exc)
+        assert "Gérer le serveur" in str(exc) and "Il vous faut la permission" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("un membre sans permission doit être refusé")
 

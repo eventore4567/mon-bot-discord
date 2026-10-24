@@ -58,9 +58,14 @@ async def _close_runtime(bot) -> None:
 #   on_member_join         a chaque arrivee
 #   on_member_remove       a chaque depart
 #   on_command_completion  a chaque commande terminee
+# Relevés le 24/10/2026 pour des fonctions ajoutées depuis : snipe (message,
+# suppression, suppression brute), suite staff (message, suppression), règles de
+# salon, preuves, logs unifiés V6 (suppression) et leurs démarrages. Prochaine
+# étape : fusionner les doublons (deux répondeurs IA, plusieurs logs de
+# suppression) plutôt que relever encore.
 BUDGETS: dict[str, int] = {
-    "on_message": 20,
-    "on_ready": 32,
+    "on_message": 24,
+    "on_ready": 38,
     "on_member_join": 17,
     "on_command_completion": 14,
     "on_member_remove": 8,
@@ -68,8 +73,8 @@ BUDGETS: dict[str, int] = {
     "on_guild_join": 9,
     "on_guild_role_update": 6,
     "on_guild_channel_create": 6,
-    "on_message_delete": 2,
-    "on_raw_message_delete": 2,
+    "on_message_delete": 4,
+    "on_raw_message_delete": 3,
 }
 
 

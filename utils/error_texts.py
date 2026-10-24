@@ -51,7 +51,7 @@ def permission_labels(permissions) -> str:
 def missing_permissions_text(permissions) -> str:
     labels = permission_labels(permissions)
     mot = "la permission" if len(list(permissions or ())) <= 1 else "les permissions"
-    return f"Il te faut {mot} **{labels}** pour utiliser cette commande."
+    return f"Il vous faut {mot} **{labels}** pour utiliser cette commande."
 
 
 def bot_missing_permissions_text(permissions) -> str:
@@ -160,7 +160,7 @@ def user_error_text(error: BaseException, *, usage: str | None = None, param_nam
         return bot_missing_permissions_text(error.missing_permissions)
     if isinstance(error, (commands.MissingRole, commands.MissingAnyRole)):
         roles = getattr(error, "missing_roles", None) or [getattr(error, "missing_role", "")]
-        return "Il te faut le rôle **" + "** ou **".join(str(r) for r in roles) + "** pour utiliser cette commande."
+        return "Il vous faut le rôle **" + "** ou **".join(str(r) for r in roles) + "** pour utiliser cette commande."
     if isinstance(error, (commands.BotMissingRole, commands.BotMissingAnyRole)):
         return "Il manque à SentriX un rôle requis pour effectuer cette action."
     if isinstance(error, commands.NoPrivateMessage):

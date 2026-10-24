@@ -128,7 +128,9 @@ def test_les_echecs_de_transport_restent_en_erreur():
     source = _source("utils/wide_logs.py")
     assert "logger.error(\n            \"SXTRACE 6 TRANSPORT phase=abort" in source or \
            source.count("logger.error(") >= 4, "les chemins d'échec du transport doivent rester en ERROR"
-    assert "SENTRIX LOG V2 FAILED" in source
+    # Le renderer s'appelle désormais « SentriX Trace » : le marqueur d'échec a
+    # suivi le renommage, il est toujours journalisé en ERROR.
+    assert 'logger.error("SENTRIX TRACE FAILED' in source or 'logger.error(\n            "SENTRIX TRACE FAILED' in source
 
 
 def test_le_filtre_est_installe_au_demarrage():

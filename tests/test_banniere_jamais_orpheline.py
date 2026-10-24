@@ -86,15 +86,21 @@ def bandeaux_actifs(monkeypatch):
     yield
 
 
-def test_par_defaut_aucun_bandeau_et_aucune_piece_jointe():
-    """L'état du produit : les deux absents, ENSEMBLE.
+def _url_de_la_galerie(galerie) -> str:
+    return galerie.to_component_dict()["items"][0]["media"]["url"]
+
+
+def test_par_defaut_aucun_bandeau_et_aucune_piece_jointe(monkeypatch):
+    """Bandeaux coupés : les deux absents, ENSEMBLE.
 
     C'est ce couplage qui compte, pas l'absence elle-même. Retirer la galerie
     sans la pièce jointe serait sans effet ; retirer la pièce jointe sans la
     galerie ferait REFUSER le message entier par Discord.
     """
     from cogs import setup_components_v73 as v73
+    from utils import sentrix_panels
 
+    monkeypatch.setattr(sentrix_panels, "BANDEAUX_ACTIFS", False)
     assert v73.banniere_disponible() is False
     assert v73.entete_banniere() is None
     assert v73.pieces_jointes_banniere() == []
@@ -105,38 +111,46 @@ def test_par_defaut_aucun_bandeau_et_aucune_piece_jointe():
     assert conteneur.items == []
 
 
+def test_par_defaut_la_bande_fine_et_sa_piece_jointe():
+    """L'état du produit depuis le 22/10/2026 (7aea328) : la bande fine
+    partout, donc galerie ET pièce jointe, ensemble."""
+    from cogs import setup_components_v73 as v73
+
+    assert v73.banniere_disponible() is True
+    assert v73.entete_banniere() is not None
+    assert "file" in v73.joindre_banniere({"view": object()})
+
+
 def test_une_banniere_absente_est_regeneree(bandeaux_actifs, tmp_path, monkeypatch):
-    """Sur Railway le dossier est VIDE après un déploiement : ``.gitignore``
-    ignore ``banner_*.webp``, donc aucune bannière n'est versionnée.
+    """Sur Railway le dossier est VIDE après un déploiement : la bande n'est
+    pas versionnée.
 
     Un simple test d'existence aurait répondu « non » au premier /setup et
     l'écran serait parti sans bandeau — valide, mais nu. C'est la plainte
     « plein de trucs n'ont pas de bannière »."""
     from cogs import setup_components_v73 as v73
-    from utils import log_banners
+    from utils import premium_log_banners
 
-    monkeypatch.setattr(log_banners, "BANNER_DIR", tmp_path)
-    monkeypatch.setattr(log_banners, "_READY", True)  # le cache mentirait
+    monkeypatch.setattr(premium_log_banners, "BANNER_DIR", tmp_path)
 
     assert list(tmp_path.iterdir()) == []
     assert v73.banniere_disponible() is True, "la bannière manquante n'a pas été générée"
-    assert (tmp_path / log_banners.nom_fichier(v73.BANNIERE)).exists()
+    assert (tmp_path / premium_log_banners.BANNER_FILENAME).exists()
     assert v73.entete_banniere() is not None
     assert "file" in v73.joindre_banniere({"view": object()})
 
 
-def test_si_la_generation_echoue_ni_galerie_ni_piece_jointe(tmp_path, monkeypatch):
+def test_si_la_generation_echoue_ni_galerie_ni_piece_jointe(bandeaux_actifs, monkeypatch):
     """Le cas qui faisait refuser le message ENTIER. Quand la bannière est
     hors d'atteinte, la galerie et la pièce jointe doivent disparaître
     ENSEMBLE — l'écran perd son bandeau mais reste affichable."""
     from cogs import setup_components_v73 as v73
-    from utils import log_banners
+    from utils import premium_log_banners
 
-    def _generation_impossible(force=False):
+    def _generation_impossible(*_args, **_kwargs):
         raise OSError("disque en lecture seule")
 
-    monkeypatch.setattr(log_banners, "BANNER_DIR", tmp_path)
-    monkeypatch.setattr(log_banners, "ensure_banners", _generation_impossible)
+    monkeypatch.setattr(premium_log_banners, "get_premium_log_banner", _generation_impossible)
 
     assert v73.banniere_disponible() is False
     assert v73.entete_banniere() is None
@@ -157,11 +171,10 @@ def test_avec_fichier_les_deux_sont_la(bandeaux_actifs):
 
 def test_le_nom_joint_est_celui_que_la_galerie_reference(bandeaux_actifs):
     """Une divergence de nom produit la même erreur Discord qu'une absence."""
-    from cogs.setup_components_v73 import BANNIERE, joindre_banniere
-    from utils.log_banners import nom_fichier
+    from cogs.setup_components_v73 import entete_banniere, joindre_banniere
 
     fichier = joindre_banniere({"view": object()})["file"]
-    assert fichier.filename == nom_fichier(BANNIERE)
+    assert _url_de_la_galerie(entete_banniere()) == f"attachment://{fichier.filename}"
 
 
 def test_chaque_appel_rend_un_fichier_neuf(bandeaux_actifs):

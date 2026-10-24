@@ -39,6 +39,8 @@ def test_banner_flag_cannot_restore_global_decorations(monkeypatch):
         generated = True
         raise AssertionError("aucune bannière ne doit être générée")
 
+    from utils.premium_log_banners import BANNER_FILENAME
+
     monkeypatch.setattr(panels, "ensure_banners", forbidden_generation)
     for requested in (None, False, True):
         panel = panels.Panneau(
@@ -46,19 +48,37 @@ def test_banner_flag_cannot_restore_global_decorations(monkeypatch):
             sections=[panels.Section("Résumé", texte="Information utile")],
             banniere=requested,
         )
-        assert panel.fichiers() == []
-        assert not any(item.get("type") == 12 for item in _flat_components(panel))
+        # Seule décoration possible : la bande fine neutre (7aea328), jamais
+        # une ancienne bannière par domaine, jamais un liseré coloré.
+        fichiers = panel.fichiers()
+        assert [f.filename for f in fichiers] in ([], [BANNER_FILENAME])
+        for f in fichiers:
+            f.close()
+        galeries = [item for item in _flat_components(panel) if item.get("type") == 12]
+        assert all(g["items"][0]["media"]["url"] == f"attachment://{BANNER_FILENAME}" for g in galeries)
         assert panel.to_components()[0].get("accent_color") is None
     assert generated is False
+
+    # Bandeaux coupés : rien du tout, même sur demande.
+    monkeypatch.setattr(panels, "BANDEAUX_ACTIFS", False)
+    panel = panels.Panneau(titre="Fiche membre", sections=[panels.Section("Résumé", texte="x")], banniere=True)
+    assert panel.fichiers() == []
+    assert not any(item.get("type") == 12 for item in _flat_components(panel))
 
 
 def test_semantic_media_stays_visible_without_banner():
     url = "https://cdn.discordapp.com/attachments/1/2/preuve.png?ex=abc&is=def"
+    from utils.premium_log_banners import BANNER_FILENAME
+
     panel = panels.Panneau(titre="Preuve", image=url, banniere=True)
     galleries = [item for item in _flat_components(panel) if item.get("type") == 12]
-    assert len(galleries) == 1
-    assert galleries[0]["items"][0]["media"]["url"] == url
-    assert panel.fichiers() == []
+    images = [g for g in galleries if g["items"][0]["media"]["url"] == url]
+    assert len(images) == 1, "l'image de la preuve doit rester visible"
+    # La bande fine peut s'ajouter, mais l'image distante n'est jamais rapatriée.
+    fichiers = panel.fichiers()
+    assert [f.filename for f in fichiers] in ([], [BANNER_FILENAME])
+    for f in fichiers:
+        f.close()
 
 
 def test_staff_suite_is_loaded_before_visual_finalizer_and_classified():
@@ -68,7 +88,7 @@ def test_staff_suite_is_loaded_before_visual_finalizer_and_classified():
     expected = {
         "member": "discord:moderate_members",
         "note": "discord:moderate_members",
-        "history": "discord:moderate_members",
+        "staff-history": "discord:moderate_members",
         "staff-proof": "discord:moderate_members",
         "incident": "discord:moderate_members",
         "watch": "discord:moderate_members",
