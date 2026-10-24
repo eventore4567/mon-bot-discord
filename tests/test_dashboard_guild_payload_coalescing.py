@@ -47,6 +47,9 @@ def _guild(guild_id: int) -> Mock:
     guild.member_count = 10
     guild.roles = []
     guild.channels = []
+    # Le payload liste aussi les emojis et stickers du serveur.
+    guild.emojis = []
+    guild.stickers = []
     return guild
 
 
@@ -63,6 +66,22 @@ async def _corps(reponse) -> dict:
 
 def _reinitialiser() -> None:
     dashboard._guild_payload_inflight.clear()
+
+
+async def _lectures_pour_un_calcul(guild) -> int:
+    """Nombre de fetchall d'un calcul de payload seul (le contenu peut évoluer)."""
+    _reinitialiser()
+    db = _db()
+
+    async def manageable(_request, _guild_id):
+        return {"user": {"id": "1"}}, guild, None
+
+    with patch.object(dashboard, "_manageable_guild", side_effect=manageable):
+        bot = Mock()
+        bot.db = db
+        await dashboard.handle_guild(_requete(bot, guild.id))
+    _reinitialiser()
+    return db.fetchall.call_count
 
 
 async def _les_appels_concurrents_ne_font_qu_un_seul_calcul():
@@ -82,7 +101,8 @@ async def _les_appels_concurrents_ne_font_qu_un_seul_calcul():
             f"12 requêtes concurrentes pour le même serveur doivent tenir sur un seul "
             f"accès SQL, pas {db.get_guild_config.call_count}"
         )
-        assert db.fetchall.call_count == 1
+        # Autant de lectures que pour UN calcul isolé, pas douze fois plus.
+        assert db.fetchall.call_count == await _lectures_pour_un_calcul(guild)
         for reponse in reponses:
             corps = await _corps(reponse)
             assert corps["guild"]["id"] == "1"

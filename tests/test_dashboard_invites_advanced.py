@@ -94,5 +94,9 @@ def test_invite_command_suite_is_expanded_without_destructive_reset():
         '"resync-invites"',
     ):
         assert marker in INVITES_COG
-    assert 'name="reset-invites"' not in INVITES_COG
     assert 'name="purge-invites"' not in INVITES_COG
+    # La remise à zéro existe (catalogue, matrice d'accès, rétention), mais
+    # jamais sans garde-fous : administrateurs seulement, double confirmation.
+    reset = INVITES_COG.split('name="reset-invites"', 1)[1].split("@commands.hybrid_command", 1)[0]
+    assert "is_owner_or_admin_for" in reset
+    assert "double_confirm_destructive" in reset

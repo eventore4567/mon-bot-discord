@@ -12,17 +12,20 @@ os.environ.setdefault("DISCORD_TOKEN", "x")
 
 from web import dashboard  # noqa: E402
 from web import dashboard_oxyde_hotfix  # noqa: E402
+# Le document réellement servi : web.dashboard_frontend_freeze_v55 pose au
+# démarrage le programme unifié assemblé depuis web/dashboard_ui.
+from web.dashboard_unified_v2 import INDEX_HTML as DOCUMENT_SERVI  # noqa: E402
 
 
 def test_landing_est_masquee_par_defaut():
-    html = dashboard.INDEX_HTML
+    html = DOCUMENT_SERVI
     assert 'class="landing hidden" id="landing"' in html, (
         "#landing doit être masquée dans le HTML reçu ; elle n'est révélée qu'après un 401"
     )
 
 
 def test_selectGuild_annule_la_requete_obsolete():
-    html = dashboard.INDEX_HTML
+    html = DOCUMENT_SERVI
     assert "state.guildAbort" in html
     assert "new AbortController()" in html
     assert "if (state.guildAbort) state.guildAbort.abort();" in html
@@ -31,7 +34,7 @@ def test_selectGuild_annule_la_requete_obsolete():
 
 
 def test_selectGuild_distingue_les_etats_d_erreur():
-    html = dashboard.INDEX_HTML
+    html = DOCUMENT_SERVI
     assert "e.status === 503" in html
     assert "Reconnexion Discord en cours" in html
     assert "e.status === 401" in html
@@ -39,7 +42,7 @@ def test_selectGuild_distingue_les_etats_d_erreur():
 
 
 def test_navigation_invalide_retombe_sur_le_bon_contexte():
-    html = dashboard.INDEX_HTML
+    html = DOCUMENT_SERVI
     assert "state.page = META[page] ? page : 'profile';" in html, (
         "au boot, un onglet inconnu doit retomber sur Mon profil"
     )
@@ -49,7 +52,7 @@ def test_navigation_invalide_retombe_sur_le_bon_contexte():
 
 
 def test_api_conserve_le_code_http_et_le_payload_de_l_erreur():
-    html = dashboard.INDEX_HTML
+    html = DOCUMENT_SERVI
     assert "Object.assign(new Error" in html
     assert "upstreamStatus: r.status" in html
     assert "data });" in html
@@ -81,7 +84,7 @@ def test_core_recovery_js_n_appelle_plus_loadGuilds():
 
 
 def test_health_watch_ne_confond_pas_standby_ha_et_panne_dashboard():
-    html = dashboard.INDEX_HTML
+    html = DOCUMENT_SERVI
     assert "await api('/health', { background: true });" in html
     assert "await api('/ready', { background: true });" not in html
     assert "dashboardHealthFailures >= 3" in html
