@@ -147,7 +147,10 @@ def test_les_fichiers_de_l_appelant_cohabitent_avec_la_banniere(bandeaux_actifs)
     fichier = discord.File(_io.BytesIO(b"x"), filename="transcription.txt")
     asyncio.run(panels.envoyer(cible, _panneau(), files=[fichier]))
     noms = [f.filename for f in cible.appels[0][1]["files"]]
-    assert noms == ["banner_info.webp", "transcription.txt"], noms
+    from utils.premium_log_banners import BANNER_FILENAME
+
+    # La bande fine (7aea328) remplace les anciennes bannières par domaine.
+    assert noms == [BANNER_FILENAME, "transcription.txt"], noms
 
 
 def test_un_fichier_unique_est_accepte_aussi(bandeaux_actifs):
@@ -160,7 +163,9 @@ def test_un_fichier_unique_est_accepte_aussi(bandeaux_actifs):
         )
     )
     noms = [f.filename for f in cible.appels[0][1]["files"]]
-    assert "carte.png" in noms and "banner_info.webp" in noms
+    from utils.premium_log_banners import BANNER_FILENAME
+
+    assert "carte.png" in noms and BANNER_FILENAME in noms
 
 
 def test_envoyer_ramene_toujours_un_message():

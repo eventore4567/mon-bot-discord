@@ -203,8 +203,25 @@ class PontDepuisEmbed(unittest.TestCase):
         self.assertIn("Résumé", texte)
 
     def test_le_domaine_ne_reactive_pas_la_banniere(self):
+        # depuis_embed suit l'interrupteur global BANDEAUX_ACTIFS (7aea328) :
+        # bandeaux coupés, demander une bannière ne la rallume pas.
+        ancien = panels.BANDEAUX_ACTIFS
+        panels.BANDEAUX_ACTIFS = False
+        try:
+            panneau = panels.depuis_embed(self._embed(), kind="moderation", banniere=True)
+            self.assertEqual(panneau.fichiers(), [])
+        finally:
+            panels.BANDEAUX_ACTIFS = ancien
+
+    def test_la_bande_fine_part_avec_sa_piece_jointe(self):
+        from utils.premium_log_banners import BANNER_FILENAME
+
         panneau = panels.depuis_embed(self._embed(), kind="moderation", banniere=True)
-        self.assertEqual(panneau.fichiers(), [])
+        fichiers = panneau.fichiers()
+        self.assertEqual([f.filename for f in fichiers], [BANNER_FILENAME])
+        self.assertIn(f"attachment://{BANNER_FILENAME}", repr(panneau.to_components()))
+        for f in fichiers:
+            f.close()
 
     def test_compact_regroupe_les_champs_dans_une_seule_section(self):
         """Un dossier de sanction a sept champs courts : chacun avec son propre

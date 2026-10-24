@@ -15,6 +15,7 @@ import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import discord
 import pytest
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
@@ -54,7 +55,15 @@ async def test_texte_court_pose_le_signal_pendant_l_envoi_et_le_retire_apres():
 
     async def send(**kwargs):
         vu["pendant"] = panels.TEXTE_BRUT.get()
-        vu["content"] = kwargs.get("content")
+        # Carte courte (CARTES_COURTES) : le texte est dans un TextDisplay.
+        textes = [kwargs.get("content") or ""]
+        pile = [kwargs.get("view")]
+        while pile:
+            element = pile.pop()
+            if isinstance(element, discord.ui.TextDisplay):
+                textes.append(element.content)
+            pile.extend(getattr(element, "children", []) or [])
+        vu["content"] = "".join(textes)
         return SimpleNamespace(id=1)
 
     ctx = SimpleNamespace(interaction=None, send=send)
