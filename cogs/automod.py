@@ -64,12 +64,23 @@ from services import moderation as moderation_service
 logger = logging.getLogger("bot")
 
 
+def _as_member(user: discord.abc.User, guild: discord.Guild | None) -> discord.abc.User:
+    """Le Member derrière un auteur. Discord transmet parfois un simple User
+    (membre absent du cache) : sans ses permissions, un administrateur était
+    traité comme un membre ordinaire et sanctionné."""
+    if isinstance(user, discord.Member) or guild is None:
+        return user
+    return guild.get_member(getattr(user, "id", 0)) or user
+
+
 def _is_discord_administrator(member: discord.abc.User) -> bool:
     """Compatibilité historique : admin Discord OU rôle de direction « all perms ».
 
     Un modérateur avec une seule permission de gestion n'est pas exempté.
-    Ce garde est limité à la modération des messages, jamais à l'anti-nuke.
+    Ce garde vaut pour la modération des messages ; l'anti-nuke a sa propre
+    règle (is_antinuke_exempt), réservée à la permission Administrateur.
     """
+    member = _as_member(member, getattr(member, "guild", None))
     return isinstance(member, discord.Member) and can_bypass_message_filters(member)
 
 
@@ -1916,14 +1927,14 @@ class AutoMod(commands.Cog, name="Automod"):
         # Exemption prioritaire pour les vrais administrateurs et les rôles
         # all-perms. Elle prime sur les salons stricts et les overrides, mais
         # ne désactive AUCUNE protection globale de sécurité du serveur.
-        if _is_discord_administrator(message.author):
+        member = _as_member(message.author, message.guild)
+        if _is_discord_administrator(member):
             return False
 
         policy = await self.get_security_filter_policy_cached(message.guild.id, canonical)
         scope_ids = self._message_scope_ids(message)
         strict = bool(scope_ids & policy["strict_channel_ids"])
 
-        member = message.author
         if not isinstance(member, discord.Member):
             return True
 
@@ -3060,7 +3071,7 @@ class AutoMod(commands.Cog, name="Automod"):
             return
         # Le bypass admin s'applique AVANT la blacklist, le spam, l'anti-arnaque,
         # les insultes et toute détection qui pourrait supprimer un message.
-        if _is_discord_administrator(message.author):
+        if _is_discord_administrator(_as_member(message.author, message.guild)):
             # Prouve que le message de l'administrateur est bien arrivé au bot.
             # Si Discord l'intercepte auparavant, seul on_automod_action apparaît.
             if LINK_RE.search(_normalize_link_text(message.content)):
@@ -4386,6 +4397,17 @@ class AutoMod(commands.Cog, name="Automod"):
         if self.bot.user and actor.id == self.bot.user.id:
             return True
         if actor.id == guild.owner_id:
+            return True
+        # Un administrateur du serveur gère salons et rôles en connaissance de
+        # cause : le bannir pour trois suppressions coupait le serveur de son
+        # propre staff. Un BOT administrateur reste surveillé — un bot piraté
+        # est précisément le scénario de nuke le plus courant.
+        member = _as_member(actor, guild)
+        if (
+            isinstance(member, discord.Member)
+            and not member.bot
+            and getattr(member.guild_permissions, "administrator", False) is True
+        ):
             return True
         row = await self.bot.db.fetchone(
             "SELECT 1 FROM antinuke_whitelist WHERE guild_id = ? AND user_id = ?", (guild.id, actor.id)
