@@ -145,3 +145,75 @@ def test_sans_anti_raid_le_verrou_des_apps_n_est_pas_pose():
     asyncio.run(cog.on_message(_app_message(guild, raider)))
     raider.timeout.assert_awaited_once()
     everyone.edit.assert_not_awaited()
+
+
+# --------------------------------------------- tous les filtres, pas seulement le raid
+
+def _cog_complet(conf):
+    cog, guild, raider, everyone = _setup(conf=conf)
+    cog.ignored_channels_cache[1] = set()
+    cog.blacklist_words_cache[1] = ["arnaqueur"]
+    cog.blacklist_links_cache[1] = []
+    cog.blacklist_users_cache[1] = set()
+    cog.whitelist_domains_cache[1] = []
+    cog.moderation_dataset = SimpleNamespace(match=lambda content: None)
+    raider.top_role = 1
+    raider.timed_out_until = None
+    return cog, guild, raider
+
+
+def test_un_mot_interdit_poste_par_une_app_suit_le_filtre_normal():
+    from unittest.mock import patch
+    from utils import sentrix_panels as panels
+
+    cog, guild, raider = _cog_complet({"antiinsult": 0})
+    message = _app_message(guild, raider, content="Ce serveur est tenu par un arnaqueur, fuyez")
+    message.channel = Mock(id=55, mention="<#55>")
+    message.channel.send = AsyncMock()
+    message.attachments = []
+    message.mentions = []
+    with patch.object(panels, "texte_court", AsyncMock()) as court, \
+         patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
+        asyncio.run(cog.on_message(message))
+    message.delete.assert_awaited_once()
+    # L'avertissement vise le membre qui a lancé l'application, pas l'application.
+    def textes(appel):
+        morceaux = [str(a) for a in appel.args]
+        pile = [appel.kwargs.get("view")]
+        while pile:
+            element = pile.pop()
+            if element is None:
+                continue
+            if isinstance(element, discord.ui.TextDisplay):
+                morceaux.append(element.content)
+            pile.extend(getattr(element, "children", []) or [])
+        return " ".join(morceaux)
+
+    notices = [textes(c) for c in [*message.channel.send.await_args_list, *court.await_args_list]]
+    assert any("<@77>" in n for n in notices), notices
+
+
+def test_le_texte_d_un_embed_est_filtre_comme_un_message():
+    from unittest.mock import patch
+    from utils import sentrix_panels as panels
+
+    cog, guild, raider = _cog_complet({})
+    message = _app_message(guild, raider, content="")
+    message.embeds = [discord.Embed(description="Contactez cet arnaqueur pour gagner")]
+    message.channel = Mock(id=55, mention="<#55>")
+    message.channel.send = AsyncMock()
+    message.attachments = []
+    message.mentions = []
+    with patch.object(panels, "texte_court", AsyncMock()), \
+         patch.object(automod_module, "INCIDENT_LOG_DELAY_SECONDS", 0.01):
+        asyncio.run(cog.on_message(message))
+    message.delete.assert_awaited_once()
+
+
+def test_le_mandataire_ne_change_que_l_auteur_et_le_contenu():
+    cog, guild, raider, _ = _setup()
+    message = _app_message(guild, raider)
+    proxy = automod_module._MessageDApplication(message, raider, "texte")
+    assert proxy.author is raider and proxy.content == "texte"
+    assert proxy.id == message.id and proxy.channel is message.channel
+    assert proxy._sentrix_external_app is True

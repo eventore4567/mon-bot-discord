@@ -31,7 +31,10 @@ def test_security_bypass_is_per_filter_and_explicit_exemptions_take_priority():
     assert '"antilink"' in source
     assert '"antiscam"' in source
     assert '"antiinsult"' in source
-    assert 'if conf["antispam"] and await self.security_filter_applies_to(message, "antispam"):' in source
+    # L'antispam reste soumis à la politique par filtre ; un message modifié
+    # (re-contrôlé par on_message_edit) ne compte pas comme un nouveau message.
+    assert 'conf["antispam"] and not getattr(message, "_sentrix_edit", False)' in source
+    assert 'await self.security_filter_applies_to(message, "antispam")' in source
 
     helper = source[
         source.index("async def security_filter_applies_to"):
