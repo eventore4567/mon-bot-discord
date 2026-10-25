@@ -227,8 +227,11 @@ async def run() -> int:
         # Le verrouillage automatique du règlement est strictement limité
         # aux espaces publics des membres. Les canaux staff/logs déjà privés ou
         # synchronisés sont réservés au diagnostic, sans aucune écriture.
-        if "surfaces = list(access.gate)" not in source_v96:
-            errors.append("V96 : verrouillage non limité aux salons membres")
+        if (
+            "surfaces = [" not in source_v96
+            or "] + list(access.category_gates)" not in source_v96
+        ):
+            errors.append("V96 : verrouillage non limité aux salons membres/catégories membres sûres")
         if "list(access.secure_sensitive)" in source_v96:
             errors.append("V96 : risque de modifier des salons staff/logs au verrouillage")
 
