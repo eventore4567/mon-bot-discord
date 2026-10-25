@@ -4,6 +4,7 @@ import base64
 import logging
 import time
 
+import discord
 from aiohttp import ClientSession, ClientTimeout, web
 
 _INSTALLED = False
@@ -24,7 +25,9 @@ async def _discord_avatar_url(request: web.Request, session: dict) -> str | None
     user = session.get("user") or {}
     stored = str(user.get("avatar_url") or "").strip()
     if stored.startswith("https://cdn.discordapp.com/"):
-        return stored
+        # Le CDN sert aussi la première image d'une PP animée en PNG, bien
+        # plus légère à embarquer que le GIF complet.
+        return stored.replace(".gif?", ".png?")
 
     try:
         user_id = int(user.get("id") or 0)
@@ -43,7 +46,10 @@ async def _discord_avatar_url(request: web.Request, session: dict) -> str | None
             avatar = getattr(discord_user, "display_avatar", None)
             if avatar is not None:
                 try:
-                    avatar = avatar.replace(size=128, static_format="png")
+                    # format= et non static_format= : une PP animée resterait un
+                    # GIF complet, embarqué en base64 dans /api/me (~400 Ko par
+                    # chargement de page mesurés en prod le 25/10).
+                    avatar = avatar.replace(size=128, format="png")
                 except Exception:
                     try:
                         avatar = avatar.with_size(128)
@@ -115,8 +121,16 @@ async def handle_me_with_embedded_avatar(request: web.Request) -> web.Response:
 
     user = dict(session.get("user") or {})
     user["avatar_url"] = await _avatar_data_uri(request, session)
+    # Le handler d'origine renvoie aussi `developer` : sans lui, le client ne
+    # montre jamais le groupe « Développeur » au propriétaire du bot.
+    developer = False
+    try:
+        bot = request.app["bot"]
+        developer = bool(await bot.is_owner(discord.Object(id=int(user["id"]))))
+    except Exception:
+        developer = False
     return web.json_response(
-        {"user": user, "csrf": session["csrf"]},
+        {"user": user, "csrf": session["csrf"], "developer": developer},
         headers={"Cache-Control": "private, no-store"},
     )
 
