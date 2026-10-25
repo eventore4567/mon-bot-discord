@@ -1010,15 +1010,18 @@ class Tickets(commands.Cog):
 
     async def start_ticket_flow(self, interaction: discord.Interaction, type_id: int):
         started = time.monotonic()
+        timings = TicketOpenTimings()
         guild_id = interaction.guild.id if interaction.guild else None
         user_id = interaction.user.id if interaction.user else None
         try:
             ticket_type = await self.get_type(type_id)
+            timings.mark("db_ticket_type")
             if not ticket_type:
                 return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.error("Ce type de ticket n'existe plus.")), ephemere=True)
 
             limit = ticket_type["max_per_member"] or 1
             open_count = await count_genuinely_open_tickets(self.bot, interaction.guild, interaction.user.id, type_id)
+            timings.mark("db_existing_tickets")
             if open_count >= limit:
                 return await sx_panels.envoyer(interaction.response, sx_panels.depuis_embed(embeds.warning(f"Vous avez déjà **{open_count}** ticket(s) « {ticket_type['name']} » ouvert(s) (maximum : {limit}).")), ephemere=True)
 
@@ -1026,11 +1029,14 @@ class Tickets(commands.Cog):
                 questions = await self.bot.db.fetchall(
                     "SELECT * FROM ticket_form_questions WHERE ticket_type_id = ? ORDER BY position", (type_id,)
                 )
+                timings.mark("db_form_questions")
                 if questions:
                     return await interaction.response.send_modal(TicketFormModal(self, ticket_type, questions))
 
             await interaction.response.defer(ephemeral=True)
+            timings.mark("discord_defer")
             await self.create_ticket(interaction, ticket_type, [])
+            timings.mark("create_ticket")
         except discord.InteractionResponded:
             logger.info("Interaction déjà répondue pour l'ouverture du type #%s (guild=%s, user=%s).", type_id, guild_id, user_id)
         except (discord.Forbidden, discord.NotFound, discord.HTTPException) as e:
@@ -1055,7 +1061,11 @@ class Tickets(commands.Cog):
         finally:
             elapsed = time.monotonic() - started
             level = logger.warning if elapsed > 2.0 else logger.info
-            level("Ouverture ticket type #%s traitée en %.2fs (guild=%s, user=%s).", type_id, elapsed, guild_id, user_id)
+            level(
+                "Ouverture ticket type #%s traitée en %.2fs (guild=%s, user=%s) ; "
+                "phase_ms=%s",
+                type_id, elapsed, guild_id, user_id, timings.stages_ms,
+            )
 
     async def create_ticket(self, interaction: discord.Interaction, ticket_type, answers: list):
         guild = interaction.guild
