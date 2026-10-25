@@ -53,6 +53,8 @@ class AccessPlan:
     untouched: dict[int, str] = field(default_factory=dict)
     sensitive_public: list = field(default_factory=list)
     secure_sensitive: list = field(default_factory=list)
+    log_destinations: list = field(default_factory=list)
+    staff_channels: list = field(default_factory=list)
     portal: list = field(default_factory=list)
 
     def preview(self) -> str:
@@ -64,6 +66,16 @@ class AccessPlan:
             f"**Salons membres à verrouiller : {len(self.gate)}**",
             names,
             f"**Staff/logs publics sécurisables : {len(self.secure_sensitive)}**",
+            (
+                "**Destinations logs enregistrées : **"
+                + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.log_destinations[:5]) or "aucune")
+                + ("…" if len(self.log_destinations) > 5 else "")
+            ),
+            (
+                "**Salons staff repérés : **"
+                + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.staff_channels[:5]) or "aucun")
+                + ("…" if len(self.staff_channels) > 5 else "")
+            ),
             f"**Salons/catégories protégés : {len(self.protected)}**",
             f"**Salons ambigus, laissés inchangés : {len(self.untouched)}**",
         ]
@@ -148,6 +160,10 @@ def plan_access(guild, *, verification_channel_id: int, configured_ids=(), speci
         )
         if sensitive:
             plan.protected[channel.id] = "staff/logs/sécurité"
+            if channel.id in log_destinations:
+                plan.log_destinations.append(channel)
+            else:
+                plan.staff_channels.append(channel)
             if current_public:
                 plan.sensitive_public.append(channel)
                 if has_explicit_staff_access(channel, everyone):
