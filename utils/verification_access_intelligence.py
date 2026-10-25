@@ -184,14 +184,15 @@ def has_explicit_staff_access(channel, everyone) -> bool:
 
 def plan_access(
     guild, *, verification_channel_id: int, configured_ids=(), special_ids=(),
-    log_ids=(), verified_role=None,
+    log_ids=(), onboarding_ids=(), verified_role=None,
 ) -> AccessPlan:
     plan = AccessPlan()
     everyone = guild.default_role
     conf_ids = {int(v) for v in configured_ids if v}
     special = {int(v) for v in special_ids if v}
     log_destinations = {int(v) for v in log_ids if v}
-    protected_ids = conf_ids | special | log_destinations | {int(verification_channel_id)}
+    onboarding = {int(v) for v in onboarding_ids if v}
+    protected_ids = conf_ids | special | log_destinations | onboarding | {int(verification_channel_id)}
     categories = list(getattr(guild, "categories", ()))
     for category in categories:
         category_tokens = tokens(getattr(category, "name", ""))
