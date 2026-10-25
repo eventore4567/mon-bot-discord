@@ -612,3 +612,68 @@ def test_la_sauvegarde_de_l_onboarding_est_restaurable_avec_ses_questions():
     assert question["options"][0]["role_ids"] == [s.gamer.id]
     relue = discord.OnboardingPrompt.from_dict(data=question, state=None, guild=s)
     assert relue.id == 4141 and relue.options[0].id == 4242
+
+
+def _creation(monkeypatch, s, salon, *, auto_access=1, publie=True):
+    """Simule la création d'un salon après un verrouillage confirmé."""
+    import sentrix_verification_v96 as v96
+    from cogs import verify_setup_interactive_v78 as rules
+
+    monkeypatch.setattr(v96, "_CREATION_SETTLE_SECONDS", 0)
+
+    async def etat(_bot, _guild):
+        if not publie:
+            return None
+        return {"channel_id": s.c["reglement"].id, "role_id": s.verifie.id, "message_id": 1}
+
+    monkeypatch.setattr(rules, "published_rules_state", etat)
+    salon.guild = s
+    s.channels.append(salon)
+    moteur = _moteur(s)
+
+    async def config(_gid):
+        return {"autorole": s.membre.id, "verification_auto_access": auto_access}
+
+    moteur.bot.db.get_guild_config = config
+    asyncio.run(moteur.on_guild_channel_create(salon))
+    return salon
+
+
+def test_un_nouveau_salon_membre_est_verrouille_tout_seul(monkeypatch):
+    s = Serveur()
+    neuf = Salon(950, "nouveau-salon", category=s.communaute,
+                 overwrites=dict(s.communaute.overwrites), synced=True)
+    _creation(monkeypatch, s, neuf)
+    assert newcomer_access(neuf, s.default_role, [s.membre]) == (False, False)
+    assert newcomer_access(neuf, s.default_role, [s.membre, s.verifie])[0] is True
+    # Rien d'autre n'est touché par cette adaptation ciblée.
+    assert not s.c["general"].ecritures and not s.c["audit_public"].ecritures
+
+
+def test_un_nouveau_salon_de_logs_est_masque_aux_arrivants(monkeypatch):
+    s = Serveur()
+    logs = Salon(951, "logs-nouveaux", overwrites={s.default_role: ow(view_channel=True)})
+    _creation(monkeypatch, s, logs)
+    assert newcomer_access(logs, s.default_role, [s.membre])[0] is False
+    assert s.verifie not in logs.overwrites
+    assert logs.overwrites[s.me].view_channel is True
+
+
+def test_un_ticket_prive_n_est_jamais_touche(monkeypatch):
+    s = Serveur()
+    ticket = Salon(952, "ticket-0042", overwrites={s.default_role: ow(view_channel=False)})
+    _creation(monkeypatch, s, ticket)
+    assert not ticket.ecritures
+
+
+def test_sans_verrouillage_confirme_rien_n_est_adapte(monkeypatch):
+    s = Serveur()
+    neuf = Salon(953, "nouveau-salon", category=s.communaute,
+                 overwrites=dict(s.communaute.overwrites), synced=True)
+    _creation(monkeypatch, s, neuf, auto_access=0)
+    assert not neuf.ecritures
+    s = Serveur()
+    neuf = Salon(954, "nouveau-salon", category=s.communaute,
+                 overwrites=dict(s.communaute.overwrites), synced=True)
+    _creation(monkeypatch, s, neuf, publie=False)
+    assert not neuf.ecritures

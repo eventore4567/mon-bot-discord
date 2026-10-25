@@ -7,6 +7,7 @@ aperçu, diagnostic, permissions automatiques facultatives puis publication.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -19,6 +20,9 @@ from utils.verification_access_intelligence import (
 )
 
 logger = logging.getLogger("bot.verification-v96")
+# Délai avant d'adapter un salon tout juste créé (synchro de catégorie,
+# dérogations posées par l'admin dans la foulée).
+_CREATION_SETTLE_SECONDS = 4.0
 
 _SETUP_TIMEOUT = 10 * 60
 _DEFAULT_TITLE = "Règlement & vérification"
@@ -717,6 +721,53 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             "has_existing_panel": panel is not None,
         }
 
+    @commands.Cog.listener()
+    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel) -> None:
+        """Un salon créé après le verrouillage suit les mêmes règles, tout seul.
+
+        Seulement si un admin a confirmé le verrouillage (verification_auto_access)
+        et que le règlement est publié. Salon membre visible des arrivants :
+        verrouillé ; staff/logs visibles : masqués aux arrivants ; ticket,
+        salon privé ou portail : rien. Les salons MODIFIÉS ne sont jamais
+        repris : SentriX ne se bat pas contre un réglage volontaire.
+        """
+        guild = getattr(channel, "guild", None)
+        if guild is None:
+            return
+        try:
+            conf = await self.bot.db.get_guild_config(guild.id)
+            if not int(_row_value(conf, "verification_auto_access", 0) or 0):
+                return
+            from cogs.verify_setup_interactive_v78 import published_rules_state
+
+            state = await published_rules_state(self.bot, guild)
+            if state is None:
+                return
+            # Laisser Discord poser la synchronisation de catégorie et l'admin
+            # régler ses dérogations de création avant de décider.
+            await asyncio.sleep(_CREATION_SETTLE_SECONDS)
+            channel = guild.get_channel(channel.id)
+            rules = guild.get_channel(state["channel_id"])
+            role = guild.get_role(state["role_id"])
+            if channel is None or rules is None or role is None or channel.id == rules.id:
+                return
+            changed, _protected = await self._apply_auto_access(
+                guild, verification_channel=rules, verified_role=role,
+                actor=guild.me, only_ids=(channel.id,),
+            )
+            if changed or getattr(self, "last_secured_count", 0):
+                logger.info(
+                    "Nouveau salon adapté au verrouillage guild=%s salon=%s (%s)",
+                    guild.id, channel.id, getattr(channel, "name", "?"),
+                )
+        except (ValueError, RuntimeError) as exc:
+            logger.warning(
+                "Nouveau salon non adapté guild=%s salon=%s : %s",
+                guild.id, getattr(channel, "id", "?"), exc,
+            )
+        except Exception:
+            logger.exception("Adaptation d'un nouveau salon impossible guild=%s", guild.id)
+
     async def _release_onboarding(self, guild: discord.Guild, reason: str) -> dict:
         """Sauvegarde puis désactive l'Onboarding Discord.
 
@@ -972,6 +1023,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         include_ids=(),
         exclude_ids=(),
         release_onboarding: bool = False,
+        only_ids=(),
     ) -> tuple[int, int]:
         """Verrouille UNIQUEMENT les salons publics membres identifiés.
 
@@ -1111,6 +1163,12 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         for surface in access.secure_sensitive:
             if surface.overwrites_for(verified_role).view_channel is True:
                 plan(surface, verified_role, view_channel=None)
+
+        # Adaptation d'un seul salon (création après verrouillage) : même plan,
+        # mêmes protections, mais seules ses écritures sont gardées.
+        if only_ids:
+            wanted = {int(i) for i in only_ids}
+            operations = [op for op in operations if op[0].id in wanted]
 
         # Pré-vérifier TOUS les salons où une écriture est nécessaire. Sinon
         # un refus sur le dernier salon peut forcer un rollback après avoir déjà
