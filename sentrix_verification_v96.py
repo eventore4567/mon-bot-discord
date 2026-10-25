@@ -82,6 +82,104 @@ def _row_value(row, key: str, default=None):
         return default
 
 
+async def published_rules_state(bot: commands.Bot, guild: discord.Guild) -> dict | None:
+    """Relit la preuve de publication en base, sans dépendre de la session /setup.
+
+    V96 et V78 enregistrent leurs panneaux dans deux tables historiques.
+    Un brouillon (salon/rôle choisis sans message public) ne suffit jamais.
+    """
+    import sqlite3
+
+    candidates: list[dict] = []
+    for table, source in (
+        ("verification_panels_v96", "v96"),
+        ("dashboard_verification_panels", "v78"),
+    ):
+        try:
+            row = await bot.db.fetchone(
+                f"SELECT * FROM {table} WHERE guild_id = ?", (guild.id,),
+            )
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                continue
+            raise
+        if row is None:
+            continue
+        message_id = _row_value(row, "message_id")
+        rules = str(_row_value(row, "rules_text", "") or "").strip()
+        if not message_id or not rules:
+            continue
+        candidates.append({
+            "source": source,
+            "channel_id": _row_value(row, "channel_id"),
+            "role_id": _row_value(row, "role_id"),
+            "message_id": message_id,
+            "rules_text": rules,
+            "updated_at": int(_row_value(row, "updated_at", 0) or 0),
+        })
+    if not candidates:
+        return None
+
+    conf = await bot.db.get_guild_config(guild.id)
+    # Le panneau le plus récemment publié fait autorité. Pour V78, salon et
+    # rôle sont enregistrés en guild_config lors de la même publication.
+    state = max(candidates, key=lambda item: item["updated_at"])
+    if state["source"] == "v78":
+        state["channel_id"] = _row_value(conf, "verification_channel")
+        state["role_id"] = _row_value(conf, "verify_role") or _row_value(conf, "verification_role")
+    try:
+        state["channel_id"] = int(state["channel_id"])
+        state["role_id"] = int(state["role_id"])
+        state["message_id"] = int(state["message_id"])
+    except (TypeError, ValueError):
+        return None
+    if not all((state["channel_id"], state["role_id"], state["message_id"])):
+        return None
+    return state
+
+
+async def lock_channels_after_published_rules(
+    bot: commands.Bot, guild: discord.Guild, actor: discord.abc.User,
+) -> tuple[int, int]:
+    """Verrouille sans re-publier ni refaire l'assistant de vérification.
+
+    L'état et les permissions sont REvalidés au clic, même si le panneau
+    /setup est resté ouvert ou si le bot a redémarré.
+    """
+    state = await published_rules_state(bot, guild)
+    if state is None:
+        raise ValueError(
+            "Publiez d'abord le règlement et son panneau public avant de verrouiller les salons."
+        )
+    channel = guild.get_channel(state["channel_id"])
+    role = guild.get_role(state["role_id"])
+    if not isinstance(channel, discord.TextChannel) or not isinstance(role, discord.Role):
+        raise ValueError(
+            "Le salon du règlement ou le rôle Vérifié n'existe plus. Corrigez la configuration."
+        )
+    try:
+        await channel.fetch_message(state["message_id"])
+    except discord.NotFound as exc:
+        raise ValueError(
+            "Le panneau public du règlement a été supprimé. Republiez-le avant de verrouiller."
+        ) from exc
+
+    manager = bot.get_cog("VerificationConfigV96") or VerificationConfigV96(bot)
+    issues = await manager._preflight(
+        guild, channel=channel, role=role, auto_access=True,
+    )
+    if issues:
+        raise ValueError("Verrouillage impossible : " + " ".join(issues))
+    # Le moteur garde visibles règlement + espaces privés/staff et effectue
+    # un rollback des overwrites s'il rencontre un refus de Discord.
+    changed, protected = await manager._apply_auto_access(
+        guild, verification_channel=channel, verified_role=role, actor=actor,
+    )
+    # Ne marquer actif qu'APRÈS toutes les opérations réussies.
+    await bot.db.set_guild_config(guild.id, "verification_auto_access", 1)
+    return changed, protected
+
+
 class VerificationRulesModal(discord.ui.Modal, title="Configurer le règlement"):
     panel_title = discord.ui.TextInput(
         label="Titre de l'embed",
@@ -548,6 +646,44 @@ class VerificationSetupView(discord.ui.View):
         finally:
             self._publishing = False
             self._sync_controls()
+
+    @discord.ui.button(
+        label="Verrouiller les salons", style=discord.ButtonStyle.danger, row=4,
+    )
+    async def lock_published_channels(
+        self, interaction: discord.Interaction, _button: discord.ui.Button,
+    ) -> None:
+        if self._publishing:
+            return await interaction.response.send_message(
+                "Une publication est en cours.", ephemeral=True,
+            )
+        # Vérifier l'état sauvegardé, PAS le texte encore en cours de saisie.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        guild = interaction.guild
+        if guild is None or guild.id != self.guild_id:
+            return await interaction.followup.send("Serveur introuvable.", ephemeral=True)
+        try:
+            changed, protected = await lock_channels_after_published_rules(
+                self.bot, guild, interaction.user,
+            )
+        except ValueError as exc:
+            return await interaction.followup.send(str(exc), ephemeral=True)
+        except (discord.Forbidden, discord.HTTPException, RuntimeError):
+            logger.exception("Échec verrouillage règlement guild=%s", guild.id)
+            return await interaction.followup.send(
+                "Discord a refusé le verrouillage. Aucune activation n'a été enregistrée ; "
+                "vérifiez les permissions de SentriX et les logs.",
+                ephemeral=True,
+            )
+        self.auto_access = True
+        self.has_existing_panel = True
+        self._sync_controls()
+        await interaction.followup.send(
+            f"Salons verrouillés derrière le règlement : **{changed}** espaces configurés ; "
+            f"**{protected}** espaces privés ou sensibles conservés. "
+            "Le salon du règlement reste accessible aux nouveaux membres.",
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="4. Accès salons : NON", style=discord.ButtonStyle.secondary, row=3)
     async def toggle_auto_access(
