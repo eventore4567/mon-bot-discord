@@ -145,7 +145,7 @@ async def _set_optional_role(view: "SentriXSetupV74", field: str, role: discord.
 
 
 class IdentiteBotModal(discord.ui.Modal, title="SentriX sur ce serveur"):
-    """Avatar, bannière et bio de SentriX **pour ce serveur uniquement**.
+    """Avatar et bannière de SentriX **pour ce serveur uniquement**.
 
     Discord distingue deux identités pour une application :
 
@@ -157,7 +157,7 @@ class IdentiteBotModal(discord.ui.Modal, title="SentriX sur ce serveur"):
       autres continuent de voir l'original. C'est celui-ci qu'on édite ici,
       et c'est pour ça que l'administrateur du serveur y a droit.
 
-    Les trois champs sont facultatifs : seuls ceux qui sont remplis sont
+    Les deux champs sont facultatifs : seuls ceux qui sont remplis sont
     appliqués. Un échec sur l'un n'empêche pas les autres, et le compte rendu
     nomme la cause — une réponse « ça n'a pas marché » serait inutilisable
     pour une image hébergée ailleurs.
@@ -170,11 +170,6 @@ class IdentiteBotModal(discord.ui.Modal, title="SentriX sur ce serveur"):
     banniere = discord.ui.TextInput(
         label="URL de la bannière", required=False, placeholder="https://…", max_length=500,
     )
-    bio = discord.ui.TextInput(
-        label="Bio affichée sur ce serveur",
-        required=False, style=discord.TextStyle.paragraph, max_length=190,
-    )
-
     def __init__(self, vue):
         super().__init__()
         self.vue = vue
@@ -203,12 +198,8 @@ class IdentiteBotModal(discord.ui.Modal, title="SentriX sur ce serveur"):
                 echecs.append(f"{champ} (image introuvable à cette adresse)")
                 continue
             changements["avatar" if champ == "avatar" else "banner"] = donnees
-        texte_bio = str(self.bio.value or "").strip()
-        if texte_bio:
-            changements["bio"] = texte_bio
-
         for cle, valeur in changements.items():
-            nom = {"avatar": "avatar", "banner": "bannière", "bio": "bio"}[cle]
+            nom = {"avatar": "avatar", "banner": "bannière"}[cle]
             try:
                 await moi.edit(**{cle: valeur})
                 faits.append(nom)
