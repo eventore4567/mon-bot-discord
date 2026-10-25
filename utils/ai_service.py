@@ -64,6 +64,8 @@ ERROR_NO_KEY = "__NO_KEY__"
 ERROR_SENSITIVE_CONTENT = "__SENSITIVE_CONTENT__"
 ERROR_CYBER_POLICY = "__CYBER_POLICY__"
 ERROR_BAD_REQUEST = "__BAD_REQUEST__"
+ERROR_MODEL_NOT_FOUND = "__MODEL_NOT_FOUND__"
+ERROR_MODEL_FORBIDDEN = "__MODEL_FORBIDDEN__"
 ERROR_AUTH = "__AUTH_ERROR__"
 ERROR_RATE_LIMIT = "__RATE_LIMIT__"
 ERROR_TIMEOUT = "__TIMEOUT__"
@@ -73,7 +75,7 @@ ERROR_DISABLED = "__AI_DISABLED__"
 ERROR_CHANNEL_NOT_ALLOWED = "__AI_CHANNEL_NOT_ALLOWED__"
 
 ALL_ERROR_CODES = frozenset({
-    ERROR_NO_KEY, ERROR_SENSITIVE_CONTENT, ERROR_CYBER_POLICY, ERROR_BAD_REQUEST, ERROR_AUTH,
+    ERROR_NO_KEY, ERROR_SENSITIVE_CONTENT, ERROR_CYBER_POLICY, ERROR_BAD_REQUEST, ERROR_MODEL_NOT_FOUND, ERROR_MODEL_FORBIDDEN, ERROR_AUTH,
     ERROR_RATE_LIMIT, ERROR_TIMEOUT, ERROR_CONNECTION, ERROR_GENERIC,
     ERROR_DISABLED, ERROR_CHANNEL_NOT_ALLOWED,
 })
@@ -93,6 +95,8 @@ ERROR_MESSAGES = {
     ),
     ERROR_BAD_REQUEST: "○ Cette demande n'a pas pu être traitée (requête invalide). Reformule-la différemment.",
     ERROR_AUTH: "🔑 Problème d'authentification avec le service IA. Contactez un administrateur.",
+    ERROR_MODEL_NOT_FOUND: "Le modèle IA configuré est introuvable. Un administrateur peut vérifier le modèle avec +aidiag et le modifier dans +aisetup.",
+    ERROR_MODEL_FORBIDDEN: "Le compte OpenAI n'a pas accès au modèle configuré. Contactez un administrateur et vérifiez +aidiag.",
     ERROR_RATE_LIMIT: "⏳ Le service IA est surchargé pour le moment. Réessaie dans quelques instants.",
     ERROR_TIMEOUT: "⏱️ Le service IA a mis trop de temps à répondre. Réessaie.",
     ERROR_CONNECTION: "🌐 Impossible de contacter le service IA pour le moment. Réessaie plus tard.",
@@ -770,6 +774,8 @@ async def generate(
         APITimeoutError,
         AuthenticationError,
         BadRequestError,
+        NotFoundError,
+        PermissionDeniedError,
         RateLimitError,
     )
 
@@ -847,6 +853,14 @@ async def generate(
             code, *log_args,
         )
         return AiResult(error=ERROR_BAD_REQUEST, model_key=model_key)
+
+    except NotFoundError:
+        logger.error("Modèle OpenAI introuvable — " + log_context, *log_args)
+        return AiResult(error=ERROR_MODEL_NOT_FOUND, model_key=model_key)
+
+    except PermissionDeniedError:
+        logger.error("Accès au modèle OpenAI refusé — " + log_context, *log_args)
+        return AiResult(error=ERROR_MODEL_FORBIDDEN, model_key=model_key)
 
     except AuthenticationError:
         logger.error("Erreur d'authentification OpenAI — " + log_context, *log_args)
