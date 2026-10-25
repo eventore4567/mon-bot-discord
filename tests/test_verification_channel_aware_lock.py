@@ -83,6 +83,9 @@ def test_screenshot_portals_remain_visible_and_staff_logs_are_classified():
     assert {channel.id for channel in plan.secure_sensitive} == {104, 105, 106}
     assert c["unknown"].id in plan.untouched
     assert "logs" in plan.preview().lower()
+    assert c["renamed_log"] in plan.log_destinations
+    assert c["logs"] in plan.suspected_logs
+    assert c["staff_room"] in plan.staff_channels
 
 
 def test_sensitive_channel_without_staff_role_is_not_locked_blindly():
@@ -129,8 +132,11 @@ async def test_real_apply_does_not_open_staff_or_logs_to_verified_role():
     assert member_targets == [guild.default_role.id, verified.id]
     for key in ("logs", "renamed_log", "staff_room"):
         targets = [call.args[0].id for call in c[key].set_permissions.await_args_list]
-        assert targets == [guild.default_role.id], key
-        assert c[key].set_permissions.await_args_list[0].kwargs["overwrite"].view_channel is False
+        assert targets == [guild.default_role.id, verified.id], key
+        assert all(
+            call.kwargs["overwrite"].view_channel is False
+            for call in c[key].set_permissions.await_args_list
+        )
     for key in ("muted", "auto", "private", "unknown"):
         c[key].set_permissions.assert_not_awaited()
     # Le salon de règlement n'est jamais fermé aux nouveaux membres.
