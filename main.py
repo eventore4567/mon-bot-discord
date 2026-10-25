@@ -97,11 +97,9 @@ EXTENSIONS = [
     "cogs.smart_creation_guard_v47",
     "cogs.owner_sanction_immunity",
     "cogs.security_tools",
-    # Publie le bulletin de sécurité dans les journaux quand la surface
-    # d'exposition du serveur change. Aucune commande, aucun écouteur : une
-    # boucle périodique. Après security_command_center, dont il réutilise
-    # l'analyse (webhooks compris).
-    "cogs.security_bulletin",
+    # cogs.security_bulletin n'est plus chargé : Jayden ne veut plus de
+    # message posté tout seul dans les journaux (25/10). L'analyse reste
+    # servie à la demande par +security-check et la page sécurité de /setup.
     "cogs.tickets",
     # Fournit +logs, +logevent et +logsearch, que HELP_VISIBLE_EXTRA_COMMANDS
     # déclare visibles dans l'aide, plus le pipeline de journalisation V17. Il

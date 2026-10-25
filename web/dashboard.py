@@ -606,6 +606,12 @@ async def handle_callback(request: web.Request):
     cookie_valid = bool(state and cookie_state and secrets.compare_digest(state, cookie_state))
     if not cookie_valid or not (signed_valid or legacy_valid):
         reason = "state absent" if not state else "cookie de state absent" if not cookie_state else "cookie de state différent" if not cookie_valid else "state expiré ou signature invalide"
+        if _session(request):
+            # Callback rejoué (actualisation, retour arrière, double ouverture)
+            # alors que ce navigateur est déjà connecté : aucun flux n'est validé,
+            # on réutilise la session comme pour le callback vide ci-dessus.
+            logger.info("OAuth : callback rejoué sur %s (%s) avec session valide → retour dashboard.", _request_host(request), reason)
+            raise web.HTTPFound("/app")
         logger.warning("OAuth : callback refusé sur %s (%s, state %s).", _request_host(request), reason, state[:6] or "—")
         return web.Response(text=OAUTH_ERROR_HTML, content_type="text/html", status=403)
     logger.info("OAuth : callback accepté sur %s (state %s).", _request_host(request), state[:6])
