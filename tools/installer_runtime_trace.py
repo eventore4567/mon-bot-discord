@@ -62,6 +62,9 @@ async def trace() -> dict:
             for key, value in status.items()
             if isinstance(value, dict) and value.get("status") == "failed"
         }
+        extensions_failed = getattr(bot, "_sentrix_extension_load_failures", {}) or {}
+        extensions_expected = getattr(bot, "expected_extension_count", None)
+        extensions_loaded = len(getattr(bot, "extensions", {}) or {})
         return {
             "scope": "offline e2e startup (no Discord gateway or on_ready)",
             "installer_modules_observed": sorted(manual & observed),
@@ -69,6 +72,10 @@ async def trace() -> dict:
             "v17_install_report": status,
             "v17_failure_count": len(failures),
             "v17_failure_labels": sorted(failures),
+            "extension_load_failure_count": len(extensions_failed),
+            "extension_load_failed_names": sorted(extensions_failed),
+            "extensions_loaded": extensions_loaded,
+            "extensions_expected": extensions_expected,
             "manual_installer_count": len(manual),
         }
     finally:
@@ -83,7 +90,13 @@ def main() -> int:
         "\nAttention : l'absence dans cette trace hors ligne n'est pas une "
         "preuve d'inutilité ni une autorisation de supprimer un cog."
     )
-    return 1 if report["v17_failure_count"] else 0
+    # Un boot qui n'a pas chargé tous les modules ne doit pas passer « vert ».
+    return 1 if (
+        report["v17_failure_count"]
+        or report["extension_load_failure_count"]
+        or report["extensions_expected"] is None
+        or report["extensions_loaded"] < report["extensions_expected"]
+    ) else 0
 
 
 if __name__ == "__main__":
