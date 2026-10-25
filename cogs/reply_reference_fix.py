@@ -48,11 +48,12 @@ def install() -> None:
 
     async def message_reply_without_reference(self: discord.Message, *args, **kwargs):
         # Par defaut : aucune reference pour les messages ordinaires.
-        # L'IA utilise un opt-in temporaire pour produire une VRAIE reponse native
-        # avec notification, sans desactiver la protection pour les autres modules.
+        # L'IA utilise un opt-in temporaire pour garder la reference native
+        # SANS notification de l'auteur ni ping des membres et des roles.
         if _NATIVE_AI_REPLY.get():
             kwargs["reference"] = self.to_reference(fail_if_not_exists=False)
-            kwargs.setdefault("mention_author", True)
+            kwargs.setdefault("mention_author", False)
+            kwargs.setdefault("allowed_mentions", discord.AllowedMentions.none())
         return await self.channel.send(*args, **_clean_reference_kwargs(kwargs))
 
     commands.Context.send = context_send_without_reference
