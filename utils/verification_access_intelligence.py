@@ -7,6 +7,7 @@ de classification ne peut jamais rendre un salon privé accessible au rôle
 """
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -107,6 +108,47 @@ class AccessPlan:
             "sont concernés."
         )
         return "\n".join(lines)
+
+
+def _safe_ai_label(value: object) -> str:
+    """Données non fiables, limitées en taille, sans mention Discord ni URL."""
+    value = str(value or "")
+    value = re.sub(r"<[@#&][!]?\\d+>", "[mention]", value)
+    value = re.sub(r"@(?:everyone|here)", "[mention]", value, flags=re.I)
+    value = re.sub(r"https?://\\S+", "[url]", value, flags=re.I)
+    value = re.sub(r"[\\x00-\\x1f\\x7f]", " ", value)
+    return value[:60]
+
+
+def ai_access_review_context(plan: AccessPlan) -> str:
+    """Synthèse minimale à envoyer à l'IA sur clic explicite de l'admin.
+
+    Jamais de contenu de messages, identifiant Discord, propriétaire,
+    liste de membres ni overwrite brut. Les noms fournis sont des DONNÉES,
+    jamais des instructions ni une preuve que des permissions sont sûres.
+    """
+    def sample(channels):
+        return [
+            {
+                "salon": _safe_ai_label(getattr(c, "name", "")),
+                "categorie": _safe_ai_label(getattr(getattr(c, "category", None), "name", "")),
+            }
+            for c in channels[:12]
+        ]
+
+    return json.dumps({
+        "salons_publics_membres": sample(plan.gate),
+        "salons_staff_ou_logs": sample(plan.staff_channels),
+        "destinations_logs_enregistrees": sample(plan.log_destinations),
+        "salons_logs_suspectes_par_nom": sample(plan.suspected_logs),
+        "salons_sensibles_a_verifier_manuellement": sample(plan.secure_sensitive),
+        "comptes": {
+            "verrouillage_membres": len(plan.gate),
+            "sensibles_a_examiner": len(plan.secure_sensitive),
+            "proteges": len(plan.protected),
+            "ambigus_laisses_intacts": len(plan.untouched),
+        },
+    }, ensure_ascii=False)
 
 
 STAFF_ROLE_WORDS = frozenset({
