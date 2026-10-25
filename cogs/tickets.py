@@ -42,6 +42,7 @@ from cogs.ticket_constants import (
     TEXT_STYLES,
 )
 from services.tickets import count_genuinely_open_tickets
+from utils.ticket_open_timings import TicketOpenTimings
 from services import tickets as tickets_service
 from utils import embeds, checks, helpers, design_system
 from utils import sentrix_panels as sx_panels
@@ -1059,8 +1060,10 @@ class Tickets(commands.Cog):
     async def create_ticket(self, interaction: discord.Interaction, ticket_type, answers: list):
         guild = interaction.guild
         user = interaction.user
+        timings = TicketOpenTimings()
 
         count_row = await self.bot.db.fetchone("SELECT COUNT(*) c FROM tickets WHERE guild_id = ?", (guild.id,))
+        timings.mark("db_ticket_count")
         number = (count_row["c"] or 0) + 1
         channel_name = format_channel_name(ticket_type["name_format"], user, number)
 
@@ -1085,17 +1088,21 @@ class Tickets(commands.Cog):
         except discord.HTTPException:
             return await sx_panels.envoyer(interaction.followup, sx_panels.depuis_embed(embeds.error('Impossible de créer le salon (permissions du bot ou catégorie pleine).')), ephemere=True)
 
+        timings.mark("discord_channel_create")
         cur = await self.bot.db.execute(
             "INSERT INTO tickets (guild_id, channel_id, user_id, status, category, type_id, priority, created_at, last_activity_at) "
             "VALUES (?, ?, ?, 'ouvert', ?, ?, 'normale', ?, ?)",
             (guild.id, channel.id, user.id, ticket_type["name"], ticket_type["id"], now(), now()),
         )
+        timings.mark("db_ticket_insert")
         ticket_id = cur.lastrowid
         for label, value in answers:
             if value:
                 await self.bot.db.execute(
                     "INSERT INTO ticket_answers (ticket_id, question_label, answer) VALUES (?, ?, ?)", (ticket_id, label, value[:1000])
                 )
+
+        timings.mark("db_ticket_answers")
 
         # Fiche d'ouverture de ticket (Phase 3, design premium/sombre) — n'affecte QUE ce
         # message d'accueil, jamais TicketControlView ni les custom_id des boutons
@@ -1115,6 +1122,7 @@ class Tickets(commands.Cog):
             if value:
                 e.add_field(name=label[:256], value=helpers.truncate(value, 1024), inline=False)
         button_settings = await get_button_settings(self.bot, guild.id)
+        timings.mark("db_button_settings")
         content = user.mention
         if ticket_type["mention_staff"] and staff_role:
             content += f" {staff_role.mention}"
@@ -1122,6 +1130,7 @@ class Tickets(commands.Cog):
         # `content` sur un message Components V2, donc il reste un embed. Le ping
         # prime sur la banniere — c'est une exception assumee, pas un oubli.
         await channel.send(content=content, embed=e, view=TicketControlView(button_settings))
+        timings.mark("discord_welcome_message")
 
         await sx_panels.envoyer(
             interaction,
@@ -1158,6 +1167,8 @@ class Tickets(commands.Cog):
             ephemere=True,
         )
 
+        timings.mark_confirmed()
+
         ticket_extra = {
             "📂 Type": ticket_type["name"],
             "📌 Salon": channel.mention,
@@ -1172,6 +1183,15 @@ class Tickets(commands.Cog):
             extra=ticket_extra,
         )
         await self.log_action(guild, log_e, ticket_type["log_channel_id"])
+        timings.mark("ticket_log")
+        info = timings.summary()
+        # Une alerte >2 s concerne le délai visible, pas l'envoi du log qui
+        # intervient APRÈS la confirmation à l'utilisateur.
+        log_level = logger.warning if (info["confirmed_ms"] or 0) > 2000 else logger.info
+        log_level(
+            "Ticket ouverture étapes guild=%s type=%s visible_ms=%s total_ms=%s étapes_ms=%s",
+            guild.id, ticket_type["id"], info["confirmed_ms"], info["total_ms"], info["stages_ms"],
+        )
 
     # ---------------------------------------------------------------- BOUTONS STAFF
 
