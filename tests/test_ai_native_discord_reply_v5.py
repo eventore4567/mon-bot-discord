@@ -74,3 +74,14 @@ async def test_discord_reference_error_fallback_still_pings_only_author():
     assert sent["allowed_mentions"].users == [author]
     assert sent["allowed_mentions"].everyone is False
     assert sent["allowed_mentions"].roles is False
+
+
+def test_reference_middleware_keeps_ai_context_explicit_and_private():
+    from cogs import reply_reference_fix as guard
+    assert guard._NATIVE_AI_REPLY.get() is False
+    assert "reference" not in guard._clean_reference_kwargs({"reference": 1})
+    token = guard._NATIVE_AI_REPLY.set(True)
+    try:
+        assert guard._clean_reference_kwargs({"reference": 1})["reference"] == 1
+    finally:
+        guard._NATIVE_AI_REPLY.reset(token)
