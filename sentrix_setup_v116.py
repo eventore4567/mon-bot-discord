@@ -655,8 +655,10 @@ class _CaptchaChannelAccessView(discord.ui.View):
         self._applying = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            current_plan, _role, _state = await preview_published_channels(self.bot, self.guild)
-            if plan_signature(current_plan) != getattr(self, "plan_signature", None):
+            current_plan, current_role, current_state = await preview_published_channels(self.bot, self.guild)
+            if plan_signature(
+                current_plan, role=current_role, state=current_state, guild=self.guild,
+            ) != getattr(self, "plan_signature", None):
                 return await interaction.followup.send(
                     "Les salons ont changé depuis l'aperçu. Réouvrez cette configuration "
                     "pour vérifier les nouveaux accès avant application.",
@@ -715,7 +717,9 @@ async def _open_captcha_channel_access(view, interaction: discord.Interaction) -
 
     panel = _CaptchaChannelAccessView(view.bot, interaction.guild, interaction.user.id)
     panel.role = role
-    panel.plan_signature = plan_signature(plan)
+    panel.plan_signature = plan_signature(
+        plan, role=_role, state=_state, guild=interaction.guild,
+    )
     # Le rôle est déjà choisi/persisté lors de la publication. Supprimer le
     # sélecteur évite d'imposer à l'admin une deuxième configuration.
     panel.remove_item(panel.chooser)
