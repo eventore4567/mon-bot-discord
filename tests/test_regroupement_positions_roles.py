@@ -81,11 +81,13 @@ async def _vingt_deplacements_donnent_un_seul_log():
     champs = {f.name: f.value for f in envois[0]["panel"].fields}
     assert "Rôles concernés" in champs
     assert "**20**" in champs["Rôles concernés"]
-    # Aucun déplacement n'est perdu.
-    # 8 rôles détaillés max : une rafale de 29 ne doit pas remplir tout le salon.
-    assert len(champs["Positions modifiées"].splitlines()) <= 9
-    assert "12 autres rôles" in champs["Positions modifiées"]
-    assert "un réarrangement" in champs["Rôles concernés"]
+    # Discord a déplacé 20 rôles d'un cran : une ligne concise suffit.
+    details = champs["Positions modifiées"]
+    assert len(details.splitlines()) <= 2
+    assert "Décalage automatique" in details
+    assert "20 position(s)" in details
+    assert "autres rôles" not in details
+    assert "20" in champs["Rôles concernés"]
 
 
 def test_une_rafale_de_vingt_roles_ne_produit_qu_un_log():
@@ -190,3 +192,45 @@ async def _ne_pas_attribuer_un_role_deplace_a_un_audit_sans_rapport():
 
 def test_audit_log_de_roles_inconnexes_ne_designe_pas_un_responsable():
     asyncio.run(_ne_pas_attribuer_un_role_deplace_a_un_audit_sans_rapport())
+
+
+async def _grand_deplacement_affiche_seulement_le_role_principal():
+    # Un déplacement intentionnel de 1 à 64 génère 63 décalages implicites.
+    mouvements = [(9999, 1, 64)] + [
+        (1000 + i, i + 2, i + 1) for i in range(63)
+    ]
+    envois, audit = await _rafale(mouvements)
+    assert len(envois) == 1
+    assert audit.await_count == 1
+    champs = {f.name: f.value for f in envois[0]["panel"].fields}
+    details = champs["Positions modifiées"]
+    assert "<@&9999>" in details
+    assert "1 → 64" in details
+    assert "63 position(s)" in details
+    assert "autres rôles" not in details
+    assert "<@&1000>" not in details
+    assert len(details) < 300
+
+
+def test_grand_glissement_est_resumee_sans_59_autres_roles():
+    asyncio.run(_grand_deplacement_affiche_seulement_le_role_principal())
+
+
+def test_echange_de_deux_roles_adjacents_montre_les_deux_sans_deviner():
+    guild = _guild()
+    text = v3._resume_positions_roles(guild, {31: (4, 5), 32: (5, 4)})
+    assert "<@&31>" in text and "<@&32>" in text
+    assert "Décalage automatique" not in text
+
+
+def test_plusieurs_roles_reellement_deplaces_reste_compact():
+    guild = _guild()
+    text = v3._resume_positions_roles(
+        guild,
+        {10: (1, 40), 20: (30, 18), 30: (19, 13), 40: (12, 7), 50: (10, 11)},
+    )
+    assert "Déplacements principaux" in text
+    assert "Déplacements importants :** 4" in text
+    assert "Décalage automatique :** 1" in text
+    assert "autres rôles" not in text
+    assert len(text) < 400
