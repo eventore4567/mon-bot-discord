@@ -723,7 +723,7 @@ async def _open_captcha_channel_access(view, interaction: discord.Interaction) -
         "**Accès aux salons — règlement publié reconnu**\n"
         f"Rôle vérifié : {role.mention}. Aucun nouveau règlement à créer.\n"
         + plan.preview()
-        + "\\n\\n**Confirmez pour appliquer ce plan.** Les rôles staff/logs existants restent intacts.",
+        + "\n\n**Confirmez pour appliquer ce plan.** Les rôles staff/logs existants restent intacts.",
         view=panel, ephemeral=True,
     )
 
