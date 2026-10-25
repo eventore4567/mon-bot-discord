@@ -89,5 +89,6 @@ async def test_modified_plan_requires_new_preview_without_writes(monkeypatch):
     )
     confirm_button = next(child for child in view.children if getattr(child, "label", "") == "Confirmer le verrouillage")
     await confirm_button.callback(interaction)
-    assert "changé" in interaction.followup.send.await_args.args[0]
+    from utils import sentrix_panels as panels
+    assert "changé" in panels.texte_complet(interaction.followup.send.await_args.kwargs["view"])
     lockdown.assert_not_awaited()
