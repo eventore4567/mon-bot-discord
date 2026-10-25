@@ -356,3 +356,109 @@ async def test_private_verification_portal_requires_manual_fix_not_automatic_ope
         )
     for surface in guild.channels:
         surface.set_permissions.assert_not_awaited()
+
+
+def test_homogeneous_synced_member_category_is_planned_once():
+    guild, verified, verify, c = guild_screenshot()
+    category = Surface(700, "Discussions membres", public=True)
+    channel1 = Surface(701, "general", category=category, public=True)
+    channel2 = Surface(702, "images", category=category, public=True)
+    channel1.permissions_synced = True
+    channel2.permissions_synced = True
+    guild.categories.append(category)
+    guild.channels.extend((category, channel1, channel2))
+    plan = plan_access(
+        guild, verification_channel_id=verify.id, verified_role=verified,
+    )
+    assert category in plan.category_gates
+    assert channel1 in plan.gate and channel2 in plan.gate
+    assert category.id not in plan.protected
+    assert "Catégories membres synchronisées conservées : 1" in plan.preview()
+
+
+@pytest.mark.asyncio
+async def test_safe_member_category_changes_once_without_unsyncing_children():
+    guild, verified, verify, c = guild_screenshot()
+    category = Surface(700, "Discussions membres", public=True)
+    channel1 = Surface(701, "general", category=category, public=True)
+    channel2 = Surface(702, "images", category=category, public=True)
+    channel1.permissions_synced = True
+    channel2.permissions_synced = True
+    guild.categories.append(category)
+    guild.channels.extend((category, channel1, channel2))
+    bot = SimpleNamespace(db=SimpleNamespace(
+        get_guild_config=AsyncMock(return_value={
+            "verification_channel": verify.id, "verify_role": verified.id,
+        }),
+        fetchall=AsyncMock(return_value=[]),
+        fetchone=AsyncMock(return_value=None),
+    ))
+    changed, _ = await VerificationConfigV96(bot)._apply_auto_access(
+        guild, verification_channel=verify, verified_role=verified,
+        actor=SimpleNamespace(id=900),
+    )
+    assert changed == 3  # Le salon général préexistant + 2 enfants synchronisés.
+    assert [call.args[0].id for call in category.set_permissions.await_args_list] == [
+        guild.default_role.id, verified.id,
+    ]
+    channel1.set_permissions.assert_not_awaited()
+    channel2.set_permissions.assert_not_awaited()
+    assert channel1.permissions_synced and channel2.permissions_synced
+
+
+@pytest.mark.asyncio
+async def test_mixed_synced_category_is_left_intact_even_with_public_member_channel():
+    guild, verified, verify, c = guild_screenshot()
+    category = Surface(700, "Discussions membres", public=True)
+    public_chat = Surface(701, "general", category=category, public=True)
+    log = Surface(702, "logs-salons", category=category, public=False)
+    public_chat.permissions_synced = True
+    log.permissions_synced = True
+    guild.categories.append(category)
+    guild.channels.extend((category, public_chat, log))
+    plan = plan_access(
+        guild, verification_channel_id=verify.id, verified_role=verified,
+    )
+    assert category not in plan.category_gates
+    assert public_chat not in plan.gate
+    assert public_chat.id in plan.untouched
+    assert log.id in plan.protected
+
+    bot = SimpleNamespace(db=SimpleNamespace(
+        get_guild_config=AsyncMock(return_value={"verification_channel": verify.id}),
+        fetchall=AsyncMock(return_value=[]),
+        fetchone=AsyncMock(return_value=None),
+    ))
+    await VerificationConfigV96(bot)._apply_auto_access(
+        guild, verification_channel=verify, verified_role=verified,
+        actor=SimpleNamespace(id=900),
+    )
+    category.set_permissions.assert_not_awaited()
+    public_chat.set_permissions.assert_not_awaited()
+    log.set_permissions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_member_category_preserves_log_category_sync_side_by_side():
+    guild, verified, verify, c = guild_screenshot()
+    log_category = Surface(800, "SentriX — Logs", public=False)
+    log_channel = Surface(801, "logs-salons", category=log_category, public=False)
+    log_channel.permissions_synced = True
+    member_category = Surface(700, "Discussions membres", public=True)
+    member_channel = Surface(701, "general", category=member_category, public=True)
+    member_channel.permissions_synced = True
+    guild.categories.extend([log_category, member_category])
+    guild.channels.extend([log_category, log_channel, member_category, member_channel])
+    bot = SimpleNamespace(db=SimpleNamespace(
+        get_guild_config=AsyncMock(return_value={"verification_channel": verify.id}),
+        fetchall=AsyncMock(return_value=[{"channel_id": log_channel.id}]),
+        fetchone=AsyncMock(return_value=None),
+    ))
+    await VerificationConfigV96(bot)._apply_auto_access(
+        guild, verification_channel=verify, verified_role=verified,
+        actor=SimpleNamespace(id=900),
+    )
+    member_category.set_permissions.assert_awaited()
+    log_category.set_permissions.assert_not_awaited()
+    log_channel.set_permissions.assert_not_awaited()
+    member_channel.set_permissions.assert_not_awaited()
