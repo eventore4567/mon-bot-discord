@@ -85,7 +85,7 @@ async def _vingt_deplacements_donnent_un_seul_log():
     details = champs["Positions modifiées"]
     assert len(details.splitlines()) <= 2
     assert "Décalage automatique" in details
-    assert "20 position(s)" in details
+    assert "20 positions ajustées" in details
     assert "autres rôles" not in details
     assert "20" in champs["Rôles concernés"]
 
@@ -206,7 +206,7 @@ async def _grand_deplacement_affiche_seulement_le_role_principal():
     details = champs["Positions modifiées"]
     assert "<@&9999>" in details
     assert "1 → 64" in details
-    assert "63 position(s)" in details
+    assert "63 positions ajustées" in details
     assert "autres rôles" not in details
     assert "<@&1000>" not in details
     assert len(details) < 300
