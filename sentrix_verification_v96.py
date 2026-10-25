@@ -710,6 +710,46 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             "has_existing_panel": panel is not None,
         }
 
+    async def _onboarding_protected_ids(self, guild: discord.Guild) -> set[int]:
+        """Ne jamais masquer les salons du parcours d'accueil Discord.
+
+        L'API Discord peut conserver des associations à l'Onboarding même
+        après désactivation de la fonctionnalité (erreur 350003). Garder les
+        ID de tous les choix, même lorsque `enabled` vaut False.
+        """
+        onboarding_method = getattr(guild, "onboarding", None)
+        if not callable(onboarding_method):
+            return set()
+        try:
+            onboarding = await onboarding_method()
+        except discord.NotFound:
+            return set()
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            raise ValueError(
+                "Impossible de vérifier les salons d'accueil Discord. "
+                "Aucune permission n'a été modifiée : contrôlez l'Onboarding "
+                "dans les paramètres du serveur puis réessayez."
+            ) from exc
+
+        def ids(items):
+            return {
+                int(getattr(item, "id", 0) or 0)
+                for item in (items or ())
+                if getattr(item, "id", None)
+            }
+
+        protected = ids(getattr(onboarding, "default_channels", ()))
+        for prompt in getattr(onboarding, "prompts", ()) or ():
+            for option in getattr(prompt, "options", ()) or ():
+                protected.update(ids(getattr(option, "channels", ())))
+        # Ces deux canaux communautaires doivent rester accessibles
+        # aux nouveaux membres indépendamment des catégories.
+        for attr in ("rules_channel", "public_updates_channel"):
+            channel = getattr(guild, attr, None)
+            if channel is not None and getattr(channel, "id", None):
+                protected.add(int(channel.id))
+        return protected
+
     async def _access_plan(
         self, guild: discord.Guild, *, verification_channel: discord.TextChannel,
         verified_role: discord.Role | None = None,
@@ -764,12 +804,14 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             value = _row_value(honeypot, field)
             if value:
                 special_ids.add(int(value))
+        onboarding_ids = await self._onboarding_protected_ids(guild)
         return plan_access(
             guild,
             verification_channel_id=verification_channel.id,
             configured_ids=configured_ids,
             special_ids=special_ids,
             log_ids=log_destinations,
+            onboarding_ids=onboarding_ids,
             verified_role=verified_role,
         )
 
