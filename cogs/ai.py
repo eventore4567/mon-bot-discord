@@ -2894,6 +2894,52 @@ class Ai(commands.Cog, name="Ai"):
         view = AiSetupView(self, ctx.guild.id, ctx.author.id, settings)
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(view.build_embed()), view))
 
+    async def _ai_connection_diagnostic(
+        self, guild_id: int | None, channel_id: int | None,
+        role_ids: list[int] | None = None,
+    ) -> dict:
+        """Diagnostic sans effet de bord : teste le modèle réellement utilisé.
+
+        +aidiag doit rester accessible même si l'IA est coupée afin qu'un
+        administrateur puisse identifier la cause. Il ne réactive rien.
+        """
+        settings = (
+            await ai_service.get_settings(self.bot, guild_id)
+            if guild_id is not None else dict(ai_service.DEFAULT_AI_SETTINGS)
+        )
+        configured_model_key = settings.get("default_model") or ai_service.MODEL_TERRA
+        if configured_model_key not in ai_service.MODEL_IDS:
+            configured_model_key = ai_service.MODEL_TERRA
+        # /sentrix et les mentions utilisent pick_model(prompt), pas le champ
+        # default_model de +aisetup. Pour une demande simple, ce sera Luna.
+        # Tester réellement cette route évite un faux OK sur Terra.
+        model_key = ai_service.pick_model("Bonjour")
+        effort = ai_service.pick_reasoning_effort(model_key, "medium")
+        result = await ai_service.test_connection(
+            model_key=model_key, reasoning_effort=effort,
+        )
+        configured_result = None
+        configured_effort = settings.get("reasoning_effort") or "medium"
+        if configured_effort not in ai_service.VALID_REASONING_EFFORTS:
+            configured_effort = "medium"
+        if configured_model_key != model_key:
+            configured_result = await ai_service.test_connection(
+                model_key=configured_model_key, reasoning_effort=configured_effort,
+            )
+        channels = settings.get("allowed_channel_ids") or []
+        return {
+            "enabled": bool(settings.get("enabled", False)),
+            "channel_allowed": not channels or channel_id is None or channel_id in channels,
+            "role_restrictions": bool(settings.get("allowed_role_ids")),
+            "role_allowed": ai_service.is_role_allowed(settings, role_ids or []),
+            "model_key": model_key,
+            "model_id": ai_service.MODEL_IDS[model_key],
+            "reasoning_effort": effort,
+            "configured_model_id": ai_service.MODEL_IDS[configured_model_key],
+            "configured_test": configured_result,
+            "test": result,
+        }
+
     @commands.hybrid_command(
         name="aidiag",
         description="Diagnostic technique de la connexion à l'IA (admin uniquement).",
@@ -2912,33 +2958,76 @@ class Ai(commands.Cog, name="Ai"):
         msg = None
         if not ctx.interaction:
             msg = await panels.envoyer(ctx, panels.depuis_embed(embeds.info("🔧 Test de connexion à l'IA en cours…")))
-        async with ctx.typing():
-            result = await ai_service.test_connection()
-
-        if not result["has_key"]:
-            e = embeds.error("Aucune clé OPENAI_API_KEY n'est configurée sur Railway (variable vide ou absente).")
-        elif result["ok"]:
-            e = embeds.success(
-                f"● Connexion à l'IA fonctionnelle.\n"
-                f"**Latence :** {result['latency_ms']} ms\n"
-                f"**Modèle testé :** {ai_service.MODEL_LABELS[ai_service.MODEL_TERRA]} (`{config.OPENAI_MODEL}`)\n"
-                f"**Réponse test :** {result.get('sample') or '(vide)'}"
+        try:
+            async with ctx.typing():
+                info = await self._ai_connection_diagnostic(
+                    ctx.guild.id if ctx.guild else None,
+                    ctx.channel.id if ctx.channel else None,
+                    [role.id for role in getattr(ctx.author, "roles", [])],
+                )
+        except Exception:
+            logger.exception("Diagnostic IA : lecture des paramètres du serveur impossible")
+            e = embeds.error(
+                "Le diagnostic ne peut pas lire la configuration IA du serveur. "
+                "Vérifiez les logs et l'état de la base de données ; aucune option n'a été modifiée."
             )
         else:
-            hints = {
-                "AuthenticationError": "La clé OPENAI_API_KEY est invalide ou incorrecte.",
-                "PermissionDeniedError": "La clé n'a pas la permission d'utiliser ce modèle (vérifie les permissions de la clé sur platform.openai.com).",
-                "RateLimitError": "Limite de débit ou quota/crédit OpenAI épuisé.",
-                "NotFoundError": "Modèle introuvable — vérifie OPENAI_MODEL sur Railway.",
-                "APIConnectionError": "Impossible de joindre l'API OpenAI depuis Railway (problème réseau côté hébergeur).",
-                "APITimeoutError": "L'appel a dépassé le délai maximal (15s) — connexion très lente ou bloquée.",
-            }
-            hint = hints.get(result["error_type"], "Erreur technique — voir les logs du serveur pour le détail complet.")
-            e = embeds.error(
-                f"○ Échec de connexion à l'IA après {result['latency_ms']} ms.\n"
-                f"**Type d'erreur :** `{result['error_type']}`\n"
-                f"**Diagnostic probable :** {hint}"
+            result = info["test"]
+            state = (
+                "**Module IA :** activé"
+                if info["enabled"] else "**Module IA :** désactivé — activez-le volontairement dans +aisetup"
             )
+            channel_note = (
+                "**Salon courant :** autorisé"
+                if info["channel_allowed"] else
+                "**Salon courant :** non autorisé dans la configuration IA"
+            )
+            role_note = (
+                "**Rôles :** restrictions spécifiques configurées"
+                if info["role_restrictions"] else "**Rôles :** aucune restriction IA supplémentaire"
+            )
+            member_role_note = (
+                "**Rôle du membre :** autorisé"
+                if info["role_allowed"] else
+                "**Rôle du membre :** non autorisé dans la configuration IA"
+            )
+            details = (
+                f"{state}\n{channel_note}\n{role_note}\n{member_role_note}\n"
+                f"**Conversation simple :** `{info['model_id']}` "
+                f"({ai_service.MODEL_LABELS.get(info['model_key'], 'IA')})\n"
+                f"**Raisonnement conversation :** `{info['reasoning_effort']}`\n"
+                f"**Modèle du serveur :** `{info['configured_model_id']}`\n"
+            )
+            other = info["configured_test"]
+            if other is not None:
+                details += (
+                    f"**Test du modèle serveur :** {'OK' if other['ok'] else 'ÉCHEC'}"
+                    + (f" (`{other['error_type']}`)" if not other['ok'] else "")
+                    + "\n"
+                )
+            if not result["has_key"]:
+                e = embeds.error(details + "Aucune clé OpenAI disponible sur Railway.")
+            elif result["ok"]:
+                e = embeds.success(
+                    details + f"**Connexion OpenAI :** OK ({result['latency_ms']} ms)\n"
+                    "**Si l'IA ne répond toujours pas :** vérifiez l'activation, "
+                    "le salon autorisé et les rôles ci-dessus."
+                )
+            else:
+                hints = {
+                    "AuthenticationError": "Clé OpenAI invalide ou révoquée.",
+                    "PermissionDeniedError": "Ce modèle est interdit pour ce compte OpenAI.",
+                    "RateLimitError": "Limite de débit ou quota/crédit OpenAI atteint.",
+                    "NotFoundError": "Modèle introuvable — vérifiez le modèle choisi dans +aisetup et Railway.",
+                    "APIConnectionError": "Impossible de joindre OpenAI depuis Railway.",
+                    "APITimeoutError": "Connexion à OpenAI trop lente.",
+                    "BadRequestError": "Paramètres du modèle ou raisonnement refusés par l'API.",
+                }
+                e = embeds.error(
+                    details + f"**Connexion OpenAI :** échec ({result['latency_ms']} ms)\n"
+                    f"**Erreur :** `{result['error_type']}`\n"
+                    f"**Cause probable :** {hints.get(result['error_type'], 'Consultez les logs techniques.')}"
+                )
 
         if msg:
             await panels.editer(msg, panels.depuis_embed(e))
