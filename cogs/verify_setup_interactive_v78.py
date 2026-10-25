@@ -40,6 +40,83 @@ def _safe_image(value: str) -> str:
     return raw
 
 
+async def published_rules_state(bot: commands.Bot, guild: discord.Guild) -> dict | None:
+    """La publication est sauvegardée : aucune nouvelle session /setup requise.
+
+    Un rôle/salon défini ou un règlement écrit en brouillon ne constituent PAS
+    une publication valide : le panneau doit avoir un message_id enregistré.
+    """
+    await bot.db.execute(_SCHEMA)
+    row = await bot.db.fetchone(
+        "SELECT rules_text,message_id FROM dashboard_verification_panels WHERE guild_id=?",
+        (guild.id,),
+    )
+    conf = await bot.db.get_guild_config(guild.id)
+    role_id = _conf(conf, "verify_role", _conf(conf, "verification_role"))
+    channel_id = _conf(conf, "verification_channel")
+    try:
+        message_id = int(row["message_id"] or 0) if row else 0
+        role_id = int(role_id or 0)
+        channel_id = int(channel_id or 0)
+    except (TypeError, ValueError):
+        return None
+    if not (
+        row and str(row["rules_text"] or "").strip()
+        and message_id and role_id and channel_id
+    ):
+        return None
+    return {
+        "channel_id": channel_id,
+        "role_id": role_id,
+        "message_id": message_id,
+    }
+
+
+async def lock_published_channels(
+    bot: commands.Bot, guild: discord.Guild, actor: discord.abc.User,
+) -> tuple[int, int]:
+    """Applique les permissions en relisant l'état publié, sans republier.
+
+    Le moteur V96 existe déjà : il protège salons staff/privés, laisse visible
+    le règlement et effectue un rollback si Discord refuse une écriture.
+    """
+    state = await published_rules_state(bot, guild)
+    if state is None:
+        raise ValueError(
+            "Publiez d'abord votre règlement et son panneau public. "
+            "Vous pourrez ensuite verrouiller les salons sans refaire la configuration."
+        )
+    channel = guild.get_channel(state["channel_id"])
+    role = guild.get_role(state["role_id"])
+    if not isinstance(channel, discord.TextChannel) or not isinstance(role, discord.Role):
+        raise ValueError(
+            "Le salon du règlement ou le rôle Vérifié n'existe plus. "
+            "Corrigez ces ressources avant le verrouillage."
+        )
+    try:
+        await channel.fetch_message(state["message_id"])
+    except discord.NotFound as exc:
+        raise ValueError(
+            "Le message public du règlement a été supprimé. Republiez le panneau."
+        ) from exc
+
+    from sentrix_verification_v96 import VerificationConfigV96
+
+    manager = bot.get_cog("VerificationConfigV96") or VerificationConfigV96(bot)
+    issues = await manager._preflight(
+        guild, channel=channel, role=role, auto_access=True,
+    )
+    if issues:
+        raise ValueError("Verrouillage impossible : " + " ".join(issues))
+    # Vérifier la persistance AVANT de changer les permissions Discord.
+    await manager._ensure_table()
+    changed, protected = await manager._apply_auto_access(
+        guild, verification_channel=channel, verified_role=role, actor=actor,
+    )
+    await bot.db.set_guild_config(guild.id, "verification_auto_access", 1)
+    return changed, protected
+
+
 async def _publish_public_panel(
     bot: commands.Bot,
     guild: discord.Guild,
@@ -269,9 +346,39 @@ class VerifySetupView(discord.ui.View):
             self.stop()
             await panels.editer(interaction.response, self.panel(closed=True, disabled=True))
 
+        lock_button = discord.ui.Button(
+            label="Verrouiller les salons derrière le règlement",
+            style=discord.ButtonStyle.danger,
+            row=4,
+            disabled=not bool(self.message_id),
+        )
+
+        async def lock_callback(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                changed, protected = await lock_published_channels(
+                    self.bot, self.guild, interaction.user,
+                )
+            except ValueError as exc:
+                return await interaction.followup.send(str(exc), ephemeral=True)
+            except Exception:
+                logger.exception("Verrouillage du règlement impossible guild=%s", self.guild.id)
+                return await interaction.followup.send(
+                    "Verrouillage impossible. Vérifiez les permissions du bot et les logs.",
+                    ephemeral=True,
+                )
+            await interaction.followup.send(
+                f"Verrouillage effectué : **{changed}** espaces publics configurés, "
+                f"**{protected}** espaces privés ou sensibles conservés. "
+                "Les nouveaux membres doivent accepter le règlement et terminer la vérification.",
+                ephemeral=True,
+            )
+
         publish_button.callback = publish_callback
+        lock_button.callback = lock_callback
         close_button.callback = close_callback
         self.add_item(publish_button)
+        self.add_item(lock_button)
         self.add_item(close_button)
 
     def embed(self, *, closed: bool = False) -> discord.Embed:
