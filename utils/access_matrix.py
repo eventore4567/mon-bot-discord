@@ -350,6 +350,8 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
         "disablecommand", "enablecommand", "ignorechannel", "unignorechannel",
         "setlevelchannel", "setsuggestchannel", "setannouncechannel",
         "setgiveawaychannel", "config-view", "config-reset", "setup",
+        # Racine slash /config : le même panneau que /setup (setup_control_center).
+        "config",
         "delete-channel",
         "rolepanel", "rolepanel-refresh", "reactionrole-add",
         "reactionrole-remove", "reactionrole-list", "set-level-role",
