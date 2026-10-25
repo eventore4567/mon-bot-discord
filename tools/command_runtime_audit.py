@@ -49,6 +49,10 @@ async def run() -> int:
         if not command_catalog_cleanup._INSTALLED:
             errors.append("politique canonique du catalogue non installée")
 
+        # Contrat canonique produit : on ne doit jamais fabriquer une liste
+        # différente des commandes retirées ni lire une variable inexistante.
+        explicit_removed = command_catalog_cleanup.EXPLICITLY_REMOVED_COMMANDS
+
         # Base validée historiquement : 97 commandes directes. Les ajouts produit
         # explicites doivent être pris en compte ici, sans changer le compteur en
         # supprimant des commandes ou en annulant une fonctionnalité valide.
