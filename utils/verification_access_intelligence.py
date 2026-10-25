@@ -116,6 +116,37 @@ class AccessPlan:
         lines.append("Les salons staff, logs et vérification restent protégés.")
         return "\n".join(lines)
 
+    def audit_lines(self) -> list[str]:
+        """Liste exhaustive et sûre des décisions présentées à l'admin.
+
+        Les noms sont affichés comme texte, sans mentions actives. Chaque salon
+        apparaît une seule fois avec la raison effective de son inclusion ou de
+        son exclusion. Les catégories modifiées sont détaillées séparément.
+        """
+        def label(channel) -> str:
+            kind = "vocal" if is_voice_channel(channel) else "salon"
+            return f"{kind} {getattr(channel, 'name', getattr(channel, 'id', '?'))}"
+
+        lines: list[str] = []
+        mixed = {channel.id for channel in self.mixed_synced}
+        category_ids = {category.id for category in self.category_gates}
+        for channel in self.gate:
+            reason = "public pour @everyone"
+            if channel.id in mixed:
+                reason += "; sera désynchronisé d'une catégorie mixte"
+            elif (
+                getattr(channel, "category", None) is not None
+                and getattr(channel.category, "id", None) in category_ids
+                and bool(getattr(channel, "permissions_synced", False))
+            ):
+                reason += "; verrouillé via sa catégorie synchronisée"
+            lines.append(f"✅ {label(channel)} — {reason}")
+        for category in self.category_gates:
+            lines.append(f"✅ catégorie {category.name} — tous ses salons synchronisés sont membres")
+        for channel_id, reason in sorted({**self.protected, **self.untouched}.items()):
+            lines.append(f"🛡️ ID {channel_id} — exclu : {reason}")
+        return lines
+
 
 def _safe_ai_label(value: object) -> str:
     """Données non fiables, limitées en taille, sans mention Discord ni URL."""

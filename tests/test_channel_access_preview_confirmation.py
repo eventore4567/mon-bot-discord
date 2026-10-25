@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cogs import verify_setup_interactive_v78 as rules
+from utils.verification_access_intelligence import AccessPlan
 
 
 def plan(*ids):
@@ -17,11 +18,36 @@ def plan(*ids):
         protected={888: "staff"},
         untouched={999: "inconnu"},
         preview=lambda: "Aperçu sûr et catégories protégées",
+        audit_lines=lambda: ["✅ salon général — public pour @everyone"],
     )
 
 
 def test_signature_changes_if_public_channel_is_added():
     assert rules.plan_signature(plan(1, 2)) != rules.plan_signature(plan(1, 2, 3))
+
+
+def test_manual_selection_can_only_reduce_the_safe_plan():
+    category = SimpleNamespace(id=10, name="Membres")
+    first = SimpleNamespace(id=1, category=category, permissions_synced=True)
+    second = SimpleNamespace(id=2, category=category, permissions_synced=True)
+    access = AccessPlan(gate=[first, second], category_gates=[category])
+    filtered = rules._selected_plan(access, {1})
+    assert [channel.id for channel in filtered.gate] == [1]
+    assert filtered.category_gates == []
+
+
+def test_setup_home_routes_lock_button_to_read_only_preview():
+    from pathlib import Path
+    source = Path("cogs/setup_experience_v74.py").read_text(encoding="utf-8")
+    callback = source[source.index("async def ouvrir_verrou"):source.index("verrou.callback = ouvrir_verrou")]
+    assert "open_lock_preview" in callback
+    assert "send_modal" not in callback
+
+
+def test_startup_does_not_replace_the_canonical_access_engine():
+    from pathlib import Path
+    source = Path("sitecustomize.py").read_text(encoding="utf-8")
+    assert "VerificationConfigV96._apply_auto_access =" not in source
 
 
 @pytest.mark.asyncio
@@ -49,8 +75,9 @@ async def test_lock_button_only_opens_preview_not_discord_permission_writes(monk
     button = next(child for child in view.children if getattr(child, "label", "").startswith("Verrouiller les salons"))
     await button.callback(interaction)
     interaction.response.defer.assert_awaited_once()
-    assert "Aperçu sûr" in interaction.followup.send.await_args.args[0]
-    confirm_view = interaction.followup.send.await_args.kwargs["view"]
+    assert interaction.followup.send.await_count == 2
+    assert "Aperçu sûr" in interaction.followup.send.await_args_list[-1].args[0]
+    confirm_view = interaction.followup.send.await_args_list[-1].kwargs["view"]
     assert isinstance(confirm_view, rules.RulesLockConfirmView)
     lockdown.assert_not_awaited()
 

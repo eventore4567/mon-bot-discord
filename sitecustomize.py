@@ -304,77 +304,12 @@ def _install_sentrix_verification_v96() -> None:
         VerificationSetupView.configuration_embed = clean_configuration_embed
         VerificationSetupView._sentrix_clean_steps_fix = True
 
-    # Accès automatiques : chaque salon public est traité individuellement. On ne touche pas
-    # aux espaces sensibles ni aux salons déjà privés, afin d'éviter d'ouvrir tickets/staff.
-    if not getattr(VerificationConfigV96, "_sentrix_per_channel_access_fix", False):
-        async def apply_per_channel_access(
-            self,
-            guild,
-            *,
-            verification_channel,
-            verified_role,
-            actor,
-        ):
-            everyone = guild.default_role
-            operations = []
-            protected_ids = set()
-            seen = set()
-
-            def plan(surface, target, *, view_channel: bool):
-                key = (surface.id, target.id)
-                if key in seen:
-                    return
-                seen.add(key)
-                old = surface.overwrites_for(target)
-                new = _clone_overwrite(old)
-                new.view_channel = view_channel
-                had_overwrite = target in surface.overwrites
-                operations.append((surface, target, had_overwrite, old, new))
-
-            for surface in guild.channels:
-                if isinstance(surface, discord.CategoryChannel):
-                    continue
-                if surface.id == verification_channel.id:
-                    plan(surface, everyone, view_channel=True)
-                    plan(surface, verified_role, view_channel=True)
-                    continue
-                if _sensitive_surface(surface):
-                    protected_ids.add(surface.id)
-                    continue
-                if not surface.permissions_for(everyone).view_channel:
-                    protected_ids.add(surface.id)
-                    continue
-                plan(surface, everyone, view_channel=False)
-                plan(surface, verified_role, view_channel=True)
-
-            changed = []
-            reason = f"SentriX vérification : accès salons configurés par {actor} ({actor.id})"
-            try:
-                for surface, target, had_overwrite, old, new in operations:
-                    await surface.set_permissions(target, overwrite=new, reason=reason)
-                    changed.append((surface, target, had_overwrite, old, new))
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                rollback_reason = "SentriX vérification : rollback après échec permissions"
-                for surface, target, had_overwrite, old, _new in reversed(changed):
-                    try:
-                        await surface.set_permissions(
-                            target,
-                            overwrite=old if had_overwrite else None,
-                            reason=rollback_reason,
-                        )
-                    except (discord.Forbidden, discord.HTTPException):
-                        logging.getLogger("bot.verification-v96").exception(
-                            "Rollback impossible sur salon=%s rôle=%s",
-                            getattr(surface, "id", "?"),
-                            getattr(target, "id", "?"),
-                        )
-                raise RuntimeError(f"Discord a refusé une permission sur {surface!s}") from exc
-
-            changed_surfaces = {surface.id for surface, *_rest in changed}
-            return len(changed_surfaces), len(protected_ids)
-
-        VerificationConfigV96._apply_auto_access = apply_per_channel_access
-        VerificationConfigV96._sentrix_per_channel_access_fix = True
+    # Le moteur canonique V96 réalise désormais ce travail avec l'audit des
+    # destinations de logs, l'Onboarding Discord, les vocaux, les catégories
+    # synchronisées et un rollback complet. Ne plus le remplacer ici par
+    # l'ancienne rustine « chaque salon public », qui court-circuitait ces
+    # protections au démarrage et annulait les correctifs récents.
+    VerificationConfigV96._sentrix_per_channel_access_fix = True
 
     try:
         install()

@@ -1036,8 +1036,12 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
 
         async def ouvrir_verrou(interaction: discord.Interaction):
-            await interaction.response.send_modal(
-                VerrouillerSalonsModal(self, channel, role)
+            # Le bouton principal doit suivre exactement le parcours sûr du
+            # configurateur V78 : lecture seule, audit exhaustif, puis une
+            # confirmation séparée. L'ancien modal écrivait immédiatement.
+            from .verify_setup_interactive_v78 import open_lock_preview
+            await open_lock_preview(
+                interaction, self.bot, self.guild, interaction.user.id,
             )
 
         verrou.callback = ouvrir_verrou

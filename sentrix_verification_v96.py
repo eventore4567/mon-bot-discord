@@ -822,6 +822,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         verification_channel: discord.TextChannel,
         verified_role: discord.Role,
         actor: discord.abc.User,
+        access_plan=None,
     ) -> tuple[int, int]:
         """Verrouille UNIQUEMENT les salons publics membres identifiés.
 
@@ -830,7 +831,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         rendu visible au rôle « Vérifié ».
         """
         everyone = guild.default_role
-        access = await self._access_plan(
+        access = access_plan or await self._access_plan(
             guild, verification_channel=verification_channel,
             verified_role=verified_role,
         )
