@@ -851,6 +851,25 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                 plan(surface, everyone, view_channel=False)
                 plan(surface, verified_role, view_channel=True)
 
+        # Pré-vérifier TOUS les salons où une écriture est nécessaire. Sinon
+        # un refus sur le dernier salon peut forcer un rollback après avoir déjà
+        # modifié des dizaines de permissions.
+        me = getattr(guild, "me", None)
+        if me is not None:
+            blocked = []
+            for surface, _target, _had, _old, _new in operations:
+                if not surface.permissions_for(me).manage_channels:
+                    blocked.append(surface)
+            if blocked:
+                names = ", ".join(
+                    f"#{surface.name}" for surface in dict.fromkeys(blocked) if hasattr(surface, "name")
+                )
+                raise ValueError(
+                    "SentriX ne peut pas gérer les permissions de ces salons : "
+                    + (names[:400] or "permissions manquantes")
+                    + ". Vérifiez les permissions du bot avant de confirmer."
+                )
+
         changed: list[
             tuple[
                 discord.abc.GuildChannel,
