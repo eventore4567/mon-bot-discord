@@ -115,6 +115,8 @@ async def published_rules_state(bot: commands.Bot, guild: discord.Guild) -> dict
             "role_id": _row_value(row, "role_id"),
             "message_id": message_id,
             "rules_text": rules,
+            "image_url": _row_value(row, "image_url"),
+            "title": _row_value(row, "title", _DEFAULT_TITLE) or _DEFAULT_TITLE,
             "updated_at": int(_row_value(row, "updated_at", 0) or 0),
         })
     if not candidates:
@@ -813,9 +815,17 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             (guild.id,),
         )
 
-        channel_id = _row_value(conf, "verification_channel") or _row_value(panel, "channel_id")
+        published = await published_rules_state(self.bot, guild)
+        # Le panneau réellement publié est prioritaire sur l'état d'un assistant
+        # antérieur : on peut reprendre après fermeture/restart sans recommencer.
+        channel_id = (
+            _row_value(published, "channel_id")
+            or _row_value(conf, "verification_channel")
+            or _row_value(panel, "channel_id")
+        )
         role_id = (
-            _row_value(conf, "verify_role")
+            _row_value(published, "role_id")
+            or _row_value(conf, "verify_role")
             or _row_value(conf, "verification_role")
             or _row_value(panel, "role_id")
         )
@@ -828,11 +838,15 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         return {
             "channel_id": int(channel_id) if channel_id else None,
             "role_id": int(role_id) if role_id else None,
-            "panel_title": _row_value(panel, "title", _DEFAULT_TITLE) or _DEFAULT_TITLE,
-            "rules_text": _row_value(panel, "rules_text", _DEFAULT_RULES) or _DEFAULT_RULES,
-            "image_url": _row_value(panel, "image_url"),
+            "panel_title": _row_value(published, "title", _DEFAULT_TITLE) or _DEFAULT_TITLE,
+            "rules_text": (
+                _row_value(published, "rules_text")
+                or _row_value(panel, "rules_text")
+                or _DEFAULT_RULES
+            ),
+            "image_url": _row_value(published, "image_url") or _row_value(panel, "image_url"),
             "auto_access": auto_access,
-            "has_existing_panel": panel is not None,
+            "has_existing_panel": published is not None,
         }
 
     async def _apply_auto_access(
