@@ -938,6 +938,12 @@ async def ensure_settings_row(bot, guild_id: int):
 async def update_setting(bot, guild_id: int, field: str, value):
     """`field` doit TOUJOURS venir d'un nom de colonne fixe côté code (jamais d'une entrée
     utilisateur brute) — même convention que Database.set_guild_config()."""
+    # /setup et +aisetup partagent exactement le meme interrupteur.
+    # Evite qu'un module affiche "active" alors que l'autre est desactive.
+    if field == "enabled":
+        from cogs import setup_v2_core
+        await setup_v2_core.set_module_enabled(bot, guild_id, "ai", bool(value))
+        return
     await ensure_settings_row(bot, guild_id)
     await bot.db.execute(f"UPDATE ai_settings SET {field} = ?, updated_at = ? WHERE guild_id = ?",
                           (value, int(time.time()), guild_id))
