@@ -126,21 +126,14 @@ async def test_real_apply_does_not_open_staff_or_logs_to_verified_role():
         guild, verification_channel=verify,
         verified_role=verified, actor=SimpleNamespace(id=900),
     )
-    assert changed >= 4
+    assert changed == 1
     assert protected >= 7
     member_targets = [call.args[0].id for call in c["chat"].set_permissions.await_args_list]
     assert member_targets == [guild.default_role.id, verified.id]
-    for key in ("logs", "renamed_log", "staff_room"):
-        targets = [call.args[0].id for call in c[key].set_permissions.await_args_list]
-        assert targets == [guild.default_role.id, verified.id], key
-        assert all(
-            call.kwargs["overwrite"].view_channel is False
-            for call in c[key].set_permissions.await_args_list
-        )
-    for key in ("muted", "auto", "private", "unknown"):
+    # La vérification ne modifie JAMAIS les logs, le staff ni les catégories
+    # synchronisées. Les anomalies vont uniquement dans l'aperçu.
+    for key in ("logs", "renamed_log", "staff_room", "muted", "auto", "private", "unknown", "verify"):
         c[key].set_permissions.assert_not_awaited()
-    # Le salon de règlement n'est jamais fermé aux nouveaux membres.
-    assert c["verify"].set_permissions.await_args_list[0].kwargs["overwrite"].view_channel is True
 
 
 @pytest.mark.asyncio
@@ -219,7 +212,7 @@ def test_private_staff_channel_with_stale_verified_allow_is_not_assumed_safe():
     assert leaked.id in plan.protected
     assert leaked in plan.secure_sensitive
     assert leaked not in plan.gate
-    assert "Accès staff/logs à sécuriser" in plan.preview()
+    assert "Salons sensibles à vérifier manuellement" in plan.preview()
     assert "Attention : -" not in plan.preview()
 
 
@@ -249,7 +242,7 @@ def test_inherited_verified_allow_on_synced_sensitive_category_requires_denial()
 
 
 @pytest.mark.asyncio
-async def test_real_permission_application_revokes_old_verified_access_to_private_logs():
+async def test_real_permission_application_only_reports_old_verified_access_to_private_logs():
     guild, verified, verify, c = guild_screenshot()
     leaked = Surface(
         120, "logs-secrets", public=False, roles=[verified],
@@ -267,12 +260,12 @@ async def test_real_permission_application_revokes_old_verified_access_to_privat
         guild, verification_channel=verify, verified_role=verified,
         actor=SimpleNamespace(id=900),
     )
-    revoked = {
-        call.args[0].id: call.kwargs["overwrite"].view_channel
-        for call in leaked.set_permissions.await_args_list
-    }
-    assert revoked[verified.id] is False
-    assert revoked[guild.default_role.id] is False
+    leaked.set_permissions.assert_not_awaited()
+    # Vérification des risques, sans correction silencieuse d'un salon staff.
+    plan = await VerificationConfigV96(bot)._access_plan(
+        guild, verification_channel=verify, verified_role=verified,
+    )
+    assert leaked in plan.secure_sensitive
 
 
 @pytest.mark.asyncio
