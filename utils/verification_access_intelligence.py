@@ -34,6 +34,10 @@ ONBOARDING = frozenset({
     "commencer", "onboarding", "informations", "information", "info",
     "aide", "help", "support", "ticket", "tickets", "stay", "muted",
 })
+# Priorité au portail Discord dans une catégorie sécurité : le CAPTCHA,
+# le règlement et stay-muted ne doivent jamais disparaître pour les arrivants.
+PORTALS = frozenset({"verification", "verify", "verif", "captcha", "reglement", "rules", "rule", "stay", "muted"})
+
 # Gater seulement des salons manifestement destinés aux membres ; les salons
 # sans catégorie claire restent intactes jusqu'à décision d'un administrateur.
 MEMBER = frozenset({
@@ -156,7 +160,12 @@ def plan_access(guild, *, verification_channel_id: int, configured_ids=(), speci
         # Exemple réel : #verification et #stay-muted dans la catégorie
         # « Sécurité SentriX ». Ce sont des portails, PAS des salons staff
         # à cacher ; leur fonction passe avant le nom de leur catégorie.
-        if own & ONBOARDING and not own & SENSITIVE and channel.id not in log_destinations:
+        if (
+            own & ONBOARDING
+            and not own & SENSITIVE
+            and channel.id not in log_destinations
+            and (not parent_words & SENSITIVE or own & PORTALS)
+        ):
             plan.protected[channel.id] = "portail d'accueil/vérification"
             continue
         sensitive = bool(
