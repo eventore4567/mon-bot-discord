@@ -27,8 +27,10 @@ async def test_old_server_xp_rate_is_ignored():
     # Old per-guild values must not allow huge rewards or zero cooldown.
     old_settings = {"xp_min": 5000, "xp_max": 5000, "xp_cooldown": 0}
     old_config = {"xp_multiplier": 5}
-    with patch("cogs.levels.random.randint", return_value=XP_MIN_FALLBACK) as randint, \\
-         patch("cogs.levels.temporary_boosts.apply_xp_boost", new_callable=AsyncMock, return_value=(XP_MIN_FALLBACK, None)):
+    with (
+        patch("cogs.levels.random.randint", return_value=XP_MIN_FALLBACK) as randint,
+        patch("cogs.levels.temporary_boosts.apply_xp_boost", new_callable=AsyncMock, return_value=(XP_MIN_FALLBACK, None)),
+    ):
         await cog._process_xp(message, old_settings, old_config)
     randint.assert_called_once_with(XP_MIN_FALLBACK, XP_MAX_FALLBACK)
     cog._apply_xp_delta.assert_awaited_once_with(55, 77, XP_MIN_FALLBACK)
