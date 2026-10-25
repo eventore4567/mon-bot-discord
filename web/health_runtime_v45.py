@@ -315,10 +315,16 @@ async def _boot_audit(bot, dashboard) -> None:
             )
             return
 
-        # Si cette instance détient déjà le lease mais n'est toujours pas prête après
-        # 90 secondes, c'est une vraie anomalie Discord et on conserve le niveau ERROR.
-        logger.error("Audit démarrage V45 : Discord n'est pas devenu prêt en 90 secondes.")
-        return
+        # Les 90 secondes ci-dessus courent depuis le démarrage du processus, attente
+        # du lease comprise : le 24/10 à 20:23, l'alerte est partie 19 s après la
+        # prise du bail, 9 s avant la connexion. On laisse donc 90 s de plus au
+        # leader avant de conclure à une vraie anomalie Discord.
+        try:
+            await asyncio.wait_for(bot.wait_until_ready(), timeout=90)
+        except asyncio.TimeoutError:
+            logger.error("Audit démarrage V45 : Discord n'est pas devenu prêt en 90 secondes après la prise du bail.")
+            return
+        logger.info("Audit démarrage V45 : Discord prêt après la prise du bail HA.")
     except asyncio.CancelledError:
         raise
     except Exception:

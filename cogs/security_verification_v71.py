@@ -668,6 +668,11 @@ class SecurityVerificationRuntimeV71:
         cfg = await settings(self.bot, message.guild.id)
         if not cfg["honeypot_enabled"] or self._staff_bypass(message.author, conf):
             return
+        # La garde d'immunité du propriétaire bloque déjà le ban, mais le reste
+        # du softban (débannissement, journal) partait quand même : 3 erreurs
+        # « Unknown Ban » le 25/10 quand le propriétaire a testé le piège.
+        if await self.bot.is_owner(message.author):
+            return
 
         key = (message.guild.id, message.author.id)
         now = time.monotonic()
@@ -696,7 +701,11 @@ class SecurityVerificationRuntimeV71:
         try:
             if action == "softban":
                 await message.guild.ban(message.author, reason=reason, delete_message_seconds=0)
-                await message.guild.unban(message.author, reason="SentriX V71 : fin du softban honeypot")
+                try:
+                    await message.guild.unban(message.author, reason="SentriX V71 : fin du softban honeypot")
+                except discord.NotFound:
+                    # Aucun ban posé (refusé en amont) : rien à lever.
+                    pass
             elif action == "kick":
                 await message.author.kick(reason=reason)
             elif action == "ban":
