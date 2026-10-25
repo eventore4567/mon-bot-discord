@@ -711,17 +711,15 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
 
         conf = await self.bot.db.get_guild_config(guild.id)
         configured_ids: set[int] = set()
-        for key in (
-            "verification_channel", "rules_channel", "log_channel",
-            "ticket_log_channel", "modlog_channel", "audit_log_channel",
-            "welcome_channel",
-        ):
+        log_destinations: set[int] = set()
+        for key in ("verification_channel", "rules_channel", "welcome_channel"):
             value = _row_value(conf, key)
             if value:
-                try:
-                    configured_ids.add(int(value))
-                except (TypeError, ValueError):
-                    pass
+                configured_ids.add(int(value))
+        for key in ("log_channel", "ticket_log_channel", "modlog_channel", "audit_log_channel"):
+            value = _row_value(conf, key)
+            if value:
+                log_destinations.add(int(value))
 
         async def rows_or_empty(sql: str):
             try:
@@ -737,7 +735,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         for row in log_rows or ():
             value = _row_value(row, "channel_id")
             if value:
-                configured_ids.add(int(value))
+                log_destinations.add(int(value))
         special_ids: set[int] = set()
         try:
             honeypot = await self.bot.db.fetchone(
@@ -757,6 +755,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             verification_channel_id=verification_channel.id,
             configured_ids=configured_ids,
             special_ids=special_ids,
+            log_ids=log_destinations,
         )
 
     async def _apply_auto_access(
@@ -779,7 +778,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         )
         # Ne pas toucher aux catégories elles-mêmes : leurs overwrites sont
         # hérités, les modifier peut masquer un salon staff/portail synchronisé.
-        surfaces = list(access.gate)
+        surfaces = list(access.gate) + list(access.secure_sensitive)
         # Le portail doit rester accessible aux arrivants, même s'il a été
         # malencontreusement masqué par un précédent règlement.
         surfaces.append(verification_channel)
@@ -818,6 +817,11 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             if surface.id == verification_channel.id:
                 plan(surface, everyone, view_channel=True)
                 plan(surface, verified_role, view_channel=True)
+            elif surface in access.secure_sensitive:
+                # Masquer staff/logs à @everyone seulement si un rôle staff
+                # possède DÉJÀ un overwrite autorisé. Ne jamais accorder
+                # l'accès à Verified sur ces salons.
+                plan(surface, everyone, view_channel=False)
             else:
                 plan(surface, everyone, view_channel=False)
                 plan(surface, verified_role, view_channel=True)
