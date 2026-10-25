@@ -407,4 +407,20 @@ def test_salons_sensibles_distingues_arrivants_et_role_verifie():
     from utils.verification_access_intelligence import decision_rows
     lignes = " | ".join(decision_rows(s, plan))
     assert "#discussion -> INCHANGE:staff/logs/sécurité !OUVERT_AU_ROLE_VERIFIE" in lignes
-    assert "#audit -> INCHANGE:staff/logs/sécurité !VISIBLE_ARRIVANTS" in lignes
+    assert "#audit -> INCHANGE:staff/logs/sécurité !VISIBLE_ARRIVANTS(@everyone)" in lignes
+
+
+def test_relevé_dit_si_le_salon_sensible_est_vu_par_le_role_d_arrivee_seul():
+    s = Serveur()
+    # @everyone sans « Voir » au niveau serveur, rôle d'arrivée avec « Voir » :
+    # un salon de logs SANS dérogation est vu des arrivants via ce rôle.
+    s.default_role.permissions = discord.Permissions.none()
+    s.membre.permissions = discord.Permissions(view_channel=True)
+    logs = Salon(700, "logs-tickets")
+    logs.guild = s
+    s.channels.append(logs)
+    plan = _plan(s)
+    assert logs in plan.sensitive_public
+    from utils.verification_access_intelligence import decision_rows
+    lignes = " | ".join(decision_rows(s, plan))
+    assert "#logs-tickets -> INCHANGE:staff/logs/sécurité !VISIBLE_ARRIVANTS(rôle d'arrivée)" in lignes

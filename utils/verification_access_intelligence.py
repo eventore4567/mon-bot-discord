@@ -557,7 +557,10 @@ def decision_rows(guild, plan: AccessPlan) -> list[str]:
         channel_id = getattr(channel, "id", 0)
         flag = ""
         if channel_id in {c.id for c in plan.sensitive_public}:
-            flag = " !VISIBLE_ARRIVANTS"
+            # @everyone seul le voit-il, ou seulement un rôle d'arrivée ?
+            # (rôle doté de « Voir les salons » sans refus @everyone ici)
+            by_everyone = newcomer_access(channel, getattr(guild, "default_role", None), ())[0]
+            flag = " !VISIBLE_ARRIVANTS(" + ("@everyone" if by_everyone else "rôle d'arrivée") + ")"
         elif channel_id in {c.id for c in plan.secure_sensitive}:
             flag = " !OUVERT_AU_ROLE_VERIFIE"
         if channel_id in gate_ids or channel_id in category_ids:
