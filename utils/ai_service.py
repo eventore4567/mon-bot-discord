@@ -889,7 +889,9 @@ async def generate(
         return AiResult(error=ERROR_GENERIC, model_key=model_key)
 
 
-async def test_connection(model_key: str = MODEL_TERRA) -> dict:
+async def test_connection(
+    model_key: str = MODEL_TERRA, *, reasoning_effort: str = "low",
+) -> dict:
     """Diagnostic pour +aidiag (admin uniquement) : tente un appel minimal à l'API et
     renvoie un résultat SANS JAMAIS inclure la clé ni le message d'erreur brut (qui peut
     contenir un extrait de la clé sur certaines erreurs d'authentification) — uniquement
@@ -906,7 +908,7 @@ async def test_connection(model_key: str = MODEL_TERRA) -> dict:
             model=model_id,
             instructions="Réponds uniquement par le mot : ok",
             input="Test de connexion.",
-            reasoning={"effort": "low"},
+            reasoning={"effort": reasoning_effort},
         )
         latency_ms = int((time.monotonic() - start) * 1000)
         text = getattr(resp, "output_text", None) or _extract_text(resp)
