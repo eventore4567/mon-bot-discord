@@ -14,7 +14,7 @@ import unicodedata
 
 import discord
 from discord.ext import commands
-from utils.verification_access_intelligence import plan_access
+from utils.verification_access_intelligence import is_voice_channel, plan_access
 
 logger = logging.getLogger("bot.verification-v96")
 
@@ -710,6 +710,46 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             "has_existing_panel": panel is not None,
         }
 
+    async def _onboarding_protected_ids(self, guild: discord.Guild) -> set[int]:
+        """Ne jamais masquer les salons du parcours d'accueil Discord.
+
+        L'API Discord peut conserver des associations à l'Onboarding même
+        après désactivation de la fonctionnalité (erreur 350003). Garder les
+        ID de tous les choix, même lorsque `enabled` vaut False.
+        """
+        onboarding_method = getattr(guild, "onboarding", None)
+        if not callable(onboarding_method):
+            return set()
+        try:
+            onboarding = await onboarding_method()
+        except discord.NotFound:
+            return set()
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            raise ValueError(
+                "Impossible de vérifier les salons d'accueil Discord. "
+                "Aucune permission n'a été modifiée : contrôlez l'Onboarding "
+                "dans les paramètres du serveur puis réessayez."
+            ) from exc
+
+        def ids(items):
+            return {
+                int(getattr(item, "id", 0) or 0)
+                for item in (items or ())
+                if getattr(item, "id", None)
+            }
+
+        protected = ids(getattr(onboarding, "default_channels", ()))
+        for prompt in getattr(onboarding, "prompts", ()) or ():
+            for option in getattr(prompt, "options", ()) or ():
+                protected.update(ids(getattr(option, "channels", ())))
+        # Ces deux canaux communautaires doivent rester accessibles
+        # aux nouveaux membres indépendamment des catégories.
+        for attr in ("rules_channel", "public_updates_channel"):
+            channel = getattr(guild, attr, None)
+            if channel is not None and getattr(channel, "id", None):
+                protected.add(int(channel.id))
+        return protected
+
     async def _access_plan(
         self, guild: discord.Guild, *, verification_channel: discord.TextChannel,
         verified_role: discord.Role | None = None,
@@ -764,12 +804,14 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             value = _row_value(honeypot, field)
             if value:
                 special_ids.add(int(value))
+        onboarding_ids = await self._onboarding_protected_ids(guild)
         return plan_access(
             guild,
             verification_channel_id=verification_channel.id,
             configured_ids=configured_ids,
             special_ids=special_ids,
             log_ids=log_destinations,
+            onboarding_ids=onboarding_ids,
             verified_role=verified_role,
         )
 
@@ -809,6 +851,16 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                 and bool(getattr(ch, "permissions_synced", False))
             )
         ] + list(access.category_gates)
+        # Modifier la catégorie elle-même quand tous ses enfants sont membres
+        # et synchronisés. Connect est posé sur la catégorie UNIQUEMENT si
+        # l'un de ses enfants éligibles est un vocal.
+        voice_category_ids = {
+            ch.category.id for ch in access.gate
+            if is_voice_channel(ch)
+            and getattr(ch, "category", None) is not None
+            and ch.category.id in synced_category_ids
+            and bool(getattr(ch, "permissions_synced", False))
+        }
         if not verification_channel.permissions_for(everyone).view_channel:
             raise ValueError(
                 "Le salon du règlement est invisible aux nouveaux membres. "
@@ -830,6 +882,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             target: discord.Role,
             *,
             view_channel: bool,
+            connect: bool | None = None,
         ) -> None:
             key = (surface.id, target.id)
             if key in seen:
@@ -838,19 +891,29 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             old = surface.overwrites_for(target)
             new = _clone_overwrite(old)
             new.view_channel = view_channel
+            if connect is not None:
+                new.connect = connect
             had_overwrite = target in surface.overwrites
-            # Discord API et journaux ne changent pas si les permissions
-            # sont déjà correctes ; limite aussi la durée du verrouillage.
-            if old.view_channel == view_channel:
+            # Un vocal doit changer aussi Connect, même lorsque View Channel
+            # est déjà à la bonne valeur. Conserver les autres permissions.
+            if old.view_channel == view_channel and (
+                connect is None or old.connect == connect
+            ):
                 return
             operations.append((surface, target, had_overwrite, old, new))
 
         for surface in surfaces:
-            # Le plan de contrôle est indépendant des espaces sensibles.
-            # Une correction staff/logs nécessite un audit et une confirmation
-            # distincte : ce parcours NE TOUCHE PAS à leurs permissions.
-            plan(surface, everyone, view_channel=False)
-            plan(surface, verified_role, view_channel=True)
+            # Ni salon staff/logs, ni vocal déjà privé ou volontairement
+            # inaccessible ne passe dans cette liste.
+            voice = is_voice_channel(surface) or surface.id in voice_category_ids
+            plan(
+                surface, everyone, view_channel=False,
+                connect=False if voice else None,
+            )
+            plan(
+                surface, verified_role, view_channel=True,
+                connect=True if voice else None,
+            )
 
         # Pré-vérifier TOUS les salons où une écriture est nécessaire. Sinon
         # un refus sur le dernier salon peut forcer un rollback après avoir déjà
@@ -880,10 +943,27 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                 discord.PermissionOverwrite,
             ]
         ] = []
+        # Une ancienne association Onboarding peut être absente du GET, alors
+        # que Discord continue de refuser de cacher ce salon (code 350003).
+        # Ignorer uniquement CETTE surface ; ne pas masquer une vraie erreur
+        # de permission (403), qui doit conserver le rollback traditionnel.
+        onboarding_skipped: set[int] = set()
         reason = f"SentriX vérification : accès automatiques configurés par {actor} ({actor.id})"
         try:
             for surface, target, had_overwrite, old, new in operations:
-                await surface.set_permissions(target, overwrite=new, reason=reason)
+                if surface.id in onboarding_skipped:
+                    continue
+                try:
+                    await surface.set_permissions(target, overwrite=new, reason=reason)
+                except discord.HTTPException as exc:
+                    if int(getattr(exc, "code", 0) or 0) != 350003:
+                        raise
+                    onboarding_skipped.add(surface.id)
+                    logger.warning(
+                        "Salon %s ignoré : toujours protégé par Discord Onboarding (350003)",
+                        getattr(surface, "id", "?"),
+                    )
+                    continue
                 changed.append((surface, target, had_overwrite, old, new))
         except (discord.Forbidden, discord.HTTPException) as exc:
             rollback_reason = "SentriX vérification : annulation après échec de configuration automatique"
@@ -908,7 +988,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             if channel.id in changed_surfaces
             or getattr(getattr(channel, "category", None), "id", None) in changed_surfaces
         )
-        return changed_members, len(access.protected) + len(access.untouched)
+        return changed_members, len(access.protected) + len(access.untouched) + len(onboarding_skipped)
 
     @commands.hybrid_command(
         name="verification",

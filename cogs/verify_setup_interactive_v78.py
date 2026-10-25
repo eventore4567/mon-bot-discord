@@ -40,6 +40,26 @@ def _safe_image(value: str) -> str:
     return raw
 
 
+async def _send_access_feedback(followup, message: str, *, kind: str = "info"):
+    """Retour court Components V2 avec la bannière très fine de SentriX.
+
+    Pas de texte/mention joint à une LayoutView : le texte vit dans le panneau,
+    et son fichier de bannière est transmis dans le même message.
+    """
+    panel = panels.Panneau(
+        titre="Accès au serveur",
+        sous_titre=message,
+        kind=kind,
+        banniere=True,
+    )
+    return await followup.send(
+        view=panel,
+        files=panel.fichiers(),
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+
 async def published_rules_state(bot: commands.Bot, guild: discord.Guild) -> dict | None:
     """La publication est sauvegardée : aucune nouvelle session /setup requise.
 
@@ -180,36 +200,42 @@ class RulesLockConfirmView(discord.ui.View):
             if plan_signature(
                 plan, role=current_role, state=current_state, guild=self.guild,
             ) != self.signature:
-                return await interaction.followup.send(
+                return await _send_access_feedback(
+                    interaction.followup,
                     "La configuration des salons a changé. Relancez l'aperçu avant de confirmer.",
-                    ephemeral=True,
+                    kind="warning",
                 )
             if not getattr(plan, "gate", ()) and not getattr(plan, "category_gates", ()):
-                return await interaction.followup.send(
+                return await _send_access_feedback(
+                    interaction.followup,
                     "Aucun salon membre à verrouiller. Rien n'a été modifié.",
-                    ephemeral=True,
                 )
             changed, protected = await lock_published_channels(
                 self.bot, self.guild, interaction.user,
             )
         except ValueError as exc:
-            return await interaction.followup.send(str(exc), ephemeral=True)
+            return await _send_access_feedback(
+                interaction.followup, str(exc), kind="warning",
+            )
         except Exception:
             logger.exception("Verrouillage après aperçu impossible guild=%s", self.guild.id)
-            return await interaction.followup.send(
-                "Discord a refusé une modification. Vérifiez les permissions et les logs.",
-                ephemeral=True,
+            return await _send_access_feedback(
+                interaction.followup,
+                "Discord a refusé une modification. Consultez le diagnostic des accès. "
+                "Les salons d'accueil Discord restent protégés.",
+                kind="warning",
             )
         finally:
             self.running = False
         self.stop()
         for item in self.children:
             item.disabled = True
-        await interaction.followup.send(
-            f"Accès appliqués : **{changed}** salons corrigés, "
-            f"**{protected}** espaces protégés ou inchangés. "
-            "Les salons staff/logs ne sont pas ouverts au rôle Vérifié.",
-            ephemeral=True,
+        await _send_access_feedback(
+            interaction.followup,
+            f"Accès appliqués : {changed} salons corrigés, "
+            f"{protected} espaces protégés ou inchangés. "
+            "Les salons staff/logs et l'Onboarding restent accessibles selon leur rôle.",
+            kind="success",
         )
 
     @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
@@ -521,11 +547,10 @@ class VerifySetupView(discord.ui.View):
             # Un aperçu avec zero salon ne doit pas proposer un bouton dangereux
             # ni demander une confirmation qui ne changerait rien.
             if not getattr(plan, "gate", ()) and not getattr(plan, "category_gates", ()):
-                return await interaction.followup.send(
+                return await _send_access_feedback(
+                    interaction.followup,
                     "Aucun salon membre à verrouiller. Les espaces staff, logs et "
                     "vérification restent inchangés.",
-                    ephemeral=True,
-                    allowed_mentions=discord.AllowedMentions.none(),
                 )
             await interaction.followup.send(
                 "**Vérifier les accès**\n"

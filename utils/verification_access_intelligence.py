@@ -13,6 +13,11 @@ import unicodedata
 from dataclasses import dataclass, field
 
 
+def is_voice_channel(channel) -> bool:
+    """Voice and stage voice only; category permissions are handled separately."""
+    return str(getattr(channel, "type", "")) in {"voice", "stage_voice"}
+
+
 def tokens(text: str) -> frozenset[str]:
     normalized = unicodedata.normalize("NFKD", str(text or "").casefold())
     normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
@@ -67,24 +72,34 @@ class AccessPlan:
     suspected_logs: list = field(default_factory=list)
     staff_channels: list = field(default_factory=list)
     portal: list = field(default_factory=list)
+    voice_already_locked: list = field(default_factory=list)
 
     def preview(self) -> str:
         """Résumé compréhensible sans exposer l'audit technique ni l'IA."""
-        nb = len(self.gate)
-        categories = len(self.category_gates)
-        labels = ", ".join(
+        text_channels = [ch for ch in self.gate if not is_voice_channel(ch)]
+        voice_channels = [ch for ch in self.gate if is_voice_channel(ch)]
+        names = ", ".join(
             "#" + str(getattr(channel, "name", getattr(channel, "id", "?")))
-            for channel in self.gate[:4]
+            for channel in text_channels[:4]
         )
-        if nb > 4:
-            labels += "…"
+        if len(text_channels) > 4:
+            names += "…"
+        voice_names = ", ".join(
+            str(getattr(channel, "name", getattr(channel, "id", "?")))
+            for channel in voice_channels[:4]
+        )
+        if len(voice_channels) > 4:
+            voice_names += "…"
         protected_count = len(self.protected) + len(self.untouched)
         sensitive = len(self.secure_sensitive)
         lines = [
-            f"**Salons membres : {nb}**" + (f" ({labels})" if labels else ""),
+            f"**Salons textuels à verrouiller : {len(text_channels)}**" + (f" ({names})" if names else ""),
+            f"**Vocaux à verrouiller : {len(voice_channels)}**" + (f" ({voice_names})" if voice_names else ""),
         ]
-        if categories:
-            lines.append(f"**Catégories membres : {categories}**")
+        if self.voice_already_locked:
+            lines.append(f"**Vocaux déjà restreints : {len(self.voice_already_locked)}**")
+        if self.category_gates:
+            lines.append(f"**Catégories membres : {len(self.category_gates)}**")
         lines.append(f"**Salons protégés ou inchangés : {protected_count}**")
         if sensitive:
             lines.append(f"**À vérifier séparément : {sensitive} salon(s) sensibles**")
@@ -169,14 +184,15 @@ def has_explicit_staff_access(channel, everyone) -> bool:
 
 def plan_access(
     guild, *, verification_channel_id: int, configured_ids=(), special_ids=(),
-    log_ids=(), verified_role=None,
+    log_ids=(), onboarding_ids=(), verified_role=None,
 ) -> AccessPlan:
     plan = AccessPlan()
     everyone = guild.default_role
     conf_ids = {int(v) for v in configured_ids if v}
     special = {int(v) for v in special_ids if v}
     log_destinations = {int(v) for v in log_ids if v}
-    protected_ids = conf_ids | special | log_destinations | {int(verification_channel_id)}
+    onboarding = {int(v) for v in onboarding_ids if v}
+    protected_ids = conf_ids | special | log_destinations | onboarding | {int(verification_channel_id)}
     categories = list(getattr(guild, "categories", ()))
     for category in categories:
         category_tokens = tokens(getattr(category, "name", ""))
@@ -192,7 +208,7 @@ def plan_access(
         current_public = bool(channel.permissions_for(everyone).view_channel)
         # Un portail de vérification doit RESTER visible. Les logs persistés
         # et les catégories staff gardent leur classification après renommage.
-        if channel.id == verification_channel_id or channel.id in special or (
+        if channel.id == verification_channel_id or channel.id in special or channel.id in onboarding or (
             channel.id in conf_ids and channel.id not in log_destinations
         ):
             plan.protected[channel.id] = "portail/configuration enregistrée"
@@ -257,9 +273,18 @@ def plan_access(
             continue
         if not current_public:
             plan.protected[channel.id] = "déjà privé"
+            if is_voice_channel(channel):
+                plan.voice_already_locked.append(channel)
             continue
-        # Les catégories de membres peuvent compléter l'indice d'un nom
-        # générique, sans annuler une exclusion explicite.
+        # Un vocal peut être visible mais interdire déjà la connexion à
+        # @everyone. Ne pas écraser une interdiction existante en donnant
+        # arbitrairement Connect au rôle Vérifié.
+        if is_voice_channel(channel) and not bool(channel.permissions_for(everyone).connect):
+            plan.protected[channel.id] = "vocal déjà restreint"
+            plan.voice_already_locked.append(channel)
+            continue
+        # Seuls les salons publics manifestement membres sont concernés :
+        # texte -> visibilité ; vocal -> visibilité ET connexion.
         if own & MEMBER or parent_words & MEMBER:
             plan.gate.append(channel)
         else:
