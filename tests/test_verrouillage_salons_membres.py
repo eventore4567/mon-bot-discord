@@ -34,6 +34,11 @@ class Role:
         self.mention = f"<@&{rid}>"
 
 
+class Bot:
+    """Le membre SentriX : clé de dérogation, comme un vrai discord.Member."""
+    id, is_bot, name = 999, True, "SentriX"
+
+
 class Salon:
     def __init__(self, cid, name, *, kind="text", category=None, overwrites=None, synced=False):
         self.id, self.name, self.category = cid, name, category
@@ -86,7 +91,7 @@ class Serveur:
         self.booster = Role(5, "Server Booster", managed=True)
         self.roles = [self.default_role, self.membre, self.verifie, self.gamer, self.modo, self.booster]
         e, m, g, mod = self.default_role, self.membre, self.verifie, self.modo
-        self.me = SimpleNamespace(is_bot=True, id=999)
+        self.me = Bot()
 
         self.accueil = Salon(100, "👋 Bienvenue", kind="category",
                              overwrites={e: ow(view_channel=False), m: ow(view_channel=True)})
@@ -289,9 +294,20 @@ def test_le_moteur_retire_l_acces_du_role_d_arrivee_et_jamais_le_staff():
     for cle in ("annonces", "giveaways", "news"):
         assert newcomer_access(s.c[cle], e, [m]) == (False, False), cle
         assert newcomer_access(s.c[cle], e, [m, v])[0] is True, cle
-    for cle in ("staff", "logs", "audit_public", "prive", "logs_mixte", "reglement", "gaming"):
+    # Déjà privés, portail ou rôle facultatif : jamais touchés.
+    for cle in ("staff", "logs", "prive", "reglement", "gaming"):
         assert not s.c[cle].ecritures, cle
     assert not s.staff_cat.ecritures and not s.mixte.ecritures
+    # Staff/logs visibles des arrivants : masqués, jamais ouverts à Vérifié,
+    # le bot garde l'accès pour y écrire ses logs.
+    for cle in ("audit_public", "logs_mixte"):
+        salon = s.c[cle]
+        assert all(cible is not v for cible, _ow in salon.ecritures), cle
+        assert newcomer_access(salon, e, [m]) == (False, False), cle
+        assert newcomer_access(salon, e, [m, v])[0] is False, cle
+        assert salon.overwrites[s.me].view_channel is True, cle
+    # Le modérateur voyait #audit par sa dérogation : il la garde.
+    assert s.c["audit_public"].overwrites[s.modo].view_channel is True
 
 
 def test_le_vocal_membre_gere_voir_et_se_connecter():
@@ -330,13 +346,13 @@ def test_selection_manuelle_recalcule_l_apercu_et_part_a_la_confirmation(monkeyp
     s = Serveur()
     appels = []
 
-    async def apercu(bot, guild, *, include_ids=(), exclude_ids=()):
+    async def apercu(bot, guild, *, include_ids=(), exclude_ids=(), release_onboarding=False):
         appels.append((set(include_ids), set(exclude_ids)))
         return _plan(s, include_ids=include_ids, exclude_ids=exclude_ids), s.verifie, {}
 
     verrous = []
 
-    async def verrouiller(bot, guild, actor, *, include_ids=(), exclude_ids=()):
+    async def verrouiller(bot, guild, actor, *, include_ids=(), exclude_ids=(), release_onboarding=False):
         verrous.append((set(include_ids), set(exclude_ids)))
         return 3, 9
 
@@ -402,7 +418,7 @@ def test_salons_sensibles_distingues_arrivants_et_role_verifie():
     s.c["staff"].permissions_synced = False
     plan = _plan(s)
     texte = plan.preview()
-    assert "staff/logs visibles des nouveaux membres" in texte  # #audit public
+    assert "Staff/logs à sécuriser" in texte  # #audit public : masqué automatiquement
     assert "staff/logs ouverts au rôle Vérifié" in texte
     from utils.verification_access_intelligence import decision_rows
     lignes = " | ".join(decision_rows(s, plan))
@@ -424,3 +440,126 @@ def test_relevé_dit_si_le_salon_sensible_est_vu_par_le_role_d_arrivee_seul():
     from utils.verification_access_intelligence import decision_rows
     lignes = " | ".join(decision_rows(s, plan))
     assert "#logs-tickets -> INCHANGE:staff/logs/sécurité !VISIBLE_ARRIVANTS(rôle d'arrivée)" in lignes
+
+
+def test_un_staff_qui_ne_voyait_que_par_ses_permissions_garde_l_acces():
+    # Salon de logs SANS dérogation, vu de tous via les permissions de
+    # serveur : poser le refus @everyone sans autorisation explicite ferait
+    # perdre l'accès au modérateur. Il reçoit donc une autorisation explicite.
+    s = Serveur()
+    s.modo.permissions = discord.Permissions(view_channel=True, ban_members=True)
+    logs = Salon(800, "logs-tickets")
+    logs.guild = s
+    s.channels.append(logs)
+    asyncio.run(_moteur(s)._apply_auto_access(
+        s, verification_channel=s.c["reglement"], verified_role=s.verifie,
+        actor=SimpleNamespace(id=1),
+    ))
+    e, m, v = s.default_role, s.membre, s.verifie
+    assert newcomer_access(logs, e, [m]) == (False, False)
+    assert newcomer_access(logs, e, [s.modo])[0] is True
+    assert logs.overwrites[s.me].view_channel is True
+    assert v not in logs.overwrites
+
+
+class _Onboarding:
+    def __init__(self, s):
+        self.enabled = True
+        self.mode = discord.OnboardingMode.default
+        self.default_channel_ids = [s.c["annonces"].id, s.c["general"].id]
+        self.default_channels = [s.c["annonces"], s.c["general"]]
+        self.prompts = []
+
+
+def _serveur_onboarding(refuse_permission=False):
+    s = Serveur()
+    s.rules_channel = s.c["reglement"]
+    s.public_updates_channel = None
+    etat = {"onboarding": _Onboarding(s), "editions": []}
+
+    async def onboarding():
+        return etat["onboarding"]
+
+    async def edit_onboarding(**kwargs):
+        etat["editions"].append(kwargs)
+        if kwargs.get("enabled") is False:
+            etat["onboarding"].default_channel_ids = []
+            etat["onboarding"].default_channels = []
+
+    s.onboarding = onboarding
+    s.edit_onboarding = edit_onboarding
+    s._state = None
+    if refuse_permission:
+        async def refuse(*_a, **_k):
+            raise discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "refus")
+        s.c["giveaways"].set_permissions = refuse
+    return s, etat
+
+
+def test_onboarding_libere_puis_salons_verrouilles():
+    s, etat = _serveur_onboarding()
+    moteur = _moteur(s)
+    sauvegardes = []
+
+    async def execute(sql, params=()):
+        if "INSERT INTO verification_onboarding_backup" in sql:
+            sauvegardes.append(params)
+
+    moteur.bot.db.execute = execute
+    plan = asyncio.run(moteur._access_plan(
+        s, verification_channel=s.c["reglement"], verified_role=s.verifie, release_onboarding=True,
+    ))
+    assert s.c["annonces"] in plan.onboarding_released and s.c["annonces"] in plan.gate
+    assert "Onboarding Discord désactivé" in plan.preview()
+    asyncio.run(moteur._apply_auto_access(
+        s, verification_channel=s.c["reglement"], verified_role=s.verifie,
+        actor=SimpleNamespace(id=1), release_onboarding=True,
+    ))
+    assert sauvegardes, "la sauvegarde doit précéder la modification"
+    assert etat["editions"][0]["enabled"] is False
+    assert newcomer_access(s.c["annonces"], s.default_role, [s.membre]) == (False, False)
+
+
+def test_sans_accord_l_onboarding_n_est_jamais_touche():
+    s, etat = _serveur_onboarding()
+    plan = asyncio.run(_moteur(s)._access_plan(
+        s, verification_channel=s.c["reglement"], verified_role=s.verifie,
+    ))
+    assert s.c["annonces"] in plan.onboarding and s.c["annonces"] not in plan.gate
+    asyncio.run(_moteur(s)._apply_auto_access(
+        s, verification_channel=s.c["reglement"], verified_role=s.verifie,
+        actor=SimpleNamespace(id=1),
+    ))
+    assert etat["editions"] == []
+
+
+def test_echec_d_ecriture_restaure_l_onboarding_et_les_permissions():
+    import pytest
+
+    s, etat = _serveur_onboarding(refuse_permission=True)
+    avant = dict(s.c["annonces"].overwrites)
+    with pytest.raises(RuntimeError):
+        asyncio.run(_moteur(s)._apply_auto_access(
+            s, verification_channel=s.c["reglement"], verified_role=s.verifie,
+            actor=SimpleNamespace(id=1), release_onboarding=True,
+        ))
+    assert etat["editions"][0]["enabled"] is False
+    assert etat["editions"][-1]["enabled"] is True
+    assert [c.id for c in etat["editions"][-1]["default_channels"]] == [s.c["annonces"].id, s.c["general"].id]
+    assert s.c["annonces"].overwrites == avant
+
+
+def test_un_salon_candidatures_public_n_est_jamais_masque_d_office():
+    s = Serveur()
+    candid = Salon(900, "📝・candidatures", overwrites={s.default_role: ow(view_channel=True)})
+    candid.guild = s
+    s.channels.append(candid)
+    plan = _plan(s)
+    assert candid in plan.sensitive_public
+    assert candid not in plan.secure_targets and candid not in plan.gate
+    assert "à vérifier manuellement : 1" in plan.preview()
+    asyncio.run(_moteur(s)._apply_auto_access(
+        s, verification_channel=s.c["reglement"], verified_role=s.verifie,
+        actor=SimpleNamespace(id=1),
+    ))
+    assert not candid.ecritures

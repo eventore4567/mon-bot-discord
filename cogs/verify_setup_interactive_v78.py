@@ -93,7 +93,7 @@ async def published_rules_state(bot: commands.Bot, guild: discord.Guild) -> dict
 
 
 async def preview_published_channels(
-    bot, guild, *, include_ids=(), exclude_ids=(),
+    bot, guild, *, include_ids=(), exclude_ids=(), release_onboarding=False,
 ) -> tuple[object, discord.Role, object]:
     """Simule les accès réels après publication, sans toucher à Discord."""
     state = await published_rules_state(bot, guild)
@@ -117,6 +117,8 @@ async def preview_published_channels(
         selection["include_ids"] = tuple(include_ids)
     if exclude_ids:
         selection["exclude_ids"] = tuple(exclude_ids)
+    if release_onboarding:
+        selection["release_onboarding"] = True
     plan = await manager._access_plan(
         guild, verification_channel=channel, verified_role=role, **selection,
     )
@@ -174,10 +176,19 @@ async def send_lock_preview(bot, guild, interaction: discord.Interaction) -> Non
             ephemeral=True,
         )
     log_plan_decisions(guild, plan)
+    # Correction complète par défaut : si des salons sont bloqués par
+    # l'Onboarding Discord, l'aperçu montre directement le plan qui le libère.
+    release = bool(getattr(plan, "onboarding", ()))
+    if release:
+        try:
+            plan, role, state = await preview_published_channels(bot, guild, release_onboarding=True)
+        except Exception:
+            logger.exception("Aperçu avec Onboarding libéré impossible guild=%s", guild.id)
+            release = False
     # Un aperçu sans aucun salon, ni verrouillable ni à confirmer, ne doit
     # pas proposer un bouton dangereux qui ne changerait rien.
     if not getattr(plan, "gate", ()) and not getattr(plan, "category_gates", ()) \
-            and not getattr(plan, "review", ()):
+            and not getattr(plan, "review", ()) and not getattr(plan, "secure_targets", ()):
         return await _send_access_feedback(
             interaction.followup,
             "Aucun salon membre à verrouiller. Les espaces staff, logs et "
@@ -188,7 +199,7 @@ async def send_lock_preview(bot, guild, interaction: discord.Interaction) -> Non
         view=RulesLockConfirmView(
             bot, guild, interaction.user.id,
             plan_signature(plan, role=role, state=state, guild=guild),
-            plan=plan,
+            plan=plan, release_onboarding=release,
         ),
         ephemeral=True,
         allowed_mentions=discord.AllowedMentions.none(),
@@ -250,8 +261,9 @@ _SELECT_TYPES = [
 
 
 class RulesLockConfirmView(discord.ui.View):
-    def __init__(self, bot, guild, owner_id: int, signature: tuple, *, plan=None):
+    def __init__(self, bot, guild, owner_id: int, signature: tuple, *, plan=None, release_onboarding=False):
         super().__init__(timeout=300)
+        self.release_onboarding = bool(release_onboarding)
         self.bot, self.guild, self.owner_id = bot, guild, int(owner_id)
         self.signature = signature
         self.running = False
@@ -285,11 +297,29 @@ class RulesLockConfirmView(discord.ui.View):
         self.add_item(exclude)
         if plan is None or getattr(plan, "review", None) or self.include_ids:
             self.add_item(include)
+        if self.release_onboarding or getattr(plan, "onboarding", None):
+            toggle = discord.ui.Button(row=3, style=discord.ButtonStyle.secondary)
+
+            def label() -> None:
+                toggle.label = (
+                    "Onboarding Discord : libéré puis verrouillé"
+                    if self.release_onboarding else "Onboarding Discord : conservé"
+                )
+
+            async def on_toggle(interaction: discord.Interaction):
+                self.release_onboarding = not self.release_onboarding
+                label()
+                await self._refresh(interaction)
+
+            label()
+            toggle.callback = on_toggle
+            self.add_item(toggle)
         self._sync_confirm(plan)
 
     def _sync_confirm(self, plan) -> None:
         empty = plan is not None and not getattr(plan, "gate", ()) \
-            and not getattr(plan, "category_gates", ())
+            and not getattr(plan, "category_gates", ()) \
+            and not getattr(plan, "secure_targets", ())
         for item in self.children:
             if isinstance(item, discord.ui.Button) and item.label == "Confirmer le verrouillage":
                 item.disabled = empty
@@ -300,6 +330,7 @@ class RulesLockConfirmView(discord.ui.View):
             plan, role, state = await preview_published_channels(
                 self.bot, self.guild,
                 include_ids=self.include_ids, exclude_ids=self.exclude_ids,
+                release_onboarding=self.release_onboarding,
             )
         except ValueError as exc:
             return await interaction.response.send_message(str(exc), ephemeral=True)
@@ -338,6 +369,7 @@ class RulesLockConfirmView(discord.ui.View):
             plan, current_role, current_state = await preview_published_channels(
                 self.bot, self.guild,
                 include_ids=self.include_ids, exclude_ids=self.exclude_ids,
+                release_onboarding=self.release_onboarding,
             )
             if plan_signature(
                 plan, role=current_role, state=current_state, guild=self.guild,
@@ -347,7 +379,8 @@ class RulesLockConfirmView(discord.ui.View):
                     "La configuration des salons a changé. Relancez l'aperçu avant de confirmer.",
                     kind="warning",
                 )
-            if not getattr(plan, "gate", ()) and not getattr(plan, "category_gates", ()):
+            if not getattr(plan, "gate", ()) and not getattr(plan, "category_gates", ()) \
+                    and not getattr(plan, "secure_targets", ()):
                 return await _send_access_feedback(
                     interaction.followup,
                     "Aucun salon membre à verrouiller. Rien n'a été modifié.",
@@ -355,6 +388,7 @@ class RulesLockConfirmView(discord.ui.View):
             changed, protected = await lock_published_channels(
                 self.bot, self.guild, interaction.user,
                 include_ids=self.include_ids, exclude_ids=self.exclude_ids,
+                release_onboarding=self.release_onboarding,
             )
         except ValueError as exc:
             return await _send_access_feedback(
@@ -375,9 +409,17 @@ class RulesLockConfirmView(discord.ui.View):
             item.disabled = True
         await _send_access_feedback(
             interaction.followup,
-            f"Accès appliqués : {changed} salons corrigés, "
-            f"{protected} espaces protégés ou inchangés. "
-            "Les salons staff/logs et l'Onboarding restent accessibles selon leur rôle.",
+            f"Accès appliqués : {changed} salons membres verrouillés, "
+            f"{protected} espaces protégés ou inchangés."
+            + (
+                f"\n{len(plan.secure_targets)} salon(s) staff/logs masqués aux arrivants ; "
+                "le staff et SentriX gardent l'accès."
+                if getattr(plan, "secure_targets", None) else ""
+            )
+            + (
+                "\nOnboarding Discord désactivé (sauvegardé) pour verrouiller ses salons."
+                if self.release_onboarding and getattr(plan, "onboarding_released", None) else ""
+            ),
             kind="success",
         )
 
@@ -394,7 +436,7 @@ class RulesLockConfirmView(discord.ui.View):
 
 async def lock_published_channels(
     bot: commands.Bot, guild: discord.Guild, actor: discord.abc.User,
-    *, include_ids=(), exclude_ids=(),
+    *, include_ids=(), exclude_ids=(), release_onboarding=False,
 ) -> tuple[int, int]:
     """Applique les permissions en relisant l'état publié, sans republier.
 
@@ -438,6 +480,8 @@ async def lock_published_channels(
         selection["include_ids"] = tuple(include_ids)
     if exclude_ids:
         selection["exclude_ids"] = tuple(exclude_ids)
+    if release_onboarding:
+        selection["release_onboarding"] = True
     changed, protected = await manager._apply_auto_access(
         guild, verification_channel=channel, verified_role=role, actor=actor,
         **selection,

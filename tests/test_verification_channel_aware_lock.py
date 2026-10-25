@@ -134,10 +134,20 @@ async def test_real_apply_does_not_open_staff_or_logs_to_verified_role():
     assert member_targets == [guild.default_role.id, verified.id]
     unknown_targets = [call.args[0].id for call in c["unknown"].set_permissions.await_args_list]
     assert unknown_targets == [guild.default_role.id, verified.id]
-    # La vérification ne modifie JAMAIS les logs, le staff ni les catégories
-    # synchronisées. Les anomalies vont uniquement dans l'aperçu.
-    for key in ("logs", "renamed_log", "staff_room", "muted", "auto", "private", "verify"):
+    # Portails et salons privés : jamais touchés.
+    for key in ("muted", "auto", "private", "verify"):
         c[key].set_permissions.assert_not_awaited()
+    # Staff/logs visibles des arrivants (25/10, « SentriX corrige tout ») :
+    # masqués à @everyone, le staff garde l'accès, et le rôle Vérifié n'y
+    # est JAMAIS ouvert.
+    for key in ("logs", "renamed_log", "staff_room"):
+        calls = c[key].set_permissions.await_args_list
+        assert calls, key
+        for call in calls:
+            target, overwrite = call.args[0], call.kwargs["overwrite"]
+            assert target is not verified, key
+            if target is guild.default_role:
+                assert overwrite.view_channel is False, key
 
 
 @pytest.mark.asyncio
@@ -264,8 +274,12 @@ async def test_real_permission_application_only_reports_old_verified_access_to_p
         guild, verification_channel=verify, verified_role=verified,
         actor=SimpleNamespace(id=900),
     )
-    leaked.set_permissions.assert_not_awaited()
-    # Vérification des risques, sans correction silencieuse d'un salon staff.
+    # Le rôle Vérifié n'a rien à faire dans un salon de logs : son accès
+    # explicite est retiré, rien d'autre n'est écrit.
+    calls = leaked.set_permissions.await_args_list
+    assert [call.args[0] for call in calls] == [verified]
+    assert calls[0].kwargs["overwrite"].view_channel is None
+    # Le diagnostic le signale toujours.
     plan = await VerificationConfigV96(bot)._access_plan(
         guild, verification_channel=verify, verified_role=verified,
     )

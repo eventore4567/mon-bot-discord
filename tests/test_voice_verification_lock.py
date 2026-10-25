@@ -51,6 +51,16 @@ class Channel:
             self.overwrites[role] = overwrite
 
 
+def assert_only_hidden_from_newcomers(channel, everyone, verified, bot):
+    """Un salon staff/logs public n'est écrit que pour le masquer aux arrivants :
+    le bot (qui y écrit ses logs) garde l'accès, le rôle Vérifié n'y entre pas."""
+    targets = {role_id for role_id, _ow, _reason in channel.updated}
+    assert targets == {everyone.id, bot.id}
+    assert channel.overwrites[everyone].view_channel is False
+    assert channel.overwrites[bot].view_channel is True
+    assert verified not in channel.overwrites
+
+
 def fixtures(*channels, categories=()):
     everyone = Role(1, "@everyone")
     verified = Role(2, "Vérifié")
@@ -121,7 +131,7 @@ async def test_confirmation_locks_connect_and_view_only_on_member_voice():
     assert member_text.overwrites[everyone].view_channel is False
     assert member_text.overwrites[verified].view_channel is True
     assert member_text.overwrites[everyone].connect is None
-    assert not staff_voice.updated
+    assert_only_hidden_from_newcomers(staff_voice, everyone, verified, guild.me)
     assert is_voice_channel(member_voice) is True
     assert is_voice_channel(member_text) is False
 
@@ -304,7 +314,7 @@ async def test_mixed_category_locks_only_public_members_not_logs_or_staff():
     assert annonce.overwrites[verified].view_channel is True
     assert giveaway.overwrites[everyone].view_channel is False
     assert giveaway.overwrites[verified].view_channel is True
-    assert not logs.updated
+    assert_only_hidden_from_newcomers(logs, everyone, verified, guild.me)
     assert not category.updated
 
 

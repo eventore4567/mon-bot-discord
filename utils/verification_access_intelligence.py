@@ -76,11 +76,23 @@ def tokens(text: str) -> frozenset[str]:
 # examiné selon sa catégorie, et « verification-auto » reste un portail.
 SENSITIVE = frozenset({
     "staff", "admin", "administration", "moderation", "moderateurs", "moderateur",
+    "moderator", "moderators",
     "modo", "modos", "logs", "log", "audit", "audits", "sanctions",
     "modmail", "direction", "fondateur", "fondateurs", "private", "prive",
     "securite", "security", "transcript", "transcripts", "dossiers",
     "candidatures", "enquetes", "reports",
 })
+# Sous-ensemble SANS ambiguïté : salons réservés au staff ou aux journaux.
+# Seuls eux sont masqués automatiquement aux arrivants. « candidatures »,
+# « reports », « sanctions » ou « sécurité » peuvent être des salons membres
+# publics (postuler, signaler) : ils restent signalés, jamais masqués d'office.
+STAFF_ONLY = frozenset({
+    "staff", "admin", "administration", "moderation", "moderateurs", "moderateur",
+    "moderator", "moderators", "modo", "modos", "logs", "log", "audit", "audits",
+    "modmail", "direction", "fondateur", "fondateurs", "transcript", "transcripts",
+    "dossiers",
+})
+
 # Uniquement les portails indispensables avant la validation. Les salons
 # d'annonces, d'informations, de giveaways, d'aide ou de discussion sont
 # verrouillables s'ils sont PUBLICS, sauf s'ils sont référencés explicitement
@@ -141,6 +153,11 @@ class AccessPlan:
     # Salons par défaut de l'Onboarding Discord visibles des arrivants :
     # Discord refuse de les masquer (erreur 350003) tant qu'ils y figurent.
     onboarding: list = field(default_factory=list)
+    # Les mêmes, quand l'admin a choisi de libérer l'Onboarding : verrouillés.
+    onboarding_released: list = field(default_factory=list)
+    # Staff/logs visibles des arrivants : masqués automatiquement aux arrivants
+    # (jamais ouverts au rôle Vérifié), le staff et SentriX gardant l'accès.
+    secure_targets: list = field(default_factory=list)
     manual_excluded: list = field(default_factory=list)
     manual_included: list = field(default_factory=list)
     # Choix manuels refusés, avec la raison, pour l'expliquer à l'admin.
@@ -209,6 +226,17 @@ class AccessPlan:
             f"\n**🛡️ Salons protégés ou inchangés : {max(kept, 0)}**"
             + (f" — {detail}" if detail else "")
         )
+        if self.onboarding_released:
+            lines.append(
+                f"📌 Onboarding Discord désactivé puis {len(self.onboarding_released)} salon(s) "
+                f"verrouillé(s) — {names(self.onboarding_released, 4)}\n"
+                "-# Ses questions et salons par défaut sont sauvegardés avant."
+            )
+        if self.secure_targets:
+            lines.append(
+                f"**🛡️ Staff/logs à sécuriser : {len(self.secure_targets)}** — masqués aux arrivants ; "
+                "le staff et SentriX gardent l'accès, le rôle Vérifié n'y est jamais ajouté."
+            )
         if self.onboarding:
             lines.append(
                 f"📌 Onboarding Discord : {len(self.onboarding)} — {names(self.onboarding, 5)}\n"
@@ -226,18 +254,19 @@ class AccessPlan:
             lines.append(f"Exclus par vous : {names(self.manual_excluded, 4)}")
         public_ids = {c.id for c in self.sensitive_public}
         opened_to_verified = [c for c in self.secure_sensitive if c.id not in public_ids]
-        if self.sensitive_public:
+        unsure = public_ids - {c.id for c in self.secure_targets}
+        if unsure:
             lines.append(
-                f"⚠️ Salons sensibles à vérifier manuellement : {len(public_ids)} "
-                "staff/logs visibles des nouveaux membres"
+                f"⚠️ Salons sensibles à vérifier manuellement : {len(unsure)} "
+                "visibles des nouveaux membres (candidatures, signalements… : non masqués d'office)"
             )
         if opened_to_verified:
             lines.append(
                 f"⚠️ Salons sensibles à vérifier manuellement : {len(opened_to_verified)} "
                 "staff/logs ouverts au rôle Vérifié"
             )
-        if self.sensitive_public or opened_to_verified:
-            lines.append("-# Jamais modifiés ici : corrigez leurs permissions à la main.")
+        if opened_to_verified:
+            lines.append("-# Le rôle Vérifié perdra l'accès à ces salons ; le staff le garde.")
         if self.refused:
             lines.append(f"Choix refusés : {len(self.refused)} (staff, logs, portail ou déjà privé)")
         lines.append("-# Vérifiez la liste avant de confirmer. Staff, logs et vérification restent protégés.")
@@ -323,7 +352,7 @@ def has_explicit_staff_access(channel, everyone) -> bool:
 def plan_access(
     guild, *, verification_channel_id: int, configured_ids=(), special_ids=(),
     log_ids=(), onboarding_ids=(), verified_role=None, entry_roles=(),
-    include_ids=(), exclude_ids=(),
+    include_ids=(), exclude_ids=(), released_onboarding_ids=(),
 ) -> AccessPlan:
     plan = AccessPlan()
     everyone = guild.default_role
@@ -332,6 +361,7 @@ def plan_access(
     log_destinations = {int(v) for v in log_ids if v}
     onboarding = {int(v) for v in onboarding_ids if v}
     include = {int(v) for v in include_ids if v}
+    released = {int(v) for v in released_onboarding_ids if v}
     exclude = {int(v) for v in exclude_ids if v}
     entry = [
         role for role in entry_roles
@@ -344,6 +374,15 @@ def plan_access(
         category_tokens = tokens(getattr(category, "name", ""))
         if category.id in protected_ids or category_tokens & (SENSITIVE | ONBOARDING):
             plan.protected[category.id] = "catégorie protégée"
+            # Catégorie staff/logs elle-même visible des arrivants : la
+            # sécuriser aussi, sinon ses salons synchronisés restent ouverts.
+            if (
+                category.id not in protected_ids
+                and category_tokens & STAFF_ONLY
+                and not category_tokens & ONBOARDING
+                and newcomer_access(category, everyone, entry)[0]
+            ):
+                plan.secure_targets.append(category)
 
     def to_review(channel, reason: str) -> None:
         # Classé par son nom seulement : l'admin tranche dans la sélection.
@@ -429,6 +468,8 @@ def plan_access(
 
             if current_public:
                 plan.sensitive_public.append(channel)
+                if channel.id in log_destinations or (own | parent_words) & STAFF_ONLY:
+                    plan.secure_targets.append(channel)
                 if has_explicit_staff_access(channel, everyone):
                     plan.secure_sensitive.append(channel)
             elif explicit_verified_allow:
@@ -484,6 +525,8 @@ def plan_access(
         # lui-même (nom ou configuration) reste ouvert.
         # L'admin doit voir l'aperçu et confirmer avant la moindre écriture.
         plan.gate.append(channel)
+        if channel.id in released:
+            plan.onboarding_released.append(channel)
         opened = opening_roles(channel, everyone, entry)
         if opened:
             plan.opened_by[channel.id] = opened

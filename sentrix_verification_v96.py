@@ -15,7 +15,7 @@ import unicodedata
 import discord
 from discord.ext import commands
 from utils.verification_access_intelligence import (
-    is_voice_channel, opening_roles, plan_access,
+    is_voice_channel, newcomer_access, opening_roles, plan_access,
 )
 
 logger = logging.getLogger("bot.verification-v96")
@@ -717,6 +717,69 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             "has_existing_panel": panel is not None,
         }
 
+    async def _release_onboarding(self, guild: discord.Guild, reason: str) -> dict:
+        """Sauvegarde puis désactive l'Onboarding Discord.
+
+        Tant qu'un salon figure dans l'Onboarding, Discord refuse de le
+        masquer à @everyone (350003) ; et un Onboarding actif exige au moins
+        7 salons par défaut. Le libérer passe donc par sa désactivation. La
+        sauvegarde (questions comprises) est écrite AVANT toute modification.
+        """
+        import json
+
+        onboarding = await guild.onboarding()
+        backup = {
+            "enabled": bool(onboarding.enabled),
+            "mode": int(getattr(onboarding.mode, "value", 0) or 0),
+            "default_channel_ids": [int(i) for i in onboarding.default_channel_ids],
+            "prompts": [prompt.to_dict() for prompt in onboarding.prompts],
+        }
+        await self.bot.db.execute(
+            "CREATE TABLE IF NOT EXISTS verification_onboarding_backup ("
+            "guild_id INTEGER NOT NULL, payload TEXT NOT NULL, created_at INTEGER NOT NULL)"
+        )
+        await self.bot.db.execute(
+            "INSERT INTO verification_onboarding_backup (guild_id, payload, created_at) VALUES (?,?,?)",
+            (guild.id, json.dumps(backup), int(__import__("time").time())),
+        )
+        try:
+            await guild.edit_onboarding(
+                enabled=False, default_channels=[], prompts=[],
+                reason=f"{reason} — Onboarding libéré pour verrouiller ses salons",
+            )
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            raise ValueError(
+                "Discord a refusé de libérer l'Onboarding. Aucune permission n'a été "
+                "modifiée ; désactivez-le dans Paramètres du serveur → Onboarding."
+            ) from exc
+        logger.warning(
+            "Onboarding libéré guild=%s : %s salon(s) par défaut, %s question(s) sauvegardés",
+            guild.id, len(backup["default_channel_ids"]), len(backup["prompts"]),
+        )
+        return backup
+
+    async def _restore_onboarding(self, guild: discord.Guild, backup: dict) -> None:
+        """Remet l'Onboarding tel qu'il était (après un échec d'écriture)."""
+        try:
+            from discord.onboarding import OnboardingMode, OnboardingPrompt
+
+            prompts = [
+                OnboardingPrompt.from_dict(data=data, state=guild._state, guild=guild)
+                for data in backup.get("prompts", ())
+            ]
+            await guild.edit_onboarding(
+                prompts=prompts,
+                default_channels=[discord.Object(id=i) for i in backup.get("default_channel_ids", ())],
+                enabled=bool(backup.get("enabled")),
+                mode=OnboardingMode(int(backup.get("mode", 0))),
+                reason="SentriX vérification : Onboarding restauré après échec",
+            )
+        except Exception:
+            logger.exception(
+                "Restauration de l'Onboarding impossible guild=%s ; sauvegarde dans "
+                "verification_onboarding_backup", guild.id,
+            )
+
     async def _onboarding_protected_ids(self, guild: discord.Guild) -> set[int]:
         """Ne jamais masquer les salons du parcours d'accueil Discord.
 
@@ -806,6 +869,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
     async def _access_plan(
         self, guild: discord.Guild, *, verification_channel: discord.TextChannel,
         verified_role: discord.Role | None = None, include_ids=(), exclude_ids=(),
+        release_onboarding: bool = False,
     ):
         """Prépare les accès sans écrire sur Discord.
 
@@ -858,6 +922,17 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             if value:
                 special_ids.add(int(value))
         onboarding_ids = await self._onboarding_protected_ids(guild)
+        released_ids: set[int] = set()
+        if release_onboarding:
+            # Seuls le salon des règles et celui des mises à jour Communauté
+            # restent imposés par Discord ; le reste sera libéré avant écriture.
+            community = {
+                int(channel.id)
+                for channel in (getattr(guild, "rules_channel", None), getattr(guild, "public_updates_channel", None))
+                if channel is not None and getattr(channel, "id", None)
+            }
+            released_ids = onboarding_ids - community
+            onboarding_ids = onboarding_ids & community
         entry_roles = await self._entry_roles(guild, verified_role, honeypot)
         return plan_access(
             guild,
@@ -870,6 +945,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             entry_roles=entry_roles,
             include_ids=include_ids,
             exclude_ids=exclude_ids,
+            released_onboarding_ids=released_ids,
         )
 
     async def _apply_auto_access(
@@ -881,6 +957,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         actor: discord.abc.User,
         include_ids=(),
         exclude_ids=(),
+        release_onboarding: bool = False,
     ) -> tuple[int, int]:
         """Verrouille UNIQUEMENT les salons publics membres identifiés.
 
@@ -893,6 +970,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             guild, verification_channel=verification_channel,
             verified_role=verified_role,
             include_ids=include_ids, exclude_ids=exclude_ids,
+            release_onboarding=release_onboarding,
         )
         # Périmètre STRICT : ne modifier que les salons membres publics.
         # Un salon staff/logs, même public par erreur, reste en DIAGNOSTIC.
@@ -939,7 +1017,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
 
         def plan(
             surface: discord.abc.GuildChannel,
-            target: discord.Role,
+            target: discord.Role | discord.Member,
             *,
             view_channel: bool | None,
             connect: bool | None = None,
@@ -988,10 +1066,41 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             for role in opening_roles(surface, everyone, access.entry_roles):
                 plan(surface, role, view_channel=None, clear_connect=voice)
 
+        # Salons staff/logs visibles des arrivants : on les masque aux
+        # arrivants SANS jamais y ajouter le rôle Vérifié. Avant de poser le
+        # refus @everyone, chaque rôle staff qui les voit aujourd'hui (et le
+        # bot, qui y écrit ses logs) reçoit une autorisation explicite : un
+        # accès qui ne tenait qu'aux permissions de serveur serait sinon perdu.
+        staff_roles = [
+            role for role in getattr(guild, "roles", ()) or ()
+            if role != everyone and role != verified_role and not getattr(role, "managed", False)
+            and any(getattr(getattr(role, "permissions", None), attr, False) for attr in (
+                "administrator", "manage_guild", "manage_channels", "manage_roles",
+                "ban_members", "kick_members", "moderate_members", "manage_messages",
+                "view_audit_log",
+            ))
+        ]
+        me = getattr(guild, "me", None)
+        for surface in access.secure_targets:
+            for role in staff_roles:
+                if (
+                    surface.overwrites_for(role).view_channel is not True
+                    and newcomer_access(surface, everyone, [role])[0]
+                ):
+                    plan(surface, role, view_channel=True)
+            if getattr(me, "id", None) is not None and surface.overwrites_for(me).view_channel is not True:
+                plan(surface, me, view_channel=True)
+            plan(surface, everyone, view_channel=False)
+            for role in opening_roles(surface, everyone, access.entry_roles):
+                plan(surface, role, view_channel=None, clear_connect=is_voice_channel(surface))
+        # Le rôle Vérifié n'a rien à faire dans un salon staff/logs.
+        for surface in access.secure_sensitive:
+            if surface.overwrites_for(verified_role).view_channel is True:
+                plan(surface, verified_role, view_channel=None)
+
         # Pré-vérifier TOUS les salons où une écriture est nécessaire. Sinon
         # un refus sur le dernier salon peut forcer un rollback après avoir déjà
         # modifié des dizaines de permissions.
-        me = getattr(guild, "me", None)
         if me is not None:
             blocked = []
             for surface, _target, _had, _old, _new in operations:
@@ -1022,6 +1131,9 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         # de permission (403), qui doit conserver le rollback traditionnel.
         onboarding_skipped: set[int] = set()
         reason = f"SentriX vérification : accès automatiques configurés par {actor} ({actor.id})"
+        onboarding_backup = None
+        if release_onboarding and access.onboarding_released:
+            onboarding_backup = await self._release_onboarding(guild, reason)
         try:
             for surface, target, had_overwrite, old, new in operations:
                 if surface.id in onboarding_skipped:
@@ -1053,6 +1165,8 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                         getattr(surface, "id", "?"),
                         getattr(target, "id", "?"),
                     )
+            if onboarding_backup is not None:
+                await self._restore_onboarding(guild, onboarding_backup)
             raise RuntimeError(f"Discord a refusé une permission sur {surface!s}") from exc
 
         changed_surfaces = {surface.id for surface, *_rest in changed}
@@ -1061,6 +1175,12 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             if channel.id in changed_surfaces
             or getattr(getattr(channel, "category", None), "id", None) in changed_surfaces
         )
+        secured = sum(1 for surface in access.secure_targets if surface.id in changed_surfaces)
+        if secured:
+            logger.warning(
+                "Verrouillage guild=%s : %s salon(s) staff/logs masqués aux arrivants", getattr(guild, "id", "?"), secured,
+            )
+        self.last_secured_count = secured
         return changed_members, len(access.protected) + len(access.untouched) + len(onboarding_skipped)
 
     @commands.hybrid_command(
