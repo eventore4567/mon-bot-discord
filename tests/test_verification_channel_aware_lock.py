@@ -155,3 +155,22 @@ async def test_db_configured_logs_are_protected_even_when_renamed():
         guild, verification_channel=verify,
     )
     assert c["renamed_log"] in plan.secure_sensitive
+
+
+@pytest.mark.asyncio
+async def test_verified_role_with_staff_permissions_is_rejected(monkeypatch):
+    import cogs.verification as verification
+    monkeypatch.setattr(verification, "role_grant_problem", lambda _guild, _role: None)
+    verified = Role("Vérifié", 33)
+    verified.permissions.administrator = True
+    member_bot = SimpleNamespace(guild_permissions=SimpleNamespace(
+        manage_channels=True, manage_roles=True,
+    ))
+    guild = SimpleNamespace(me=member_bot)
+    channel = SimpleNamespace(permissions_for=lambda _member: SimpleNamespace(
+        view_channel=True, send_messages=True, embed_links=True,
+    ))
+    issues = await VerificationConfigV96(SimpleNamespace())._preflight(
+        guild, channel=channel, role=verified, auto_access=False,
+    )
+    assert any("permissions staff" in issue for issue in issues)
