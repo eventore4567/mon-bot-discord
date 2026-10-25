@@ -69,48 +69,26 @@ class AccessPlan:
     portal: list = field(default_factory=list)
 
     def preview(self) -> str:
-        names = ", ".join(getattr(c, "name", str(c.id)) for c in self.gate[:7]) or "aucun"
-        if len(self.gate) > 7:
-            names += "…"
-        pending = sum(
-            1 for channel in self.sensitive_public
-            if channel not in self.secure_sensitive
+        """Résumé compréhensible sans exposer l'audit technique ni l'IA."""
+        nb = len(self.gate)
+        categories = len(self.category_gates)
+        labels = ", ".join(
+            "#" + str(getattr(channel, "name", getattr(channel, "id", "?")))
+            for channel in self.gate[:4]
         )
+        if nb > 4:
+            labels += "…"
+        protected_count = len(self.protected) + len(self.untouched)
+        sensitive = len(self.secure_sensitive)
         lines = [
-            f"**Salons membres à verrouiller : {len(self.gate)}**",
-            names,
-            f"**Catégories membres synchronisées conservées : {len(self.category_gates)}**",
-            f"**Salons sensibles à vérifier manuellement : {len(self.secure_sensitive)}**",
-            (
-                "**Destinations logs enregistrées : **"
-                + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.log_destinations[:5]) or "aucune")
-                + ("…" if len(self.log_destinations) > 5 else "")
-            ),
-            (
-                "**Autres salons de logs probables : **"
-                + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.suspected_logs[:5]) or "aucun")
-                + ("…" if len(self.suspected_logs) > 5 else "")
-            ),
-            (
-                "**Salons staff repérés : **"
-                + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.staff_channels[:5]) or "aucun")
-                + ("…" if len(self.staff_channels) > 5 else "")
-            ),
-            f"**Salons/catégories protégés : {len(self.protected)}**",
-            f"**Salons ambigus, laissés inchangés : {len(self.untouched)}**",
+            f"**Salons membres : {nb}**" + (f" ({labels})" if labels else ""),
         ]
-        if pending:
-            lines.append(
-                f"**Attention : {pending} salon(s) staff/logs semblent publics "
-                "mais n'ont pas de rôle staff explicitement autorisé.** "
-                "Corrigez ces permissions manuellement, hors du verrouillage automatique."
-            )
-        lines.append(
-            "**Aucun salon staff, logs, audit, privé ou de vérification n'est modifié "
-            "par ce verrouillage.** Les accès suspects sont des recommandations "
-            "à contrôler séparément. Seuls les salons publics membres identifiés "
-            "sont concernés."
-        )
+        if categories:
+            lines.append(f"**Catégories membres : {categories}**")
+        lines.append(f"**Salons protégés ou inchangés : {protected_count}**")
+        if sensitive:
+            lines.append(f"**À vérifier séparément : {sensitive} salon(s) sensibles**")
+        lines.append("Les salons staff, logs et vérification restent protégés.")
         return "\n".join(lines)
 
 
