@@ -15,7 +15,7 @@ from aiohttp import web
 
 logger = logging.getLogger("bot.dashboard-community")
 
-LEVEL_SETTING_KEYS = ("xp_min", "xp_max", "xp_cooldown", "level_announce_enabled", "level_keep_old_roles", "xp_disabled_on_commands", "xp_excluded_role_ids")
+LEVEL_SETTING_KEYS = ("level_announce_enabled", "level_keep_old_roles", "xp_disabled_on_commands", "xp_excluded_role_ids")
 
 
 def _int(value, minimum: int, maximum: int, field: str) -> int:
@@ -87,19 +87,12 @@ def register(app: web.Application, dashboard) -> None:
         if error:
             return error
         payload = await _payload(request)
+        # Le bareme automatique appartient a SentriX, pas au serveur.
+        if any(key in payload for key in ("xp_min", "xp_max", "xp_cooldown", "xp_multiplier")):
+            return dashboard._json_error(
+                "Les gains automatiques d'XP sont geres par SentriX et ne sont pas configurables.", 400
+            )
         updates: dict = {}
-        try:
-            if "xp_min" in payload:
-                updates["xp_min"] = _int(payload["xp_min"], 1, 1000, "XP minimum")
-            if "xp_max" in payload:
-                updates["xp_max"] = _int(payload["xp_max"], 1, 1000, "XP maximum")
-            if "xp_cooldown" in payload:
-                updates["xp_cooldown"] = _int(payload["xp_cooldown"], 0, 3600, "délai entre deux gains")
-        except ValueError as exc:
-            return dashboard._json_error(str(exc), 400)
-        current = await bot.db.get_stats_settings(guild.id)
-        if updates.get("xp_min", current["xp_min"]) > updates.get("xp_max", current["xp_max"]):
-            return dashboard._json_error("L'XP minimum doit être inférieur ou égal à l'XP maximum.", 400)
         for key in ("level_announce_enabled", "level_keep_old_roles", "xp_disabled_on_commands"):
             if key in payload:
                 updates[key] = bool(payload[key])
