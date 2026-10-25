@@ -792,12 +792,18 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             guild, verification_channel=verification_channel,
             verified_role=verified_role,
         )
-        # Ne pas toucher aux catégories elles-mêmes : leurs overwrites sont
-        # hérités, les modifier peut masquer un salon staff/portail synchronisé.
-        surfaces = list(access.gate) + list(access.secure_sensitive)
-        # Le portail doit rester accessible aux arrivants, même s'il a été
-        # malencontreusement masqué par un précédent règlement.
-        surfaces.append(verification_channel)
+        # Périmètre STRICT : ne modifier que les salons membres publics.
+        # Un salon staff/logs, même public par erreur, reste en DIAGNOSTIC.
+        # En effet toucher à l'overwrite d'un salon synchronisé le désynchronise
+        # de sa catégorie et peut casser les accès existants.
+        # Ne pas toucher non plus au portail de vérification : son accessibilité
+        # est vérifiée indépendamment avant application.
+        surfaces = list(access.gate)
+        if not verification_channel.permissions_for(everyone).view_channel:
+            raise ValueError(
+                "Le salon du règlement est invisible aux nouveaux membres. "
+                "Corrigez ses permissions manuellement avant de verrouiller."
+            )
         operations: list[
             tuple[
                 discord.abc.GuildChannel,
@@ -830,26 +836,11 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             operations.append((surface, target, had_overwrite, old, new))
 
         for surface in surfaces:
-            if surface.id == verification_channel.id:
-                plan(surface, everyone, view_channel=True)
-                plan(surface, verified_role, view_channel=True)
-            elif surface in access.secure_sensitive:
-                # Le staff a DÉJÀ un overwrite de lecture. Refuser l'accès
-                # à everyone ET à Verified : un vieux « allow » explicite sur
-                # Verified ne doit pas laisser fuiter un salon de logs.
-                # Les autorisations staff existantes restent inchangées.
-                if verified_role in surface.overwrites and (
-                    verified_role == everyone
-                    or getattr(verified_role, "name", "").casefold() in {"staff", "admin"}
-                ):
-                    # Configuration du rôle final anormale : éviter de priver
-                    # directement un rôle administrateur de son propre salon.
-                    continue
-                plan(surface, everyone, view_channel=False)
-                plan(surface, verified_role, view_channel=False)
-            else:
-                plan(surface, everyone, view_channel=False)
-                plan(surface, verified_role, view_channel=True)
+            # Le plan de contrôle est indépendant des espaces sensibles.
+            # Une correction staff/logs nécessite un audit et une confirmation
+            # distincte : ce parcours NE TOUCHE PAS à leurs permissions.
+            plan(surface, everyone, view_channel=False)
+            plan(surface, verified_role, view_channel=True)
 
         # Pré-vérifier TOUS les salons où une écriture est nécessaire. Sinon
         # un refus sur le dernier salon peut forcer un rollback après avoir déjà
