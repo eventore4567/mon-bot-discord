@@ -37,3 +37,31 @@ def test_trace_ignores_non_executed_installer():
     finally:
         sys.setprofile(previous)
     assert "cogs.not_executed" not in observed
+
+
+import pytest
+from unittest.mock import AsyncMock
+
+
+@pytest.mark.parametrize(
+    "v17_failures, load_failures, loaded, expected, exit_code",
+    [
+        (0, 0, 12, 12, 0),
+        (1, 0, 12, 12, 1),
+        (0, 1, 12, 12, 1),
+        (0, 0, 11, 12, 1),
+        (0, 0, 12, None, 1),
+    ],
+)
+def test_runtime_trace_exits_nonzero_on_incomplete_boot(
+    monkeypatch, capsys, v17_failures, load_failures, loaded, expected, exit_code
+):
+    payload = {
+        "v17_failure_count": v17_failures,
+        "extension_load_failure_count": load_failures,
+        "extensions_loaded": loaded,
+        "extensions_expected": expected,
+    }
+    monkeypatch.setattr(trace, "trace", AsyncMock(return_value=payload))
+    assert trace.main() == exit_code
+    assert "Attention" in capsys.readouterr().out
