@@ -94,13 +94,50 @@ async def preview_published_channels(bot, guild) -> tuple[object, discord.Role, 
     return plan, role, state
 
 
-def plan_signature(plan) -> tuple:
-    """Vérifie que rien n'a changé entre aperçu et confirmation."""
+def plan_signature(plan, *, role=None, state=None, guild=None) -> tuple:
+    """Empreinte du plan affiché et des ressources réellement autorisées.
+
+    La liste de salons seule ne suffit pas : si le rôle Vérifié, le panneau
+    public ou une permission change entre aperçu et clic, la confirmation
+    précédente doit devenir caduque.
+    """
+    state = state or {}
+    everyone = getattr(guild, "default_role", None)
+    channel_state = []
+    for channel in getattr(guild, "channels", ()) if guild is not None else ():
+        perms = channel.permissions_for(everyone) if everyone is not None else None
+        overwrites = getattr(channel, "overwrites", {}) or {}
+        everyone_rule = overwrites.get(everyone)
+        role_rule = overwrites.get(role)
+        # Les rôles du serveur ou les overrides staff ont pu changer : la
+        # confirmation reste conservatrice et impose un nouvel aperçu.
+        role_access = tuple(sorted(
+            (int(getattr(target, "id", 0)), str(getattr(value, "view_channel", None)))
+            for target, value in overwrites.items()
+            if getattr(target, "id", None) is not None
+        ))
+        channel_state.append((
+            int(channel.id),
+            str(getattr(channel, "name", "")),
+            int(getattr(channel, "category_id", 0) or 0),
+            bool(getattr(channel, "permissions_synced", False)),
+            getattr(perms, "view_channel", None),
+            getattr(everyone_rule, "view_channel", None),
+            getattr(role_rule, "view_channel", None),
+            role_access,
+        ))
     return (
+        int(state.get("message_id") or 0),
+        int(state.get("channel_id") or 0),
+        int(state.get("role_id") or 0),
+        int(getattr(role, "id", 0) or 0),
+        tuple(sorted(channel_state)),
         tuple(sorted(c.id for c in plan.gate)),
         tuple(sorted(c.id for c in plan.secure_sensitive)),
-        tuple(sorted(plan.protected)),
-        tuple(sorted(plan.untouched)),
+        tuple(sorted((int(k), str(v)) for k, v in plan.protected.items())),
+        tuple(sorted((int(k), str(v)) for k, v in plan.untouched.items())),
+        tuple(sorted(c.id for c in plan.log_destinations)),
+        tuple(sorted(c.id for c in plan.staff_channels)),
     )
 
 
@@ -136,8 +173,10 @@ class RulesLockConfirmView(discord.ui.View):
         self.running = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            plan, _role, _state = await preview_published_channels(self.bot, self.guild)
-            if plan_signature(plan) != self.signature:
+            plan, current_role, current_state = await preview_published_channels(self.bot, self.guild)
+            if plan_signature(
+                plan, role=current_role, state=current_state, guild=self.guild,
+            ) != self.signature:
                 return await interaction.followup.send(
                     "La configuration des salons a changé. Relancez l'aperçu avant de confirmer.",
                     ephemeral=True,
@@ -477,7 +516,8 @@ class VerifySetupView(discord.ui.View):
                 + plan.preview()
                 + "\n\n**Aucune modification tant que vous ne confirmez pas.**",
                 view=RulesLockConfirmView(
-                    self.bot, self.guild, interaction.user.id, plan_signature(plan),
+                    self.bot, self.guild, interaction.user.id,
+                    plan_signature(plan, role=role, state=_state, guild=self.guild),
                 ),
                 ephemeral=True,
             )
