@@ -816,8 +816,12 @@ class Ai(commands.Cog, name="Ai"):
                     guild_id=reply_to.guild.id if reply_to.guild else None,
                     fail_if_not_exists=False,
                 )
-                kwargs.setdefault("mention_author", False)
-            kwargs.setdefault("allowed_mentions", discord.AllowedMentions.none())
+                kwargs.setdefault("mention_author", True)
+                kwargs.setdefault("allowed_mentions", discord.AllowedMentions(
+                    everyone=False, roles=False, users=[reply_to.author], replied_user=True,
+                ))
+            else:
+                kwargs.setdefault("allowed_mentions", discord.AllowedMentions.none())
             try:
                 return await destination.send(**kwargs)
             except discord.HTTPException:
