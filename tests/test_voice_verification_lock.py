@@ -158,3 +158,68 @@ async def test_existing_connect_deny_is_not_overridden_for_private_voice():
     )
     assert changed == 0
     assert not voice.updated
+
+
+def test_onboarding_default_and_prompt_channels_are_excluded():
+    member_voice = Channel(80, "Général", kind="voice")
+    onboarding_member = Channel(81, "boosters")
+    logs = Channel(82, "logs-messages")
+    guild, _, verified = fixtures(member_voice, onboarding_member, logs)
+    plan = plan_access(
+        guild, verification_channel_id=99,
+        onboarding_ids=[81], log_ids=[82], verified_role=verified,
+    )
+    assert [ch.id for ch in plan.gate] == [80]
+    assert plan.protected[81] == "portail/configuration enregistrée"
+    assert 82 in plan.protected
+
+
+@pytest.mark.asyncio
+async def test_onboarding_loader_protects_default_channels_and_prompt_choices():
+    bot = SimpleNamespace()
+    cog = VerificationConfigV96(bot)
+    guild = SimpleNamespace(
+        onboarding=AsyncMock(return_value=SimpleNamespace(
+            enabled=False,
+            default_channels=[SimpleNamespace(id=121)],
+            prompts=[
+                SimpleNamespace(options=[
+                    SimpleNamespace(channels=[SimpleNamespace(id=122)]),
+                    SimpleNamespace(channels=[SimpleNamespace(id=123)]),
+                ]),
+            ],
+        )),
+        rules_channel=SimpleNamespace(id=124),
+        public_updates_channel=None,
+    )
+    assert await cog._onboarding_protected_ids(guild) == {121, 122, 123, 124}
+
+
+@pytest.mark.asyncio
+async def test_onboarding_350003_does_not_abort_other_member_voice_locks():
+    locked_by_discord = Channel(131, "boosters")
+    voice = Channel(132, "Général", kind="voice")
+    guild, everyone, verified = fixtures(locked_by_discord, voice)
+    plan = plan_access(guild, verification_channel_id=99, verified_role=verified)
+
+    async def discord_rejects_onboarding(role, *, overwrite=None, reason=None):
+        if role is everyone:
+            response = SimpleNamespace(status=400, reason="Bad Request")
+            raise discord.HTTPException(
+                response,
+                {"code": 350003, "message": "Onboarding channels must be readable by everyone"},
+            )
+        raise AssertionError("Must not add verified-role access to an onboarding channel")
+
+    locked_by_discord.set_permissions = discord_rejects_onboarding
+    manager = VerificationConfigV96(SimpleNamespace())
+    manager._access_plan = AsyncMock(return_value=plan)
+    changed, protected = await manager._apply_auto_access(
+        guild, verification_channel=Channel(99, "règlement"),
+        verified_role=verified, actor=SimpleNamespace(id=5),
+    )
+    assert changed == 1
+    assert protected >= 1
+    assert voice.overwrites[everyone].connect is False
+    assert voice.overwrites[verified].connect is True
+    assert not locked_by_discord.overwrites
