@@ -236,7 +236,7 @@ class RulesLockConfirmView(discord.ui.View):
                 "Insiste pour NE PAS modifier les salons logs/staff déjà privés, "
                 "ne pas casser les catégories synchronisées et ne pas masquer "
                 "les portails d'accueil. Liste uniquement des suggestions à "
-                "vérifier manuellement, jamais des commandes à exécuter.\\n"
+                "vérifier manuellement, jamais des commandes à exécuter.\n"
                 + context,
                 model_key=settings.get("default_model", ai_service.MODEL_TERRA),
                 reasoning_effort="medium",
@@ -262,9 +262,9 @@ class RulesLockConfirmView(discord.ui.View):
                     ephemeral=True,
                 )
             await interaction.followup.send(
-                "**Avis de l'IA — conseils uniquement**\\n"
+                "**Avis de l'IA — conseils uniquement**\n"
                 + (result.text or "").strip()[:1550]
-                + "\\n\\n**Aucune permission n'a été modifiée.** "
+                + "\n\n**Aucune permission n'a été modifiée.** "
                 "Vérifiez chaque suggestion avant de changer quoi que ce soit.",
                 ephemeral=True,
                 allowed_mentions=discord.AllowedMentions.none(),
