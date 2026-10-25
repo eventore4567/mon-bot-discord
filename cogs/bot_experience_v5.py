@@ -165,8 +165,9 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
                     everyone=False, roles=False, users=[reply_to.author], replied_user=True,
                 )
                 try:
-                    return await reply_to.reply(
-                        **kwargs, mention_author=True, allowed_mentions=notification,
+                    from .reply_reference_fix import send_native_ai_reply
+                    return await send_native_ai_reply(
+                        reply_to, **kwargs, mention_author=True, allowed_mentions=notification,
                     )
                 except discord.HTTPException as exc:
                     # Ne plus supprimer la reference en silence : elle expliquait
