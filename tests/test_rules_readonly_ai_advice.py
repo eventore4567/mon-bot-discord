@@ -76,8 +76,12 @@ async def test_no_member_channels_does_not_offer_dangerous_confirm(monkeypatch):
     )
     button = next(x for x in view.children if getattr(x, "label", "").startswith("Verrouiller les salons"))
     await button.callback(interaction)
-    assert "Aucun salon membre" in followup.send.await_args.args[0]
-    assert "view" not in followup.send.await_args.kwargs
+    from utils import sentrix_panels as panels
+    result = followup.send.await_args.kwargs["view"]
+    assert "Aucun salon membre" in panels.texte_complet(result)
+    assert isinstance(result, panels.Panneau)
+    assert result.avec_banniere
+    assert result.fichiers()
     apply_lock.assert_not_awaited()
 
 
@@ -93,3 +97,22 @@ def test_short_preview_does_not_show_log_destinations_or_ai_advice():
     assert "logs-confidentiels" not in summary
     assert "IA" not in summary
     assert len(summary) < 350
+
+
+
+@pytest.mark.asyncio
+async def test_warning_feedback_has_neutral_banner_and_no_user_ping():
+    from utils import sentrix_panels as panels
+    followup = SimpleNamespace(send=AsyncMock())
+    await rules._send_access_feedback(
+        followup,
+        "Discord protège un salon d'accueil : aucun changement demandé.",
+        kind="warning",
+    )
+    kwargs = followup.send.await_args.kwargs
+    assert kwargs["ephemeral"] is True
+    assert isinstance(kwargs["view"], panels.Panneau)
+    assert kwargs["view"].avec_banniere is True
+    assert kwargs["files"]
+    assert kwargs["allowed_mentions"].everyone is False
+    assert kwargs["allowed_mentions"].users is False
