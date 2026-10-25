@@ -28,8 +28,8 @@ MODULES = (
 # ils sont NON CONFIGURÉS, donc inactifs. Historiquement l'absence de ligne valait
 # « activé », ce qui faisait envoyer des messages de bienvenue dans le salon système
 # d'un serveur fraîchement rejoint, ou compter de l'XP sans que personne ne l'ait voulu.
-# moderation / security / ai gardent le comportement inverse (actifs tant qu'on ne les
-# coupe pas) : ce sont des protections, pas des fonctionnalités à installer.
+# moderation et security restent actives par defaut. L'IA est opt-in :
+# sans activation explicite dans /setup ou +aisetup, elle reste inactive.
 CONFIGURABLE_MODULES = frozenset({
     "logs", "tickets", "welcome", "goodbye", "roles", "levels", "economy", "notifications", "ai",
 })
@@ -256,6 +256,15 @@ async def module_state(bot: commands.Bot, guild_id: int, module: str) -> str:
     await ensure_schema(bot)
     value = await module_row_value(bot, guild_id, module)
     if value is None:
+        if module == "ai":
+            # Serveurs historiques : +aisetup a pu creer la ligne ai_settings
+            # avant la synchronisation avec module_settings. Ne pas afficher
+            # "non configure" si l'IA a deja ete explicitement activee.
+            old_ai = await bot.db.fetchone(
+                "SELECT enabled FROM ai_settings WHERE guild_id=?", (int(guild_id),)
+            )
+            if old_ai is not None:
+                return MODULE_STATE_ENABLED if old_ai["enabled"] else MODULE_STATE_DISABLED
         if module in CONFIGURABLE_MODULES:
             return MODULE_STATE_NOT_CONFIGURED
         return MODULE_STATE_ENABLED if await module_enabled(bot, guild_id, module) else MODULE_STATE_DISABLED
