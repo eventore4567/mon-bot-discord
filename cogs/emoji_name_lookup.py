@@ -7,13 +7,16 @@ Modes pris en charge :
 
 La copie d'un emoji Discord/Nitro contourne volontairement Pillow : l'asset existe deja
 au bon format sur le CDN Discord, donc le redecoder ne sert a rien et peut echouer selon
-les codecs installes sur l'hebergeur.
+les codecs installes sur l'hebergeur. Les GIF qui doivent quand meme etre recompresses
+passent par un encodeur qui conserve les images completes et la transparence : cela evite
+les petits fragments colores qui pouvaient remplacer certains emojis apres l'import.
 """
 from __future__ import annotations
 
 import asyncio
 import difflib
 import functools
+import io
 import re
 import time
 import unicodedata
@@ -22,6 +25,7 @@ from typing import Any
 import aiohttp
 import discord
 from discord.ext import commands
+from PIL import Image, UnidentifiedImageError
 
 from utils import embeds
 from utils import sentrix_panels as panels
@@ -31,6 +35,7 @@ CATALOG_TTL_SECONDS = 15 * 60
 LOOKUP_TIMEOUT_SECONDS = 8
 FUZZY_MIN_SCORE = 0.80
 MAX_DIRECT_EMOJI_BYTES = 2 * 1024 * 1024
+MAX_NORMALIZED_EMOJI_BYTES = 256 * 1024
 CUSTOM_EMOJI_RE = re.compile(r"<(a?):([A-Za-z0-9_]{2,32}):([0-9]+)>")
 
 _catalog_cache: list[dict[str, Any]] = []
@@ -84,7 +89,7 @@ async def _emoji_gg_catalog() -> list[dict[str, Any]]:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(
                 EMOJI_GG_API_URL,
-                headers={"User-Agent": "SentriX-EmojiNameLookup/1.2", "Accept": "application/json"},
+                headers={"User-Agent": "SentriX-EmojiNameLookup/1.3", "Accept": "application/json"},
             ) as response:
                 if response.status != 200:
                     raise ValueError(f"Le catalogue d'emojis est indisponible (HTTP {response.status}).")
@@ -182,7 +187,137 @@ def _plain_name_request(ctx: commands.Context, nom: str, source: str | None) -> 
     return all(ord(ch) < 0x2300 for ch in value)
 
 
-async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str):
+def _emoji_canvas(frame: Image.Image, size: int) -> Image.Image:
+    """Place une frame complete au centre sans recadrer les deltas d'un GIF optimise."""
+    rgba = frame.convert("RGBA")
+    rgba.thumbnail((size, size), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    canvas.alpha_composite(
+        rgba,
+        ((size - rgba.width) // 2, (size - rgba.height) // 2),
+    )
+    return canvas
+
+
+def _gif_palette_frame(frame: Image.Image, colors: int) -> Image.Image:
+    """Reserve un index GIF a la transparence au lieu de la transformer en noir."""
+    alpha = frame.getchannel("A")
+    indexed = frame.convert("RGB").quantize(
+        colors=max(2, min(255, int(colors) - 1)),
+        method=Image.Quantize.MEDIANCUT,
+        dither=Image.Dither.NONE,
+    )
+    transparent_mask = alpha.point(lambda value: 255 if value <= 24 else 0)
+    indexed.paste(255, mask=transparent_mask)
+
+    palette = list(indexed.getpalette() or [])
+    if len(palette) < 768:
+        palette.extend([0] * (768 - len(palette)))
+    palette[765:768] = [0, 0, 0]
+    indexed.putpalette(palette[:768])
+    indexed.info["transparency"] = 255
+    indexed.info["disposal"] = 2
+    return indexed
+
+
+def _encode_animated_emoji_safe(data: bytes) -> bytes:
+    """Reencode une animation sans perdre transparence ni frames partielles.
+
+    Pillow sait reconstruire l'etat visuel complet d'un GIF lorsque les frames sont
+    parcourues avec ``seek`` dans l'ordre. On convertit cet etat complet en RGBA avant
+    de redimensionner ; ainsi les GIF optimises en petits rectangles/deltas ne deviennent
+    plus de minuscules morceaux colores une fois envoyes a Discord.
+    """
+    strategies = [
+        (128, 256, 1),
+        (112, 192, 1),
+        (96, 128, 1),
+        (80, 96, 2),
+        (64, 64, 2),
+        (56, 48, 3),
+    ]
+    last_size = 0
+
+    for size, colors, frame_step in strategies:
+        try:
+            with Image.open(io.BytesIO(data)) as source:
+                frame_count = int(getattr(source, "n_frames", 1) or 1)
+                if frame_count <= 1:
+                    raise ValueError("L'animation ne contient pas plusieurs images.")
+                if frame_count > 400:
+                    raise ValueError("L'animation contient trop d'images pour un emoji Discord.")
+                if source.width * source.height > 16_777_216:
+                    raise ValueError("L'animation source est trop grande pour etre traitee.")
+
+                default_duration = max(20, int(source.info.get("duration", 100) or 100))
+                loop = int(source.info.get("loop", 0) or 0)
+                frames: list[Image.Image] = []
+                durations: list[int] = []
+
+                # seek() sequentiel laisse Pillow composer les rectangles delta du GIF
+                # sur le canvas logique. Chaque frame sauvegardee ci-dessous est donc une
+                # vraie image complete, meme si le fichier source n'en stocke qu'un morceau.
+                for index in range(frame_count):
+                    source.seek(index)
+                    duration = max(
+                        20,
+                        min(1000, int(source.info.get("duration", default_duration) or default_duration)),
+                    )
+                    if index % frame_step == 0:
+                        complete = source.convert("RGBA").copy()
+                        frames.append(_gif_palette_frame(_emoji_canvas(complete, size), colors))
+                        durations.append(duration)
+                    elif durations:
+                        durations[-1] = min(65_535, durations[-1] + duration)
+        except (UnidentifiedImageError, OSError) as exc:
+            raise ValueError("Impossible de decoder cette animation.") from exc
+
+        if len(frames) <= 1:
+            raise ValueError("L'animation ne contient pas assez d'images pour rester animee.")
+
+        output = io.BytesIO()
+        frames[0].save(
+            output,
+            format="GIF",
+            save_all=True,
+            append_images=frames[1:],
+            duration=durations,
+            loop=loop,
+            disposal=2,
+            transparency=255,
+            optimize=True,
+        )
+        encoded = output.getvalue()
+        last_size = len(encoded)
+        if last_size <= MAX_NORMALIZED_EMOJI_BYTES:
+            return encoded
+
+    raise ValueError(
+        f"Le GIF reste trop lourd apres optimisation ({last_size // 1024} Ko). "
+        "Utilisez une animation plus courte."
+    )
+
+
+def _install_animation_repair() -> bool:
+    """Remplace uniquement le reencodeur GIF du pipeline +addemoji existant."""
+    from . import utility as utility_module
+
+    current = getattr(utility_module, "_encode_animated_emoji", None)
+    if getattr(current, "_sentrix_fragment_safe", False):
+        return False
+
+    _encode_animated_emoji_safe._sentrix_fragment_safe = True
+    utility_module._encode_animated_emoji = _encode_animated_emoji_safe
+    return True
+
+
+async def _copy_custom_emoji_direct(
+    cog_self,
+    ctx: commands.Context,
+    markup: str,
+    *,
+    target_name: str | None = None,
+):
     """Copie un emoji Discord/Nitro sans le faire passer par Pillow."""
     match = CUSTOM_EMOJI_RE.fullmatch((markup or "").strip())
     if match is None:
@@ -195,7 +330,8 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
         return await panels.envoyer(ctx, panels.depuis_embed(await cog_self._embed(ctx.guild.id, title='Permission manquante', description='Le bot doit avoir la permission **Gerer les emojis et stickers**.', kind='danger')))
 
     animated = bool(match.group(1))
-    emoji_name = _discord_name(match.group(2), fallback="emoji")
+    source_name = match.group(2)
+    emoji_name = _discord_name(target_name or source_name, fallback=source_name)
     emoji_id = match.group(3)
 
     existing = discord.utils.find(lambda item: item.name.casefold() == emoji_name.casefold(), ctx.guild.emojis)
@@ -218,7 +354,7 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
                 async with session.get(
                     candidate,
                     headers={
-                        "User-Agent": "SentriX-NitroEmojiCopy/1.0",
+                        "User-Agent": "SentriX-NitroEmojiCopy/1.1",
                         "Accept": "image/png,image/gif,image/webp,image/*;q=0.8",
                     },
                 ) as response:
@@ -252,6 +388,10 @@ async def _copy_custom_emoji_direct(cog_self, ctx: commands.Context, markup: str
 
 
 def install(bot: commands.Bot) -> bool:
+    # Le correctif d'encodage doit etre actif meme si le wrapper de nom a deja ete
+    # installe par un autre passage du chargeur runtime.
+    _install_animation_repair()
+
     command = bot.get_command("addemoji")
     if command is None or getattr(command.callback, "_sentrix_name_lookup", False):
         return False
@@ -261,12 +401,19 @@ def install(bot: commands.Bot) -> bool:
 
     @functools.wraps(original)
     async def wrapped(cog_self, ctx: commands.Context, nom: str, url: str = None):
-        # Quand Nitro remplace :nom: par un vrai emoji, Discord envoie <a?:nom:id>.
-        # On le copie directement depuis son CDN : aucun decodage Pillow.
-        if not url:
-            direct_match = CUSTOM_EMOJI_RE.fullmatch((nom or "").strip())
-            if direct_match is not None:
-                return await _copy_custom_emoji_direct(cog_self, ctx, nom)
+        # Un emoji Discord/Nitro ne doit jamais etre reencode : on copie ses octets CDN
+        # directement. Cela couvre maintenant les DEUX syntaxes :
+        #   +addemogi <a:danse:id>
+        #   +addemogi nouveau <a:danse:id>
+        direct_markup = (url or nom or "").strip()
+        if CUSTOM_EMOJI_RE.fullmatch(direct_markup) is not None:
+            target_name = nom if url else None
+            return await _copy_custom_emoji_direct(
+                cog_self,
+                ctx,
+                direct_markup,
+                target_name=target_name,
+            )
 
         if not _plain_name_request(ctx, nom, url):
             # Unicode, image jointe ou ancienne syntaxe : pipeline historique.
