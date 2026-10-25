@@ -152,33 +152,47 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
         *,
         reply_to: discord.Message | None = None,
     ):
+        replied_once = False
+
         async def _send(**kwargs):
-            # Le texte produit par un modèle ne doit jamais pouvoir ping @everyone, un rôle
-            # ou un utilisateur arbitraire. Le seul ping autorisé est celui de la réponse
-            # Discord vers l'auteur du message auquel le bot répond.
-            kwargs.setdefault(
-                "allowed_mentions",
-                discord.AllowedMentions(
-                    everyone=False,
-                    roles=False,
-                    users=False,
-                    replied_user=reply_to is not None,
-                ),
-            )
-            if reply_to is not None:
-                kwargs["reference"] = discord.MessageReference(
-                    message_id=reply_to.id,
-                    channel_id=reply_to.channel.id,
-                    guild_id=reply_to.guild.id if reply_to.guild else None,
-                    fail_if_not_exists=False,
+            nonlocal replied_once
+            # Une seule reponse Discord native (= citation et notification) par question.
+            # Les morceaux suivants restent des messages normaux pour ne pas re-ping.
+            # Seul l'auteur peut etre notifie ; les mentions du texte IA sont neutralisees.
+            if reply_to is not None and not replied_once:
+                replied_once = True
+                notification = discord.AllowedMentions(
+                    everyone=False, roles=False, users=[reply_to.author], replied_user=True,
                 )
-                kwargs.setdefault("mention_author", True)
-            try:
-                return await destination.send(**kwargs)
-            except discord.HTTPException:
-                kwargs.pop("reference", None)
-                kwargs.pop("mention_author", None)
-                return await destination.send(**kwargs)
+                try:
+                    return await reply_to.reply(
+                        **kwargs, mention_author=True, allowed_mentions=notification,
+                    )
+                except discord.HTTPException as exc:
+                    # Ne plus supprimer la reference en silence : elle expliquait
+                    # les reponses sans citation observes sur Discord.
+                    logger.warning(
+                        "Reponse native Discord impossible guild=%s channel=%s message=%s code=%s status=%s",
+                        getattr(getattr(reply_to, "guild", None), "id", None),
+                        getattr(getattr(reply_to, "channel", None), "id", None),
+                        getattr(reply_to, "id", None),
+                        getattr(exc, "code", None),
+                        getattr(exc, "status", None),
+                    )
+                    # Si Discord refuse la reference, notifier explicitement l'auteur
+                    # en dernier recours, sans autoriser aucune autre mention.
+                    fallback = dict(kwargs)
+                    fallback["content"] = (
+                        f"{reply_to.author.mention} " + str(fallback.get("content") or "")
+                    ).strip()
+                    fallback["allowed_mentions"] = discord.AllowedMentions(
+                        everyone=False, roles=False, users=[reply_to.author], replied_user=False,
+                    )
+                    return await destination.send(**fallback)
+
+            return await destination.send(
+                **kwargs, allowed_mentions=discord.AllowedMentions.none(),
+            )
 
         if await _is_blacklisted(self.bot, author.id):
             return await _send(embed=embeds.error("Vous n'êtes pas autorisé à utiliser ce bot."))
