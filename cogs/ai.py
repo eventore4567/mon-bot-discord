@@ -745,6 +745,14 @@ class Ai(commands.Cog, name="Ai"):
                     fail_if_not_exists=False,
                 )
                 kwargs.setdefault("mention_author", True)
+                # Autorise explicitement le ping de l'auteur dans la reponse,
+                # sans pouvoir notifier everyone, les roles ou d'autres membres.
+                kwargs.setdefault(
+                    "allowed_mentions",
+                    discord.AllowedMentions(
+                        everyone=False, roles=False, users=[reply_to.author], replied_user=True
+                    ),
+                )
             try:
                 return await destination.send(**kwargs)
             except discord.HTTPException:
