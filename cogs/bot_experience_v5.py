@@ -156,18 +156,15 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
 
         async def _send(**kwargs):
             nonlocal replied_once
-            # Une seule reponse Discord native (= citation et notification) par question.
-            # Les morceaux suivants restent des messages normaux pour ne pas re-ping.
-            # Seul l'auteur peut etre notifie ; les mentions du texte IA sont neutralisees.
+            # Une seule reponse Discord native liee au message, SANS notification.
+            # La reference Discord reste visible, mais aucun utilisateur/role n'est ping.
             if reply_to is not None and not replied_once:
                 replied_once = True
-                notification = discord.AllowedMentions(
-                    everyone=False, roles=False, users=[reply_to.author], replied_user=True,
-                )
+                no_ping = discord.AllowedMentions.none()
                 try:
                     from .reply_reference_fix import send_native_ai_reply
                     return await send_native_ai_reply(
-                        reply_to, **kwargs, mention_author=True, allowed_mentions=notification,
+                        reply_to, **kwargs, mention_author=False, allowed_mentions=no_ping,
                     )
                 except discord.HTTPException as exc:
                     # Ne plus supprimer la reference en silence : elle expliquait
@@ -180,15 +177,9 @@ def _install_ai_pipeline_upgrade(bot: commands.Bot) -> None:
                         getattr(exc, "code", None),
                         getattr(exc, "status", None),
                     )
-                    # Si Discord refuse la reference, notifier explicitement l'auteur
-                    # en dernier recours, sans autoriser aucune autre mention.
+                    # Si Discord refuse la reference, envoyer le texte SANS ping.
                     fallback = dict(kwargs)
-                    fallback["content"] = (
-                        f"{reply_to.author.mention} " + str(fallback.get("content") or "")
-                    ).strip()
-                    fallback["allowed_mentions"] = discord.AllowedMentions(
-                        everyone=False, roles=False, users=[reply_to.author], replied_user=False,
-                    )
+                    fallback["allowed_mentions"] = discord.AllowedMentions.none()
                     return await destination.send(**fallback)
 
             return await destination.send(
