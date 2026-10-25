@@ -77,11 +77,13 @@ def test_screenshot_portals_remain_visible_and_staff_logs_are_classified():
     plan = plan_access(
         guild, verification_channel_id=verify.id, log_ids=[106],
     )
-    assert [channel.id for channel in plan.gate] == [108]
+    # Depuis la PR #531, un salon public sans catégorie claire (#nouveautes)
+    # est un espace membre : il est verrouillé, l'admin peut l'exclure.
+    assert [channel.id for channel in plan.gate] == [108, 109]
     for key in ("verify", "muted", "auto", "staff_room", "logs", "renamed_log", "private"):
         assert c[key].id in plan.protected
     assert {channel.id for channel in plan.secure_sensitive} == {104, 105, 106}
-    assert c["unknown"].id in plan.untouched
+    assert c["unknown"] in plan.gate
     assert "logs" in plan.preview().lower()
     assert c["renamed_log"] in plan.log_destinations
     assert c["logs"] in plan.suspected_logs
@@ -126,13 +128,15 @@ async def test_real_apply_does_not_open_staff_or_logs_to_verified_role():
         guild, verification_channel=verify,
         verified_role=verified, actor=SimpleNamespace(id=900),
     )
-    assert changed == 1
+    assert changed == 2  # #general et #nouveautes (public sans catégorie, PR #531).
     assert protected >= 7
     member_targets = [call.args[0].id for call in c["chat"].set_permissions.await_args_list]
     assert member_targets == [guild.default_role.id, verified.id]
+    unknown_targets = [call.args[0].id for call in c["unknown"].set_permissions.await_args_list]
+    assert unknown_targets == [guild.default_role.id, verified.id]
     # La vérification ne modifie JAMAIS les logs, le staff ni les catégories
     # synchronisées. Les anomalies vont uniquement dans l'aperçu.
-    for key in ("logs", "renamed_log", "staff_room", "muted", "auto", "private", "unknown", "verify"):
+    for key in ("logs", "renamed_log", "staff_room", "muted", "auto", "private", "verify"):
         c[key].set_permissions.assert_not_awaited()
 
 
@@ -397,7 +401,9 @@ async def test_safe_member_category_changes_once_without_unsyncing_children():
         guild, verification_channel=verify, verified_role=verified,
         actor=SimpleNamespace(id=900),
     )
-    assert changed == 3  # Le salon général préexistant + 2 enfants synchronisés.
+    # #general, #nouveautes, #chat (public : aucune destination de logs
+    # enregistrée dans ce test) + les 2 enfants synchronisés de la catégorie.
+    assert changed == 5
     assert [call.args[0].id for call in category.set_permissions.await_args_list] == [
         guild.default_role.id, verified.id,
     ]
@@ -419,9 +425,10 @@ async def test_mixed_synced_category_is_left_intact_even_with_public_member_chan
     plan = plan_access(
         guild, verification_channel_id=verify.id, verified_role=verified,
     )
+    # Catégorie mixte (PR #531) : la catégorie n'est jamais touchée ; le salon
+    # membre public est verrouillé seul (désynchronisé, annoncé dans l'aperçu).
     assert category not in plan.category_gates
-    assert public_chat not in plan.gate
-    assert public_chat.id in plan.untouched
+    assert public_chat in plan.gate and public_chat in plan.mixed_synced
     assert log.id in plan.protected
 
     bot = SimpleNamespace(db=SimpleNamespace(
@@ -434,7 +441,7 @@ async def test_mixed_synced_category_is_left_intact_even_with_public_member_chan
         actor=SimpleNamespace(id=900),
     )
     category.set_permissions.assert_not_awaited()
-    public_chat.set_permissions.assert_not_awaited()
+    assert public_chat.set_permissions.await_count == 2
     log.set_permissions.assert_not_awaited()
 
 

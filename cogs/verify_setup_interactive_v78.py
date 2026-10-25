@@ -92,7 +92,9 @@ async def published_rules_state(bot: commands.Bot, guild: discord.Guild) -> dict
     }
 
 
-async def preview_published_channels(bot, guild) -> tuple[object, discord.Role, object]:
+async def preview_published_channels(
+    bot, guild, *, include_ids=(), exclude_ids=(),
+) -> tuple[object, discord.Role, object]:
     """Simule les accès réels après publication, sans toucher à Discord."""
     state = await published_rules_state(bot, guild)
     if state is None:
@@ -110,10 +112,82 @@ async def preview_published_channels(bot, guild) -> tuple[object, discord.Role, 
     issues = await manager._preflight(guild, channel=channel, role=role, auto_access=True)
     if issues:
         raise ValueError("Permissions insuffisantes : " + " ".join(issues))
+    selection = {}
+    if include_ids:
+        selection["include_ids"] = tuple(include_ids)
+    if exclude_ids:
+        selection["exclude_ids"] = tuple(exclude_ids)
     plan = await manager._access_plan(
-        guild, verification_channel=channel, verified_role=role,
+        guild, verification_channel=channel, verified_role=role, **selection,
     )
     return plan, role, state
+
+
+def log_plan_decisions(guild, plan) -> None:
+    """Relevé en LECTURE SEULE de chaque décision, pour diagnostic en prod.
+
+    Permet de comparer l'aperçu à la structure réelle du serveur (type,
+    catégorie, rôle d'arrivée qui ouvre le salon) sans modifier Discord.
+    """
+    from utils.verification_access_intelligence import decision_rows
+
+    try:
+        rows = decision_rows(guild, plan)
+    except Exception:
+        # Le diagnostic ne doit jamais empêcher l'aperçu.
+        logger.debug("Relevé d'aperçu impossible guild=%s", guild.id, exc_info=True)
+        return
+    logger.info(
+        "Aperçu verrouillage guild=%s : %s à verrouiller, %s à confirmer, %s inchangés, "
+        "rôles d'arrivée=%s",
+        guild.id, len(plan.gate) + len(getattr(plan, "category_gates", ())),
+        len(getattr(plan, "review", ())), len(getattr(plan, "protected", {})),
+        [getattr(r, "name", "?") for r in getattr(plan, "entry_roles", ())],
+    )
+    for start in range(0, len(rows), 12):
+        logger.info("Aperçu verrouillage guild=%s | %s", guild.id, " | ".join(rows[start:start + 12]))
+
+
+def _lock_preview_text(plan) -> str:
+    return "**Vérifier les accès**\n" + plan.preview()
+
+
+async def send_lock_preview(bot, guild, interaction: discord.Interaction) -> None:
+    """Aperçu + sélection manuelle + confirmation, depuis n'importe quel bouton.
+
+    L'interaction doit déjà être différée. Aucune permission n'est modifiée
+    avant le clic sur « Confirmer le verrouillage ».
+    """
+    try:
+        plan, role, state = await preview_published_channels(bot, guild)
+    except ValueError as exc:
+        return await interaction.followup.send(str(exc), ephemeral=True)
+    except Exception:
+        logger.exception("Aperçu du verrouillage impossible guild=%s", guild.id)
+        return await interaction.followup.send(
+            "Impossible de vérifier les permissions. Aucun salon n'a été modifié.",
+            ephemeral=True,
+        )
+    log_plan_decisions(guild, plan)
+    # Un aperçu sans aucun salon, ni verrouillable ni à confirmer, ne doit
+    # pas proposer un bouton dangereux qui ne changerait rien.
+    if not getattr(plan, "gate", ()) and not getattr(plan, "category_gates", ()) \
+            and not getattr(plan, "review", ()):
+        return await _send_access_feedback(
+            interaction.followup,
+            "Aucun salon membre à verrouiller. Les espaces staff, logs et "
+            "vérification restent inchangés.",
+        )
+    await interaction.followup.send(
+        _lock_preview_text(plan),
+        view=RulesLockConfirmView(
+            bot, guild, interaction.user.id,
+            plan_signature(plan, role=role, state=state, guild=guild),
+            plan=plan,
+        ),
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
 
 
 def plan_signature(plan, *, role=None, state=None, guild=None) -> tuple:
@@ -164,12 +238,72 @@ def plan_signature(plan, *, role=None, state=None, guild=None) -> tuple:
     )
 
 
+_SELECT_TYPES = [
+    discord.ChannelType.text, discord.ChannelType.news, discord.ChannelType.forum,
+    discord.ChannelType.voice, discord.ChannelType.stage_voice,
+]
+
+
 class RulesLockConfirmView(discord.ui.View):
-    def __init__(self, bot, guild, owner_id: int, signature: tuple):
-        super().__init__(timeout=180)
+    def __init__(self, bot, guild, owner_id: int, signature: tuple, *, plan=None):
+        super().__init__(timeout=300)
         self.bot, self.guild, self.owner_id = bot, guild, int(owner_id)
         self.signature = signature
         self.running = False
+        # Sélection manuelle : ces ID sont revalidés par le planificateur à
+        # chaque aperçu ; un salon staff, logs, privé ou portail enregistré
+        # est refusé quoi qu'on sélectionne ici.
+        self.include_ids: set[int] = set()
+        self.exclude_ids: set[int] = set()
+        self._add_selection(plan)
+
+    def _add_selection(self, plan) -> None:
+        exclude = discord.ui.ChannelSelect(
+            placeholder="Retirer des salons du verrouillage",
+            channel_types=_SELECT_TYPES, min_values=0, max_values=25, row=0,
+        )
+        include = discord.ui.ChannelSelect(
+            placeholder="Ajouter des salons « à confirmer »",
+            channel_types=_SELECT_TYPES, min_values=0, max_values=25, row=1,
+        )
+
+        async def on_exclude(interaction: discord.Interaction):
+            self.exclude_ids = {int(value.id) for value in exclude.values}
+            await self._refresh(interaction)
+
+        async def on_include(interaction: discord.Interaction):
+            self.include_ids = {int(value.id) for value in include.values}
+            await self._refresh(interaction)
+
+        exclude.callback = on_exclude
+        include.callback = on_include
+        self.add_item(exclude)
+        if plan is None or getattr(plan, "review", None) or self.include_ids:
+            self.add_item(include)
+        self._sync_confirm(plan)
+
+    def _sync_confirm(self, plan) -> None:
+        empty = plan is not None and not getattr(plan, "gate", ()) \
+            and not getattr(plan, "category_gates", ())
+        for item in self.children:
+            if isinstance(item, discord.ui.Button) and item.label == "Confirmer le verrouillage":
+                item.disabled = empty
+
+    async def _refresh(self, interaction: discord.Interaction) -> None:
+        """Recalcule l'aperçu avec la sélection ; rien n'est encore écrit."""
+        try:
+            plan, role, state = await preview_published_channels(
+                self.bot, self.guild,
+                include_ids=self.include_ids, exclude_ids=self.exclude_ids,
+            )
+        except ValueError as exc:
+            return await interaction.response.send_message(str(exc), ephemeral=True)
+        self.signature = plan_signature(plan, role=role, state=state, guild=self.guild)
+        self._sync_confirm(plan)
+        await interaction.response.edit_message(
+            content=_lock_preview_text(plan), view=self,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if (
@@ -187,7 +321,7 @@ class RulesLockConfirmView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Confirmer le verrouillage", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Confirmer le verrouillage", style=discord.ButtonStyle.danger, row=2)
     async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button):
         if self.running:
             return await interaction.response.send_message(
@@ -196,7 +330,10 @@ class RulesLockConfirmView(discord.ui.View):
         self.running = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            plan, current_role, current_state = await preview_published_channels(self.bot, self.guild)
+            plan, current_role, current_state = await preview_published_channels(
+                self.bot, self.guild,
+                include_ids=self.include_ids, exclude_ids=self.exclude_ids,
+            )
             if plan_signature(
                 plan, role=current_role, state=current_state, guild=self.guild,
             ) != self.signature:
@@ -212,6 +349,7 @@ class RulesLockConfirmView(discord.ui.View):
                 )
             changed, protected = await lock_published_channels(
                 self.bot, self.guild, interaction.user,
+                include_ids=self.include_ids, exclude_ids=self.exclude_ids,
             )
         except ValueError as exc:
             return await _send_access_feedback(
@@ -238,7 +376,7 @@ class RulesLockConfirmView(discord.ui.View):
             kind="success",
         )
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, row=2)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self.stop()
         for item in self.children:
@@ -251,6 +389,7 @@ class RulesLockConfirmView(discord.ui.View):
 
 async def lock_published_channels(
     bot: commands.Bot, guild: discord.Guild, actor: discord.abc.User,
+    *, include_ids=(), exclude_ids=(),
 ) -> tuple[int, int]:
     """Applique les permissions en relisant l'état publié, sans republier.
 
@@ -287,8 +426,16 @@ async def lock_published_channels(
         raise ValueError("Verrouillage impossible : " + " ".join(issues))
     # Vérifier la persistance AVANT de changer les permissions Discord.
     await manager._ensure_table()
+    # La sélection n'est transmise que si elle existe : un moteur remplacé
+    # avec l'ancienne signature reste utilisable sans sélection manuelle.
+    selection = {}
+    if include_ids:
+        selection["include_ids"] = tuple(include_ids)
+    if exclude_ids:
+        selection["exclude_ids"] = tuple(exclude_ids)
     changed, protected = await manager._apply_auto_access(
         guild, verification_channel=channel, verified_role=role, actor=actor,
+        **selection,
     )
     await bot.db.set_guild_config(guild.id, "verification_auto_access", 1)
     return changed, protected
@@ -532,37 +679,7 @@ class VerifySetupView(discord.ui.View):
 
         async def lock_callback(interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True, thinking=True)
-            try:
-                plan, role, _state = await preview_published_channels(
-                    self.bot, self.guild,
-                )
-            except ValueError as exc:
-                return await interaction.followup.send(str(exc), ephemeral=True)
-            except Exception:
-                logger.exception("Aperçu du verrouillage impossible guild=%s", self.guild.id)
-                return await interaction.followup.send(
-                    "Impossible de vérifier les permissions. Aucun salon n'a été modifié.",
-                    ephemeral=True,
-                )
-            # Un aperçu avec zero salon ne doit pas proposer un bouton dangereux
-            # ni demander une confirmation qui ne changerait rien.
-            if not getattr(plan, "gate", ()) and not getattr(plan, "category_gates", ()):
-                return await _send_access_feedback(
-                    interaction.followup,
-                    "Aucun salon membre à verrouiller. Les espaces staff, logs et "
-                    "vérification restent inchangés.",
-                )
-            await interaction.followup.send(
-                "**Vérifier les accès**\n"
-                + plan.preview()
-                + "\n\nConfirmer pour appliquer ces changements ?",
-                view=RulesLockConfirmView(
-                    self.bot, self.guild, interaction.user.id,
-                    plan_signature(plan, role=role, state=_state, guild=self.guild),
-                ),
-                ephemeral=True,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            await send_lock_preview(self.bot, self.guild, interaction)
 
         publish_button.callback = publish_callback
         lock_button.callback = lock_callback

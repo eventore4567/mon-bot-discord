@@ -14,7 +14,9 @@ import unicodedata
 
 import discord
 from discord.ext import commands
-from utils.verification_access_intelligence import is_voice_channel, plan_access
+from utils.verification_access_intelligence import (
+    is_voice_channel, opening_roles, plan_access,
+)
 
 logger = logging.getLogger("bot.verification-v96")
 
@@ -567,6 +569,11 @@ class VerificationSetupView(discord.ui.View):
 
 
 class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
+    # sitecustomize.py remplaçait _apply_auto_access par une version qui ouvre
+    # au rôle Vérifié TOUT salon public, sans Onboarding ni rôles d'arrivée.
+    # Ce marqueur l'en empêche : le moteur ci-dessous est la seule source.
+    _sentrix_per_channel_access_fix = True
+
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
@@ -750,9 +757,55 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                 protected.add(int(channel.id))
         return protected
 
+    async def _entry_roles(
+        self, guild: discord.Guild, verified_role: discord.Role | None, honeypot,
+    ) -> list[discord.Role]:
+        """Rôles qu'un membre porte AVANT d'être vérifié.
+
+        Sources déclarées : rôles automatiques d'arrivée et rôle « non
+        vérifié ». Source mesurée : un rôle porté par au moins 95 % des
+        membres humains (rôle d'arrivée d'un autre bot, par exemple). Jamais
+        le rôle Vérifié, un rôle géré (boost, intégration) ni un rôle doté
+        de permissions de modération : le traiter comme rôle d'arrivée
+        reviendrait à verrouiller des salons qu'il ouvre volontairement.
+        """
+        ids: set[int] = set()
+        try:
+            from utils import welcome_autoroles
+
+            ids.update(await welcome_autoroles.configured_ids(self.bot, guild.id))
+        except Exception:
+            logger.debug("Rôles d'arrivée SentriX illisibles guild=%s", guild.id, exc_info=True)
+        value = _row_value(honeypot, "unverified_role_id")
+        if value:
+            ids.add(int(value))
+
+        def eligible(role) -> bool:
+            if role is None or role == guild.default_role or role == verified_role:
+                return False
+            if getattr(role, "managed", False):
+                return False
+            perms = getattr(role, "permissions", None)
+            return not any(getattr(perms, attr, False) for attr in (
+                "administrator", "manage_guild", "manage_channels", "manage_roles",
+                "ban_members", "kick_members", "moderate_members", "manage_messages",
+            ))
+
+        roles = [guild.get_role(role_id) for role_id in sorted(ids)]
+        humans = [m for m in (getattr(guild, "members", None) or ()) if not getattr(m, "bot", False)]
+        if len(humans) >= 5:
+            counts: dict[int, int] = {}
+            for member in humans:
+                for role in getattr(member, "roles", ()) or ():
+                    counts[role.id] = counts.get(role.id, 0) + 1
+            for role in getattr(guild, "roles", ()) or ():
+                if counts.get(role.id, 0) >= 0.95 * len(humans) and role not in roles:
+                    roles.append(role)
+        return [role for role in roles if eligible(role)]
+
     async def _access_plan(
         self, guild: discord.Guild, *, verification_channel: discord.TextChannel,
-        verified_role: discord.Role | None = None,
+        verified_role: discord.Role | None = None, include_ids=(), exclude_ids=(),
     ):
         """Prépare les accès sans écrire sur Discord.
 
@@ -793,7 +846,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         special_ids: set[int] = set()
         try:
             honeypot = await self.bot.db.fetchone(
-                "SELECT category_id, verify_channel_id, trap_channel_id "
+                "SELECT category_id, verify_channel_id, trap_channel_id, unverified_role_id "
                 "FROM honeypot_verification WHERE guild_id=?", (guild.id,),
             )
         except sqlite3.OperationalError as exc:
@@ -805,6 +858,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             if value:
                 special_ids.add(int(value))
         onboarding_ids = await self._onboarding_protected_ids(guild)
+        entry_roles = await self._entry_roles(guild, verified_role, honeypot)
         return plan_access(
             guild,
             verification_channel_id=verification_channel.id,
@@ -813,6 +867,9 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             log_ids=log_destinations,
             onboarding_ids=onboarding_ids,
             verified_role=verified_role,
+            entry_roles=entry_roles,
+            include_ids=include_ids,
+            exclude_ids=exclude_ids,
         )
 
     async def _apply_auto_access(
@@ -822,6 +879,8 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         verification_channel: discord.TextChannel,
         verified_role: discord.Role,
         actor: discord.abc.User,
+        include_ids=(),
+        exclude_ids=(),
     ) -> tuple[int, int]:
         """Verrouille UNIQUEMENT les salons publics membres identifiés.
 
@@ -833,6 +892,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         access = await self._access_plan(
             guild, verification_channel=verification_channel,
             verified_role=verified_role,
+            include_ids=include_ids, exclude_ids=exclude_ids,
         )
         # Périmètre STRICT : ne modifier que les salons membres publics.
         # Un salon staff/logs, même public par erreur, reste en DIAGNOSTIC.
@@ -881,8 +941,9 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             surface: discord.abc.GuildChannel,
             target: discord.Role,
             *,
-            view_channel: bool,
+            view_channel: bool | None,
             connect: bool | None = None,
+            clear_connect: bool = False,
         ) -> None:
             key = (surface.id, target.id)
             if key in seen:
@@ -893,6 +954,10 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             new.view_channel = view_channel
             if connect is not None:
                 new.connect = connect
+            elif clear_connect and old.connect is True:
+                new.connect = None
+            if clear_connect and old.view_channel == view_channel and old.connect is not True:
+                return
             had_overwrite = target in surface.overwrites
             # Un vocal doit changer aussi Connect, même lorsque View Channel
             # est déjà à la bonne valeur. Conserver les autres permissions.
@@ -914,6 +979,14 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                 surface, verified_role, view_channel=True,
                 connect=True if voice else None,
             )
+            # Un rôle reçu à l'arrivée (« Membre », rôle automatique…) qui
+            # ouvre ce salon le laisserait visible aux non-vérifiés malgré
+            # @everyone masqué. On retire SEULEMENT son autorisation de vue
+            # (et de connexion) ; ses autres permissions restent intactes.
+            # Les vérifiés portent aussi ce rôle : ils gardent l'accès via
+            # le rôle Vérifié, sans élargissement.
+            for role in opening_roles(surface, everyone, access.entry_roles):
+                plan(surface, role, view_channel=None, clear_connect=voice)
 
         # Pré-vérifier TOUS les salons où une écriture est nécessaire. Sinon
         # un refus sur le dernier salon peut forcer un rollback après avoir déjà

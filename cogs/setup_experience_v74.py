@@ -227,108 +227,6 @@ class IdentiteBotModal(discord.ui.Modal, title="SentriX sur ce serveur"):
         )
 
 
-class VerrouillerSalonsModal(discord.ui.Modal, title="Verrouiller derrière le règlement"):
-    """Cache tous les salons à @everyone et les ouvre au rôle du règlement.
-
-    L'action touche TOUS les salons d'un coup : elle est donc confirmée par une
-    saisie explicite, pas par un simple clic. Quatre gardes la rendent sûre :
-
-    - le salon du règlement reste VISIBLE à @everyone, sinon plus personne ne
-      peut accepter le règlement et le serveur devient inaccessible — c'est
-      l'erreur qui transforme une sécurisation en panne totale ;
-    - les dérogations existantes sont fusionnées, jamais remplacées : un rôle
-      staff déjà autorisé quelque part le reste ;
-    - un salon que SentriX ne peut pas gérer est compté et nommé, pas ignoré
-      en silence ;
-    - rien n'est tenté sans salon de règlement ET rôle configurés.
-    """
-
-    confirmation = discord.ui.TextInput(
-        label="Tapez VERROUILLER pour confirmer",
-        placeholder="VERROUILLER",
-        required=True,
-        max_length=20,
-    )
-
-    def __init__(self, vue, salon_reglement, role):
-        super().__init__()
-        self.vue = vue
-        self.salon_reglement = salon_reglement
-        self.role = role
-
-    async def on_submit(self, interaction: discord.Interaction):
-        if str(self.confirmation.value or "").strip().upper() != "VERROUILLER":
-            return await panels.envoyer(
-                interaction.response,
-                panels.depuis_embed(embeds.warning(
-                    "Confirmation incorrecte : aucun salon n'a été modifié."
-                )),
-                ephemere=True,
-            )
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
-
-        guild = self.vue.guild
-        moi = guild.me
-        verrouilles, refuses = 0, []
-        for salon in list(guild.channels):
-            if salon.id == self.salon_reglement.id:
-                continue
-            if not salon.permissions_for(moi).manage_permissions:
-                refuses.append(salon.name)
-                continue
-            try:
-                # Fusion, pas remplacement : set_permissions(**perms) écraserait
-                # les autres réglages de la dérogation existante.
-                pour_tous = salon.overwrites_for(guild.default_role)
-                pour_tous.view_channel = False
-                await salon.set_permissions(
-                    guild.default_role, overwrite=pour_tous,
-                    reason="Verrouillage derrière le règlement (SentriX)",
-                )
-                pour_role = salon.overwrites_for(self.role)
-                pour_role.view_channel = True
-                await salon.set_permissions(
-                    self.role, overwrite=pour_role,
-                    reason="Accès accordé au rôle du règlement (SentriX)",
-                )
-                verrouilles += 1
-            except discord.HTTPException:
-                refuses.append(salon.name)
-
-        # Le salon du règlement doit rester lisible par les non-vérifiés.
-        try:
-            ouvert = self.salon_reglement.overwrites_for(guild.default_role)
-            ouvert.view_channel = True
-            await self.salon_reglement.set_permissions(
-                guild.default_role, overwrite=ouvert,
-                reason="Le règlement doit rester visible avant acceptation (SentriX)",
-            )
-        except discord.HTTPException:
-            refuses.append(f"{self.salon_reglement.name} (règlement)")
-
-        lignes = [
-            f"🔒 **{verrouilles}** salon(s) cachés à @\u200beveryone et ouverts à "
-            f"{self.role.mention}.",
-            f"👁️ {self.salon_reglement.mention} reste visible pour que les "
-            "nouveaux puissent accepter le règlement.",
-        ]
-        if refuses:
-            lignes.append(
-                "⚠️ Hors de portée de SentriX : " + ", ".join(refuses[:8])
-                + (f" (+{len(refuses) - 8})" if len(refuses) > 8 else "")
-                + "\n-# Remontez le rôle SentriX au-dessus, puis relancez."
-            )
-        await panels.envoyer(
-            interaction.followup,
-            panels.depuis_embed(embeds.success(
-                "\n".join(lignes), title="Salons verrouillés"
-            )),
-            ephemere=True,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
-
-
 class SentriXSetupV74(v73.SentriXSetupV73):
     """Dernière façade du Setup : simple pour la sécurité, complète pour les tickets."""
 
@@ -1036,9 +934,12 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
 
         async def ouvrir_verrou(interaction: discord.Interaction):
-            await interaction.response.send_modal(
-                VerrouillerSalonsModal(self, channel, role)
-            )
+            # Même parcours que l'éditeur du règlement : aperçu, sélection
+            # manuelle, puis confirmation explicite. L'ancien formulaire
+            # « tapez VERROUILLER » cachait TOUS les salons et les ouvrait au
+            # rôle Vérifié, staff et logs compris : il est retiré.
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            await rules_setup.send_lock_preview(self.bot, self.guild, interaction)
 
         verrou.callback = ouvrir_verrou
         container.add_item(discord.ui.ActionRow(configure, verrou))

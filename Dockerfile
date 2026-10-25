@@ -78,6 +78,9 @@ RUN python -m pytest -q \
     tests/test_channel_access_preview_confirmation.py \
     tests/test_published_rules_lock_v119.py \
     tests/test_voice_verification_lock.py \
+    tests/test_verrouillage_salons_membres.py \
+    tests/test_verrouillage_reglement.py \
+    tests/test_verification_channel_aware_lock.py \
     tests/test_dashboard_json_snowflakes.py \
     tests/test_guild_departure_notify.py \
     tests/test_verification_panel_recovery.py \
