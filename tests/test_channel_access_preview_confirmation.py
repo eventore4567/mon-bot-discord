@@ -11,6 +11,9 @@ def plan(*ids):
     return SimpleNamespace(
         gate=[SimpleNamespace(id=i) for i in ids],
         secure_sensitive=[],
+        category_gates=[],
+        log_destinations=[],
+        staff_channels=[],
         protected={888: "staff"},
         untouched={999: "inconnu"},
         preview=lambda: "Aperçu sûr et catégories protégées",
