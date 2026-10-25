@@ -170,7 +170,8 @@ def test_onboarding_default_and_prompt_channels_are_excluded():
         onboarding_ids=[81], log_ids=[82], verified_role=verified,
     )
     assert [ch.id for ch in plan.gate] == [80]
-    assert plan.protected[81] == "portail/configuration enregistrée"
+    # Raison précise : Discord refuse de masquer un salon de l'Onboarding.
+    assert plan.protected[81] == "Onboarding Discord"
     assert 82 in plan.protected
 
 

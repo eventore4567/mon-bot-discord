@@ -167,6 +167,16 @@ def _first_role_ref(value: object) -> str:
     return f"<@&{sid}>" if sid else ""
 
 
+def _id_chip(value: object) -> str:
+    """« · `ID 123…` » pour un vrai identifiant Discord, rien sinon."""
+    text = str(value or "").strip()
+    if not (text.isdecimal() and 15 <= len(text) <= 21):
+        return ""
+    # Espace insécable : jamais « > » + espace après une mention, que
+    # Discord pourrait lire comme une citation.
+    return f"\u00a0· `{text}`"
+
+
 def _first_channel_ref(value: object) -> str:
     match = _CHANNEL_MENTION_RE.search(str(value or ""))
     if match:
@@ -1459,9 +1469,13 @@ class WideLogView(discord.ui.LayoutView):
         meta = _trace_meta(event_type, emoji=emoji)
         identity_label = _trace_identity_label(event_type)
 
-        # 2 — en-tête compact : vraie mention Discord, jamais un gros ID brut.
+        # 2 — en-tête compact : vraie mention Discord, suivie de son ID. Une
+        # mention ne survit pas au départ du membre ou à la suppression du
+        # salon (« @utilisateur inconnu ») : l'ID reste lisible et copiable.
         header_lines = [meta, f"### {title}"]
         identity_ref = _trace_identity_ref(event_type, identity_id)
+        if identity_ref:
+            identity_ref += _id_chip(identity_id)
         identity_display = identity_ref or (safe_text(identity_name)[:80] if identity_name else "")
         # A role-reorder event may carry a count (17) as its "identity".
         # It is not an individual Discord entity: avoid "Élément · 17".
@@ -1475,7 +1489,7 @@ class WideLogView(discord.ui.LayoutView):
         if event_type.startswith("message_"):
             channel_ref = _first_channel_ref(_field_value(embed, "salon", "channel"))
             if channel_ref:
-                context_bits.append(f"**Salon** · {channel_ref}")
+                context_bits.append(f"**Salon** · {channel_ref}{_id_chip(_first_snowflake(channel_ref))}")
         if context_bits:
             header_lines.append(" · ".join(context_bits))
 

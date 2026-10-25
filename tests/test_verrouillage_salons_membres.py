@@ -381,3 +381,14 @@ def test_selection_manuelle_recalcule_l_apercu_et_part_a_la_confirmation(monkeyp
     asyncio.run(scenario())
     assert appels[-1] == ({s.c["aide"].id}, {s.c["giveaways"].id})
     assert verrous == [({s.c["aide"].id}, {s.c["giveaways"].id})]
+
+
+def test_les_salons_onboarding_sont_nommes_avec_la_marche_a_suivre():
+    s = Serveur()
+    plan = _plan(s, onboarding_ids=[s.c["annonces"].id], include_ids=[s.c["annonces"].id])
+    assert s.c["annonces"] not in plan.gate
+    assert s.c["annonces"] in plan.onboarding
+    assert s.c["annonces"].id in plan.refused
+    texte = plan.preview()
+    assert "Onboarding Discord : 1" in texte and "annonces" in texte
+    assert "Paramètres du serveur → Onboarding" in texte

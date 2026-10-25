@@ -138,6 +138,9 @@ class AccessPlan:
     # les ouvrirait à tous les vérifiés. Ils restent tels quels.
     role_restricted: list = field(default_factory=list)
     verified_only: list = field(default_factory=list)
+    # Salons par défaut de l'Onboarding Discord visibles des arrivants :
+    # Discord refuse de les masquer (erreur 350003) tant qu'ils y figurent.
+    onboarding: list = field(default_factory=list)
     manual_excluded: list = field(default_factory=list)
     manual_included: list = field(default_factory=list)
     # Choix manuels refusés, avec la raison, pour l'expliquer à l'admin.
@@ -206,6 +209,12 @@ class AccessPlan:
             f"\n**🛡️ Salons protégés ou inchangés : {max(kept, 0)}**"
             + (f" — {detail}" if detail else "")
         )
+        if self.onboarding:
+            lines.append(
+                f"📌 Onboarding Discord : {len(self.onboarding)} — {names(self.onboarding, 5)}\n"
+                "-# Discord interdit de les masquer : retirez-les des salons par défaut "
+                "(Paramètres du serveur → Onboarding) pour pouvoir les verrouiller."
+            )
         if self.voice_already_locked:
             lines.append(f"Vocaux déjà restreints : {len(self.voice_already_locked)}")
         if self.role_restricted:
@@ -346,6 +355,12 @@ def plan_access(
         current_public, can_connect = newcomer_access(channel, everyone, entry)
         # Un portail de vérification doit RESTER visible. Les logs persistés
         # et les catégories staff gardent leur classification après renommage.
+        if channel.id in onboarding and channel.id != verification_channel_id and current_public:
+            plan.protected[channel.id] = "Onboarding Discord"
+            plan.onboarding.append(channel)
+            if channel.id in include:
+                plan.refused[channel.id] = "salon par défaut de l'Onboarding Discord"
+            continue
         if channel.id == verification_channel_id or channel.id in special or channel.id in onboarding or (
             channel.id in conf_ids and channel.id not in log_destinations
         ):
