@@ -472,10 +472,10 @@ class VerifySetupView(discord.ui.View):
                     ephemeral=True,
                 )
             await interaction.followup.send(
-                "**Aperçu avant verrouillage**\\n"
-                f"Rôle après validation : {role.mention}\\n\\n"
+                "**Aperçu avant verrouillage**\n"
+                f"Rôle après validation : {role.mention}\n\n"
                 + plan.preview()
-                + "\\n\\n**Aucune modification tant que vous ne confirmez pas.**",
+                + "\n\n**Aucune modification tant que vous ne confirmez pas.**",
                 view=RulesLockConfirmView(
                     self.bot, self.guild, interaction.user.id, plan_signature(plan),
                 ),
