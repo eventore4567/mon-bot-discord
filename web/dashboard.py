@@ -1004,13 +1004,7 @@ def _validate_settings(guild: discord.Guild, values: dict) -> tuple[dict, str | 
                 return {}, "Le niveau de sécurité doit être faible, moyen ou élevé."
             clean[field] = value
         elif field == "xp_multiplier":
-            try:
-                number = float(value)
-            except (TypeError, ValueError):
-                return {}, "Le multiplicateur XP doit être un nombre."
-            if not 0.1 <= number <= 5:
-                return {}, "Le multiplicateur XP doit être compris entre 0,1 et 5."
-            clean[field] = round(number, 2)
+            return {}, "Le multiplicateur XP est gere automatiquement par SentriX."
         elif field in INT_FIELDS:
             try:
                 number = int(value)
@@ -1986,7 +1980,7 @@ INDEX_HTML = r"""<!doctype html>
         {key:"goodbye_channel",label:"Salon de départ",type:"channel",group:"Départ"},{key:"goodbye_message",label:"Message de départ",type:"textarea",hint:"Variables disponibles : {member} et {server}.",group:"Départ"},{key:"goodbye_image_url",label:"Fond de départ",type:"choice",options:[["preset:dark","Sombre"],["preset:gray","Gris Discord"],["preset:light","Clair"]],group:"Départ"}
       ]},
       levels:{title:"Niveaux et expérience",description:"Configurez la progression et les annonces de niveau.",fields:[
-        {key:"xp_multiplier",label:"Multiplicateur d'XP",type:"number",min:.1,max:5,step:.1},{key:"level_channel",label:"Salon des niveaux",type:"channel"},{key:"level_message",label:"Message de passage de niveau",type:"textarea",hint:"Le membre est mentionné automatiquement lors du passage de niveau."}
+        {key:"level_channel",label:"Salon des niveaux",type:"channel"},{key:"level_message",label:"Message de passage de niveau",type:"textarea",hint:"Le membre est mentionné automatiquement lors du passage de niveau."}
       ]},
       tickets:{title:"Tickets",description:"Relie les tickets aux catégories et salons que tu choisis. Aucun salon n'est créé automatiquement.",fields:[
         {key:"ticket_category",label:"Catégorie des tickets",type:"category"},{key:"ticket_log_channel",label:"Salon des logs tickets",type:"channel"},{key:"ticket_delete_delay",label:"Délai avant suppression (secondes)",type:"number",min:0,max:3600},{key:"ticket_transcript_dm",label:"Envoyer le transcript en message privé",type:"switch",hint:"Envoie une copie au membre lors de la fermeture."},{key:"ticket_rating_enabled",label:"Activer l'évaluation",type:"switch",hint:"Propose au membre de noter le support."}
