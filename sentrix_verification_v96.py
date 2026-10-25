@@ -818,10 +818,19 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                 plan(surface, everyone, view_channel=True)
                 plan(surface, verified_role, view_channel=True)
             elif surface in access.secure_sensitive:
-                # Masquer staff/logs à @everyone seulement si un rôle staff
-                # possède DÉJÀ un overwrite autorisé. Ne jamais accorder
-                # l'accès à Verified sur ces salons.
+                # Le staff a DÉJÀ un overwrite de lecture. Refuser l'accès
+                # à everyone ET à Verified : un vieux « allow » explicite sur
+                # Verified ne doit pas laisser fuiter un salon de logs.
+                # Les autorisations staff existantes restent inchangées.
+                if verified_role in surface.overwrites and (
+                    verified_role == everyone
+                    or getattr(verified_role, "name", "").casefold() in {"staff", "admin"}
+                ):
+                    # Configuration du rôle final anormale : éviter de priver
+                    # directement un rôle administrateur de son propre salon.
+                    continue
                 plan(surface, everyone, view_channel=False)
+                plan(surface, verified_role, view_channel=False)
             else:
                 plan(surface, everyone, view_channel=False)
                 plan(surface, verified_role, view_channel=True)
