@@ -93,6 +93,9 @@ async def _resolve_invite_guild_id(runtime) -> int | None:
     return None
 
 
+_DERNIER_APPAIRAGE_ANNONCE: int | None = None
+
+
 async def official_guild_id_fixed(self) -> int | None:
     # 1) Source d'autorité : invitation officielle.
     resolved = await _resolve_invite_guild_id(self)
@@ -104,7 +107,13 @@ async def official_guild_id_fixed(self) -> int | None:
     marker_guild = _unique_marker_guild(self)
     if marker_guild is not None:
         await _persist_binding(self, marker_guild)
-        logger.info(
+        # Ce repli tourne toutes les trois minutes en production : on n'annonce
+        # l'appairage qu'au premier passage ou quand le serveur change.
+        global _DERNIER_APPAIRAGE_ANNONCE
+        niveau = logging.INFO if _DERNIER_APPAIRAGE_ANNONCE != marker_guild.id else logging.DEBUG
+        _DERNIER_APPAIRAGE_ANNONCE = marker_guild.id
+        logger.log(
+            niveau,
             "Serveur officiel SentriX appairé via marqueurs Communauté : %s (%s)",
             marker_guild.name,
             marker_guild.id,
