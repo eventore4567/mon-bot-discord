@@ -924,13 +924,12 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         onboarding_ids = await self._onboarding_protected_ids(guild)
         released_ids: set[int] = set()
         if release_onboarding:
-            # Seuls le salon des règles et celui des mises à jour Communauté
-            # restent imposés par Discord ; le reste sera libéré avant écriture.
-            community = {
-                int(channel.id)
-                for channel in (getattr(guild, "rules_channel", None), getattr(guild, "public_updates_channel", None))
-                if channel is not None and getattr(channel, "id", None)
-            }
+            # Seul le salon des règles doit rester lisible par tous (Communauté).
+            # Le salon des mises à jour Communauté sert au staff : rien n'oblige
+            # à le laisser aux arrivants (#annonces-sentrix sur le serveur
+            # officiel restait sinon bloqué après libération).
+            rules = getattr(guild, "rules_channel", None)
+            community = {int(rules.id)} if rules is not None and getattr(rules, "id", None) else set()
             released_ids = onboarding_ids - community
             onboarding_ids = onboarding_ids & community
         entry_roles = await self._entry_roles(guild, verified_role, honeypot)

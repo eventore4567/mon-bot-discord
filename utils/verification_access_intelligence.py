@@ -164,57 +164,71 @@ class AccessPlan:
     refused: dict[int, str] = field(default_factory=dict)
 
     def preview(self) -> str:
-        """Résumé compact : quoi verrouiller, quoi confirmer, quoi reste intact.
+        """Aperçu en deux blocs : ce que SentriX va faire, ce qui reste tel quel.
 
-        Jamais de liste interminable : au plus quelques noms par groupe, le
-        reste en « +N ». Les noms des salons staff/logs ne sont pas affichés.
+        Noms propres (sans l'emoji de décoration ni le « ・ »), quelques noms
+        par groupe puis « +N », jamais les noms des salons staff/logs.
         """
-        def names(channels, limit=6, hash_=True) -> str:
-            shown = [
-                ("#" if hash_ else "") + str(getattr(c, "name", getattr(c, "id", "?")))
-                for c in channels[:limit]
-            ]
+        def clean(channel) -> str:
+            name = str(getattr(channel, "name", getattr(channel, "id", "?")))
+            return re.sub(r"^[^\w]+", "", name) or name
+
+        def names(channels, limit=5) -> str:
+            shown = ", ".join(clean(c) for c in channels[:limit])
             extra = len(channels) - limit
-            return ", ".join(shown) + (f" +{extra}" if extra > 0 else "")
+            return shown + (f" +{extra}" if extra > 0 else "")
 
         text_channels = [ch for ch in self.gate if not is_voice_channel(ch)]
         voice_channels = [ch for ch in self.gate if is_voice_channel(ch)]
-        lines = ["**🔒 À verrouiller**"]
-        line = f"Salons textuels à verrouiller : {len(text_channels)}"
-        lines.append(line + (f" — {names(text_channels)}" if text_channels else ""))
-        line = f"Vocaux à verrouiller : {len(voice_channels)}"
-        lines.append(line + (f" — {names(voice_channels, hash_=False)}" if voice_channels else ""))
+        lines = ["**Ce que SentriX va faire**"]
+        lines.append(
+            f"🔒 Salons textuels à verrouiller : {len(text_channels)} · "
+            f"Vocaux à verrouiller : {len(voice_channels)}"
+        )
+        if self.gate:
+            lines.append(f"-# {names([*text_channels, *voice_channels])}")
+        if self.secure_targets:
+            lines.append(
+                f"🛡️ Staff/logs à sécuriser : {len(self.secure_targets)} · "
+                "invisibles des arrivants, le staff et SentriX gardent l'accès"
+            )
+        if self.onboarding_released:
+            lines.append(
+                f"📌 Onboarding Discord désactivé (sauvegardé) · "
+                f"{len(self.onboarding_released)} salon(s) libéré(s)"
+            )
         if self.category_gates:
-            lines.append(f"Catégories membres synchronisées conservées : {len(self.category_gates)}")
+            lines.append(f"🗂️ Catégories membres synchronisées conservées : {len(self.category_gates)}")
         if self.mixed_synced:
             lines.append(
-                f"Catégories mixtes : {len(self.mixed_synced)} salon(s) membre(s) "
-                "seront désynchronisés de leur catégorie."
-            )
-        opening = {
-            str(getattr(role, "name", "?"))
-            for roles in self.opened_by.values() for role in roles
-        }
-        if opening:
-            lines.append(
-                "Accès retiré aux rôles d'arrivée : " + ", ".join(sorted(opening)[:4])
-                + " (les vérifiés gardent l'accès)"
+                f"🗂️ Catégories mixtes : {len(self.mixed_synced)} salon(s) membre(s) "
+                "seront désynchronisés de leur catégorie"
             )
         if self.manual_included:
-            lines.append(f"Ajoutés par vous : {names(self.manual_included, 4)}")
+            lines.append(f"➕ Ajoutés par vous : {names(self.manual_included, 4)}")
+        opening = sorted({
+            str(getattr(role, "name", "?"))
+            for roles in self.opened_by.values() for role in roles
+        })
+        if opening:
+            lines.append(
+                "-# Les vérifiés gardent l'accès ; retiré aux rôles d'arrivée : "
+                + ", ".join(opening[:3])
+            )
 
         if self.review:
             lines.append(
-                f"\n**✋ À confirmer : {len(self.review)}** — {names(self.review, 5)}\n"
-                "-# Classés comme accueil/vérification d'après leur nom. "
-                "Ajoutez-les s'ils doivent être verrouillés."
+                f"\n**À confirmer : {len(self.review)}** · {names(self.review, 4)}\n"
+                "-# Classés accueil/vérification d'après leur nom : ajoutez-les s'ils doivent être verrouillés."
             )
 
-        reasons = list(self.protected.values())
+        # Les salons sécurisés sont modifiés : ils ne sont pas « tels quels ».
+        secured = {c.id for c in self.secure_targets}
+        reasons = [r for cid, r in self.protected.items() if cid not in secured]
         staff = sum(1 for r in reasons if r in {"staff/logs/sécurité", "catégorie protégée"})
         portal = sum(1 for r in reasons if "portail" in r or "accueil" in r or "vérification" in r)
         private = sum(1 for r in reasons if r == "déjà privé")
-        kept = len(self.protected) + len(self.untouched) - len(self.review)
+        kept = len(reasons) + len(self.untouched) - len(self.review)
         detail = " · ".join(
             f"{label} {count}" for label, count in (
                 ("staff/logs", staff),
@@ -222,54 +236,38 @@ class AccessPlan:
                 ("déjà privés", private),
             ) if count
         )
-        lines.append(
-            f"\n**🛡️ Salons protégés ou inchangés : {max(kept, 0)}**"
-            + (f" — {detail}" if detail else "")
-        )
-        if self.onboarding_released:
-            lines.append(
-                f"📌 Onboarding Discord désactivé puis {len(self.onboarding_released)} salon(s) "
-                f"verrouillé(s) — {names(self.onboarding_released, 4)}\n"
-                "-# Ses questions et salons par défaut sont sauvegardés avant."
-            )
-        if self.secure_targets:
-            lines.append(
-                f"**🛡️ Staff/logs à sécuriser : {len(self.secure_targets)}** — masqués aux arrivants ; "
-                "le staff et SentriX gardent l'accès, le rôle Vérifié n'y est jamais ajouté."
-            )
-        if self.onboarding:
-            lines.append(
-                f"📌 Onboarding Discord : {len(self.onboarding)} — {names(self.onboarding, 5)}\n"
-                "-# Discord interdit de les masquer : retirez-les des salons par défaut "
-                "(Paramètres du serveur → Onboarding) pour pouvoir les verrouiller."
-            )
+        lines.append("\n**Laissés tels quels**")
+        lines.append(f"Salons protégés ou inchangés : {max(kept, 0)}" + (f" · {detail}" if detail else ""))
         if self.voice_already_locked:
             lines.append(f"Vocaux déjà restreints : {len(self.voice_already_locked)}")
         if self.role_restricted:
             lines.append(
-                f"Réservés à un rôle facultatif : {len(self.role_restricted)} "
-                "(jamais ouverts aux vérifiés)"
+                f"Réservés à un rôle facultatif : {len(self.role_restricted)} · jamais ouverts aux vérifiés"
             )
         if self.manual_excluded:
             lines.append(f"Exclus par vous : {names(self.manual_excluded, 4)}")
+        if self.onboarding:
+            lines.append(
+                f"📌 Onboarding Discord : {len(self.onboarding)} · {names(self.onboarding, 4)}\n"
+                "-# Discord interdit de les masquer : libérez l'Onboarding ci-dessous, "
+                "ou retirez-les dans Paramètres du serveur → Onboarding."
+            )
         public_ids = {c.id for c in self.sensitive_public}
-        opened_to_verified = [c for c in self.secure_sensitive if c.id not in public_ids]
         unsure = public_ids - {c.id for c in self.secure_targets}
         if unsure:
             lines.append(
-                f"⚠️ Salons sensibles à vérifier manuellement : {len(unsure)} "
-                "visibles des nouveaux membres (candidatures, signalements… : non masqués d'office)"
+                f"⚠️ Salons sensibles à vérifier manuellement : {len(unsure)} · "
+                "visibles des arrivants (candidatures, signalements…), non masqués d'office"
             )
+        opened_to_verified = [c for c in self.secure_sensitive if c.id not in public_ids]
         if opened_to_verified:
             lines.append(
-                f"⚠️ Salons sensibles à vérifier manuellement : {len(opened_to_verified)} "
-                "staff/logs ouverts au rôle Vérifié"
+                f"⚠️ Salons sensibles à vérifier manuellement : {len(opened_to_verified)} · "
+                "staff/logs ouverts au rôle Vérifié, qui en perdra l'accès"
             )
-        if opened_to_verified:
-            lines.append("-# Le rôle Vérifié perdra l'accès à ces salons ; le staff le garde.")
         if self.refused:
-            lines.append(f"Choix refusés : {len(self.refused)} (staff, logs, portail ou déjà privé)")
-        lines.append("-# Vérifiez la liste avant de confirmer. Staff, logs et vérification restent protégés.")
+            lines.append(f"Choix refusés : {len(self.refused)} · staff, logs, portail ou déjà privé")
+        lines.append("\n-# Vérifiez avant de confirmer : rien n'est modifié avant « Confirmer ».")
         text = "\n".join(lines)
         return text if len(text) <= 1700 else text[:1697] + "…"
 

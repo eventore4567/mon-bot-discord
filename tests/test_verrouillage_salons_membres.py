@@ -563,3 +563,20 @@ def test_un_salon_candidatures_public_n_est_jamais_masque_d_office():
         actor=SimpleNamespace(id=1),
     ))
     assert not candid.ecritures
+
+
+def test_le_salon_des_mises_a_jour_communaute_est_libere_avec_l_onboarding():
+    # Serveur officiel : #annonces-sentrix restait bloqué après libération,
+    # gardé comme « mises à jour Communauté ». Seul le salon des règles
+    # doit rester lisible par tous.
+    s, _etat = _serveur_onboarding()
+    s.public_updates_channel = s.c["news"]
+    plan = asyncio.run(_moteur(s)._access_plan(
+        s, verification_channel=s.c["reglement"], verified_role=s.verifie, release_onboarding=True,
+    ))
+    assert s.c["news"] in plan.gate and s.c["news"] not in plan.onboarding
+    assert s.c["reglement"] not in plan.gate
+    plan = asyncio.run(_moteur(s)._access_plan(
+        s, verification_channel=s.c["reglement"], verified_role=s.verifie,
+    ))
+    assert s.c["news"] in plan.onboarding and s.c["news"] not in plan.gate
