@@ -842,6 +842,45 @@ def _patch_addemoji_direct_copy(bot: commands.Bot) -> None:
     logger.info("V3: +addemoji conserve strictement GIF animé / image statique.")
 
 
+def _resume_positions_roles(guild: discord.Guild, reels: dict[int, tuple[int, int]]) -> str:
+    """Montre la vraie action et résume le décalage automatique des rôles.
+
+    Discord déclenche aussi role_update pour TOUS les rôles voisins quand un
+    seul rôle est déplacé. Les énumérer produit des dizaines de lignes sans
+    information utile. Les grands déplacements identifient les vrais candidats.
+    La totalité des mouvements reste dans reels pour l'audit et l'event_key.
+    """
+    ordonnes = sorted(
+        reels.items(),
+        key=lambda x: (-abs(x[1][1] - x[1][0]), -x[1][1], x[0]),
+    )
+    directs = [(rid, old, new) for rid, (old, new) in ordonnes if abs(new - old) > 1]
+    if not directs and len(ordonnes) <= 3:
+        # En cas d'échange entre deux positions voisines, impossible de
+        # connaître l'intention de l'admin : montrer les deux, sans deviner.
+        directs = [(rid, old, new) for rid, (old, new) in ordonnes]
+
+    def nom(rid: int) -> str:
+        role = guild.get_role(rid)
+        return role.mention if role is not None else f"`{rid}`"
+
+    lignes: list[str] = []
+    if len(directs) == 1:
+        rid, avant, apres = directs[0]
+        lignes.extend((f"**Rôle déplacé :** {nom(rid)}", f"**Position :** {avant} → {apres}"))
+    elif directs:
+        lignes.append("**Déplacements principaux :**")
+        lignes.extend(f"{nom(rid)} : {avant} → {apres}" for rid, avant, apres in directs[:3])
+        if len(directs) > 3:
+            lignes.append(f"**Déplacements importants :** {len(directs)} au total")
+
+    ajustements = len(reels) - len(directs)
+    if ajustements:
+        label = "position ajustée" if ajustements == 1 else "positions ajustées"
+        lignes.append(f"**Décalage automatique :** {ajustements} {label}")
+    return "\n".join(lignes) or "**Ordre des rôles ajusté automatiquement**"
+
+
 class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1058,23 +1097,20 @@ class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
                 target_ids=set(reels),
             )
 
-            lignes = []
-            for role_id, (avant, apres) in sorted(reels.items(), key=lambda item: item[1][1], reverse=True):
-                role = guild.get_role(role_id)
-                nom = role.mention if role is not None else f"`{role_id}`"
-                lignes.append(f"{nom} : {avant} → {apres}")
-
             if len(reels) == 1:
                 titre = "Rôle modifié"
+                role_id, (avant, apres) = next(iter(reels.items()))
+                role = guild.get_role(role_id)
+                nom = role.mention if role is not None else f"`{role_id}`"
                 fields = [
-                    ("Rôle", lignes[0].split(" : ")[0], True),
-                    ("Position modifiée", lignes[0].split(" : ", 1)[1], False),
+                    ("Rôle", nom, True),
+                    ("Position modifiée", f"{avant} → {apres}", False),
                 ]
             else:
                 titre = "Rôles déplacés"
                 fields = [
-                    ("Rôles concernés", f"**{len(reels)}** (décalés lors d’un réarrangement)", True),
-                    ("Positions modifiées", "\n".join(lignes[:8]) + (f"\n… et {len(lignes)-8} autres rôles." if len(lignes)>8 else ""), False),
+                    ("Rôles concernés", f"**{len(reels)}** positions réorganisées", True),
+                    ("Positions modifiées", _resume_positions_roles(guild, reels), False),
                 ]
             if actor is not None:
                 fields.append(("Modérateur", f"<@{actor.id}>", True))
