@@ -964,6 +964,21 @@ class Tickets(commands.Cog):
         from utils import log_service
         await log_service.send_log(self.bot, guild, "tickets", embed)
 
+    async def _send_open_log_safely(self, guild: discord.Guild, embed: discord.Embed, log_channel_id: int | None) -> bool:
+        """Un échec de journalisation APRÈS confirmation ne doit pas faire croire
+        au membre que la création du ticket a échoué. On conserve l'erreur dans
+        les logs techniques pour réparation, sans renvoyer de faux message.
+        """
+        try:
+            await self.log_action(guild, embed, log_channel_id)
+        except Exception as exc:
+            logger.error(
+                "Ticket créé mais journal d'ouverture impossible (guild=%s, type_erreur=%s).",
+                guild.id, type(exc).__name__, exc_info=True,
+            )
+            return False
+        return True
+
     # ---------------------------------------------------------------- OUVERTURE
 
     def build_panel_embed(self, panel) -> discord.Embed:
@@ -1192,15 +1207,17 @@ class Tickets(commands.Cog):
             "🎫 Ticket ouvert", 0x5865F2, cible=user,
             extra=ticket_extra,
         )
-        await self.log_action(guild, log_e, ticket_type["log_channel_id"])
+        log_ok = await self._send_open_log_safely(guild, log_e, ticket_type["log_channel_id"])
         timings.mark("ticket_log")
         info = timings.summary()
         # Une alerte >2 s concerne le délai visible, pas l'envoi du log qui
         # intervient APRÈS la confirmation à l'utilisateur.
-        log_level = logger.warning if (info["confirmed_ms"] or 0) > 2000 else logger.info
+        log_level = logger.warning if (info["confirmed_ms"] or 0) > 2000 or not log_ok else logger.info
         log_level(
-            "Ticket ouverture étapes guild=%s type=%s visible_ms=%s total_ms=%s étapes_ms=%s",
-            guild.id, ticket_type["id"], info["confirmed_ms"], info["total_ms"], info["stages_ms"],
+            "Ticket ouverture étapes guild=%s type=%s visible_ms=%s total_ms=%s "
+            "journal_ok=%s étapes_ms=%s",
+            guild.id, ticket_type["id"], info["confirmed_ms"], info["total_ms"],
+            log_ok, info["stages_ms"],
         )
 
     # ---------------------------------------------------------------- BOUTONS STAFF
