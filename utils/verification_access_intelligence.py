@@ -110,23 +110,29 @@ STAFF_ROLE_WORDS = frozenset({
 
 
 def has_explicit_staff_access(channel, everyone) -> bool:
-    """Preuve locale : un rôle staff existant bénéficie déjà de l'accès.
+    """Preuve : une permission staff explicite sur le salon OU sa catégorie synchronisée.
 
-    On ne déduit JAMAIS un rôle staff via IA pour lui ouvrir un salon privé.
+    Une catégorie non synchronisée n'est pas une preuve d'accès au salon.
+    On n'invente jamais un rôle staff et on n'ouvre jamais un salon privé.
     """
-    for role, overwrite in getattr(channel, "overwrites", {}).items():
-        if role == everyone or getattr(overwrite, "view_channel", None) is not True:
-            continue
-        role_name = tokens(getattr(role, "name", ""))
-        permissions = getattr(role, "permissions", None)
-        privileged = bool(permissions and any(
-            getattr(permissions, attr, False) for attr in (
-                "administrator", "manage_guild", "manage_channels",
-                "ban_members", "kick_members",
-            )
-        ))
-        if privileged or (role_name & STAFF_ROLE_WORDS):
-            return True
+    sources = [getattr(channel, "overwrites", {}) or {}]
+    category = getattr(channel, "category", None)
+    if category is not None and bool(getattr(channel, "permissions_synced", False)):
+        sources.append(getattr(category, "overwrites", {}) or {})
+    for overwrites in sources:
+        for role, overwrite in overwrites.items():
+            if role == everyone or getattr(overwrite, "view_channel", None) is not True:
+                continue
+            role_name = tokens(getattr(role, "name", ""))
+            permissions = getattr(role, "permissions", None)
+            privileged = bool(permissions and any(
+                getattr(permissions, attr, False) for attr in (
+                    "administrator", "manage_guild", "manage_channels",
+                    "ban_members", "kick_members",
+                )
+            ))
+            if privileged or (role_name & STAFF_ROLE_WORDS):
+                return True
     return False
 
 
