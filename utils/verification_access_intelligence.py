@@ -66,7 +66,10 @@ class AccessPlan:
         names = ", ".join(getattr(c, "name", str(c.id)) for c in self.gate[:7]) or "aucun"
         if len(self.gate) > 7:
             names += "…"
-        pending = len(self.sensitive_public) - len(self.secure_sensitive)
+        pending = sum(
+            1 for channel in self.sensitive_public
+            if channel not in self.secure_sensitive
+        )
         lines = [
             f"**Salons membres à verrouiller : {len(self.gate)}**",
             names,
