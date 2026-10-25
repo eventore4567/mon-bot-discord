@@ -2890,7 +2890,10 @@ class Ai(commands.Cog, name="Ai"):
         view = AiSetupView(self, ctx.guild.id, ctx.author.id, settings)
         await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(view.build_embed()), view))
 
-    async def _ai_connection_diagnostic(self, guild_id: int | None, channel_id: int | None) -> dict:
+    async def _ai_connection_diagnostic(
+        self, guild_id: int | None, channel_id: int | None,
+        role_ids: list[int] | None = None,
+    ) -> dict:
         """Diagnostic sans effet de bord : teste le modèle réellement utilisé.
 
         +aidiag doit rester accessible même si l'IA est coupée afin qu'un
@@ -2915,6 +2918,7 @@ class Ai(commands.Cog, name="Ai"):
             "enabled": bool(settings.get("enabled", False)),
             "channel_allowed": not channels or channel_id is None or channel_id in channels,
             "role_restrictions": bool(settings.get("allowed_role_ids")),
+            "role_allowed": ai_service.is_role_allowed(settings, role_ids or []),
             "model_key": model_key,
             "model_id": ai_service.MODEL_IDS[model_key],
             "reasoning_effort": effort,
@@ -2942,7 +2946,9 @@ class Ai(commands.Cog, name="Ai"):
         try:
             async with ctx.typing():
                 info = await self._ai_connection_diagnostic(
-                    ctx.guild.id if ctx.guild else None, ctx.channel.id if ctx.channel else None,
+                    ctx.guild.id if ctx.guild else None,
+                    ctx.channel.id if ctx.channel else None,
+                    [role.id for role in getattr(ctx.author, "roles", [])],
                 )
         except Exception:
             logger.exception("Diagnostic IA : lecture des paramètres du serveur impossible")
@@ -2965,8 +2971,13 @@ class Ai(commands.Cog, name="Ai"):
                 "**Rôles :** restrictions spécifiques configurées"
                 if info["role_restrictions"] else "**Rôles :** aucune restriction IA supplémentaire"
             )
+            member_role_note = (
+                "**Rôle du membre :** autorisé"
+                if info["role_allowed"] else
+                "**Rôle du membre :** non autorisé dans la configuration IA"
+            )
             details = (
-                f"{state}\n{channel_note}\n{role_note}\n"
+                f"{state}\n{channel_note}\n{role_note}\n{member_role_note}\n"
                 f"**Modèle utilisé :** `{info['model_id']}` "
                 f"({ai_service.MODEL_LABELS.get(info['model_key'], 'IA')})\n"
                 f"**Raisonnement :** `{info['reasoning_effort']}`\n"
