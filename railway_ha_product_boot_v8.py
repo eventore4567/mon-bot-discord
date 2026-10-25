@@ -29,3 +29,7 @@ if __name__ == "__main__":
         asyncio.run(product_boot.ha_boot.run())
     except KeyboardInterrupt:
         logger.info("Arrêt de SentriX HA V8.")
+    except asyncio.CancelledError:
+        # Même cas que railway_ha_boot.__main__, mais c'est CE fichier que
+        # Railway lance : SIGTERM pendant l'attente du bail est un arrêt voulu.
+        logger.info("Arrêt de SentriX HA V8 pendant l'attente du bail : instance passive remplacée.")

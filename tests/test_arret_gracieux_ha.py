@@ -47,6 +47,14 @@ def test_le_lanceur_ha_rattrape_l_annulation():
     )
 
 
+def test_le_point_d_entree_railway_rattrape_l_annulation():
+    # C'est CE fichier que la commande de démarrage Railway lance : la pile du
+    # 25/10 21:39 venait de sa ligne asyncio.run, pas de railway_ha_boot.
+    rattrapees = _exceptions_rattrapees(_bloc_principal("railway_ha_product_boot_v8.py"))
+    assert any("CancelledError" in nom for nom in rattrapees), rattrapees
+    assert any("KeyboardInterrupt" in nom for nom in rattrapees), rattrapees
+
+
 def test_c_est_bien_une_annulation_qui_est_levee_pendant_l_attente():
     # Si failover cessait de signaler l'arrêt par CancelledError, la branche
     # ci-dessus deviendrait du code mort sans que rien ne le dise.
