@@ -72,6 +72,110 @@ async def published_rules_state(bot: commands.Bot, guild: discord.Guild) -> dict
     }
 
 
+async def preview_published_channels(bot, guild) -> tuple[object, discord.Role, object]:
+    """Simule les accès réels après publication, sans toucher à Discord."""
+    state = await published_rules_state(bot, guild)
+    if state is None:
+        raise ValueError("Publiez d'abord le règlement et son panneau public.")
+    channel = guild.get_channel(state["channel_id"])
+    role = guild.get_role(state["role_id"])
+    if not isinstance(channel, discord.TextChannel) or not isinstance(role, discord.Role):
+        raise ValueError("Salon du règlement ou rôle Vérifié introuvable.")
+    try:
+        await channel.fetch_message(state["message_id"])
+    except discord.NotFound as exc:
+        raise ValueError("Panneau du règlement supprimé : republiez-le.") from exc
+    from sentrix_verification_v96 import VerificationConfigV96
+    manager = bot.get_cog("VerificationConfigV96") or VerificationConfigV96(bot)
+    issues = await manager._preflight(guild, channel=channel, role=role, auto_access=True)
+    if issues:
+        raise ValueError("Permissions insuffisantes : " + " ".join(issues))
+    plan = await manager._access_plan(guild, verification_channel=channel)
+    return plan, role, state
+
+
+def plan_signature(plan) -> tuple:
+    """Vérifie que rien n'a changé entre aperçu et confirmation."""
+    return (
+        tuple(sorted(c.id for c in plan.gate)),
+        tuple(sorted(c.id for c in plan.secure_sensitive)),
+        tuple(sorted(plan.protected)),
+        tuple(sorted(plan.untouched)),
+    )
+
+
+class RulesLockConfirmView(discord.ui.View):
+    def __init__(self, bot, guild, owner_id: int, signature: tuple):
+        super().__init__(timeout=180)
+        self.bot, self.guild, self.owner_id = bot, guild, int(owner_id)
+        self.signature = signature
+        self.running = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if (
+            interaction.user.id != self.owner_id
+            or interaction.guild_id != self.guild.id
+            or not (
+                interaction.user.id == self.guild.owner_id
+                or interaction.user.guild_permissions.administrator
+            )
+        ):
+            await interaction.response.send_message(
+                "Confirmation réservée à l'administrateur ayant ouvert cet aperçu.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirmer le verrouillage", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if self.running:
+            return await interaction.response.send_message(
+                "Un verrouillage est déjà en cours.", ephemeral=True,
+            )
+        self.running = True
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            plan, _role, _state = await preview_published_channels(self.bot, self.guild)
+            if plan_signature(plan) != self.signature:
+                return await interaction.followup.send(
+                    "La configuration des salons a changé. Relancez l'aperçu avant de confirmer.",
+                    ephemeral=True,
+                )
+            changed, protected = await lock_published_channels(
+                self.bot, self.guild, interaction.user,
+            )
+        except ValueError as exc:
+            return await interaction.followup.send(str(exc), ephemeral=True)
+        except Exception:
+            logger.exception("Verrouillage après aperçu impossible guild=%s", self.guild.id)
+            return await interaction.followup.send(
+                "Discord a refusé une modification. Vérifiez les permissions et les logs.",
+                ephemeral=True,
+            )
+        finally:
+            self.running = False
+        self.stop()
+        for item in self.children:
+            item.disabled = True
+        await interaction.followup.send(
+            f"Accès appliqués : **{changed}** salons corrigés, "
+            f"**{protected}** espaces protégés ou inchangés. "
+            "Les salons staff/logs ne sont pas ouverts au rôle Vérifié.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.stop()
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(
+            content="Verrouillage annulé : aucune permission modifiée.",
+            view=self,
+        )
+
+
 async def lock_published_channels(
     bot: commands.Bot, guild: discord.Guild, actor: discord.abc.User,
 ) -> tuple[int, int]:
@@ -356,21 +460,25 @@ class VerifySetupView(discord.ui.View):
         async def lock_callback(interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True, thinking=True)
             try:
-                changed, protected = await lock_published_channels(
-                    self.bot, self.guild, interaction.user,
+                plan, role, _state = await preview_published_channels(
+                    self.bot, self.guild,
                 )
             except ValueError as exc:
                 return await interaction.followup.send(str(exc), ephemeral=True)
             except Exception:
-                logger.exception("Verrouillage du règlement impossible guild=%s", self.guild.id)
+                logger.exception("Aperçu du verrouillage impossible guild=%s", self.guild.id)
                 return await interaction.followup.send(
-                    "Verrouillage impossible. Vérifiez les permissions du bot et les logs.",
+                    "Impossible de vérifier les permissions. Aucun salon n'a été modifié.",
                     ephemeral=True,
                 )
             await interaction.followup.send(
-                f"Verrouillage effectué : **{changed}** espaces publics configurés, "
-                f"**{protected}** espaces privés ou sensibles conservés. "
-                "Les nouveaux membres doivent accepter le règlement et terminer la vérification.",
+                "**Aperçu avant verrouillage**\\n"
+                f"Rôle après validation : {role.mention}\\n\\n"
+                + plan.preview()
+                + "\\n\\n**Aucune modification tant que vous ne confirmez pas.**",
+                view=RulesLockConfirmView(
+                    self.bot, self.guild, interaction.user.id, plan_signature(plan),
+                ),
                 ephemeral=True,
             )
 
