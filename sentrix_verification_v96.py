@@ -170,6 +170,9 @@ async def lock_channels_after_published_rules(
     )
     if issues:
         raise ValueError("Verrouillage impossible : " + " ".join(issues))
+    # Préparer la colonne de persistance AVANT toute modification de salon.
+    # Les anciens serveurs V78 peuvent ne pas l'avoir créée.
+    await manager._ensure_table()
     # Le moteur garde visibles règlement + espaces privés/staff et effectue
     # un rollback des overwrites s'il rencontre un refus de Discord.
     changed, protected = await manager._apply_auto_access(
