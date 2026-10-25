@@ -205,3 +205,71 @@ def test_unsynchronized_category_does_not_prove_staff_can_read_channel():
     plan = plan_access(guild, verification_channel_id=verify.id)
     assert channel in plan.sensitive_public
     assert channel not in plan.secure_sensitive
+
+
+def test_private_staff_channel_with_stale_verified_allow_is_not_assumed_safe():
+    guild, verified, verify, c = guild_screenshot()
+    leaked = Surface(
+        120, "staff-confidentiel", public=False, roles=[verified],
+    )
+    guild.channels.append(leaked)
+    plan = plan_access(
+        guild, verification_channel_id=verify.id, verified_role=verified,
+    )
+    assert leaked.id in plan.protected
+    assert leaked in plan.secure_sensitive
+    assert leaked not in plan.gate
+    assert "Accès staff/logs à sécuriser" in plan.preview()
+    assert "Attention : -" not in plan.preview()
+
+
+def test_private_staff_channel_without_verified_allow_is_left_alone():
+    guild, verified, verify, c = guild_screenshot()
+    private = Surface(120, "staff-confidentiel", public=False)
+    guild.channels.append(private)
+    plan = plan_access(
+        guild, verification_channel_id=verify.id, verified_role=verified,
+    )
+    assert private.id in plan.protected
+    assert private not in plan.secure_sensitive
+
+
+def test_inherited_verified_allow_on_synced_sensitive_category_requires_denial():
+    guild, verified, verify, c = guild_screenshot()
+    category = Surface(140, "Staff - archives")
+    category.overwrites[verified] = discord.PermissionOverwrite(view_channel=True)
+    leaked = Surface(141, "archives", category=category, public=False)
+    leaked.permissions_synced = True
+    guild.categories.append(category)
+    guild.channels.extend([category, leaked])
+    plan = plan_access(
+        guild, verification_channel_id=verify.id, verified_role=verified,
+    )
+    assert leaked in plan.secure_sensitive
+
+
+@pytest.mark.asyncio
+async def test_real_permission_application_revokes_old_verified_access_to_private_logs():
+    guild, verified, verify, c = guild_screenshot()
+    leaked = Surface(
+        120, "logs-secrets", public=False, roles=[verified],
+    )
+    guild.channels.append(leaked)
+    bot = SimpleNamespace(db=SimpleNamespace(
+        get_guild_config=AsyncMock(return_value={
+            "verification_channel": verify.id,
+            "verify_role": verified.id,
+        }),
+        fetchall=AsyncMock(return_value=[]),
+        fetchone=AsyncMock(return_value=None),
+    ))
+    await VerificationConfigV96(bot)._apply_auto_access(
+        guild, verification_channel=verify, verified_role=verified,
+        actor=SimpleNamespace(id=900),
+    )
+    revoked = {
+        call.args[0].id: call.kwargs["overwrite"].view_channel
+        for call in leaked.set_permissions.await_args_list
+    }
+    assert revoked[verified.id] is False
+    assert revoked[guild.default_role.id] is False
