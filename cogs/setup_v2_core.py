@@ -31,7 +31,7 @@ MODULES = (
 # moderation / security / ai gardent le comportement inverse (actifs tant qu'on ne les
 # coupe pas) : ce sont des protections, pas des fonctionnalités à installer.
 CONFIGURABLE_MODULES = frozenset({
-    "logs", "tickets", "welcome", "goodbye", "roles", "levels", "economy", "notifications",
+    "logs", "tickets", "welcome", "goodbye", "roles", "levels", "economy", "notifications", "ai",
 })
 MODULE_STATE_ENABLED = "enabled"
 MODULE_STATE_DISABLED = "disabled"
