@@ -56,6 +56,8 @@ class AccessPlan:
     protected: dict[int, str] = field(default_factory=dict)
     untouched: dict[int, str] = field(default_factory=dict)
     sensitive_public: list = field(default_factory=list)
+    # Diagnostic uniquement : NE JAMAIS appliquer ces corrections dans le
+    # parcours qui verrouille les salons membres.
     secure_sensitive: list = field(default_factory=list)
     log_destinations: list = field(default_factory=list)
     suspected_logs: list = field(default_factory=list)
@@ -73,7 +75,7 @@ class AccessPlan:
         lines = [
             f"**Salons membres à verrouiller : {len(self.gate)}**",
             names,
-            f"**Accès staff/logs à sécuriser : {len(self.secure_sensitive)}**",
+            f"**Salons sensibles à vérifier manuellement : {len(self.secure_sensitive)}**",
             (
                 "**Destinations logs enregistrées : **"
                 + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.log_destinations[:5]) or "aucune")
@@ -96,11 +98,13 @@ class AccessPlan:
             lines.append(
                 f"**Attention : {pending} salon(s) staff/logs semblent publics "
                 "mais n'ont pas de rôle staff explicitement autorisé.** "
-                "Vérifiez-les manuellement."
+                "Corrigez ces permissions manuellement, hors du verrouillage automatique."
             )
         lines.append(
-            "Aucun accès privé ne sera donné au rôle Vérifié. "
-            "Les salons inconnus et les espaces de vérification restent inchangés."
+            "**Aucun salon staff, logs, audit, privé ou de vérification n'est modifié "
+            "par ce verrouillage.** Les accès suspects sont des recommandations "
+            "à contrôler séparément. Seuls les salons publics membres identifiés "
+            "sont concernés."
         )
         return "\n".join(lines)
 
