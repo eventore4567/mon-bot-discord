@@ -82,6 +82,11 @@ jobs:
           DISCORD_TOKEN: "ci.fake.token"
         run: python -m pytest -q tests/test_rules_readonly_ai_advice.py tests/test_channel_access_preview_confirmation.py tests/test_published_rules_lock_v119.py
 
+      - name: Verify member voice locking with safe staff exclusions
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python -m pytest -q tests/test_voice_verification_lock.py tests/test_channel_access_preview_confirmation.py
+
       - name: Dashboard interaction audit
         env:
           DISCORD_TOKEN: "ci.fake.token"
