@@ -14,7 +14,7 @@ import unicodedata
 
 import discord
 from discord.ext import commands
-from utils.verification_access_intelligence import plan_access
+from utils.verification_access_intelligence import is_voice_channel, plan_access
 
 logger = logging.getLogger("bot.verification-v96")
 
@@ -809,6 +809,16 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                 and bool(getattr(ch, "permissions_synced", False))
             )
         ] + list(access.category_gates)
+        # Modifier la catégorie elle-même quand tous ses enfants sont membres
+        # et synchronisés. Connect est posé sur la catégorie UNIQUEMENT si
+        # l'un de ses enfants éligibles est un vocal.
+        voice_category_ids = {
+            ch.category.id for ch in access.gate
+            if is_voice_channel(ch)
+            and getattr(ch, "category", None) is not None
+            and ch.category.id in synced_category_ids
+            and bool(getattr(ch, "permissions_synced", False))
+        }
         if not verification_channel.permissions_for(everyone).view_channel:
             raise ValueError(
                 "Le salon du règlement est invisible aux nouveaux membres. "
@@ -830,6 +840,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             target: discord.Role,
             *,
             view_channel: bool,
+            connect: bool | None = None,
         ) -> None:
             key = (surface.id, target.id)
             if key in seen:
@@ -838,19 +849,29 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             old = surface.overwrites_for(target)
             new = _clone_overwrite(old)
             new.view_channel = view_channel
+            if connect is not None:
+                new.connect = connect
             had_overwrite = target in surface.overwrites
-            # Discord API et journaux ne changent pas si les permissions
-            # sont déjà correctes ; limite aussi la durée du verrouillage.
-            if old.view_channel == view_channel:
+            # Un vocal doit changer aussi Connect, même lorsque View Channel
+            # est déjà à la bonne valeur. Conserver les autres permissions.
+            if old.view_channel == view_channel and (
+                connect is None or old.connect == connect
+            ):
                 return
             operations.append((surface, target, had_overwrite, old, new))
 
         for surface in surfaces:
-            # Le plan de contrôle est indépendant des espaces sensibles.
-            # Une correction staff/logs nécessite un audit et une confirmation
-            # distincte : ce parcours NE TOUCHE PAS à leurs permissions.
-            plan(surface, everyone, view_channel=False)
-            plan(surface, verified_role, view_channel=True)
+            # Ni salon staff/logs, ni vocal déjà privé ou volontairement
+            # inaccessible ne passe dans cette liste.
+            voice = is_voice_channel(surface) or surface.id in voice_category_ids
+            plan(
+                surface, everyone, view_channel=False,
+                connect=False if voice else None,
+            )
+            plan(
+                surface, verified_role, view_channel=True,
+                connect=True if voice else None,
+            )
 
         # Pré-vérifier TOUS les salons où une écriture est nécessaire. Sinon
         # un refus sur le dernier salon peut forcer un rollback après avoir déjà
