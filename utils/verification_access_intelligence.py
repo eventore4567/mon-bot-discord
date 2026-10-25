@@ -113,10 +113,10 @@ class AccessPlan:
 def _safe_ai_label(value: object) -> str:
     """Données non fiables, limitées en taille, sans mention Discord ni URL."""
     value = str(value or "")
-    value = re.sub(r"<[@#&][!]?\\d+>", "[mention]", value)
+    value = re.sub(r"<[@#&][!]?\d+>", "[mention]", value)
     value = re.sub(r"@(?:everyone|here)", "[mention]", value, flags=re.I)
-    value = re.sub(r"https?://\\S+", "[url]", value, flags=re.I)
-    value = re.sub(r"[\\x00-\\x1f\\x7f]", " ", value)
+    value = re.sub(r"https?://\S+", "[url]", value, flags=re.I)
+    value = re.sub(r"[\x00-\x1f\x7f]", " ", value)
     return value[:60]
 
 
