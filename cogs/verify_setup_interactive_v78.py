@@ -135,6 +135,7 @@ def plan_signature(plan, *, role=None, state=None, guild=None) -> tuple:
         int(getattr(role, "id", 0) or 0),
         tuple(sorted(channel_state)),
         tuple(sorted(c.id for c in plan.gate)),
+        tuple(sorted(c.id for c in getattr(plan, "category_gates", ()))),
         tuple(sorted(c.id for c in plan.secure_sensitive)),
         tuple(sorted((int(k), str(v)) for k, v in plan.protected.items())),
         tuple(sorted((int(k), str(v)) for k, v in plan.untouched.items())),
