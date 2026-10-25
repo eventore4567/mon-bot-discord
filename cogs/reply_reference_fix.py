@@ -7,12 +7,18 @@ sources habituelles de référence : ctx.reply(), Message.reply() et les send(re
 from __future__ import annotations
 
 import discord
+from contextvars import ContextVar
 from discord.ext import commands
 
 _INSTALLED = False
+# La reference reste desactivee pour les commandes ordinaires. Seule une
+# reponse IA explicite peut l'autoriser, pendant la duree d'un envoi.
+_NATIVE_AI_REPLY = ContextVar('sentrix_native_ai_reply', default=False)
 
 
 def _clean_reference_kwargs(kwargs: dict) -> dict:
+    if _NATIVE_AI_REPLY.get():
+        return kwargs
     kwargs.pop("reference", None)
     kwargs.pop("mention_author", None)
     kwargs.pop("fail_if_not_exists", None)
@@ -41,12 +47,24 @@ def install() -> None:
         return await messageable_send(self, *args, **_clean_reference_kwargs(kwargs))
 
     async def message_reply_without_reference(self: discord.Message, *args, **kwargs):
-        # Message.reply() ajoute normalement reference=self. On envoie volontairement dans
-        # le salon comme un message normal pour qu'une suppression future n'affiche jamais
-        # le bandeau « message original supprimé ».
+        # Par defaut : aucune reference pour les messages ordinaires.
+        # L'IA utilise un opt-in temporaire pour produire une VRAIE reponse native
+        # avec notification, sans desactiver la protection pour les autres modules.
+        if _NATIVE_AI_REPLY.get():
+            kwargs["reference"] = self.to_reference(fail_if_not_exists=False)
+            kwargs.setdefault("mention_author", True)
         return await self.channel.send(*args, **_clean_reference_kwargs(kwargs))
 
     commands.Context.send = context_send_without_reference
     commands.Context.reply = context_reply_without_reference
     discord.abc.Messageable.send = messageable_send_without_reference
     discord.Message.reply = message_reply_without_reference
+
+
+async def send_native_ai_reply(message: discord.Message, **kwargs):
+    """Autorise la reference Discord UNIQUEMENT pour cette reponse IA."""
+    token = _NATIVE_AI_REPLY.set(True)
+    try:
+        return await message.reply(**kwargs)
+    finally:
+        _NATIVE_AI_REPLY.reset(token)
