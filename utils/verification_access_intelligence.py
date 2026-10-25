@@ -56,25 +56,28 @@ class AccessPlan:
     portal: list = field(default_factory=list)
 
     def preview(self) -> str:
-        shown = ", ".join(getattr(c, "name", str(c.id)) for c in self.gate[:7]) or "aucun"
-        trailing = "…" if len(self.gate) > 7 else ""
-        alerts = len(self.sensitive_public)
-        return (
-            f"**À verrouiller : {len(self.gate)} salon(s) publics**\n"
-            f"{shown}{trailing}\n"
-            f"**À préserver : {len(self.protected)} salon(s)/catégories privés, staff, logs ou vérification**\n"
-            f"**À examiner : {len(self.untouched)} salon(s) ambigus, laissés intacts**\n"
-            + (
-                f"**Attention : {alerts - len(self.secure_sensitive)} salon(s) sensibles "
-                "ne sont pas sécurisables automatiquement.** "
-                "Confirmez leurs rôles staff et leurs accès manuellement."
-                if alerts > len(self.secure_sensitive) else
-                "Les salons staff/logs sécurisables seront masqués à @everyone, "
-                "sans attribuer de nouveaux droits."
-
-                if alerts else ""
+        names = ", ".join(getattr(c, "name", str(c.id)) for c in self.gate[:7]) or "aucun"
+        if len(self.gate) > 7:
+            names += "…"
+        pending = len(self.sensitive_public) - len(self.secure_sensitive)
+        lines = [
+            f"**Salons membres à verrouiller : {len(self.gate)}**",
+            names,
+            f"**Staff/logs publics sécurisables : {len(self.secure_sensitive)}**",
+            f"**Salons/catégories protégés : {len(self.protected)}**",
+            f"**Salons ambigus, laissés inchangés : {len(self.untouched)}**",
+        ]
+        if pending:
+            lines.append(
+                f"**Attention : {pending} salon(s) staff/logs semblent publics "
+                "mais n'ont pas de rôle staff explicitement autorisé.** "
+                "Vérifiez-les manuellement."
             )
-        ).strip()
+        lines.append(
+            "Aucun accès privé ne sera donné au rôle Vérifié. "
+            "Les salons inconnus et les espaces de vérification restent inchangés."
+        )
+        return "\\n".join(lines)
 
 
 STAFF_ROLE_WORDS = frozenset({
