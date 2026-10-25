@@ -54,6 +54,7 @@ class AccessPlan:
     sensitive_public: list = field(default_factory=list)
     secure_sensitive: list = field(default_factory=list)
     log_destinations: list = field(default_factory=list)
+    suspected_logs: list = field(default_factory=list)
     staff_channels: list = field(default_factory=list)
     portal: list = field(default_factory=list)
 
@@ -70,6 +71,11 @@ class AccessPlan:
                 "**Destinations logs enregistrées : **"
                 + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.log_destinations[:5]) or "aucune")
                 + ("…" if len(self.log_destinations) > 5 else "")
+            ),
+            (
+                "**Autres salons de logs probables : **"
+                + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.suspected_logs[:5]) or "aucun")
+                + ("…" if len(self.suspected_logs) > 5 else "")
             ),
             (
                 "**Salons staff repérés : **"
@@ -162,6 +168,9 @@ def plan_access(guild, *, verification_channel_id: int, configured_ids=(), speci
             plan.protected[channel.id] = "staff/logs/sécurité"
             if channel.id in log_destinations:
                 plan.log_destinations.append(channel)
+            elif own & {"logs", "log", "audit", "audits", "transcript", "transcripts", "dossiers"}:
+                # Nom suggestif, mais pas une destination officielle log_config.
+                plan.suspected_logs.append(channel)
             else:
                 plan.staff_channels.append(channel)
             if current_public:
