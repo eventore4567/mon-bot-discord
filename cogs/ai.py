@@ -2966,16 +2966,16 @@ class Ai(commands.Cog, name="Ai"):
                 if info["role_restrictions"] else "**Rôles :** aucune restriction IA supplémentaire"
             )
             details = (
-                f"{state}\\n{channel_note}\\n{role_note}\\n"
+                f"{state}\n{channel_note}\n{role_note}\n"
                 f"**Modèle utilisé :** `{info['model_id']}` "
-                f"({ai_service.MODEL_LABELS.get(info['model_key'], 'IA')})\\n"
-                f"**Raisonnement :** `{info['reasoning_effort']}`\\n"
-            ).replace("\\n", "\n")
+                f"({ai_service.MODEL_LABELS.get(info['model_key'], 'IA')})\n"
+                f"**Raisonnement :** `{info['reasoning_effort']}`\n"
+            )
             if not result["has_key"]:
                 e = embeds.error(details + "Aucune clé OpenAI disponible sur Railway.")
             elif result["ok"]:
                 e = embeds.success(
-                    details + f"**Connexion OpenAI :** OK ({result['latency_ms']} ms)\\n"
+                    details + f"**Connexion OpenAI :** OK ({result['latency_ms']} ms)\n"
                     "**Si l'IA ne répond toujours pas :** vérifiez l'activation, "
                     "le salon autorisé et les rôles ci-dessus."
                 )
@@ -2990,8 +2990,8 @@ class Ai(commands.Cog, name="Ai"):
                     "BadRequestError": "Paramètres du modèle ou raisonnement refusés par l'API.",
                 }
                 e = embeds.error(
-                    details + f"**Connexion OpenAI :** échec ({result['latency_ms']} ms)\\n"
-                    f"**Erreur :** `{result['error_type']}`\\n"
+                    details + f"**Connexion OpenAI :** échec ({result['latency_ms']} ms)\n"
+                    f"**Erreur :** `{result['error_type']}`\n"
                     f"**Cause probable :** {hints.get(result['error_type'], 'Consultez les logs techniques.')}"
                 )
 
