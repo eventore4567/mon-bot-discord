@@ -273,3 +273,31 @@ async def test_real_permission_application_revokes_old_verified_access_to_privat
     }
     assert revoked[verified.id] is False
     assert revoked[guild.default_role.id] is False
+
+
+@pytest.mark.asyncio
+async def test_missing_bot_permissions_on_one_target_blocks_all_changes():
+    guild, verified, verify, c = guild_screenshot()
+    bot_member = object()
+    guild.me = bot_member
+    for surface in guild.channels:
+        original = surface.permissions_for
+        def permissions_for(who, *, surface=surface, original=original):
+            if who is bot_member:
+                return SimpleNamespace(manage_channels=surface.id != 108)
+            return original(who)
+        surface.permissions_for = permissions_for
+
+    bot = SimpleNamespace(db=SimpleNamespace(
+        get_guild_config=AsyncMock(return_value={"verification_channel": verify.id}),
+        fetchall=AsyncMock(return_value=[]),
+        fetchone=AsyncMock(return_value=None),
+    ))
+    with pytest.raises(ValueError, match="general"):
+        await VerificationConfigV96(bot)._apply_auto_access(
+            guild, verification_channel=verify, verified_role=verified,
+            actor=SimpleNamespace(id=900),
+        )
+    # Aucun salon ne doit être modifié, même si seul le dernier est inaccessible.
+    for surface in guild.channels:
+        surface.set_permissions.assert_not_awaited()
