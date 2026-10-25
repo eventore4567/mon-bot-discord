@@ -70,7 +70,7 @@ class AccessPlan:
         lines = [
             f"**Salons membres à verrouiller : {len(self.gate)}**",
             names,
-            f"**Staff/logs publics sécurisables : {len(self.secure_sensitive)}**",
+            f"**Accès staff/logs à sécuriser : {len(self.secure_sensitive)}**",
             (
                 "**Destinations logs enregistrées : **"
                 + (", ".join("#" + str(getattr(c, "name", c.id)) for c in self.log_destinations[:5]) or "aucune")
@@ -136,7 +136,10 @@ def has_explicit_staff_access(channel, everyone) -> bool:
     return False
 
 
-def plan_access(guild, *, verification_channel_id: int, configured_ids=(), special_ids=(), log_ids=()) -> AccessPlan:
+def plan_access(
+    guild, *, verification_channel_id: int, configured_ids=(), special_ids=(),
+    log_ids=(), verified_role=None,
+) -> AccessPlan:
     plan = AccessPlan()
     everyone = guild.default_role
     conf_ids = {int(v) for v in configured_ids if v}
@@ -188,10 +191,35 @@ def plan_access(guild, *, verification_channel_id: int, configured_ids=(), speci
                 plan.suspected_logs.append(channel)
             else:
                 plan.staff_channels.append(channel)
+            # Un ancien overwrite peut laisser le rôle Vérifié lire des logs
+            # pourtant invisibles à @everyone. Ne pas prendre "déjà privé"
+            # pour une garantie de confidentialité du rôle final.
+            verified_overwrite = (
+                channel.overwrites_for(verified_role)
+                if verified_role is not None else None
+            )
+            explicit_verified_allow = (
+                verified_overwrite is not None
+                and verified_overwrite.view_channel is True
+            )
+            category = getattr(channel, "category", None)
+            if (
+                not explicit_verified_allow
+                and verified_role is not None
+                and category is not None
+                and bool(getattr(channel, "permissions_synced", False))
+            ):
+                inherited = category.overwrites_for(verified_role)
+                explicit_verified_allow = inherited.view_channel is True
+
             if current_public:
                 plan.sensitive_public.append(channel)
                 if has_explicit_staff_access(channel, everyone):
                     plan.secure_sensitive.append(channel)
+            elif explicit_verified_allow:
+                # Révoquer seulement cet accès inadéquat ; les autres rôles
+                # (modération, propriétaires, administrateurs) sont intacts.
+                plan.secure_sensitive.append(channel)
             continue
         if own & ONBOARDING or parent_words & ONBOARDING:
             plan.protected[channel.id] = "accueil/vérification"
