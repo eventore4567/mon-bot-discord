@@ -1,6 +1,6 @@
 """Diagnostic SentriX IA : tester le VRAI modèle, jamais un modèle fixe."""
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 
@@ -21,7 +21,7 @@ async def test_aidiag_uses_guild_model_and_effort(monkeypatch):
     monkeypatch.setattr(ai_service, "test_connection", probe)
     info = await ai_cog.Ai._ai_connection_diagnostic(SimpleNamespace(bot=object()), 99, 44)
     get_settings.assert_awaited_once()
-    probe.assert_awaited_once_with(model_key=ai_service.MODEL_LUNA, reasoning_effort="low")
+    probe.assert_awaited_once_with(model_key=ai_service.MODEL_LUNA, reasoning_effort="none")
     assert info["model_id"] == ai_service.MODEL_IDS[ai_service.MODEL_LUNA]
     assert info["enabled"] is True
     assert info["channel_allowed"] is True
@@ -42,7 +42,11 @@ async def test_aidiag_reports_disabled_guild_and_blocked_channel_without_enablin
     assert info["channel_allowed"] is False
     assert info["role_restrictions"] is True
     assert info["role_allowed"] is False
-    probe.assert_awaited_once_with(model_key=ai_service.MODEL_SOL, reasoning_effort="high")
+    assert probe.await_args_list == [
+        call(model_key=ai_service.MODEL_LUNA, reasoning_effort="none"),
+        call(model_key=ai_service.MODEL_SOL, reasoning_effort="high"),
+    ]
+    assert info["configured_test"]["ok"] is True
 
 
 @pytest.mark.asyncio
@@ -68,8 +72,12 @@ async def test_aidiag_falls_back_to_same_model_as_generate(monkeypatch):
     probe = AsyncMock(return_value={"has_key": False, "ok": False, "latency_ms": 0})
     monkeypatch.setattr(ai_service, "test_connection", probe)
     info = await ai_cog.Ai._ai_connection_diagnostic(SimpleNamespace(bot=object()), 99, 44)
-    assert info["model_key"] == ai_service.MODEL_TERRA
-    probe.assert_awaited_once_with(model_key=ai_service.MODEL_TERRA, reasoning_effort="medium")
+    assert info["model_key"] == ai_service.MODEL_LUNA
+    assert info["configured_model_id"] == ai_service.MODEL_IDS[ai_service.MODEL_TERRA]
+    assert probe.await_args_list == [
+        call(model_key=ai_service.MODEL_LUNA, reasoning_effort="none"),
+        call(model_key=ai_service.MODEL_TERRA, reasoning_effort="medium"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -117,3 +125,21 @@ async def test_connection_probe_uses_selected_model_and_reasoning(monkeypatch):
     assert result["ok"] is True
     assert fake_create.await_args.kwargs["model"] == ai_service.MODEL_IDS[ai_service.MODEL_LUNA]
     assert fake_create.await_args.kwargs["reasoning"]["effort"] == "medium"
+
+
+
+@pytest.mark.asyncio
+async def test_conversation_probe_failure_is_reported_even_if_configured_model_works(monkeypatch):
+    monkeypatch.setattr(ai_service, "get_settings", AsyncMock(return_value={
+        "enabled": True, "default_model": ai_service.MODEL_TERRA, "reasoning_effort": "medium",
+    }))
+    probe = AsyncMock(side_effect=[
+        {"ok": False, "has_key": True, "error_type": "PermissionDeniedError", "latency_ms": 40},
+        {"ok": True, "has_key": True, "error_type": None, "latency_ms": 30},
+    ])
+    monkeypatch.setattr(ai_service, "test_connection", probe)
+    result = await ai_cog.Ai._ai_connection_diagnostic(SimpleNamespace(bot=object()), 99, 44)
+    assert result["model_key"] == ai_service.MODEL_LUNA
+    assert result["test"]["ok"] is False
+    assert result["configured_test"]["ok"] is True
+    assert probe.await_count == 2
