@@ -628,6 +628,19 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         problem = role_grant_problem(guild, role)
         if problem:
             issues.append(problem)
+        # Un rôle final qui donne des droits staff serait un risque majeur :
+        # tous les membres vérifiés le recevraient.
+        perms = getattr(role, "permissions", None)
+        if perms is not None and any(
+            getattr(perms, name, False) for name in (
+                "administrator", "manage_guild", "manage_channels",
+                "manage_roles", "ban_members", "kick_members",
+            )
+        ):
+            issues.append(
+                "Le rôle Vérifié possède des permissions staff/administrateur. "
+                "Choisissez un rôle membre sans permissions de modération."
+            )
 
         me = guild.me
         if me is None:
