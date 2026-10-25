@@ -74,6 +74,9 @@ RUN python -m pytest -q \
     tests/test_discord_command_publish_audit.py \
     tests/test_dashboard_feedback_reports.py \
     tests/test_dashboard_logs_visible_v1.py \
+    tests/test_rules_readonly_ai_advice.py \
+    tests/test_channel_access_preview_confirmation.py \
+    tests/test_published_rules_lock_v119.py \
     tests/test_dashboard_json_snowflakes.py \
     tests/test_guild_departure_notify.py \
     tests/test_verification_panel_recovery.py \
