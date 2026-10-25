@@ -468,7 +468,18 @@ class _Onboarding:
         self.mode = discord.OnboardingMode.default
         self.default_channel_ids = [s.c["annonces"].id, s.c["general"].id]
         self.default_channels = [s.c["annonces"], s.c["general"]]
-        self.prompts = []
+        # Une VRAIE question discord.py : un Onboarding sans question a laissé
+        # passer to_dict() sans son « id » obligatoire (prod, 25/10 23:39).
+        # Construite comme discord.py le fait d'une réponse de l'API.
+        question = discord.OnboardingPrompt.from_dict(data={
+            "id": 4141, "type": 0, "title": "Tes centres d'intérêt ?",
+            "single_select": False, "required": False, "in_onboarding": True,
+            "options": [{
+                "id": 4242, "title": "Gamer", "description": "Salons jeux",
+                "channel_ids": [s.c["gaming"].id], "role_ids": [s.gamer.id],
+            }],
+        }, state=None, guild=s)
+        self.prompts = [question]
 
 
 def _serveur_onboarding(refuse_permission=False):
@@ -580,3 +591,24 @@ def test_le_salon_des_mises_a_jour_communaute_est_libere_avec_l_onboarding():
         s, verification_channel=s.c["reglement"], verified_role=s.verifie,
     ))
     assert s.c["news"] in plan.onboarding and s.c["news"] not in plan.gate
+
+
+def test_la_sauvegarde_de_l_onboarding_est_restaurable_avec_ses_questions():
+    import json
+
+    s, _etat = _serveur_onboarding()
+    moteur = _moteur(s)
+    lignes = []
+
+    async def execute(sql, params=()):
+        if "INSERT INTO verification_onboarding_backup" in sql:
+            lignes.append(params)
+
+    moteur.bot.db.execute = execute
+    asyncio.run(moteur._release_onboarding(s, "test"))
+    sauvegarde = json.loads(lignes[0][1])
+    question = sauvegarde["prompts"][0]
+    assert question["id"] == 4141 and question["options"][0]["id"] == 4242
+    assert question["options"][0]["role_ids"] == [s.gamer.id]
+    relue = discord.OnboardingPrompt.from_dict(data=question, state=None, guild=s)
+    assert relue.id == 4141 and relue.options[0].id == 4242

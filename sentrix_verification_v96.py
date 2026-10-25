@@ -728,11 +728,21 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         import json
 
         onboarding = await guild.onboarding()
+
+        def prompt_payload(prompt) -> dict:
+            # to_dict() de discord.py exige l'id de la question et omet celui
+            # des options, que from_dict() exige : on les remet pour que la
+            # sauvegarde en base reste restaurable.
+            data = prompt.to_dict(id=int(prompt.id))
+            for option_data, option in zip(data.get("options", ()), prompt.options):
+                option_data["id"] = int(getattr(option, "id", 0) or 0)
+            return data
+
         backup = {
             "enabled": bool(onboarding.enabled),
             "mode": int(getattr(onboarding.mode, "value", 0) or 0),
             "default_channel_ids": [int(i) for i in onboarding.default_channel_ids],
-            "prompts": [prompt.to_dict() for prompt in onboarding.prompts],
+            "prompts": [prompt_payload(prompt) for prompt in onboarding.prompts],
         }
         await self.bot.db.execute(
             "CREATE TABLE IF NOT EXISTS verification_onboarding_backup ("
@@ -742,6 +752,9 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             "INSERT INTO verification_onboarding_backup (guild_id, payload, created_at) VALUES (?,?,?)",
             (guild.id, json.dumps(backup), int(__import__("time").time())),
         )
+        # Restauration immédiate (échec d'écriture) : les objets d'origine,
+        # sans repasser par le JSON.
+        backup["_prompt_objects"] = list(onboarding.prompts)
         try:
             await guild.edit_onboarding(
                 enabled=False, default_channels=[], prompts=[],
@@ -763,10 +776,12 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         try:
             from discord.onboarding import OnboardingMode, OnboardingPrompt
 
-            prompts = [
-                OnboardingPrompt.from_dict(data=data, state=guild._state, guild=guild)
-                for data in backup.get("prompts", ())
-            ]
+            prompts = backup.get("_prompt_objects")
+            if prompts is None:
+                prompts = [
+                    OnboardingPrompt.from_dict(data=data, state=guild._state, guild=guild)
+                    for data in backup.get("prompts", ())
+                ]
             await guild.edit_onboarding(
                 prompts=prompts,
                 default_channels=[discord.Object(id=i) for i in backup.get("default_channel_ids", ())],
