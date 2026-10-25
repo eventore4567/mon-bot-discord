@@ -648,11 +648,20 @@ class _CaptchaChannelAccessView(discord.ui.View):
             )
         # Le rôle est celui publié avec le règlement : le sélecteur historique
         # n'autorise plus à ouvrir les salons à un rôle arbitraire.
-        from cogs.verify_setup_interactive_v78 import lock_published_channels
+        from cogs.verify_setup_interactive_v78 import (
+            lock_published_channels, preview_published_channels, plan_signature,
+        )
 
         self._applying = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
+            current_plan, _role, _state = await preview_published_channels(self.bot, self.guild)
+            if plan_signature(current_plan) != getattr(self, "plan_signature", None):
+                return await interaction.followup.send(
+                    "Les salons ont changé depuis l'aperçu. Réouvrez cette configuration "
+                    "pour vérifier les nouveaux accès avant application.",
+                    ephemeral=True,
+                )
             changed, protected = await lock_published_channels(
                 self.bot, self.guild, interaction.user,
             )
@@ -692,16 +701,29 @@ async def _open_captcha_channel_access(view, interaction: discord.Interaction) -
             ephemeral=True,
         )
 
+    from cogs.verify_setup_interactive_v78 import preview_published_channels, plan_signature
+    try:
+        plan, _role, _state = await preview_published_channels(view.bot, interaction.guild)
+    except ValueError as exc:
+        return await interaction.response.send_message(str(exc), ephemeral=True)
+    except Exception:
+        logger.exception("Aperçu accès vérification impossible guild=%s", interaction.guild.id)
+        return await interaction.response.send_message(
+            "Impossible de contrôler les salons et leurs permissions. Rien n'a été modifié.",
+            ephemeral=True,
+        )
+
     panel = _CaptchaChannelAccessView(view.bot, interaction.guild, interaction.user.id)
     panel.role = role
+    panel.plan_signature = plan_signature(plan)
     # Le rôle est déjà choisi/persisté lors de la publication. Supprimer le
     # sélecteur évite d'imposer à l'admin une deuxième configuration.
     panel.remove_item(panel.chooser)
     await interaction.response.send_message(
         "**Accès aux salons — règlement publié reconnu**\n"
         f"Rôle vérifié : {role.mention}. Aucun nouveau règlement à créer.\n"
-        "Confirmez pour masquer les espaces publics aux membres non vérifiés. "
-        "Les salons privés/staff restent protégés et le salon du règlement reste visible.",
+        + plan.preview()
+        + "\\n\\n**Confirmez pour appliquer ce plan.** Les rôles staff/logs existants restent intacts.",
         view=panel, ephemeral=True,
     )
 
