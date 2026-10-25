@@ -223,3 +223,100 @@ async def test_onboarding_350003_does_not_abort_other_member_voice_locks():
     assert voice.overwrites[everyone].connect is False
     assert voice.overwrites[verified].connect is True
     assert not locked_by_discord.overwrites
+
+
+def test_public_announcements_giveaways_and_custom_names_are_member_channels():
+    member_channels = [
+        Channel(201, "📣・annonces"),
+        Channel(202, "🎉・giveaways"),
+        Channel(203, "📌・nouveautés"),
+        Channel(204, "🗳️・sondages", kind="forum"),
+        Channel(205, "🗣・blabla"),
+        Channel(206, "Général", kind="voice"),
+    ]
+    guild, _, verified = fixtures(*member_channels)
+    plan = plan_access(
+        guild, verification_channel_id=999,
+        verified_role=verified,
+    )
+    assert {ch.id for ch in plan.gate} == {201, 202, 203, 204, 205, 206}
+    assert "Salons textuels à verrouiller : 5" in plan.preview()
+    assert "Vocaux à verrouiller : 1" in plan.preview()
+
+
+def test_private_staff_logs_and_verification_stay_unmodified():
+    channels = [
+        Channel(211, "annonces"),
+        Channel(212, "logs-messages"),
+        Channel(213, "chat-staff"),
+        Channel(214, "audit"),
+        Channel(215, "secret-sans-nom-explicite", public=False),
+        Channel(216, "règlement"),
+        Channel(217, "vérification"),
+        Channel(218, "boosters"),
+        Channel(219, "Général", kind="voice"),
+    ]
+    guild, _, verified = fixtures(*channels)
+    plan = plan_access(
+        guild, verification_channel_id=216,
+        log_ids=[212], onboarding_ids=[218],
+        verified_role=verified,
+    )
+    assert {ch.id for ch in plan.gate} == {211, 219}
+    assert {212, 213, 214, 215, 216, 217, 218}.issubset(plan.protected)
+    assert "logs-messages" not in plan.preview()
+
+
+def test_public_announcements_under_informations_category_are_not_exempt():
+    category = Channel(221, "Informations", kind="category")
+    annonce = Channel(222, "annonces", category=category, synced=True)
+    giveaways = Channel(223, "giveaways", category=category, synced=True)
+    guild, _, verified = fixtures(annonce, giveaways, categories=[category])
+    plan = plan_access(guild, verification_channel_id=999, verified_role=verified)
+    assert {ch.id for ch in plan.gate} == {222, 223}
+    assert {ch.id for ch in plan.category_gates} == {221}
+    assert not plan.mixed_synced
+
+
+@pytest.mark.asyncio
+async def test_mixed_category_locks_only_public_members_not_logs_or_staff():
+    category = Channel(231, "Salons textuels", kind="category")
+    annonce = Channel(232, "annonces", category=category, synced=True)
+    giveaway = Channel(233, "giveaways", category=category, synced=True)
+    logs = Channel(234, "logs-messages", category=category, synced=True)
+    guild, everyone, verified = fixtures(annonce, giveaway, logs, categories=[category])
+    plan = plan_access(guild, verification_channel_id=999, verified_role=verified)
+    assert {ch.id for ch in plan.gate} == {232, 233}
+    assert {ch.id for ch in plan.mixed_synced} == {232, 233}
+    assert plan.category_gates == []
+    assert logs.id in plan.protected
+    assert "désynchronisés" in plan.preview()
+    manager = VerificationConfigV96(SimpleNamespace())
+    manager._access_plan = AsyncMock(return_value=plan)
+    changed, protected = await manager._apply_auto_access(
+        guild, verification_channel=Channel(999, "règlement"),
+        verified_role=verified, actor=SimpleNamespace(id=11),
+    )
+    assert changed == 2
+    assert protected >= 1
+    assert annonce.overwrites[everyone].view_channel is False
+    assert annonce.overwrites[verified].view_channel is True
+    assert giveaway.overwrites[everyone].view_channel is False
+    assert giveaway.overwrites[verified].view_channel is True
+    assert not logs.updated
+    assert not category.updated
+
+
+def test_onboarding_by_name_and_explicit_ids_remain_accessible():
+    channels = [
+        Channel(241, "règlement"),
+        Channel(242, "captcha"),
+        Channel(243, "bienvenue"),
+        Channel(244, "boosters"),
+        Channel(245, "annonces"),
+    ]
+    guild, _, verified = fixtures(*channels)
+    plan = plan_access(guild, verification_channel_id=241,
+                       onboarding_ids=[244], verified_role=verified)
+    assert {ch.id for ch in plan.gate} == {245}
+    assert {241, 242, 243, 244}.issubset(plan.protected)

@@ -1,9 +1,9 @@
 """Plan prudent de visibilité Discord pour le règlement SentriX.
 
-Ni IA probabiliste ni écriture Discord : les indices déterministes sont
-noms/catégories, permissions actuelles et identifiants persistés. Une erreur
-de classification ne peut jamais rendre un salon privé accessible au rôle
-« Vérifié » : les salons inconnus sont conservés sans modification.
+Ni IA probabiliste ni écriture Discord : la visibilité réelle de @everyone
+sert de critère d'appartenance aux espaces membres. Les exceptions sensibles,
+les salons privés et les accès d'accueil/vérification restent intacts.
+Un salon privé ne doit jamais être ouvert au rôle « Vérifié ».
 """
 from __future__ import annotations
 
@@ -33,12 +33,14 @@ SENSITIVE = frozenset({
     "securite", "security", "transcript", "transcripts", "dossiers",
     "candidatures", "enquetes", "reports",
 })
-# Portails que les nouveaux membres doivent conserver AVANT la vérification.
+# Uniquement les portails indispensables avant la validation. Les salons
+# d'annonces, d'informations, de giveaways, d'aide ou de discussion sont
+# verrouillables s'ils sont PUBLICS, sauf s'ils sont référencés explicitement
+# dans la configuration (Onboarding Discord, règlement, bienvenue, etc.).
 ONBOARDING = frozenset({
     "verification", "verify", "verif", "captcha", "reglement", "rules",
-    "rule", "bienvenue", "welcome", "arrivee", "depart", "start",
-    "commencer", "onboarding", "informations", "information", "info",
-    "aide", "help", "support", "ticket", "tickets", "stay", "muted",
+    "rule", "bienvenue", "welcome", "arrivee", "start", "commencer",
+    "onboarding", "stay", "muted",
 })
 # Priorité au portail Discord dans une catégorie sécurité : le CAPTCHA,
 # le règlement et stay-muted ne doivent jamais disparaître pour les arrivants.
@@ -73,6 +75,9 @@ class AccessPlan:
     staff_channels: list = field(default_factory=list)
     portal: list = field(default_factory=list)
     voice_already_locked: list = field(default_factory=list)
+    # En catégorie mixte, seules les surfaces membres seront écrites : cela
+    # désynchronise ces salons, après confirmation explicite de l'aperçu.
+    mixed_synced: list = field(default_factory=list)
 
     def preview(self) -> str:
         """Résumé compréhensible sans exposer l'audit technique ni l'IA."""
@@ -100,6 +105,11 @@ class AccessPlan:
             lines.append(f"**Vocaux déjà restreints : {len(self.voice_already_locked)}**")
         if self.category_gates:
             lines.append(f"**Catégories membres : {len(self.category_gates)}**")
+        if self.mixed_synced:
+            lines.append(
+                f"**Catégories mixtes : {len(self.mixed_synced)} salon(s) membre(s) "
+                "seront désynchronisés de leur catégorie.**"
+            )
         lines.append(f"**Salons protégés ou inchangés : {protected_count}**")
         if sensitive:
             lines.append(f"**À vérifier séparément : {sensitive} salon(s) sensibles**")
@@ -283,12 +293,12 @@ def plan_access(
             plan.protected[channel.id] = "vocal déjà restreint"
             plan.voice_already_locked.append(channel)
             continue
-        # Seuls les salons publics manifestement membres sont concernés :
-        # texte -> visibilité ; vocal -> visibilité ET connexion.
-        if own & MEMBER or parent_words & MEMBER:
-            plan.gate.append(channel)
-        else:
-            plan.untouched[channel.id] = "fonction inconnue"
+        # Règle principale : si @everyone peut voir ce salon et qu'aucune
+        # exception sensible/portail/privé ne s'applique, c'est un espace
+        # destiné aux membres, quel que soit son nom personnalisé :
+        # annonces, giveaways, discussion, forums, vidéos, salon vocal...
+        # L'admin doit voir l'aperçu et confirmer avant la moindre écriture.
+        plan.gate.append(channel)
 
     # Les permissions de catégorie se propagent aux salons synchronisés.
     # Écrire un overwrite directement sur chaque salon casserait cet héritage.
@@ -318,12 +328,10 @@ def plan_access(
         if safe_whole_category:
             plan.category_gates.append(category)
             continue
-        # Une catégorie mixte nécessite un choix explicite de l'admin.
-        # Ne jamais casser sa synchro silencieusement pour modifier un seul
-        # des salons membres.
-        synced_ids = {ch.id for ch in synced_gates}
-        plan.gate = [ch for ch in plan.gate if ch.id not in synced_ids]
-        gate_ids.difference_update(synced_ids)
-        for ch in synced_gates:
-            plan.untouched[ch.id] = "catégorie synchronisée mixte : revue manuelle"
+        # Catégorie mixte (ex. #annonces et #logs sous une même catégorie) :
+        # ne JAMAIS toucher les permissions de la catégorie. Après un aperçu
+        # signalant explicitement la désynchronisation, appliquer les deux
+        # overwrites uniquement sur les salons membres publics sélectionnés.
+        # Ainsi les salons staff/logs/portails restent inchangés.
+        plan.mixed_synced.extend(synced_gates)
     return plan
