@@ -85,3 +85,53 @@ def test_reference_middleware_keeps_ai_context_explicit_and_private():
         assert guard._clean_reference_kwargs({"reference": 1})["reference"] == 1
     finally:
         guard._NATIVE_AI_REPLY.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_installed_reference_filter_preserves_only_explicit_ai_reply(monkeypatch):
+    """Exercise the actual discord.py Message.reply and Messageable.send patch stack."""
+    from cogs import reply_reference_fix as guard
+    from discord.ext import commands
+
+    observed = []
+
+    async def original_channel_send(_self, *args, **kwargs):
+        observed.append(dict(kwargs))
+        return SimpleNamespace(reference=kwargs.get("reference"))
+
+    async def original_message_reply(_self, *args, **kwargs):
+        raise AssertionError("The middleware should replace Discord Message.reply")
+
+    class Channel:
+        async def send(self, *args, **kwargs):
+            return await discord.abc.Messageable.send(self, *args, **kwargs)
+
+    class Message:
+        channel = Channel()
+
+        def to_reference(self, *, fail_if_not_exists=False):
+            return ("ref", 777, fail_if_not_exists)
+
+        async def reply(self, *args, **kwargs):
+            return await discord.Message.reply(self, *args, **kwargs)
+
+    was_installed = guard._INSTALLED
+    try:
+        with monkeypatch.context() as mp:
+            mp.setattr(discord.abc.Messageable, "send", original_channel_send)
+            mp.setattr(discord.Message, "reply", original_message_reply)
+            mp.setattr(commands.Context, "send", original_channel_send)
+            mp.setattr(commands.Context, "reply", original_message_reply)
+            guard._INSTALLED = False
+            guard.install()
+            message = Message()
+            await guard.send_native_ai_reply(message, content="Bonjour", mention_author=True)
+            await message.reply(content="Message normal", mention_author=True)
+            await message.channel.send(content="Envoi normal", reference="no")
+    finally:
+        guard._INSTALLED = was_installed
+
+    assert observed[0]["reference"] == ("ref", 777, False)
+    assert observed[0]["mention_author"] is True
+    assert "reference" not in observed[1]
+    assert "reference" not in observed[2]
