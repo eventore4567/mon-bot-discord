@@ -685,27 +685,13 @@ class _CaptchaChannelAccessView(discord.ui.View):
         )
 
 async def _open_captcha_channel_access(view, interaction: discord.Interaction) -> None:
-    from cogs.verify_setup_interactive_v78 import published_rules_state
-
-    # On exige la publication enregistrée, pas la progression d'un assistant
-    # local. Fonctionne donc aussitôt après Publier et après un redémarrage.
-    state = await published_rules_state(view.bot, interaction.guild)
-    if state is None:
-        return await interaction.response.send_message(
-            "Publiez d'abord votre règlement dans **Règlement & accès**. "
-            "Le verrouillage sera ensuite disponible sans refaire le setup.",
-            ephemeral=True,
-        )
-    role = interaction.guild.get_role(state["role_id"])
-    if role is None:
-        return await interaction.response.send_message(
-            "Le rôle Vérifié lié au règlement n'existe plus. Corrigez le panneau.",
-            ephemeral=True,
-        )
-
     from cogs.verify_setup_interactive_v78 import preview_published_channels, plan_signature
+
+    # Une seule lecture autoritative du panneau publié : la carte d'aperçu,
+    # le rôle affiché et son empreinte proviennent des MÊMES données.
+    # Aucun re-setup ou choix de rôle supplémentaire n'est nécessaire.
     try:
-        plan, _role, _state = await preview_published_channels(view.bot, interaction.guild)
+        plan, role, state = await preview_published_channels(view.bot, interaction.guild)
     except ValueError as exc:
         return await interaction.response.send_message(str(exc), ephemeral=True)
     except Exception:
@@ -718,7 +704,7 @@ async def _open_captcha_channel_access(view, interaction: discord.Interaction) -
     panel = _CaptchaChannelAccessView(view.bot, interaction.guild, interaction.user.id)
     panel.role = role
     panel.plan_signature = plan_signature(
-        plan, role=_role, state=_state, guild=interaction.guild,
+        plan, role=role, state=state, guild=interaction.guild,
     )
     # Le rôle est déjà choisi/persisté lors de la publication. Supprimer le
     # sélecteur évite d'imposer à l'admin une deuxième configuration.
