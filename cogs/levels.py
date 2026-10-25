@@ -172,32 +172,6 @@ class StatsAppearanceModal(discord.ui.Modal, title="Apparence de /stats et /leve
         await self.view_ref.refresh(interaction)
 
 
-class StatsXPModal(discord.ui.Modal, title="Réglages de l'XP"):
-    def __init__(self, view: "StatsConfigView"):
-        super().__init__()
-        self.view_ref = view
-        p = view.pending
-        self.cooldown = discord.ui.TextInput(label="Cooldown entre deux gains (secondes)", default=str(p["xp_cooldown"]), max_length=6)
-        self.xp_min = discord.ui.TextInput(label="XP minimum par message", default=str(p["xp_min"]), max_length=6)
-        self.xp_max = discord.ui.TextInput(label="XP maximum par message", default=str(p["xp_max"]), max_length=6)
-        for item in (self.cooldown, self.xp_min, self.xp_max):
-            self.add_item(item)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            cooldown = int(str(self.cooldown.value).strip())
-            xp_min = int(str(self.xp_min.value).strip())
-            xp_max = int(str(self.xp_max.value).strip())
-        except ValueError:
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Utilisez uniquement des nombres entiers.')), ephemere=True)
-        if cooldown < 0 or xp_min < 0 or xp_max < 0:
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Ces valeurs ne peuvent pas être négatives.')), ephemere=True)
-        if xp_min > xp_max:
-            return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Le XP minimum ne peut pas dépasser le XP maximum.')), ephemere=True)
-        self.view_ref.pending.update({"xp_cooldown": cooldown, "xp_min": xp_min, "xp_max": xp_max})
-        await self.view_ref.refresh(interaction)
-
-
 VISIBILITY_OPTIONS = [
     ("show_economy", "💰 Économie"),
     ("show_reputation", "⭐ Réputation"),
@@ -420,7 +394,7 @@ class StatsConfigCategorySelect(discord.ui.Select):
         options = [
             discord.SelectOption(label="🎨 Apparence (couleur, titre, footer, emojis)", value="appearance"),
             discord.SelectOption(label="👁️ Visibilité des champs", value="visibility"),
-            discord.SelectOption(label="✨ XP (cooldown, bornes, exclusions)", value="xp"),
+            discord.SelectOption(label="✨ XP (exclusions et commandes)", value="xp"),
             discord.SelectOption(label="🔊 Vocal (salons ignorés)", value="voice"),
             discord.SelectOption(label="🎭 Niveaux (paliers, annonce)", value="levels"),
             discord.SelectOption(label="💰 Économie & Réputation (emoji, cooldown)", value="economy"),
@@ -474,8 +448,6 @@ class StatsConfigView(discord.ui.View):
             self.add_item(BoolToggleButton(self, "buttons_visible", "Boutons sous /stats", row=2))
             self.add_item(BoolToggleButton(self, "allow_view_others", "Voir les stats d'un autre membre", row=2))
         elif self.category == "xp":
-            self.add_item(discord.ui.Button(label="✏️ Modifier cooldown / bornes XP", style=discord.ButtonStyle.primary, row=1, custom_id="cfg:edit_xp"))
-            self.children[-1].callback = self._open_xp_modal
             self.add_item(ExcludedRolesSelect(self))
             self.add_item(DisabledChannelsSelect(self))
             self.add_item(BoolToggleButton(self, "xp_disabled_on_commands", "XP désactivé sur les commandes", row=1))
@@ -515,9 +487,6 @@ class StatsConfigView(discord.ui.View):
     async def _open_appearance_modal(self, interaction: discord.Interaction):
         await interaction.response.send_modal(StatsAppearanceModal(self))
 
-    async def _open_xp_modal(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(StatsXPModal(self))
-
     async def _open_economy_modal(self, interaction: discord.Interaction):
         await interaction.response.send_modal(StatsEconomyModal(self))
 
@@ -556,7 +525,7 @@ class StatsConfigView(discord.ui.View):
         e.add_field(name="🎨 Apparence", value=f"Titre : {p['title_stats']}\nFooter : {p['footer']}\nCouleur : #{p['color']:06X}", inline=False)
         visible = ", ".join(label for key, label in VISIBILITY_OPTIONS if p.get(key, True)) or "Aucun"
         e.add_field(name="👁️ Champs visibles", value=visible, inline=False)
-        e.add_field(name="✨ XP", value=f"Cooldown : {p['xp_cooldown']}s • Min/Max : {p['xp_min']}/{p['xp_max']}\nDésactivé sur commandes : {'Oui' if p.get('xp_disabled_on_commands') else 'Non'}\nRôles exclus : {len(p.get('xp_excluded_role_ids', []))}", inline=False)
+        e.add_field(name="✨ XP", value=f"Gains automatiques définis par SentriX\nDésactivé sur commandes : {'Oui' if p.get('xp_disabled_on_commands') else 'Non'}\nRôles exclus : {len(p.get('xp_excluded_role_ids', []))}", inline=False)
         e.add_field(name="🔊 Vocal", value=f"Salons ignorés : {len(p.get('voice_ignored_channel_ids', []))}\nIgnorer si seul : {'Oui' if p.get('voice_ignore_solo') else 'Non'}", inline=False)
         level_channel_id = p.get("_level_channel")
         level_channel_text = f"<#{level_channel_id}>" if level_channel_id else "Salon du message (par défaut)"
@@ -595,6 +564,9 @@ class StatsConfigView(discord.ui.View):
         level_channel = to_save.pop("_level_channel", None)
         await self.cog.bot.db.set_guild_config(self.guild.id, "xp_channel_disabled", disabled_channels)
         await self.cog.bot.db.set_guild_config(self.guild.id, "level_channel", level_channel)
+        # Un administrateur peut gérer l'apparence et les exclusions, pas le barème XP.
+        for field in ("xp_min", "xp_max", "xp_cooldown"):
+            to_save.pop(field, None)
         await self.cog.bot.db.set_stats_settings(self.guild.id, to_save)
         embed = self.build_summary_embed()
         embed.set_footer(text="● Enregistré — ces réglages sont actifs immédiatement et resteront après un redémarrage.")
@@ -810,7 +782,8 @@ class Levels(commands.Cog, name="Levels"):
         if not await self._niveaux_actifs(message.guild.id):
             return
         settings = await self.bot.db.get_stats_settings(message.guild.id)
-        cooldown = settings.get("xp_cooldown", XP_COOLDOWN_FALLBACK)
+        # Barème commun choisi par SentriX, indépendant des anciens réglages serveur.
+        cooldown = XP_COOLDOWN_FALLBACK
         if time.time() - last < cooldown:
             return
 
@@ -841,12 +814,9 @@ class Levels(commands.Cog, name="Levels"):
         try:
             # Les messages ont déjà été comptés dans on_message. Le cooldown
             # et les exclusions ci-dessous s'appliquent UNIQUEMENT à l'XP.
-            xp_min = settings.get("xp_min", XP_MIN_FALLBACK)
-            xp_max = settings.get("xp_max", XP_MAX_FALLBACK)
-            if xp_min > xp_max:
-                xp_min, xp_max = xp_max, xp_min
-            multiplier = conf["xp_multiplier"] if conf and conf["xp_multiplier"] else 1.0
-            gained = round(random.randint(xp_min, xp_max) * multiplier)
+            # Les montants et le delai sont maitrises par SentriX, et jamais
+            # par les parametres de serveur, le dashboard ou une vieille config.
+            gained = random.randint(XP_MIN_FALLBACK, XP_MAX_FALLBACK)
             # Les boosts de quête ne touchent que l'XP gagnée naturellement. Les
             # commandes admin set-xp/add-xp gardent exactement la quantité demandée.
             gained, _active_boost = await temporary_boosts.apply_xp_boost(
