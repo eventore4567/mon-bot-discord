@@ -132,7 +132,10 @@ async def test_permissions_insuffisantes_ne_modifient_pas_les_salons(monkeypatch
 
 @pytest.mark.asyncio
 async def test_setup_refuse_config_sans_reglement_publie(monkeypatch):
-    monkeypatch.setattr(rules, "published_rules_state", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        rules, "preview_published_channels",
+        AsyncMock(side_effect=ValueError("Publiez d'abord votre règlement")),
+    )
     response = SimpleNamespace(send_message=AsyncMock())
     bot = _bot()
     interaction = SimpleNamespace(
