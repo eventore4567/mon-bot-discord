@@ -54,6 +54,9 @@ MEMBER = frozenset({
 @dataclass
 class AccessPlan:
     gate: list = field(default_factory=list)
+    # Catégories membres 100 % synchronisées et sans aucun salon sensible :
+    # appliquer à la catégorie au lieu de rompre chaque synchronisation.
+    category_gates: list = field(default_factory=list)
     protected: dict[int, str] = field(default_factory=dict)
     untouched: dict[int, str] = field(default_factory=dict)
     sensitive_public: list = field(default_factory=list)
@@ -76,6 +79,7 @@ class AccessPlan:
         lines = [
             f"**Salons membres à verrouiller : {len(self.gate)}**",
             names,
+            f"**Catégories membres synchronisées conservées : {len(self.category_gates)}**",
             f"**Salons sensibles à vérifier manuellement : {len(self.secure_sensitive)}**",
             (
                 "**Destinations logs enregistrées : **"
@@ -282,4 +286,41 @@ def plan_access(
             plan.gate.append(channel)
         else:
             plan.untouched[channel.id] = "fonction inconnue"
+
+    # Les permissions de catégorie se propagent aux salons synchronisés.
+    # Écrire un overwrite directement sur chaque salon casserait cet héritage.
+    # Autoriser la modification de la catégorie SEULEMENT si l'ensemble de
+    # ses enfants sont publics, membres, et toujours synchronisés. Une seule
+    # exception (staff, logs, portail, privé, inconnu) annule l'opération de
+    # catégorie pour éviter d'affecter accidentellement cette exception.
+    gate_ids = {channel.id for channel in plan.gate}
+    for category in categories:
+        children = [
+            ch for ch in guild.channels
+            if ch not in categories and getattr(ch, "category", None) == category
+        ]
+        synced_gates = [
+            ch for ch in children
+            if ch.id in gate_ids and bool(getattr(ch, "permissions_synced", False))
+        ]
+        if not synced_gates:
+            continue
+        safe_whole_category = (
+            bool(children)
+            and category.id not in plan.protected
+            and all(ch.id in gate_ids for ch in children)
+            and all(bool(getattr(ch, "permissions_synced", False)) for ch in children)
+            and bool(category.permissions_for(everyone).view_channel)
+        )
+        if safe_whole_category:
+            plan.category_gates.append(category)
+            continue
+        # Une catégorie mixte nécessite un choix explicite de l'admin.
+        # Ne jamais casser sa synchro silencieusement pour modifier un seul
+        # des salons membres.
+        synced_ids = {ch.id for ch in synced_gates}
+        plan.gate = [ch for ch in plan.gate if ch.id not in synced_ids]
+        gate_ids.difference_update(synced_ids)
+        for ch in synced_gates:
+            plan.untouched[ch.id] = "catégorie synchronisée mixte : revue manuelle"
     return plan
