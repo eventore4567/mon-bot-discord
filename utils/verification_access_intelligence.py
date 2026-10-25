@@ -77,7 +77,7 @@ class AccessPlan:
             "Aucun accès privé ne sera donné au rôle Vérifié. "
             "Les salons inconnus et les espaces de vérification restent inchangés."
         )
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
 
 STAFF_ROLE_WORDS = frozenset({
@@ -134,6 +134,12 @@ def plan_access(guild, *, verification_channel_id: int, configured_ids=(), speci
             channel.id in conf_ids and channel.id not in log_destinations
         ):
             plan.protected[channel.id] = "portail/configuration enregistrée"
+            continue
+        # Exemple réel : #verification et #stay-muted dans la catégorie
+        # « Sécurité SentriX ». Ce sont des portails, PAS des salons staff
+        # à cacher ; leur fonction passe avant le nom de leur catégorie.
+        if own & ONBOARDING and not own & SENSITIVE and channel.id not in log_destinations:
+            plan.protected[channel.id] = "portail d'accueil/vérification"
             continue
         sensitive = bool(
             channel.id in log_destinations
