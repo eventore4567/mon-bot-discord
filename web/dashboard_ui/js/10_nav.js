@@ -58,11 +58,11 @@ const META = {
 };
 const SUBS = {
   welcome: [['bienvenue', 'Bienvenue'], ['departs', 'Départs']],
-  levels: [['general', 'Général'], ['levelup', 'Message de niveau'], ['roles', 'Récompenses'], ['avance', 'Avancé']],
-  economy: [['general', 'Général'], ['boutique', 'Boutique'], ['jeux', 'Jeux'], ['gains', 'Gains'], ['avance', 'Avancé']],
+  levels: [['general', 'Général'], ['levelup', 'Message de niveau'], ['roles', 'Récompenses'], ['exclusions', 'Exclusions XP']],
+  economy: [['general', 'Général'], ['boutique', 'Boutique'], ['jeux', 'Jeux'], ['gains', 'Gains'], ['avance', 'Accès']],
   games: [['jeux', 'Catalogue & accès']],
   music: [['player', 'Lecteur'], ['queue', 'File d’attente'], ['playlists', 'Playlists']],
-  roles: [['autoroles', 'Autorôle'], ['interactifs', 'Rôles interactifs'], ['niveau', 'Rôles de niveau'], ['avance', 'Avancé']],
+  roles: [['autoroles', 'Autorôle'], ['interactifs', 'Rôles interactifs'], ['niveau', 'Rôles de niveau'], ['avance', 'Équipe']],
   tickets: [['panneaux', 'Panneaux'], ['actions', 'Actions staff']],
   security: [['protections', 'Protections'], ['verification', 'Vérification']],
   advanced: [['actions', 'Actions'], ['members', 'Membres'], ['automations', 'Automations'], ['templates', 'Templates'], ['audit', 'Audit'], ['access', 'Accès dashboard']],
