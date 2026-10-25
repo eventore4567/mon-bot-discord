@@ -24,6 +24,9 @@ from utils import sentrix_panels as panels
 logger = logging.getLogger("bot.tickets.claim-security")
 _INSTALLED = False
 _CREATING: set[tuple[int, int, int]] = set()
+# Références fortes jusqu'à fin du nettoyage asynchrone. Les tâches sont retirées
+# automatiquement une fois terminées, sans impact sur les interactions Discord.
+_PRIORITY_CLEANUP_TASKS: set[asyncio.Task] = set()
 
 _STAFF_ONLY_KEYS = {"claim", "unclaim", "add", "remove", "rename", "transfer", "note", "bump"}
 
@@ -103,6 +106,33 @@ async def _delayed_priority_cleanup(channel: discord.TextChannel, bot_user_id: i
     # d'accueil. Un second passage couvre ce cas sans ralentir l'interaction utilisateur.
     await asyncio.sleep(1.5)
     await _remove_priority_cards(channel, bot_user_id)
+
+
+async def _cleanup_priority_cards_after_open(channel: discord.TextChannel, bot_user_id: int | None) -> None:
+    """Nettoyage secondaire : jamais attendu par l'ouverture déjà confirmée.
+
+    Les deux passages sont indépendants : un raté au premier n'empêche pas la
+    tentative différée. Toute panne est loguée côté technique, sans faux message
+    d'échec pour le membre. L'annulation de tâche reste propagée.
+    """
+    for phase in ("initial", "delayed"):
+        try:
+            if phase == "delayed":
+                await asyncio.sleep(1.5)
+            await _remove_priority_cards(channel, bot_user_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Nettoyage visuel ticket impossible phase=%s channel=%s", phase, channel.id)
+
+
+def _schedule_priority_cleanup(channel: discord.TextChannel, bot_user_id: int | None) -> None:
+    task = asyncio.create_task(
+        _cleanup_priority_cards_after_open(channel, bot_user_id),
+        name=f"sentrix-ticket-priority-cleanup-{channel.id}",
+    )
+    _PRIORITY_CLEANUP_TASKS.add(task)
+    task.add_done_callback(_PRIORITY_CLEANUP_TASKS.discard)
 
 
 async def _ticket_type(cog, ticket):
@@ -274,19 +304,28 @@ def install(bot: commands.Bot) -> None:
             # start_ticket_flow et produire un faux « Action impossible » après le succès.
             result = await original_create_ticket(self, interaction, ticket_type, answers)
 
-            latest = await self.bot.db.fetchone(
-                "SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=? AND type_id=? AND status='ouvert' "
-                "ORDER BY id DESC LIMIT 1",
-                (guild.id, user.id, type_id),
-            )
-            if latest:
-                channel = guild.get_channel(int(latest["channel_id"]))
-                if isinstance(channel, discord.TextChannel):
-                    await _remove_priority_cards(channel, getattr(self.bot.user, "id", None))
-                    asyncio.create_task(
-                        _delayed_priority_cleanup(channel, getattr(self.bot.user, "id", None)),
-                        name=f"sentrix-ticket-priority-cleanup-{channel.id}",
-                    )
+            # Le ticket est déjà créé et sa confirmation est envoyée. Ce
+            # nettoyage anciennement ATTENDU faisait encore une lecture HTTP
+            # history(limit=30), pouvant ralentir ou faire échouer l'interaction
+            # après son succès. Le rendre non bloquant, sans supprimer les
+            # deux passes utiles au design des tickets.
+            try:
+                latest = await self.bot.db.fetchone(
+                    "SELECT channel_id FROM tickets WHERE guild_id=? AND user_id=? AND type_id=? AND status='ouvert' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (guild.id, user.id, type_id),
+                )
+                if latest:
+                    channel = guild.get_channel(int(latest["channel_id"]))
+                    if isinstance(channel, discord.TextChannel):
+                        _schedule_priority_cleanup(channel, getattr(self.bot.user, "id", None))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Ticket créé : planification du nettoyage visuel impossible guild=%s type=%s",
+                    guild.id, type_id,
+                )
             return result
         finally:
             _CREATING.discard(key)

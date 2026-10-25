@@ -309,7 +309,7 @@ def _discord_timestamp(date_text: str, heure: str = "00:00", fuseau: str = "UTC"
         except ValueError:
             continue
     if naive is None:
-        raise ValueError("Format invalide. Utilise JJ/MM/AAAA et HH:MM (ex. 25/10/2026, 18:30).")
+        raise ValueError("Format invalide. Utilisez JJ/MM/AAAA et HH:MM (ex. 25/10/2026, 18:30).")
     aware = naive.replace(tzinfo=zone)
     result = int(aware.timestamp())
     back = _datetime.datetime.fromtimestamp(result, zone).replace(tzinfo=None)
@@ -1953,7 +1953,7 @@ class Utility(commands.Cog, name="Utility"):
         if not message or len(message) > 1800 or not cible or len(cible) > 32:
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
                 guild_id, title="Traduction", kind="warning",
-                description="Indique une langue et un texte de 1 à 1800 caractères.",
+                description="Indiquez une langue et un texte de 1 à 1800 caractères.",
             )))
         try:
             from deep_translator import GoogleTranslator
@@ -1970,7 +1970,7 @@ class Utility(commands.Cog, name="Utility"):
             logger.warning("Traduction indisponible (langue=%s)", cible, exc_info=True)
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
                 guild_id, title="Traduction indisponible", kind="danger",
-                description="Impossible de traduire ce texte pour l'instant. Vérifie la langue (fr, en, es...) et réessaie.",
+                description="Impossible de traduire ce texte pour l'instant. Vérifiez la langue (fr, en, es...) et réessayez.",
             )))
 
         # Texte externe : aucune mention ni mise en forme arbitraire ne doit être injectée.
@@ -2009,7 +2009,7 @@ class Utility(commands.Cog, name="Utility"):
             return await panels.envoyer(ctx, panels.depuis_embed(await self._embed(
                 ctx.guild.id if ctx.guild else None,
                 title="Format inconnu", kind="warning",
-                description="Choisis t, T, d, D, f, F ou R.",
+                description="Choisissez t, T, d, D, f, F ou R.",
             )))
         try:
             epoch = _discord_timestamp(date, heure, fuseau)

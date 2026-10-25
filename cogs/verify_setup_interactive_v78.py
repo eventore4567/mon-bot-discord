@@ -269,9 +269,42 @@ class VerifySetupView(discord.ui.View):
             self.stop()
             await panels.editer(interaction.response, self.panel(closed=True, disabled=True))
 
+        async def lock_published_callback(interaction: discord.Interaction):
+            # Pas besoin de réouvrir l'assistant / refaire la publication :
+            # le moteur relit l'état publié en base à CHAQUE clic.
+            from sentrix_verification_v96 import lock_channels_after_published_rules
+
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            try:
+                changed, protected = await lock_channels_after_published_rules(
+                    self.bot, self.guild, interaction.user,
+                )
+            except ValueError as exc:
+                return await interaction.followup.send(str(exc), ephemeral=True)
+            except Exception:
+                logger.exception("V78 : verrouillage des salons impossible guild=%s", self.guild.id)
+                return await interaction.followup.send(
+                    "Verrouillage impossible. Vérifiez les permissions de SentriX et réessayez.",
+                    ephemeral=True,
+                )
+            await interaction.followup.send(
+                f"Règlement déjà publié reconnu. **{changed}** espaces verrouillés, "
+                f"**{protected}** espaces privés/sensibles préservés. "
+                "Les membres doivent se vérifier pour accéder aux espaces publics.",
+                ephemeral=True,
+            )
+
+        lock_button = discord.ui.Button(
+            label="Verrouiller les salons",
+            style=discord.ButtonStyle.danger,
+            row=4,
+            disabled=not bool(self.message_id),
+        )
         publish_button.callback = publish_callback
         close_button.callback = close_callback
+        lock_button.callback = lock_published_callback
         self.add_item(publish_button)
+        self.add_item(lock_button)
         self.add_item(close_button)
 
     def embed(self, *, closed: bool = False) -> discord.Embed:
