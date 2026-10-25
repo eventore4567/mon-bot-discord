@@ -92,7 +92,7 @@ def test_short_preview_does_not_show_log_destinations_or_ai_advice():
         log_destinations=[SimpleNamespace(name="logs-confidentiels", id=32)],
     )
     summary = plan.preview()
-    assert "Salons membres : 1" in summary
+    assert "Salons textuels à verrouiller : 1" in summary
     assert "Salons protégés ou inchangés : 1" in summary
     assert "logs-confidentiels" not in summary
     assert "IA" not in summary
