@@ -644,112 +644,64 @@ class _CaptchaChannelAccessView(discord.ui.View):
     async def confirm(self, interaction: discord.Interaction) -> None:
         if self._applying:
             return await interaction.response.send_message(
-                "La configuration est déjà en cours. Suis la progression affichée.", ephemeral=True,
+                "Un verrouillage est déjà en cours.", ephemeral=True,
             )
-        role = self.role
-        if role is None:
-            return await interaction.response.send_message("Sélectionne d'abord le rôle vérifié.", ephemeral=True)
-        me = self.guild.me
-        if me is None or not me.guild_permissions.manage_channels:
-            return await interaction.response.send_message(
-                "SentriX doit posséder Gérer les salons.", ephemeral=True,
-            )
-        if role >= me.top_role and not me.guild_permissions.administrator:
-            return await interaction.response.send_message(
-                "Place le rôle SentriX au-dessus du rôle sélectionné.", ephemeral=True,
-            )
+        # Le rôle est celui publié avec le règlement : le sélecteur historique
+        # n'autorise plus à ouvrir les salons à un rôle arbitraire.
+        from cogs.verify_setup_interactive_v78 import lock_published_channels
+
         self._applying = True
         await interaction.response.defer(ephemeral=True, thinking=True)
-        # Les arrivants non vérifiés doivent conserver l'accès au portail CAPTCHA.
-        # Ne jamais masquer son salon ni sa catégorie par cette opération globale.
-        protected_ids = set()
         try:
-            conf = await self.bot.db.get_guild_config(self.guild.id)
-            for field in ("verification_channel", "verification_channel_id",
-                          "rules_channel", "rules_channel_id"):
-                try:
-                    value = conf[field] if conf is not None else None
-                except (KeyError, IndexError, TypeError):
-                    value = None
-                if value:
-                    protected_ids.add(int(value))
-            for channel_id in tuple(protected_ids):
-                protected = self.guild.get_channel(channel_id)
-                if protected and protected.category_id:
-                    protected_ids.add(protected.category_id)
+            changed, protected = await lock_published_channels(
+                self.bot, self.guild, interaction.user,
+            )
+        except ValueError as exc:
+            return await interaction.followup.send(str(exc), ephemeral=True)
         except Exception:
+            logger.exception("Échec verrouillage salons derrière règlement guild=%s", self.guild.id)
             return await interaction.followup.send(
-                "Impossible de vérifier les salons de vérification : aucune permission modifiée.",
+                "Discord n'a pas pu terminer le verrouillage. Vérifiez les permissions et les logs.",
                 ephemeral=True,
             )
-        # Photographier les accès AVANT toute modification de catégorie :
-        # une catégorie verrouillée en cours de route change les permissions
-        # héritées de ses salons. Ne jamais exposer les salons staff privés.
-        channels = list(self.guild.channels)
-        originally_public = {
-            channel.id for channel in channels
-            if channel.permissions_for(self.guild.default_role).view_channel
-        }
-        total = len(channels)
-        changed, skipped, unchanged, errors = 0, 0, 0, []
-        progress = await interaction.followup.send(
-            f"⏳ CAPTCHA · Configuration des accès\nRôle : {role.mention}\n"
-            f"Progression : 0/{total} salons et catégories.",
-            ephemeral=True, wait=True,
+        finally:
+            self._applying = False
+        await interaction.followup.send(
+            f"✅ Règlement déjà publié reconnu. **{changed}** espace(s) public(s) verrouillé(s) ; "
+            f"**{protected}** espace(s) privé(s)/sensible(s) conservé(s). "
+            "Le règlement reste visible aux nouveaux membres.",
+            ephemeral=True,
         )
-        for index, channel in enumerate(channels, start=1):
-            if (channel.id in protected_ids or channel.id not in originally_public
-                    or not channel.permissions_for(me).manage_channels):
-                skipped += 1
-            else:
-                try:
-                    everyone = channel.overwrites_for(self.guild.default_role)
-                    verified = channel.overwrites_for(role)
-                    if everyone.view_channel is False and verified.view_channel is True:
-                        unchanged += 1
-                    else:
-                        everyone.view_channel = False
-                        verified.view_channel = True
-                        await channel.set_permissions(
-                            self.guild.default_role, overwrite=everyone,
-                            reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
-                        )
-                        await channel.set_permissions(
-                            role, overwrite=verified,
-                            reason=f"SentriX CAPTCHA : accès confirmé par {interaction.user}",
-                        )
-                        changed += 1
-                except (discord.Forbidden, discord.HTTPException) as exc:
-                    errors.append(f"{channel.name}: {type(exc).__name__}")
-            # Une seule mise à jour par lot de cinq évite les limites API.
-            if index == total or index % 5 == 0:
-                try:
-                    await progress.edit(content=(
-                        f"⏳ CAPTCHA · Configuration des accès\nRôle : {role.mention}\n"
-                        f"Progression : {index}/{total} · Salon : {channel.name[:60]}\n"
-                        f"Modifiés : {changed} · Déjà corrects : {unchanged} · "
-                        f"Ignorés : {skipped} · Erreurs : {len(errors)}"
-                    ))
-                except discord.HTTPException:
-                    pass
-        await progress.edit(content=(
-            f"✅ CAPTCHA · Configuration terminée\nRôle : {role.mention} · {total}/{total}\n"
-            f"Modifiés : {changed} · Déjà corrects : {unchanged} · "
-            f"Ignorés : {skipped} · Erreurs : {len(errors)}"
-            + ("\nDétails : " + "; ".join(errors[:5]) if errors else "")
-        ))
-
-
 
 async def _open_captcha_channel_access(view, interaction: discord.Interaction) -> None:
+    from cogs.verify_setup_interactive_v78 import published_rules_state
+
+    # On exige la publication enregistrée, pas la progression d'un assistant
+    # local. Fonctionne donc aussitôt après Publier et après un redémarrage.
+    state = await published_rules_state(view.bot, interaction.guild)
+    if state is None:
+        return await interaction.response.send_message(
+            "Publiez d'abord votre règlement dans **Règlement & accès**. "
+            "Le verrouillage sera ensuite disponible sans refaire le setup.",
+            ephemeral=True,
+        )
+    role = interaction.guild.get_role(state["role_id"])
+    if role is None:
+        return await interaction.response.send_message(
+            "Le rôle Vérifié lié au règlement n'existe plus. Corrigez le panneau.",
+            ephemeral=True,
+        )
+
     panel = _CaptchaChannelAccessView(view.bot, interaction.guild, interaction.user.id)
+    panel.role = role
+    # Le rôle est déjà choisi/persisté lors de la publication. Supprimer le
+    # sélecteur évite d'imposer à l'admin une deuxième configuration.
+    panel.remove_item(panel.chooser)
     await interaction.response.send_message(
-        "**CAPTCHA · Accès aux salons**\n"
-        "Choisis le rôle attribué après vérification, puis confirme.\n"
-        "Le bot refuse alors Voir le salon à @everyone et l'autorise au rôle sélectionné "
-        "sur les salons existants, sans toucher aux autres permissions.\n"
-        "**Attention :** des rôles disposant d'autres autorisations explicites ou "
-        "de la permission Administrateur peuvent conserver l'accès.",
+        "**Accès aux salons — règlement publié reconnu**\n"
+        f"Rôle vérifié : {role.mention}. Aucun nouveau règlement à créer.\n"
+        "Confirmez pour masquer les espaces publics aux membres non vérifiés. "
+        "Les salons privés/staff restent protégés et le salon du règlement reste visible.",
         view=panel, ephemeral=True,
     )
 
