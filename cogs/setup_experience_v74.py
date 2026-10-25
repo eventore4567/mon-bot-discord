@@ -418,11 +418,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         et activer les niveaux demandait plusieurs écrans. Maintenant : une ligne par
         module (Niveaux, Économie, Bienvenue, Départs, Anti-spam, Tickets, Logs,
         Notifications) avec un bouton ON/OFF direct, un menu pour ouvrir la page détaillée
-        d'une catégorie, et « Paramètres avancés » pour l'ancienne vue complète.
+        d'une catégorie. Plus de second ecran de parametres avances.
         """
         self.backend.category = None
-        if getattr(self, "avance", False):
-            return await self._build_home_complet()
+        # Toutes les categories utiles sont accessibles directement ici.
+        self.avance = False
 
         switch_states = await setup_ui.module_switch_states(self.bot, self.guild.id)
         actifs = sum(1 for etat in switch_states.values() if etat == "enabled")
@@ -503,8 +503,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         soundboard_button.callback = open_soundboard
         container.add_item(discord.ui.ActionRow(music_button, soundboard_button))
 
-        # Le PROFIL DE SERVEUR de SentriX (guild.me.edit) : avatar, bannière et
-        # bio visibles sur CE serveur seulement. Les autres gardent l'original,
+        # Le PROFIL DE SERVEUR de SentriX (guild.me.edit) : avatar et bannière
+        # visibles sur CE serveur seulement. Les autres gardent l'original,
         # donc l'administrateur du serveur y a légitimement droit — il ne décide
         # que de ce qu'il voit chez lui.
         # L'identité GLOBALE (bot.user.edit) reste, elle, réservée au
@@ -570,13 +570,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         except Exception:
             logger.debug("Sélecteur de langue indisponible sur l'accueil V74.", exc_info=True)
 
-        avance = discord.ui.Button(label="Paramètres avancés", style=discord.ButtonStyle.secondary)
         refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, emoji="🔄")
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
-
-        async def voir_avance(interaction: discord.Interaction):
-            self.avance = True
-            await self.refresh(interaction)
 
         async def do_refresh(interaction: discord.Interaction):
             await self.refresh(interaction)
@@ -584,10 +579,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         async def do_close(interaction: discord.Interaction):
             await self._close(interaction)
 
-        avance.callback = voir_avance
         refresh.callback = do_refresh
         close.callback = do_close
-        container.add_item(discord.ui.ActionRow(avance, refresh, close))
+        container.add_item(discord.ui.ActionRow(refresh, close))
         self.add_item(container)
 
     async def _build_home_complet(self) -> None:
