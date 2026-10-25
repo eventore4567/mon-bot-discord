@@ -7,7 +7,6 @@ import pytest
 
 from utils.verification_access_intelligence import AccessPlan, ai_access_review_context
 from cogs import verify_setup_interactive_v78 as rules
-from utils import ai_service
 
 
 def test_ai_context_contains_only_bounded_channel_names_and_no_discord_identifiers():
@@ -42,55 +41,55 @@ def test_ai_context_never_contains_overwrite_objects_or_members():
     assert '"verrouillage_membres": 1' in prompt
 
 
-def _interaction():
-    reply = SimpleNamespace(send_message=AsyncMock())
-    followup = SimpleNamespace(send=AsyncMock())
-    return SimpleNamespace(
-        response=reply, followup=followup,
-        guild_id=5, user=SimpleNamespace(id=11),
-    )
-
-
-@pytest.mark.asyncio
-async def test_ia_disabled_does_not_call_provider_or_change_permissions(monkeypatch):
-    monkeypatch.setattr(ai_service, "get_settings", AsyncMock(return_value={"enabled": False}))
-    model = AsyncMock()
-    monkeypatch.setattr(ai_service, "generate", model)
-    monkeypatch.setattr(rules, "preview_published_channels", AsyncMock())
+def test_no_public_ai_advice_button_in_rules_preview():
     bot = SimpleNamespace()
     guild = SimpleNamespace(id=5, owner_id=11)
     view = rules.RulesLockConfirmView(bot, guild, 11, ())
-    button = next(x for x in view.children if getattr(x, "label", "") == "Avis IA (lecture seule)")
-    inter = _interaction()
-    await button.callback(inter)
-    model.assert_not_awaited()
-    inter.followup.send.assert_awaited_once()
-    assert "désactivée" in inter.followup.send.await_args.args[0]
+    labels = [getattr(x, "label", "") for x in view.children]
+    assert "Avis IA (lecture seule)" not in labels
+    assert "Confirmer le verrouillage" in labels
+    assert "Annuler" in labels
 
 
 @pytest.mark.asyncio
-async def test_explicit_ai_review_is_read_only_and_never_calls_lock(monkeypatch):
-    monkeypatch.setattr(
-        ai_service, "get_settings",
-        AsyncMock(return_value={"enabled": True, "default_model": ai_service.MODEL_TERRA}),
+async def test_no_member_channels_does_not_offer_dangerous_confirm(monkeypatch):
+    bot = SimpleNamespace()
+    guild = SimpleNamespace(id=5, owner_id=11, get_channel=lambda _id: None, get_role=lambda _id: None)
+    view = rules.VerifySetupView(
+        bot, guild, 11, channel_id=10, role_id=20,
+        rules_text="Règlement déjà publié", image_url="",
+        captcha_enabled=True, captcha_max_attempts=3, message_id=123,
     )
-    model = AsyncMock(return_value=SimpleNamespace(ok=True, text="Ne touchez pas aux logs privés."))
-    monkeypatch.setattr(ai_service, "generate", model)
     plan = AccessPlan()
-    plan.gate.append(SimpleNamespace(name="general", category=None))
+    plan.secure_sensitive.append(SimpleNamespace(id=33, name="staff"))
     monkeypatch.setattr(
         rules, "preview_published_channels",
-        AsyncMock(return_value=(plan, SimpleNamespace(id=7), {"role_id": 7})),
+        AsyncMock(return_value=(plan, SimpleNamespace(mention="@Vérifié"), {})),
     )
-    lock = AsyncMock()
-    monkeypatch.setattr(rules, "lock_published_channels", lock)
-    bot = SimpleNamespace()
-    guild = SimpleNamespace(id=5, owner_id=11)
-    view = rules.RulesLockConfirmView(bot, guild, 11, ())
-    button = next(x for x in view.children if getattr(x, "label", "") == "Avis IA (lecture seule)")
-    inter = _interaction()
-    await button.callback(inter)
-    model.assert_awaited_once()
-    lock.assert_not_awaited()
-    assert "Aucune permission n'a été modifiée." in inter.followup.send.await_args.args[0]
-    assert inter.followup.send.await_args.kwargs["ephemeral"] is True
+    apply_lock = AsyncMock()
+    monkeypatch.setattr(rules, "lock_published_channels", apply_lock)
+    response = SimpleNamespace(defer=AsyncMock())
+    followup = SimpleNamespace(send=AsyncMock())
+    interaction = SimpleNamespace(
+        guild_id=5, user=SimpleNamespace(id=11),
+        response=response, followup=followup,
+    )
+    button = next(x for x in view.children if getattr(x, "label", "").startswith("Verrouiller les salons"))
+    await button.callback(interaction)
+    assert "Aucun salon membre" in followup.send.await_args.args[0]
+    assert "view" not in followup.send.await_args.kwargs
+    apply_lock.assert_not_awaited()
+
+
+def test_short_preview_does_not_show_log_destinations_or_ai_advice():
+    plan = AccessPlan(
+        gate=[SimpleNamespace(name="general", id=11)],
+        protected={99: "logs"},
+        log_destinations=[SimpleNamespace(name="logs-confidentiels", id=32)],
+    )
+    summary = plan.preview()
+    assert "Salons membres : 1" in summary
+    assert "Salons protégés ou inchangés : 1" in summary
+    assert "logs-confidentiels" not in summary
+    assert "IA" not in summary
+    assert len(summary) < 350
