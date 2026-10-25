@@ -84,6 +84,7 @@ async def test_modified_plan_requires_new_preview_without_writes(monkeypatch):
         response=SimpleNamespace(defer=AsyncMock()),
         followup=SimpleNamespace(send=AsyncMock()),
     )
-    await view.confirm.callback(interaction)
+    confirm_button = next(child for child in view.children if getattr(child, "label", "") == "Confirmer le verrouillage")
+    await confirm_button.callback(interaction)
     assert "changé" in interaction.followup.send.await_args.args[0]
     lockdown.assert_not_awaited()
