@@ -712,6 +712,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
 
     async def _access_plan(
         self, guild: discord.Guild, *, verification_channel: discord.TextChannel,
+        verified_role: discord.Role | None = None,
     ):
         """Prépare les accès sans écrire sur Discord.
 
@@ -769,6 +770,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             configured_ids=configured_ids,
             special_ids=special_ids,
             log_ids=log_destinations,
+            verified_role=verified_role,
         )
 
     async def _apply_auto_access(
@@ -788,6 +790,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         everyone = guild.default_role
         access = await self._access_plan(
             guild, verification_channel=verification_channel,
+            verified_role=verified_role,
         )
         # Ne pas toucher aux catégories elles-mêmes : leurs overwrites sont
         # hérités, les modifier peut masquer un salon staff/portail synchronisé.
