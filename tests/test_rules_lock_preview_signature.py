@@ -4,6 +4,12 @@ from types import SimpleNamespace
 from cogs.verify_setup_interactive_v78 import plan_signature
 
 
+class Role:
+    def __init__(self, role_id, name="Vérifié"):
+        self.id = role_id
+        self.name = name
+
+
 class Channel:
     def __init__(self, *, name="general", public=True):
         self.id = 10
@@ -18,8 +24,8 @@ class Channel:
 
 
 def _args():
-    everyone = SimpleNamespace(id=1)
-    role = SimpleNamespace(id=2)
+    everyone = Role(1, "@everyone")
+    role = Role(2)
     channel = Channel()
     guild = SimpleNamespace(default_role=everyone, channels=[channel])
     plan = SimpleNamespace(
@@ -43,7 +49,7 @@ def test_changing_published_role_invalidates_approval():
     plan, guild, role, state, _ = _args()
     previous = _sig(plan, guild, role, state)
     state["role_id"] = 3
-    assert _sig(plan, guild, SimpleNamespace(id=3), state) != previous
+    assert _sig(plan, guild, Role(3), state) != previous
 
 
 def test_changing_rules_panel_invalidates_approval():
@@ -63,9 +69,7 @@ def test_changing_effective_public_access_invalidates_approval():
 def test_changing_any_explicit_staff_overwrite_invalidates_approval():
     plan, guild, role, state, channel = _args()
     previous = _sig(plan, guild, role, state)
-    channel.overwrites[SimpleNamespace.__class__] = SimpleNamespace(view_channel=True)
-    # An overwrite without a role ID isn't treated as a Discord role: add real one.
-    staff = type("Role", (), {"id": 43, "name": "Staff"})()
+    staff = Role(43, "Staff")
     channel.overwrites[staff] = SimpleNamespace(view_channel=True)
     assert _sig(plan, guild, role, state) != previous
 
