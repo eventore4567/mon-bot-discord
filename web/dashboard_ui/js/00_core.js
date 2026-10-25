@@ -308,8 +308,10 @@ function field(label, key, value = '', opts = {}) {
 function switchRow(label, key, on, copy = '', kind = 'automod') {
   return `<label class="switch-row"><span class="switch-copy"><b>${esc(label)}</b>${copy ? `<span>${esc(copy)}</span>` : ''}</span><input class="switch" type="checkbox" data-${kind}="${esc(key)}" ${on ? 'checked' : ''}></label>`;
 }
-function advanced(body, copy = 'Réglages rares. Rien ici n’est nécessaire pour démarrer.', open = false) {
-  return `<details class="advanced full" ${open ? 'open' : ''}><summary><span>Paramètres avancés</span><small>${esc(copy)}</small></summary><div class="advanced-body">${body}</div></details>`;
+function advanced(body, copy = '', open = false) {
+  // Compatibility helper: existing sections stay visible in their normal module page.
+  // No hidden "advanced settings" accordion anywhere in the dashboard.
+  return `<div class="full module-settings">${body}</div>`;
 }
 function emptyState(title, copy, action) {
   return `<div class="empty"><b>${esc(title)}</b>${copy ? `<span>${esc(copy)}</span>` : ''}${action ? `<button class="btn primary" type="button" data-empty-action="${esc(action.id)}">${esc(action.label)}</button>` : ''}</div>`;
