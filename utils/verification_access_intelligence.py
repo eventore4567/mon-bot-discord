@@ -208,7 +208,7 @@ def plan_access(
         current_public = bool(channel.permissions_for(everyone).view_channel)
         # Un portail de vérification doit RESTER visible. Les logs persistés
         # et les catégories staff gardent leur classification après renommage.
-        if channel.id == verification_channel_id or channel.id in special or (
+        if channel.id == verification_channel_id or channel.id in special or channel.id in onboarding or (
             channel.id in conf_ids and channel.id not in log_destinations
         ):
             plan.protected[channel.id] = "portail/configuration enregistrée"
