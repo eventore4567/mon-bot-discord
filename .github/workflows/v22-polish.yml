@@ -67,6 +67,11 @@ jobs:
           DISCORD_TOKEN: "ci.fake.token"
         run: python tools/instance_isolation_audit.py
 
+      - name: Validate ported feature on real code
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python -m pytest -q tests/test_ticket_panel_atomic_republish.py tests/test_ticket_panel_restore_atomic.py
+
       - name: Dashboard interaction audit
         env:
           DISCORD_TOKEN: "ci.fake.token"

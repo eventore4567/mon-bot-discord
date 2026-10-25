@@ -34,6 +34,8 @@ RUN python -m pytest -q \
     tests/test_runtime_attribution.py \
     tests/test_tickets_autoclose_resilience.py \
     tests/test_ticket_open_concurrency.py \
+    tests/test_ticket_panel_atomic_republish.py \
+    tests/test_ticket_panel_restore_atomic.py \
     tests/test_logs_bulk_delete_resilience.py \
     tests/test_moderation_logging_resilience.py \
     tests/test_automod_enforcement_resilience.py \
