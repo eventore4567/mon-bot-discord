@@ -49,7 +49,9 @@ async def test_lock_button_only_opens_preview_not_discord_permission_writes(monk
     button = next(child for child in view.children if getattr(child, "label", "").startswith("Verrouiller les salons"))
     await button.callback(interaction)
     interaction.response.defer.assert_awaited_once()
-    assert "Aperçu sûr" in interaction.followup.send.await_args.args[0]
+    card = interaction.followup.send.await_args.kwargs["embed"]
+    assert card.title == "Vérifier les accès"
+    assert "Aperçu sûr" in card.description
     confirm_view = interaction.followup.send.await_args.kwargs["view"]
     assert isinstance(confirm_view, rules.RulesLockConfirmView)
     lockdown.assert_not_awaited()

@@ -224,12 +224,20 @@ class AccessPlan:
             )
         if self.manual_excluded:
             lines.append(f"Exclus par vous : {names(self.manual_excluded, 4)}")
-        if self.secure_sensitive or self.sensitive_public:
-            count = len({c.id for c in [*self.secure_sensitive, *self.sensitive_public]})
+        public_ids = {c.id for c in self.sensitive_public}
+        opened_to_verified = [c for c in self.secure_sensitive if c.id not in public_ids]
+        if self.sensitive_public:
             lines.append(
-                f"⚠️ Salons sensibles à vérifier manuellement : {count} "
-                "(staff/logs visibles des nouveaux membres, jamais modifiés ici)"
+                f"⚠️ Salons sensibles à vérifier manuellement : {len(public_ids)} "
+                "staff/logs visibles des nouveaux membres"
             )
+        if opened_to_verified:
+            lines.append(
+                f"⚠️ Salons sensibles à vérifier manuellement : {len(opened_to_verified)} "
+                "staff/logs ouverts au rôle Vérifié"
+            )
+        if self.sensitive_public or opened_to_verified:
+            lines.append("-# Jamais modifiés ici : corrigez leurs permissions à la main.")
         if self.refused:
             lines.append(f"Choix refusés : {len(self.refused)} (staff, logs, portail ou déjà privé)")
         lines.append("-# Vérifiez la liste avant de confirmer. Staff, logs et vérification restent protégés.")
@@ -547,6 +555,11 @@ def decision_rows(guild, plan: AccessPlan) -> list[str]:
     rows = []
     for channel in getattr(guild, "channels", ()):
         channel_id = getattr(channel, "id", 0)
+        flag = ""
+        if channel_id in {c.id for c in plan.sensitive_public}:
+            flag = " !VISIBLE_ARRIVANTS"
+        elif channel_id in {c.id for c in plan.secure_sensitive}:
+            flag = " !OUVERT_AU_ROLE_VERIFIE"
         if channel_id in gate_ids or channel_id in category_ids:
             decision = "VERROUILLER"
         elif channel_id in review_ids:
@@ -560,6 +573,6 @@ def decision_rows(guild, plan: AccessPlan) -> list[str]:
             f"{channel_id} {getattr(channel, 'type', '?')} "
             f"cat={getattr(getattr(channel, 'category', None), 'id', '-')} "
             f"#{getattr(channel, 'name', '?')} -> {decision}"
-            + (f" via={opened}" if opened else "")
+            + (f" via={opened}" if opened else "") + flag
         )
     return rows

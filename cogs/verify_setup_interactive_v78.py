@@ -144,12 +144,17 @@ def log_plan_decisions(guild, plan) -> None:
         len(getattr(plan, "review", ())), len(getattr(plan, "protected", {})),
         [getattr(r, "name", "?") for r in getattr(plan, "entry_roles", ())],
     )
-    for start in range(0, len(rows), 12):
-        logger.info("Aperçu verrouillage guild=%s | %s", guild.id, " | ".join(rows[start:start + 12]))
+    # Une seule ligne : le limiteur de répétitions masquait les suivantes.
+    logger.info("Aperçu verrouillage guild=%s détail | %s", guild.id, " | ".join(rows))
 
 
-def _lock_preview_text(plan) -> str:
-    return "**Vérifier les accès**\n" + plan.preview()
+def _lock_preview_card(plan) -> discord.Embed:
+    """Carte titrée : un texte brut était transformé en « Action effectuée »
+    par la couche globale (le mot « retiré » suffisait), alors que rien n'a
+    encore été modifié."""
+    from utils import embeds
+
+    return embeds.standard("Vérifier les accès", plan.preview())
 
 
 async def send_lock_preview(bot, guild, interaction: discord.Interaction) -> None:
@@ -179,7 +184,7 @@ async def send_lock_preview(bot, guild, interaction: discord.Interaction) -> Non
             "vérification restent inchangés.",
         )
     await interaction.followup.send(
-        _lock_preview_text(plan),
+        embed=_lock_preview_card(plan),
         view=RulesLockConfirmView(
             bot, guild, interaction.user.id,
             plan_signature(plan, role=role, state=state, guild=guild),
@@ -301,7 +306,7 @@ class RulesLockConfirmView(discord.ui.View):
         self.signature = plan_signature(plan, role=role, state=state, guild=self.guild)
         self._sync_confirm(plan)
         await interaction.response.edit_message(
-            content=_lock_preview_text(plan), view=self,
+            content=None, embed=_lock_preview_card(plan), view=self,
             allowed_mentions=discord.AllowedMentions.none(),
         )
 

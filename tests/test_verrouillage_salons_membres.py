@@ -347,8 +347,9 @@ def test_selection_manuelle_recalcule_l_apercu_et_part_a_la_confirmation(monkeyp
         def __init__(self):
             self.contenus = []
 
-        async def edit_message(self, *, content, view, allowed_mentions):
-            self.contenus.append(content)
+        async def edit_message(self, *, content, embed, view, allowed_mentions):
+            assert content is None and embed.title == "Vérifier les accès"
+            self.contenus.append(embed.description)
 
         async def defer(self, **_k):
             pass
@@ -392,3 +393,18 @@ def test_les_salons_onboarding_sont_nommes_avec_la_marche_a_suivre():
     texte = plan.preview()
     assert "Onboarding Discord : 1" in texte and "annonces" in texte
     assert "Paramètres du serveur → Onboarding" in texte
+
+
+def test_salons_sensibles_distingues_arrivants_et_role_verifie():
+    s = Serveur()
+    # Un ancien verrouillage a ouvert #discussion (staff) au rôle Vérifié.
+    s.c["staff"].overwrites[s.verifie] = ow(view_channel=True)
+    s.c["staff"].permissions_synced = False
+    plan = _plan(s)
+    texte = plan.preview()
+    assert "staff/logs visibles des nouveaux membres" in texte  # #audit public
+    assert "staff/logs ouverts au rôle Vérifié" in texte
+    from utils.verification_access_intelligence import decision_rows
+    lignes = " | ".join(decision_rows(s, plan))
+    assert "#discussion -> INCHANGE:staff/logs/sécurité !OUVERT_AU_ROLE_VERIFIE" in lignes
+    assert "#audit -> INCHANGE:staff/logs/sécurité !VISIBLE_ARRIVANTS" in lignes
