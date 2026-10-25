@@ -214,12 +214,23 @@ async def run() -> int:
             "verification_auto_access",
             "manage_channels",
             "manage_roles",
-            "category_targets",
+            # La nouvelle stratégie protège les catégories : on ne modifie
+            # plus leurs overwrites, car cela désynchroniserait les salons.
+            # Vérifier le moteur de planification plutôt que l'ancienne API.
+            "plan_access",
             "annulation après échec",
             "_SENSITIVE_CHANNEL_WORDS",
         ):
             if required_fragment not in source_v96:
                 errors.append(f"V96 incomplet : élément absent {required_fragment}")
+
+        # Le verrouillage automatique du règlement est strictement limité
+        # aux espaces publics des membres. Les canaux staff/logs déjà privés ou
+        # synchronisés sont réservés au diagnostic, sans aucune écriture.
+        if "surfaces = list(access.gate)" not in source_v96:
+            errors.append("V96 : verrouillage non limité aux salons membres")
+        if "list(access.secure_sensitive)" in source_v96:
+            errors.append("V96 : risque de modifier des salons staff/logs au verrouillage")
 
         # Le verrou slash groupé doit continuer à évaluer la commande TEXTE d'origine,
         # sinon /owner ou /security deviendraient soit bloqués, soit trop permissifs.
