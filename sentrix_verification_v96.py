@@ -798,7 +798,17 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         # de sa catégorie et peut casser les accès existants.
         # Ne pas toucher non plus au portail de vérification : son accessibilité
         # est vérifiée indépendamment avant application.
-        surfaces = list(access.gate)
+        synced_category_ids = {category.id for category in access.category_gates}
+        # Ne pas écrire sur les enfants synchronisés : l'overwrite de leur
+        # catégorie sûre leur sera transmis par Discord sans désynchronisation.
+        surfaces = [
+            ch for ch in access.gate
+            if not (
+                getattr(ch, "category", None) is not None
+                and getattr(ch.category, "id", None) in synced_category_ids
+                and bool(getattr(ch, "permissions_synced", False))
+            )
+        ] + list(access.category_gates)
         if not verification_channel.permissions_for(everyone).view_channel:
             raise ValueError(
                 "Le salon du règlement est invisible aux nouveaux membres. "
@@ -893,7 +903,12 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             raise RuntimeError(f"Discord a refusé une permission sur {surface!s}") from exc
 
         changed_surfaces = {surface.id for surface, *_rest in changed}
-        return len(changed_surfaces), len(access.protected) + len(access.untouched)
+        changed_members = sum(
+            1 for channel in access.gate
+            if channel.id in changed_surfaces
+            or getattr(getattr(channel, "category", None), "id", None) in changed_surfaces
+        )
+        return changed_members, len(access.protected) + len(access.untouched)
 
     @commands.hybrid_command(
         name="verification",
