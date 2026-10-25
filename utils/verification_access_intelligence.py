@@ -52,6 +52,7 @@ class AccessPlan:
     protected: dict[int, str] = field(default_factory=dict)
     untouched: dict[int, str] = field(default_factory=dict)
     sensitive_public: list = field(default_factory=list)
+    secure_sensitive: list = field(default_factory=list)
     portal: list = field(default_factory=list)
 
     def preview(self) -> str:
@@ -64,19 +65,53 @@ class AccessPlan:
             f"**À préserver : {len(self.protected)} salon(s)/catégories privés, staff, logs ou vérification**\n"
             f"**À examiner : {len(self.untouched)} salon(s) ambigus, laissés intacts**\n"
             + (
-                f"**Attention : {alerts} salon(s) staff/logs paraissent publics.** "
-                "Ils ne seront pas ouverts au rôle Vérifié : vérifiez leur accès staff séparément."
+                f"**Attention : {alerts - len(self.secure_sensitive)} salon(s) sensibles "
+                "ne sont pas sécurisables automatiquement.** "
+                "Confirmez leurs rôles staff et leurs accès manuellement."
+                if alerts > len(self.secure_sensitive) else
+                "Les salons staff/logs sécurisables seront masqués à @everyone, "
+                "sans attribuer de nouveaux droits."
+
                 if alerts else ""
             )
         ).strip()
 
 
-def plan_access(guild, *, verification_channel_id: int, configured_ids=(), special_ids=()) -> AccessPlan:
+STAFF_ROLE_WORDS = frozenset({
+    "staff", "admin", "administrateur", "administrateurs", "moderation",
+    "moderateur", "moderateurs", "modo", "modos", "fondateur", "fondateurs",
+    "direction", "responsable", "responsables", "manager", "managers",
+})
+
+
+def has_explicit_staff_access(channel, everyone) -> bool:
+    """Preuve locale : un rôle staff existant bénéficie déjà de l'accès.
+
+    On ne déduit JAMAIS un rôle staff via IA pour lui ouvrir un salon privé.
+    """
+    for role, overwrite in getattr(channel, "overwrites", {}).items():
+        if role == everyone or getattr(overwrite, "view_channel", None) is not True:
+            continue
+        role_name = tokens(getattr(role, "name", ""))
+        permissions = getattr(role, "permissions", None)
+        privileged = bool(permissions and any(
+            getattr(permissions, attr, False) for attr in (
+                "administrator", "manage_guild", "manage_channels",
+                "ban_members", "kick_members",
+            )
+        ))
+        if privileged or (role_name & STAFF_ROLE_WORDS):
+            return True
+    return False
+
+
+def plan_access(guild, *, verification_channel_id: int, configured_ids=(), special_ids=(), log_ids=()) -> AccessPlan:
     plan = AccessPlan()
     everyone = guild.default_role
     conf_ids = {int(v) for v in configured_ids if v}
     special = {int(v) for v in special_ids if v}
-    protected_ids = conf_ids | special | {int(verification_channel_id)}
+    log_destinations = {int(v) for v in log_ids if v}
+    protected_ids = conf_ids | special | log_destinations | {int(verification_channel_id)}
     categories = list(getattr(guild, "categories", ()))
     for category in categories:
         category_tokens = tokens(getattr(category, "name", ""))
@@ -90,17 +125,27 @@ def plan_access(guild, *, verification_channel_id: int, configured_ids=(), speci
         own = tokens(getattr(channel, "name", ""))
         parent_words = tokens(getattr(parent, "name", "")) if parent else frozenset()
         current_public = bool(channel.permissions_for(everyone).view_channel)
-        # Toujours protéger une destination sauvegardée (logs, portails,
-        # honeypot), même si elle a été renommée en « général ».
-        if channel.id in protected_ids or (parent is not None and parent.id in plan.protected):
-            plan.protected[channel.id] = "configuration/portail/catégorie sensible"
-            if current_public and (own | parent_words) & SENSITIVE:
-                plan.sensitive_public.append(channel)
+        # Un portail de vérification doit RESTER visible. Les logs persistés
+        # et les catégories staff gardent leur classification après renommage.
+        if channel.id == verification_channel_id or channel.id in special or (
+            channel.id in conf_ids and channel.id not in log_destinations
+        ):
+            plan.protected[channel.id] = "portail/configuration enregistrée"
             continue
-        if own & (SENSITIVE | ONBOARDING):
-            plan.protected[channel.id] = "staff/logs/accueil"
-            if current_public and own & SENSITIVE:
+        sensitive = bool(
+            channel.id in log_destinations
+            or (own | parent_words) & SENSITIVE
+            or (parent is not None and parent.id in plan.protected and not parent_words & ONBOARDING)
+        )
+        if sensitive:
+            plan.protected[channel.id] = "staff/logs/sécurité"
+            if current_public:
                 plan.sensitive_public.append(channel)
+                if has_explicit_staff_access(channel, everyone):
+                    plan.secure_sensitive.append(channel)
+            continue
+        if own & ONBOARDING or parent_words & ONBOARDING:
+            plan.protected[channel.id] = "accueil/vérification"
             continue
         if not current_public:
             plan.protected[channel.id] = "déjà privé"
