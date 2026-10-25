@@ -876,8 +876,9 @@ def _resume_positions_roles(guild: discord.Guild, reels: dict[int, tuple[int, in
 
     ajustements = len(reels) - len(directs)
     if ajustements:
-        lignes.append(f"**Décalage automatique :** {ajustements} position(s) ajustée(s)")
-    return "\n".join(lignes) or f"**Réorganisation :** {len(reels)} position(s) ajustée(s)"
+        label = "position ajustée" if ajustements == 1 else "positions ajustées"
+        lignes.append(f"**Décalage automatique :** {ajustements} {label}")
+    return "\n".join(lignes) or "**Ordre des rôles ajusté automatiquement**"
 
 
 class CreateSentriXV3(commands.Cog, name="CreateSentriXV3"):
