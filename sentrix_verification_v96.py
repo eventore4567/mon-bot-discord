@@ -14,6 +14,7 @@ import unicodedata
 
 import discord
 from discord.ext import commands
+from utils.verification_access_intelligence import plan_access
 
 logger = logging.getLogger("bot.verification-v96")
 
@@ -627,6 +628,19 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         problem = role_grant_problem(guild, role)
         if problem:
             issues.append(problem)
+        # Un rôle final qui donne des droits staff serait un risque majeur :
+        # tous les membres vérifiés le recevraient.
+        perms = getattr(role, "permissions", None)
+        if perms is not None and any(
+            getattr(perms, name, False) for name in (
+                "administrator", "manage_guild", "manage_channels",
+                "manage_roles", "ban_members", "kick_members",
+            )
+        ):
+            issues.append(
+                "Le rôle Vérifié possède des permissions staff/administrateur. "
+                "Choisissez un rôle membre sans permissions de modération."
+            )
 
         me = guild.me
         if me is None:
@@ -696,6 +710,69 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             "has_existing_panel": panel is not None,
         }
 
+    async def _access_plan(
+        self, guild: discord.Guild, *, verification_channel: discord.TextChannel,
+        verified_role: discord.Role | None = None,
+    ):
+        """Prépare les accès sans écrire sur Discord.
+
+        Les ID de log_config restent protégés même après renommage ; les
+        espaces du CAPTCHA renforcé et les autres portails le sont aussi.
+        En cas de panne SQL inattendue, refuser le verrouillage plutôt que
+        de prendre une décision à l'aveugle.
+        """
+        import sqlite3
+
+        conf = await self.bot.db.get_guild_config(guild.id)
+        configured_ids: set[int] = set()
+        log_destinations: set[int] = set()
+        for key in ("verification_channel", "rules_channel", "welcome_channel"):
+            value = _row_value(conf, key)
+            if value:
+                configured_ids.add(int(value))
+        for key in ("log_channel", "ticket_log_channel", "modlog_channel", "audit_log_channel"):
+            value = _row_value(conf, key)
+            if value:
+                log_destinations.add(int(value))
+
+        async def rows_or_empty(sql: str):
+            try:
+                return await self.bot.db.fetchall(sql, (guild.id,))
+            except sqlite3.OperationalError as exc:
+                if "no such table" in str(exc).lower():
+                    return []
+                raise
+
+        log_rows = await rows_or_empty(
+            "SELECT channel_id FROM log_config WHERE guild_id=? AND channel_id IS NOT NULL"
+        )
+        for row in log_rows or ():
+            value = _row_value(row, "channel_id")
+            if value:
+                log_destinations.add(int(value))
+        special_ids: set[int] = set()
+        try:
+            honeypot = await self.bot.db.fetchone(
+                "SELECT category_id, verify_channel_id, trap_channel_id "
+                "FROM honeypot_verification WHERE guild_id=?", (guild.id,),
+            )
+        except sqlite3.OperationalError as exc:
+            if "no such table" not in str(exc).lower():
+                raise
+            honeypot = None
+        for field in ("category_id", "verify_channel_id", "trap_channel_id"):
+            value = _row_value(honeypot, field)
+            if value:
+                special_ids.add(int(value))
+        return plan_access(
+            guild,
+            verification_channel_id=verification_channel.id,
+            configured_ids=configured_ids,
+            special_ids=special_ids,
+            log_ids=log_destinations,
+            verified_role=verified_role,
+        )
+
     async def _apply_auto_access(
         self,
         guild: discord.Guild,
@@ -704,60 +781,39 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
         verified_role: discord.Role,
         actor: discord.abc.User,
     ) -> tuple[int, int]:
-        """Ferme les espaces publics à @everyone et les ouvre au rôle vérifié.
+        """Verrouille UNIQUEMENT les salons publics membres identifiés.
 
-        Les espaces déjà privés et les surfaces sensibles (staff/admin/modération/logs/audits)
-        ne sont jamais modifiés. Le salon de vérification reste visible avant le CAPTCHA.
-        Si Discord refuse une écriture, les changements déjà effectués sont restaurés.
+        Préserve catégories, salons staff/logs et espaces inconnus, ainsi que
+        les permissions des rôles non concernés. Aucun canal privé n'est
+        rendu visible au rôle « Vérifié ».
         """
         everyone = guild.default_role
-        channels = list(guild.channels)
-        public_before = {
-            item.id: bool(item.permissions_for(everyone).view_channel)
-            for item in channels
-        }
-        sensitive_ids = {item.id for item in channels if _sensitive_surface(item)}
-
-        category_targets: set[int] = set()
-        protected_ids: set[int] = set()
-        for category in guild.categories:
-            children = list(category.channels)
-            risky_child = any(
-                child.id != verification_channel.id
-                and (child.id in sensitive_ids or not public_before.get(child.id, False))
-                for child in children
+        access = await self._access_plan(
+            guild, verification_channel=verification_channel,
+            verified_role=verified_role,
+        )
+        # Périmètre STRICT : ne modifier que les salons membres publics.
+        # Un salon staff/logs, même public par erreur, reste en DIAGNOSTIC.
+        # En effet toucher à l'overwrite d'un salon synchronisé le désynchronise
+        # de sa catégorie et peut casser les accès existants.
+        # Ne pas toucher non plus au portail de vérification : son accessibilité
+        # est vérifiée indépendamment avant application.
+        synced_category_ids = {category.id for category in access.category_gates}
+        # Ne pas écrire sur les enfants synchronisés : l'overwrite de leur
+        # catégorie sûre leur sera transmis par Discord sans désynchronisation.
+        surfaces = [
+            ch for ch in access.gate
+            if not (
+                getattr(ch, "category", None) is not None
+                and getattr(ch.category, "id", None) in synced_category_ids
+                and bool(getattr(ch, "permissions_synced", False))
             )
-            if (
-                not public_before.get(category.id, False)
-                or category.id in sensitive_ids
-                or risky_child
-            ):
-                protected_ids.add(category.id)
-                continue
-            category_targets.add(category.id)
-
-        surfaces: list[discord.abc.GuildChannel] = []
-        surfaces.extend(category for category in guild.categories if category.id in category_targets)
-
-        for item in channels:
-            if isinstance(item, discord.CategoryChannel):
-                continue
-            if item.id == verification_channel.id:
-                continue
-            if item.id in sensitive_ids or not public_before.get(item.id, False):
-                protected_ids.add(item.id)
-                continue
-            parent = getattr(item, "category", None)
-            covered_by_category = (
-                parent is not None
-                and parent.id in category_targets
-                and bool(getattr(item, "permissions_synced", False))
+        ] + list(access.category_gates)
+        if not verification_channel.permissions_for(everyone).view_channel:
+            raise ValueError(
+                "Le salon du règlement est invisible aux nouveaux membres. "
+                "Corrigez ses permissions manuellement avant de verrouiller."
             )
-            if not covered_by_category:
-                surfaces.append(item)
-
-        surfaces.append(verification_channel)
-
         operations: list[
             tuple[
                 discord.abc.GuildChannel,
@@ -783,15 +839,37 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             new = _clone_overwrite(old)
             new.view_channel = view_channel
             had_overwrite = target in surface.overwrites
+            # Discord API et journaux ne changent pas si les permissions
+            # sont déjà correctes ; limite aussi la durée du verrouillage.
+            if old.view_channel == view_channel:
+                return
             operations.append((surface, target, had_overwrite, old, new))
 
         for surface in surfaces:
-            if surface.id == verification_channel.id:
-                plan(surface, everyone, view_channel=True)
-                plan(surface, verified_role, view_channel=True)
-            else:
-                plan(surface, everyone, view_channel=False)
-                plan(surface, verified_role, view_channel=True)
+            # Le plan de contrôle est indépendant des espaces sensibles.
+            # Une correction staff/logs nécessite un audit et une confirmation
+            # distincte : ce parcours NE TOUCHE PAS à leurs permissions.
+            plan(surface, everyone, view_channel=False)
+            plan(surface, verified_role, view_channel=True)
+
+        # Pré-vérifier TOUS les salons où une écriture est nécessaire. Sinon
+        # un refus sur le dernier salon peut forcer un rollback après avoir déjà
+        # modifié des dizaines de permissions.
+        me = getattr(guild, "me", None)
+        if me is not None:
+            blocked = []
+            for surface, _target, _had, _old, _new in operations:
+                if not surface.permissions_for(me).manage_channels:
+                    blocked.append(surface)
+            if blocked:
+                names = ", ".join(
+                    f"#{surface.name}" for surface in dict.fromkeys(blocked) if hasattr(surface, "name")
+                )
+                raise ValueError(
+                    "SentriX ne peut pas gérer les permissions de ces salons : "
+                    + (names[:400] or "permissions manquantes")
+                    + ". Vérifiez les permissions du bot avant de confirmer."
+                )
 
         changed: list[
             tuple[
@@ -825,8 +903,12 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             raise RuntimeError(f"Discord a refusé une permission sur {surface!s}") from exc
 
         changed_surfaces = {surface.id for surface, *_rest in changed}
-        protected_ids.discard(verification_channel.id)
-        return len(changed_surfaces), len(protected_ids)
+        changed_members = sum(
+            1 for channel in access.gate
+            if channel.id in changed_surfaces
+            or getattr(getattr(channel, "category", None), "id", None) in changed_surfaces
+        )
+        return changed_members, len(access.protected) + len(access.untouched)
 
     @commands.hybrid_command(
         name="verification",
