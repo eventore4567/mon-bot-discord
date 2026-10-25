@@ -294,3 +294,65 @@ async def test_missing_bot_permissions_on_one_target_blocks_all_changes():
     # Aucun salon ne doit être modifié, même si seul le dernier est inaccessible.
     for surface in guild.channels:
         surface.set_permissions.assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_screenshot_private_synced_logs_permissions_remain_byte_for_byte_untouched():
+    """Cas réel : #logs-salons est privé et synchronisé à SentriX — Logs."""
+    guild, verified, verify, c = guild_screenshot()
+    logs_category = Surface(300, "SentriX — Logs", public=False)
+    staff = Role("tomi", 402, staff=True)
+    logs_category.overwrites[staff] = discord.PermissionOverwrite(view_channel=True)
+    logs_category.overwrites[guild.default_role] = discord.PermissionOverwrite(view_channel=False)
+    logs = Surface(301, "logs-salons", category=logs_category, public=False)
+    logs.permissions_synced = True
+    logs.overwrites = dict(logs_category.overwrites)
+    guild.categories.append(logs_category)
+    guild.channels.extend([logs_category, logs])
+    before_category = dict(logs_category.overwrites)
+    before_channel = dict(logs.overwrites)
+
+    bot = SimpleNamespace(db=SimpleNamespace(
+        get_guild_config=AsyncMock(return_value={
+            "verification_channel": verify.id,
+            "verify_role": verified.id,
+        }),
+        fetchall=AsyncMock(return_value=[{"channel_id": logs.id}]),
+        fetchone=AsyncMock(return_value=None),
+    ))
+    manager = VerificationConfigV96(bot)
+    plan = await manager._access_plan(
+        guild, verification_channel=verify, verified_role=verified,
+    )
+    assert logs.id in plan.protected
+    assert logs not in plan.gate
+    assert logs in plan.log_destinations
+
+    await manager._apply_auto_access(
+        guild, verification_channel=verify, verified_role=verified,
+        actor=SimpleNamespace(id=900),
+    )
+    logs.set_permissions.assert_not_awaited()
+    logs_category.set_permissions.assert_not_awaited()
+    assert logs.permissions_synced is True
+    assert logs.overwrites == before_channel
+    assert logs_category.overwrites == before_category
+
+
+@pytest.mark.asyncio
+async def test_private_verification_portal_requires_manual_fix_not_automatic_opening():
+    guild, verified, verify, c = guild_screenshot()
+    verify.public = False
+    bot = SimpleNamespace(db=SimpleNamespace(
+        get_guild_config=AsyncMock(return_value={"verification_channel": verify.id}),
+        fetchall=AsyncMock(return_value=[]),
+        fetchone=AsyncMock(return_value=None),
+    ))
+    with pytest.raises(ValueError, match="invisible aux nouveaux membres"):
+        await VerificationConfigV96(bot)._apply_auto_access(
+            guild, verification_channel=verify, verified_role=verified,
+            actor=SimpleNamespace(id=900),
+        )
+    for surface in guild.channels:
+        surface.set_permissions.assert_not_awaited()
