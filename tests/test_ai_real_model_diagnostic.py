@@ -41,7 +41,23 @@ async def test_aidiag_reports_disabled_guild_and_blocked_channel_without_enablin
     assert info["enabled"] is False
     assert info["channel_allowed"] is False
     assert info["role_restrictions"] is True
+    assert info["role_allowed"] is False
     probe.assert_awaited_once_with(model_key=ai_service.MODEL_SOL, reasoning_effort="high")
+
+
+@pytest.mark.asyncio
+async def test_role_restriction_checks_actual_member_role_ids(monkeypatch):
+    monkeypatch.setattr(ai_service, "get_settings", AsyncMock(return_value={
+        "enabled": True, "default_model": ai_service.MODEL_LUNA,
+        "reasoning_effort": "low", "allowed_role_ids": [7],
+    }))
+    monkeypatch.setattr(ai_service, "test_connection", AsyncMock(return_value={
+        "has_key": True, "ok": True, "latency_ms": 10,
+    }))
+    result = await ai_cog.Ai._ai_connection_diagnostic(
+        SimpleNamespace(bot=object()), 99, 44, role_ids=[7],
+    )
+    assert result["role_allowed"] is True
 
 
 @pytest.mark.asyncio
