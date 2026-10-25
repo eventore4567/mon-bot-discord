@@ -887,7 +887,7 @@ async def test_connection(model_key: str = MODEL_TERRA) -> dict:
 # ---------------------------------------------------------------- RÉGLAGES PAR SERVEUR (+aisetup)
 
 DEFAULT_AI_SETTINGS = {
-    "enabled": True,
+    "enabled": False,
     "default_model": MODEL_LUNA,
     "reasoning_effort": "low",
     "allowed_channel_ids": [],
@@ -908,6 +908,8 @@ async def get_settings(bot, guild_id: int) -> dict:
     row = await bot.db.fetchone("SELECT * FROM ai_settings WHERE guild_id = ?", (guild_id,))
     settings = dict(DEFAULT_AI_SETTINGS)
     if not row:
+        from cogs import setup_v2_core
+        settings["enabled"] = await setup_v2_core.module_enabled(bot, guild_id, "ai")
         return settings
     settings.update({
         "enabled": bool(row["enabled"]),
@@ -925,6 +927,8 @@ async def get_settings(bot, guild_id: int) -> dict:
         "language": row["language"] or "fr",
         "logs_enabled": bool(row["logs_enabled"]),
     })
+    from cogs import setup_v2_core
+    settings["enabled"] = await setup_v2_core.module_enabled(bot, guild_id, "ai")
     return settings
 
 
