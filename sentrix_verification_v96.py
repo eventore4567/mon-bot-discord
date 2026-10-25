@@ -943,10 +943,27 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
                 discord.PermissionOverwrite,
             ]
         ] = []
+        # Une ancienne association Onboarding peut être absente du GET, alors
+        # que Discord continue de refuser de cacher ce salon (code 350003).
+        # Ignorer uniquement CETTE surface ; ne pas masquer une vraie erreur
+        # de permission (403), qui doit conserver le rollback traditionnel.
+        onboarding_skipped: set[int] = set()
         reason = f"SentriX vérification : accès automatiques configurés par {actor} ({actor.id})"
         try:
             for surface, target, had_overwrite, old, new in operations:
-                await surface.set_permissions(target, overwrite=new, reason=reason)
+                if surface.id in onboarding_skipped:
+                    continue
+                try:
+                    await surface.set_permissions(target, overwrite=new, reason=reason)
+                except discord.HTTPException as exc:
+                    if int(getattr(exc, "code", 0) or 0) != 350003:
+                        raise
+                    onboarding_skipped.add(surface.id)
+                    logger.warning(
+                        "Salon %s ignoré : toujours protégé par Discord Onboarding (350003)",
+                        getattr(surface, "id", "?"),
+                    )
+                    continue
                 changed.append((surface, target, had_overwrite, old, new))
         except (discord.Forbidden, discord.HTTPException) as exc:
             rollback_reason = "SentriX vérification : annulation après échec de configuration automatique"
@@ -971,7 +988,7 @@ class VerificationConfigV96(commands.Cog, name="VerificationConfigV96"):
             if channel.id in changed_surfaces
             or getattr(getattr(channel, "category", None), "id", None) in changed_surfaces
         )
-        return changed_members, len(access.protected) + len(access.untouched)
+        return changed_members, len(access.protected) + len(access.untouched) + len(onboarding_skipped)
 
     @commands.hybrid_command(
         name="verification",
