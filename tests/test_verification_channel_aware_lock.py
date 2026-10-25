@@ -174,3 +174,34 @@ async def test_verified_role_with_staff_permissions_is_rejected(monkeypatch):
         guild, channel=channel, role=verified, auto_access=False,
     )
     assert any("permissions staff" in issue for issue in issues)
+
+
+def test_staff_access_inherited_from_synchronized_category_is_recognized():
+    from utils.verification_access_intelligence import has_explicit_staff_access
+    guild, _verified, verify, _c = guild_screenshot()
+    staff = Role("Modérateur", 41, staff=True)
+    category = Surface(999, "Personnel")
+    category.overwrites[staff] = discord.PermissionOverwrite(view_channel=True)
+    channel = Surface(1000, "logs-archives", category=category, public=True)
+    channel.permissions_synced = True
+    guild.categories.append(category)
+    guild.channels.extend([category, channel])
+    assert has_explicit_staff_access(channel, guild.default_role)
+    plan = plan_access(guild, verification_channel_id=verify.id)
+    assert channel in plan.secure_sensitive
+
+
+def test_unsynchronized_category_does_not_prove_staff_can_read_channel():
+    from utils.verification_access_intelligence import has_explicit_staff_access
+    guild, _verified, verify, _c = guild_screenshot()
+    staff = Role("Modérateur", 41, staff=True)
+    category = Surface(999, "Personnel")
+    category.overwrites[staff] = discord.PermissionOverwrite(view_channel=True)
+    channel = Surface(1000, "logs-archives", category=category, public=True)
+    channel.permissions_synced = False
+    guild.categories.append(category)
+    guild.channels.extend([category, channel])
+    assert not has_explicit_staff_access(channel, guild.default_role)
+    plan = plan_access(guild, verification_channel_id=verify.id)
+    assert channel in plan.sensitive_public
+    assert channel not in plan.secure_sensitive
