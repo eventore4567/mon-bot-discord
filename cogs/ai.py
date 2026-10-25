@@ -2903,16 +2903,25 @@ class Ai(commands.Cog, name="Ai"):
             await ai_service.get_settings(self.bot, guild_id)
             if guild_id is not None else dict(ai_service.DEFAULT_AI_SETTINGS)
         )
-        model_key = settings.get("default_model") or ai_service.MODEL_TERRA
-        if model_key not in ai_service.MODEL_IDS:
-            # generate() emploie déjà cette valeur de repli pour modèle inconnu.
-            model_key = ai_service.MODEL_TERRA
-        effort = settings.get("reasoning_effort") or "medium"
-        if effort not in ai_service.VALID_REASONING_EFFORTS:
-            effort = "medium"
+        configured_model_key = settings.get("default_model") or ai_service.MODEL_TERRA
+        if configured_model_key not in ai_service.MODEL_IDS:
+            configured_model_key = ai_service.MODEL_TERRA
+        # /sentrix et les mentions utilisent pick_model(prompt), pas le champ
+        # default_model de +aisetup. Pour une demande simple, ce sera Luna.
+        # Tester réellement cette route évite un faux OK sur Terra.
+        model_key = ai_service.pick_model("Bonjour")
+        effort = ai_service.pick_reasoning_effort(model_key, "medium")
         result = await ai_service.test_connection(
             model_key=model_key, reasoning_effort=effort,
         )
+        configured_result = None
+        configured_effort = settings.get("reasoning_effort") or "medium"
+        if configured_effort not in ai_service.VALID_REASONING_EFFORTS:
+            configured_effort = "medium"
+        if configured_model_key != model_key:
+            configured_result = await ai_service.test_connection(
+                model_key=configured_model_key, reasoning_effort=configured_effort,
+            )
         channels = settings.get("allowed_channel_ids") or []
         return {
             "enabled": bool(settings.get("enabled", False)),
@@ -2922,6 +2931,8 @@ class Ai(commands.Cog, name="Ai"):
             "model_key": model_key,
             "model_id": ai_service.MODEL_IDS[model_key],
             "reasoning_effort": effort,
+            "configured_model_id": ai_service.MODEL_IDS[configured_model_key],
+            "configured_test": configured_result,
             "test": result,
         }
 
@@ -2978,10 +2989,18 @@ class Ai(commands.Cog, name="Ai"):
             )
             details = (
                 f"{state}\n{channel_note}\n{role_note}\n{member_role_note}\n"
-                f"**Modèle utilisé :** `{info['model_id']}` "
+                f"**Conversation simple :** `{info['model_id']}` "
                 f"({ai_service.MODEL_LABELS.get(info['model_key'], 'IA')})\n"
-                f"**Raisonnement :** `{info['reasoning_effort']}`\n"
+                f"**Raisonnement conversation :** `{info['reasoning_effort']}`\n"
+                f"**Modèle du serveur :** `{info['configured_model_id']}`\n"
             )
+            other = info["configured_test"]
+            if other is not None:
+                details += (
+                    f"**Test du modèle serveur :** {'OK' if other['ok'] else 'ÉCHEC'}"
+                    + (f" (`{other['error_type']}`)" if not other['ok'] else "")
+                    + "\n"
+                )
             if not result["has_key"]:
                 e = embeds.error(details + "Aucune clé OpenAI disponible sur Railway.")
             elif result["ok"]:
