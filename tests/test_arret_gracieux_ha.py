@@ -47,12 +47,21 @@ def test_le_lanceur_ha_rattrape_l_annulation():
     )
 
 
-def test_le_point_d_entree_railway_rattrape_l_annulation():
-    # C'est CE fichier que la commande de démarrage Railway lance : la pile du
-    # 25/10 21:39 venait de sa ligne asyncio.run, pas de railway_ha_boot.
-    rattrapees = _exceptions_rattrapees(_bloc_principal("railway_ha_product_boot_v8.py"))
-    assert any("CancelledError" in nom for nom in rattrapees), rattrapees
-    assert any("KeyboardInterrupt" in nom for nom in rattrapees), rattrapees
+def test_tous_les_points_d_entree_ha_rattrapent_l_annulation():
+    # Chaque service Railway a sa propre commande de démarrage : le principal
+    # lance railway_ha_product_boot_v8.py, le standby sentrix_v98_ha_product_boot_v8.py.
+    # Corriger un seul fichier laissait la pile sur l'autre (vu le 25/10 22:16).
+    # Tout fichier racine qui lance ha_boot.run() est donc vérifié.
+    points = sorted(
+        chemin.name for chemin in RACINE.glob("*.py")
+        if "ha_boot.run()" in chemin.read_text(encoding="utf-8")
+    )
+    assert "sentrix_v98_ha_product_boot_v8.py" in points
+    assert "railway_ha_product_boot_v8.py" in points
+    for nom in points:
+        rattrapees = _exceptions_rattrapees(_bloc_principal(nom))
+        assert any("CancelledError" in r for r in rattrapees), (nom, rattrapees)
+        assert any("KeyboardInterrupt" in r for r in rattrapees), (nom, rattrapees)
 
 
 def test_c_est_bien_une_annulation_qui_est_levee_pendant_l_attente():

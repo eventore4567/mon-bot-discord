@@ -239,3 +239,6 @@ if __name__ == "__main__":
         asyncio.run(ha_boot.run())
     except KeyboardInterrupt:
         logger.info("Arrêt de SentriX HA.")
+    except asyncio.CancelledError:
+        # SIGTERM pendant l'attente du bail HA : arrêt voulu, pas une panne.
+        logger.info("Arrêt de SentriX HA pendant l'attente du bail : instance passive remplacée.")
