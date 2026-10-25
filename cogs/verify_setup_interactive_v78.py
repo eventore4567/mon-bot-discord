@@ -90,7 +90,9 @@ async def preview_published_channels(bot, guild) -> tuple[object, discord.Role, 
     issues = await manager._preflight(guild, channel=channel, role=role, auto_access=True)
     if issues:
         raise ValueError("Permissions insuffisantes : " + " ".join(issues))
-    plan = await manager._access_plan(guild, verification_channel=channel)
+    plan = await manager._access_plan(
+        guild, verification_channel=channel, verified_role=role,
+    )
     return plan, role, state
 
 
