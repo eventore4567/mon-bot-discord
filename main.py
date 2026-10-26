@@ -425,6 +425,16 @@ def cooldown_text(seconds: float) -> str:
     return f"{remaining} s"
 
 
+def sync_interrompue_par_arret(bot, exc: BaseException) -> bool:
+    """Vrai si la synchro slash a échoué parce que l'instance s'arrête.
+
+    Redéploiement ou bail HA repris : la session HTTP est fermée en pleine
+    synchro. L'instance suivante publie le catalogue ; ce n'est pas une panne.
+    """
+    is_closed = getattr(bot, "is_closed", None)
+    return bool(callable(is_closed) and is_closed()) or "Connector is closed" in str(exc)
+
+
 INTENTS = discord.Intents.default()
 # Accès privilégiés réellement nécessaires à SentriX :
 # - members : arrivée/départ, modération, vérification et protections anti-raid ;
@@ -940,8 +950,14 @@ class BotAllInOne(commands.Bot):
                         ", ".join(publish_audit.missing_paths[:20]) or "aucune",
                         ", ".join(publish_audit.unexpected_paths[:20]) or "aucune",
                     )
-            except Exception:
-                logger.error(f"Échec de la synchronisation des commandes slash :\n{traceback.format_exc()}")
+            except Exception as exc:
+                # Arrêt pendant la synchro (redéploiement, bail HA repris) : la
+                # connexion HTTP est fermée sous ses pieds. Ce n'est pas un échec
+                # du catalogue — l'instance qui reprend le publie (26/10 19:04).
+                if sync_interrompue_par_arret(self, exc):
+                    logger.info("Synchronisation slash interrompue par l'arrêt de l'instance : reprise par la suivante.")
+                else:
+                    logger.error(f"Échec de la synchronisation des commandes slash :\n{traceback.format_exc()}")
 
         asyncio.create_task(start_dashboard(self))
 
