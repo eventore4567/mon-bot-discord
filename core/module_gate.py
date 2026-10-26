@@ -92,9 +92,30 @@ def cle_dinvocation(source: object) -> object | None:
 
 
 async def prefix_gate(ctx: commands.Context) -> bool:
+    """Check global : bloque une commande dont le module est indisponible.
+
+    Ne compte RIEN : un check tourne aussi quand du code appelle
+    `command.can_run(ctx)` sans exécuter la commande (actions en langage
+    naturel, +setup automatique, invites de configuration). Chaque appel de ce
+    genre ouvrait un « appel en vol » jamais refermé ; 120 s plus tard le
+    module passait « dégradé » (cogs.moderation, prod 26/10 20:22). Le
+    comptage vit dans `prefix_enter`, hook before_invoke, qui ne tourne que
+    pour une exécution réelle.
+    """
     module = prefix_command_module(ctx)
     if module_unavailable(ctx.bot, module):
         raise ModuleTemporarilyUnavailable(module or "inconnu")
+    return True
+
+
+async def prefix_enter(ctx: commands.Context) -> None:
+    """Hook before_invoke global : l'invocation réelle entre en vol.
+
+    discord.py l'appelle après les checks et la conversion des arguments, en
+    préfixe comme en hybride lancé en slash ; la sortie (fin ou erreur de
+    commande) est garantie derrière.
+    """
+    module = prefix_command_module(ctx)
     kernel = getattr(ctx.bot, "module_kernel", None)
     if module and kernel is not None and hasattr(kernel, "enter_runtime"):
         # La clé de l'INVOCATION, pas du module : une commande hybride lancée
@@ -105,11 +126,18 @@ async def prefix_gate(ctx: commands.Context) -> bool:
         # qui modifie le contexte pendant la commande (réponse différée,
         # message supprimé, interaction simulée) faisait recalculer une autre
         # clé, et l'entrée ne se refermait plus (+clear, 26/10 09:51).
+        # Un groupe puis sa sous-commande repassent ici avec la même clé :
+        # toutes les entrées sont gardées, la sortie les referme toutes.
         try:
             ctx._sentrix_appel = (module, cle)
+            entrees = getattr(ctx, "_sentrix_appels", None)
+            if not isinstance(entrees, list):
+                entrees = []
+                ctx._sentrix_appels = entrees
+            if (module, cle) not in entrees:
+                entrees.append((module, cle))
         except Exception:
             pass
-    return True
 
 
 def app_gate_for(command):

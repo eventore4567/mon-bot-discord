@@ -50,6 +50,7 @@ from core.module_gate import (
     ModuleTemporarilyUnavailable,
     app_command_module,
     install_app_gates,
+    prefix_enter,
     prefix_gate,
 )
 from core.module_runtime import ModuleRuntimeController
@@ -779,6 +780,8 @@ class BotAllInOne(commands.Bot):
         self.add_check(self.global_blacklist_check)
         self.add_check(self.global_cooldown_check)
         self.add_check(prefix_gate)
+        # Le comptage des appels en vol, lui, ne suit que les exécutions réelles.
+        self.before_invoke(prefix_enter)
         # cogs/permission_guard.py::install() s'enregistre désormais lui-même dès
         # qu'il réaffecte self.global_permission_check (docs/core-v2-audit-
         # technical-debt.md, §6) — ne l'ajouter ici qu'en repli, si cette extension

@@ -10,6 +10,7 @@ from core.module_gate import (
     ModuleTemporarilyUnavailable,
     circuit_open,
     install_app_gates,
+    prefix_enter,
     prefix_gate,
 )
 from core.module_kernel import ModuleKernel
@@ -63,7 +64,11 @@ async def test_prefix_gate_counts_only_allowed_module_call():
         command=SimpleNamespace(cog=None, callback=callback),
     )
 
+    # Le check ne compte rien : il tourne aussi pour un simple can_run().
     assert await prefix_gate(ctx) is True
+    assert kernel.in_flight("cogs.music") == 0
+    # L'exécution réelle (hook before_invoke) entre en vol.
+    await prefix_enter(ctx)
     assert kernel.in_flight("cogs.music") == 1
 
 

@@ -166,6 +166,12 @@ def _exit_module_runtime(
     kernel = getattr(bot, "module_kernel", None)
     # Module et clé mémorisés par la garde à l'entrée : ils font foi, même si
     # le contexte a changé depuis.
+    entrees = getattr(source, "_sentrix_appels", None)
+    if isinstance(entrees, list) and entrees:
+        if kernel is not None and hasattr(kernel, "exit_runtime"):
+            for module, cle in entrees:
+                kernel.exit_runtime(module, cle)
+        return
     memorise = getattr(source, "_sentrix_appel", None)
     if isinstance(memorise, tuple) and len(memorise) == 2 and memorise[0]:
         if kernel is not None and hasattr(kernel, "exit_runtime"):

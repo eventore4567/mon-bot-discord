@@ -140,9 +140,68 @@ def test_un_contexte_modifie_pendant_la_commande_ne_fait_plus_fuir_l_appel():
         message=SimpleNamespace(id=1001), interaction=None,
         bot=SimpleNamespace(module_kernel=kernel),
     )
-    asyncio.run(module_gate.prefix_gate(ctx))
+    asyncio.run(module_gate.prefix_enter(ctx))
     assert etat.in_flight == 1
     # Une couche pose une interaction sur le contexte pendant la commande.
     ctx.interaction = SimpleNamespace(id=555)
     obs._exit_module_runtime(ctx.bot, "cogs.moderation", ctx)
     assert etat.in_flight == 0
+
+
+def _kernel_moderation():
+    from types import SimpleNamespace
+
+    etat = _resilience()[1]
+    etat.name = "cogs.moderation"
+    r = ModuleResilience({"cogs.moderation": etat}, lambda *a, **k: None)
+    kernel = SimpleNamespace(
+        enter_runtime=r.enter, exit_runtime=r.exit, snapshot=lambda: {"modules": {}},
+    )
+    return etat, kernel
+
+
+def test_un_simple_can_run_n_ouvre_aucun_appel_en_vol():
+    """Prod 26/10 20:22 : cogs.moderation « dégradé », appel bloqué depuis 350 s.
+
+    Actions en langage naturel, +setup automatique, invites de configuration :
+    ces chemins appellent `command.can_run(ctx)` — donc les checks globaux —
+    sans exécuter la commande, et sans fin ni erreur de commande derrière.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from core import module_gate
+
+    etat, kernel = _kernel_moderation()
+    cog = type("Moderation", (), {"__module__": "cogs.moderation"})()
+    ctx = SimpleNamespace(
+        command=SimpleNamespace(cog=cog, callback=None),
+        message=SimpleNamespace(id=2002), interaction=None,
+        bot=SimpleNamespace(module_kernel=kernel),
+    )
+    for _ in range(3):
+        assert asyncio.run(module_gate.prefix_gate(ctx)) is True
+    assert etat.in_flight == 0
+
+
+def test_groupe_et_sous_commande_de_deux_modules_sont_tous_refermes():
+    import asyncio
+    from types import SimpleNamespace
+
+    from cogs import runtime_observability_v26 as obs
+    from core import module_gate
+
+    etats = {}
+    for nom in ("cogs.a", "cogs.b"):
+        etat = _resilience()[1]
+        etat.name = nom
+        etats[nom] = etat
+    r = ModuleResilience(etats, lambda *a, **k: None)
+    kernel = SimpleNamespace(enter_runtime=r.enter, exit_runtime=r.exit, snapshot=lambda: {"modules": {}})
+    ctx = SimpleNamespace(message=SimpleNamespace(id=3003), interaction=None, bot=SimpleNamespace(module_kernel=kernel))
+    for nom in ("cogs.a", "cogs.b"):
+        ctx.command = SimpleNamespace(cog=type("C", (), {"__module__": nom})(), callback=None)
+        asyncio.run(module_gate.prefix_enter(ctx))
+    assert etats["cogs.a"].in_flight == etats["cogs.b"].in_flight == 1
+    obs._exit_module_runtime(ctx.bot, "cogs.b", ctx)
+    assert etats["cogs.a"].in_flight == etats["cogs.b"].in_flight == 0
