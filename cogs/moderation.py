@@ -788,19 +788,24 @@ class Moderation(commands.Cog):
             0: "Aucun", 900: "15 dernières minutes", 3600: "1 dernière heure",
             86400: "24 dernières heures",
         }[supprimer_messages]
-        await self.log_sanction(
+        journal = asyncio.create_task(self.log_sanction(
             ctx, "ban", membre, raison, case_number=outcome.case_number,
             extra_fields={"Messages supprimés": purge_label},
-        )
+        ))
         purge_suffix = {
             0: "",
             900: " Ses messages des 15 dernières minutes ont été supprimés.",
             3600: " Ses messages de la dernière heure ont été supprimés.",
             86400: " Ses messages des 24 dernières heures ont été supprimés.",
         }[supprimer_messages]
-        await self._confirm_sanction(
-            ctx, "ban", membre, raison, outcome.case_number, suffix=purge_suffix,
-        )
+        try:
+            await self._confirm_sanction(
+                ctx, "ban", membre, raison, outcome.case_number, suffix=purge_suffix,
+            )
+        finally:
+            # Log en fond (autre salon) ; toujours attendu : un log de
+            # sanction perdu en silence est pire qu'un aller-retour.
+            await journal
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
@@ -850,14 +855,19 @@ class Moderation(commands.Cog):
         if not outcome.executed:
             return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        await self.log_sanction(
+        journal = asyncio.create_task(self.log_sanction(
             ctx, "tempban", membre, raison,
             duration_seconds=outcome.duration_seconds, case_number=outcome.case_number,
-        )
-        await self._confirm_sanction(
-            ctx, "tempban", membre, raison, outcome.case_number,
-            duration=helpers.format_duration(outcome.duration_seconds),
-        )
+        ))
+        try:
+            await self._confirm_sanction(
+                ctx, "tempban", membre, raison, outcome.case_number,
+                duration=helpers.format_duration(outcome.duration_seconds),
+            )
+        finally:
+            # Log en fond (autre salon) ; toujours attendu : un log de
+            # sanction perdu en silence est pire qu'un aller-retour.
+            await journal
 
     @commands.hybrid_command(name="unban", description="Débannir un utilisateur via son identifiant Discord.")
     @app_commands.describe(user_id="L'identifiant Discord de l'utilisateur", raison="La raison")
@@ -898,10 +908,15 @@ class Moderation(commands.Cog):
         if not outcome.executed:
             return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        await self.log_sanction(ctx, "unban", outcome.resolved_target, raison, case_number=outcome.case_number)
-        await self._confirm_sanction(
-            ctx, "unban", outcome.resolved_target, raison, outcome.case_number,
-        )
+        journal = asyncio.create_task(self.log_sanction(ctx, "unban", outcome.resolved_target, raison, case_number=outcome.case_number))
+        try:
+            await self._confirm_sanction(
+                ctx, "unban", outcome.resolved_target, raison, outcome.case_number,
+            )
+        finally:
+            # Log en fond (autre salon) ; toujours attendu : un log de
+            # sanction perdu en silence est pire qu'un aller-retour.
+            await journal
 
     # ---------------------------------------------------------------- HACKBAN
 
@@ -952,11 +967,16 @@ class Moderation(commands.Cog):
         case_number, _error = await moderation_service.persist_sanction(
             self.bot, guild_id=ctx.guild.id, target_id=uid, actor_id=ctx.author.id, action="ban", reason=raison,
         )
-        await self.log_sanction(ctx, "ban", user, raison, case_number=case_number)
-        await self._confirm_sanction(
-            ctx, "hackban", user, raison, case_number,
-            suffix="Compte absent du serveur.",
-        )
+        journal = asyncio.create_task(self.log_sanction(ctx, "ban", user, raison, case_number=case_number))
+        try:
+            await self._confirm_sanction(
+                ctx, "hackban", user, raison, case_number,
+                suffix="Compte absent du serveur.",
+            )
+        finally:
+            # Log en fond (autre salon) ; toujours attendu : un log de
+            # sanction perdu en silence est pire qu'un aller-retour.
+            await journal
 
     # ---------------------------------------------------------------- KICK
 
@@ -994,10 +1014,15 @@ class Moderation(commands.Cog):
         if not outcome.executed:
             return await self._reply(ctx, outcome.hierarchy_error, ephemere=True)
 
-        await self.log_sanction(ctx, "kick", membre, raison, case_number=outcome.case_number)
-        await self._confirm_sanction(
-            ctx, "kick", membre, raison, outcome.case_number,
-        )
+        journal = asyncio.create_task(self.log_sanction(ctx, "kick", membre, raison, case_number=outcome.case_number))
+        try:
+            await self._confirm_sanction(
+                ctx, "kick", membre, raison, outcome.case_number,
+            )
+        finally:
+            # Log en fond (autre salon) ; toujours attendu : un log de
+            # sanction perdu en silence est pire qu'un aller-retour.
+            await journal
 
     # ---------------------------------------------------------------- MUTE
 
@@ -1101,10 +1126,15 @@ class Moderation(commands.Cog):
         if not outcome.executed:
             return await self._reply(ctx, outcome.rejection_reason, ephemere=True)
 
-        await self.log_sanction(ctx, "unmute", membre, raison, case_number=outcome.case_number)
-        await self._confirm_sanction(
-            ctx, "unmute", membre, raison, outcome.case_number,
-        )
+        journal = asyncio.create_task(self.log_sanction(ctx, "unmute", membre, raison, case_number=outcome.case_number))
+        try:
+            await self._confirm_sanction(
+                ctx, "unmute", membre, raison, outcome.case_number,
+            )
+        finally:
+            # Log en fond (autre salon) ; toujours attendu : un log de
+            # sanction perdu en silence est pire qu'un aller-retour.
+            await journal
 
     # ---------------------------------------------------------------- WARN
 
@@ -1184,15 +1214,20 @@ class Moderation(commands.Cog):
         extra = {"📌 Détails": f"Total d'avertissements : {total_txt}{role_note}"}
         if not notifier:
             extra["Notification"] = "Aucun MP envoyé (option notifier : false)."
-        await self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra, case_number=outcome.case_number)
+        journal = asyncio.create_task(self.log_sanction(ctx, "warn", membre, raison, extra_fields=extra, case_number=outcome.case_number))
         total_note = f" ({total_txt} au total)" if outcome.total_warnings is not None else ""
-        await self._confirm_sanction(
-            ctx, "warn", membre, raison, outcome.case_number,
-            suffix=(
-                f"{total_txt} avertissement(s) au total." + role_note
-                + ("" if notifier else " Aucun message privé envoyé.")
-            ),
-        )
+        try:
+            await self._confirm_sanction(
+                ctx, "warn", membre, raison, outcome.case_number,
+                suffix=(
+                    f"{total_txt} avertissement(s) au total." + role_note
+                    + ("" if notifier else " Aucun message privé envoyé.")
+                ),
+            )
+        finally:
+            # Log en fond (autre salon) ; toujours attendu : un log de
+            # sanction perdu en silence est pire qu'un aller-retour.
+            await journal
 
         if not outcome.auto_ban_triggered:
             return
@@ -1416,16 +1451,19 @@ class Moderation(commands.Cog):
 
         is_prefix = ctx.interaction is None
         protected_ids: set[int] = set()
-        progress = None
         # Chronométrage par étape : /clear prend 4 à 6 s en prod (mesuré du
         # 24 au 26/10) sans limitation de débit visible. Journalisé seulement
         # au-delà de 2 s, pour savoir QUELLE étape coûte avant de corriger.
         etapes: list[tuple[str, float]] = [("début", time.perf_counter())]
         if is_prefix:
-            # Accusé de réception immédiat pendant les appels API de purge.
-            progress = await ctx.channel.send("Suppression des messages en cours…")
-            protected_ids.add(int(progress.id))
-            etapes.append(("progression", time.perf_counter()))
+            # Accusé de réception : l'indicateur « SentriX écrit… », demandé
+            # sans l'attendre. L'ancien message « Suppression en cours… »
+            # coûtait deux allers-retours sur le chemin critique (envoi, puis
+            # modification) avant même la purge : +clear passe de 4 à 3 appels
+            # enchaînés, mesuré avec 300 ms de latence simulée.
+            tache = asyncio.create_task(self._typing_silencieux(ctx))
+            _TACHES_TYPING.add(tache)
+            tache.add_done_callback(_TACHES_TYPING.discard)
 
         if ctx.interaction is not None:
             # Les wrappers slash SentriX peuvent déjà avoir defer() avant d'entrer ici.
@@ -1466,13 +1504,6 @@ class Moderation(commands.Cog):
                 "ou `Voir l'historique`."
             )
             if is_prefix:
-                if progress is not None:
-                    try:
-                        await progress.edit(content=message)
-                        await progress.delete(delay=8)
-                        return
-                    except (discord.NotFound, discord.HTTPException):
-                        pass
                 return await ctx.channel.send(message, delete_after=8)
             try:
                 return await ctx.interaction.edit_original_response(content=message)
@@ -1481,13 +1512,6 @@ class Moderation(commands.Cog):
         except discord.HTTPException:
             message = "Une erreur est survenue, merci de réessayer."
             if is_prefix:
-                if progress is not None:
-                    try:
-                        await progress.edit(content=message)
-                        await progress.delete(delay=5)
-                        return
-                    except (discord.NotFound, discord.HTTPException):
-                        pass
                 return await ctx.channel.send(message, delete_after=5)
             try:
                 return await ctx.interaction.edit_original_response(content=message)
@@ -1502,12 +1526,9 @@ class Moderation(commands.Cog):
 
         texte = f"{len(messages)} message(s) supprimé(s)."
         if is_prefix:
-            # Réponse courte, sans embed ni bloc visuel. Elle disparaît rapidement.
-            if progress is not None:
-                await progress.edit(content=texte)
-                await progress.delete(delay=4)
-            else:
-                await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
+            # Réponse courte, sans embed ni bloc visuel. Elle disparaît
+            # rapidement (delete_after : programmé côté client, pas d'appel).
+            await panels.texte_court(ctx.channel, texte, supprimer_apres=4)
         else:
             # texte_court sait utiliser la réponse différée de /clear et garde la
             # confirmation éphémère, sans dépendre directement de response.send_message.
