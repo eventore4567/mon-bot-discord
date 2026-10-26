@@ -942,7 +942,21 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await rules_setup.send_lock_preview(self.bot, self.guild, interaction)
 
         verrou.callback = ouvrir_verrou
-        container.add_item(discord.ui.ActionRow(configure, verrou))
+
+        # Configurer les salons par type (lecture seule, staff, discussion,
+        # vocal), tous ou seulement ceux choisis : aperçu puis « Appliquer ».
+        types = discord.ui.Button(
+            label="Configurer les salons",
+            emoji="⚙️",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def ouvrir_types(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            await rules_setup.send_profile_preview(self.bot, self.guild, interaction)
+
+        types.callback = ouvrir_types
+        container.add_item(discord.ui.ActionRow(configure, verrou, types))
         if not pret:
             container.add_item(discord.ui.TextDisplay(
                 "-# Choisissez d'abord le salon du règlement et le rôle accordé "

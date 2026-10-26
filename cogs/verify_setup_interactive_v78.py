@@ -1041,3 +1041,227 @@ def install(bot: commands.Bot) -> bool:
 
 
 __all__ = ["install", "VerifySetupView", "build_setup_view", "open_setup_interaction", "_safe_image"]
+
+
+# ---------------------------------------------------------------------------
+# Configurer les salons par type (lecture seule, staff, discussion, vocal)
+# ---------------------------------------------------------------------------
+
+async def _profile_context(bot, guild) -> dict:
+    """Rôle Vérifié, rôles d'arrivée et salons à ne jamais toucher."""
+    conf = await bot.db.get_guild_config(guild.id)
+    protected: set[int] = set()
+    for key in ("verification_channel", "rules_channel", "welcome_channel"):
+        value = _conf(conf, key)
+        if value:
+            protected.add(int(value))
+    rules = getattr(guild, "rules_channel", None)
+    if rules is not None:
+        protected.add(int(rules.id))
+    honeypot = None
+    try:
+        honeypot = await bot.db.fetchone(
+            "SELECT category_id, verify_channel_id, trap_channel_id, unverified_role_id "
+            "FROM honeypot_verification WHERE guild_id=?", (guild.id,),
+        )
+    except Exception:
+        honeypot = None
+    for field_name in ("verify_channel_id", "trap_channel_id"):
+        try:
+            value = honeypot[field_name] if honeypot else None
+        except (KeyError, IndexError, TypeError):
+            value = None
+        if value:
+            protected.add(int(value))
+    role_id = _conf(conf, "verify_role", _conf(conf, "verification_role"))
+    verified = guild.get_role(int(role_id)) if role_id else None
+    entry = []
+    try:
+        from sentrix_verification_v96 import VerificationConfigV96
+
+        manager = bot.get_cog("VerificationConfigV96") or VerificationConfigV96(bot)
+        entry = await manager._entry_roles(guild, verified, honeypot)
+    except Exception:
+        logger.debug("Rôles d'arrivée illisibles guild=%s", guild.id, exc_info=True)
+    return {"verified_role": verified, "entry_roles": entry, "protected_ids": frozenset(protected)}
+
+
+def _profile_card(plan) -> discord.Embed:
+    from utils import embeds
+
+    return embeds.standard("Configurer les salons", plan.preview())
+
+
+async def send_profile_preview(bot, guild, interaction: discord.Interaction) -> None:
+    """Aperçu de la configuration par type ; l'interaction doit être différée."""
+    from utils import channel_profiles
+
+    try:
+        context = await _profile_context(bot, guild)
+        plan = channel_profiles.plan_profiles(guild, **context)
+    except Exception:
+        logger.exception("Aperçu de configuration des salons impossible guild=%s", guild.id)
+        return await interaction.followup.send(
+            "Impossible d'analyser les salons. Aucun salon n'a été modifié.", ephemeral=True,
+        )
+    await interaction.followup.send(
+        embed=_profile_card(plan),
+        view=ChannelProfileView(bot, guild, interaction.user.id, context, plan),
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+
+async def apply_profile_plan(guild, plan, actor) -> int:
+    """Applique les dérogations prévues ; annule tout si Discord en refuse une."""
+    me = getattr(guild, "me", None)
+    blocked = [
+        channel for channel in {op[0] for op in plan.operations}
+        if me is not None and not channel.permissions_for(me).manage_channels
+    ]
+    if blocked:
+        raise ValueError(
+            "SentriX ne peut pas gérer ces salons : "
+            + ", ".join(f"#{c.name}" for c in blocked[:8])
+            + ". Remontez son rôle ou donnez-lui « Gérer les salons »."
+        )
+    reason = f"SentriX : configuration des salons par type, demandée par {actor} ({actor.id})"
+    done = []
+    try:
+        for channel, target, old, new, had in plan.operations:
+            await channel.set_permissions(target, overwrite=new, reason=reason)
+            done.append((channel, target, old, had))
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        for channel, target, old, had in reversed(done):
+            try:
+                await channel.set_permissions(
+                    target, overwrite=old if had else None,
+                    reason="SentriX : annulation après refus de Discord",
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                logger.exception("Annulation impossible salon=%s", getattr(channel, "id", "?"))
+        raise RuntimeError(f"Discord a refusé une permission sur #{getattr(channel, 'name', '?')}") from exc
+    return len({channel.id for channel, *_rest in done})
+
+
+_PROFILE_CHOICES = [
+    ("auto", "Type automatique (d'après le nom)"),
+    ("lecture", "📢 Lecture seule"),
+    ("discussion", "💬 Discussion"),
+    ("staff", "🛡️ Staff seulement"),
+    ("ignore", "⏭️ Ne pas toucher"),
+]
+
+
+class ChannelProfileView(discord.ui.View):
+    def __init__(self, bot, guild, owner_id: int, context: dict, plan):
+        super().__init__(timeout=300)
+        self.bot, self.guild, self.owner_id = bot, guild, int(owner_id)
+        self.context = context
+        self.only_ids: set[int] = set()
+        self.forced: dict[int, str] = {}
+        self.running = False
+
+        channels = discord.ui.ChannelSelect(
+            placeholder="Choisir des salons (sinon : tous)",
+            channel_types=_SELECT_TYPES, min_values=0, max_values=25, row=0,
+        )
+        kind = discord.ui.Select(
+            placeholder="Type pour les salons choisis",
+            options=[discord.SelectOption(label=label, value=value) for value, label in _PROFILE_CHOICES],
+            row=1,
+        )
+
+        async def on_channels(interaction: discord.Interaction):
+            self.only_ids = {int(value.id) for value in channels.values}
+            await self._refresh(interaction)
+
+        async def on_kind(interaction: discord.Interaction):
+            value = kind.values[0]
+            if not self.only_ids:
+                return await interaction.response.send_message(
+                    "Choisissez d'abord un ou plusieurs salons, puis leur type.", ephemeral=True,
+                )
+            for channel_id in self.only_ids:
+                if value == "auto":
+                    self.forced.pop(channel_id, None)
+                else:
+                    self.forced[channel_id] = value
+            await self._refresh(interaction)
+
+        channels.callback = on_channels
+        kind.callback = on_kind
+        self.add_item(channels)
+        self.add_item(kind)
+        self._sync_apply(plan)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        user = interaction.user
+        allowed = (
+            user.id == self.owner_id
+            and interaction.guild_id == self.guild.id
+            and (user.id == self.guild.owner_id or user.guild_permissions.administrator)
+        )
+        if not allowed:
+            await interaction.response.send_message(
+                "Réservé à l'administrateur qui a ouvert cette configuration.", ephemeral=True,
+            )
+        return allowed
+
+    def _plan(self):
+        from utils import channel_profiles
+
+        return channel_profiles.plan_profiles(
+            self.guild, **self.context, only_ids=self.only_ids, forced=self.forced,
+        )
+
+    def _sync_apply(self, plan) -> None:
+        for item in self.children:
+            if isinstance(item, discord.ui.Button) and item.label == "Appliquer":
+                item.disabled = not plan.operations
+
+    async def _refresh(self, interaction: discord.Interaction) -> None:
+        plan = self._plan()
+        self._sync_apply(plan)
+        await interaction.response.edit_message(
+            content=None, embed=_profile_card(plan), view=self,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @discord.ui.button(label="Appliquer", style=discord.ButtonStyle.success, row=2)
+    async def apply(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if self.running:
+            return await interaction.response.send_message("Configuration déjà en cours.", ephemeral=True)
+        self.running = True
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            # Recalcul au clic : les salons ont pu changer depuis l'aperçu.
+            plan = self._plan()
+            if not plan.operations:
+                return await _send_access_feedback(
+                    interaction.followup, "Tout est déjà réglé : aucun salon modifié.",
+                )
+            changed = await apply_profile_plan(self.guild, plan, interaction.user)
+        except ValueError as exc:
+            return await _send_access_feedback(interaction.followup, str(exc), kind="warning")
+        except Exception:
+            logger.exception("Configuration des salons impossible guild=%s", self.guild.id)
+            return await _send_access_feedback(
+                interaction.followup,
+                "Discord a refusé une modification : tout a été remis comme avant.",
+                kind="warning",
+            )
+        finally:
+            self.running = False
+        self.stop()
+        logger.info("Salons configurés par type guild=%s : %s salon(s)", self.guild.id, changed)
+        await _send_access_feedback(
+            interaction.followup, f"{changed} salon(s) configuré(s) selon leur type.", kind="success",
+        )
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary, row=2)
+    async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.stop()
+        await interaction.response.edit_message(
+            content="Configuration annulée : aucun salon modifié.", embed=None, view=None,
+        )
