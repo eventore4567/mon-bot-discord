@@ -82,6 +82,8 @@ RUN python -m pytest -q \
     tests/test_configuration_salons_par_type.py \
     tests/test_reglement_configuration_automatique.py \
     tests/test_staff_watch_evenements.py \
+    tests/test_moderation_short_replies.py \
+    tests/test_moderation_latence.py \
     tests/test_logs_id_toujours_affiche.py \
     tests/test_verrouillage_reglement.py \
     tests/test_verification_channel_aware_lock.py \
