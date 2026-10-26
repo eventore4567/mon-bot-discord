@@ -345,3 +345,29 @@ def test_les_logs_ignorent_les_messages_purges():
     assert not log_service.is_purged(113)
     log_service._purged_message_ids[112] = 0.0  # expiré
     assert not log_service.is_purged(112)
+
+
+@pytest.mark.asyncio
+async def test_clear_supprime_les_vieux_messages_en_parallele():
+    """Messages de plus de 14 jours : un appel chacun, mais pas enchaînés."""
+    en_cours = 0
+    pic = 0
+
+    async def lent():
+        nonlocal en_cours, pic
+        en_cours += 1
+        pic = max(pic, en_cours)
+        await asyncio.sleep(0.05)
+        en_cours -= 1
+
+    vieux = [_message(i, age_jours=20) for i in range(1, 9)]
+    for message in vieux:
+        message.delete = AsyncMock(side_effect=lent)
+    ctx = _clear_ctx(vieux)
+    debut = asyncio.get_running_loop().time()
+    await Moderation._purge_messages(ctx, vieux)
+    duree = asyncio.get_running_loop().time() - debut
+
+    assert all(m.delete.await_count == 1 for m in vieux)
+    assert pic > 1 and duree < 0.05 * len(vieux) / 2
+    assert ctx._sentrix_purge_unitaire == len(vieux)

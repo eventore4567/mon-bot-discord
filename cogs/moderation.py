@@ -1537,13 +1537,14 @@ class Moderation(commands.Cog):
         total = etapes[-1][1] - etapes[0][1]
         if total > 2.0:
             logger.info(
-                "Clear lent guild=%s : %.2fs (%s), %s message(s)",
+                "Clear lent guild=%s : %.2fs (%s), %s message(s) dont %s supprimé(s) un par un",
                 getattr(ctx.guild, "id", "?"), total,
                 ", ".join(
                     f"{nom}={(t - etapes[i][1]) * 1000:.0f}ms"
                     for i, (nom, t) in enumerate(etapes[1:])
                 ),
                 len(messages),
+                getattr(ctx, "_sentrix_purge_unitaire", "?"),
             )
 
         asyncio.create_task(self._log_clear_safely(ctx, messages, requested))
@@ -1561,31 +1562,50 @@ class Moderation(commands.Cog):
         limite_groupee = discord.utils.utcnow() - timedelta(days=14)
         recent = [message for message in candidates if message.created_at > limite_groupee]
         old = [message for message in candidates if message.created_at <= limite_groupee]
+        individuels: list = list(old)
 
         for start in range(0, len(recent), 100):
             batch = recent[start:start + 100]
             if not batch:
                 continue
+            if len(batch) == 1:
+                individuels.extend(batch)
+                continue
             try:
-                if len(batch) == 1:
-                    await batch[0].delete()
-                else:
-                    await ctx.channel.delete_messages(batch)
+                await ctx.channel.delete_messages(batch)
             except discord.Forbidden:
                 raise
             except (discord.HTTPException, discord.ClientException):
                 # Repli message par message, mais toujours sur la sélection initiale.
-                for message in batch:
+                individuels.extend(batch)
+
+        # Suppressions unitaires (plus de 14 jours, repli) en parallèle :
+        # enchaînées, elles coûtaient un aller-retour chacune (11 messages en
+        # 3,4 s en prod le 26/10). discord.py respecte seul la limite de débit
+        # de la route ; le sémaphore évite juste de tout empiler d'un coup.
+        if individuels:
+            verrou = asyncio.Semaphore(5)
+
+            async def supprimer(message) -> None:
+                async with verrou:
                     try:
                         await message.delete()
                     except discord.NotFound:
                         pass
 
-        for message in old:
-            try:
-                await message.delete()
-            except discord.NotFound:
-                pass
+            resultats = await asyncio.gather(
+                *(supprimer(message) for message in individuels), return_exceptions=True
+            )
+            for resultat in resultats:
+                if isinstance(resultat, discord.Forbidden):
+                    raise resultat
+            for resultat in resultats:
+                if isinstance(resultat, BaseException):
+                    raise resultat
+        try:
+            ctx._sentrix_purge_unitaire = len(individuels)
+        except Exception:
+            pass
 
         return candidates
 
