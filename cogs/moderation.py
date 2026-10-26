@@ -1417,10 +1417,15 @@ class Moderation(commands.Cog):
         is_prefix = ctx.interaction is None
         protected_ids: set[int] = set()
         progress = None
+        # Chronométrage par étape : /clear prend 4 à 6 s en prod (mesuré du
+        # 24 au 26/10) sans limitation de débit visible. Journalisé seulement
+        # au-delà de 2 s, pour savoir QUELLE étape coûte avant de corriger.
+        etapes: list[tuple[str, float]] = [("début", time.perf_counter())]
         if is_prefix:
             # Accusé de réception immédiat pendant les appels API de purge.
             progress = await ctx.channel.send("Suppression des messages en cours…")
             protected_ids.add(int(progress.id))
+            etapes.append(("progression", time.perf_counter()))
 
         if ctx.interaction is not None:
             # Les wrappers slash SentriX peuvent déjà avoir defer() avant d'entrer ici.
@@ -1449,6 +1454,7 @@ class Moderation(commands.Cog):
                 break
         if invocation is not None and invocation_id not in protected_ids:
             candidates.append(invocation)
+        etapes.append(("historique", time.perf_counter()))
 
         log_service.mark_purged(int(message.id) for message in candidates)
 
@@ -1488,6 +1494,7 @@ class Moderation(commands.Cog):
             except (discord.NotFound, discord.HTTPException):
                 return await ctx.interaction.followup.send(message, ephemeral=True)
 
+        etapes.append(("suppression", time.perf_counter()))
         messages = [
             message for message in deleted
             if invocation_id is None or int(message.id) != int(invocation_id)
@@ -1505,6 +1512,18 @@ class Moderation(commands.Cog):
             # texte_court sait utiliser la réponse différée de /clear et garde la
             # confirmation éphémère, sans dépendre directement de response.send_message.
             await panels.texte_court(ctx, texte, ephemere=True)
+        etapes.append(("réponse", time.perf_counter()))
+        total = etapes[-1][1] - etapes[0][1]
+        if total > 2.0:
+            logger.info(
+                "Clear lent guild=%s : %.2fs (%s), %s message(s)",
+                getattr(ctx.guild, "id", "?"), total,
+                ", ".join(
+                    f"{nom}={(t - etapes[i][1]) * 1000:.0f}ms"
+                    for i, (nom, t) in enumerate(etapes[1:])
+                ),
+                len(messages),
+            )
 
         asyncio.create_task(self._log_clear_safely(ctx, messages, requested))
 
