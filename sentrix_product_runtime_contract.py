@@ -84,7 +84,7 @@ def install() -> None:
         v95._build_signature = build_signature
 
     _INSTALLED = True
-    logger.warning(
+    logger.info(
         "Contrats runtime produit actifs : IA passive suit le leader HA, duree de mute requise en slash, URLs IA conservees."
     )
 

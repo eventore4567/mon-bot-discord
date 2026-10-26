@@ -200,7 +200,7 @@ async def _prepare_leader_storage(
         # nouveau leader lit directement les données à jour. Ni snapshot de référence
         # (il n'y a plus de fichier SQLite à protéger), ni restauration au takeover —
         # celle-ci fermait la connexion pour restaurer un fichier que le bot n'utilise plus.
-        logger.warning(
+        logger.info(
             "HA: base principale PostgreSQL partagée — reprise immédiate, aucune restauration SQLite."
         )
         return

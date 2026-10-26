@@ -1025,7 +1025,10 @@ def publish(bot: Any) -> dict[str, Any]:
     }
     bot._sentrix_slash_catalog_report = report
     if missing or hidden or report["lost_roots"]:
-        logger.warning(
+        # Les commandes masquées le sont volontairement : seule une source
+        # introuvable ou une racine perdue mérite un avertissement.
+        logger.log(
+            logging.WARNING if (missing or report["lost_roots"]) else logging.INFO,
             "Catalogue slash : %s source(s) introuvable(s) %s, %s masquée(s) %s, racines perdues %s.",
             len(missing), missing[:10], len(hidden), hidden[:10], report["lost_roots"],
         )

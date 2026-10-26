@@ -499,7 +499,7 @@ def install(bot: commands.Bot) -> dict[str, Any]:
     if not failed_loop_only:
         logger.warning("Garde finale : superviseur de boucles non corrigé.")
 
-    logger.warning(
+    logger.info(
         "Garde stabilité finale active : zéro cooldown=%s, throttle IA=%s, fichiers sûrs=%s, "
         "personnalité IA=%s, boucles failed-only=%s, diagnostic unique=%s.",
         zero_cooldown,

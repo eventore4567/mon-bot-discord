@@ -470,7 +470,7 @@ def _install_playlist_group(bot, music_cog) -> None:
 
     music_root.add_command(playlist)
     music_cog._sentrix_playlists_v108 = True
-    logger.warning(
+    logger.info(
         "Musique V108 playlists active : /music playlist create/add/list/show/play/remove/clear/rename/delete."
     )
 

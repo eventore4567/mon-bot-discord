@@ -176,7 +176,7 @@ from sentrix_verification_v96_finalizer import install as _install_verification_
 
 _install_verification_v96()
 _install_verification_v96_final()
-logger.warning(
+logger.info(
     "V96 vérification guidée + finalizer explicitement branchés dans l'entrypoint Railway HA produit."
 )
 

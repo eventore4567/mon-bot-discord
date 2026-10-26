@@ -182,7 +182,7 @@ def _patch_logs_cog(bot: commands.Bot) -> bool:
     if "_send" in vars(cog):
         stale = vars(cog).get("_send")
         function = getattr(stale, "__func__", stale)
-        logger.warning(
+        logger.info(
             "V5.3 compat : ancien override Logs._send retiré | qualname=%s | module=%s",
             getattr(function, "__qualname__", "?"),
             getattr(function, "__module__", "?"),
@@ -199,7 +199,7 @@ def install(bot: commands.Bot) -> None:
     state = _state(bot)
     state["installed"] = True
     _patch_logs_cog(bot)
-    logger.warning(
+    logger.info(
         "V5.3 compat chargé sans patch : transport officiel = log_service -> wide_logs."
     )
 

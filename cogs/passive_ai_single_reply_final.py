@@ -367,7 +367,7 @@ def install(bot: commands.Bot) -> None:
     }
     setattr(bot, _MARKER, True)
 
-    logger.warning(
+    logger.info(
         "IA passive V2 : service_principal=%s responders=%s wrappers=%s "
         "fallback_hotfix_supprime=%s postgres=%s ttl=%ss",
         primary_service,

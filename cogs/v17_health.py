@@ -153,7 +153,8 @@ async def _recover_startup_tasks(bot: commands.Bot) -> list[str]:
                         logger.exception("Impossible de relancer la restauration PlatformV4")
 
     if recovered:
-        logger.warning("Tâches de fond récupérées après READY : %s", ", ".join(recovered))
+        # Relance prévue à chaque démarrage : information, pas avertissement.
+        logger.info("Tâches de fond récupérées après READY : %s", ", ".join(recovered))
     return recovered
 
 

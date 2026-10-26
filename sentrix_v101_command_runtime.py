@@ -477,7 +477,7 @@ def install() -> None:
     _install_ai_timeout()
     _install_runtime_trace()
     _INSTALLED = True
-    logger.warning(
+    logger.info(
         "SentriX V101 installé : signatures assainies, Cog fail-closed, timeout IA renforcé et traces privées actives."
     )
 

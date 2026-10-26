@@ -259,7 +259,7 @@ class BotTracker(commands.Cog):
         await asyncio.sleep(1.0)
         changed = _restore_canonical_log_pipeline()
         if changed:
-            logger.warning("Pipeline logs canonique restauré après les wrappers V3 legacy.")
+            logger.info("Pipeline logs canonique restauré après les wrappers V3 legacy.")
         else:
             logger.info("Pipeline logs canonique déjà autoritaire.")
 

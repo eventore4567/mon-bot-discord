@@ -8,6 +8,22 @@ import sentrix_v95_runtime as v95
 import sentrix_v98_slash as v98
 
 
+def _v98_isole():
+    """Un exemplaire NEUF de sentrix_v98_slash, sous un autre nom.
+
+    sentrix_canonical_command_surface et sentrix_v102_command_surface
+    remplacent v98.semantic_bucket / semantic_leaf à leur installation : selon
+    l'ordre des tests, on vérifiait leur version au lieu de celle de v98
+    (« panels » au lieu de « panel », racine « general » absente).
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("v98_isole", v98.__file__)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _target(original: str, root: str, leaf: str | None = None) -> v95.SlashTarget:
     async def callback(ctx):
         return None
@@ -27,6 +43,7 @@ def _target(original: str, root: str, leaf: str | None = None) -> v95.SlashTarge
 
 
 def test_ticket_panel_uses_semantic_path():
+    v98 = _v98_isole()
     target = _target("ticketpanel", "ticket", "panel")
     assert v98.semantic_bucket("ticket", target) == "panel"
     assert v98.semantic_leaf("ticket", "panel", target) == "create"
@@ -58,6 +75,7 @@ def test_install_normalizes_main_category_roots(monkeypatch):
 
 
 def test_overflow_uses_semantic_groups_never_page_numbers(monkeypatch):
+    v98 = _v98_isole()
     bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
     targets = [
         _target(f"guard-{index}", "security")

@@ -153,7 +153,7 @@ def install() -> None:
                 )
 
             bot._sentrix_verification_v96_path = verification_paths[0]
-            logger.warning(
+            logger.info(
                 "V96 final : +verification/+verify-panel/+verify-setup actifs ; slash=%s.",
                 verification_paths[0],
             )

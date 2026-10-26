@@ -262,7 +262,7 @@ def install(bot: commands.Bot) -> None:
         "heavy_rate_limit": False,
     }
     setattr(bot, _MARKER, True)
-    logger.warning(
+    logger.info(
         "SentriX zéro cooldown V2 actif : V41=%s, état V41 vidé=%s, %s check(s) globaux, %s check(s) slash retirés, %s commandes sans cooldown/max_concurrency.",
         bot.no_cooldown_final_state["v41_throttling_disabled"],
         bot.no_cooldown_final_state["v41_state_cleared"],

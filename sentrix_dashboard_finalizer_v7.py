@@ -106,7 +106,7 @@ def install() -> bool:
         if forbidden in chain:
             raise RuntimeError(f"Dashboard : le patch de réponse {forbidden} est encore branché sur /app")
 
-    logger.warning(
+    logger.info(
         "Dashboard : programme unique servi (sha=%s, %s octets, chaîne=%s).",
         digest, len(str(dashboard.INDEX_HTML).encode("utf-8")), " > ".join(chain),
     )

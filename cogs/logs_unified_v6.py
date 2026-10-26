@@ -729,7 +729,7 @@ async def install(bot: commands.Bot) -> None:
         await bot.remove_cog("UnifiedLogsV6")
     await bot.add_cog(UnifiedLogsV6(bot))
 
-    logger.warning(
+    logger.info(
         "Logs V6 actifs : 9 routes, logs-dossiers, tickets/transcripts unifiés et barre large."
     )
 

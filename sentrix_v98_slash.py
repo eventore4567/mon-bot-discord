@@ -466,7 +466,7 @@ def _add_grouped_surface_v98(bot) -> dict[str, dict]:
     bot._sentrix_v98_slash_mapping = report
     bot._sentrix_v98_slash_root_count = len(roots)
 
-    logger.warning(
+    logger.info(
         "V98 slash prête : %s actions, %s racines, sous-groupes sémantiques actifs.",
         len(report),
         len(roots),
@@ -484,7 +484,7 @@ def install() -> None:
     v95._add_grouped_surface = _add_grouped_surface_v98
     v95._sentrix_v98_grouped_slash = True
 
-    logger.warning(
+    logger.info(
         "V98 slash actif : level/game/role normalisés, sanctions fusionnées, page-N supprimées."
     )
 

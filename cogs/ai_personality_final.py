@@ -321,7 +321,7 @@ def install(bot=None) -> bool:
             "installed": True,
             "sarcasm_variations": SARCASM_VARIATION_COUNT,
         }
-    logger.warning(
+    logger.info(
         "Personnalité IA dynamique active : expert sur demandes utiles, sarcasme calme sur hostilité/vides (%s variations).",
         SARCASM_VARIATION_COUNT,
     )

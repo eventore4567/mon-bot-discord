@@ -212,7 +212,7 @@ def install_slash() -> None:
     prepare_bot_v97._sentrix_original = current_prepare
     v95.prepare_bot = prepare_bot_v97
     v95._sentrix_v97_reliability = True
-    logger.warning("V97 slash actif : gaps optionnels sûrs, attachments restaurés, /setup nettoyé.")
+    logger.info("V97 slash actif : gaps optionnels sûrs, attachments restaurés, /setup nettoyé.")
 
 
 DASHBOARD_CSS = r'''

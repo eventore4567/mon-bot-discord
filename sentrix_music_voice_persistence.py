@@ -289,7 +289,7 @@ class PersistentVoiceState:
                             max(0.0, time.monotonic() - abnormal_at),
                         )
                     else:
-                        logger.warning(
+                        logger.info(
                             "connexion vocale persistante restaurée -> guild=%s channel=%s",
                             guild_id,
                             voice_channel.id,

@@ -299,7 +299,7 @@ def _install_smooth_ffmpeg_defaults(cog) -> None:
         options.update(_SMOOTH_FFMPEG_OPTIONS)
         music_module.FFMPEG_OPTIONS = options
         cog._sentrix_music_audio_v103 = True
-        logger.warning(
+        logger.info(
             "Musique V103 audio fluide active : reconnexion renforcée + PCM 48 kHz stéréo + anti-jitter aresample."
         )
     except Exception:

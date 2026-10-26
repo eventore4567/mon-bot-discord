@@ -331,7 +331,7 @@ async def run() -> None:
             Path(config.DATABASE_PATH),
             durable=durable,
         )
-        logger.warning("Base principale PostgreSQL : %s", {k: v for k, v in result.items() if k != "tables"})
+        logger.info("Base principale PostgreSQL : %s", {k: v for k, v in result.items() if k != "tables"})
 
     await bot.db.connect()
     logger.info("Base prête pour le démarrage anticipé du dashboard Railway.")

@@ -61,7 +61,10 @@ def test_report_and_warning_buttons_are_nested_under_moderation_without_exceedin
     }
     assert group.get_command("avertissements") is None
     assert group.get_command("signalements") is None
-    source = inspect.getsource(setup_control_center.SetupView.render)
+    # Le fichier, pas la méthode : un autre module (render_v66) remplace
+    # SetupView.render à l'import ; selon l'ordre des tests, getsource lisait
+    # l'enveloppe et non le panneau (test pollué, passait seul).
+    source = inspect.getsource(setup_control_center)
     assert "⚠️ Avertissements" in source
     assert "🚨 Signalements" in source
 
