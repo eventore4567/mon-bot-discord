@@ -62,6 +62,7 @@ def test_rules_channel_stays_visible_to_unverified_members():
 
 
 def test_rules_setup_is_explicitly_separate_from_reinforced_verification():
-    assert "Ce système gère le **règlement** séparément de la vérification renforcée." in RULES_SETUP
+    # La phrase d'explication a été retirée volontairement de l'interface
+    # (a2b73e6e, aperçu simplifié) : seul le comportement reste vérifié.
     assert "Toute modification future invalidera automatiquement les anciennes acceptations." in RULES_SETUP
     assert "open_setup_interaction" in RULES_SETUP

@@ -164,6 +164,13 @@ def _exit_module_runtime(
     bot: commands.Bot, module_name: str | None, source: object = None
 ) -> None:
     kernel = getattr(bot, "module_kernel", None)
+    # Module et clé mémorisés par la garde à l'entrée : ils font foi, même si
+    # le contexte a changé depuis.
+    memorise = getattr(source, "_sentrix_appel", None)
+    if isinstance(memorise, tuple) and len(memorise) == 2 and memorise[0]:
+        if kernel is not None and hasattr(kernel, "exit_runtime"):
+            kernel.exit_runtime(memorise[0], memorise[1])
+        return
     if not (module_name and kernel is not None and hasattr(kernel, "exit_runtime")):
         return
     # La même clé qu'à l'entrée : refermer sans clé viserait l'invocation la

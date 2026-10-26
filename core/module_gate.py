@@ -99,7 +99,16 @@ async def prefix_gate(ctx: commands.Context) -> bool:
     if module and kernel is not None and hasattr(kernel, "enter_runtime"):
         # La clé de l'INVOCATION, pas du module : une commande hybride lancée
         # en slash passe ici ET par la garde slash, avec la même interaction.
-        kernel.enter_runtime(module, cle_dinvocation(ctx))
+        cle = cle_dinvocation(ctx)
+        kernel.enter_runtime(module, cle)
+        # La sortie réutilise EXACTEMENT ce module et cette clé : une couche
+        # qui modifie le contexte pendant la commande (réponse différée,
+        # message supprimé, interaction simulée) faisait recalculer une autre
+        # clé, et l'entrée ne se refermait plus (+clear, 26/10 09:51).
+        try:
+            ctx._sentrix_appel = (module, cle)
+        except Exception:
+            pass
     return True
 
 

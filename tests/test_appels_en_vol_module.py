@@ -112,3 +112,37 @@ def test_en_prefixe_pur_la_cle_vient_du_message():
         message = type("M", (), {"id": 111})()
 
     assert cle_dinvocation(_Ctx()) == ("m", 111)
+
+
+def test_un_contexte_modifie_pendant_la_commande_ne_fait_plus_fuir_l_appel():
+    """Prod 26/10 09:51 : +clear en erreur, appel jamais refermé, module dégradé.
+
+    La sortie recalculait la clé depuis le contexte ; une couche qui y pose une
+    interaction (réponse différée simulée) en cours de commande changeait la
+    clé. La garde mémorise désormais module + clé, et la sortie les réutilise.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from cogs import runtime_observability_v26 as obs
+    from core import module_gate
+
+    r, etat = _resilience()
+    etat.name = "cogs.moderation"
+    etats = {"cogs.moderation": etat}
+    r = ModuleResilience(etats, lambda *a, **k: None)
+    kernel = SimpleNamespace(
+        enter_runtime=r.enter, exit_runtime=r.exit, snapshot=lambda: {"modules": {}},
+    )
+    cog = type("Moderation", (), {"__module__": "cogs.moderation"})()
+    ctx = SimpleNamespace(
+        command=SimpleNamespace(cog=cog, callback=None),
+        message=SimpleNamespace(id=1001), interaction=None,
+        bot=SimpleNamespace(module_kernel=kernel),
+    )
+    asyncio.run(module_gate.prefix_gate(ctx))
+    assert etat.in_flight == 1
+    # Une couche pose une interaction sur le contexte pendant la commande.
+    ctx.interaction = SimpleNamespace(id=555)
+    obs._exit_module_runtime(ctx.bot, "cogs.moderation", ctx)
+    assert etat.in_flight == 0
