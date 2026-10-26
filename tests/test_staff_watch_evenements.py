@@ -105,7 +105,9 @@ DECLENCHEURS = {
         _membre(), _membre(roles=[SimpleNamespace(id=3, mention="<@&3>")])),
     "timeout": lambda s: s.on_member_update(
         _membre(), _membre(timed_out_until=dt.datetime(2030, 1, 1, tzinfo=dt.timezone.utc))),
-    "bans": lambda s: s.on_member_ban(_guild(), SimpleNamespace(id=MEMBRE)),
+    "bans": lambda s: s.on_audit_log_entry_create(SimpleNamespace(
+        action=discord.AuditLogAction.ban, user_id=AUTRE, guild=_guild(),
+        target=SimpleNamespace(id=MEMBRE), reason=None, changes=SimpleNamespace(after=SimpleNamespace()))),
     "join_leave": lambda s: s.on_member_join(_membre()),
     "invites": lambda s: s.on_invite_create(SimpleNamespace(
         guild=_guild(), inviter=SimpleNamespace(id=MEMBRE), code="abc", channel=_salon())),

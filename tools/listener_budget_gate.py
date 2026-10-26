@@ -63,12 +63,16 @@ async def _close_runtime(bot) -> None:
 # salon, preuves, logs unifiés V6 (suppression) et leurs démarrages. Prochaine
 # étape : fusionner les doublons (deux répondeurs IA, plusieurs logs de
 # suppression) plutôt que relever encore.
+# Relevés le 26/10/2026, un de plus chacun, par choix : /staff watch doit voir
+# un membre surveillé arriver ou partir (contournement de ban), et ces deux
+# événements n'existent pas dans le journal d'audit. Les bans surveillés, eux,
+# passent par on_audit_log_entry_create : on_member_ban n'a pas bougé.
 BUDGETS: dict[str, int] = {
     "on_message": 24,
     "on_ready": 38,
-    "on_member_join": 17,
+    "on_member_join": 18,
     "on_command_completion": 14,
-    "on_member_remove": 8,
+    "on_member_remove": 9,
     "on_member_ban": 6,
     "on_guild_join": 9,
     "on_guild_role_update": 6,

@@ -1938,14 +1938,6 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         await self._watch_event(member.guild.id, member.id, "join_leave", "A quitté le serveur")
 
     @commands.Cog.listener()
-    async def on_member_ban(self, guild: discord.Guild, user):
-        await self._watch_event(guild.id, user.id, "bans", "A été banni du serveur")
-
-    @commands.Cog.listener()
-    async def on_member_unban(self, guild: discord.Guild, user):
-        await self._watch_event(guild.id, user.id, "bans", "A été débanni")
-
-    @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite):
         guild = getattr(invite, "guild", None)
         inviter = getattr(invite, "inviter", None)
@@ -1963,7 +1955,18 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         """Actions faites PAR le membre surveillé : seule source fiable de l'auteur."""
         actor_id = getattr(entry, "user_id", None)
         guild = getattr(entry, "guild", None)
-        if not actor_id or guild is None or (guild.id, int(actor_id)) not in self._watch_cache:
+        if guild is None:
+            return
+        # Ban / déban REÇU par le membre surveillé : lu ici plutôt que par deux
+        # écouteurs on_member_ban/unban de plus (budget d'écouteurs tenu).
+        action = getattr(getattr(entry, "action", None), "name", "")
+        target_id = getattr(getattr(entry, "target", None), "id", None)
+        if action in {"ban", "unban"} and target_id and (guild.id, int(target_id)) in self._watch_cache:
+            text = "A été banni du serveur" if action == "ban" else "A été débanni"
+            if actor_id:
+                text += f" par {_mention(actor_id)}"
+            await self._watch_event(guild.id, int(target_id), "bans", text)
+        if not actor_id or (guild.id, int(actor_id)) not in self._watch_cache:
             return
         event_type, summary = _audit_watch_summary(entry)
         if event_type:

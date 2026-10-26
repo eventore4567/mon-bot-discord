@@ -36,7 +36,7 @@ EVENTS: tuple[WatchEvent, ...] = (
     WatchEvent("username", "Nom / avatar Discord", "Profil", "👤", "Nom d'utilisateur et avatar global", ("intent:members",)),
     WatchEvent("roles", "Rôles reçus / retirés", "Rôles", "🎭", "Chaque rôle ajouté ou enlevé", ("intent:members",)),
     WatchEvent("timeout", "Exclusions temporaires reçues", "Sanctions", "⏳", "Timeout posé ou levé sur lui", ("intent:members",)),
-    WatchEvent("bans", "Bannissement / débannissement", "Sanctions", "🔨", "S'il est banni ou débanni", ("intent:moderation",)),
+    WatchEvent("bans", "Bannissement / débannissement", "Sanctions", "🔨", "S'il est banni ou débanni", ("intent:moderation", "perm:view_audit_log")),
     WatchEvent("join_leave", "Arrivées / départs du serveur", "Serveur", "🚪", "Quand il rejoint ou quitte", ("intent:members",)),
     WatchEvent("invites", "Invitations créées", "Serveur", "🔗", "Liens d'invitation qu'il crée", ("intent:invites", "perm:manage_guild")),
     WatchEvent("mod_actions", "Sanctions qu'il donne", "Ses actions", "🛡️", "Bans, expulsions, timeouts, déplacements vocaux", ("intent:moderation", "perm:view_audit_log")),
