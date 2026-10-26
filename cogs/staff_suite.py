@@ -28,6 +28,7 @@ from services import moderation as moderation_service
 from utils import checks, helpers, log_service
 from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
+from utils import watch_events
 
 
 def now() -> int:
@@ -365,7 +366,11 @@ class WatchStartModal(discord.ui.Modal, title="Démarrer une surveillance"):
                     "Durée invalide. Exemples : 2h, 1j, 7j.",
                     ephemeral=True,
                 )
-        events = sorted(self.setup_view.events or {"messages", "deleted", "edited"})
+        events = watch_events.sanitize(self.setup_view.events)
+        if not events:
+            return await interaction.response.send_message(
+                "Choisissez au moins un événement à suivre.", ephemeral=True,
+            )
         timestamp = now()
         await self.setup_view.suite.bot.db.execute(
             "UPDATE staff_watches_v1 SET status='termine' "
@@ -403,41 +408,132 @@ class WatchStartModal(discord.ui.Modal, title="Démarrer une surveillance"):
 
 
 class WatchEventSelect(discord.ui.Select):
+    """Tous les événements surveillables, cochés selon le choix en cours."""
+
     def __init__(self, owner: "WatchSetupView"):
         self.owner = owner
-        options = [
-            discord.SelectOption(label="Messages", value="messages"),
-            discord.SelectOption(label="Messages supprimés", value="deleted"),
-            discord.SelectOption(label="Messages modifiés", value="edited"),
-            discord.SelectOption(label="Réactions", value="reactions"),
-            discord.SelectOption(label="Salons vocaux", value="voice"),
-            discord.SelectOption(label="Présence", value="presence"),
-            discord.SelectOption(label="Pseudo / profil", value="profile"),
-            discord.SelectOption(label="Rôles", value="roles"),
-        ]
+        options = []
+        for event in watch_events.EVENTS:
+            missing = owner.missing.get(event.key, [])
+            description = event.description
+            if missing:
+                description = "⚠️ Requiert " + ", ".join(
+                    watch_events.requirement_label(m) for m in missing
+                )
+            options.append(discord.SelectOption(
+                label=event.label, value=event.key, emoji=event.emoji,
+                description=description[:100], default=event.key in owner.events,
+            ))
         super().__init__(
             placeholder="Événements à suivre",
-            min_values=1,
+            min_values=0,
             max_values=len(options),
             options=options,
+            row=0,
         )
 
     async def callback(self, interaction: discord.Interaction):
         self.owner.events = set(self.values)
-        await interaction.response.defer()
+        await self.owner.refresh(interaction)
 
 
 class WatchSetupView(OwnedView):
-    def __init__(self, suite: "StaffSuite", owner_id: int, guild_id: int, member_id: int):
+    """Choix des événements : à la création, ou pour modifier une surveillance active.
+
+    Rien n'est coché d'office. Le choix est enregistré en base au démarrage
+    (ou à « Enregistrer »), donc il survit aux redémarrages.
+    """
+
+    def __init__(
+        self, suite: "StaffSuite", owner_id: int, guild_id: int, member_id: int,
+        *, events=(), watch_id: int | None = None,
+    ):
         super().__init__(suite, owner_id)
         self.guild_id = guild_id
         self.member_id = member_id
-        self.events: set[str] = {"messages", "deleted", "edited"}
+        self.watch_id = watch_id
+        self.events: set[str] = set(watch_events.sanitize(events))
+        guild = suite.bot.get_guild(guild_id) if hasattr(suite.bot, "get_guild") else None
+        self.missing = {
+            event.key: watch_events.missing_requirements(event, suite.bot, guild)
+            for event in watch_events.EVENTS
+        }
         self.add_item(WatchEventSelect(self))
+        self.start.label = "Enregistrer" if watch_id else "Démarrer"
+        self.start.disabled = not self.events
+
+    def panel(self) -> "panels.Panneau":
+        chosen = [watch_events.BY_KEY[k] for k in watch_events.sanitize(self.events)]
+        groups: dict[str, list[str]] = {}
+        for event in chosen:
+            groups.setdefault(event.group, []).append(event.label)
+        lines = [f"**{group}** · " + ", ".join(labels) for group, labels in groups.items()]
+        warnings = []
+        for event in watch_events.EVENTS:
+            missing = self.missing.get(event.key)
+            if missing:
+                warnings.append(
+                    f"{event.emoji} {event.label} : "
+                    + ", ".join(watch_events.requirement_label(m) for m in missing)
+                )
+        sections = [panels.Section(
+            f"Événements suivis · {len(chosen)}/{len(watch_events.EVENTS)}",
+            texte="\n".join(lines) if lines else "Aucun : choisissez au moins un événement.",
+        )]
+        if warnings:
+            sections.append(panels.Section(
+                "⚠️ Ne remonteront rien sur ce serveur",
+                texte="\n".join(warnings[:8]) + ("\n…" if len(warnings) > 8 else ""),
+            ))
+        return panels.avec_composants(
+            panels.Panneau(
+                titre="Surveillance — événements" if self.watch_id else "Surveillance — configuration",
+                sous_titre=f"Cible : {_mention(self.member_id)}",
+                kind="moderation",
+                sections=sections,
+                pied="SentriX • Surveillance",
+            ),
+            self,
+        )
+
+    async def refresh(self, interaction: discord.Interaction) -> None:
+        # Une vue neuve à chaque fois : avec_composants consomme les items.
+        fresh = WatchSetupView(
+            self.suite, self.owner_id, self.guild_id, self.member_id,
+            events=self.events, watch_id=self.watch_id,
+        )
+        self.stop()
+        await panels.editer(interaction.response, fresh.panel())
+
+    @discord.ui.button(label="Tout sélectionner", style=discord.ButtonStyle.secondary, row=1)
+    async def select_all(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.events = set(watch_events.KEYS)
+        await self.refresh(interaction)
+
+    @discord.ui.button(label="Tout désélectionner", style=discord.ButtonStyle.secondary, row=1)
+    async def select_none(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.events = set()
+        await self.refresh(interaction)
 
     @discord.ui.button(label="Démarrer", style=discord.ButtonStyle.success, row=1)
     async def start(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await interaction.response.send_modal(WatchStartModal(self))
+        events = watch_events.sanitize(self.events)
+        if not events:
+            return await interaction.response.send_message(
+                "Choisissez au moins un événement à suivre.", ephemeral=True,
+            )
+        if not self.watch_id:
+            return await interaction.response.send_modal(WatchStartModal(self))
+        await self.suite.bot.db.execute(
+            "UPDATE staff_watches_v1 SET events_json=? WHERE id=? AND guild_id=?",
+            (json.dumps(events), self.watch_id, self.guild_id),
+        )
+        await self.suite.reload_watch_cache()
+        self.stop()
+        await panels.editer(
+            interaction.response,
+            await self.suite.watch_panel(interaction.guild, self.member_id, interaction.user.id),
+        )
 
 
 class ModViewLookupModal(discord.ui.Modal, title="Trouver un membre"):
@@ -881,17 +977,9 @@ class MemberPanelView(OwnedView):
                 ephemere=True,
             )
         view = WatchSetupView(self.suite, interaction.user.id, interaction.guild.id, self.member_id)
-        embed = discord.Embed(
-            title="Surveillance — configuration",
-            description=(
-                f"Cible : <@{self.member_id}>\n"
-                "Choisissez uniquement les événements utiles, puis démarrez la surveillance."
-            ),
-            colour=discord.Colour.blurple(),
-        )
         await panels.envoyer(
             interaction.response,
-            panels.avec_composants(panels.depuis_embed(embed), view),
+            view.panel(),
             ephemere=True,
         )
 
@@ -1291,6 +1379,22 @@ class WatchControlView(OwnedView):
             await self.suite.watch_panel(interaction.guild, self.member_id, interaction.user.id),
         )
 
+    @discord.ui.button(label="Événements", style=discord.ButtonStyle.secondary)
+    async def events(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        row = await self.suite.bot.db.fetchone(
+            "SELECT events_json FROM staff_watches_v1 WHERE id=? AND guild_id=?",
+            (self.watch_id, interaction.guild.id),
+        )
+        try:
+            current = json.loads(row["events_json"] or "[]") if row else []
+        except Exception:
+            current = []
+        view = WatchSetupView(
+            self.suite, interaction.user.id, interaction.guild.id, self.member_id,
+            events=current, watch_id=self.watch_id,
+        )
+        await panels.editer(interaction.response, view.panel())
+
     @discord.ui.button(label="Rapport", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("history"))
     async def report(self, interaction: discord.Interaction, _button: discord.ui.Button):
         row = await self.suite.bot.db.fetchone(
@@ -1550,6 +1654,63 @@ class StaffCenterView(OwnedView):
         )
 
 
+_AUDIT_WATCH = {
+    "ban": ("mod_actions", "a banni"),
+    "unban": ("mod_actions", "a débanni"),
+    "kick": ("mod_actions", "a expulsé"),
+    "member_prune": ("mod_actions", "a lancé un nettoyage de membres"),
+    "member_move": ("mod_actions", "a déplacé des membres en vocal"),
+    "member_disconnect": ("mod_actions", "a déconnecté des membres du vocal"),
+    "channel_create": ("channels", "a créé le salon"),
+    "channel_update": ("channels", "a modifié le salon"),
+    "channel_delete": ("channels", "a supprimé le salon"),
+    "thread_delete": ("channels", "a supprimé le fil"),
+    "overwrite_create": ("permissions", "a ajouté une dérogation sur"),
+    "overwrite_update": ("permissions", "a modifié une dérogation sur"),
+    "overwrite_delete": ("permissions", "a retiré une dérogation sur"),
+    "role_create": ("role_admin", "a créé le rôle"),
+    "role_update": ("role_admin", "a modifié le rôle"),
+    "role_delete": ("role_admin", "a supprimé le rôle"),
+    "member_role_update": ("role_admin", "a changé les rôles de"),
+    "message_delete": ("message_admin", "a supprimé un message de"),
+    "message_bulk_delete": ("message_admin", "a supprimé des messages en masse dans"),
+    "message_pin": ("message_admin", "a épinglé un message de"),
+    "message_unpin": ("message_admin", "a désépinglé un message de"),
+}
+
+
+def _audit_target(entry) -> str:
+    target = getattr(entry, "target", None)
+    if target is None:
+        return ""
+    if isinstance(target, (discord.abc.GuildChannel, discord.Thread)) or hasattr(target, "mention"):
+        return str(getattr(target, "mention", "") or getattr(target, "name", ""))
+    target_id = getattr(target, "id", None)
+    return f"`{target_id}`" if target_id else ""
+
+
+def _audit_watch_summary(entry) -> tuple[str | None, str]:
+    """(type d'événement, résumé) d'une entrée du journal d'audit, ou (None, '')."""
+    action = getattr(getattr(entry, "action", None), "name", "")
+    if action == "member_update":
+        after = getattr(getattr(entry, "changes", None), "after", None)
+        until = getattr(after, "timed_out_until", None)
+        if until is not None or hasattr(after, "timed_out_until"):
+            target = _audit_target(entry)
+            text = "a exclu temporairement" if until else "a levé l'exclusion de"
+            return "mod_actions", f"{text} {target}".strip()
+        return None, ""
+    mapping = _AUDIT_WATCH.get(action)
+    if mapping is None:
+        return None, ""
+    event_type, text = mapping
+    summary = f"{text} {_audit_target(entry)}".strip()
+    reason = getattr(entry, "reason", None)
+    if reason:
+        summary += f" · raison : {_trim(reason, 200)}"
+    return event_type, summary
+
+
 class StaffSuite(commands.Cog, name="StaffSuite"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -1574,7 +1735,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             try:
                 data["events"] = set(json.loads(row["events_json"] or "[]"))
             except Exception:
-                data["events"] = {"messages", "deleted", "edited"}
+                data["events"] = set()
             cache.setdefault((int(row["guild_id"]), int(row["member_id"])), []).append(data)
         self._watch_cache = cache
 
@@ -1682,6 +1843,16 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
             if removed:
                 detail.append("Retrait : " + ", ".join(removed))
             await self._watch_event(after.guild.id, after.id, "roles", " · ".join(detail))
+        before_timeout = getattr(before, "timed_out_until", None)
+        after_timeout = getattr(after, "timed_out_until", None)
+        if before_timeout != after_timeout:
+            if after_timeout:
+                await self._watch_event(
+                    after.guild.id, after.id, "timeout",
+                    f"Exclu temporairement jusqu'à <t:{int(after_timeout.timestamp())}:f>",
+                )
+            else:
+                await self._watch_event(after.guild.id, after.id, "timeout", "Exclusion temporaire levée")
         if before.display_name != after.display_name or before.display_avatar.url != after.display_avatar.url:
             await self._watch_event(
                 after.guild.id,
@@ -1692,15 +1863,111 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before, after):
-        if before.channel == after.channel:
+        if before.channel != after.channel:
+            await self._watch_event(
+                member.guild.id,
+                member.id,
+                "voice",
+                f"Vocal : {getattr(before.channel, 'mention', 'aucun')} → {getattr(after.channel, 'mention', 'aucun')}",
+                channel_id=getattr(after.channel or before.channel, "id", None),
+            )
+            return
+        changes = []
+        for attr, on, off in (
+            ("self_mute", "micro coupé", "micro rétabli"),
+            ("self_deaf", "casque coupé", "casque rétabli"),
+            ("self_video", "caméra allumée", "caméra éteinte"),
+            ("self_stream", "partage d'écran lancé", "partage d'écran arrêté"),
+            ("mute", "rendu muet par le staff", "muet levé par le staff"),
+            ("deaf", "rendu sourd par le staff", "sourdine levée par le staff"),
+        ):
+            if getattr(before, attr, None) != getattr(after, attr, None):
+                changes.append(on if getattr(after, attr, False) else off)
+        if changes:
+            await self._watch_event(
+                member.guild.id, member.id, "voice_state",
+                f"{getattr(after.channel, 'mention', 'Vocal')} · " + ", ".join(changes),
+                channel_id=getattr(after.channel, "id", None),
+            )
+
+    @commands.Cog.listener()
+    async def on_reaction_remove(self, reaction: discord.Reaction, user):
+        message = reaction.message
+        if message.guild is None or getattr(user, "bot", False):
             return
         await self._watch_event(
-            member.guild.id,
-            member.id,
-            "voice",
-            f"Vocal : {getattr(before.channel, 'mention', 'aucun')} → {getattr(after.channel, 'mention', 'aucun')}",
-            channel_id=getattr(after.channel or before.channel, "id", None),
+            message.guild.id, user.id, "reactions_removed",
+            f"Réaction {reaction.emoji} retirée dans {message.channel.mention}",
+            channel_id=message.channel.id,
         )
+
+    @commands.Cog.listener()
+    async def on_thread_create(self, thread: discord.Thread):
+        owner_id = getattr(thread, "owner_id", None)
+        if thread.guild is None or not owner_id:
+            return
+        parent = getattr(thread, "parent", None)
+        await self._watch_event(
+            thread.guild.id, int(owner_id), "threads",
+            f"Fil créé {thread.mention}" + (f" dans {parent.mention}" if parent is not None else ""),
+            channel_id=thread.id,
+        )
+
+    @commands.Cog.listener()
+    async def on_user_update(self, before: discord.User, after: discord.User):
+        changes = []
+        if before.name != after.name:
+            changes.append(f"nom {before.name} → {after.name}")
+        if getattr(before, "global_name", None) != getattr(after, "global_name", None):
+            changes.append(f"nom affiché {before.global_name or '—'} → {after.global_name or '—'}")
+        if getattr(before.avatar, "key", None) != getattr(after.avatar, "key", None):
+            changes.append("avatar Discord changé")
+        if not changes:
+            return
+        # Le profil Discord est global : chaque serveur où il est surveillé le note.
+        for guild_id, member_id in list(self._watch_cache):
+            if member_id == after.id:
+                await self._watch_event(guild_id, after.id, "username", "Profil Discord · " + ", ".join(changes))
+
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        await self._watch_event(member.guild.id, member.id, "join_leave", "A rejoint le serveur")
+
+    @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        await self._watch_event(member.guild.id, member.id, "join_leave", "A quitté le serveur")
+
+    @commands.Cog.listener()
+    async def on_member_ban(self, guild: discord.Guild, user):
+        await self._watch_event(guild.id, user.id, "bans", "A été banni du serveur")
+
+    @commands.Cog.listener()
+    async def on_member_unban(self, guild: discord.Guild, user):
+        await self._watch_event(guild.id, user.id, "bans", "A été débanni")
+
+    @commands.Cog.listener()
+    async def on_invite_create(self, invite: discord.Invite):
+        guild = getattr(invite, "guild", None)
+        inviter = getattr(invite, "inviter", None)
+        if guild is None or inviter is None:
+            return
+        channel = getattr(invite, "channel", None)
+        await self._watch_event(
+            guild.id, inviter.id, "invites",
+            f"Invitation {invite.code} créée" + (f" pour {channel.mention}" if hasattr(channel, "mention") else ""),
+            channel_id=getattr(channel, "id", None),
+        )
+
+    @commands.Cog.listener()
+    async def on_audit_log_entry_create(self, entry: discord.AuditLogEntry):
+        """Actions faites PAR le membre surveillé : seule source fiable de l'auteur."""
+        actor_id = getattr(entry, "user_id", None)
+        guild = getattr(entry, "guild", None)
+        if not actor_id or guild is None or (guild.id, int(actor_id)) not in self._watch_cache:
+            return
+        event_type, summary = _audit_watch_summary(entry)
+        if event_type:
+            await self._watch_event(guild.id, int(actor_id), event_type, summary)
 
     @commands.Cog.listener()
     async def on_presence_update(self, before: discord.Member, after: discord.Member):
@@ -2374,7 +2641,10 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                         panels.Ligne("Démarrée par", _mention(row["created_by"])),
                         panels.Ligne("Début", _relative(row["created_at"])),
                         panels.Ligne("Fin", _relative(row["end_at"]) if row["end_at"] else "Sans limite"),
-                        panels.Ligne("Événements", ", ".join(types) or "—"),
+                        panels.Ligne(
+                            "Événements",
+                            ", ".join(watch_events.BY_KEY[k].label for k in watch_events.sanitize(types)) or "—",
+                        ),
                     ],
                 ),
                 panels.Section("Activité récente", texte="\n".join(lines) if lines else "Aucun événement enregistré pour l’instant."),
@@ -2830,12 +3100,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                 await self.watch_panel(ctx.guild, membre.id, ctx.author.id),
             )
         view = WatchSetupView(self, ctx.author.id, ctx.guild.id, membre.id)
-        embed = discord.Embed(
-            title="Surveillance — configuration",
-            description=f"Cible : {membre.mention}\nChoisissez les événements à suivre puis démarrez.",
-            colour=discord.Colour.blurple(),
-        )
-        await panels.envoyer(ctx, panels.avec_composants(panels.depuis_embed(embed), view))
+        await panels.envoyer(ctx, view.panel())
 
     @commands.hybrid_command(name="staff", description="Ouvrir le centre staff SentriX.")
     @checks.has_permission_or_modrole("moderate_members")
