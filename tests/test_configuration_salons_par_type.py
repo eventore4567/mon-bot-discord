@@ -220,3 +220,27 @@ def test_choisir_des_salons_forcer_un_type_puis_appliquer(monkeypatch):
     plan = appliques[0]
     assert list(plan.kinds) == [s.c["general"]]
     assert plan.kinds[s.c["general"]] == (cp.READ_ONLY, "choisi par vous")
+
+
+def test_lecture_seule_stricte_l_animateur_n_ecrit_plus():
+    # Retour de Jayden : « les animateurs peuvent écrire, c'est nul ».
+    from tests.test_verrouillage_salons_membres import Role
+
+    s = Serveur()
+    animateur = Role(60, "🎉・Animateur", discord.Permissions(manage_messages=True, mention_everyone=True))
+    direction = Role(61, "👑・Fondateur", discord.Permissions(administrator=True))
+    gerant = Role(62, "Gérant", discord.Permissions(manage_guild=True))
+    s.roles += [animateur, direction, gerant]
+    annonces = s.c["annonces"]
+    annonces.overwrites[animateur] = ow(view_channel=True, send_messages=True)
+    annonces.overwrites[s.modo] = ow(view_channel=True, send_messages=True)
+    annonces.overwrites[gerant] = ow(view_channel=True)
+    plan = _plan(s, only_ids=[annonces.id])
+    nouvelles = {t: n for _c, t, _o, n, _h in plan.operations}
+    assert nouvelles[animateur].send_messages is None
+    assert nouvelles[animateur].view_channel is True  # il lit toujours
+    assert nouvelles[s.modo].send_messages is None
+    assert nouvelles[s.default_role].send_messages is False
+    assert nouvelles[gerant].send_messages is True
+    assert direction not in nouvelles or nouvelles[direction].send_messages is True
+    assert "seuls les administrateurs publient" in plan.preview()

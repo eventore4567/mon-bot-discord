@@ -50,6 +50,19 @@ _PRIVILEGED = (
 )
 
 
+def is_publisher_role(role) -> bool:
+    """Peut publier dans un salon en lecture seule : la direction seulement.
+
+    Strict (retour de Jayden, 26/10) : un Animateur ou un Modérateur qui a
+    « Gérer les messages » n'écrit PAS dans #annonces ; seuls les rôles
+    Administrateur ou Gérer le serveur publient, avec SentriX.
+    """
+    perms = getattr(role, "permissions", None)
+    return not getattr(role, "managed", False) and (
+        getattr(perms, "administrator", False) or getattr(perms, "manage_guild", False)
+    )
+
+
 def is_staff_role(role) -> bool:
     perms = getattr(role, "permissions", None)
     return not getattr(role, "managed", False) and any(getattr(perms, attr, False) for attr in _PRIVILEGED)
@@ -107,7 +120,7 @@ class ProfilePlan:
         changed = {op[0].id for op in self.operations}
         lines = ["**Ce que SentriX va régler**"]
         for kind, effect in (
-            (READ_ONLY, "les membres lisent et réagissent, le staff publie"),
+            (READ_ONLY, "les membres lisent et réagissent, seuls les administrateurs publient"),
             (STAFF, "invisibles des membres, le staff et SentriX gardent l'accès"),
             (DISCUSSION, "les membres vérifiés écrivent"),
             (VOICE, "les vérifiés se connectent et parlent"),
@@ -173,11 +186,20 @@ def plan_profiles(
 
         if kind == READ_ONLY:
             change(everyone, **{perm: False for perm in _WRITE})
-            for role in (verified_role, *entry):
-                if role is not None and any(getattr(channel.overwrites_for(role), p) is True for p in _WRITE):
-                    change(role, **{perm: None for perm in _WRITE})
-            for role in staff_roles:
-                if newcomer_access(channel, everyone, [role])[0] or channel.overwrites_for(role).view_channel:
+            # Toute autre autorisation d'écrire est retirée (Animateur,
+            # Modérateur, Vérifié, rôles d'arrivée…) : seule la direction publie.
+            for target, value in list((getattr(channel, "overwrites", {}) or {}).items()):
+                if target == everyone or target == me or isinstance(target, discord.Member):
+                    continue
+                if is_publisher_role(target):
+                    continue
+                if any(getattr(value, p) is True for p in _WRITE):
+                    change(target, **{perm: None for perm in _WRITE})
+            for role in getattr(guild, "roles", ()) or ():
+                if role != everyone and is_publisher_role(role) and (
+                    newcomer_access(channel, everyone, [role])[0]
+                    or channel.overwrites_for(role).view_channel
+                ):
                     change(role, send_messages=True)
             change(me, send_messages=True)
         elif kind == DISCUSSION:
