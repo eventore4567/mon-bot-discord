@@ -15,6 +15,7 @@ handover, rappels staff et centres interactifs.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -29,6 +30,8 @@ from utils import checks, helpers, log_service
 from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
 from utils import watch_events
+
+logger = logging.getLogger("bot.staff-suite")
 
 
 def now() -> int:
@@ -379,8 +382,8 @@ class WatchStartModal(discord.ui.Modal, title="Démarrer une surveillance"):
         )
         await self.setup_view.suite.bot.db.execute(
             "INSERT INTO staff_watches_v1 "
-            "(guild_id,member_id,reason,events_json,status,created_by,created_at,end_at) "
-            "VALUES (?,?,?,?, 'actif', ?, ?, ?)",
+            "(guild_id,member_id,reason,events_json,status,created_by,created_at,end_at,channel_id) "
+            "VALUES (?,?,?,?, 'actif', ?, ?, ?, ?)",
             (
                 self.setup_view.guild_id,
                 self.setup_view.member_id,
@@ -389,6 +392,7 @@ class WatchStartModal(discord.ui.Modal, title="Démarrer une surveillance"):
                 interaction.user.id,
                 timestamp,
                 timestamp + seconds if seconds else None,
+                self.setup_view.channel_id,
             ),
         )
         await self.setup_view.suite.reload_watch_cache()
@@ -408,12 +412,16 @@ class WatchStartModal(discord.ui.Modal, title="Démarrer une surveillance"):
 
 
 class WatchEventSelect(discord.ui.Select):
-    """Tous les événements surveillables, cochés selon le choix en cours."""
+    """Une famille d'événements (menu court), cochée selon le choix en cours."""
 
-    def __init__(self, owner: "WatchSetupView"):
+    def __init__(self, owner: "WatchSetupView", group: str, placeholder: str, row: int):
         self.owner = owner
+        self.group = group
+        self.keys = [event.key for event in watch_events.EVENTS if event.group == group]
         options = []
         for event in watch_events.EVENTS:
+            if event.group != group:
+                continue
             missing = owner.missing.get(event.key, [])
             description = event.description
             if missing:
@@ -424,73 +432,93 @@ class WatchEventSelect(discord.ui.Select):
                 label=event.label, value=event.key, emoji=event.emoji,
                 description=description[:100], default=event.key in owner.events,
             ))
+        chosen = sum(1 for key in self.keys if key in owner.events)
         super().__init__(
-            placeholder="Événements à suivre",
+            placeholder=f"{placeholder} · {chosen}/{len(self.keys)}",
             min_values=0,
             max_values=len(options),
             options=options,
-            row=0,
+            row=row,
         )
 
     async def callback(self, interaction: discord.Interaction):
-        self.owner.events = set(self.values)
+        self.owner.events = (self.owner.events - set(self.keys)) | set(self.values)
+        await self.owner.refresh(interaction)
+
+
+class WatchChannelSelect(discord.ui.ChannelSelect):
+    """Salon où chaque événement capté est publié, sans aucun ping."""
+
+    def __init__(self, owner: "WatchSetupView"):
+        self.owner = owner
+        defaults = [discord.Object(id=owner.channel_id)] if owner.channel_id else []
+        super().__init__(
+            placeholder="Salon où publier les événements (obligatoire)",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.private_thread,
+                           discord.ChannelType.public_thread],
+            min_values=1, max_values=1, row=0,
+            default_values=defaults,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        self.owner.channel_id = int(self.values[0].id)
         await self.owner.refresh(interaction)
 
 
 class WatchSetupView(OwnedView):
-    """Choix des événements : à la création, ou pour modifier une surveillance active.
+    """Choix du salon et des événements : création, ou modification d'une surveillance.
 
-    Rien n'est coché d'office. Le choix est enregistré en base au démarrage
-    (ou à « Enregistrer »), donc il survit aux redémarrages.
+    Rien n'est coché d'office ; « Démarrer » reste grisé tant qu'il manque le
+    salon de publication ou un événement. Le choix est enregistré en base,
+    donc il survit aux redémarrages.
     """
 
     def __init__(
         self, suite: "StaffSuite", owner_id: int, guild_id: int, member_id: int,
-        *, events=(), watch_id: int | None = None,
+        *, events=(), watch_id: int | None = None, channel_id: int | None = None,
     ):
         super().__init__(suite, owner_id)
         self.guild_id = guild_id
         self.member_id = member_id
         self.watch_id = watch_id
+        self.channel_id = int(channel_id) if channel_id else None
         self.events: set[str] = set(watch_events.sanitize(events))
         guild = suite.bot.get_guild(guild_id) if hasattr(suite.bot, "get_guild") else None
         self.missing = {
             event.key: watch_events.missing_requirements(event, suite.bot, guild)
             for event in watch_events.EVENTS
         }
-        self.add_item(WatchEventSelect(self))
+        self.add_item(WatchChannelSelect(self))
+        for row, (group, placeholder) in enumerate(watch_events.GROUPS, start=1):
+            self.add_item(WatchEventSelect(self, group, placeholder, row))
         self.start.label = "Enregistrer" if watch_id else "Démarrer"
-        self.start.disabled = not self.events
+        self.start.disabled = not (self.events and self.channel_id)
 
     def panel(self) -> "panels.Panneau":
-        chosen = [watch_events.BY_KEY[k] for k in watch_events.sanitize(self.events)]
-        groups: dict[str, list[str]] = {}
-        for event in chosen:
-            groups.setdefault(event.group, []).append(event.label)
-        lines = [f"**{group}** · " + ", ".join(labels) for group, labels in groups.items()]
-        warnings = []
-        for event in watch_events.EVENTS:
-            missing = self.missing.get(event.key)
-            if missing:
-                warnings.append(
-                    f"{event.emoji} {event.label} : "
-                    + ", ".join(watch_events.requirement_label(m) for m in missing)
-                )
-        sections = [panels.Section(
-            f"Événements suivis · {len(chosen)}/{len(watch_events.EVENTS)}",
-            texte="\n".join(lines) if lines else "Aucun : choisissez au moins un événement.",
-        )]
-        if warnings:
-            sections.append(panels.Section(
-                "⚠️ Ne remonteront rien sur ce serveur",
-                texte="\n".join(warnings[:8]) + ("\n…" if len(warnings) > 8 else ""),
-            ))
+        chosen = watch_events.sanitize(self.events)
+        if not self.channel_id:
+            etat = "Choisissez d'abord le salon où publier les événements."
+        elif not chosen:
+            etat = "Choisissez au moins un événement dans les menus ci-dessous."
+        else:
+            etat = f"Prêt : {len(chosen)} événement(s), publiés dans <#{self.channel_id}>, sans ping."
+        lines = [etat]
+        indisponibles = [
+            f"{event.emoji} {event.label}"
+            for event in watch_events.EVENTS if self.missing.get(event.key)
+        ]
+        if indisponibles:
+            lines.append(
+                "-# ⚠️ Ne remonteront rien ici : " + ", ".join(indisponibles[:4])
+                + (" …" if len(indisponibles) > 4 else "")
+                + " (permission ou intent Discord manquant)."
+            )
         return panels.avec_composants(
             panels.Panneau(
                 titre="Surveillance — événements" if self.watch_id else "Surveillance — configuration",
                 sous_titre=f"Cible : {_mention(self.member_id)}",
                 kind="moderation",
-                sections=sections,
+                sections=[panels.Section("État", texte="\n".join(lines))],
                 pied="SentriX • Surveillance",
             ),
             self,
@@ -500,33 +528,33 @@ class WatchSetupView(OwnedView):
         # Une vue neuve à chaque fois : avec_composants consomme les items.
         fresh = WatchSetupView(
             self.suite, self.owner_id, self.guild_id, self.member_id,
-            events=self.events, watch_id=self.watch_id,
+            events=self.events, watch_id=self.watch_id, channel_id=self.channel_id,
         )
         self.stop()
         await panels.editer(interaction.response, fresh.panel())
 
-    @discord.ui.button(label="Tout sélectionner", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Tout sélectionner", style=discord.ButtonStyle.secondary, row=4)
     async def select_all(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self.events = set(watch_events.KEYS)
         await self.refresh(interaction)
 
-    @discord.ui.button(label="Tout désélectionner", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Tout désélectionner", style=discord.ButtonStyle.secondary, row=4)
     async def select_none(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self.events = set()
         await self.refresh(interaction)
 
-    @discord.ui.button(label="Démarrer", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="Démarrer", style=discord.ButtonStyle.success, row=4)
     async def start(self, interaction: discord.Interaction, _button: discord.ui.Button):
         events = watch_events.sanitize(self.events)
-        if not events:
+        if not events or not self.channel_id:
             return await interaction.response.send_message(
-                "Choisissez au moins un événement à suivre.", ephemeral=True,
+                "Choisissez le salon de publication et au moins un événement.", ephemeral=True,
             )
         if not self.watch_id:
             return await interaction.response.send_modal(WatchStartModal(self))
         await self.suite.bot.db.execute(
-            "UPDATE staff_watches_v1 SET events_json=? WHERE id=? AND guild_id=?",
-            (json.dumps(events), self.watch_id, self.guild_id),
+            "UPDATE staff_watches_v1 SET events_json=?, channel_id=? WHERE id=? AND guild_id=?",
+            (json.dumps(events), self.channel_id, self.watch_id, self.guild_id),
         )
         await self.suite.reload_watch_cache()
         self.stop()
@@ -1382,16 +1410,20 @@ class WatchControlView(OwnedView):
     @discord.ui.button(label="Événements", style=discord.ButtonStyle.secondary)
     async def events(self, interaction: discord.Interaction, _button: discord.ui.Button):
         row = await self.suite.bot.db.fetchone(
-            "SELECT events_json FROM staff_watches_v1 WHERE id=? AND guild_id=?",
+            "SELECT * FROM staff_watches_v1 WHERE id=? AND guild_id=?",
             (self.watch_id, interaction.guild.id),
         )
         try:
             current = json.loads(row["events_json"] or "[]") if row else []
         except Exception:
             current = []
+        try:
+            channel_id = row["channel_id"] if row else None
+        except (KeyError, IndexError):
+            channel_id = None
         view = WatchSetupView(
             self.suite, interaction.user.id, interaction.guild.id, self.member_id,
-            events=current, watch_id=self.watch_id,
+            events=current, watch_id=self.watch_id, channel_id=channel_id,
         )
         await panels.editer(interaction.response, view.panel())
 
@@ -1719,6 +1751,12 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
     async def cog_load(self):
         for statement in SCHEMA:
             await self.bot.db.execute(statement)
+        # Salon de publication des surveillances (26/10) : colonne ajoutée aux
+        # tables existantes ; déjà présente = rien à faire.
+        try:
+            await self.bot.db.execute("ALTER TABLE staff_watches_v1 ADD COLUMN channel_id INTEGER")
+        except Exception:
+            pass
         await self.reload_watch_cache()
         self.reminder_loop.start()
 
@@ -1778,8 +1816,32 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
                 "(watch_id,event_type,summary,channel_id,created_at) VALUES (?,?,?,?,?)",
                 (watch["id"], event_type, _trim(summary, 900), channel_id, timestamp),
             )
+            await self._publish_watch_event(guild_id, member_id, watch, event_type, summary)
         if changed:
             await self.reload_watch_cache()
+
+    async def _publish_watch_event(self, guild_id, member_id, watch, event_type, summary) -> None:
+        """Publie l'événement dans le salon de la surveillance, sans aucun ping."""
+        target_id = watch.get("channel_id")
+        if not target_id:
+            return
+        guild = self.bot.get_guild(int(guild_id)) if hasattr(self.bot, "get_guild") else None
+        channel = guild.get_channel(int(target_id)) if guild is not None else None
+        if channel is None:
+            return
+        event = watch_events.BY_KEY.get(event_type)
+        title = f"{event.emoji} {event.label}" if event else event_type
+        card = discord.Embed(
+            title=title,
+            description=f"{_mention(member_id)} · {_trim(summary, 900)}",
+            colour=discord.Colour.from_rgb(139, 92, 246),
+            timestamp=discord.utils.utcnow(),
+        )
+        card.set_footer(text=f"Surveillance #{watch.get('id')} · ID {member_id}")
+        try:
+            await channel.send(embed=card, allowed_mentions=discord.AllowedMentions.none())
+        except (discord.Forbidden, discord.HTTPException):
+            logger.warning("Surveillance #%s : publication impossible dans %s", watch.get("id"), target_id)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

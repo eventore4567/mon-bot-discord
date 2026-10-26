@@ -23,27 +23,34 @@ class WatchEvent:
 
 
 EVENTS: tuple[WatchEvent, ...] = (
-    WatchEvent("messages", "Messages envoyés", "Messages", "💬", "Chaque message et son contenu", ("intent:message_content",)),
-    WatchEvent("deleted", "Messages supprimés", "Messages", "🗑️", "Ses messages effacés", ("intent:message_content",)),
-    WatchEvent("edited", "Messages modifiés", "Messages", "✏️", "Avant / après chaque modification", ("intent:message_content",)),
-    WatchEvent("threads", "Fils créés", "Messages", "🧵", "Fils ouverts par le membre"),
-    WatchEvent("reactions", "Réactions ajoutées", "Réactions", "😀", "Chaque réaction posée", ("intent:reactions",)),
-    WatchEvent("reactions_removed", "Réactions retirées", "Réactions", "↩️", "Chaque réaction enlevée", ("intent:reactions",)),
-    WatchEvent("voice", "Vocal : arrivées / départs", "Vocal", "🔊", "Connexions et changements de salon", ("intent:voice_states",)),
-    WatchEvent("voice_state", "Vocal : micro, casque, caméra", "Vocal", "🎙️", "Micro, casque, caméra, partage d'écran", ("intent:voice_states",)),
-    WatchEvent("presence", "Présence", "Profil", "🟢", "En ligne, absent, hors ligne", ("intent:presences",)),
-    WatchEvent("profile", "Pseudo / avatar du serveur", "Profil", "🪪", "Pseudo et avatar sur ce serveur", ("intent:members",)),
-    WatchEvent("username", "Nom / avatar Discord", "Profil", "👤", "Nom d'utilisateur et avatar global", ("intent:members",)),
-    WatchEvent("roles", "Rôles reçus / retirés", "Rôles", "🎭", "Chaque rôle ajouté ou enlevé", ("intent:members",)),
-    WatchEvent("timeout", "Exclusions temporaires reçues", "Sanctions", "⏳", "Timeout posé ou levé sur lui", ("intent:members",)),
-    WatchEvent("bans", "Bannissement / débannissement", "Sanctions", "🔨", "S'il est banni ou débanni", ("intent:moderation", "perm:view_audit_log")),
-    WatchEvent("join_leave", "Arrivées / départs du serveur", "Serveur", "🚪", "Quand il rejoint ou quitte", ("intent:members",)),
-    WatchEvent("invites", "Invitations créées", "Serveur", "🔗", "Liens d'invitation qu'il crée", ("intent:invites", "perm:manage_guild")),
-    WatchEvent("mod_actions", "Sanctions qu'il donne", "Ses actions", "🛡️", "Bans, expulsions, timeouts, déplacements vocaux", ("intent:moderation", "perm:view_audit_log")),
-    WatchEvent("channels", "Salons créés / modifiés / supprimés", "Ses actions", "📁", "Ses actions sur les salons et fils", ("intent:moderation", "perm:view_audit_log")),
-    WatchEvent("permissions", "Permissions de salon modifiées", "Ses actions", "🔐", "Dérogations ajoutées, changées, retirées", ("intent:moderation", "perm:view_audit_log")),
-    WatchEvent("role_admin", "Gestion des rôles", "Ses actions", "🏷️", "Rôles créés, modifiés, donnés à d'autres", ("intent:moderation", "perm:view_audit_log")),
-    WatchEvent("message_admin", "Messages d'autres supprimés / épinglés", "Ses actions", "📌", "Suppressions et épinglages de modération", ("intent:moderation", "perm:view_audit_log")),
+    WatchEvent("messages", "Messages envoyés", "Messages", "💬", "Chaque message qu'il écrit, avec le salon et le texte", ("intent:message_content",)),
+    WatchEvent("deleted", "Messages supprimés", "Messages", "🗑️", "Ses messages effacés, avec leur ancien contenu", ("intent:message_content",)),
+    WatchEvent("edited", "Messages modifiés", "Messages", "✏️", "Chaque modification, avant → après", ("intent:message_content",)),
+    WatchEvent("threads", "Fils créés", "Messages", "🧵", "Les fils de discussion qu'il ouvre"),
+    WatchEvent("reactions", "Réactions ajoutées", "Messages", "😀", "Chaque emoji qu'il pose sur un message", ("intent:reactions",)),
+    WatchEvent("reactions_removed", "Réactions retirées", "Messages", "↩️", "Chaque emoji qu'il enlève", ("intent:reactions",)),
+    WatchEvent("voice", "Vocal : arrivées et départs", "Vocal et profil", "🔊", "Quand il rejoint, quitte ou change de vocal", ("intent:voice_states",)),
+    WatchEvent("voice_state", "Vocal : micro, casque, caméra", "Vocal et profil", "🎙️", "Micro ou casque coupé, caméra, partage d'écran", ("intent:voice_states",)),
+    WatchEvent("presence", "Présence", "Vocal et profil", "🟢", "En ligne, absent, ne pas déranger, hors ligne", ("intent:presences",)),
+    WatchEvent("profile", "Pseudo et avatar du serveur", "Vocal et profil", "🪪", "Son pseudo ou son avatar sur ce serveur", ("intent:members",)),
+    WatchEvent("username", "Nom et avatar Discord", "Vocal et profil", "👤", "Son nom d'utilisateur ou son avatar global", ("intent:members",)),
+    WatchEvent("roles", "Rôles reçus ou retirés", "Vocal et profil", "🎭", "Chaque rôle qu'on lui donne ou lui retire", ("intent:members",)),
+    WatchEvent("timeout", "Exclusions temporaires reçues", "Sanctions et staff", "⏳", "Quand il est mis en timeout ou en sort", ("intent:members",)),
+    WatchEvent("bans", "Bannissement ou débannissement", "Sanctions et staff", "🔨", "S'il est banni ou débanni, et par qui", ("intent:moderation", "perm:view_audit_log")),
+    WatchEvent("join_leave", "Arrivées et départs du serveur", "Sanctions et staff", "🚪", "S'il quitte ou revient (contournement de ban)", ("intent:members",)),
+    WatchEvent("invites", "Invitations créées", "Sanctions et staff", "🔗", "Les liens d'invitation qu'il crée", ("intent:invites", "perm:manage_guild")),
+    WatchEvent("mod_actions", "Sanctions qu'il donne", "Sanctions et staff", "🛡️", "Ses bans, expulsions, timeouts, déplacements vocaux", ("intent:moderation", "perm:view_audit_log")),
+    WatchEvent("channels", "Salons créés, modifiés, supprimés", "Sanctions et staff", "📁", "Ce qu'il fait sur les salons et les fils", ("intent:moderation", "perm:view_audit_log")),
+    WatchEvent("permissions", "Permissions de salon modifiées", "Sanctions et staff", "🔐", "Les dérogations qu'il ajoute, change ou retire", ("intent:moderation", "perm:view_audit_log")),
+    WatchEvent("role_admin", "Gestion des rôles", "Sanctions et staff", "🏷️", "Rôles qu'il crée, modifie, donne aux autres", ("intent:moderation", "perm:view_audit_log")),
+    WatchEvent("message_admin", "Messages des autres supprimés", "Sanctions et staff", "📌", "Messages d'autres qu'il supprime ou épingle", ("intent:moderation", "perm:view_audit_log")),
+)
+
+# Trois menus courts plutôt qu'un seul de 21 cases (retour de Jayden, 26/10).
+GROUPS: tuple[tuple[str, str], ...] = (
+    ("Messages", "💬 Messages et réactions"),
+    ("Vocal et profil", "🎙️ Vocal, profil et rôles"),
+    ("Sanctions et staff", "🛡️ Sanctions, serveur et actions du staff"),
 )
 
 BY_KEY = {event.key: event for event in EVENTS}

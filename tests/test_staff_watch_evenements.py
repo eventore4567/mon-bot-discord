@@ -154,19 +154,41 @@ def _vue(suite, **kwargs):
     return asyncio.run(creer())
 
 
+def _menus(vue):
+    return [i for i in vue.children if isinstance(i, discord.ui.Select)]
+
+
 def test_rien_n_est_coche_d_office_et_demarrer_est_grise():
     vue = _vue(_suite())
     assert vue.events == set()
     assert vue.start.disabled is True
-    menu = next(i for i in vue.children if isinstance(i, discord.ui.Select))
-    assert menu.min_values == 0 and menu.max_values == len(we.KEYS)
-    assert not any(option.default for option in menu.options)
+    menus = _menus(vue)
+    # Trois menus courts par famille, qui couvrent tout le catalogue.
+    assert len(menus) == len(we.GROUPS)
+    assert sorted(o.value for m in menus for o in m.options) == sorted(we.KEYS)
+    assert all(m.min_values == 0 for m in menus)
+    assert not any(o.default for m in menus for o in m.options)
+
+
+def test_le_salon_de_publication_est_obligatoire():
+    vue = _vue(_suite(), events=["messages"])
+    assert vue.start.disabled is True  # événement choisi, mais pas de salon
+    vue = _vue(_suite(), events=["messages"], channel_id=55)
+    assert vue.start.disabled is False
+    salon = next(i for i in vue.children if isinstance(i, discord.ui.ChannelSelect))
+    assert [d.id for d in salon.default_values] == [55]
+
+
+def test_chaque_evenement_est_decrit():
+    vue = _vue(_suite(presences=True))
+    for menu in _menus(vue):
+        for option in menu.options:
+            assert option.description and len(option.description) >= 15, option.label
 
 
 def test_les_besoins_discord_sont_affiches_clairement():
     vue = _vue(_suite(presences=False, audit=False))
-    menu = next(i for i in vue.children if isinstance(i, discord.ui.Select))
-    descriptions = {o.value: o.description for o in menu.options}
+    descriptions = {o.value: o.description for m in _menus(vue) for o in m.options}
     assert "intent Présence" in descriptions["presence"]
     assert "Voir les logs du serveur" in descriptions["mod_actions"]
     texte = " ".join(
@@ -174,6 +196,24 @@ def test_les_besoins_discord_sont_affiches_clairement():
         if isinstance(i, discord.ui.TextDisplay)
     )
     assert "Ne remonteront rien" in texte and "Présence" in texte
+
+
+def test_un_evenement_est_publie_dans_le_salon_sans_ping():
+    envois = []
+
+    class _Salon:
+        async def send(self, **kwargs):
+            envois.append(kwargs)
+
+    suite = _suite(events={"messages"})
+    guild = SimpleNamespace(id=GUILD, get_channel=lambda cid: _Salon() if cid == 55 else None)
+    suite.bot.get_guild = lambda _i: guild
+    suite._watch_cache[(GUILD, MEMBRE)][0]["channel_id"] = 55
+    asyncio.run(DECLENCHEURS["messages"](suite))
+    assert len(envois) == 1
+    carte, mentions = envois[0]["embed"], envois[0]["allowed_mentions"]
+    assert carte.title == "💬 Messages envoyés" and f"<@{MEMBRE}>" in carte.description
+    assert mentions.users is False and mentions.roles is False and mentions.everyone is False
 
 
 def test_tout_selectionner_puis_tout_deselectionner(monkeypatch):
@@ -216,13 +256,13 @@ def test_modifier_une_surveillance_active_enregistre_en_base(monkeypatch):
     monkeypatch.setattr(ss.panels, "editer", editer)
 
     async def scenario():
-        vue = ss.WatchSetupView(suite, 7, GUILD, MEMBRE, events=["roles", "bans"], watch_id=9)
+        vue = ss.WatchSetupView(suite, 7, GUILD, MEMBRE, events=["roles", "bans"], watch_id=9, channel_id=55)
         assert vue.start.label == "Enregistrer" and vue.start.disabled is False
         await vue.start.callback(SimpleNamespace(response=object(), guild=_guild(), user=SimpleNamespace(id=7)))
 
     asyncio.run(scenario())
-    events_json, watch_id, _guild_id = suite.bot.db.majs[0]
-    assert json.loads(events_json) == ["roles", "bans"] and watch_id == 9
+    events_json, channel_id, watch_id, _guild_id = suite.bot.db.majs[0]
+    assert json.loads(events_json) == ["roles", "bans"] and watch_id == 9 and channel_id == 55
     assert rechargements
 
 
