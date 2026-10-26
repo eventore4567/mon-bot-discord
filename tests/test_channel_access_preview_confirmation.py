@@ -25,36 +25,16 @@ def test_signature_changes_if_public_channel_is_added():
 
 
 @pytest.mark.asyncio
-async def test_lock_button_only_opens_preview_not_discord_permission_writes(monkeypatch):
+async def test_editor_has_no_manual_lock_button_anymore(monkeypatch):
     guild = SimpleNamespace(id=55, owner_id=7, get_role=lambda _id: None, get_channel=lambda _id: None)
-    bot = SimpleNamespace()
     view = rules.VerifySetupView(
-        bot, guild, 7, channel_id=10, role_id=20,
+        SimpleNamespace(), guild, 7, channel_id=10, role_id=20,
         rules_text="Règlement déjà publié", image_url="",
         captcha_enabled=True, captcha_max_attempts=3, message_id=1234,
     )
-    monkeypatch.setattr(
-        rules, "preview_published_channels",
-        AsyncMock(return_value=(plan(1, 2), SimpleNamespace(mention="@Vérifié"), {})),
+    assert not any(
+        "Verrouiller" in (getattr(child, "label", "") or "") for child in view.children
     )
-    lockdown = AsyncMock()
-    monkeypatch.setattr(rules, "lock_published_channels", lockdown)
-    interaction = SimpleNamespace(
-        user=SimpleNamespace(id=7),
-        guild=guild,
-        guild_id=55,
-        response=SimpleNamespace(defer=AsyncMock()),
-        followup=SimpleNamespace(send=AsyncMock()),
-    )
-    button = next(child for child in view.children if getattr(child, "label", "").startswith("Verrouiller les salons"))
-    await button.callback(interaction)
-    interaction.response.defer.assert_awaited_once()
-    card = interaction.followup.send.await_args.kwargs["embed"]
-    assert card.title == "Vérifier les accès"
-    assert "Aperçu sûr" in card.description
-    confirm_view = interaction.followup.send.await_args.kwargs["view"]
-    assert isinstance(confirm_view, rules.RulesLockConfirmView)
-    lockdown.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -524,11 +524,31 @@ async def _publish_public_panel(
             description=rules,
             colour=discord.Colour(0x4DA3FF),
         )
+    banner = None
     if image_url:
         public_embed.set_image(url=image_url)
+    else:
+        # Bannière SentriX en pièce jointe : l'image par URL est effacée par
+        # la couche visuelle globale. Si Discord refuse le message avec elle,
+        # on republie sans : le panneau ne doit jamais manquer pour une image.
+        banner = _rules_banner_file()
+        if banner is not None:
+            public_embed.set_image(url=f"attachment://{_RULES_BANNER_NAME}")
+
+    def without_banner():
+        public_embed.set_image(url=None)
 
     if previous_message is not None and previous_channel.id == channel.id:
-        await previous_message.edit(embed=public_embed, view=VerifyView())
+        try:
+            await previous_message.edit(
+                embed=public_embed, view=VerifyView(),
+                attachments=[banner] if banner is not None else [],
+            )
+        except discord.HTTPException:
+            if banner is None:
+                raise
+            without_banner()
+            await previous_message.edit(embed=public_embed, view=VerifyView(), attachments=[])
         return previous_message
 
     if previous_message is not None:
@@ -536,7 +556,32 @@ async def _publish_public_panel(
             await previous_message.delete()
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             pass
+    if banner is not None:
+        try:
+            return await channel.send(embed=public_embed, view=VerifyView(), file=banner)
+        except discord.Forbidden:
+            raise
+        except discord.HTTPException:
+            logger.warning("Panneau du règlement refusé avec bannière guild=%s : republié sans.", guild.id)
+            without_banner()
     return await channel.send(embed=public_embed, view=VerifyView())
+
+
+_RULES_BANNER_NAME = "sentrix-reglement.webp"
+
+
+def _rules_banner_file():
+    """Bannière de marque SentriX pour le panneau du règlement, ou None."""
+    try:
+        from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
+
+        ensure_banners()
+        path = BANNER_DIR / nom_fichier("special")
+        if path.exists():
+            return discord.File(path, filename=_RULES_BANNER_NAME)
+    except Exception:
+        logger.debug("Bannière du règlement indisponible", exc_info=True)
+    return None
 
 
 class RulesModal(discord.ui.Modal):
@@ -719,22 +764,9 @@ class VerifySetupView(discord.ui.View):
             self.stop()
             await panels.editer(interaction.response, self.panel(closed=True, disabled=True))
 
-        lock_button = discord.ui.Button(
-            label="Verrouiller les salons derrière le règlement",
-            style=discord.ButtonStyle.danger,
-            row=4,
-            disabled=not bool(self.message_id),
-        )
-
-        async def lock_callback(interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            await send_lock_preview(self.bot, self.guild, interaction)
-
         publish_button.callback = publish_callback
-        lock_button.callback = lock_callback
         close_button.callback = close_callback
         self.add_item(publish_button)
-        self.add_item(lock_button)
         self.add_item(close_button)
 
     def embed(self, *, closed: bool = False) -> discord.Embed:
@@ -944,6 +976,9 @@ class VerifySetupView(discord.ui.View):
             f"Règlement enregistré et panneau publié dans {channel.mention}. Toute modification future invalidera automatiquement les anciennes acceptations.",
             ephemeral=True,
         )
+        # Les salons se configurent seuls derrière le règlement, avec 10 s
+        # pour annuler : plus d'aperçu ni de bouton de verrouillage à part.
+        await start_auto_configuration(self.bot, self.guild, interaction)
 
     async def on_timeout(self) -> None:
         if self.message is None:
@@ -1265,3 +1300,154 @@ class ChannelProfileView(discord.ui.View):
         await interaction.response.edit_message(
             content="Configuration annulée : aucun salon modifié.", embed=None, view=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Configuration automatique à la publication du règlement (10 s pour annuler)
+# ---------------------------------------------------------------------------
+
+AUTO_CONFIG_DELAY_SECONDS = 10
+
+
+async def prepare_auto_configuration(bot, guild) -> dict:
+    """Tout le plan, sans rien écrire : verrou, staff, lecture seule, Onboarding."""
+    from utils import channel_profiles
+
+    lock, _role, _state = await preview_published_channels(bot, guild)
+    release = bool(getattr(lock, "onboarding", ()))
+    if release:
+        lock, _role, _state = await preview_published_channels(bot, guild, release_onboarding=True)
+    context = await _profile_context(bot, guild)
+    profiles = channel_profiles.plan_profiles(guild, **context)
+    forced = await channel_profiles.ai_reclassify(guild, profiles)
+    if forced:
+        profiles = channel_profiles.plan_profiles(guild, **context, forced=forced)
+    return {"lock": lock, "release": release, "context": context, "forced": forced, "profiles": profiles}
+
+
+def _auto_configuration_text(guild, prepared: dict, deadline: int) -> str:
+    from utils import channel_profiles
+
+    lock, profiles = prepared["lock"], prepared["profiles"]
+    members = len(getattr(lock, "gate", ()))
+    staff = len(getattr(lock, "secure_targets", ()))
+    read_only = len(profiles.channels(channel_profiles.READ_ONLY))
+    lines = [f"**SentriX configure vos salons <t:{deadline}:R>.**"]
+    lines.append(f"🔒 {members} salon(s) réservés aux membres vérifiés")
+    if staff:
+        lines.append(f"🛡️ {staff} salon(s) staff/logs invisibles des membres")
+    if read_only:
+        lines.append(f"📢 {read_only} salon(s) en lecture seule : seuls les administrateurs publient")
+    if prepared["release"]:
+        lines.append("📌 Onboarding Discord désactivé (sauvegardé) pour verrouiller ses salons")
+    if prepared["forced"]:
+        reviewed = [
+            str(getattr(channel, "name", "?")) for channel in profiles.kinds
+            if int(channel.id) in prepared["forced"]
+        ]
+        lines.append("🤖 L'IA a resserré : " + ", ".join(reviewed[:5]) + (" …" if len(reviewed) > 5 else ""))
+    lines.append("\nLes nouveaux membres ne verront que le règlement ; une fois le rôle reçu, "
+                 "les salons membres s'ouvrent, jamais ceux du staff.")
+    lines.append("-# Annulez pour ne rien modifier.")
+    return "\n".join(lines)
+
+
+async def run_auto_configuration(bot, guild, actor, prepared: dict) -> str:
+    """Applique le verrou puis les types de salons ; chaque étape s'annule seule en cas de refus."""
+    from utils import channel_profiles
+
+    changed, protected = await lock_published_channels(
+        bot, guild, actor, release_onboarding=prepared["release"],
+    )
+    # Recalcul après le verrou : les dérogations viennent de changer.
+    profiles = channel_profiles.plan_profiles(guild, **prepared["context"], forced=prepared["forced"])
+    configured = await apply_profile_plan(guild, profiles, actor) if profiles.operations else 0
+    secured = len(getattr(prepared["lock"], "secure_targets", ()))
+    lines = [f"🔒 {changed} salon(s) réservés aux membres vérifiés."]
+    if secured:
+        lines.append(f"🛡️ {secured} salon(s) staff/logs invisibles des membres.")
+    if configured:
+        lines.append(f"⚙️ {configured} salon(s) réglés selon leur type (lecture seule, discussion, vocal).")
+    if prepared["release"]:
+        lines.append("📌 Onboarding Discord désactivé (sauvegardé).")
+    lines.append(f"-# {protected} espace(s) laissés tels quels : règlement, vérification, salons privés.")
+    return "\n".join(lines)
+
+
+class AutoConfigCountdownView(discord.ui.View):
+    def __init__(self, guild, owner_id: int):
+        super().__init__(timeout=AUTO_CONFIG_DELAY_SECONDS + 60)
+        self.guild, self.owner_id = guild, int(owner_id)
+        self.cancelled = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        user = interaction.user
+        allowed = user.id == self.owner_id or getattr(user.guild_permissions, "administrator", False)
+        if not allowed:
+            await interaction.response.send_message("Réservé à l'administrateur qui a publié le règlement.", ephemeral=True)
+        return allowed
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.cancelled = True
+        self.stop()
+        from utils import embeds
+
+        await interaction.response.edit_message(
+            embed=embeds.standard("Configuration annulée", "Aucun salon n'a été modifié."), view=None,
+        )
+
+
+async def start_auto_configuration(bot, guild, interaction: discord.Interaction) -> None:
+    """Annonce le plan, laisse 10 s pour annuler, puis applique en arrière-plan."""
+    import asyncio
+
+    from utils import embeds
+
+    try:
+        prepared = await prepare_auto_configuration(bot, guild)
+    except ValueError as exc:
+        return await interaction.followup.send(str(exc), ephemeral=True)
+    except Exception:
+        logger.exception("Préparation de la configuration automatique impossible guild=%s", guild.id)
+        return await interaction.followup.send(
+            "Impossible d'analyser les salons : aucun salon n'a été modifié.", ephemeral=True,
+        )
+    lock, profiles = prepared["lock"], prepared["profiles"]
+    if not (
+        getattr(lock, "gate", ()) or getattr(lock, "category_gates", ())
+        or getattr(lock, "secure_targets", ()) or profiles.operations
+    ):
+        return await interaction.followup.send(
+            embed=embeds.standard("Salons déjà configurés", "Tout est en place : rien à modifier."),
+            ephemeral=True,
+        )
+    log_plan_decisions(guild, lock)
+    deadline = int(time.time()) + AUTO_CONFIG_DELAY_SECONDS
+    view = AutoConfigCountdownView(guild, interaction.user.id)
+    message = await interaction.followup.send(
+        embed=embeds.standard("Configuration des salons", _auto_configuration_text(guild, prepared, deadline)),
+        view=view, ephemeral=True, wait=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+    async def countdown() -> None:
+        await asyncio.sleep(AUTO_CONFIG_DELAY_SECONDS)
+        if view.cancelled:
+            return
+        view.stop()
+        title = "Salons configurés"
+        try:
+            text = await run_auto_configuration(bot, guild, interaction.user, prepared)
+        except ValueError as exc:
+            title, text = "Configuration interrompue", str(exc)
+        except Exception:
+            logger.exception("Configuration automatique impossible guild=%s", guild.id)
+            title, text = "Configuration interrompue", "Discord a refusé une modification : tout a été remis comme avant."
+        logger.info("Configuration automatique guild=%s : %s", guild.id, title)
+        try:
+            await message.edit(embed=embeds.standard(title, text), view=None)
+        except (discord.NotFound, discord.HTTPException):
+            pass
+
+    asyncio.create_task(countdown())

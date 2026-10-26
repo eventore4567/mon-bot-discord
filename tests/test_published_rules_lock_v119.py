@@ -53,20 +53,21 @@ async def test_publier_le_texte_sans_message_public_ne_compte_pas():
     assert await rules.published_rules_state(bot, SimpleNamespace(id=10)) is None
 
 
-def test_bouton_de_verrouillage_active_apres_publication():
+def test_plus_de_bouton_de_verrouillage_dans_l_editeur():
+    # 26/10 : publier le règlement configure les salons tout seul (10 s pour
+    # annuler) ; le bouton de verrouillage manuel est retiré.
     bot = _bot()
     guild = SimpleNamespace(id=10, get_channel=lambda _id: None, get_role=lambda _id: None)
-    def view(message_id):
-        return rules.VerifySetupView(
+    for message_id in (None, 987):
+        view = rules.VerifySetupView(
             bot, guild, 3,
             channel_id=60, role_id=40, rules_text="Règlement",
             image_url="", captcha_enabled=True, captcha_max_attempts=3,
             message_id=message_id,
         )
-    before = next(x for x in view(None).children if getattr(x, "label", "") == "Verrouiller les salons derrière le règlement")
-    after = next(x for x in view(987).children if getattr(x, "label", "") == "Verrouiller les salons derrière le règlement")
-    assert before.disabled is True
-    assert after.disabled is False
+        labels = [getattr(x, "label", "") or "" for x in view.children]
+        assert not any("Verrouiller" in label for label in labels)
+        assert "Enregistrer et publier" in labels
 
 
 @pytest.mark.asyncio

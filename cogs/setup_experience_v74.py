@@ -921,47 +921,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 view.message = None
 
         configure.callback = open_configurator
-
-        # Verrouiller le serveur derrière le règlement, en un geste. Le bouton
-        # n'est actif que si le salon ET le rôle sont déjà configurés : sans
-        # les deux, l'action rendrait le serveur inaccessible.
-        pret = channel is not None and role is not None
-        verrou = discord.ui.Button(
-            label="Verrouiller les salons derrière le règlement",
-            emoji="🔒",
-            style=discord.ButtonStyle.danger,
-            disabled=not pret,
-        )
-
-        async def ouvrir_verrou(interaction: discord.Interaction):
-            # Même parcours que l'éditeur du règlement : aperçu, sélection
-            # manuelle, puis confirmation explicite. L'ancien formulaire
-            # « tapez VERROUILLER » cachait TOUS les salons et les ouvrait au
-            # rôle Vérifié, staff et logs compris : il est retiré.
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            await rules_setup.send_lock_preview(self.bot, self.guild, interaction)
-
-        verrou.callback = ouvrir_verrou
-
-        # Configurer les salons par type (lecture seule, staff, discussion,
-        # vocal), tous ou seulement ceux choisis : aperçu puis « Appliquer ».
-        types = discord.ui.Button(
-            label="Configurer les salons",
-            emoji="⚙️",
-            style=discord.ButtonStyle.secondary,
-        )
-
-        async def ouvrir_types(interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            await rules_setup.send_profile_preview(self.bot, self.guild, interaction)
-
-        types.callback = ouvrir_types
-        container.add_item(discord.ui.ActionRow(configure, verrou, types))
-        if not pret:
-            container.add_item(discord.ui.TextDisplay(
-                "-# Choisissez d'abord le salon du règlement et le rôle accordé "
-                "à l'acceptation : le verrouillage s'appuie sur les deux."
-            ))
+        container.add_item(discord.ui.ActionRow(configure))
+        # Plus de bouton de verrouillage : publier le règlement configure les
+        # salons tout seul, avec 10 secondes pour annuler.
+        container.add_item(discord.ui.TextDisplay(
+            "-# En publiant le règlement, SentriX configure les salons tout seul : "
+            "les nouveaux ne voient que le règlement, puis les salons membres une fois "
+            "vérifiés. 10 secondes pour annuler."
+        ))
         self._add_navigation(container)
         self.add_item(container)
 

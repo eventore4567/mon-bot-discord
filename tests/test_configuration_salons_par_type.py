@@ -121,60 +121,6 @@ def test_un_refus_de_discord_remet_tout_comme_avant():
     assert s.c["annonces"].overwrites == avant["annonces"]
 
 
-def test_le_bouton_de_setup_ouvre_l_apercu_sans_rien_ecrire(monkeypatch):
-    from cogs import setup_experience_v74 as v74
-    from cogs import verify_setup_interactive_v78 as rules
-
-    reglement = Salon(10, "règlement")
-    reglement.mention = "<#10>"
-    role = SimpleNamespace(id=20, mention="@Vérifié", name="Vérifié")
-    guild = SimpleNamespace(
-        id=1, channels=[reglement],
-        get_channel=lambda cid: reglement if cid == 10 else None,
-        get_role=lambda rid: role if rid == 20 else None,
-    )
-
-    async def rien(*_a):
-        return None
-
-    async def config(_gid):
-        return {"verification_channel": 10, "verify_role": 20}
-
-    async def ligne(*_a):
-        return {"rules_text": "Respect", "image_url": None, "message_id": 99}
-
-    async def langue(*_a):
-        return "fr"
-
-    monkeypatch.setattr(v74.language_runtime, "get_language", langue)
-    monkeypatch.setattr(v74.v73, "poser_banniere", lambda _c: None)
-    monkeypatch.setattr(v74.v73, "_thumbnail", lambda _b: discord.ui.Thumbnail("https://example.com/a.png"))
-    ajoutes = []
-    vue = SimpleNamespace(
-        bot=SimpleNamespace(db=SimpleNamespace(execute=rien, get_guild_config=config, fetchone=ligne)),
-        guild=guild, add_item=ajoutes.append, _add_navigation=lambda _c: None,
-    )
-    asyncio.run(v74.SentriXSetupV74._build_rules_access(vue))
-    bouton = next(
-        item for container in ajoutes for item in container.walk_children()
-        if isinstance(item, discord.ui.Button) and item.label == "Configurer les salons"
-    )
-    appels = []
-
-    async def apercu(_bot, g, interaction):
-        appels.append(g)
-
-    monkeypatch.setattr(rules, "send_profile_preview", apercu)
-
-    class _Reponse:
-        async def defer(self, **_k):
-            pass
-
-    asyncio.run(bouton.callback(SimpleNamespace(response=_Reponse())))
-    assert appels == [guild]
-    assert not reglement.ecritures
-
-
 def test_choisir_des_salons_forcer_un_type_puis_appliquer(monkeypatch):
     from cogs import verify_setup_interactive_v78 as rules
 

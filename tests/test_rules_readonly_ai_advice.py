@@ -53,35 +53,22 @@ def test_no_public_ai_advice_button_in_rules_preview():
 
 @pytest.mark.asyncio
 async def test_no_member_channels_does_not_offer_dangerous_confirm(monkeypatch):
-    bot = SimpleNamespace()
+    from utils.channel_profiles import ProfilePlan
+
     guild = SimpleNamespace(id=5, owner_id=11, get_channel=lambda _id: None, get_role=lambda _id: None)
-    view = rules.VerifySetupView(
-        bot, guild, 11, channel_id=10, role_id=20,
-        rules_text="Règlement déjà publié", image_url="",
-        captcha_enabled=True, captcha_max_attempts=3, message_id=123,
-    )
     plan = AccessPlan()
     plan.secure_sensitive.append(SimpleNamespace(id=33, name="staff"))
-    monkeypatch.setattr(
-        rules, "preview_published_channels",
-        AsyncMock(return_value=(plan, SimpleNamespace(mention="@Vérifié"), {})),
-    )
+    monkeypatch.setattr(rules, "prepare_auto_configuration", AsyncMock(return_value={
+        "lock": plan, "release": False, "context": {}, "forced": {}, "profiles": ProfilePlan(),
+    }))
     apply_lock = AsyncMock()
     monkeypatch.setattr(rules, "lock_published_channels", apply_lock)
-    response = SimpleNamespace(defer=AsyncMock())
     followup = SimpleNamespace(send=AsyncMock())
-    interaction = SimpleNamespace(
-        guild_id=5, user=SimpleNamespace(id=11),
-        response=response, followup=followup,
-    )
-    button = next(x for x in view.children if getattr(x, "label", "").startswith("Verrouiller les salons"))
-    await button.callback(interaction)
-    from utils import sentrix_panels as panels
-    result = followup.send.await_args.kwargs["view"]
-    assert "Aucun salon membre" in panels.texte_complet(result)
-    assert isinstance(result, panels.Panneau)
-    assert result.avec_banniere
-    assert result.fichiers()
+    interaction = SimpleNamespace(guild_id=5, user=SimpleNamespace(id=11), followup=followup)
+    await rules.start_auto_configuration(SimpleNamespace(), guild, interaction)
+    card = followup.send.await_args.kwargs["embed"]
+    assert card.title == "Salons déjà configurés"
+    assert "view" not in followup.send.await_args.kwargs
     apply_lock.assert_not_awaited()
 
 

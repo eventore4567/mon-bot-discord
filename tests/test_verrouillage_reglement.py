@@ -60,38 +60,19 @@ def _page(monkeypatch):
         bot=bot, guild=guild, add_item=ajoutes.append, _add_navigation=lambda _c: None,
     )
     asyncio.run(v74.SentriXSetupV74._build_rules_access(vue))
-    boutons = [
-        item for container in ajoutes for item in container.walk_children()
-        if isinstance(item, discord.ui.Button) and "Verrouiller" in str(item.label)
-    ]
-    assert len(boutons) == 1
-    return boutons[0], guild, [reglement, staff]
+    return ajoutes, guild, [reglement, staff]
 
 
 def test_le_formulaire_dangereux_n_existe_plus():
     assert not hasattr(v74, "VerrouillerSalonsModal")
 
 
-def test_le_bouton_ouvre_l_apercu_sans_rien_ecrire(monkeypatch):
-    bouton, guild, salons = _page(monkeypatch)
-    apercus = []
-
-    async def apercu(bot, g, interaction):
-        apercus.append((g, interaction))
-
-    monkeypatch.setattr(rules_setup, "send_lock_preview", apercu)
-
-    differe = []
-
-    class _Reponse:
-        async def defer(self, **kwargs):
-            differe.append(kwargs)
-
-        async def send_modal(self, _modal):
-            raise AssertionError("aucun formulaire de verrouillage direct")
-
-    interaction = SimpleNamespace(response=_Reponse())
-    asyncio.run(bouton.callback(interaction))
-    assert apercus == [(guild, interaction)]
-    assert differe == [{"ephemeral": True, "thinking": True}]
+def test_publier_suffit_plus_aucun_bouton_de_verrouillage(monkeypatch):
+    # 26/10 : publier le règlement configure tout seul (10 s pour annuler).
+    ajoutes, _guild, salons = _page(monkeypatch)
+    items = [item for container in ajoutes for item in container.walk_children()]
+    labels = [str(getattr(i, "label", "") or "") for i in items if isinstance(i, discord.ui.Button)]
+    assert not any("Verrouiller" in label or "Configurer les salons" in label for label in labels)
+    textes = " ".join(i.content for i in items if isinstance(i, discord.ui.TextDisplay))
+    assert "10 secondes pour annuler" in textes
     assert all(not salon.ecritures for salon in salons)
