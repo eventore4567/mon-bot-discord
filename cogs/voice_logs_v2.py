@@ -81,6 +81,11 @@ def install(bot: commands.Bot) -> bool:
         # Mute/deaf/stream/caméra ne sont pas des déplacements vocaux.
         if before.channel == after.channel:
             return
+        # Les reconnexions de SentriX lui-même (musique persistante, coupures
+        # 1006 de Discord) postaient une paire départ/arrivée dans les logs du
+        # serveur toutes les ~10 minutes (prod, 25-26/10).
+        if getattr(member, "id", None) == getattr(getattr(bot, "user", None), "id", None):
+            return
 
         key_id = (member.guild.id, member.id)
         before_channel = before.channel

@@ -1279,6 +1279,9 @@ class Logs(commands.Cog, name="Logs"):
             and before.self_deaf == after.self_deaf
         ):
             return
+        # SentriX ne journalise pas ses propres reconnexions vocales.
+        if member.id == getattr(self.bot.user, "id", None):
+            return
         fields = [("Membre", _user_ref(member.id), True)]
         if before.channel != after.channel:
             fields.extend(
