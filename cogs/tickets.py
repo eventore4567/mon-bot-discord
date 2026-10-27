@@ -45,6 +45,7 @@ from cogs.ticket_constants import (
 )
 from services.tickets import count_genuinely_open_tickets
 from services import tickets as tickets_service
+from services import ticket_transcript_html
 from services import ticket_panels_v3
 from utils import embeds, checks, helpers, design_system
 from utils import cluster
@@ -1980,7 +1981,15 @@ class Tickets(commands.Cog):
         return tickets_service.transcript_file(channel, text)
 
     async def generate_transcript(self, channel: discord.TextChannel) -> discord.File:
-        return await tickets_service.generate_transcript(channel)
+        text = await self._fetch_transcript_text(channel)
+        ticket = await self.get_ticket_by_channel(channel.id)
+        return ticket_transcript_html.transcript_html_file(
+            channel, text,
+            ticket_id=int(ticket["id"]) if ticket else None,
+            subject=channel.name,
+            created_at=ticket["created_at"] if ticket else None,
+            closed_at=ticket["closed_at"] if ticket else None,
+        )
     async def close_ticket(self, interaction: discord.Interaction, ticket_id: int, reason: str):
         ticket = await self.bot.db.fetchone("SELECT * FROM tickets WHERE id = ?", (ticket_id,))
         if not ticket:
@@ -2061,7 +2070,12 @@ class Tickets(commands.Cog):
             await sx_panels.envoyer(
                 channel,
                 closed_panel,
-                file=self._transcript_file(channel, transcript_text),
+                file=ticket_transcript_html.transcript_html_file(
+                    channel, transcript_text, ticket_id=ticket_id,
+                    created_at=ticket["created_at"],
+                    closed_at=now(), closed_by=str(interaction.user),
+                    close_reason=reason,
+                ),
             )
         except discord.HTTPException:
             pass
@@ -2086,7 +2100,12 @@ class Tickets(commands.Cog):
 
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
-                await sx_panels.envoyer(owner, sx_panels.depuis_embed(embeds.info(f'Voici la transcription de votre ticket sur **{interaction.guild.name}**.')), file=self._transcript_file(channel, transcript_text))
+                await ticket_transcript_html.send_closure_dm(
+                    owner, interaction.guild, channel, transcript_text,
+                    ticket_id=ticket_id, created_at=ticket["created_at"],
+                    closed_at=now(), closer=interaction.user, reason=reason,
+                    subject=channel.name,
+                )
             except (discord.Forbidden, discord.HTTPException):
                 pass
             if not conf or conf["ticket_rating_enabled"]:
