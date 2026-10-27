@@ -139,3 +139,18 @@ def test_configured_site_origin_must_use_https():
         assert links.public_origin() is None
     with patch.dict(os.environ, {"SENTRIX_TRANSCRIPT_PUBLIC_URL": "https://sentrix.example"}):
         assert links.public_origin() == "https://sentrix.example"
+
+
+
+def test_close_only_posts_one_visible_panel_and_discards_private_duplicate():
+    from pathlib import Path
+    base = Path(__file__).resolve().parents[1]
+    secure = (base / "cogs" / "ticket_claim_security.py").read_text(encoding="utf-8")
+    tickets = (base / "cogs" / "tickets.py").read_text(encoding="utf-8")
+    assert "ticket_panels_v3.closed_card(" in secure
+    assert "ticket_panels_v3.ticket_closed_confirmation(" not in secure
+    assert "await interaction.delete_original_response()" in secure
+    assert "await interaction.response.defer(ephemeral=True)" in tickets
+    assert "transcript_filename=None" in secure
+    assert "file=ticket_transcript_html.transcript_html_file(" not in secure
+    assert "transcript_url=transcript_url" in secure
