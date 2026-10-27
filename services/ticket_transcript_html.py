@@ -252,6 +252,68 @@ async def resolve_ticket_recipient(
     return None, user
 
 
+class TicketTranscriptDM(discord.ui.LayoutView):
+    """One wide Components V2 card with the official SentriX banner and link."""
+
+    def __init__(
+        self, *, ticket_id: int, guild_name: str, subject: str,
+        created_at: int | None, closed_at: int | None, closer_name: str,
+        count: int, transcript_url: str | None, banner_filename: str,
+    ) -> None:
+        super().__init__(timeout=None)
+        card = discord.ui.Container()
+        banner = discord.ui.MediaGallery()
+        banner.add_item(media=f"attachment://{banner_filename}")
+        card.add_item(banner)
+
+        guild_label = discord.utils.escape_mentions(
+            discord.utils.escape_markdown(str(guild_name)[:150])
+        )
+        subject_label = discord.utils.escape_mentions(
+            discord.utils.escape_markdown(str(subject)[:160])
+        )
+        closer_label = discord.utils.escape_mentions(
+            discord.utils.escape_markdown(str(closer_name)[:120])
+        )
+        card.add_item(discord.ui.TextDisplay(
+            f"-# SentriX · Assistance · Ticket fermé\n"
+            f"## Transcription — TICKET-{int(ticket_id):04d}\n"
+            f"Votre ticket sur **{guild_label}** a été fermé."
+        ))
+        card.add_item(discord.ui.Separator())
+        card.add_item(discord.ui.TextDisplay(
+            f"**Sujet :** {subject_label}\n"
+            f"**Ouverture :** {_stamp(created_at)}\n"
+            f"**Fermeture :** {_stamp(closed_at)}\n"
+            f"**Durée :** {_duration(created_at, closed_at)}\n"
+            f"**Fermé par :** {closer_label}  ·  **Messages :** {int(count)}"
+        ))
+        card.add_item(discord.ui.Separator())
+
+        if transcript_url and urlsplit(transcript_url).scheme == "https":
+            # A dedicated click-target inside the same full-width container:
+            # text hyperlink + native Discord link button. No HTML attachment.
+            card.add_item(discord.ui.Section(
+                discord.ui.TextDisplay(
+                    "**Votre transcription**\n"
+                    f"[Consulter la conversation sur SentriX]({transcript_url})\n"
+                    "-# Page privée · Lien valable 90 jours · Ne pas partager"
+                ),
+                accessory=discord.ui.Button(
+                    label="Ouvrir la transcription",
+                    style=discord.ButtonStyle.link,
+                    url=transcript_url,
+                ),
+            ))
+        else:
+            card.add_item(discord.ui.TextDisplay(
+                "**Votre transcription**\n"
+                "Le lien privé est temporairement indisponible."
+            ))
+        card.add_item(discord.ui.TextDisplay("-# SentriX · Gestion des tickets"))
+        self.add_item(card)
+
+
 async def send_closure_dm(
     owner: discord.abc.User,
     guild: discord.Guild,
@@ -266,51 +328,26 @@ async def send_closure_dm(
     subject: str = "",
     transcript_url: str | None = None,
 ) -> None:
-    """Send a compact DM with a real website link. Never attach the HTML file."""
+    """Deliver one wide, branded DM and a link to the private web transcript."""
+    del reason  # Closure reason remains in the secure web archive, not the public URL.
+    # Load the image generator only when sending a DM, not while parsing HTML
+    # or handling /transcripts requests that do not require bot configuration.
+    from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
+
     closer_name = getattr(closer, "display_name", None) or str(closer)
-    count = len(parse_transcript(transcript_text))
-    label = f"TICKET-{int(ticket_id):04d}"
-    e = discord.Embed(
-        title=f"Transcription — {label}",
-        description=(
-            f"Votre ticket sur **{discord.utils.escape_markdown(guild.name)}** a été fermé.\n\n"
-            f"**Sujet :** {discord.utils.escape_markdown((subject or channel.name)[:240])}\n"
-            "Merci d'avoir contacté le support."
-        ),
-        color=discord.Color(0x5865F2),
+    view = TicketTranscriptDM(
+        ticket_id=ticket_id,
+        guild_name=guild.name,
+        subject=subject or channel.name,
+        created_at=created_at,
+        closed_at=closed_at,
+        closer_name=closer_name,
+        count=len(parse_transcript(transcript_text)),
+        transcript_url=transcript_url,
+        banner_filename=BANNER_FILENAME,
     )
-    e.add_field(
-        name="Durée",
-        value=f"{_stamp(created_at)} — {_stamp(closed_at)}\n{_duration(created_at, closed_at)}",
-        inline=False,
-    )
-    e.add_field(name="Fermé par", value=discord.utils.escape_markdown(str(closer_name)[:256]), inline=True)
-    e.add_field(name="Messages", value=str(count), inline=True)
-    view = None
-    if transcript_url and transcript_url.startswith("https://"):
-        e.add_field(
-            name="Transcription",
-            value=(
-                f"[Consulter la conversation sur SentriX]({transcript_url})\n"
-                "Lien privé valable 90 jours. Ne le partagez pas."
-            ),
-            inline=False,
-        )
-        view = discord.ui.View(timeout=None)
-        view.add_item(discord.ui.Button(
-            label="Ouvrir la transcription",
-            style=discord.ButtonStyle.link,
-            url=transcript_url,
-        ))
-    else:
-        e.add_field(
-            name="Transcription",
-            value="Le lien privé est temporairement indisponible.",
-            inline=False,
-        )
-    e.set_footer(text=f"SentriX · {guild.name}"[:2048])
     await owner.send(
-        embed=e,
         view=view,
+        file=discord.File(str(get_premium_log_banner()), filename=BANNER_FILENAME),
         allowed_mentions=discord.AllowedMentions.none(),
     )

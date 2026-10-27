@@ -59,6 +59,8 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-system-v25-js">
   "use strict";
   if (window.__sentrixDashboardMotionSystemV25) return;
   window.__sentrixDashboardMotionSystemV25 = true;
+  // V29: a single native transition replaces the old observers and ripples.
+  if (window.__sentrixQuietMotionV29) return;
 
   const reducedQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   const reduced = () => !!reducedQuery?.matches;

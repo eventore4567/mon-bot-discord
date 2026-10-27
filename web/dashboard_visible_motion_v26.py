@@ -49,6 +49,8 @@ SCRIPT = r'''<script id="sentrix-dashboard-visible-motion-v26-js">
   "use strict";
   if (window.__sentrixDashboardVisibleMotionV26) return;
   window.__sentrixDashboardVisibleMotionV26 = true;
+  // V29 owns visual transitions. Never replay cards on DOM mutations.
+  if (window.__sentrixQuietMotionV29) return;
 
   const reducedQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   const reduced = () => !!reducedQuery?.matches;
