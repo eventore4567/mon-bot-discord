@@ -28,6 +28,16 @@ SCRIPT = r'''<script id="sentrix-dashboard-motion-audio-v27-js">
   "use strict";
   if (window.__sentrixDashboardMotionAudioV27) return;
   window.__sentrixDashboardMotionAudioV27 = true;
+  // Keep the optional sound API defined, but use the quiet native dashboard.
+  // No click ripples, extra Web Animations, audio or MutationObservers.
+  if (window.__sentrixQuietMotionV29) {
+    window.__sentrixMotionV27 = {
+      get soundEnabled(){return false},
+      setSound(){return false},
+      preview(){}
+    };
+    return;
+  }
 
   const content = document.getElementById("content") || document.querySelector(".workspace");
   if (!content) return;
