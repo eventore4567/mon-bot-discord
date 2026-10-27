@@ -1,0 +1,33 @@
+name: SentriX Ticket HTML Transcripts
+
+on:
+  pull_request:
+    paths:
+      - "services/ticket_transcript_html.py"
+      - "cogs/tickets.py"
+      - "cogs/ticket_claim_security.py"
+      - "tests/test_ticket_transcript_html.py"
+      - ".github/workflows/ticket-html-transcripts.yml"
+  push:
+    branches:
+      - dashboard-refonte-2026-09
+    paths:
+      - "services/ticket_transcript_html.py"
+      - "cogs/tickets.py"
+      - "cogs/ticket_claim_security.py"
+      - "tests/test_ticket_transcript_html.py"
+
+jobs:
+  transcript-html:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install "discord.py>=2.7,<3" pytest
+      - name: Check Python syntax
+        run: python -m py_compile services/ticket_transcript_html.py cogs/tickets.py cogs/ticket_claim_security.py
+      - name: Test safe HTML and closure DMs
+        run: python -m pytest tests/test_ticket_transcript_html.py -q
