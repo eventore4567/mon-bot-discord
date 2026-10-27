@@ -90,11 +90,27 @@ class TicketTranscriptHTMLTests(TestCase):
         ))
         owner.send.assert_awaited_once()
         kwargs = owner.send.call_args.kwargs
-        self.assertNotIn("file", kwargs)
-        self.assertEqual(kwargs["embed"].title, "Transcription — TICKET-0029")
-        self.assertEqual(len(kwargs["embed"].fields), 4)
-        self.assertIn("https://sentrix.example/transcripts#", kwargs["embed"].fields[-1].value)
-        self.assertEqual(kwargs["view"].children[0].label, "Ouvrir la transcription")
+        import discord
+        from utils.premium_log_banners import BANNER_FILENAME
+        self.assertNotIn("embed", kwargs)
+        self.assertEqual(kwargs["file"].filename, BANNER_FILENAME)
+        self.assertIsInstance(kwargs["view"], discord.ui.LayoutView)
+        self.assertEqual(len(kwargs["view"].children), 1)
+        card = kwargs["view"].children[0]
+        self.assertIsInstance(card, discord.ui.Container)
+        self.assertTrue(any(isinstance(item, discord.ui.MediaGallery) for item in card.children))
+        body = "\\n".join(
+            item.content for item in card.children
+            if isinstance(item, discord.ui.TextDisplay)
+        )
+        self.assertIn("TICKET-0029", body)
+        self.assertIn("Serveur test", body)
+        section = next(item for item in card.children if isinstance(item, discord.ui.Section))
+        self.assertIn("https://sentrix.example/transcripts#", section.children[0].content)
+        self.assertEqual(section.accessory.label, "Ouvrir la transcription")
+        self.assertEqual(section.accessory.style, discord.ButtonStyle.link)
+        self.assertIn("https://sentrix.example/transcripts#", section.accessory.url)
+        kwargs["file"].close()
 
     def test_uncached_guild_member_is_fetched_and_dm_can_be_sent(self):
         member = SimpleNamespace(id=55, send=AsyncMock())
