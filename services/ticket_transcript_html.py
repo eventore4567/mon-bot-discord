@@ -62,6 +62,9 @@ def _duration(created: int | None, closed: int | None) -> str:
         seconds = max(0, int(closed) - int(created))
     except (TypeError, ValueError):
         return "Non disponible"
+    if seconds < 60:
+        # Même écriture que la carte de clôture (« 2 s ») au lieu de « 0 min ».
+        return f"{seconds} s"
     days, remainder = divmod(seconds, 86400)
     hours, remainder = divmod(remainder, 3600)
     minutes = remainder // 60

@@ -660,14 +660,16 @@ class BoutonRouvrirTicket(discord.ui.DynamicItem[discord.ui.Button],
                 ephemere=True,
             )
 
+        # Même lien ticket/salon/serveur que la suppression : rouvrir rend des
+        # accès au membre sur LE salon courant, jamais sur un autre.
         ticket = await interaction.client.db.fetchone(
-            "SELECT * FROM tickets WHERE id = ?",
-            (self.ticket_id,),
+            "SELECT * FROM tickets WHERE id = ? AND guild_id = ? AND channel_id = ?",
+            (self.ticket_id, int(guild.id), int(channel.id)),
         )
         if ticket is None:
             return await _panels.envoyer(
                 interaction.response,
-                _panels.depuis_embed(_embeds.error("Ticket introuvable.")),
+                _panels.depuis_embed(_embeds.error("Ticket introuvable dans ce salon.")),
                 ephemere=True,
             )
         if str(ticket["status"]) != "ferme":

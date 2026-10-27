@@ -563,7 +563,7 @@ def install(bot: commands.Bot) -> None:
                     owner, guild, channel, transcript_text,
                     ticket_id=ticket_id, created_at=ticket["created_at"],
                     closed_at=closed_at, closer=interaction.user,
-                    reason=reason_text, subject=channel.name,
+                    reason=reason_text, subject=await self._sujet_du_ticket(ticket, channel),
                     transcript_url=transcript_url,
                 )
                 logger.info("Ticket #%s : message de fermeture envoyé en MP user=%s lien_web=%s.", ticket_id, owner.id, bool(transcript_url))

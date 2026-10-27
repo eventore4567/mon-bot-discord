@@ -2107,7 +2107,7 @@ class Tickets(commands.Cog):
                     owner, interaction.guild, channel, transcript_text,
                     ticket_id=ticket_id, created_at=ticket["created_at"],
                     closed_at=now(), closer=interaction.user, reason=reason,
-                    subject=channel.name, transcript_url=transcript_url,
+                    subject=await self._sujet_du_ticket(ticket, channel), transcript_url=transcript_url,
                 )
             except (discord.Forbidden, discord.HTTPException) as exc:
                 logger.warning(
@@ -2121,6 +2121,21 @@ class Tickets(commands.Cog):
                     )
                 except (discord.Forbidden, discord.HTTPException):
                     pass
+
+    async def _sujet_du_ticket(self, ticket, channel) -> str:
+        """La catégorie choisie par le membre (« Aide »), sinon le nom du salon."""
+        try:
+            type_id = ticket["type_id"]
+        except (KeyError, IndexError, TypeError):
+            type_id = None
+        if type_id:
+            try:
+                row = await self.get_type(int(type_id))
+                if row and row["name"]:
+                    return str(row["name"])
+            except Exception:
+                logger.debug("Type du ticket illisible pour le MP.", exc_info=True)
+        return str(getattr(channel, "name", "") or "")
 
     async def _auto_delete(self, channel: discord.TextChannel, ticket_id: int, delay: int):
         await asyncio.sleep(delay)
@@ -2293,7 +2308,7 @@ class Tickets(commands.Cog):
                         owner, guild, channel, transcript_text,
                         ticket_id=int(row["id"]), created_at=row["created_at"],
                         closed_at=closed_at, closer="SentriX",
-                        reason=reason, subject=channel.name,
+                        reason=reason, subject=await self._sujet_du_ticket(row, channel),
                         transcript_url=transcript_url,
                     )
             except (discord.Forbidden, discord.HTTPException) as exc:
