@@ -89,6 +89,10 @@ def _install_late_motion_response_bridge(dashboard) -> None:
             getattr(dashboard, "INDEX_HTML", "") or ""
         )
         html = inject_late_motion_into_native_v2(source)
+        # Last, visible /app response: the lightweight V29 skin runs before
+        # native V2 and prevents legacy V25-V27 observers from stacking.
+        from .dashboard_quiet_motion_v29 import enhance as enhance_quiet_motion
+        html = enhance_quiet_motion(html)
         if html == source:
             return response
 
