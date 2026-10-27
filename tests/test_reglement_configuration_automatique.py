@@ -66,7 +66,7 @@ def test_sans_annulation_les_salons_sont_configures(monkeypatch):
     envois, message, run = _lancer(monkeypatch, annuler=False)
     carte = envois[0]["embed"]
     assert carte.title == "Configuration des salons"
-    assert "<t:" in carte.description and "Annulez" in carte.description
+    assert "<t:" in carte.description and "Ne pas configurer les salons" in carte.description
     run.assert_awaited_once()
     assert message.edits[-1]["embed"].title == "Salons configurés"
 
@@ -80,7 +80,7 @@ def test_annuler_dans_les_10_secondes_ne_modifie_rien(monkeypatch):
 def test_le_bouton_annuler_existe_et_se_desactive(monkeypatch):
     async def scenario():
         vue = rules.AutoConfigCountdownView(SimpleNamespace(id=1), 7)
-        bouton = next(i for i in vue.children if getattr(i, "label", "") == "Annuler")
+        bouton = next(i for i in vue.children if getattr(i, "label", "") == "Ne pas configurer les salons")
         edits = []
 
         async def edit_message(**kwargs):
@@ -91,7 +91,22 @@ def test_le_bouton_annuler_existe_et_se_desactive(monkeypatch):
 
     vue, edits = asyncio.run(scenario())
     assert vue.cancelled is True
-    assert edits[0]["embed"].title == "Configuration annulée"
+    assert edits[0]["embed"].title == "Salons laissés tels quels"
+
+
+def test_configurer_maintenant_n_attend_pas_les_10_secondes():
+    async def scenario():
+        vue = rules.AutoConfigCountdownView(SimpleNamespace(id=1), 7)
+        bouton = next(i for i in vue.children if getattr(i, "label", "") == "Configurer maintenant")
+
+        async def defer(**_kwargs):
+            return None
+
+        await bouton.callback(SimpleNamespace(response=SimpleNamespace(defer=defer)))
+        return vue
+
+    vue = asyncio.run(scenario())
+    assert vue.go_now.is_set() and vue.cancelled is False
 
 
 def test_l_ia_ne_peut_que_fermer_un_salon(monkeypatch):

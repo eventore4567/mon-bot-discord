@@ -729,7 +729,10 @@ def _en_citation(texte: str) -> str:
     lignes = texte.split("\n")
     if any(l.lstrip().startswith(("#", ">", "```", "-#")) for l in lignes) or len(lignes) > 6:
         return texte
-    return "\n".join(f"> {l}" if l.strip() else ">" for l in lignes)
+    # Une ligne « > » seule s'affiche telle quelle dans Discord (capture du
+    # 27/10/2026 : colonne de « > » blancs). Une ligne vide garde la citation
+    # avec un espace insécable invisible.
+    return "\n".join(f"> {l}" if l.strip() else "> \u200b" for l in lignes)
 
 
 def _icone_de_famille(famille: str, titre: str) -> str:

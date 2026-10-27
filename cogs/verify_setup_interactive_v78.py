@@ -6,6 +6,8 @@ de vérification. Les anciennes commandes verify-setup / verify-panel ne sont pl
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import time
 
@@ -490,6 +492,63 @@ async def lock_published_channels(
     return changed, protected
 
 
+def _is_rules_panel(message) -> bool:
+    me = getattr(getattr(message, "guild", None), "me", None)
+    if me is None or getattr(message.author, "id", None) != me.id:
+        return False
+    for row in getattr(message, "components", ()) or ():
+        for child in getattr(row, "children", ()) or ():
+            if getattr(child, "custom_id", None) == "verify_panel_btn":
+                return True
+    return False
+
+
+async def remove_stale_rules_panels(channel, *, limit: int = 50) -> int:
+    """Supprime les panneaux du règlement SentriX déjà présents dans ce salon."""
+    removed = 0
+    if not hasattr(channel, "history"):
+        return 0
+    try:
+        async for message in channel.history(limit=limit):
+            if _is_rules_panel(message):
+                try:
+                    await message.delete()
+                    removed += 1
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+    except (discord.Forbidden, discord.HTTPException):
+        logger.debug("Historique du salon du règlement illisible", exc_info=True)
+    return removed
+
+
+async def delete_published_rules(bot, guild) -> bool:
+    """Retire le panneau public du règlement ; les salons ne sont pas touchés."""
+    await bot.db.execute(_SCHEMA)
+    row = await bot.db.fetchone(
+        "SELECT message_id FROM dashboard_verification_panels WHERE guild_id=?", (guild.id,),
+    )
+    conf = await bot.db.get_guild_config(guild.id)
+    try:
+        channel_id = conf["verification_channel"] if conf is not None else None
+    except (KeyError, IndexError, TypeError):
+        channel_id = None
+    channel = guild.get_channel(int(channel_id)) if channel_id else None
+    removed = 0
+    if isinstance(channel, discord.TextChannel):
+        message_id = (dict(row).get("message_id") if row else None)
+        if message_id:
+            try:
+                await (await channel.fetch_message(int(message_id))).delete()
+                removed += 1
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+        removed += await remove_stale_rules_panels(channel)
+    await bot.db.execute(
+        "UPDATE dashboard_verification_panels SET message_id=NULL WHERE guild_id=?", (guild.id,),
+    )
+    return bool(removed)
+
+
 async def _publish_public_panel(
     bot: commands.Bot,
     guild: discord.Guild,
@@ -556,6 +615,9 @@ async def _publish_public_panel(
             await previous_message.delete()
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             pass
+    # Jamais deux règlements dans le même salon : les anciens panneaux SentriX
+    # (bouton « J'ai lu les règles ») dont on a perdu la trace sont retirés.
+    await remove_stale_rules_panels(channel)
     if banner is not None:
         try:
             return await channel.send(embed=public_embed, view=VerifyView(), file=banner)
@@ -1351,7 +1413,8 @@ def _auto_configuration_text(guild, prepared: dict, deadline: int) -> str:
         lines.append("🤖 L'IA a resserré : " + ", ".join(reviewed[:5]) + (" …" if len(reviewed) > 5 else ""))
     lines.append("\nLes nouveaux membres ne verront que le règlement ; une fois le rôle reçu, "
                  "les salons membres s'ouvrent, jamais ceux du staff.")
-    lines.append("-# Annulez pour ne rien modifier.")
+    lines.append("-# « Configurer maintenant » pour ne pas attendre, "
+                 "« Ne pas configurer les salons » pour garder vos permissions.")
     return "\n".join(lines)
 
 
@@ -1382,6 +1445,8 @@ class AutoConfigCountdownView(discord.ui.View):
         super().__init__(timeout=AUTO_CONFIG_DELAY_SECONDS + 60)
         self.guild, self.owner_id = guild, int(owner_id)
         self.cancelled = False
+        # Pressé par « Configurer maintenant » : le compte à rebours s'arrête là.
+        self.go_now = asyncio.Event()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         user = interaction.user
@@ -1390,14 +1455,24 @@ class AutoConfigCountdownView(discord.ui.View):
             await interaction.response.send_message("Réservé à l'administrateur qui a publié le règlement.", ephemeral=True)
         return allowed
 
-    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Configurer maintenant", emoji="✅", style=discord.ButtonStyle.success)
+    async def now(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.defer()
+        self.go_now.set()
+
+    @discord.ui.button(label="Ne pas configurer les salons", emoji="✖️", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, _button: discord.ui.Button):
         self.cancelled = True
+        self.go_now.set()
         self.stop()
         from utils import embeds
 
         await interaction.response.edit_message(
-            embed=embeds.standard("Configuration annulée", "Aucun salon n'a été modifié."), view=None,
+            embed=embeds.standard(
+                "Salons laissés tels quels",
+                "Le règlement est publié ; aucun salon n'a été modifié.",
+            ),
+            view=None,
         )
 
 
@@ -1435,7 +1510,10 @@ async def start_auto_configuration(bot, guild, interaction: discord.Interaction)
     )
 
     async def countdown() -> None:
-        await asyncio.sleep(AUTO_CONFIG_DELAY_SECONDS)
+        try:
+            await asyncio.wait_for(view.go_now.wait(), AUTO_CONFIG_DELAY_SECONDS)
+        except asyncio.TimeoutError:
+            pass
         if view.cancelled:
             return
         view.stop()

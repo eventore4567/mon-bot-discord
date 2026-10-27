@@ -311,6 +311,24 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             logger.debug("Propriétaire du bot indéterminé.", exc_info=True)
             return False
 
+    async def _open_embed_builder(self, interaction: discord.Interaction) -> None:
+        """L'éditeur de +embed, ouvert en privé depuis le Setup."""
+        from .embed_builder import EmbedBuilderView, EmbedDraft
+
+        cog = self.bot.get_cog("EmbedBuilder")
+        if cog is None:
+            return await panels.envoyer(
+                interaction.response,
+                panels.depuis_embed(embeds.warning("L’éditeur d’embeds n’est pas chargé.")),
+                ephemere=True,
+            )
+        view = EmbedBuilderView(cog, EmbedDraft(), interaction.user.id)
+        await interaction.response.send_message(embeds=view.build_panel_embeds(), view=view, ephemeral=True)
+        try:
+            view.message = await interaction.original_response()
+        except (discord.NotFound, discord.HTTPException):
+            view.message = None
+
     async def _build_home(self) -> None:
         """Premier écran : les modules et leur interrupteur, rien d'autre.
 
@@ -458,6 +476,14 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         options.append(
             discord.SelectOption(
+                label="Embeds",
+                value="embeds",
+                emoji="📨",
+                description="Créer et envoyer un embed personnalisé (titre, couleur, images, boutons).",
+            )
+        )
+        options.append(
+            discord.SelectOption(
                 label="Automatisations",
                 value="automation",
                 emoji="⚙️",
@@ -467,6 +493,8 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         selecteur = discord.ui.Select(placeholder="Configurer un module en détail…", options=options[:25])
 
         async def ouvrir(interaction: discord.Interaction):
+            if selecteur.values[0] == "embeds":
+                return await self._open_embed_builder(interaction)
             self.page = selecteur.values[0]
             self.backend = self._new_backend(self.page)
             await self.refresh(interaction)
@@ -937,7 +965,26 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 view.message = None
 
         configure.callback = open_configurator
-        container.add_item(discord.ui.ActionRow(configure))
+        boutons = [configure]
+        if published:
+            supprimer = discord.ui.Button(
+                label="Delete rules" if english else "Supprimer le règlement",
+                emoji="🗑️", style=discord.ButtonStyle.danger,
+            )
+
+            async def delete_rules(interaction: discord.Interaction):
+                await interaction.response.defer()
+                await rules_setup.delete_published_rules(self.bot, self.guild)
+                await self.refresh(interaction)
+                await interaction.followup.send(
+                    "🗑️ Règlement retiré. Les permissions des salons n’ont pas changé : "
+                    "republiez un règlement pour que les nouveaux puissent se vérifier.",
+                    ephemeral=True,
+                )
+
+            supprimer.callback = delete_rules
+            boutons.append(supprimer)
+        container.add_item(discord.ui.ActionRow(*boutons))
         # Plus de bouton de verrouillage : publier le règlement configure les
         # salons tout seul, avec 10 secondes pour annuler.
         container.add_item(discord.ui.TextDisplay(
