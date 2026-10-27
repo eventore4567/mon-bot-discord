@@ -427,7 +427,7 @@ def _ticket_actions(
     view = log_service.log_actions(ids=ids) or discord.ui.View(timeout=None)
     view.add_item(
         discord.ui.Button(
-            label="Télécharger la transcript",
+            label="Ouvrir la transcription",
             style=discord.ButtonStyle.secondary,
             custom_id=f"sentrix:ticket-transcript:{int(ticket_id)}",
             row=0,
@@ -705,11 +705,22 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
         if not allowed:
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'avez pas accès à cette transcript.")), ephemere=True)
 
-        name = _clean_channel_name(row["channel_name"])
-        payload = io.BytesIO(str(row["transcript_text"] or "Aucun message.").encode("utf-8"))
+        # Les archives restent stockées en texte brut en base, mais le fichier
+        # remis au staff/demandeur s'ouvre maintenant comme une page HTML Discord.
+        from services import ticket_transcript_html
+        html = ticket_transcript_html.render_transcript_html(
+            str(row["transcript_text"] or ""),
+            guild_name=interaction.guild.name,
+            ticket_label=f"TICKET-{ticket_id:04d}",
+            subject=str(row["channel_name"] or "Support"),
+            created_at=ticket["created_at"] if ticket else None,
+            closed_at=ticket["closed_at"] if ticket else None,
+        )
+        payload = io.BytesIO(html.encode("utf-8"))
         await interaction.response.send_message(
-            file=discord.File(payload, filename=f"transcript-{name}.txt"),
+            file=discord.File(payload, filename=f"TICKET-{ticket_id:04d}.html"),
             ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
 
