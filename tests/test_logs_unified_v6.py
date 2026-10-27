@@ -84,16 +84,16 @@ def test_ticket_transcript_stays_archived_and_is_visible_inside_the_new_card():
     assert "CREATE TABLE IF NOT EXISTS ticket_transcripts" in source
     assert 'custom_id=f"sentrix:ticket-transcript:{int(ticket_id)}"' in source
     assert 'prefix = "sentrix:ticket-transcript:"' in source
-    assert 'filename=f"TICKET-{ticket_id:04d}.html"' in source
-    assert "ticket_transcript_html.render_transcript_html(" in source
+    assert "ticket_transcript_links.publish_link(" in source
+    assert 'file=discord.File(payload' not in source
     assert 'label="Ouvrir la transcription"' in source
     # Plus de panneau vert ni de boutons Copier-ID/Transcript sur une fermeture
-    # neuve : c'est désormais le fichier HTML de la carte Components V2.
+    # neuve : le salon ne reçoit aucun fichier HTML, seulement la fiche de fermeture.
     close_block = source[source.index("async def close_ticket_v6"):source.index("def _patch_raw_file_recovery")]
     assert "ticket_claim_security.close_ticket_via_security(" in close_block
     assert 'view=_ticket_actions(' not in close_block
     assert "ticket_panels_v3.closed_card(" in secure
-    assert "file=transcript_file" in secure
+    assert "file=transcript_file" not in secure
     assert "await logs_unified_v6._store_transcript(" in secure
     assert 'component(media=f"attachment://{transcript_filename}")' in cards
     assert "vue_ticket_ferme(ticket_id)" in secure
