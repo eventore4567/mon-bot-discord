@@ -48,6 +48,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import config
+from utils import audit_entries
 from utils import embeds, checks, helpers, log_service, text_normalization, ai_service
 from utils import lookalike_domains
 from utils.sliding_window import FenetreGlissante
@@ -4606,7 +4607,7 @@ class AutoMod(commands.Cog, name="Automod"):
             async for entry in guild.audit_logs(limit=5, action=action):
                 if (discord.utils.utcnow() - entry.created_at).total_seconds() > 15:
                     continue
-                if target_id is None or (entry.target and getattr(entry.target, "id", None) == target_id):
+                if target_id is None or (audit_entries.cible_id(entry) == target_id):
                     return entry.user
         except discord.HTTPException as exc:
             logger.warning(

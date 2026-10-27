@@ -20,6 +20,7 @@ import unicodedata
 
 import discord
 
+from utils import audit_entries
 from utils import embeds
 from utils import sentrix_panels as panels
 from discord import app_commands
@@ -493,7 +494,7 @@ class SecurityHardening(commands.Cog):
         Une entrée sans channel_id confirmé ne justifie PAS de bannir
         quelqu'un : on privilégie l'absence de sanction à une fausse accusation.
         """
-        target = getattr(entry, "target", None)
+        target = audit_entries.cible(entry)
         audit_channel = getattr(target, "channel_id", None)
         if audit_channel is None:
             audit_channel = getattr(getattr(entry, "extra", None), "channel_id", None)

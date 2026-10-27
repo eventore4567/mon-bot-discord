@@ -13,6 +13,7 @@ import discord
 from discord.ext import commands
 
 from database.db import now
+from utils import audit_entries
 from utils import checks, embeds, helpers, log_service
 from utils import sentrix_panels as panels
 from .v17_shared import ensure_schema, register_command_policy, safe_discord_call, state
@@ -123,7 +124,7 @@ async def _audit_actor_map(guild: discord.Guild, event_key: str, target_ids: set
     result: dict[int, discord.abc.User] = {}
     try:
         async for entry in guild.audit_logs(limit=min(100, max(25, len(target_ids) * 4)), action=action):
-            target_id = int(getattr(getattr(entry, "target", None), "id", 0) or 0)
+            target_id = int(audit_entries.cible_id(entry) or 0)
             if target_id in target_ids and entry.user is not None:
                 result[target_id] = entry.user
                 if len(result) >= len(target_ids):

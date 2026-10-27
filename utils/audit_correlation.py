@@ -6,6 +6,8 @@ journal d'audit sans jamais prendre simplement sa dernière entrée.
 """
 from __future__ import annotations
 
+from utils import audit_entries
+
 import asyncio
 from dataclasses import dataclass
 from typing import Callable
@@ -21,7 +23,7 @@ class AuditCorrelation:
 
 
 def _target_id(entry: discord.AuditLogEntry) -> int | None:
-    value = getattr(getattr(entry, "target", None), "id", None)
+    value = audit_entries.cible_id(entry)
     try:
         return int(value) if value is not None else None
     except (TypeError, ValueError):

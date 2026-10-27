@@ -40,6 +40,7 @@ from typing import Any
 
 import discord
 
+from utils import audit_entries
 from utils import embeds
 from utils import sentrix_panels as panels
 from discord.ext import commands, tasks
@@ -1593,7 +1594,7 @@ class BotMasteryRuntime(commands.Cog, name=_COG_NAME):
                 actor = guild.get_member(entry.user.id) or entry.user
                 if await automod.is_antinuke_exempt(guild, actor):
                     continue
-                target_id = getattr(entry.target, "id", None)
+                target_id = audit_entries.cible_id(entry)
                 kind = "webhook_create" if action == discord.AuditLogAction.webhook_create else "webhook_change"
                 if await self._record_nuke(guild, actor.id, kind, target_id, {"channel_id": channel.id}):
                     await self._trigger_nuke(automod, guild, actor.id, "Modification massive de webhooks")

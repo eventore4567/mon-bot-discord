@@ -25,6 +25,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 
+from utils import audit_entries
 from utils import embeds, log_categories, log_service
 from utils import sentrix_panels as panels
 
@@ -688,7 +689,7 @@ async def _audit_actor_for(
         async for entry in guild.audit_logs(limit=8, action=action):
             if abs((now - entry.created_at).total_seconds()) > 10:
                 continue
-            target = entry.target
+            target = audit_entries.cible(entry)
             if target_id is not None and getattr(target, "id", None) != target_id:
                 continue
             if target_ids is not None and getattr(target, "id", None) not in target_ids:

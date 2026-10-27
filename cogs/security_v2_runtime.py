@@ -25,6 +25,7 @@ from types import MethodType
 import discord
 from discord.ext import commands, tasks
 
+from utils import audit_entries
 from utils import embeds, helpers
 from utils import sentrix_panels as panels
 
@@ -393,7 +394,7 @@ class SecurityV2Runtime(commands.Cog, name=_COG_NAME):
                 actor = entry.user
                 if actor is None or await automod.is_antinuke_exempt(guild, actor):
                     return
-                target_id = int(getattr(entry.target, "id", 0) or 0)
+                target_id = int(audit_entries.cible_id(entry) or 0)
                 if not target_id:
                     return
                 # Évite de dupliquer la même entrée quand Discord dispatch plusieurs updates.

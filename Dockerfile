@@ -54,6 +54,7 @@ RUN python -m pytest -q \
     tests/test_command_usage.py \
     tests/test_command_refs.py \
     tests/test_loop_watchdog.py \
+    tests/test_audit_entries.py \
     tests/test_raid_verification_recovery_v130.py \
     tests/test_automod_log_manage_style.py \
     tests/test_sentrix_trace_style.py \

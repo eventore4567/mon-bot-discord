@@ -14,6 +14,7 @@ from discord.ext import commands
 
 import config
 from database.db import now
+from utils import audit_entries
 from utils import checks, embeds, helpers, log_service
 from utils import sentrix_panels as panels
 from .v17_shared import (
@@ -114,7 +115,7 @@ async def _audit_actor(guild: discord.Guild, action: discord.AuditLogAction, tar
     for attempt in range(3):
         try:
             async for entry in guild.audit_logs(limit=8, action=action):
-                target = getattr(entry, "target", None)
+                target = audit_entries.cible(entry)
                 if int(getattr(target, "id", 0) or 0) == int(target_id):
                     return entry.user
         except (discord.Forbidden, discord.HTTPException):

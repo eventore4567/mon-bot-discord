@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import discord
 from discord.ext import commands
 
+from utils import audit_entries
 from utils import embeds, log_service
 from services import voice_history
 
@@ -625,7 +626,7 @@ class Logs(commands.Cog, name="Logs"):
                     limit=12,
                     action=discord.AuditLogAction.message_delete,
                 ):
-                    if getattr(entry.target, "id", None) != int(author_id):
+                    if audit_entries.cible_id(entry) != int(author_id):
                         continue
                     if abs((now - entry.created_at).total_seconds()) > 4:
                         continue

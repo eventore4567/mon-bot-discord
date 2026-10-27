@@ -24,6 +24,7 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from utils import audit_entries
 from utils import embeds
 
 logger = logging.getLogger("bot.security.antinuke-v55")
@@ -55,7 +56,7 @@ def _action_key(action: discord.AuditLogAction) -> int | str:
 
 
 def _target_id(entry: discord.AuditLogEntry) -> int | None:
-    target = getattr(entry, "target", None)
+    target = audit_entries.cible(entry)
     value = getattr(target, "id", None)
     try:
         return int(value) if value is not None else None

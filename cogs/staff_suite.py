@@ -26,6 +26,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from services import moderation as moderation_service
+from utils import audit_entries
 from utils import checks, helpers, log_service
 from utils import sentrix_emojis as sxemoji
 from utils import sentrix_panels as panels
@@ -1712,7 +1713,7 @@ _AUDIT_WATCH = {
 
 
 def _audit_target(entry) -> str:
-    target = getattr(entry, "target", None)
+    target = audit_entries.cible(entry)
     if target is None:
         return ""
     if isinstance(target, (discord.abc.GuildChannel, discord.Thread)) or hasattr(target, "mention"):
@@ -2022,7 +2023,7 @@ class StaffSuite(commands.Cog, name="StaffSuite"):
         # Ban / déban REÇU par le membre surveillé : lu ici plutôt que par deux
         # écouteurs on_member_ban/unban de plus (budget d'écouteurs tenu).
         action = getattr(getattr(entry, "action", None), "name", "")
-        target_id = getattr(getattr(entry, "target", None), "id", None)
+        target_id = audit_entries.cible_id(entry)
         if action in {"ban", "unban"} and target_id and (guild.id, int(target_id)) in self._watch_cache:
             text = "A été banni du serveur" if action == "ban" else "A été débanni"
             if actor_id:
