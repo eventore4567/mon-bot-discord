@@ -19,6 +19,7 @@ from discord.ext import commands
 
 from services import tickets as tickets_service
 from services import ticket_log_report
+from services import ticket_transcript_html
 from services import ticket_panels_v3
 from utils import log_service
 from utils import sentrix_panels as panels
@@ -449,7 +450,12 @@ def install(bot: commands.Bot) -> None:
         # Les boutons Rouvrir / Supprimer sont ceux de la vue persistante :
         # leur custom_id survit aux redémarrages.
         vue_fermeture = tickets_service.vue_ticket_ferme(ticket_id)
-        transcript_file = self._transcript_file(channel, transcript_text)
+        transcript_file = ticket_transcript_html.transcript_html_file(
+            channel, transcript_text, ticket_id=ticket_id,
+            guild_name=guild.name, subject=channel.name,
+            created_at=ticket["created_at"], closed_at=closed_at,
+            closed_by=str(interaction.user), close_reason=reason_text,
+        )
         closure_card = panels.avec_composants(
             ticket_panels_v3.closed_card(
                 ticket_id=ticket_id,
@@ -533,7 +539,12 @@ def install(bot: commands.Bot) -> None:
 
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
-                await panels.envoyer(owner, panels.depuis_embed(tickets.embeds.info(f'Voici la transcription de votre ticket sur **{guild.name}**.')), file=self._transcript_file(channel, transcript_text))
+                await ticket_transcript_html.send_closure_dm(
+                    owner, guild, channel, transcript_text,
+                    ticket_id=ticket_id, created_at=ticket["created_at"],
+                    closed_at=closed_at, closer=interaction.user,
+                    reason=reason_text, subject=channel.name,
+                )
             except (discord.Forbidden, discord.HTTPException):
                 pass
             if not conf or conf["ticket_rating_enabled"]:
