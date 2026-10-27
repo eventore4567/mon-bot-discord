@@ -209,7 +209,10 @@ def _permission(entry: HelpEntry) -> str:
 def _title(entry: HelpEntry, prefix: str = "+") -> str:
     parts: list[str] = []
     if entry.slash_name:
-        parts.append(f"/{entry.slash_name}")
+        # Mention cliquable : un clic place la commande dans la barre de message.
+        from utils import slash_ids
+
+        parts.append(slash_ids.mention(entry.slash_name))
     if entry.prefix_command is not None:
         # Nom court conseillé (cogs/common_command_names.py) ; le nom interne reste
         # tapable et apparaît dans la ligne Alias.

@@ -45,6 +45,9 @@ async def _fetch_remote_slash(bot: commands.Bot) -> tuple[set[str], str | None]:
     for attempt in range(3):
         try:
             items = await bot.tree.fetch_commands()
+            from utils import slash_ids
+
+            slash_ids.retenir(items)
             return {str(item.name).casefold() for item in items}, None
         except discord.HTTPException as exc:
             last_error = exc

@@ -219,7 +219,8 @@ def test_long_subcommand_and_short_alias_both_keep_working():
     assert bot.get_command("administration notif-set") is original
 
 
-def test_generic_long_command_gets_fallback_alias():
+def test_long_command_without_readable_shortcut_keeps_its_name():
+    """27/10/2026 (Jayden) : plus d'alias sans voyelles (+ticktrpnwndw) ; le nom reste."""
     bot = _bot()
 
     @bot.command(name="supercalifragilistic")
@@ -229,10 +230,9 @@ def test_generic_long_command_gets_fallback_alias():
     command = bot.get_command("supercalifragilistic")
     short._apply_short_names(bot, command)
 
-    aliases = [alias for alias in command.aliases if len(alias) <= 12]
-    assert aliases
+    assert short._automatic_short_alias("supercalifragilistic") is None
+    assert short._automatic_short_alias("ticketreopenwindow") is None
     assert bot.get_command("supercalifragilistic") is command
-    assert any(bot.get_command(alias) is command for alias in aliases)
 
 
 def test_auto_alias_collision_gets_safe_numbered_variant():

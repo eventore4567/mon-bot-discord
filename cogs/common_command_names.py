@@ -256,26 +256,9 @@ def _automatic_short_alias(name: str) -> str | None:
         candidate = candidate.replace(source, target)
 
     candidate = re.sub(r"-+", "-", candidate).strip("-")
-    parts = [part for part in candidate.split("-") if part]
-
-    if len(candidate) > _AUTO_SHORT_MAX_LENGTH and len(parts) >= 2:
-        compact = "".join(part[:4] for part in parts)
-        if compact:
-            candidate = compact
-
-    if len(candidate) > _AUTO_SHORT_MAX_LENGTH or candidate == original:
-        # Fallback universel pour les longs noms en un seul bloc :
-        # on garde le début lisible puis on retire les voyelles du reste.
-        flat = re.sub(r"[^a-z0-9]", "", candidate or original)
-        if len(flat) >= _AUTO_SHORT_MIN_LENGTH:
-            head = flat[:4]
-            tail = re.sub(r"[aeiouy]", "", flat[4:])
-            candidate = (head + tail)[:_AUTO_SHORT_MAX_LENGTH]
-
-    if not candidate or candidate == original or len(candidate) >= len(original):
-        flat = re.sub(r"[^a-z0-9]", "", original)
-        candidate = flat[:_AUTO_SHORT_MAX_LENGTH]
-
+    # 27/10/2026 (Jayden, capture de +help) : les replis « 4 lettres par mot » et
+    # « sans voyelles » donnaient +ticktrpnwndw, +domaremo, +invisear… que l'aide
+    # affichait comme nom. Seuls les raccourcis lisibles du tableau restent.
     if (
         not candidate
         or candidate == original

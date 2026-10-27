@@ -567,18 +567,21 @@ async def _publish_public_panel(
     return await channel.send(embed=public_embed, view=VerifyView())
 
 
-_RULES_BANNER_NAME = "sentrix-reglement.webp"
+_RULES_BANNER_NAME = "sentrix-reglement.png"
 
 
 def _rules_banner_file():
-    """Bannière de marque SentriX pour le panneau du règlement, ou None."""
-    try:
-        from utils.log_banners import BANNER_DIR, ensure_banners, nom_fichier
+    """La bande neutre ultra-fine des logs pour le panneau du règlement, ou None.
 
-        ensure_banners()
-        path = BANNER_DIR / nom_fichier("special")
-        if path.exists():
-            return discord.File(path, filename=_RULES_BANNER_NAME)
+    27/10/2026 (Jayden, capture) : l'ancienne bannière « special » avec l'écusson
+    était trop haute ; il veut la même bande quasi invisible que les journaux.
+    """
+    try:
+        from utils.premium_log_banners import get_premium_log_banner
+
+        path = get_premium_log_banner()
+        if path.is_file():
+            return discord.File(str(path), filename=_RULES_BANNER_NAME)
     except Exception:
         logger.debug("Bannière du règlement indisponible", exc_info=True)
     return None
