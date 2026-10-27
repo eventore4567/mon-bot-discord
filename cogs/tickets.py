@@ -2827,9 +2827,33 @@ class Tickets(commands.Cog):
         ticket = await self.get_ticket_by_channel(ctx.channel.id)
         if not ticket:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket. Lancez la commande dans le salon du ticket concerné.")))
-        await ctx.defer() if ctx.interaction else None
-        file = await self.generate_transcript(ctx.channel)
-        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success('📄 Transcription générée.')), file=file)
+        if ctx.interaction:
+            await ctx.defer(ephemeral=True)
+        try:
+            text = await self._fetch_transcript_text(ctx.channel)
+            url = await ticket_transcript_links.publish_link(
+                self.bot, ticket_id=int(ticket["id"]), guild_id=ctx.guild.id,
+                channel_id=ctx.channel.id, channel_name=ctx.channel.name,
+                transcript_text=text, viewer_id=ctx.author.id,
+                closer_name="Consultation staff", close_reason="Archive demandée",
+            )
+        except Exception:
+            logger.exception("Lien de transcription manuelle indisponible ticket #%s.", ticket["id"])
+            url = None
+        notice = (
+            f"Transcription privée : {url}\nCe lien est personnel (90 jours)."
+            if url else "La transcription est temporairement indisponible."
+        )
+        if ctx.interaction:
+            await ctx.interaction.followup.send(
+                notice, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
+            )
+        else:
+            try:
+                await ctx.author.send(notice, allowed_mentions=discord.AllowedMentions.none())
+                await ctx.send("Lien privé envoyé en message direct.")
+            except discord.HTTPException:
+                await ctx.send("Impossible d'envoyer le lien privé en message direct.")
 
     async def send_stats(self, ctx_or_interaction):
         guild = ctx_or_interaction.guild
