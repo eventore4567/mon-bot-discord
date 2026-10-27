@@ -46,6 +46,7 @@ from cogs.ticket_constants import (
 from services.tickets import count_genuinely_open_tickets
 from services import tickets as tickets_service
 from services import ticket_transcript_html
+from services import ticket_transcript_links
 from services import ticket_panels_v3
 from utils import embeds, checks, helpers, design_system
 from utils import cluster
