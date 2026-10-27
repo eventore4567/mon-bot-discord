@@ -145,6 +145,7 @@ EXTENSIONS = [
     "cogs.minigames",
     "cogs.fun_social",  # 69 interactions Fun, GIFs pertinents et profils fictifs
     "cogs.command_usage_report",  # usage réel des commandes dans le journal (comptes seuls)
+    "cogs.loop_watchdog_cog",  # dit QUEL code bloque la boucle (lenteurs par paquets, 27/10)
     "cogs.games_economy",
     "cogs.games_arcade",
     "cogs.music",
