@@ -378,7 +378,30 @@ MODULE_SWITCHES = (
     ("levels", "Niveaux"), ("economy", "Économie"), ("welcome", "Bienvenue"), ("goodbye", "Départs"),
     ("antispam", "Anti-spam"), ("tickets", "Tickets"), ("logs", "Logs"), ("notifications", "Notifications"),
 )
-_SWITCH_LABELS = {"enabled": "ON", "disabled": "OFF", "not_configured": "OFF (non configuré)"}
+_SWITCH_LABELS = {
+    "enabled": "ON", "disabled": "OFF", "not_configured": "OFF (non configuré)",
+    "empty": "OFF (aucune protection active)",
+}
+
+
+async def security_protections_actives(bot, guild_id: int) -> int:
+    """Nombre de protections de sécurité qui tournent vraiment.
+
+    27/10/2026 : « Sécurité » est actif par défaut (PROTECTION_MODULES), mais
+    toutes les colonnes d'automod_settings valent 0 tant que personne n'a
+    cliqué « Activer la sécurité ». Le Setup affichait donc « Sécurité — ON »
+    sur un serveur où aucun filtre ne tournait.
+    """
+    row = await bot.db.fetchone("SELECT * FROM automod_settings WHERE guild_id = ?", (guild_id,))
+    total = sum(1 for field, _label in AUTOMOD if _get(row, field, 0))
+    try:
+        v71 = await bot.db.fetchone(
+            "SELECT honeypot_enabled, verification_enabled FROM sentrix_security_v71 WHERE guild_id = ?",
+            (guild_id,),
+        )
+    except Exception:
+        v71 = None
+    return total + int(bool(_get(v71, "honeypot_enabled", 0))) + int(bool(_get(v71, "verification_enabled", 0)))
 
 
 async def module_switch_states(bot, guild_id: int) -> dict[str, str]:
@@ -392,6 +415,8 @@ async def module_switch_states(bot, guild_id: int) -> dict[str, str]:
             states[key] = "enabled" if row and _get(row, "antispam", 0) and await core.module_enabled(bot, guild_id, "security") else ("disabled" if row else "not_configured")
         else:
             states[key] = await core.module_state(bot, guild_id, key)
+        if key == "security" and states[key] == "enabled" and not await security_protections_actives(bot, guild_id):
+            states[key] = "empty"
     return states
 
 

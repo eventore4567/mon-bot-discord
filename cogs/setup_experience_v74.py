@@ -264,9 +264,11 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             else "○ INACTIF"
         )
         states["security"] = (
-            "● ACTIF"
-            if await core.module_enabled(self.bot, self.guild.id, "security")
-            else "○ INACTIF"
+            "○ INACTIF"
+            if not await core.module_enabled(self.bot, self.guild.id, "security")
+            else "● ACTIF"
+            if await setup_ui.security_protections_actives(self.bot, self.guild.id)
+            else "— À CONFIGURER"
         )
         if await core.module_enabled(self.bot, self.guild.id, "tickets"):
             states["tickets"] = (
@@ -350,11 +352,25 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             "**Activés**\n" + (" · ".join(actifs_noms) or "Aucun module activé")
             + "\n\n**Désactivés**\n" + (" · ".join(inactifs_noms) or "Aucun")
         )
+        if switch_states.get("security") == "empty":
+            resume += (
+                "\n\n> ⚠️ **Aucune protection ne tourne** : anti-spam, anti-raid et anti-nuke "
+                "sont coupés. Choisissez « Sécurité » dans le menu pour les activer."
+            )
         container.add_item(discord.ui.TextDisplay(resume))
         interrupteurs = setup_ui.ModuleSwitchSelect(self, switch_states)
 
         async def basculer(interaction: discord.Interaction):
             module = interrupteurs.values[0]
+            # « Sécurité » sans aucune protection : allumer le module seul ne
+            # change rien, le même profil que le bouton de la page Sécurité.
+            if module == "security" and switch_states.get(module) == "empty":
+                await self._set_security_profile(True, interaction.user.id)
+                try:
+                    await self.backend.audit(interaction.user.id, "module:security", "profil")
+                except Exception:
+                    logger.debug("Audit setup indisponible.", exc_info=True)
+                return await self.refresh(interaction)
             try:
                 nouveau = await setup_ui.toggle_module_switch(self.bot, self.guild.id, module, interaction.user.id)
             except core.ModuleSetupRequired as exc:
@@ -1199,7 +1215,12 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 logger.debug("Rafraîchissement des panneaux sécurité indisponible", exc_info=True)
 
     async def _build_security(self) -> None:
-        enabled = await core.module_enabled(self.bot, self.guild.id, "security")
+        # Module allumé sans aucune protection = rien ne tourne : le bouton
+        # propose d'activer, comme si la sécurité était coupée.
+        enabled = (
+            await core.module_enabled(self.bot, self.guild.id, "security")
+            and await setup_ui.security_protections_actives(self.bot, self.guild.id) > 0
+        )
         _ok, missing = _bot_permission_audit(self.guild)
         status = discord.ui.Button(
             label="Activé" if enabled else "Désactivé",

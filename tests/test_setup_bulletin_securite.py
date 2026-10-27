@@ -41,6 +41,9 @@ def _construire(constats, *, analyse_casse=False):
     async def _module_enabled(*_a, **_k):
         return True
 
+    async def _protections(*_a, **_k):
+        return 3
+
     async def _analyser(_guild):
         if analyse_casse:
             raise RuntimeError("Discord indisponible")
@@ -52,8 +55,10 @@ def _construire(constats, *, analyse_casse=False):
         v74.v73.poser_banniere,
         v74.v73._thumbnail,
         sa.analyser_complet,
+        v74.setup_ui.security_protections_actives,
     )
     v74.core.module_enabled = _module_enabled
+    v74.setup_ui.security_protections_actives = _protections
     v74._bot_permission_audit = lambda _g: (True, [])
     v74.v73.poser_banniere = lambda _c: False
     v74.v73._thumbnail = lambda _b: discord.ui.Thumbnail("https://example.invalid/x.png")
@@ -67,6 +72,7 @@ def _construire(constats, *, analyse_casse=False):
             v74.v73.poser_banniere,
             v74.v73._thumbnail,
             sa.analyser_complet,
+            v74.setup_ui.security_protections_actives,
         ) = origines
     assert poses, "la page doit produire un conteneur"
     return poses[0]
