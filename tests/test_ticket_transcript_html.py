@@ -4,11 +4,12 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 from services.ticket_transcript_html import (
     parse_transcript,
     render_transcript_html,
+    resolve_ticket_recipient,
     send_closure_dm,
     transcript_html_file,
 )
@@ -92,3 +93,35 @@ class TicketTranscriptHTMLTests(TestCase):
         self.assertEqual(kwargs["embed"].title, "Transcription — TICKET-0029")
         self.assertEqual(len(kwargs["embed"].fields), 4)
         kwargs["file"].close()
+
+    def test_uncached_guild_member_is_fetched_and_dm_can_be_sent(self):
+        member = SimpleNamespace(id=55, send=AsyncMock())
+        guild = SimpleNamespace(
+            get_member=Mock(return_value=None),
+            fetch_member=AsyncMock(return_value=member),
+        )
+        bot = SimpleNamespace(get_user=Mock(), fetch_user=AsyncMock())
+        resolved_member, user = asyncio.run(resolve_ticket_recipient(bot, guild, 55))
+        self.assertIs(resolved_member, member)
+        self.assertIs(user, member)
+        guild.fetch_member.assert_awaited_once_with(55)
+        bot.get_user.assert_not_called()
+        bot.fetch_user.assert_not_awaited()
+
+    def test_former_member_can_still_receive_transcript(self):
+        response = Mock(status=404, reason="Not Found")
+        guild = SimpleNamespace(
+            get_member=Mock(return_value=None),
+            fetch_member=AsyncMock(
+                side_effect=__import__("discord").NotFound(response, "Unknown Member")
+            ),
+        )
+        user = SimpleNamespace(id=55, send=AsyncMock())
+        bot = SimpleNamespace(
+            get_user=Mock(return_value=None),
+            fetch_user=AsyncMock(return_value=user),
+        )
+        resolved_member, recipient = asyncio.run(resolve_ticket_recipient(bot, guild, 55))
+        self.assertIsNone(resolved_member)
+        self.assertIs(recipient, user)
+        bot.fetch_user.assert_awaited_once_with(55)
