@@ -20,6 +20,7 @@ from discord.ext import commands
 from services import tickets as tickets_service
 from services import ticket_log_report
 from services import ticket_transcript_html
+from services import ticket_transcript_links
 from services import ticket_panels_v3
 from utils import log_service
 from utils import sentrix_panels as panels
