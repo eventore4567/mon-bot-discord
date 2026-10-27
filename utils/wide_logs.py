@@ -1717,8 +1717,15 @@ def _field_id(embed: discord.Embed, labels: tuple[str, ...]) -> int | None:
     return None
 
 
-def extract_history_ids(embed: discord.Embed) -> tuple[int | None, int | None]:
-    target_id = _field_id(embed, _TARGET_LABELS)
+def extract_history_ids(embed: discord.Embed, log_type: str = "") -> tuple[int | None, int | None]:
+    # Journal de message : la cible est l'auteur. Sans lui, l'ID du salon était
+    # enregistré comme membre et « History » cherchait l'historique du salon.
+    event_type = canonical_event_type(log_type, embed.title or "", embed.description or "")
+    labels = (
+        tuple(l for l in _TARGET_LABELS if l not in {"salon", "channel"})
+        if event_type.startswith("message_") else _TARGET_LABELS
+    )
+    target_id = _field_id(embed, labels)
     moderator_id = _field_id(embed, _MODERATOR_LABELS)
     if target_id is None:
         target_id = _first_snowflake(embed.description)
@@ -1738,7 +1745,7 @@ def _history_description(embed: discord.Embed) -> str:
 
 async def _record_log(*, guild_id: int, log_type: str, kind: str, embed: discord.Embed) -> None:
     await ensure_log_storage()
-    target_id, moderator_id = extract_history_ids(embed)
+    target_id, moderator_id = extract_history_ids(embed, log_type)
     main = _main_postgres()
     if main is not None:
         await main.execute(
