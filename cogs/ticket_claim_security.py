@@ -488,7 +488,7 @@ def install(bot: commands.Bot) -> None:
             )
         except discord.HTTPException:
             logger.warning(
-                "Fiche de fermeture ticket #%s refusée ; repli avec pièce jointe HTML.",
+                "Fiche de fermeture ticket #%s refusée ; envoi du résumé seul.",
                 ticket_id, exc_info=True,
             )
             try:
@@ -501,7 +501,7 @@ def install(bot: commands.Bot) -> None:
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             except discord.HTTPException:
-                logger.exception("Envoi de secours HTML impossible ticket #%s.", ticket_id)
+                logger.exception("Envoi du résumé de fermeture impossible ticket #%s.", ticket_id)
 
         participants = [
             f"{member.display_name} (`{member.id}`)"
@@ -527,7 +527,7 @@ def install(bot: commands.Bot) -> None:
             title="🔒 Fermeture du ticket",
             description=(
                 f"Dossier du ticket **#{ticket_id}** · fermeture enregistrée. "
-                "Le récapitulatif et le transcript sont disponibles ci-dessous."
+                "Le récapitulatif est enregistré. La transcription reste privée."
             ),
             colour=discord.Colour(0x4385DF),
             timestamp=discord.utils.utcnow(),
@@ -564,6 +564,7 @@ def install(bot: commands.Bot) -> None:
                     ticket_id=ticket_id, created_at=ticket["created_at"],
                     closed_at=closed_at, closer=interaction.user,
                     reason=reason_text, subject=channel.name,
+                    transcript_url=transcript_url,
                 )
                 logger.info("Ticket #%s : transcription HTML envoyée en MP user=%s.", ticket_id, owner.id)
             except (discord.Forbidden, discord.HTTPException) as exc:
