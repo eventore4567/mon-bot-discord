@@ -2073,12 +2073,6 @@ class Tickets(commands.Cog):
             await sx_panels.envoyer(
                 channel,
                 closed_panel,
-                file=ticket_transcript_html.transcript_html_file(
-                    channel, transcript_text, ticket_id=ticket_id,
-                    created_at=ticket["created_at"],
-                    closed_at=now(), closed_by=str(interaction.user),
-                    close_reason=reason,
-                ),
             )
         except discord.HTTPException:
             pass
@@ -2095,7 +2089,7 @@ class Tickets(commands.Cog):
             target_channel = channel.guild.get_channel(fallback_id) if fallback_id else None
         if target_channel:
             try:
-                await sx_panels.envoyer(target_channel, sx_panels.depuis_embed(log_e), file=self._transcript_file(channel, transcript_text))
+                await sx_panels.envoyer(target_channel, sx_panels.depuis_embed(log_e))
             except discord.HTTPException:
                 await helpers.send_log(self.bot, interaction.guild, "moderation", log_e)
         else:
@@ -2103,11 +2097,17 @@ class Tickets(commands.Cog):
 
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
+                transcript_url = await ticket_transcript_links.publish_link(
+                    self.bot, ticket_id=ticket_id, guild_id=interaction.guild.id,
+                    channel_id=channel.id, channel_name=channel.name,
+                    transcript_text=transcript_text, viewer_id=owner.id,
+                    closer_name=str(interaction.user), close_reason=reason,
+                )
                 await ticket_transcript_html.send_closure_dm(
                     owner, interaction.guild, channel, transcript_text,
                     ticket_id=ticket_id, created_at=ticket["created_at"],
                     closed_at=now(), closer=interaction.user, reason=reason,
-                    subject=channel.name,
+                    subject=channel.name, transcript_url=transcript_url,
                 )
             except (discord.Forbidden, discord.HTTPException) as exc:
                 logger.warning(
