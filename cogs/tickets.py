@@ -2015,17 +2015,19 @@ class Tickets(commands.Cog):
                 pass
             return
 
-        owner = interaction.guild.get_member(ticket["user_id"])
-        if owner:
+        owner_member, owner = await ticket_transcript_html.resolve_ticket_recipient(
+            self.bot, interaction.guild, int(ticket["user_id"])
+        )
+        if owner_member:
             # CLOSE = le membre ne voit plus du tout le salon. Les permissions
             # staff/rôles du ticket restent intactes, donc le support garde accès.
-            overwrite = channel.overwrites_for(owner)
+            overwrite = channel.overwrites_for(owner_member)
             overwrite.view_channel = False
             overwrite.send_messages = False
             overwrite.read_message_history = False
             try:
                 await channel.set_permissions(
-                    owner,
+                    owner_member,
                     overwrite=overwrite,
                     reason=f"Ticket fermé par {interaction.user}",
                 )
@@ -2106,8 +2108,11 @@ class Tickets(commands.Cog):
                     closed_at=now(), closer=interaction.user, reason=reason,
                     subject=channel.name,
                 )
-            except (discord.Forbidden, discord.HTTPException):
-                pass
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                logger.warning(
+                    "Ticket #%s : MP HTML refusé au membre %s (%s).",
+                    ticket_id, ticket["user_id"], type(exc).__name__,
+                )
             if not conf or conf["ticket_rating_enabled"]:
                 try:
                     await owner.send(
@@ -2188,15 +2193,17 @@ class Tickets(commands.Cog):
         if getattr(cursor, "rowcount", 0) != 1:
             return
 
-        owner = guild.get_member(int(row["user_id"])) if row["user_id"] else None
-        if owner is not None:
-            overwrite = channel.overwrites_for(owner)
+        owner_member, owner = await ticket_transcript_html.resolve_ticket_recipient(
+            self.bot, guild, int(row["user_id"])
+        ) if row["user_id"] else (None, None)
+        if owner_member is not None:
+            overwrite = channel.overwrites_for(owner_member)
             overwrite.view_channel = False
             overwrite.send_messages = False
             overwrite.read_message_history = False
             try:
                 await channel.set_permissions(
-                    owner,
+                    owner_member,
                     overwrite=overwrite,
                     reason="Ticket fermé automatiquement pour inactivité",
                 )
@@ -2289,8 +2296,11 @@ class Tickets(commands.Cog):
                         reason="Inactivité : délai configuré dépassé.",
                         subject=channel.name,
                     )
-            except (discord.Forbidden, discord.HTTPException):
-                pass
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                logger.warning(
+                    "Ticket #%s : MP HTML auto-close refusé au membre %s (%s).",
+                    row["id"], row["user_id"], type(exc).__name__,
+                )
             except Exception:
                 logger.exception("MP de fermeture automatique impossible pour ticket #%s.", row["id"])
 
