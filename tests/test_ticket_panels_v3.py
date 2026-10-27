@@ -123,16 +123,38 @@ def test_ticket_creation_receipt_is_navigable_and_never_says_inconnu():
     assert not links[0].custom_id
 
 
-def test_ticket_creation_confirmation_uses_real_destination_in_runtime():
+def test_ticket_creation_confirmation_is_one_short_ephemeral_line_with_mention():
+    """27/10/2026 (Jayden) : « Votre ticket a bien été ouvert : #salon », rien d'autre."""
     source = (ROOT / "cogs/tickets.py").read_text(encoding="utf-8")
-    assert "ticket_panels_v3.ticket_created_confirmation(" in source
-    assert "guild_id=int(guild.id)" in source
-    assert "channel_id=int(channel.id)" in source
-    assert "channel_name=str(channel.name)" in source
-    assert "ephemere=True" in source
-    # Do not silently regress to the former oversized response.
-    assert 'titre="Ticket ouvert"' not in source
-    assert 'sous_titre=f"Votre ticket est prêt dans {channel.mention}."' not in source
+    assert 'texte = f"Votre ticket a bien été ouvert : {channel.mention}"' in source
+    assert "ticket_panels_v3.ticket_created_confirmation(" not in source
+    # Jamais edit_original_response ici : après un defer d'update, il réécrit le panneau public.
+    bloc = source[source.index('texte = f"Votre ticket a bien été ouvert'):][:900]
+    assert "interaction.followup.send(" in bloc and "ephemeral=True" in bloc
+    assert "edit_original_response" not in bloc
+
+
+def test_private_reply_never_overwrites_the_public_ticket_panel():
+    """Le panneau d'ouverture reste inchangé : la réponse éphémère part en follow-up."""
+    import asyncio
+    from unittest.mock import AsyncMock
+    from utils import sentrix_panels as sx
+
+    class Reponse:
+        type = discord.InteractionResponseType.deferred_message_update
+
+        def is_done(self):
+            return True
+
+    interaction = SimpleNamespace(
+        id=1, response=Reponse(),
+        message=SimpleNamespace(flags=SimpleNamespace(ephemeral=False)),
+        edit_original_response=AsyncMock(), followup=SimpleNamespace(send=AsyncMock()),
+    )
+    assert sx._ecraserait_un_message_public(interaction, True) is True
+    assert sx._ecraserait_un_message_public(interaction, False) is False
+    interaction.message.flags.ephemeral = True
+    assert sx._ecraserait_un_message_public(interaction, True) is False
 
 
 def test_closed_ticket_has_native_downloadable_file_reopen_and_delete():
@@ -231,12 +253,12 @@ def test_delete_button_requires_real_confirmation_form():
     panel = service_tickets.vue_ticket_ferme(9)
     delete = next(x for x in panel.children if getattr(x, "custom_id", "").startswith("sx_ticket_del:"))
     assert delete.item.style is discord.ButtonStyle.danger
-    modal = service_tickets.ConfirmerSuppressionTicket(9)
-    assert modal.reason.required is False
-    assert modal.confirmation.required is True
-    assert modal.confirmation.min_length == 9
-    assert modal.confirmation.max_length == 9
-    assert modal.ticket_id == 9
+    # 27/10/2026 (Jayden) : plus de saisie « SUPPRIMER », deux boutons.
+    vue = service_tickets.ConfirmerSuppressionTicket(9, 42)
+    assert not isinstance(vue, discord.ui.Modal)
+    labels = [getattr(c, "label", None) for c in vue.children]
+    assert labels == ["Annuler", "Confirmer la suppression"]
+    assert vue.ticket_id == 9 and vue.author_id == 42
 
 
 def fake_interaction(*, status="ferme", permission=True, db_error=False):
@@ -344,7 +366,8 @@ def test_ticket_open_and_close_use_v3_in_real_runtime():
     assert "ticket_panels_v3.closed_card(" in closer
     assert "file=transcript_file" in closer
     assert "ticket_panels_v3.reopened_card(" in buttons
-    assert "ConfirmerSuppressionTicket(self.ticket_id)" in buttons
+    assert "ConfirmerSuppressionTicket(self.ticket_id, interaction.user.id)" in buttons
+    assert "send_modal(ConfirmerSuppressionTicket" not in buttons
     assert "ticket_panels_v3.opening_card(" in migration
     assert "await control_message.delete()" in migration
     assert "allowed_mentions=discord.AllowedMentions.none()" in migration

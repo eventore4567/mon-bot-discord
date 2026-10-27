@@ -1299,7 +1299,7 @@ async def envoyer(
         # par l'interaction parente, faute d'accesseur public.
         parent = getattr(destination, "_parent", None)
         if parent is not None:
-            if reponse_differee_a_finaliser(parent):
+            if reponse_differee_a_finaliser(parent) and not _ecraserait_un_message_public(parent, ephemere):
                 try:
                     result = await parent.edit_original_response(**kwargs_edition_reponse_differee(kwargs))
                     marquer_reponse_differee_finalisee(parent)
@@ -1319,7 +1319,7 @@ async def envoyer(
             kwargs["ephemeral"] = True
         if not interaction.response.is_done():
             return _message_envoye(await interaction.response.send_message(**kwargs))
-        if reponse_differee_a_finaliser(interaction):
+        if reponse_differee_a_finaliser(interaction) and not _ecraserait_un_message_public(interaction, ephemere):
             try:
                 result = await interaction.edit_original_response(**kwargs_edition_reponse_differee(kwargs))
                 marquer_reponse_differee_finalisee(interaction)
@@ -1750,6 +1750,22 @@ def _cle_interaction(interaction: Any) -> str:
     if token:
         return token
     return str(getattr(interaction, "id", id(interaction)))
+
+
+def _ecraserait_un_message_public(interaction: Any, ephemere: bool) -> bool:
+    """Une réponse privée après un defer d'update réécrirait le message PUBLIC du bouton.
+
+    27/10/2026 : ouvrir un ticket remplaçait le panneau public par « Ticket #11
+    créé » — plus personne ne pouvait ouvrir de ticket depuis ce panneau. Une
+    réponse demandée en éphémère part alors en follow-up, le panneau reste intact.
+    """
+    if not ephemere:
+        return False
+    response = getattr(interaction, "response", None)
+    if getattr(response, "type", None) != discord.InteractionResponseType.deferred_message_update:
+        return False
+    flags = getattr(getattr(interaction, "message", None), "flags", None)
+    return not bool(getattr(flags, "ephemeral", False))
 
 
 def reponse_differee_a_finaliser(interaction: Any) -> bool:

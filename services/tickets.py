@@ -777,41 +777,36 @@ async def _ticket_action_reply(
         await interaction.response.send_message(**payload)
 
 
-class ConfirmerSuppressionTicket(discord.ui.Modal, title="🗑️ Supprimer définitivement le ticket"):
-    """La suppression est irréversible : demander motif + confirmation explicite."""
+class ConfirmerSuppressionTicket(discord.ui.View):
+    """Deux boutons, aucune saisie (Jayden, 27/10/2026 : plus de « écrire SUPPRIMER »).
 
-    def __init__(self, ticket_id: int):
-        super().__init__(timeout=300)
+    Seul le membre qui a cliqué « Supprimer » peut confirmer ; rien n'est
+    supprimé avant « Confirmer la suppression ».
+    """
+
+    def __init__(self, ticket_id: int, author_id: int):
+        super().__init__(timeout=120)
         self.ticket_id = int(ticket_id)
-        self.reason = discord.ui.TextInput(
-            label="Raison de la suppression (facultatif)",
-            placeholder="Ex. : ticket traité, archive conservée",
-            style=discord.TextStyle.paragraph,
-            max_length=500,
-            required=False,
-        )
-        self.confirmation = discord.ui.TextInput(
-            label="Écrire SUPPRIMER pour confirmer",
-            placeholder="SUPPRIMER",
-            style=discord.TextStyle.short,
-            min_length=9,
-            max_length=9,
-            required=True,
-        )
-        self.add_item(self.reason)
-        self.add_item(self.confirmation)
+        self.author_id = int(author_id)
 
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        if str(self.confirmation.value or "").strip().upper() != "SUPPRIMER":
-            return await _ticket_action_reply(
-                interaction,
-                ticket_id=self.ticket_id,
-                action="Suppression annulée",
-                explanation="Pour confirmer, écrivez exactement SUPPRIMER. Aucun salon n'a été supprimé.",
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Seul le membre du staff qui a demandé la suppression peut confirmer.", ephemeral=True,
             )
+            return False
+        return True
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.secondary)
+    async def annuler(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(content="Suppression annulée.", embed=None, view=None)
+
+    @discord.ui.button(label="Confirmer la suppression", style=discord.ButtonStyle.danger)
+    async def confirmer(self, interaction: discord.Interaction, _button: discord.ui.Button) -> None:
+        self.stop()
         await supprimer_ticket_apres_confirmation(
-            interaction, ticket_id=self.ticket_id,
-            raison=str(self.reason.value or "").strip() or "Suppression demandée par le staff.",
+            interaction, ticket_id=self.ticket_id, raison="Suppression confirmée par le staff.",
         )
 
 
@@ -976,10 +971,14 @@ class BoutonSupprimerTicket(discord.ui.DynamicItem[discord.ui.Button],
                 ephemere=True,
             )
 
-        # Ne plus supprimer instantanément au clic : ouvrir un modal explicite
-        # avec motif libre et confirmation SUPPRIMER. Le traitement irréversible
-        # reste dans supprimer_ticket_apres_confirmation().
-        await interaction.response.send_modal(ConfirmerSuppressionTicket(self.ticket_id))
+        # Une confirmation simple, deux boutons : rien n'est supprimé avant
+        # « Confirmer la suppression ». Le traitement irréversible reste dans
+        # supprimer_ticket_apres_confirmation() (transcription et logs d'abord).
+        await interaction.response.send_message(
+            f"Supprimer définitivement le ticket #{self.ticket_id} ? La transcription et les logs sont conservés.",
+            view=ConfirmerSuppressionTicket(self.ticket_id, interaction.user.id),
+            ephemeral=True,
+        )
 
 
 def vue_ticket_ferme(ticket_id: int) -> discord.ui.View:

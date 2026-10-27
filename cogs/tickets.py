@@ -1706,21 +1706,21 @@ class Tickets(commands.Cog):
                 ephemere=True,
             )
 
-        # L'ancienne réponse « Ticket ouvert » contenait beaucoup de texte
-        # générique et une mention de salon parfois rendue « # inconnu ».
-        # Même identité visuelle que le ticket lui-même, avec navigation native.
-        await sx_panels.envoyer(
-            interaction,
-            ticket_panels_v3.ticket_created_confirmation(
-                ticket_number=number,
-                ticket_type=str(ticket_type["name"]),
-                guild_id=int(guild.id),
-                channel_id=int(channel.id),
-                channel_name=str(channel.name),
-            ),
-            ephemere=True,
-            allowed_mentions=discord.AllowedMentions.none(),
-        )
+        # Jayden, 27/10/2026 : une phrase et la vraie mention du salon, rien de
+        # plus. Le panneau public n'est JAMAIS modifié : followup en éphémère
+        # (après un defer d'update, edit_original_response réécrirait le panneau).
+        texte = f"Votre ticket a bien été ouvert : {channel.mention}"
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    texte, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
+                )
+            else:
+                await interaction.response.send_message(
+                    texte, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
+                )
+        except (discord.NotFound, discord.HTTPException):
+            logger.debug("Confirmation d'ouverture du ticket #%s non envoyée.", ticket_id, exc_info=True)
 
         ticket_extra = {
             "📂 Type": ticket_type["name"],
