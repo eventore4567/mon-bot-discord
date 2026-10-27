@@ -58,6 +58,8 @@ en avoir besoin.
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -625,13 +627,18 @@ async def warn(
         (guild.id, target.id, actor.id, reason, now()),
     )
 
-    total_warnings, count_error = await _count_warnings(bot, guild_id=guild.id, target_id=target.id)
-    role_assigned, role_error = await _apply_warn_role(bot, target, warn_role, actor=actor, reason=reason)
-    dm_sent = await _send_dm_best_effort(target, dm_text)
-
-    case_number, persistence_error = await persist_sanction(
-        bot, guild_id=guild.id, target_id=target.id, actor_id=actor.id, action="warn", reason=reason,
-    )
+    # Le MP (deux appels Discord) part PENDANT les écritures du dossier au lieu
+    # d'après : le membre reste sur le serveur, l'ordre n'importe pas, et
+    # dm_sent reste le vrai résultat de la remise.
+    dm_task = asyncio.create_task(_send_dm_best_effort(target, dm_text))
+    try:
+        total_warnings, count_error = await _count_warnings(bot, guild_id=guild.id, target_id=target.id)
+        role_assigned, role_error = await _apply_warn_role(bot, target, warn_role, actor=actor, reason=reason)
+        case_number, persistence_error = await persist_sanction(
+            bot, guild_id=guild.id, target_id=target.id, actor_id=actor.id, action="warn", reason=reason,
+        )
+    finally:
+        dm_sent = await dm_task
 
     auto_ban_triggered = bool(ban_threshold) and total_warnings is not None and total_warnings >= ban_threshold
     auto_ban_hierarchy_error = None
