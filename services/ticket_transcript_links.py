@@ -13,8 +13,6 @@ import secrets
 import time
 from urllib.parse import urlsplit
 
-import config
-
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{40,60}$")
 EXPIRY_SECONDS = 90 * 86400
 
@@ -48,11 +46,14 @@ ON ticket_transcript_links(expires_at)
 
 def public_origin() -> str | None:
     """Use a configured HTTPS dashboard origin, never derive a URL from a user request."""
-    configured = str(
-        os.getenv("SENTRIX_TRANSCRIPT_PUBLIC_URL")
-        or getattr(config, "DASHBOARD_PUBLIC_URL", "")
-        or os.getenv("DASHBOARD_PUBLIC_URL", "")
-    ).strip().rstrip("/")
+    configured = os.getenv("SENTRIX_TRANSCRIPT_PUBLIC_URL", "").strip()
+    if not configured:
+        import config
+        configured = str(
+            getattr(config, "DASHBOARD_PUBLIC_URL", "")
+            or os.getenv("DASHBOARD_PUBLIC_URL", "")
+        ).strip()
+    configured = configured.rstrip("/")
     if not configured:
         domain = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip().strip("/")
         configured = "https://" + domain if domain else ""
