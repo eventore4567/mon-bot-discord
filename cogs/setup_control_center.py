@@ -393,6 +393,11 @@ async def security_protections_actives(bot, guild_id: int) -> int:
     sur un serveur où aucun filtre ne tournait.
     """
     row = await bot.db.fetchone("SELECT * FROM automod_settings WHERE guild_id = ?", (guild_id,))
+    if row is None:
+        # Pas encore de ligne : la première lecture la créera avec ces défauts.
+        from cogs.automod import PROTECTIONS_PAR_DEFAUT
+
+        row = PROTECTIONS_PAR_DEFAUT
     total = sum(1 for field, _label in AUTOMOD if _get(row, field, 0))
     try:
         v71 = await bot.db.fetchone(

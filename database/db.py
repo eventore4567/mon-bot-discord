@@ -1948,8 +1948,11 @@ class Database:
         await self.execute(
             "INSERT OR IGNORE INTO guild_config (guild_id) VALUES (?)", (guild_id,)
         )
+        # Anti-spam et anti-raid actifs dès l'arrivée (Jayden, 27/10/2026) ; le reste
+        # du profil (anti-liens strict, majuscules…) reste un choix de l'admin.
         await self.execute(
-            "INSERT OR IGNORE INTO automod_settings (guild_id) VALUES (?)", (guild_id,)
+            "INSERT OR IGNORE INTO automod_settings (guild_id, antispam, antiraid) VALUES (?, 1, 1)",
+            (guild_id,),
         )
 
     async def get_guild_config(self, guild_id: int):
