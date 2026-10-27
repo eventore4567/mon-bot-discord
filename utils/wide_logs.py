@@ -277,6 +277,14 @@ def derive_identity(
                 _field_value_exact(embed, "ID", "ID du son", "Sound ID")
             )
 
+    # Un message a pour identité son AUTEUR, jamais son salon : sans auteur
+    # connu (contenu hors cache), « Salon : <#…> » devenait
+    # « Auteur · @utilisateur-inconnu · <id du salon> » (capture du 27/10/2026).
+    labels = (
+        tuple(l for l in _TARGET_LABELS if l not in {"salon", "channel"})
+        if event_type.startswith("message_") else _TARGET_LABELS
+    )
+
     if event_type in {"invite_create", "invite_delete"}:
         # L'identité est le CRÉATEUR de l'invitation, jamais son salon.
         # Sans ce garde, « Salon : <#...> » devenait une mention utilisateur
@@ -291,7 +299,7 @@ def derive_identity(
             identity_name = _first_user_ref(actor_value) or safe_text(actor_value)[:80]
     else:
         if identity_id is None:
-            for label in _TARGET_LABELS:
+            for label in labels:
                 value = _field_value(embed, label)
                 identity_id = _first_snowflake(value)
                 if identity_id:
@@ -327,7 +335,7 @@ def derive_identity(
             identity_name = candidat[:80] or None
 
     if not identity_name and event_type not in {"invite_create", "invite_delete"}:
-        for label in _TARGET_LABELS:
+        for label in labels:
             value = _field_value(embed, label)
             if not value:
                 continue

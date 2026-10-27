@@ -29,7 +29,9 @@ logger = logging.getLogger("bot.logs")
 # même catégorie « Serveur », alors que le registre les répartit entre Salons, Rôles
 # et Serveur.
 
-MESSAGE_CACHE_RETENTION_SECONDS = 86400
+# 27/10/2026 : 24 h ne suffisaient pas — un message de deux jours supprimé
+# arrivait « contenu indisponible » quand d'autres bots le restituaient.
+MESSAGE_CACHE_RETENTION_SECONDS = 7 * 86400
 MESSAGE_CACHE_CLEANUP_EVERY = 250
 MESSAGE_CACHE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS message_log_cache (
