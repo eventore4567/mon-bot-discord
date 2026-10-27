@@ -993,6 +993,15 @@ class EmbedBuilder(commands.Cog, name="EmbedBuilder"):
 
     # ---------------------------------------------------------------- OUVERTURE DE L'ÉDITEUR
 
+    async def open_builder_from_interaction(self, interaction: discord.Interaction) -> None:
+        """L'éditeur en privé depuis un bouton ou un menu (le Setup)."""
+        view = EmbedBuilderView(self, EmbedDraft(), interaction.user.id)
+        await interaction.response.send_message(embeds=view.build_panel_embeds(), view=view, ephemeral=True)
+        try:
+            view.message = await interaction.original_response()
+        except (discord.NotFound, discord.HTTPException):
+            view.message = None
+
     async def open_builder(self, ctx: commands.Context, draft: EmbedDraft | None = None):
         draft = draft or EmbedDraft()
         view = EmbedBuilderView(self, draft, ctx.author.id)

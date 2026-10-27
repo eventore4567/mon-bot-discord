@@ -313,8 +313,6 @@ class SentriXSetupV74(v73.SentriXSetupV73):
 
     async def _open_embed_builder(self, interaction: discord.Interaction) -> None:
         """L'éditeur de +embed, ouvert en privé depuis le Setup."""
-        from .embed_builder import EmbedBuilderView, EmbedDraft
-
         cog = self.bot.get_cog("EmbedBuilder")
         if cog is None:
             return await panels.envoyer(
@@ -322,12 +320,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
                 panels.depuis_embed(embeds.warning("L’éditeur d’embeds n’est pas chargé.")),
                 ephemere=True,
             )
-        view = EmbedBuilderView(cog, EmbedDraft(), interaction.user.id)
-        await interaction.response.send_message(embeds=view.build_panel_embeds(), view=view, ephemeral=True)
-        try:
-            view.message = await interaction.original_response()
-        except (discord.NotFound, discord.HTTPException):
-            view.message = None
+        await cog.open_builder_from_interaction(interaction)
 
     async def _build_home(self) -> None:
         """Premier écran : les modules et leur interrupteur, rien d'autre.

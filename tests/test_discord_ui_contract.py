@@ -239,7 +239,9 @@ class DiscordUiContractTests(unittest.TestCase):
         self.assertIn('return f"<@{int(user_id)}>"', source)
         self.assertIn('return f"<@&{int(role_id)}>"', source)
         self.assertIn('return f"<#{int(channel_id)}>"', source)
-        self.assertIn("entry.target", source)
+        # La cible d'audit passe par utils/audit_entries : entry.target lève
+        # TypeError sur une entrée sans cible (production, 27/10/2026).
+        self.assertIn("audit_entries.cible", source)
         self.assertIn("max_age_seconds", source)
         self.assertIn("after.jump_url", source)
         self.assertIn("AuditLogAction.kick", source)
