@@ -12,6 +12,9 @@ from urllib.parse import urlsplit
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+# Le tableau de bord importe config.py : utiliser uniquement un faux secret de CI.
+os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
+
 from services import ticket_transcript_links as links
 from web import ticket_transcript_viewer as viewer
 
