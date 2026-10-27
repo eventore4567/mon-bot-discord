@@ -449,6 +449,19 @@ def install(bot: commands.Bot) -> None:
         # Aucun ticket fermé manuellement n'est donc programmé pour auto-delete.
         duree = tickets_service.duree_du_ticket(ticket, fin=closed_at)
         reason_text = (reason or "Non précisée").strip()[:1200]
+        # Le lien est remis uniquement au demandeur en MP, sans fichier dans le salon.
+        transcript_url = None
+        if owner and (not conf or conf["ticket_transcript_dm"]):
+            try:
+                transcript_url = await ticket_transcript_links.publish_link(
+                    self.bot, ticket_id=ticket_id, guild_id=guild.id,
+                    channel_id=int(channel.id), channel_name=channel.name,
+                    transcript_text=transcript_text, viewer_id=int(owner.id),
+                    closer_name=str(interaction.user), close_reason=reason_text,
+                )
+            except Exception:
+                logger.exception("Lien web privé indisponible pour ticket #%s.", ticket_id)
+
         # Le membre reste masqué, le staff conserve la conversation.
         # Les boutons Rouvrir / Supprimer sont ceux de la vue persistante :
         # leur custom_id survit aux redémarrages.
