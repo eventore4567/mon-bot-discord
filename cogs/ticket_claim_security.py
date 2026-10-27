@@ -466,12 +466,6 @@ def install(bot: commands.Bot) -> None:
         # Les boutons Rouvrir / Supprimer sont ceux de la vue persistante :
         # leur custom_id survit aux redémarrages.
         vue_fermeture = tickets_service.vue_ticket_ferme(ticket_id)
-        transcript_file = ticket_transcript_html.transcript_html_file(
-            channel, transcript_text, ticket_id=ticket_id,
-            guild_name=guild.name, subject=channel.name,
-            created_at=ticket["created_at"], closed_at=closed_at,
-            closed_by=str(interaction.user), close_reason=reason_text,
-        )
         closure_card = panels.avec_composants(
             ticket_panels_v3.closed_card(
                 ticket_id=ticket_id,
@@ -479,7 +473,7 @@ def install(bot: commands.Bot) -> None:
                 closer=interaction.user,
                 reason=reason_text,
                 duration=duree,
-                transcript_filename=transcript_file.filename,
+                transcript_filename=None,
                 avatar_url=str(owner.display_avatar.url) if owner else None,
                 claimed_by_id=int(ticket["claimed_by"]) if ticket["claimed_by"] else None,
                 closed_at=closed_at,
@@ -490,7 +484,6 @@ def install(bot: commands.Bot) -> None:
             await panels.envoyer(
                 channel,
                 closure_card,
-                file=transcript_file,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException:
@@ -504,11 +497,6 @@ def install(bot: commands.Bot) -> None:
                         f"Ticket #{ticket_id} fermé par {interaction.user.display_name}.\n"
                         f"Raison : {reason_text}\n"
                         "Le staff peut rouvrir ou supprimer le salon."
-                    ),
-                    file=ticket_transcript_html.transcript_html_file(
-                        channel, transcript_text, ticket_id=ticket_id,
-                        created_at=ticket["created_at"], closed_at=closed_at,
-                        closed_by=str(interaction.user), close_reason=reason_text,
                     ),
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
@@ -561,7 +549,6 @@ def install(bot: commands.Bot) -> None:
             guild,
             "ticket_close",
             log_embed,
-            file=report.transcript_file(transcript_text),
             view=tickets_service.vue_voir_le_ticket(guild.id, channel.id),
             event_key=event_key,
             identity_name=(owner.display_name if owner else f"Membre {ticket['user_id']}"),
