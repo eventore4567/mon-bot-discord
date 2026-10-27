@@ -1441,6 +1441,9 @@ async def start_auto_configuration(bot, guild, interaction: discord.Interaction)
             text = await run_auto_configuration(bot, guild, interaction.user, prepared)
         except ValueError as exc:
             title, text = "Configuration interrompue", str(exc)
+            # 27/10/2026 : deux échecs en production sur le même serveur, raison
+            # affichée à l'admin mais absente des journaux — introuvable après coup.
+            logger.warning("Configuration automatique refusée guild=%s : %s", guild.id, text)
         except Exception:
             logger.exception("Configuration automatique impossible guild=%s", guild.id)
             title, text = "Configuration interrompue", "Discord a refusé une modification : tout a été remis comme avant."
