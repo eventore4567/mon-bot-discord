@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS ticket_transcript_links (
     ticket_id BIGINT NOT NULL,
     guild_id BIGINT NOT NULL,
     viewer_id BIGINT NOT NULL,
+    closer_name TEXT NOT NULL DEFAULT '',
+    close_reason TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL,
     expires_at BIGINT NOT NULL
 )
@@ -73,6 +75,7 @@ async def publish_link(
     bot, *,
     ticket_id: int, guild_id: int, channel_id: int, channel_name: str,
     transcript_text: str, viewer_id: int,
+    closer_name: str = "", close_reason: str = "",
 ) -> str:
     """Persist archive and mint a new private URL for one recipient.
 
@@ -104,10 +107,10 @@ async def publish_link(
     )
     await db.execute(
         "INSERT INTO ticket_transcript_links "
-        "(token_hash, ticket_id, guild_id, viewer_id, created_at, expires_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "(token_hash, ticket_id, guild_id, viewer_id, closer_name, close_reason, created_at, expires_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (digest, int(ticket_id), int(guild_id), int(viewer_id),
-         stamp, stamp + EXPIRY_SECONDS),
+         str(closer_name)[:150], str(close_reason)[:600], stamp, stamp + EXPIRY_SECONDS),
     )
     return f"{origin}/transcripts#{raw}"
 
@@ -120,7 +123,7 @@ async def load_archive(bot, raw_token: str):
     db = bot.db
     try:
         link = await db.fetchone(
-            "SELECT ticket_id, guild_id, viewer_id, expires_at "
+            "SELECT ticket_id, guild_id, viewer_id, closer_name, close_reason, expires_at "
             "FROM ticket_transcript_links WHERE token_hash = ?", (digest,),
         )
         if link is None or int(link["expires_at"]) <= int(time.time()):
@@ -139,7 +142,12 @@ async def load_archive(bot, raw_token: str):
         )
         if ticket is None:
             return None
-        return {"ticket": ticket, "archive": archive, "viewer_id": int(link["viewer_id"])}
+        return {
+            "ticket": ticket, "archive": archive,
+            "viewer_id": int(link["viewer_id"]),
+            "closed_by": str(link["closer_name"] or ""),
+            "close_reason": str(link["close_reason"] or ""),
+        }
     except Exception:
         # The HTTP handler will surface a temporary 503 if schema is unavailable.
         raise
