@@ -396,15 +396,17 @@ def install(bot: commands.Bot) -> None:
                 tickets.embeds.warning("Ce ticket est déjà fermé ou n'est plus disponible."),
             )
 
-        owner = guild.get_member(int(ticket["user_id"]))
-        if owner:
-            overwrite = channel.overwrites_for(owner)
+        owner_member, owner = await ticket_transcript_html.resolve_ticket_recipient(
+            self.bot, guild, int(ticket["user_id"])
+        )
+        if owner_member:
+            overwrite = channel.overwrites_for(owner_member)
             overwrite.view_channel = False
             overwrite.send_messages = False
             overwrite.read_message_history = False
             try:
                 await channel.set_permissions(
-                    owner,
+                    owner_member,
                     overwrite=overwrite,
                     reason=f"Ticket fermé par {interaction.user}",
                 )
@@ -479,9 +481,25 @@ def install(bot: commands.Bot) -> None:
             )
         except discord.HTTPException:
             logger.warning(
-                "Fiche de fermeture ticket #%s refusée, archivage maintenu.",
+                "Fiche de fermeture ticket #%s refusée ; repli avec pièce jointe HTML.",
                 ticket_id, exc_info=True,
             )
+            try:
+                await channel.send(
+                    embed=tickets.embeds.warning(
+                        f"Ticket #{ticket_id} fermé par {interaction.user.display_name}.\n"
+                        f"Raison : {reason_text}\n"
+                        "Le staff peut rouvrir ou supprimer le salon."
+                    ),
+                    file=ticket_transcript_html.transcript_html_file(
+                        channel, transcript_text, ticket_id=ticket_id,
+                        created_at=ticket["created_at"], closed_at=closed_at,
+                        closed_by=str(interaction.user), close_reason=reason_text,
+                    ),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except discord.HTTPException:
+                logger.exception("Envoi de secours HTML impossible ticket #%s.", ticket_id)
 
         participants = [
             f"{member.display_name} (`{member.id}`)"
@@ -537,7 +555,8 @@ def install(bot: commands.Bot) -> None:
             identity_icon=(str(owner.display_avatar.url) if owner else None),
         )
 
-        if owner and (not conf or conf["ticket_transcript_dm"]):
+        dm_enabled = not conf or bool(conf["ticket_transcript_dm"])
+        if dm_enabled and owner:
             try:
                 await ticket_transcript_html.send_closure_dm(
                     owner, guild, channel, transcript_text,
@@ -545,8 +564,12 @@ def install(bot: commands.Bot) -> None:
                     closed_at=closed_at, closer=interaction.user,
                     reason=reason_text, subject=channel.name,
                 )
-            except (discord.Forbidden, discord.HTTPException):
-                pass
+                logger.info("Ticket #%s : transcription HTML envoyée en MP user=%s.", ticket_id, owner.id)
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                logger.warning(
+                    "Ticket #%s : MP transcript HTML non remis à user=%s (%s).",
+                    ticket_id, owner.id, type(exc).__name__,
+                )
             if not conf or conf["ticket_rating_enabled"]:
                 try:
                     await owner.send(
@@ -554,7 +577,13 @@ def install(bot: commands.Bot) -> None:
                         view=tickets.RatingView(self, ticket_id),
                     )
                 except (discord.Forbidden, discord.HTTPException):
-                    pass
+                    logger.info("Ticket #%s : demande de notation en MP refusée.", ticket_id)
+        elif not dm_enabled:
+            logger.info("Ticket #%s : MP transcript désactivé dans le setup serveur=%s.", ticket_id, guild.id)
+        else:
+            logger.warning(
+                "Ticket #%s : impossible de résoudre le destinataire MP user=%s.", ticket_id, ticket["user_id"]
+            )
 
         # Le panneau public (Rouvrir/Supprimer + transcript) est déjà envoyé.
         # Accuser aussi le clic du staff, en privé, avec le motif et la durée.
