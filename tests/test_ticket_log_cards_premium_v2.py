@@ -145,8 +145,9 @@ def test_staff_report_file_still_attaches_through_canonical_log_transport():
     claim_src = (base / "cogs" / "ticket_claim_security.py").read_text()
     transport_src = (base / "utils" / "log_service.py").read_text()
     wide_src = (base / "utils" / "wide_logs.py").read_text()
-    assert "file=report.transcript_file(transcript_text)" in claim_src
-    assert "ticket_transcript_html.transcript_html_file(" in claim_src
+    assert "file=report.transcript_file(transcript_text)" not in claim_src
+    assert "file=transcript_file" not in claim_src
+    assert "ticket_transcript_links.publish_link(" in claim_src
     assert "await ticket_transcript_html.send_closure_dm(" in claim_src
     assert "extra_file=file" in transport_src
     assert 'media=f"attachment://{filename}"' in wide_src

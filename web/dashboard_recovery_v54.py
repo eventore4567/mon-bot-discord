@@ -357,6 +357,10 @@ def install(dashboard) -> None:
                     )
                     app = _build_core_app(dashboard, bot)
 
+                # Register even on the fallback app. Private transcript routes
+                # must not depend on the optional advanced dashboard modules.
+                from .ticket_transcript_viewer import register_routes as register_transcript_routes
+                register_transcript_routes(app)
                 # Apply after the final builder AND the recovery path. A plugin failure
                 # must never reopen the API or bypass the public hostname boundary.
                 from .http_surfaces import apply as apply_http_surfaces

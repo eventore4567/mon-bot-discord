@@ -18,9 +18,11 @@ def test_ticket_autoclose_loop_is_fault_isolated_and_restartable():
 def test_ticket_autoclose_has_safe_fallbacks():
     source = (ROOT / "cogs" / "tickets.py").read_text(encoding="utf-8")
 
-    # Un transcript ou un journal indisponible ne doit pas empêcher la fermeture :
-    # le ticket se ferme quand même, sans sa pièce jointe.
-    assert "transcript = None" in source
+    # Une erreur de récupération des messages ne bloque pas la fermeture.
+    # Le salon ne reçoit jamais une pièce jointe de transcription.
+    assert 'transcript_text = ""' in source
+    assert "file=ticket_transcript_html.transcript_html_file(" not in source
+    assert "transcript_filename=None" in source
     assert "Journal auto-close indisponible" in source
 
 

@@ -46,6 +46,7 @@ from cogs.ticket_constants import (
 from services.tickets import count_genuinely_open_tickets
 from services import tickets as tickets_service
 from services import ticket_transcript_html
+from services import ticket_transcript_links
 from services import ticket_panels_v3
 from utils import embeds, checks, helpers, design_system
 from utils import cluster
@@ -2072,12 +2073,6 @@ class Tickets(commands.Cog):
             await sx_panels.envoyer(
                 channel,
                 closed_panel,
-                file=ticket_transcript_html.transcript_html_file(
-                    channel, transcript_text, ticket_id=ticket_id,
-                    created_at=ticket["created_at"],
-                    closed_at=now(), closed_by=str(interaction.user),
-                    close_reason=reason,
-                ),
             )
         except discord.HTTPException:
             pass
@@ -2094,7 +2089,7 @@ class Tickets(commands.Cog):
             target_channel = channel.guild.get_channel(fallback_id) if fallback_id else None
         if target_channel:
             try:
-                await sx_panels.envoyer(target_channel, sx_panels.depuis_embed(log_e), file=self._transcript_file(channel, transcript_text))
+                await sx_panels.envoyer(target_channel, sx_panels.depuis_embed(log_e))
             except discord.HTTPException:
                 await helpers.send_log(self.bot, interaction.guild, "moderation", log_e)
         else:
@@ -2102,11 +2097,17 @@ class Tickets(commands.Cog):
 
         if owner and (not conf or conf["ticket_transcript_dm"]):
             try:
+                transcript_url = await ticket_transcript_links.publish_link(
+                    self.bot, ticket_id=ticket_id, guild_id=interaction.guild.id,
+                    channel_id=channel.id, channel_name=channel.name,
+                    transcript_text=transcript_text, viewer_id=owner.id,
+                    closer_name=str(interaction.user), close_reason=reason,
+                )
                 await ticket_transcript_html.send_closure_dm(
                     owner, interaction.guild, channel, transcript_text,
                     ticket_id=ticket_id, created_at=ticket["created_at"],
                     closed_at=now(), closer=interaction.user, reason=reason,
-                    subject=channel.name,
+                    subject=channel.name, transcript_url=transcript_url,
                 )
             except (discord.Forbidden, discord.HTTPException) as exc:
                 logger.warning(
@@ -2219,17 +2220,11 @@ class Tickets(commands.Cog):
         closed_at = int(now())
         try:
             transcript_text = await self._fetch_transcript_text(channel)
-            transcript = ticket_transcript_html.transcript_html_file(
-                channel, transcript_text, ticket_id=int(row["id"]),
-                created_at=row["created_at"], closed_at=closed_at,
-                closed_by="SentriX", close_reason="Inactivité : délai configuré dépassé.",
-            )
         except Exception:
             logger.exception(
                 "Transcription auto-close indisponible pour le ticket #%s.",
                 row["id"],
             )
-            transcript = None
 
         try:
             # Même interface que les fermetures manuelles, sans ancienne carte
@@ -2242,17 +2237,15 @@ class Tickets(commands.Cog):
                     closer=self.bot.user,
                     reason="Inactivité : délai configuré dépassé.",
                     duration=duration,
-                    transcript_filename=transcript.filename if transcript else None,
+                    transcript_filename=None,
                     avatar_url=str(owner.display_avatar.url) if owner else None,
                     claimed_by_id=int(row["claimed_by"]) if row["claimed_by"] else None,
                     closed_at=int(now()),
                 ),
                 tickets_service.vue_ticket_ferme(row["id"]),
             )
-            kwargs = {"file": transcript} if transcript else {}
             await sx_panels.envoyer(
                 channel, panel, allowed_mentions=discord.AllowedMentions.none(),
-                **kwargs,
             )
         except discord.HTTPException:
             logger.warning(
@@ -2289,12 +2282,19 @@ class Tickets(commands.Cog):
             try:
                 conf = await self.bot.db.get_guild_config(guild.id)
                 if not conf or conf["ticket_transcript_dm"]:
+                    reason = "Inactivité : délai configuré dépassé."
+                    transcript_url = await ticket_transcript_links.publish_link(
+                        self.bot, ticket_id=int(row["id"]), guild_id=guild.id,
+                        channel_id=channel.id, channel_name=channel.name,
+                        transcript_text=transcript_text, viewer_id=owner.id,
+                        closer_name="SentriX", close_reason=reason,
+                    )
                     await ticket_transcript_html.send_closure_dm(
                         owner, guild, channel, transcript_text,
                         ticket_id=int(row["id"]), created_at=row["created_at"],
                         closed_at=closed_at, closer="SentriX",
-                        reason="Inactivité : délai configuré dépassé.",
-                        subject=channel.name,
+                        reason=reason, subject=channel.name,
+                        transcript_url=transcript_url,
                     )
             except (discord.Forbidden, discord.HTTPException) as exc:
                 logger.warning(
@@ -2827,9 +2827,33 @@ class Tickets(commands.Cog):
         ticket = await self.get_ticket_by_channel(ctx.channel.id)
         if not ticket:
             return await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.error("Ce salon n'est pas un ticket. Lancez la commande dans le salon du ticket concerné.")))
-        await ctx.defer() if ctx.interaction else None
-        file = await self.generate_transcript(ctx.channel)
-        await sx_panels.envoyer(ctx, sx_panels.depuis_embed(embeds.success('📄 Transcription générée.')), file=file)
+        if ctx.interaction:
+            await ctx.defer(ephemeral=True)
+        try:
+            text = await self._fetch_transcript_text(ctx.channel)
+            url = await ticket_transcript_links.publish_link(
+                self.bot, ticket_id=int(ticket["id"]), guild_id=ctx.guild.id,
+                channel_id=ctx.channel.id, channel_name=ctx.channel.name,
+                transcript_text=text, viewer_id=ctx.author.id,
+                closer_name="Consultation staff", close_reason="Archive demandée",
+            )
+        except Exception:
+            logger.exception("Lien de transcription manuelle indisponible ticket #%s.", ticket["id"])
+            url = None
+        notice = (
+            f"Transcription privée : {url}\nCe lien est personnel (90 jours)."
+            if url else "La transcription est temporairement indisponible."
+        )
+        if ctx.interaction:
+            await ctx.interaction.followup.send(
+                notice, ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
+            )
+        else:
+            try:
+                await ctx.author.send(notice, allowed_mentions=discord.AllowedMentions.none())
+                await ctx.send("Lien privé envoyé en message direct.")
+            except discord.HTTPException:
+                await ctx.send("Impossible d'envoyer le lien privé en message direct.")
 
     async def send_stats(self, ctx_or_interaction):
         guild = ctx_or_interaction.guild

@@ -705,22 +705,25 @@ class UnifiedLogsV6(commands.Cog, name="UnifiedLogsV6"):
         if not allowed:
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Vous n'avez pas accès à cette transcript.")), ephemere=True)
 
-        # Les archives restent stockées en texte brut en base, mais le fichier
-        # remis au staff/demandeur s'ouvre maintenant comme une page HTML Discord.
-        from services import ticket_transcript_html
-        html = ticket_transcript_html.render_transcript_html(
-            str(row["transcript_text"] or ""),
-            guild_name=interaction.guild.name,
-            ticket_label=f"TICKET-{ticket_id:04d}",
-            subject=str(row["channel_name"] or "Support"),
-            created_at=ticket["created_at"] if ticket else None,
-            closed_at=ticket["closed_at"] if ticket else None,
-        )
-        payload = io.BytesIO(html.encode("utf-8"))
+        # Le contrôle de permissions ci-dessus précède la création d'un lien
+        # privé. Aucun fichier HTML n'est envoyé dans le salon ni dans les logs.
+        from services import ticket_transcript_links
+        try:
+            url = await ticket_transcript_links.publish_link(
+                self.bot, ticket_id=ticket_id, guild_id=row["guild_id"],
+                channel_id=row["channel_id"], channel_name=row["channel_name"],
+                transcript_text=row["transcript_text"], viewer_id=interaction.user.id,
+                closer_name="Historique staff", close_reason="Consultation d'archive",
+            )
+        except Exception:
+            logger.exception("Lien privé du ticket #%s indisponible.", ticket_id)
+            return await interaction.response.send_message(
+                "La transcription est temporairement indisponible.", ephemeral=True,
+            )
         await interaction.response.send_message(
-            file=discord.File(payload, filename=f"TICKET-{ticket_id:04d}.html"),
-            ephemeral=True,
-            allowed_mentions=discord.AllowedMentions.none(),
+            f"[Ouvrir la transcription dans le navigateur]({url})\n"
+            "Lien privé valable 90 jours.",
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
         )
 
 

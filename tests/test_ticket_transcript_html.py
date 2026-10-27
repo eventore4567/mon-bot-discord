@@ -78,7 +78,7 @@ class TicketTranscriptHTMLTests(TestCase):
         self.assertIn(b"<!doctype html>", file.fp.getvalue())
         file.close()
 
-    def test_dm_sends_one_embed_and_html_file(self):
+    def test_dm_sends_site_link_without_html_attachment(self):
         guild = SimpleNamespace(name="Serveur test")
         channel = SimpleNamespace(name="ticket-29", guild=guild)
         owner = SimpleNamespace(send=AsyncMock())
@@ -86,13 +86,15 @@ class TicketTranscriptHTMLTests(TestCase):
             owner, guild, channel, self.SOURCE,
             ticket_id=29, created_at=1793124000, closed_at=1793127600,
             closer="Staff", reason="Résolu",
+            transcript_url="https://sentrix.example/transcripts#private-link-123",
         ))
         owner.send.assert_awaited_once()
         kwargs = owner.send.call_args.kwargs
-        self.assertEqual(kwargs["file"].filename, "TICKET-0029.html")
+        self.assertNotIn("file", kwargs)
         self.assertEqual(kwargs["embed"].title, "Transcription — TICKET-0029")
         self.assertEqual(len(kwargs["embed"].fields), 4)
-        kwargs["file"].close()
+        self.assertIn("https://sentrix.example/transcripts#", kwargs["embed"].fields[-1].value)
+        self.assertEqual(kwargs["view"].children[0].label, "Ouvrir la transcription")
 
     def test_uncached_guild_member_is_fetched_and_dm_can_be_sent(self):
         member = SimpleNamespace(id=55, send=AsyncMock())
