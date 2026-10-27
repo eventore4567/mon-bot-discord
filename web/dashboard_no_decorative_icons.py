@@ -238,11 +238,10 @@ def install(*modules) -> None:
             production_health.install(modules[0])
         except Exception:
             logger.exception("Impossible d'installer le healthcheck de production.")
-        try:
-            from . import dashboard_server_tools
-            dashboard_server_tools.install(modules[0])
-        except Exception:
-            logger.exception("Impossible d'installer les outils serveur du dashboard.")
+        # Création de serveur retirée du dashboard (Jayden, 27/10/2026 : « enlève les
+        # créations de serveur ») : web/dashboard_server_tools n'est plus installé —
+        # ni route /server-tools, ni panneau « Modèle ». Les commandes Discord de
+        # création avaient déjà été retirées le 18/09 (da7b00e7).
         try:
             from . import enterprise_suite
             enterprise_suite.install(modules[0])
