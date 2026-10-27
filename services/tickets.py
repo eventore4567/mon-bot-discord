@@ -911,11 +911,16 @@ async def supprimer_ticket_apres_confirmation(
             view=card, files=card.fichiers(), ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none(),
         )
-    except discord.HTTPException:
-        logger.warning(
-            "Suppression ticket #%s réussie, mais la confirmation n'a pas pu être envoyée.",
-            ticket_id, exc_info=True,
-        )
+    except discord.HTTPException as exc:
+        # 10003 Unknown Channel : la confirmation éphémère vivait dans le salon
+        # qu'on vient de supprimer. Attendu, pas une erreur (production, 27/10/2026).
+        if int(getattr(exc, "code", 0) or 0) == 10003:
+            logger.debug("Ticket #%s supprimé : confirmation sans salon, normal.", ticket_id)
+        else:
+            logger.warning(
+                "Suppression ticket #%s réussie, mais la confirmation n'a pas pu être envoyée.",
+                ticket_id, exc_info=True,
+            )
 
 
 class BoutonSupprimerTicket(discord.ui.DynamicItem[discord.ui.Button],
