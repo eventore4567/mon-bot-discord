@@ -364,7 +364,8 @@ def test_ticket_open_and_close_use_v3_in_real_runtime():
         assert token in opener, token
     assert 'embed=e,' not in opener
     assert "ticket_panels_v3.closed_card(" in closer
-    assert "file=transcript_file" in closer
+    assert "file=transcript_file" not in closer
+    assert "ticket_transcript_links.publish_link(" in closer
     assert "ticket_panels_v3.reopened_card(" in buttons
     assert "ConfirmerSuppressionTicket(self.ticket_id, interaction.user.id)" in buttons
     assert "send_modal(ConfirmerSuppressionTicket" not in buttons

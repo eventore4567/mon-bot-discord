@@ -127,8 +127,9 @@ async def test_history_query_scoped_to_ticket_and_guild(ticket, events):
 def test_new_html_dm_and_existing_audit_ticket_view_are_preserved():
     source = (Path(__file__).resolve().parents[1] / "cogs" / "ticket_claim_security.py").read_text()
     assert "ticket_log_report.load_report(" in source
-    assert "file=report.transcript_file(transcript_text)" in source
-    assert "ticket_transcript_html.transcript_html_file(" in source
+    assert "file=report.transcript_file(transcript_text)" not in source
+    assert "ticket_transcript_html.transcript_html_file(" not in source
+    assert "ticket_transcript_links.publish_link(" in source
     assert "await ticket_transcript_html.send_closure_dm(" in source
     assert 'actor_id=interaction.user.id' in source
     assert "vue_voir_le_ticket(guild.id, channel.id)" in source

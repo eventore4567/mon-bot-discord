@@ -20,6 +20,7 @@ from discord.ext import commands
 from services import tickets as tickets_service
 from services import ticket_log_report
 from services import ticket_transcript_html
+from services import ticket_transcript_links
 from services import ticket_panels_v3
 from utils import log_service
 from utils import sentrix_panels as panels
@@ -448,16 +449,23 @@ def install(bot: commands.Bot) -> None:
         # Aucun ticket fermé manuellement n'est donc programmé pour auto-delete.
         duree = tickets_service.duree_du_ticket(ticket, fin=closed_at)
         reason_text = (reason or "Non précisée").strip()[:1200]
+        # Le lien est remis uniquement au demandeur en MP, sans fichier dans le salon.
+        transcript_url = None
+        if owner and (not conf or conf["ticket_transcript_dm"]):
+            try:
+                transcript_url = await ticket_transcript_links.publish_link(
+                    self.bot, ticket_id=ticket_id, guild_id=guild.id,
+                    channel_id=int(channel.id), channel_name=channel.name,
+                    transcript_text=transcript_text, viewer_id=int(owner.id),
+                    closer_name=str(interaction.user), close_reason=reason_text,
+                )
+            except Exception:
+                logger.exception("Lien web privé indisponible pour ticket #%s.", ticket_id)
+
         # Le membre reste masqué, le staff conserve la conversation.
         # Les boutons Rouvrir / Supprimer sont ceux de la vue persistante :
         # leur custom_id survit aux redémarrages.
         vue_fermeture = tickets_service.vue_ticket_ferme(ticket_id)
-        transcript_file = ticket_transcript_html.transcript_html_file(
-            channel, transcript_text, ticket_id=ticket_id,
-            guild_name=guild.name, subject=channel.name,
-            created_at=ticket["created_at"], closed_at=closed_at,
-            closed_by=str(interaction.user), close_reason=reason_text,
-        )
         closure_card = panels.avec_composants(
             ticket_panels_v3.closed_card(
                 ticket_id=ticket_id,
@@ -465,7 +473,7 @@ def install(bot: commands.Bot) -> None:
                 closer=interaction.user,
                 reason=reason_text,
                 duration=duree,
-                transcript_filename=transcript_file.filename,
+                transcript_filename=None,
                 avatar_url=str(owner.display_avatar.url) if owner else None,
                 claimed_by_id=int(ticket["claimed_by"]) if ticket["claimed_by"] else None,
                 closed_at=closed_at,
@@ -476,12 +484,11 @@ def install(bot: commands.Bot) -> None:
             await panels.envoyer(
                 channel,
                 closure_card,
-                file=transcript_file,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException:
             logger.warning(
-                "Fiche de fermeture ticket #%s refusée ; repli avec pièce jointe HTML.",
+                "Fiche de fermeture ticket #%s refusée ; envoi du résumé seul.",
                 ticket_id, exc_info=True,
             )
             try:
@@ -491,15 +498,10 @@ def install(bot: commands.Bot) -> None:
                         f"Raison : {reason_text}\n"
                         "Le staff peut rouvrir ou supprimer le salon."
                     ),
-                    file=ticket_transcript_html.transcript_html_file(
-                        channel, transcript_text, ticket_id=ticket_id,
-                        created_at=ticket["created_at"], closed_at=closed_at,
-                        closed_by=str(interaction.user), close_reason=reason_text,
-                    ),
                     allowed_mentions=discord.AllowedMentions.none(),
                 )
             except discord.HTTPException:
-                logger.exception("Envoi de secours HTML impossible ticket #%s.", ticket_id)
+                logger.exception("Envoi du résumé de fermeture impossible ticket #%s.", ticket_id)
 
         participants = [
             f"{member.display_name} (`{member.id}`)"
@@ -525,7 +527,7 @@ def install(bot: commands.Bot) -> None:
             title="🔒 Fermeture du ticket",
             description=(
                 f"Dossier du ticket **#{ticket_id}** · fermeture enregistrée. "
-                "Le récapitulatif et le transcript sont disponibles ci-dessous."
+                "Le récapitulatif est enregistré. La transcription reste privée."
             ),
             colour=discord.Colour(0x4385DF),
             timestamp=discord.utils.utcnow(),
@@ -547,7 +549,6 @@ def install(bot: commands.Bot) -> None:
             guild,
             "ticket_close",
             log_embed,
-            file=report.transcript_file(transcript_text),
             view=tickets_service.vue_voir_le_ticket(guild.id, channel.id),
             event_key=event_key,
             identity_name=(owner.display_name if owner else f"Membre {ticket['user_id']}"),
@@ -563,6 +564,7 @@ def install(bot: commands.Bot) -> None:
                     ticket_id=ticket_id, created_at=ticket["created_at"],
                     closed_at=closed_at, closer=interaction.user,
                     reason=reason_text, subject=channel.name,
+                    transcript_url=transcript_url,
                 )
                 logger.info("Ticket #%s : transcription HTML envoyée en MP user=%s.", ticket_id, owner.id)
             except (discord.Forbidden, discord.HTTPException) as exc:
