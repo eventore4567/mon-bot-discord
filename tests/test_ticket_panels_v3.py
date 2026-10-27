@@ -189,8 +189,10 @@ def test_close_modal_has_private_defer_and_real_acknowledgement():
     handler = (ROOT / "cogs" / "ticket_claim_security.py").read_text(encoding="utf-8")
     block = source[source.index("class CloseReasonModal"):source.index("class TicketNoteModal")]
     assert "await interaction.response.defer(ephemeral=True)" in block
-    assert "ticket_panels_v3.ticket_closed_confirmation(" in handler
-    assert "ephemere=True" in handler[handler.index("ticket_panels_v3.ticket_closed_confirmation("):handler.index("async def secure_claim")]
+    # Une unique carte publique est publiée ; le defer modal est simplement supprimé.
+    assert "ticket_panels_v3.closed_card(" in handler
+    assert "ticket_panels_v3.ticket_closed_confirmation(" not in handler
+    assert "await interaction.delete_original_response()" in handler
     card = cards.ticket_closed_confirmation(
         ticket_id=9, closer=user(222222222222222222),
         reason="Problème traité", duration="42 min",

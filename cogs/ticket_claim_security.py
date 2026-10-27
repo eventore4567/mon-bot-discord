@@ -566,7 +566,7 @@ def install(bot: commands.Bot) -> None:
                     reason=reason_text, subject=channel.name,
                     transcript_url=transcript_url,
                 )
-                logger.info("Ticket #%s : transcription HTML envoyée en MP user=%s.", ticket_id, owner.id)
+                logger.info("Ticket #%s : message de fermeture envoyé en MP user=%s lien_web=%s.", ticket_id, owner.id, bool(transcript_url))
             except (discord.Forbidden, discord.HTTPException) as exc:
                 logger.warning(
                     "Ticket #%s : MP transcript HTML non remis à user=%s (%s).",
@@ -587,29 +587,18 @@ def install(bot: commands.Bot) -> None:
                 "Ticket #%s : impossible de résoudre le destinataire MP user=%s.", ticket_id, ticket["user_id"]
             )
 
-        # Le panneau public (Rouvrir/Supprimer + transcript) est déjà envoyé.
-        # Accuser aussi le clic du staff, en privé, avec le motif et la durée.
-        # Sinon la réponse au formulaire reste indéfiniment sur « chargement ».
+        # Un seul panneau dans le salon : le récapitulatif et les actions staff.
+        # CloseReasonModal.on_submit a déjà accusé la soumission par defer().
+        # Supprimer sa réponse provisoire (éphémère) évite une deuxième grande
+        # carte « Ticket fermé » visible uniquement au modérateur.
+        # Les réponses d'erreur, traitées plus haut, restent visibles.
         try:
-            await panels.envoyer(
-                interaction,
-                ticket_panels_v3.ticket_closed_confirmation(
-                    ticket_id=ticket_id,
-                    closer=interaction.user,
-                    reason=reason_text,
-                    duration=duree,
-                    guild_id=guild.id,
-                    channel_id=channel.id,
-                    channel_name=channel.name,
-                    closed_at=closed_at,
-                ),
-                ephemere=True,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+            if interaction.response.is_done():
+                await interaction.delete_original_response()
         except (discord.HTTPException, discord.NotFound):
-            logger.warning(
-                "Confirmation privée de fermeture ticket #%s indisponible.",
-                ticket_id, exc_info=True,
+            logger.debug(
+                "Réponse différée de fermeture déjà supprimée ticket #%s.",
+                ticket_id,
             )
 
     async def secure_claim(self, interaction: discord.Interaction, ticket):
