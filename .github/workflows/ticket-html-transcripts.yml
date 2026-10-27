@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - "services/ticket_transcript_html.py"
+      - "services/ticket_transcript_links.py"
+      - "web/ticket_transcript_viewer.py"
+      - "web/dashboard_recovery_v54.py"
+      - "tests/test_ticket_transcript_web.py"
       - "cogs/tickets.py"
       - "cogs/ticket_claim_security.py"
       - "tests/test_ticket_transcript_html.py"
@@ -13,6 +17,10 @@ on:
       - dashboard-refonte-2026-09
     paths:
       - "services/ticket_transcript_html.py"
+      - "services/ticket_transcript_links.py"
+      - "web/ticket_transcript_viewer.py"
+      - "web/dashboard_recovery_v54.py"
+      - "tests/test_ticket_transcript_web.py"
       - "cogs/tickets.py"
       - "cogs/ticket_claim_security.py"
       - "tests/test_ticket_transcript_html.py"
@@ -28,6 +36,6 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install "discord.py>=2.7,<3" pytest
       - name: Check Python syntax
-        run: python -m py_compile services/ticket_transcript_html.py cogs/tickets.py cogs/ticket_claim_security.py
+        run: python -m py_compile services/ticket_transcript_html.py services/ticket_transcript_links.py web/ticket_transcript_viewer.py cogs/tickets.py cogs/ticket_claim_security.py
       - name: Test safe HTML and closure DMs
-        run: python -m pytest tests/test_ticket_transcript_html.py -q
+        run: python -m pytest tests/test_ticket_transcript_html.py tests/test_ticket_transcript_web.py -q
