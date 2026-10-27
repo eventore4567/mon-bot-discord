@@ -2208,8 +2208,15 @@ class Tickets(commands.Cog):
                 )
                 return
 
+        transcript_text = ""
+        closed_at = int(now())
         try:
-            transcript = await self.generate_transcript(channel)
+            transcript_text = await self._fetch_transcript_text(channel)
+            transcript = ticket_transcript_html.transcript_html_file(
+                channel, transcript_text, ticket_id=int(row["id"]),
+                created_at=row["created_at"], closed_at=closed_at,
+                closed_by="SentriX", close_reason="Inactivité : délai configuré dépassé.",
+            )
         except Exception:
             logger.exception(
                 "Transcription auto-close indisponible pour le ticket #%s.",
@@ -2268,6 +2275,24 @@ class Tickets(commands.Cog):
                 "Journal auto-close indisponible pour le ticket #%s.",
                 row["id"],
             )
+
+        # Le membre reçoit la même fiche HTML que pour une fermeture manuelle.
+        # Les MP sont facultatifs, conformément au réglage du serveur.
+        if owner:
+            try:
+                conf = await self.bot.db.get_guild_config(guild.id)
+                if not conf or conf["ticket_transcript_dm"]:
+                    await ticket_transcript_html.send_closure_dm(
+                        owner, guild, channel, transcript_text,
+                        ticket_id=int(row["id"]), created_at=row["created_at"],
+                        closed_at=closed_at, closer="SentriX",
+                        reason="Inactivité : délai configuré dépassé.",
+                        subject=channel.name,
+                    )
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            except Exception:
+                logger.exception("MP de fermeture automatique impossible pour ticket #%s.", row["id"])
 
         # Important : auto-close ferme le ticket, mais ne détruit jamais le salon.
         # La suppression reste une action staff explicite via le bouton rouge.
