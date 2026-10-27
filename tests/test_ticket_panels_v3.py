@@ -42,14 +42,17 @@ def contents(view):
     )
 
 
-def test_ticket_banner_is_real_image_not_invisible_24px_strip():
+def test_ticket_banner_is_the_same_transparent_strip_as_sentrix_core():
+    from utils.premium_log_banners import BANNER_FILENAME as SHARED_BANNER, get_premium_log_banner
     image_data = cards.banner_bytes()
     image = Image.open(io.BytesIO(image_data))
     assert image.format == "PNG"
-    assert image.size == (1200, 172)
-    assert len(image_data) > 1000
+    assert image.mode == "RGBA"
+    assert image.size == (1200, 24)
+    assert image.getpixel((0, 0))[3] == 0
+    assert image_data == get_premium_log_banner().read_bytes()
+    assert cards.BANNER_FILENAME == SHARED_BANNER
     assert len(image_data) < 500_000
-    assert cards.banner_bytes() is cards.banner_bytes()
 
 
 def test_new_ticket_open_panel_contains_banner_answers_and_two_main_actions():
@@ -71,9 +74,12 @@ def test_new_ticket_open_panel_contains_banner_answers_and_two_main_actions():
     assert "Ticket #9" in body
     assert "Votre question" in body
     assert maker.mention in body and staff.mention in body
-    # Surtitre lisible depuis le 22/10/2026 : « 🎫 Support · 🟢 Ouvert ».
-    assert "🎫 Support ·" in body
+    # En-tête propre : icônes SentriX si disponibles, jamais d'émojis Unicode.
+    assert "Support · Ouvert" in body
+    assert "🎫" not in body
+    assert "🟢" not in body
     assert "Résumé automatique" not in body
+    assert "sentrix-ticket-cover-v3.png" not in str(children)
     assert any(isinstance(child, discord.ui.MediaGallery) for child in children)
     buttons = [
         x.custom_id for x in children
