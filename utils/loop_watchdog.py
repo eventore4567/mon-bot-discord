@@ -28,7 +28,7 @@ INTERVALLE_S = 0.25
 _CE_FICHIER = os.path.abspath(__file__)
 _RACINE = os.path.dirname(os.path.dirname(_CE_FICHIER))
 
-_etat = {"dernier": time.monotonic(), "actif": False}
+_etat = {"dernier": time.monotonic(), "actif": False, "generation": 0}
 
 
 def cadres_sentrix(frame, limite: int = 6) -> list[str]:
@@ -42,16 +42,21 @@ def cadres_sentrix(frame, limite: int = 6) -> list[str]:
     return lignes
 
 
-async def _battre() -> None:
-    while True:
+async def _battre(generation: int) -> None:
+    # Une tâche liée à un ancien cycle ne modifie jamais le battement du nouveau.
+    while _etat["actif"] and _etat["generation"] == generation:
         _etat["dernier"] = time.monotonic()
         await asyncio.sleep(INTERVALLE_S)
 
 
-def _surveiller(fil_principal: int) -> None:
+def _surveiller(fil_principal: int, generation: int) -> None:
     signale = False
-    while _etat["actif"]:
-        time.sleep(INTERVALLE_S * 2)
+    while _etat["actif"] and _etat["generation"] == generation:
+        time.sleep(INTERVALLE_S)
+        # arreter() peut être appelé pendant le sommeil. Ne pas publier un
+        # avertissement périmé dans une session suivante du watchdog.
+        if not _etat["actif"] or _etat["generation"] != generation:
+            return
         retard = time.monotonic() - _etat["dernier"]
         if retard < SEUIL_S:
             signale = False
@@ -72,16 +77,19 @@ def demarrer(loop: asyncio.AbstractEventLoop | None = None) -> bool:
     if _etat["actif"]:
         return False
     loop = loop or asyncio.get_event_loop()
+    _etat["generation"] += 1
+    generation = _etat["generation"]
     _etat["actif"] = True
     _etat["dernier"] = time.monotonic()
-    loop.create_task(_battre(), name="sentrix:loop-watchdog")
-    threading.Thread(target=_surveiller, args=(threading.get_ident(),), name="sentrix-loop-watchdog",
+    loop.create_task(_battre(generation), name="sentrix:loop-watchdog")
+    threading.Thread(target=_surveiller, args=(threading.get_ident(), generation), name="sentrix-loop-watchdog",
                      daemon=True).start()
     return True
 
 
 def arreter() -> None:
     _etat["actif"] = False
+    _etat["generation"] += 1
 
 
 __all__ = ["demarrer", "arreter", "cadres_sentrix", "SEUIL_S"]
