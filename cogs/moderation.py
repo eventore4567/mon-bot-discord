@@ -1470,13 +1470,18 @@ class Moderation(commands.Cog):
             # La réponse originale devient alors un vrai message Discord. Si on la laisse
             # dans l'historique à purger, /clear la supprime puis tente de l'éditer :
             # Discord répond 404 Unknown Message.
+            # Une réponse différée en éphémère n'est jamais dans l'historique du
+            # salon : la relire coûtait un aller-retour Discord pour rien (5 appels
+            # enchaînés → 4). Seule une réponse déjà ouverte par un wrapper, dont
+            # on ignore la visibilité, doit être protégée.
             if not ctx.interaction.response.is_done():
                 await ctx.interaction.response.defer(ephemeral=True, thinking=True)
-            try:
-                original = await ctx.interaction.original_response()
-                protected_ids.add(int(original.id))
-            except (discord.NotFound, discord.HTTPException, discord.ClientException):
-                pass
+            else:
+                try:
+                    original = await ctx.interaction.original_response()
+                    protected_ids.add(int(original.id))
+                except (discord.NotFound, discord.HTTPException, discord.ClientException):
+                    pass
 
         invocation = getattr(ctx, "message", None) if is_prefix else None
         invocation_id = getattr(invocation, "id", None)
