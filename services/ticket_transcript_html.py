@@ -13,7 +13,6 @@ import re
 from urllib.parse import urlsplit
 
 import discord
-from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
 
 
 _MESSAGE = re.compile(
@@ -259,12 +258,12 @@ class TicketTranscriptDM(discord.ui.LayoutView):
     def __init__(
         self, *, ticket_id: int, guild_name: str, subject: str,
         created_at: int | None, closed_at: int | None, closer_name: str,
-        count: int, transcript_url: str | None,
+        count: int, transcript_url: str | None, banner_filename: str,
     ) -> None:
         super().__init__(timeout=None)
         card = discord.ui.Container()
         banner = discord.ui.MediaGallery()
-        banner.add_item(media=f"attachment://{BANNER_FILENAME}")
+        banner.add_item(media=f"attachment://{banner_filename}")
         card.add_item(banner)
 
         guild_label = discord.utils.escape_mentions(
@@ -331,6 +330,10 @@ async def send_closure_dm(
 ) -> None:
     """Deliver one wide, branded DM and a link to the private web transcript."""
     del reason  # Closure reason remains in the secure web archive, not the public URL.
+    # Load the image generator only when sending a DM, not while parsing HTML
+    # or handling /transcripts requests that do not require bot configuration.
+    from utils.premium_log_banners import BANNER_FILENAME, get_premium_log_banner
+
     closer_name = getattr(closer, "display_name", None) or str(closer)
     view = TicketTranscriptDM(
         ticket_id=ticket_id,
@@ -341,6 +344,7 @@ async def send_closure_dm(
         closer_name=closer_name,
         count=len(parse_transcript(transcript_text)),
         transcript_url=transcript_url,
+        banner_filename=BANNER_FILENAME,
     )
     await owner.send(
         view=view,
