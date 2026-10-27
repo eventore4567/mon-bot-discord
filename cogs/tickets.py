@@ -2220,17 +2220,11 @@ class Tickets(commands.Cog):
         closed_at = int(now())
         try:
             transcript_text = await self._fetch_transcript_text(channel)
-            transcript = ticket_transcript_html.transcript_html_file(
-                channel, transcript_text, ticket_id=int(row["id"]),
-                created_at=row["created_at"], closed_at=closed_at,
-                closed_by="SentriX", close_reason="Inactivité : délai configuré dépassé.",
-            )
         except Exception:
             logger.exception(
                 "Transcription auto-close indisponible pour le ticket #%s.",
                 row["id"],
             )
-            transcript = None
 
         try:
             # Même interface que les fermetures manuelles, sans ancienne carte
@@ -2243,17 +2237,15 @@ class Tickets(commands.Cog):
                     closer=self.bot.user,
                     reason="Inactivité : délai configuré dépassé.",
                     duration=duration,
-                    transcript_filename=transcript.filename if transcript else None,
+                    transcript_filename=None,
                     avatar_url=str(owner.display_avatar.url) if owner else None,
                     claimed_by_id=int(row["claimed_by"]) if row["claimed_by"] else None,
                     closed_at=int(now()),
                 ),
                 tickets_service.vue_ticket_ferme(row["id"]),
             )
-            kwargs = {"file": transcript} if transcript else {}
             await sx_panels.envoyer(
                 channel, panel, allowed_mentions=discord.AllowedMentions.none(),
-                **kwargs,
             )
         except discord.HTTPException:
             logger.warning(
@@ -2290,12 +2282,19 @@ class Tickets(commands.Cog):
             try:
                 conf = await self.bot.db.get_guild_config(guild.id)
                 if not conf or conf["ticket_transcript_dm"]:
+                    reason = "Inactivité : délai configuré dépassé."
+                    transcript_url = await ticket_transcript_links.publish_link(
+                        self.bot, ticket_id=int(row["id"]), guild_id=guild.id,
+                        channel_id=channel.id, channel_name=channel.name,
+                        transcript_text=transcript_text, viewer_id=owner.id,
+                        closer_name="SentriX", close_reason=reason,
+                    )
                     await ticket_transcript_html.send_closure_dm(
                         owner, guild, channel, transcript_text,
                         ticket_id=int(row["id"]), created_at=row["created_at"],
                         closed_at=closed_at, closer="SentriX",
-                        reason="Inactivité : délai configuré dépassé.",
-                        subject=channel.name,
+                        reason=reason, subject=channel.name,
+                        transcript_url=transcript_url,
                     )
             except (discord.Forbidden, discord.HTTPException) as exc:
                 logger.warning(
