@@ -221,6 +221,34 @@ def transcript_html_file(
     return discord.File(io.BytesIO(data), filename=f"{label}.html")
 
 
+async def resolve_ticket_recipient(
+    bot: discord.Client, guild: discord.Guild, user_id: int
+) -> tuple[discord.Member | None, discord.abc.User | None]:
+    """Retrouve le destinataire même si le membre n'est pas en cache.
+
+    La réponse est (membre encore présent dans le serveur, utilisateur à contacter).
+    Ne jamais employer un discord.User comme cible de permissions de salon.
+    """
+    user_id = int(user_id)
+    member = guild.get_member(user_id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(user_id)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            member = None
+
+    if member is not None:
+        return member, member
+
+    user = bot.get_user(user_id)
+    if user is None:
+        try:
+            user = await bot.fetch_user(user_id)
+        except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+            user = None
+    return None, user
+
+
 async def send_closure_dm(
     owner: discord.abc.User,
     guild: discord.Guild,
