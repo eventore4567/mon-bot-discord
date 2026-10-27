@@ -130,7 +130,7 @@ class TicketCardV3(discord.ui.LayoutView):
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay(
                 "**📄 Transcription du ticket**\n"
-                "-# Archive TXT du salon avant fermeture. Accessible au staff."
+                "-# Archive HTML du salon : ouvrez le fichier joint dans un navigateur. Accessible au staff."
             ))
             component = getattr(discord.ui, "File", None)
             if component:
