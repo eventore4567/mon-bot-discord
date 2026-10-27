@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test dependencies
-        run: python -m pip install "discord.py>=2.7,<3" pytest
+        run: python -m pip install -r requirements.txt pytest
       - name: Check Python syntax
         run: python -m py_compile services/ticket_transcript_html.py services/ticket_transcript_links.py web/ticket_transcript_viewer.py cogs/tickets.py cogs/ticket_claim_security.py
       - name: Test safe HTML and closure DMs
