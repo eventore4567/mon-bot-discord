@@ -261,8 +261,9 @@ async def send_closure_dm(
     closer: discord.abc.User | str,
     reason: str,
     subject: str = "",
+    transcript_url: str | None = None,
 ) -> None:
-    """Un seul MP : fiche de fermeture + fichier HTML navigable en pièce jointe."""
+    """Send a compact DM with a real website link. Never attach the HTML file."""
     closer_name = getattr(closer, "display_name", None) or str(closer)
     count = len(parse_transcript(transcript_text))
     label = f"TICKET-{int(ticket_id):04d}"
@@ -275,21 +276,38 @@ async def send_closure_dm(
         ),
         color=discord.Color(0x5865F2),
     )
-    e.add_field(name="Durée", value=_duration(created_at, closed_at), inline=False)
-    e.add_field(name="Fermé par", value=str(closer_name)[:256], inline=True)
-    e.add_field(name="Messages", value=str(count), inline=True)
     e.add_field(
-        name="Transcription",
-        value=f"Ouvrez le fichier **{label}.html** ci-joint dans votre navigateur pour consulter la conversation.",
+        name="Durée",
+        value=f"{_stamp(created_at)} — {_stamp(closed_at)}\n{_duration(created_at, closed_at)}",
         inline=False,
     )
+    e.add_field(name="Fermé par", value=discord.utils.escape_markdown(str(closer_name)[:256]), inline=True)
+    e.add_field(name="Messages", value=str(count), inline=True)
+    view = None
+    if transcript_url and transcript_url.startswith("https://"):
+        e.add_field(
+            name="Transcription",
+            value=(
+                f"[Consulter la conversation sur SentriX]({transcript_url})\n"
+                "Lien privé valable 90 jours. Ne le partagez pas."
+            ),
+            inline=False,
+        )
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(
+            label="Ouvrir la transcription",
+            style=discord.ButtonStyle.link,
+            url=transcript_url,
+        ))
+    else:
+        e.add_field(
+            name="Transcription",
+            value="Le lien privé est temporairement indisponible.",
+            inline=False,
+        )
     e.set_footer(text=f"SentriX · {guild.name}"[:2048])
     await owner.send(
         embed=e,
-        file=transcript_html_file(
-            channel, transcript_text, ticket_id=ticket_id, guild_name=guild.name,
-            subject=subject, created_at=created_at, closed_at=closed_at,
-            closed_by=str(closer_name), close_reason=reason,
-        ),
+        view=view,
         allowed_mentions=discord.AllowedMentions.none(),
     )
