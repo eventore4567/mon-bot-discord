@@ -638,6 +638,33 @@ class SecurityVerificationRuntimeV71:
         cache[int(guild_id)] = (now_mono, row)
         return row
 
+    def _raison_bypass(self, member: discord.Member, conf: Any) -> str:
+        if member.bot:
+            return "bot"
+        if member.id == member.guild.owner_id:
+            return "propriétaire du serveur"
+        if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
+            return "staff (administrateur / gérer le serveur)"
+        verified_id = _get(conf, "verified_role_id")
+        if verified_id and any(role.id == int(verified_id) for role in member.roles):
+            return "membre déjà vérifié"
+        return "n'a pas le rôle « non vérifié » (le piège ne vise que les comptes en attente)"
+
+    def _tracer_ignore(self, message: discord.Message, conf: Any, raison: str) -> None:
+        cle = (message.guild.id, message.author.id)
+        vus = self.__dict__.setdefault("_ignores_traces", {})
+        maintenant = time.monotonic()
+        if vus.get(cle, 0.0) > maintenant:
+            return
+        vus[cle] = maintenant + 60.0
+        if len(vus) > 5000:
+            vus.clear()
+        logger.info(
+            "Honeypot : message ignoré guild=%s user=%s salon=%s pièces=%s commande=%s raison=%s",
+            message.guild.id, message.author.id, message.channel.id, len(message.attachments),
+            str(message.content or "").startswith(("+", "/")), raison,
+        )
+
     def _staff_bypass(self, member: discord.Member, conf: Any) -> bool:
         if member.bot or member.id == member.guild.owner_id:
             return True
@@ -666,7 +693,13 @@ class SecurityVerificationRuntimeV71:
         if message.channel.id != int(_get(conf, "trap_channel_id")):
             return
         cfg = await settings(self.bot, message.guild.id)
-        if not cfg["honeypot_enabled"] or self._staff_bypass(message.author, conf):
+        if not cfg["honeypot_enabled"]:
+            return
+        if self._staff_bypass(message.author, conf):
+            # Une sortie silencieuse donnait « le honeypot ne marche pas » (Jayden,
+            # 27/10) : un test fait avec un compte staff, vérifié ou sans le rôle
+            # « non vérifié » ne déclenche rien, par conception. La raison est tracée.
+            self._tracer_ignore(message, conf, self._raison_bypass(message.author, conf))
             return
         # La garde d'immunité du propriétaire bloque déjà le ban, mais le reste
         # du softban (débannissement, journal) partait quand même : 3 erreurs
@@ -693,6 +726,22 @@ class SecurityVerificationRuntimeV71:
 
         me = message.guild.me
         if me is None or message.author.top_role >= me.top_role:
+            # Le message est supprimé mais aucune sanction n'est possible : le dire,
+            # au lieu de laisser croire que le piège n'a rien vu.
+            self._tracer_ignore(message, conf, "rôle égal ou supérieur à SentriX")
+            engine = self.bot.get_cog("HoneypotVerification")
+            log_fn = getattr(engine, "_log", None)
+            if callable(log_fn):
+                try:
+                    await log_fn(
+                        message.guild, "Honeypot déclenché — sanction impossible",
+                        f"{message.author.mention} (`{message.author.id}`) a écrit dans le salon piège : "
+                        "message supprimé, mais son rôle est égal ou supérieur à celui de SentriX. "
+                        "Placez le rôle **SentriX** plus haut dans **Paramètres du serveur → Rôles**.",
+                        danger=True,
+                    )
+                except Exception:
+                    logger.exception("V71: log honeypot impossible")
             return
 
         action = cfg["honeypot_action"]
