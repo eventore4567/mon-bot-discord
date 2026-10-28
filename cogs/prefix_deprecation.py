@@ -31,6 +31,17 @@ EFFACER_APRES_S = 120
 _dernier_avis: dict[tuple[int, int], float] = {}
 
 
+def actif() -> bool:
+    """Coupé par le harnais e2e (SENTRIX_AVIS_PREFIXE=0) : l'avis est un message de
+    plus après chaque « + », et les parcours repèrent le panneau du bot comme
+    « dernier message ». Lu à l'appel : discord.py recharge l'extension comme un
+    nouveau module, un drapeau posé avant le chargement serait perdu.
+    tools/prefix_deprecation_e2e.py le teste explicitement, allumé."""
+    import os
+
+    return os.environ.get("SENTRIX_AVIS_PREFIXE", "1") != "0"
+
+
 def equivalent_slash(bot: commands.Bot, commande: commands.Command) -> str | None:
     """La commande « / » à proposer, en mention cliquable si possible."""
     from utils import slash_ids
@@ -74,7 +85,7 @@ def doit_avertir(guild_id: int, user_id: int, maintenant: float | None = None) -
 
 
 async def avertir(bot: commands.Bot, ctx: commands.Context) -> None:
-    if ctx.interaction is not None or ctx.guild is None or ctx.command is None:
+    if not actif() or ctx.interaction is not None or ctx.guild is None or ctx.command is None:
         return
     if getattr(ctx.author, "bot", False) or not doit_avertir(ctx.guild.id, ctx.author.id):
         return
