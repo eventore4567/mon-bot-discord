@@ -48,7 +48,13 @@ async def _server_owner_only(ctx: commands.Context) -> bool:
 def _guard_whitelists(bot: commands.Bot) -> None:
     for qualified in _OWNER_ONLY_QUALIFIED:
         command = bot.get_command(qualified)
-        if command is None or getattr(command, "_sentrix_real_owner_whitelist", False):
+        # get_command("security whitelist user-add") rend la RACINE quand elle
+        # n'est pas un groupe : depuis que « security » est un alias de
+        # +security-check, ce verrou propriétaire tombait sur la vérification de
+        # sécurité elle-même et la refusait à tous les admins (28/10/2026).
+        if command is None or command.qualified_name != qualified:
+            continue
+        if getattr(command, "_sentrix_real_owner_whitelist", False):
             continue
         command.add_check(_server_owner_only)
         command._sentrix_real_owner_whitelist = True
