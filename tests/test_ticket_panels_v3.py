@@ -203,7 +203,8 @@ def test_close_modal_has_private_defer_and_real_acknowledgement():
     assert "Ticket #9 fermé" in body
     assert "Problème traité" in body and "42 min" in body
     assert "<t:1700003600:F>" in body
-    assert "Le staff peut **rouvrir**" in body
+    # Minimalisme (28/10/2026) : plus de paragraphe « Le staff peut rouvrir… », les boutons suffisent.
+    assert "Le staff peut" not in body
     links = [x for x in walk(card.children) if isinstance(x, discord.ui.Button) and x.style == discord.ButtonStyle.link]
     assert len(links) == 1
     assert links[0].label == "Voir le ticket fermé"

@@ -114,7 +114,6 @@ class TicketCardV3(discord.ui.LayoutView):
             ))
             container.add_item(row)
 
-        container.add_item(discord.ui.TextDisplay("-# SentriX · Gestion des tickets"))
         self.add_item(container)
 
     def fichiers(self) -> list[discord.File]:
@@ -158,27 +157,23 @@ def ticket_created_confirmation(
 def opening_card(*, ticket_number: int, ticket_type: str, opener: discord.abc.User,
                  description: str, staff_role: discord.Role | None = None,
                  answers: Iterable[tuple[str, str]] = ()) -> TicketCardV3:
-    summary = [
-        f"**Demandeur :** {opener.mention}",
-        f"**Catégorie :** {_safe(ticket_type, 120)}",
-        f"**Ouverture :** <t:{int(discord.utils.utcnow().timestamp())}:F>",
-    ]
-    if staff_role:
-        summary.append(f"**Équipe notifiée :** {staff_role.mention}")
-    sections = [("Dossier", "\n".join(summary))]
+    # Minimalisme (Jayden, 28/10/2026 : « les embeds tickets sont immenses ») :
+    # une ligne d'informations, les réponses du formulaire, rien d'autre.
+    ligne = (
+        f"{opener.mention} · <t:{int(discord.utils.utcnow().timestamp())}:R>"
+        + (f" · {staff_role.mention}" if staff_role else "")
+    )
+    sections = [("Demande", ligne)]
     questions = [
         f"**{discord.utils.escape_markdown(_safe(key, 70))}**\n"
         f"{discord.utils.escape_mentions(discord.utils.escape_markdown(_safe(value, 380)))}"
         for key, value in answers if str(value or "").strip()
     ]
     if questions:
-        sections.append(("Réponses au formulaire", "\n\n".join(questions)[:1450]))
-    sections.append(("Assistance", "Expliquez votre demande dans ce salon. "
-                     "Un membre du staff peut la prendre en charge, puis fermer "
-                     "le ticket avec une raison."))
+        sections.append(("Formulaire", "\n".join(questions)[:1450]))
     return TicketCardV3(
         title=_icon("ticket", f"Ticket #{int(ticket_number)} · {_safe(ticket_type, 70)}"),
-        description=_safe(description, 430),
+        description=_safe(description, 300),
         sections=sections, avatar_url=str(opener.display_avatar.url),
     )
 
@@ -187,27 +182,22 @@ def closed_card(*, ticket_id: int, opener_id: int, closer: discord.abc.User,
                 reason: str, duration: str | None, transcript_filename: str | None,
                 avatar_url: str | None = None, claimed_by_id: int | None = None,
                 closed_at: int | None = None) -> TicketCardV3:
-    values = [
-        f"**Créé par :** <@{int(opener_id)}>",
-        f"**Pris en charge par :** <@{int(claimed_by_id)}>" if claimed_by_id else "**Prise en charge :** Non attribuée",
-        f"**Fermé par :** {closer.mention}",
-        f"**Durée :** {duration or 'Indisponible'}",
-        f"**Fermeture :** <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>",
-    ]
+    prise = f" · pris par <@{int(claimed_by_id)}>" if claimed_by_id else ""
+    ligne = (
+        f"<@{int(opener_id)}>{prise} · fermé par {closer.mention}"
+        f" · {duration or 'durée inconnue'} · <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>"
+    )
     reason_display = discord.utils.escape_mentions(
         discord.utils.escape_markdown(_safe(reason, 650))
     )
     return TicketCardV3(
         title=f"Ticket #{int(ticket_id)} · Fermé",
-        description="Le ticket est archivé. Le salon est masqué au demandeur, "
-                    "mais conservé pour le staff.",
+        description="Masqué au demandeur, conservé pour le staff.",
         status="fermé",
         avatar_url=avatar_url,
         sections=(
-            ("Résumé de clôture", "\n".join(values)),
-            ("Raison de fermeture", reason_display),
-            ("Suite du dossier", "Le staff peut rouvrir le salon ou le supprimer "
-                                     "définitivement. La suppression demande confirmation."),
+            ("Clôture", ligne),
+            ("Raison", reason_display),
         ),
         transcript_filename=transcript_filename,
     )
@@ -230,18 +220,9 @@ def ticket_closed_confirmation(
     return TicketCardV3(
         title=f"Ticket #{int(ticket_id)} fermé",
         status="fermé",
-        description="La fermeture est enregistrée. Le membre ne peut plus "
-                    "consulter le salon, mais le staff conserve son historique.",
+        description=f"Durée : {duration or 'inconnue'} · <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>",
         sections=(
-            ("Détails de fermeture",
-             f"**Salon :** `#{discord.utils.escape_markdown(_safe(channel_name, 72))}`\n"
-             f"**Fermé par :** {closer.mention}\n"
-             f"**Heure :** <t:{int(closed_at or discord.utils.utcnow().timestamp())}:F>\n"
-             f"**Durée :** {duration or 'Indisponible'}"),
-            ("Motif enregistré", _safe_reason(reason)),
-            ("Actions disponibles",
-             "Le staff peut **rouvrir** le ticket ou le **supprimer** depuis "
-             "les boutons du panneau de clôture."),
+            ("Raison", _safe_reason(reason)),
         ),
         navigation_url=f"https://discord.com/channels/{int(guild_id)}/{int(channel_id)}",
         navigation_label="Voir le ticket fermé",

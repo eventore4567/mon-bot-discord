@@ -73,8 +73,9 @@ async def main() -> int:
     await v71.update_setting(bot, h.GID, "verification_enabled", 1, h.ADMIN_ID)
     view = await build(bot, guild, "security")
     defaults = [o.value for o in select_of(view).options if o.default]
-    check("honeypot" not in defaults and "verification" not in defaults
-          and "Salon piège" not in texts(view).split("**Actuellement :**")[-1],
+    # La liste « Actuellement : … » est devenue un compteur (28/10/2026) : le
+    # menu (options cochées) est la seule source de ce qui est actif.
+    check("honeypot" not in defaults and "verification" not in defaults,
           "un ancien réglage à 1 n'apparaît pas comme actif", str(defaults))
 
     # Système installé (ressources existantes) : les deux redeviennent proposées.
