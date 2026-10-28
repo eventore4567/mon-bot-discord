@@ -129,3 +129,23 @@ async def test_min_level_is_verified_on_entry_and_draw():
     db.get_level.return_value = {"level": 10}
     allowed, reason, weight = await cog._eligibility(row, member)
     assert allowed and reason is None and weight == 1
+
+
+@pytest.mark.asyncio
+async def test_publication_error_removes_orphan_and_never_pings_role():
+    db = SimpleNamespace(execute=AsyncMock(side_effect=RuntimeError("database unavailable")))
+    cog = giveaway_v2.GiveawayV2.__new__(giveaway_v2.GiveawayV2)
+    cog.bot = SimpleNamespace(db=db)
+    cog.ensure_schema = AsyncMock()
+    channel = SimpleNamespace(id=567, send=AsyncMock())
+    guild = SimpleNamespace(id=42, get_channel=lambda n: channel)
+    state = giveaway_v2.BuilderState(
+        author_id=123, guild_id=42, prize="Nitro", duration_seconds=3600,
+        winners=1, channel_id=567, ping_role_id=66,
+    )
+    message = SimpleNamespace(id=999, attachments=[], delete=AsyncMock())
+    with patch.object(giveaway_v2.panels, "envoyer", new_callable=AsyncMock, return_value=message):
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            await cog.publish(guild, state, SimpleNamespace(id=123, mention="<@123>"))
+    message.delete.assert_awaited_once()
+    channel.send.assert_not_awaited()
