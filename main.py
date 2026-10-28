@@ -180,6 +180,8 @@ EXTENSIONS = [
     # Retire les commandes de utils/unused_commands.SUPPRIMEES (28/10/2026).
     # Après toutes les autres, pour que chacune soit déjà enregistrée.
     "cogs.commandes_retirees",
+    # Avis de retrait des commandes « + » (100 % « / » le 30/11/2026).
+    "cogs.prefix_deprecation",
     # cogs.visual_experience_v5 declenche finalize_runtime() et doit rester
     # DERNIERE : une extension chargee apres elle echappe a toute la pile de
     # style.
