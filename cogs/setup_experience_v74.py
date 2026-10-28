@@ -1441,11 +1441,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# 🎫 Tickets\n"
-                    "Activez le module puis choisissez vous-même chaque réglage : "
-                    "titre, texte, couleur, image, miniature, salon, rôle support, catégorie, logs, "
-                    "formulaire, message d’ouverture et boutons.\n\n"
-                    "**Un type de ticket = un bouton** en mode boutons. Discord permet jusqu’à "
-                    "**25 options par panel** ; vous pouvez créer plusieurs panneaux si nécessaire."
+                    "Un type de ticket = un bouton du panneau (25 au maximum)."
                 ),
                 accessory=v73._thumbnail(self.bot),
             )

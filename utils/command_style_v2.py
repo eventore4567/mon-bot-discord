@@ -269,7 +269,9 @@ def style_view(view: Any) -> Any:
                 # sur les boutons — sans interdire l'identité du produit. La
                 # frontière est le préfixe « sentrix_ », pas une liste à tenir
                 # à la main.
-                if not jeu and not est_sentrix(item.emoji):
+                # Un bouton sans libellé garde son emoji : vide, Discord refuse
+                # tout le message (/play bomb, 28/10/2026).
+                if not jeu and not est_sentrix(item.emoji) and item.label:
                     item.emoji = None
             except Exception:
                 logger.warning("Étape non critique ignorée dans style_view", exc_info=True)

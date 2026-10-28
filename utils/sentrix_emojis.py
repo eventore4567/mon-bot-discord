@@ -151,6 +151,11 @@ EQUIVALENCES: dict[str, str] = {
     # restent volontairement en Unicode : ce sont des pièces, pas un décor.
     "👋": "member_join", "📜": "note", "🔥": "level", "🏦": "bank",
     "⏰": "reminder", "⏰️": "reminder", "🎧": "voice", "➕": "more", "💸": "dollar",
+    # 28/10/2026 (Jayden : « des emojis simples, pas des emojis normaux ») : les
+    # pastilles d'état du setup et des journaux prennent les icônes ANIMÉES
+    # dessinées pour SentriX — un état est exactement ce qui justifie une animation.
+    "🟢": "valide", "🔴": "croix", "🟠": "alerte", "🟡": "chargement", "⚪": "away",
+    "🧭": "fleche", "📨": "message", "🪪": "user",
 }
 
 #: Version du pack. À incrémenter dès que les FICHIERS changent d'apparence.

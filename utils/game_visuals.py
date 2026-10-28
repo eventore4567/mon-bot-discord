@@ -289,6 +289,11 @@ async def decorate_embed_checked(
     kind: str = "primary", scene: str | None = None, graine: object = None,
 ) -> discord.Embed:
     """Pour les commandes de jeu : aucun cadre vide si un GIF ne charge pas."""
+    # Pas de grand GIF sur une erreur ou un avertissement (« la partie n'a pas
+    # pu démarrer » sous une image géante, capture du 28/10/2026) : le GIF
+    # accompagne une partie ou un résultat, pas un problème.
+    if str(kind or "").casefold() in {"danger", "error", "warning"}:
+        return embed
     url = await verified_image_for(title, description, kind, scene=scene, graine=graine)
     if url:
         embed.set_image(url=url)
@@ -384,6 +389,8 @@ def decorate_embed(
     """
     # L'ancienne fonction synchrone ne doit jamais injecter une URL extérieure
     # non vérifiée. Elle exploite seulement les GIFs déjà téléchargés.
+    if str(kind or "").casefold() in {"danger", "error", "warning"}:
+        return embed
     scene = scene_for(title, description, kind)
     if scene in _MEDIA_BYTES:
         embed.set_image(url=f"attachment://{_ATTACHMENT_PREFIX}{scene}.gif")

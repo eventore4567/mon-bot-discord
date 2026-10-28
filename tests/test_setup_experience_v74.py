@@ -39,7 +39,7 @@ class SetupExperienceV74Tests(unittest.TestCase):
         self.assertIn("TicketSetupHubView", source)
         self.assertIn("Configuration complète des tickets", source)
         self.assertIn("Tout personnaliser", source)
-        self.assertIn("25 options par panel", source)
+        self.assertIn("(25 au maximum)", source)  # texte raccourci le 28/10 (minimalisme)
         self.assertIn(".add_roles(", source)
 
     def test_moderation_role_is_clear_and_sanction_badges_are_real(self):

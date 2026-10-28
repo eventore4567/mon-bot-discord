@@ -21,6 +21,7 @@ from typing import Any, Iterable, Sequence
 import discord
 
 import config as _config
+from utils import titres_discrets as _titres_discrets  # noqa: F401  (installe la règle des titres)
 from utils.log_banners import (
     BANNER_DIR, ensure_banners, family_for_command, nom_fichier,
 )

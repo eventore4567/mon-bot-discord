@@ -419,10 +419,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(
         discord.ui.TextDisplay(
             "### Centre de sécurité\n"
-            "Ouvrez une protection précise pour gérer son état et ses réglages. "
-            "Les protections de messages proposent en plus les **rôles bypass** et "
-            "les **salons stricts** ; l'anti-raid, le honeypot, la vérification et "
-            "les protections serveur utilisent leurs réglages adaptés."
+            "Seuils, rôles exemptés et salons stricts, protection par protection."
         )
     )
     exceptions = discord.ui.Button(
@@ -441,11 +438,12 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     exceptions.callback = open_exceptions
     container.add_item(discord.ui.ActionRow(exceptions))
 
-    active_labels = [label for key, label, _description in option_specs if key in selected]
-    if active_labels:
-        container.add_item(discord.ui.TextDisplay("**Actuellement :** " + " · ".join(active_labels)))
-    else:
-        container.add_item(discord.ui.TextDisplay("**Actuellement :** aucune protection active."))
+    # La liste « Actuellement : … » répétait mot pour mot les choix déjà visibles
+    # dans le menu ci-dessus (capture du 28/10/2026) : un compteur suffit.
+    container.add_item(discord.ui.TextDisplay(
+        f"-# {len(selected)} protection(s) active(s) sur {total}." if selected
+        else "-# Aucune protection active."
+    ))
 
     self._add_navigation(container)
     self.add_item(container)
@@ -573,7 +571,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
             needs_file=(selected == "tickets"),
         )
         selected_route = selected_channel.mention
-        permission_line = "● TOUT EST PRÊT" if valid else f"⚠️ {detail}"
+        permission_line = "🟢 Tout est prêt." if valid else f"🟠 {detail[:1].upper()}{detail[1:]}."
     else:
         selected_route = "aucun salon choisi"
         permission_line = "⚠️ Choisissez un salon ci-dessous."
@@ -594,8 +592,7 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
         discord.ui.Section(
             discord.ui.TextDisplay(
                 "# 📜 Logs du serveur\n"
-                "Choisissez une catégorie puis **le salon exact** où SentriX doit envoyer ces logs.\n"
-                "Activez le module Logs, puis choisissez les catégories à recevoir."
+                "Une catégorie, un salon."
             ),
             accessory=v74.v73._thumbnail(self.bot),
         )

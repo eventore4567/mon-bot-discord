@@ -22,6 +22,8 @@ logger = logging.getLogger("bot.game-context")
 COGS_DE_JEU = frozenset({
     "minigames", "gamesrapides", "gamessolo", "gamescommunity", "gamesduels",
     "gamesplayercommands", "gameseconomy", "games", "gamesetup",
+    # 28/10/2026 : absent, ses grilles (/play bomb) perdaient leurs cases.
+    "gamesarcade",
 })
 
 # L'économie partage l'exception, pour une raison différente : son pictogramme

@@ -532,7 +532,8 @@ def clean_view(view: Any) -> Any:
             if item.label:
                 item.label = clean_ui_text(item.label, 80, "Action")
             try:
-                if not jeu and not est_sentrix(item.emoji):
+                # Un bouton sans libellé garde son emoji (sinon : bouton vide, message refusé).
+                if not jeu and not est_sentrix(item.emoji) and item.label:
                     item.emoji = None
             except Exception:
                 pass

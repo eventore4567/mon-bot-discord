@@ -176,7 +176,9 @@ def _clean_embed(embed: discord.Embed) -> discord.Embed:
 def _clean_component(component) -> None:
     jeu = _commande_de_jeu()  # un mini-jeu garde les emojis de ses boutons
     if isinstance(component, discord.ui.Button):
-        if not jeu and not est_sentrix(component.emoji):
+        # Jamais retirer l'emoji d'un bouton SANS libellé : il deviendrait vide et
+        # Discord refuserait tout le message (/play bomb, 28/10/2026).
+        if not jeu and not est_sentrix(component.emoji) and component.label:
             component.emoji = None
         if component.label:
             component.label = strip_decorative_emoji(component.label)[:80] or "Action"
