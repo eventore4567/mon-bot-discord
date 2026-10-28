@@ -1126,6 +1126,28 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
                 if str(getattr(attachment, "filename", "")) == state.image_filename:
                     published_image_url = str(attachment.url)
                     break
+        bonus_map = {
+            str(role_id): int(state.bonus_multipliers.get(role_id, state.bonus_multiplier))
+            for role_id in state.bonus_roles
+        }
+        try:
+            await self.bot.db.execute(
+                "INSERT INTO giveaways_v2 (guild_id,channel_id,message_id,prize,winners_count,end_at,status,created_by,created_at,ping_role_id,image_url,description,custom_condition,min_invites,min_account_age_days,min_server_age_days,min_level,required_roles_json,excluded_roles_json,bonus_roles_json,winners_json) VALUES (?,?,?,?,?,?,'actif',?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    guild.id, channel.id, msg.id, state.prize, state.winners, end_at,
+                    author.id, int(time.time()), state.ping_role_id, published_image_url, state.description,
+                    state.custom_condition, state.min_invites, state.min_account_age_days, state.min_server_age_days,
+                    state.min_level, json.dumps(state.required_roles), json.dumps(state.excluded_roles), json.dumps(bonus_map), "[]",
+                ),
+            )
+            except Exception:
+            # Panneau publié mais non enregistré = bouton de participation mort.
+            # On supprime ce message avant de signaler l'échec à l'administrateur.
+            try:
+                await msg.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException, AttributeError):
+                pass
+            raise
         if state.ping_role_id:
             try:
                 await channel.send(
@@ -1138,19 +1160,6 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             except discord.HTTPException:
                 pass
 
-        bonus_map = {
-            str(role_id): int(state.bonus_multipliers.get(role_id, state.bonus_multiplier))
-            for role_id in state.bonus_roles
-        }
-        await self.bot.db.execute(
-            "INSERT INTO giveaways_v2 (guild_id,channel_id,message_id,prize,winners_count,end_at,status,created_by,created_at,ping_role_id,image_url,description,custom_condition,min_invites,min_account_age_days,min_server_age_days,min_level,required_roles_json,excluded_roles_json,bonus_roles_json,winners_json) VALUES (?,?,?,?,?,?,'actif',?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                guild.id, channel.id, msg.id, state.prize, state.winners, end_at,
-                author.id, int(time.time()), state.ping_role_id, published_image_url, state.description,
-                state.custom_condition, state.min_invites, state.min_account_age_days, state.min_server_age_days,
-                state.min_level, json.dumps(state.required_roles), json.dumps(state.excluded_roles), json.dumps(bonus_map), "[]",
-            ),
-        )
         return msg
 
     async def _eligibility(self, row, member: discord.Member) -> tuple[bool, str | None, int]:
