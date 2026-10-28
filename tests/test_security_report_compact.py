@@ -34,6 +34,6 @@ async def test_automod_status_compact_with_counts_and_exemptions():
     assert isinstance(embed, discord.Embed)
     assert len(embed.fields) <= 5
     assert "4 actions" in (embed.description or "")
-    assert any("spam" in f.value.casefold() for f in embed.fields)
+    assert any(mod.AUTOMOD_TOGGLE_LABELS["antispam"] in field.value for field in embed.fields)
     assert any("<@&123>" in f.value for f in embed.fields)
     assert len(embed) < 1800
