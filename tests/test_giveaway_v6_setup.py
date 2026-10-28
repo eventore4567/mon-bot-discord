@@ -64,6 +64,14 @@ def test_panneau_avertit_des_parametres_manquants():
     assert "le lot" in text and "le salon" in text
 
 
+def test_published_giveaway_displays_link_on_same_panel():
+    builder = _builder()
+    builder._published_url = "https://discord.com/channels/42/456/789"
+    text = panels.texte_complet(builder.setup_panel())
+    assert "Giveaway publié" in text
+    assert "https://discord.com/channels/42/456/789" in text
+
+
 def test_conditions_modal_contains_level_without_exceeding_discord_limit():
     modal = giveaway_v2.ConditionsModal(_builder())
     assert len(modal.children) <= 5
