@@ -104,8 +104,10 @@ CATEGORY_STYLES = {
 # Titres sobres et lisibles : la couleur de l'embed indique déjà l'état. Les anciens
 # pictogrammes ajoutés automatiquement surchargeaient les réponses et pouvaient donner
 # l'impression qu'une information neutre était une réussite ou une alerte.
+#: Pas de libellé pour une réussite (brief V6, point 6) : « Terminé — Rappel
+#: défini », « Terminé — Attribution terminée » répétaient ce que le titre et la
+#: couleur disent déjà. Seuls les états qui demandent une lecture gardent le leur.
 KIND_LABELS = {
-    "success": "Terminé",
     "warning": "À vérifier",
     "danger": "Action impossible",
 }

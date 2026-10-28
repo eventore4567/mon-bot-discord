@@ -1881,7 +1881,7 @@ class Utility(commands.Cog, name="Utility"):
             "INSERT INTO reminders (user_id, channel_id, guild_id, text, trigger_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (ctx.author.id, ctx.channel.id, ctx.guild.id if ctx.guild else None, texte, trigger_at, now()),
         )
-        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Rappel défini', description=f'⏰ Rappel défini dans {helpers.format_duration(seconds)}.', kind='success')))
+        await panels.envoyer(ctx, panels.depuis_embed(await self._embed(ctx.guild.id if ctx.guild else None, title='Rappel défini', description=f'⏰ Dans {helpers.format_duration(seconds)}.', kind='success')))
 
     @commands.hybrid_command(name="reminder-list", description="Lister vos rappels en cours.", with_app_command=False)
     async def reminder_list(self, ctx: commands.Context):
