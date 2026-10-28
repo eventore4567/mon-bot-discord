@@ -177,6 +177,9 @@ EXTENSIONS = [
     # Suite staff : fiches membres, dossiers, incidents, surveillance, absences,
     # handover, rapports et rappels. Doit être chargée AVANT la finalisation visuelle.
     "cogs.staff_suite",
+    # +logs, +role, +queue, +nowplaying : relais vers les commandes + existantes.
+    # Après toutes les autres : il ne crée une racine que si personne ne l'a prise.
+    "cogs.prefix_slash_mirrors",
     # cogs.visual_experience_v5 declenche finalize_runtime() et doit rester
     # DERNIERE : une extension chargee apres elle echappe a toute la pile de
     # style.
@@ -294,6 +297,9 @@ PUBLIC_COMMANDS = frozenset({
     # comme "ai" plus haut). "play" reste aussi une commande racine autonome
     # (+play / /play), alias direct de "music play".
     "music", "play",
+    # Relais + (cogs/prefix_slash_mirrors) : +queue/+nowplaying = +music …,
+    # +role seul liste ses sous-commandes, évaluées sur leur cible.
+    "queue", "nowplaying", "role",
     # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain montre
     # toujours SA PROPRE décision — pas de fuite d'information. Diagnostiquer un
     # autre membre est restreint aux administrateurs dans le corps de la commande.
