@@ -1140,7 +1140,7 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
                     state.min_level, json.dumps(state.required_roles), json.dumps(state.excluded_roles), json.dumps(bonus_map), "[]",
                 ),
             )
-            except Exception:
+        except Exception:
             # Panneau publié mais non enregistré = bouton de participation mort.
             # On supprime ce message avant de signaler l'échec à l'administrateur.
             try:
