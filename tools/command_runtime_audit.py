@@ -32,6 +32,7 @@ async def run() -> int:
             help_complete,
             slash_command_budget,
         )
+        from utils.unused_commands import SUPPRIMEES
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -110,7 +111,7 @@ async def run() -> int:
 
         missing_direct = sorted(
             name for name in command_catalog_cleanup.NORMAL_DIRECT_COMMANDS
-            if bot.get_command(name) is None
+            if name not in SUPPRIMEES and bot.get_command(name) is None
         )
         if missing_direct:
             errors.append("commandes directes normales absentes: " + ", ".join(missing_direct))
@@ -124,10 +125,16 @@ async def run() -> int:
 
         missing_admin = sorted(
             name for name in command_catalog_cleanup.ADMIN_DIRECT_COMMANDS
-            if bot.get_command(name) is None
+            if name not in SUPPRIMEES and bot.get_command(name) is None
         )
         if missing_admin:
             errors.append("commandes admin directes absentes: " + ", ".join(missing_admin))
+
+        # Les retraits V6 sont une décision produit, pas une régression runtime.
+        # À l'inverse, un retrait revenu par mégarde doit faire échouer l'audit.
+        restored = sorted(name for name in SUPPRIMEES if bot.get_command(name) is not None)
+        if restored:
+            errors.append("commandes supprimées réapparues: " + ", ".join(restored))
 
         missing_proof = sorted(
             name for name in command_catalog_cleanup.PROOF_VISIBLE_COMMANDS
