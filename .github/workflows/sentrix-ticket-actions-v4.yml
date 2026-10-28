@@ -9,6 +9,7 @@ on:
       - 'services/tickets.py'
       - 'services/ticket_panels_v3.py'
       - 'tests/test_ticket_panels_v3.py'
+      - 'tests/test_ticket_close_reason_preference.py'
       - '.github/workflows/sentrix-ticket-actions-v4.yml'
   push:
     branches: [dashboard-refonte-2026-09]
@@ -18,6 +19,7 @@ on:
       - 'services/tickets.py'
       - 'services/ticket_panels_v3.py'
       - 'tests/test_ticket_panels_v3.py'
+      - 'tests/test_ticket_close_reason_preference.py'
       - '.github/workflows/sentrix-ticket-actions-v4.yml'
 
 jobs:
@@ -39,6 +41,7 @@ jobs:
         run: |
           python -m pytest -q \
             tests/test_ticket_panels_v3.py \
+            tests/test_ticket_close_reason_preference.py \
             tests/test_ticket_log_cards_premium_v2.py \
             tests/test_ticket_log_report_v1.py \
             tests/test_ticket_claim_security_safe_log.py \
