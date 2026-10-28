@@ -554,6 +554,7 @@ class GiveawayBuilderView(discord.ui.View):
         self.state = BuilderState(author_id=ctx.author.id, guild_id=ctx.guild.id)
         self.message: discord.Message | None = None
         self._publishing = False
+        self._published_url: str | None = None
         # Les cinq étapes dans un menu, mêmes actions qu'avant (Jayden, 22/10/2026 :
         # moins de boutons) ; restent Aperçu, Publier, Annuler.
         etapes = [
@@ -590,6 +591,8 @@ class GiveawayBuilderView(discord.ui.View):
         channel = guild.get_channel(state.channel_id) if state.channel_id else None
         missing = self.cog.missing_base(state)
         configured = 4 - len(missing)
+        if state.channel_id and channel is None:
+            missing.append("le salon sélectionné a été supprimé")
 
         def escape(value: object, limit: int = 160) -> str:
             raw = str(value or "").strip()
@@ -629,8 +632,11 @@ class GiveawayBuilderView(discord.ui.View):
             "**Description** · " + (escape(state.description, 260) if state.description else "Aucune"),
         ]
         status = (
-            "**Prêt pour l'aperçu et la publication.**"
-            if not missing else "À compléter : **" + ", ".join(missing) + "**."
+            f"**Giveaway publié.** [Ouvrir le concours]({self._published_url})"
+            if self._published_url else (
+                "**Prêt pour l'aperçu et la publication.**"
+                if not missing else "À compléter : **" + ", ".join(missing) + "**."
+            )
         )
         e = discord.Embed(
             title="Giveaway · Configuration",
@@ -755,6 +761,7 @@ class GiveawayBuilderView(discord.ui.View):
         except Exception as exc:
             self._publishing = False
             return await interaction.followup.send(f"Publication impossible : {str(exc)[:220] or 'réessayez.'}", ephemeral=True)
+        self._published_url = msg.jump_url
         for child in self.children:
             child.disabled = True
         if self.message:
