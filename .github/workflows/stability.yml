@@ -36,6 +36,11 @@ jobs:
           DISCORD_TOKEN: "ci.fake.token"
         run: python -m pytest -q tests/test_security_report_compact.py tests/test_security_check_exposition.py
 
+      - name: Giveaway V6 setup and migration tests
+        env:
+          DISCORD_TOKEN: "ci.fake.token"
+        run: python -m pytest -q tests/test_giveaway_v6_setup.py tests/test_giveaway_dashboard_v101.py tests/test_giveaway_premium_panel.py tests/test_giveaway_center.py
+
       - name: Compact healthcheck regression
         env:
           DISCORD_TOKEN: "ci.fake.token"
