@@ -18,9 +18,9 @@ def test_security_protections_are_individually_selectable():
 
 
 def test_command_permissions_are_not_manual_security_options():
-    assert "Les permissions **Kick, Ban, Timeout" in SOURCE
+    assert "Choisissez les protections à activer." in SOURCE
     assert "permissions Discord réelles" in SOURCE
-    assert "Aucun rôle `kick`, `ban` ou autre n'est créé par ce panneau" in SOURCE
+    assert "SentriX a les permissions nécessaires." in SOURCE  # texte raccourci le 28/10
 
 
 def test_module_state_tracks_selected_protections():

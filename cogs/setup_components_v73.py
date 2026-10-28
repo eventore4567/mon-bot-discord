@@ -266,24 +266,36 @@ def _thumbnail(bot: commands.Bot) -> discord.ui.Thumbnail:
 
 
 def _summary_from_embed(panel: discord.Embed) -> str:
-    """Transforme le dernier rendu V72 en texte Components V2 sans perdre ses informations."""
-    blocks: list[str] = []
+    """Transforme le dernier rendu V72 en texte Components V2 sans perdre ses informations.
+
+    Minimalisme (Jayden, 28/10/2026) : une ligne « Libellé · valeur » par champ
+    court, libellés en casse normale (plus de « **ÉTAT** » en capitales), et
+    sans le champ « État » : le bouton d'état de la page le montre déjà.
+    """
+    lignes: list[str] = []
     description = _plain(panel.description)
     if description:
-        # Le titre de page est déjà affiché dans le header V73 ; on conserve le contexte utile.
-        blocks.append(description[:1200])
+        # Le titre de page est déjà affiché dans le header V73 ; on garde le contexte
+        # utile, sans la ligne du nom du serveur répétée en gras.
+        utiles = [l for l in description.splitlines() if l.strip() and not l.strip().startswith("**")]
+        if utiles:
+            lignes.append("\n".join(utiles)[:400])
 
-    ignored = {"navigation"}
+    ignored = {"navigation", "état", "etat", "configuration"}
     for field in panel.fields:
         name = _plain(field.name)
         value = _plain(field.value)
         if not name or not value or name.casefold() in ignored:
             continue
-        blocks.append(f"**{name}**\n{value}")
-        if len("\n\n".join(blocks)) >= 3000:
+        libelle = name[:1].upper() + name[1:].lower() if name.isupper() else name
+        if "\n" not in value and len(value) <= 90:
+            lignes.append(f"**{libelle}** · {value}")
+        else:
+            lignes.append(f"**{libelle}**\n{value}")
+        if len("\n".join(lignes)) >= 3000:
             break
 
-    text = "\n\n".join(blocks).strip()
+    text = "\n".join(lignes).strip()
     return text[:3600] if text else "Les réglages de cette catégorie sont disponibles ci-dessous."
 
 

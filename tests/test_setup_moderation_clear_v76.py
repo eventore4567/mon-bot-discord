@@ -13,13 +13,13 @@ def test_role_builder_is_removed_from_moderation_setup():
     assert "Choisir les droits de ce rôle" not in source
     assert "Donner ce rôle à un membre" not in source
     assert "Enregistrer les permissions" not in source
-    assert "aucun rôle de modération n'est à créer ou à préparer" in source
+    assert "Les droits viennent des permissions Discord" in source
 
 
 def test_warn_auto_ban_is_configurable_from_setup():
     source = V76.read_text(encoding="utf-8")
 
-    assert "Bannissement automatique après avertissements" in source
+    assert "### Ban automatique" in source
     assert "warn_ban_threshold" in source
     assert "2 avertissements" in source
     assert "3 avertissements" in source
@@ -29,7 +29,7 @@ def test_warn_auto_ban_is_configurable_from_setup():
 def test_sanction_dm_configuration_is_available_from_setup():
     source = V76.read_text(encoding="utf-8")
 
-    assert "Messages privés envoyés lors des sanctions" in source
+    assert "### MP de sanction" in source
     assert "sanction_dm_templates" in source
     assert "Texte par défaut" in source
     assert "Personnaliser le MP" in source

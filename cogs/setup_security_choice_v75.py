@@ -104,10 +104,8 @@ async def _selected_protections(view: v74.SentriXSetupV74) -> set[str]:
 
 
 EXTRAS_NOT_INSTALLED = (
-    "**Salon piège** et **Vérification des nouveaux membres** ont besoin du système de "
-    "vérification SentriX (salon de vérification, salon piège, rôle « Non vérifié »). "
-    "Il n'est pas installé : ces deux protections ne feraient rien. Ouvrez son installation "
-    "ci-dessous, après avoir choisi le rôle Vérifié dans **Règlement & accès**."
+    "-# **Salon piège** et **Vérification** demandent d'installer la vérification "
+    "(rôle Vérifié choisi dans **Règlement & accès**)."
 )
 
 
@@ -273,12 +271,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
         discord.ui.Section(
             discord.ui.TextDisplay(
                 "# 🔒 Sécurité\n"
-                "Choisissez **exactement les protections anti** que vous voulez utiliser. "
-                "Vous pouvez en activer une seule, plusieurs ou toutes.\n\n"
-                "Les permissions **Kick, Ban, Timeout, Gérer les messages, Gérer les rôles, "
-                "Gérer les salons, etc. ne se règlent pas ici** : SentriX vérifie "
-                "les permissions Discord réelles de la personne qui lance la commande et respecte "
-                "la hiérarchie des rôles."
+                "Choisissez les protections à activer."
             ),
             accessory=v74.v73._thumbnail(self.bot),
         )
@@ -286,9 +279,7 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     container.add_item(discord.ui.Separator())
 
     permissions_text = (
-        "### Permissions requises\n"
-        "✅ SentriX possède actuellement les permissions nécessaires pour ses fonctions principales.\n"
-        "Aucun rôle `kick`, `ban` ou autre n'est créé par ce panneau."
+        "🟢 SentriX a les permissions nécessaires."
         if not missing
         else (
             "### Permissions requises\n"

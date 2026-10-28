@@ -55,7 +55,7 @@ async def main() -> int:
     values = [o.value for o in select_of(view).options]
     check("honeypot" not in values and "verification" not in values,
           "sans système de vérification, le menu ne propose ni Salon piège ni Vérification", str(values))
-    check("ne feraient rien" in texts(view) and button(view, "Ouvrir l'installation") is not None,
+    check("demandent d'installer la vérification" in texts(view) and button(view, "Ouvrir l'installation") is not None,
           "la page explique pourquoi et propose « Ouvrir l'installation de la vérification »")
     check(sum(1 for _ in items(view)) <= 40, f"la page tient dans la limite Discord ({len(items(view))} composants)")
 

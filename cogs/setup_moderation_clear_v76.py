@@ -139,10 +139,7 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
         discord.ui.Section(
             discord.ui.TextDisplay(
                 "# 🛡️ Modération\n"
-                "Ici, **aucun rôle de modération n'est à créer ou à préparer**. SentriX utilise "
-                "directement les permissions Discord de chaque membre et respecte la hiérarchie "
-                "des rôles.\n\n"
-                "Cette page sert uniquement à régler le **comportement des sanctions**."
+                "Comportement des sanctions. Les droits viennent des permissions Discord."
             ),
             accessory=v74.v73._thumbnail(self.bot),
         )
@@ -185,9 +182,8 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
 
     container.add_item(
         discord.ui.TextDisplay(
-            "### Bannissement automatique après avertissements\n"
-            "Choisissez combien d'avertissements un membre peut recevoir avant que SentriX le "
-            "bannisse automatiquement. **Désactivé** signifie qu'un warn ne déclenche jamais de ban."
+            "### Ban automatique\n"
+            "Nombre d'avertissements avant un ban."
         )
     )
 
@@ -247,10 +243,9 @@ async def _build_moderation_v76(self: v74.SentriXSetupV74) -> None:
 
     container.add_item(
         discord.ui.TextDisplay(
-            "### Messages privés envoyés lors des sanctions\n"
-            "Choisissez une sanction, puis décidez si le membre reçoit le **message SentriX par "
-            "défaut**, **aucun MP**, ou votre **propre texte**.\n"
-            "Variables disponibles : `{membre}` `{serveur}` `{raison}` `{duree}` `{moderateur}` `{action}`"
+            "### MP de sanction\n"
+            "Par défaut, aucun ou votre texte.\n"
+            "-# `{membre}` `{serveur}` `{raison}` `{duree}` `{moderateur}` `{action}`"
         )
     )
 
