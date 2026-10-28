@@ -480,10 +480,6 @@ class SentriXHelpV79(discord.ui.LayoutView):
         slash_only = sum(entry.slash_name is not None and entry.prefix_command is None for entry in entries)
 
         keys = list(grouped.keys())
-        pages = max(1, (len(keys) + HOME_PAGE_SIZE - 1) // HOME_PAGE_SIZE)
-        self.home_index = min(max(self.home_index, 0), pages - 1)
-        start = self.home_index * HOME_PAGE_SIZE
-        page_keys = keys[start:start + HOME_PAGE_SIZE]
 
         container = discord.ui.Container()
         setup_v73.poser_banniere(container)
@@ -491,47 +487,42 @@ class SentriXHelpV79(discord.ui.LayoutView):
             discord.ui.Section(
                 discord.ui.TextDisplay(
                     "# Centre d'aide SentriX\n"
-                    "Toutes les commandes en service : commandes `+`, commandes `/`, "
-                    "sous-commandes slash et commandes administratives. "
-                    f"Les {len(unused_commands.MASQUEES)} commandes jamais utilisées restent "
-                    "disponibles en `+` : `+help nom` affiche leur fiche.\n\n"
-                    f"**{len(entries)} commandes uniques** · **{prefix_count} en +** · **{slash_count} en /**"
+                    "Choisissez une catégorie pour voir ses commandes, ou recherchez une commande.\n"
+                    f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
                     + (f" · **{slash_only} uniquement en /**" if slash_only else "")
-                    + f"\nCatégories : page **{self.home_index + 1}/{pages}**"
+                    + f"\n-# Les {len(unused_commands.MASQUEES)} commandes jamais utilisées restent "
+                    "disponibles en `+` : `+help nom` affiche leur fiche."
                 ),
                 accessory=setup_v73._thumbnail(self.bot),
             )
         )
         container.add_item(discord.ui.Separator())
 
-        for index, key in enumerate(page_keys):
+        # Brief V6 (points 5 et 17) : une ligne par catégorie et UN menu pour
+        # l'ouvrir, au lieu d'un bouton « Voir les commandes » par catégorie et
+        # d'une pagination de l'accueil (onze boutons sur un écran).
+        lignes = []
+        options = []
+        for key in keys:
             emoji, label, description = v77._meta(key)
-            rows = grouped[key]
-            button = discord.ui.Button(label="Voir les commandes", style=discord.ButtonStyle.secondary)
+            total = len(grouped[key])
+            lignes.append(f"{emoji} **{label}** · {total}")
+            options.append(discord.SelectOption(
+                label=f"{label} ({total})"[:100], value=key, description=str(description or "")[:100],
+            ))
+        container.add_item(discord.ui.TextDisplay("\n".join(lignes)))
+        categories = discord.ui.Select(placeholder="Ouvrir une catégorie…", options=options[:25])
 
-            async def open_category(interaction: discord.Interaction, category_key=key):
-                self.show_category(category_key)
-                await self.refresh(interaction)
+        async def open_category(interaction: discord.Interaction):
+            self.show_category(categories.values[0])
+            await self.refresh(interaction)
 
-            button.callback = open_category
-            container.add_item(
-                discord.ui.Section(
-                    discord.ui.TextDisplay(f"## {emoji} {label}\n{description}\n**{len(rows)} commande(s)**"),
-                    accessory=button,
-                )
-            )
-            if index == 2 and len(page_keys) > 3:
-                container.add_item(discord.ui.Separator())
+        categories.callback = open_category
+        container.add_item(discord.ui.ActionRow(categories))
 
-        previous = discord.ui.Button(label="Précédent", style=discord.ButtonStyle.secondary, disabled=self.home_index <= 0)
         all_commands = discord.ui.Button(label="Toutes les commandes", style=discord.ButtonStyle.primary)
         search = discord.ui.Button(label="Rechercher", style=discord.ButtonStyle.secondary, emoji="🔎")
-        next_button = discord.ui.Button(label="Suivant", style=discord.ButtonStyle.secondary, disabled=self.home_index >= pages - 1)
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
-
-        async def go_previous(interaction: discord.Interaction):
-            self.home_index = max(0, self.home_index - 1)
-            await self.refresh(interaction)
 
         async def open_all(interaction: discord.Interaction):
             self.show_all()
@@ -540,22 +531,16 @@ class SentriXHelpV79(discord.ui.LayoutView):
         async def open_search(interaction: discord.Interaction):
             await interaction.response.send_modal(SearchModalV79(self))
 
-        async def go_next(interaction: discord.Interaction):
-            self.home_index = min(pages - 1, self.home_index + 1)
-            await self.refresh(interaction)
-
         async def close_help(interaction: discord.Interaction):
             self.mode = "closed"
             await self.refresh(interaction)
             self.stop()
 
-        previous.callback = go_previous
         all_commands.callback = open_all
         search.callback = open_search
-        next_button.callback = go_next
         close.callback = close_help
         container.add_item(discord.ui.Separator())
-        container.add_item(discord.ui.ActionRow(previous, all_commands, search, next_button, close))
+        container.add_item(discord.ui.ActionRow(all_commands, search, close))
         self.add_item(container)
 
     def _build_list(self) -> None:

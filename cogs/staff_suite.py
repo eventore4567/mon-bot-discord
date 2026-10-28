@@ -960,9 +960,39 @@ class SanctionHistoryView(OwnedView):
 
 
 class MemberPanelView(OwnedView):
+    # Moins de boutons (brief V6, point 5) : deux actions visibles, Historique
+    # et Avertir ; les sept autres passent dans UN menu qui appelle exactement
+    # les mêmes callbacks qu'avant.
+    _DANS_LE_MENU = (
+        ("sanctions", "Sanctions", "Historique paginé des sanctions"),
+        ("note", "Note", "Ajouter une note staff"),
+        ("case", "Dossier", "Ouvrir un dossier"),
+        ("watch", "Surveiller", "Surveiller ce membre"),
+        ("mute", "Timeout", "Rendre muet temporairement"),
+        ("kick", "Expulser", "Expulser du serveur"),
+        ("ban", "Bannir", "Bannir du serveur"),
+    )
+
     def __init__(self, suite: "StaffSuite", owner_id: int, member_id: int):
         super().__init__(suite, owner_id)
         self.member_id = member_id
+        actions = {cle: getattr(self, cle) for cle, _l, _d in self._DANS_LE_MENU}
+        for item in actions.values():
+            self.remove_item(item)
+        menu = discord.ui.Select(
+            placeholder="Plus d'actions…", row=2,
+            options=[
+                discord.SelectOption(label=libelle, value=cle, description=description,
+                                     emoji=getattr(actions[cle], "emoji", None))
+                for cle, libelle, description in self._DANS_LE_MENU
+            ],
+        )
+
+        async def choisir(interaction: discord.Interaction) -> None:
+            await actions[menu.values[0]].callback(interaction)
+
+        menu.callback = choisir
+        self.add_item(menu)
 
     @discord.ui.button(label="Historique", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("history"), row=0)
     async def history(self, interaction: discord.Interaction, _button: discord.ui.Button):
@@ -1596,6 +1626,37 @@ class StaffReminderModal(discord.ui.Modal, title="Rappel staff"):
 
 
 class StaffCenterView(OwnedView):
+    # Trois actions visibles (Dossiers, Incidents, Urgence) ; les six autres
+    # dans UN menu qui appelle les mêmes callbacks (brief V6, point 5).
+    _DANS_LE_MENU = (
+        ("watches", "Surveillances", "Membres surveillés et alertes"),
+        ("absences", "Absences", "Absences du staff"),
+        ("report", "Rapport", "Rapport d'activité staff"),
+        ("handover", "Handover", "Passation entre équipes"),
+        ("diagnostic", "Diagnostic", "État des outils staff"),
+        ("reminder", "Rappel", "Programmer un rappel staff"),
+    )
+
+    def __init__(self, suite: "StaffSuite", owner_id: int, *args, **kwargs):
+        super().__init__(suite, owner_id, *args, **kwargs)
+        actions = {cle: getattr(self, cle) for cle, _l, _d in self._DANS_LE_MENU}
+        for item in actions.values():
+            self.remove_item(item)
+        menu = discord.ui.Select(
+            placeholder="Plus d'outils staff…",
+            options=[
+                discord.SelectOption(label=libelle, value=cle, description=description,
+                                     emoji=getattr(actions[cle], "emoji", None))
+                for cle, libelle, description in self._DANS_LE_MENU
+            ],
+        )
+
+        async def choisir(interaction: discord.Interaction) -> None:
+            await actions[menu.values[0]].callback(interaction)
+
+        menu.callback = choisir
+        self.add_item(menu)
+
     @discord.ui.button(label="Dossiers", style=discord.ButtonStyle.secondary, emoji=sxemoji.partiel("case"))
     async def cases(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await panels.envoyer(
