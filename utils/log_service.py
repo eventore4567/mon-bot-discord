@@ -307,6 +307,17 @@ async def _resolve_log_identity(
     if not unresolved:
         return identity_name, identity_id, identity_icon
 
+    # Un salon ou un rôle n'est pas un utilisateur : +lock et +slowmode
+    # faisaient un GET /users/<id du salon> à chaque journal (404 en
+    # production, un aller-retour perdu). Mesuré sur le bot booté, 28/10/2026.
+    salon = guild.get_channel(int(identity_id)) if hasattr(guild, "get_channel") else None
+    nom_salon = getattr(salon, "name", None) if salon is not None else None
+    if nom_salon:
+        return (f"#{nom_salon}" if not identity_name or str(identity_name).startswith("<@") else identity_name,
+                identity_id, identity_icon)
+    if hasattr(guild, "get_role") and guild.get_role(int(identity_id)) is not None:
+        return identity_name, identity_id, identity_icon
+
     user = guild.get_member(int(identity_id))
     if user is None:
         try:

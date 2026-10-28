@@ -920,6 +920,10 @@ def narrative_body(
             clean_value = safe_text(value)
             if not clean_value or len(clean_value) > 180:
                 continue
+            # L'identité est déjà dans l'en-tête (« Salon · #général · id ») :
+            # la répéter dans le corps doublait l'information (+lock, +slowmode).
+            if identity_id and str(identity_id) in clean_value:
+                continue
             detail = f"{field_name} : {clean_value}"
             if detail not in fallback_details:
                 fallback_details.append(detail)
