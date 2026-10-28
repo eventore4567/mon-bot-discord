@@ -3445,6 +3445,10 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
         for game_name, (libelle, famille) in GAME_CATALOG.items():
             if famille not in rangs or not ouvert or game_name in coupes:
                 continue
+            # Un jeu retiré (utils/unused_commands.SUPPRIMEES, 28/10/2026) ne doit
+            # plus être proposé : seule la commande réellement chargée compte.
+            if self.bot.get_command(game_name) is None:
+                continue
             duree = min(
                 int(game_rewards.GAME_COOLDOWNS.get(game_name, 0)),
                 game_rewards.MAX_PLAY_COOLDOWN_SECONDS,
@@ -3452,24 +3456,23 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
             reste = 0
             if duree > 0 and derniers.get(game_name):
                 reste = max(0, duree - (maintenant - derniers[game_name]))
+            # Minimalisme (Jayden, 28/10/2026) : la commande seule, et le délai
+            # seulement quand il y en a un — « · prêt » sur trente lignes noyait tout.
+            reference = f"`{command_refs.reference(ctx, game_name)}`"
             if reste:
                 cooldowns_actifs += 1
-                etat, marque = f"encore {reste}s", "⏳"
-            else:
-                etat, marque = "prêt", "·"
-            rangs[famille].append(f"{marque} {libelle} — `{command_refs.reference(ctx, game_name)}` · {etat}")
+                reference += f" ⏳ {reste}s"
+            rangs[famille].append(reference)
 
         sections = [panels.Section("Aujourd'hui", [
-            panels.Ligne("Manches récompensées", limit_text,
-                         indice="Au-delà, les parties restent jouables : seule la monnaie est plafonnée."),
-            panels.Ligne("Jeux en attente", f"**{cooldowns_actifs}**" if cooldowns_actifs else "**Aucun**",
-                         indice="⏳ = il faut patienter un peu avant de rejouer."),
+            panels.Ligne("Manches récompensées", limit_text),
+            panels.Ligne("Jeux en attente", f"**{cooldowns_actifs}**" if cooldowns_actifs else "**Aucun**"),
         ])]
         for cle, (titre_famille, quoi) in familles.items():
             lignes = rangs[cle]
             if not lignes:
                 continue
-            sections.append(panels.Section(f"{titre_famille} — {len(lignes)}", texte=f"*{quoi}*\n" + "\n".join(lignes)))
+            sections.append(panels.Section(f"{titre_famille} — {len(lignes)}", texte=" · ".join(lignes)))
 
         if len(sections) == 1:
             sections.append(panels.Section(
@@ -3480,7 +3483,6 @@ class GamesPlayerCommands(commands.Cog, name="GamesPlayerCommands"):
 
         await panels.envoyer(ctx, panels.Panneau(
             titre=f"{_game_icon('Mini-jeux du jour')} Mini-jeux du jour",
-            sous_titre="Ce à quoi vous pouvez jouer, maintenant, sur ce serveur",
             sections=sections,
             kind="jeux",
         ))
