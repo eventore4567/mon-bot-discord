@@ -2601,33 +2601,53 @@ class AutoMod(commands.Cog, name="Automod"):
         stats_by_filter = {r["filter_name"]: r["c"] for r in stats_rows}
         total_24h = sum(stats_by_filter.values())
 
-        e = embeds.brand(
+        active = [
+            label for field, label in AUTOMOD_TOGGLE_LABELS.items()
+            if conf and conf[field]
+        ]
+        inactive = [
+            label for field, label in AUTOMOD_TOGGLE_LABELS.items()
+            if not conf or not conf[field]
+        ]
+        e = embeds.neutral(
             "État de l'AutoMod",
-            f"**{total_24h}** action(s) déclenchée(s) sur les dernières 24h. "
-            f"Escalade automatique : {'ACTIVE' if (conf and conf['escalation']) else 'INACTIVE'} "
-            f"(`/automod-escalation`) — les filtres de contenu ne sanctionnent jamais seuls.",
+            f"{len(active)}/{len(AUTOMOD_TOGGLE_LABELS)} filtres configurés · "
+            f"{total_24h} action(s) sur 24 h · "
+            f"Escalade : {'active' if conf and conf['escalation'] else 'inactive'}",
         )
-        lines = []
-        for field, label in AUTOMOD_TOGGLE_LABELS.items():
-            value = conf[field] if conf else 0
-            state = "ACTIF" if value else "INACTIF"
-            count = stats_by_filter.get(field, 0)
-            count_txt = f" — `{count}` déclenchement(s)/24h" if count else ""
-            lines.append(f"**{label}** : {state}{count_txt}")
-        dataset_count = sum(self.moderation_dataset.source_counts.values())
-        dataset_state = "ACTIF" if self.moderation_dataset.loaded else "ERREUR DE CHARGEMENT"
-        dataset_hits = stats_by_filter.get("multilingual_toxicity", 0)
-        dataset_hits_text = f" — `{dataset_hits}` déclenchement(s)/24h" if dataset_hits else ""
-        lines.insert(
-            0,
-            f"**Filtre multilingue ({len(self.moderation_dataset.languages)} langues, "
-            f"{dataset_count} entrées, mute 10 min)** : {dataset_state}{dataset_hits_text}",
+        e.add_field(
+            name="Activés",
+            value=", ".join(active)[:1024] or "Aucun filtre",
+            inline=False,
         )
-        e.add_field(name="Filtres", value="\n".join(lines), inline=False)
+        e.add_field(
+            name="Désactivés",
+            value=", ".join(inactive)[:1024] or "Aucun",
+            inline=False,
+        )
+        events = sorted(
+            ((str(name), int(count)) for name, count in stats_by_filter.items() if count),
+            key=lambda item: (-item[1], item[0]),
+        )
+        if events:
+            labels = dict(AUTOMOD_TOGGLE_LABELS)
+            e.add_field(
+                name="Déclenchements (24 h)",
+                value=" · ".join(
+                    f"{labels.get(name, name)} : {count}" for name, count in events[:5]
+                )[:1024],
+                inline=False,
+            )
+        if not self.moderation_dataset.loaded:
+            e.add_field(name="À vérifier", value="Le filtre multilingue n'a pas pu charger ses données.", inline=False)
         exempt_rows = await self.bot.db.list_automod_exempt_roles(ctx.guild.id)
         if exempt_rows:
-            mentions = ", ".join(f"<@&{r['role_id']}>" for r in exempt_rows)
-            e.add_field(name="Rôles exemptés", value=mentions, inline=False)
+            mentions = [f"<@&{r['role_id']}>" for r in exempt_rows]
+            e.add_field(
+                name="Rôles exemptés",
+                value=", ".join(mentions[:5]) + (f" et {len(mentions) - 5} autre(s)" if len(mentions) > 5 else ""),
+                inline=False,
+            )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
@@ -2800,18 +2820,26 @@ class AutoMod(commands.Cog, name="Automod"):
             "Gérer les rôles": perms.manage_roles,
             "Gérer les salons": perms.manage_channels,
         }
-        permission_lines = [f"**{name}** : {'Accordée' if ok else 'Manquante'}" for name, ok in required.items()]
-        filter_lines = [
-            f"**{label}** : {'Actif' if conf and conf[field] else 'Inactif'}"
-            for field, label in AUTOMOD_TOGGLE_LABELS.items()
+        configured = [
+            label for field, label in AUTOMOD_TOGGLE_LABELS.items()
+            if conf and conf[field]
         ]
-        e = embeds.brand(
+        missing = [name for name, granted in required.items() if not granted]
+        e = embeds.neutral(
             "Diagnostic de sécurité",
-            "Ce diagnostic vérifie les réglages enregistrés et les permissions réellement "
-            "accordées au bot. Une permission manquante empêche la protection associée.",
+            f"{len(configured)} protection(s) configurée(s) · "
+            f"{len(missing)} permission(s) manquante(s)",
         )
-        e.add_field(name="Protections", value="\n".join(filter_lines), inline=False)
-        e.add_field(name="Permissions du bot", value="\n".join(permission_lines), inline=False)
+        e.add_field(
+            name="Protections",
+            value=", ".join(configured)[:1024] or "Aucune protection configurée",
+            inline=False,
+        )
+        e.add_field(
+            name="Permissions du bot",
+            value=("Manquante : " + ", ".join(missing)) if missing else "Toutes accordées",
+            inline=False,
+        )
 
         # Jusqu'ici le diagnostic ne regardait que SentriX : ses protections et
         # ses permissions. Il disait si le bot peut travailler, jamais si le
@@ -2831,18 +2859,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 value=security_advisory.resume(constats),
                 inline=False,
             )
-            for nom, valeur, inline in security_advisory.champs(constats, limite=4):
+            for nom, valeur, inline in security_advisory.champs(constats, limite=2):
                 e.add_field(name=nom, value=valeur, inline=inline)
         except Exception:
             logger.exception("Bulletin de sécurité indisponible guild=%s", ctx.guild.id)
 
         e.add_field(
             name="Test conseillé",
-            value=(
-                "Utilisez `+security-level eleve`, puis testez avec un compte qui n'est pas "
-                "propriétaire du serveur, sauf si celui-ci a volontairement désactivé "
-                "son immunité avec +immunity off."
-            ),
+            value="Vérifiez les réglages dans +setup, puis testez avec un membre non staff.",
             inline=False,
         )
         await panels.envoyer(ctx, panels.depuis_embed(e))

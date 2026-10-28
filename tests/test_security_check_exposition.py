@@ -173,3 +173,10 @@ def test_un_webhook_illisible_nannonce_pas_zero():
     # présenté comme rassurant : le contrôle doit disparaître, pas mentir.
     embed = _executer(_guild_expose())
     assert not any("Webhooks actifs" in f.name for f in embed.fields)
+
+
+def test_le_resume_de_securite_reste_court():
+    embed = _executer(_guild_expose())
+    assert len(embed.description or "") < 150
+    assert "\n" not in (_champ(embed, "Protections") or "")
+    assert len(embed.fields) <= 8
