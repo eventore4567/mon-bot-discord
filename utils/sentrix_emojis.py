@@ -156,6 +156,12 @@ EQUIVALENCES: dict[str, str] = {
     # dessinées pour SentriX — un état est exactement ce qui justifie une animation.
     "🟢": "valide", "🔴": "croix", "🟠": "alerte", "🟡": "chargement", "⚪": "away",
     "🧭": "fleche", "📨": "message", "🪪": "user",
+    # 28/10/2026, balayage des 355 commandes + : habillage hors jeux. Les pièces
+    # de jeu (fruits, cartes, barres de vie 🟥🟩, 🚀, ⚡ d'emojiorder…) restent en
+    # Unicode : les remplacer changerait le jeu lui-même.
+    "🟧": "alerte", "🟨": "chargement", "😴": "away", "🔧": "tools",
+    "🏅": "trophy", "🥇": "trophy", "💬": "message", "✍️": "note", "✍": "note",
+    "🖥️": "laptop", "🖥": "laptop",
 }
 
 #: Version du pack. À incrémenter dès que les FICHIERS changent d'apparence.
