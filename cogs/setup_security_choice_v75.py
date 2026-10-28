@@ -539,9 +539,19 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
         else:
             destination = "*aucun salon*"
         label = str(meta.get("label") or meta.get("category") or key)
-        route_lines.append(
-            f"**{label}** — {'ACTIF' if enabled else 'INACTIF'} — {destination}"
-        )
+        # État réel (brief V6, points 7 et 36) : « ACTIF — aucun salon »
+        # laissait croire que des logs partaient alors que rien n'était envoyé.
+        if not enabled:
+            etat = "⚪ Inactif"
+        elif channel is None and channel_id:
+            etat = "🔴 Erreur"
+        elif channel is None:
+            etat = "🟠 Non configuré"
+        elif not log_service.validate_channel(self.guild, channel.id, needs_file=(key == "tickets"))[0]:
+            etat = "🟠 Permissions manquantes"
+        else:
+            etat = "🟢 Actif"
+        route_lines.append(f"**{label}** — {etat} — {destination}")
 
     selected_meta = log_service.LOG_TYPES.get(selected, {})
     selected_label = str(
@@ -746,7 +756,38 @@ async def _build_logs_v75(self: v74.SentriXSetupV74) -> None:
                 pass
 
     toggle.callback = toggle_category
-    container.add_item(discord.ui.ActionRow(toggle))
+
+    test = discord.ui.Button(label="Envoyer un test", style=discord.ButtonStyle.secondary)
+
+    async def send_test(interaction: discord.Interaction):
+        """Une vraie carte par le pipeline des logs : arrive-t-elle, sinon pourquoi."""
+        log_type = getattr(self.backend, "selected_log", None) or selected
+        label = str(log_service.LOG_TYPES.get(log_type, {}).get("label") or log_type)
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        setting = await log_service.get_log_setting(self.bot, self.guild.id, log_type)
+        channel_id = setting.get("dedicated_channel_id") or setting.get("channel_id")
+        if not setting.get("enabled") or not channel_id:
+            texte = f"Test impossible : « {label} » n'a pas de salon actif. Choisissez un salon avec le menu 2."
+        else:
+            valide, detail = log_service.validate_channel(self.guild, int(channel_id), needs_file=(log_type == "tickets"))
+            if not valide:
+                texte = f"Test impossible dans <#{channel_id}> : {detail}."
+            else:
+                carte = discord.Embed(
+                    title="Test des logs",
+                    description=f"Ce salon reçoit bien les logs « {label} ». Test demandé par {interaction.user.mention}.",
+                )
+                envoye = await log_service.send_log(self.bot, self.guild, log_type, carte)
+                texte = (
+                    f"Test envoyé dans <#{channel_id}>."
+                    if envoye else
+                    f"Le test n'est pas parti dans <#{channel_id}> : vérifiez les permissions de SentriX."
+                )
+        await interaction.followup.send(texte, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+    test.callback = send_test
+    container.add_item(discord.ui.ActionRow(toggle, test))
 
     self._add_navigation(container)
     self.add_item(container)
