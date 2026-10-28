@@ -49,6 +49,7 @@ class _Ctx:
         self.bot = None
 
 
+
 def _erreur_slash():
     """CommandInvokeError lit command.name a la construction."""
     faux = type("Commande", (), {"name": "ban", "qualified_name": "ban"})()
@@ -91,9 +92,9 @@ def _controler(libelle: str, panneau) -> list[str]:
         problemes.append(f"{libelle} : intention inattendue « {panneau.kind} »")
 
     rendu = panels.texte_complet(panneau)
-    if not rendu.startswith("## "):
+    # Depuis le 28/10/2026 (utils/titres_discrets) le titre sort en « ### ».
+    if not rendu.startswith(("## ", "### ")):
         problemes.append(f"{libelle} : pas de titre de panneau")
-    # Sections SentriX Core : « ### 01 · Titre » ou « ### Titre », sans puce.
     if "\n### " not in rendu:
         problemes.append(f"{libelle} : aucune section — l'erreur n'explique rien")
     if "\n-# " not in rendu:

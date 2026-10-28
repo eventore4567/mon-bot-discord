@@ -70,8 +70,8 @@ class PanneauDeComposant(unittest.TestCase):
         texte = panels.texte_complet(panneau)
         # Les emojis restent visibles (EMOJIS_VISIBLES) : « ## ❌ Action interrompue ».
         titre = texte.splitlines()[0]
-        self.assertTrue(titre.startswith("## ") and titre.endswith("Action interrompue"), titre)
-        self.assertGreaterEqual(texte.count("### "), 2, "il faut au moins deux sections")
+        self.assertTrue(titre.startswith("### ") and titre.endswith("Action interrompue"), titre)  # titre aussi en « ### » depuis le 28/10/2026 (utils/titres_discrets)
+        self.assertGreaterEqual(texte.count("### ") - 1, 2, "il faut au moins deux sections")
         # Pied commun aux autres erreurs (« -# … »), sans publicité de marque.
         self.assertIn("\n-# ", texte)
         # Seule pièce jointe possible : la bande fine commune (7aea328).

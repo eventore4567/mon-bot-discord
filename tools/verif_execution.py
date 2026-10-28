@@ -335,7 +335,10 @@ def _classer(captures) -> tuple[str, int]:
                 parcourir(vue.to_components())
             except Exception:
                 return "panneau", 0
-            sections = sum(1 for t in plat if t.startswith("### "))
+            # Depuis le 28/10/2026 le titre est aussi en « ### » (utils/titres_discrets) :
+            # le premier bloc de texte est le titre, pas une section.
+            titres = [t for t in plat if t.startswith("### ")]
+            sections = len(titres) - (1 if plat and plat[0].startswith("### ") else 0)
             return ("panneau+sections" if sections else "panneau"), sections
 
     # Reste du texte nu : +say repete le message d'un membre, l'IA rend sa reponse

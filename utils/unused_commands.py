@@ -185,3 +185,31 @@ def masquee(nom: str) -> bool:
 
 
 __all__ = ["MASQUEES", "masquee", "RELEVE", "PERIODE"]
+
+
+#: SUPPRIMÉES (Jayden, 28/10/2026 : « n'ajoute pas de commandes, rends-les
+#: identiques et supprime des commandes, minimum 50 »). Toutes viennent de
+#: MASQUEES — jamais utilisées en production, déjà absentes de l'aide et du
+#: menu « / » — et n'existaient donc qu'en « + » : les retirer rapproche les
+#: deux surfaces. Les données (marché, invitations, profils…) restent en base.
+#: Restent volontairement : sécurité, modération, tickets, économie de base,
+#: compléments de fonctions utilisées et tous les jeux cités dans le brief V6.
+SUPPRIMEES: frozenset[str] = frozenset({
+    # Jeux hors de la liste du brief
+    "adventure", "archery", "collec", "colorquiz", "crown", "detective", "emojiquiz",
+    "explore", "highlow", "hunt", "ice", "lava", "potion", "safe", "scramble",
+    "treasure", "wordgame",
+    # Marché entre membres
+    "market", "market-buy", "market-cancel", "market-find", "market-history",
+    "market-my", "market-sell",
+    # Variantes d'invitations (+invites et +invite-leaderboard restent)
+    "invite-codes", "invite-history", "invite-info", "invite-label", "invite-rank",
+    "invite-retention", "invite-search", "invite-sources", "invite-stats", "invite-unlabel",
+    # Rapports serveur et sous-commandes « pro »
+    "server-audit", "server-growth", "server-health", "server-managed",
+    "sentrixpro badges", "sentrixpro goal", "sentrixpro live", "sentrixpro season",
+    # Divers
+    "achievements", "challenges", "changelog", "choose", "emoji-list", "roll", "theme",
+    "footer", "say", "systemstatus", "logevent", "notifs-list", "notifs-status", "profilecard",
+})
+

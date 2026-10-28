@@ -114,10 +114,9 @@ PUBLIC_COMMANDS = frozenset({
     # comme "ai" plus haut). "play" reste aussi une commande racine autonome
     # (+play / /play), alias direct de "music play".
     "music", "play",
-    # Relais + (cogs/prefix_slash_mirrors) : +queue/+nowplaying = +music …, et
-    # +role seul n'affiche que la liste de ses sous-commandes. Chaque
-    # sous-commande de role est évaluée sur sa CIBLE via MIRROR_TARGETS.
-    "queue", "nowplaying", "role",
+    # Racine / « role » : chaque sous-commande est évaluée sur sa CIBLE via
+    # MIRROR_TARGETS (/role give → giverole, /role info → info).
+    "role",
     # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain montre
     # toujours SA PROPRE décision d'accès (aucune fuite d'information — c'est
     # exactement ce qu'evaluate() calculerait pour cette personne de toute façon).
@@ -608,15 +607,14 @@ def normalise(value: Any) -> str:
     return str(value or "").strip().casefold().lstrip("+/")
 
 
-#: Sous-commandes / (et relais +) dont la commande historique porte un autre nom :
+#: Sous-commandes / dont la commande historique + porte un autre nom :
 #: /role give ↔ +giverole. Les deux transports évaluent la CIBLE, donc la même
 #: décision de permission (28/10/2026 : /role info était refusé aux membres alors
-#: que +info role est public). Source unique, lue aussi par cogs/prefix_slash_mirrors.
+#: que +info role est public).
 MIRROR_TARGETS: dict[str, str] = {
     "logs search": "logsearch", "logs trace": "trace", "logs digest": "sentrixpro digest",
     "role give": "giverole", "role remove": "removerole", "role info": "info role",
     "role mass": "massrole", "role menu": "rolepanel dropdown", "role reactions": "rolepanel reaction",
-    "queue": "music queue", "nowplaying": "music nowplaying",
 }
 
 

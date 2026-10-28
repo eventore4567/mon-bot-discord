@@ -1,4 +1,4 @@
-"""Titres discrets partout : « # » et « ## » deviennent « ### », « ### » du gras.
+"""Titres discrets partout : « # » et « ## » deviennent « ### ».
 
 28/10/2026 (Jayden, captures de /setup et des tickets) : « les trucs gros ça sert
 à rien, c'est moche ». Les panneaux Components V2 ouvraient sur un titre
@@ -15,16 +15,14 @@ import re
 
 import discord
 
-_TITRE = re.compile(r"^(#{1,3}) (.+)$", re.MULTILINE)
+_TITRE = re.compile(r"^(#{1,2}) (.+)$", re.MULTILINE)
 
 
 def adoucir(texte: str) -> str:
     def remplacer(m: re.Match) -> str:
-        niveau, contenu = len(m.group(1)), m.group(2).strip()
-        if niveau == 3:
-            # Déjà en gras ? ne pas empiler les astérisques.
-            return contenu if contenu.startswith("**") and contenu.endswith("**") else f"**{contenu}**"
-        return f"### {contenu}"
+        # Titres « # » et « ## » ramenés au niveau des sections (« ### ») : plus
+        # rien de géant, et la grammaire titre/sections reste lisible.
+        return f"### {m.group(2).strip()}"
 
     return _TITRE.sub(remplacer, texte) if texte and "#" in texte else texte
 

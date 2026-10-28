@@ -47,11 +47,10 @@ def test_native_panels_start_directly_with_useful_content():
     text = panels.texte_complet(panel)
 
     assert "SENTRIX CORE" not in text
-    # Titres discrets depuis le 28/10/2026 (utils/titres_discrets) : titre en
-    # « ### », sections en gras — plus de « # » / « ## » géants.
+    # Titres discrets depuis le 28/10/2026 (utils/titres_discrets) : plus de
+    # « # » / « ## » géants, titre et sections en « ### ».
     assert "### 🎵 Lecture" in text or "### Lecture" in text
-    assert "**Piste**" in text
-    assert "**Lecture**" in text
+    assert "### Piste" in text
     assert "\n# " not in text and "## " not in text.replace("### ", "")
     assert "01 ·" not in text
 

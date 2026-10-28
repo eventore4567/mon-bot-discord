@@ -83,7 +83,7 @@ def test_le_panneau_reste_un_message_components_v2_valide():
     assert composants
     # Titre précédé de l'icône de l'intention (EMOJIS_VISIBLES).
     titre = panels.texte_complet(panneau).splitlines()[0]
-    assert titre.startswith("## ") and titre.endswith("Confirmer"), titre
+    assert titre.startswith("### ") and titre.endswith("Confirmer"), titre  # titre aussi en « ### » depuis le 28/10/2026 (utils/titres_discrets)
 
 
 def test_une_vue_sans_composant_laisse_le_panneau_intact():

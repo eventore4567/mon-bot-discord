@@ -69,7 +69,7 @@ class StructureDUnPanneau(unittest.TestCase):
 
     def test_les_sections_restent_sans_filet_decoratif(self):
         types = [i["type"] for i in self.panneau.to_components()[0]["components"]]
-        sections = [i for i in self.plat if i["type"] == TEXTE and str(i.get("content", "")).startswith("### ")]
+        sections = [i for i in self.plat if i["type"] == TEXTE and str(i.get("content", "")).startswith("### ")][1:]  # titre aussi en « ### » depuis le 28/10/2026 (utils/titres_discrets)
         self.assertEqual(len(sections), 2)
         self.assertEqual(types.count(FILET), 0)
 
@@ -185,7 +185,7 @@ class PontDepuisEmbed(unittest.TestCase):
             t.split("\n")[0] for t in
             [i.get("content", "") for i in _aplatir(panneau.to_components())]
             if t.startswith("### ")
-        ]
+        ][1:]  # titre aussi en « ### » depuis le 28/10/2026 (utils/titres_discrets)
         self.assertEqual(len(titres), 2, "un champ vide ne doit pas créer de section")
 
     def test_les_emojis_de_tete_sont_retires(self):
@@ -232,7 +232,7 @@ class PontDepuisEmbed(unittest.TestCase):
         # Une seule section : c'est ça qui rend la fiche proportionnée. Le
         # numéro disparaît quand il n'y a qu'une section — numéroter une liste
         # de un n'apporte rien et fait gabarit.
-        self.assertEqual(texte.count("### "), 1)
+        self.assertEqual(texte.count("### "), 2)  # titre aussi en « ### » depuis le 28/10/2026 (utils/titres_discrets) : titre + une section
         self.assertIn("Résumé", texte)
         self.assertIn("**Membre** · <@1>", texte)
         self.assertIn("**Raison** · Spam massif", texte)

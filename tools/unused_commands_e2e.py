@@ -72,18 +72,25 @@ async def main() -> int:
     check(not (paths & masked_paths) and "market view" not in paths and "ban" in paths,
           f"le menu « / » ne publie plus les {len(masked_paths)} chemins masqués", str(sorted(paths & masked_paths)[:5]))
 
-    for nom in unused_commands.MASQUEES:
+    # Les SUPPRIMEES (28/10/2026) ont quitté le bot ; les autres masquées restent en +.
+    from cogs import commandes_retirees
+    commandes_retirees.retirer(bot)
+    supprimees = unused_commands.SUPPRIMEES
+    for nom in unused_commands.MASQUEES - supprimees:
+        if nom.split(" ")[0] in supprimees:
+            continue  # sous-commande d'une racine supprimée (logevent on/off)
         if bot.get_command(nom) is None:
             check(False, f"+{nom} existe toujours")
             break
     else:
         check(True, f"les {len(unused_commands.MASQUEES)} commandes masquées existent toujours en préfixe")
 
-    shown = await prefix("+help market")
-    check("market" in shown.lower() and "Recherche" not in shown, "« +help market » montre toujours la fiche",
+    # « market » a été supprimée le 28/10/2026 : l'exemple est une masquée gardée.
+    shown = await prefix("+help minesweeper")
+    check("minesweeper" in shown.lower() and "Recherche" not in shown, "« +help minesweeper » montre toujours la fiche",
           shown[:160])
-    shown = await prefix("+market")
-    check(len(shown.strip()) > 0 and "introuvable" not in shown.lower(), "« +market » fonctionne toujours",
+    shown = await prefix("+minesweeper")
+    check(len(shown.strip()) > 0 and "introuvable" not in shown.lower(), "« +minesweeper » fonctionne toujours",
           shown[:160])
     # Même décision de permission qu'avant : un membre sans droit reste refusé.
     shown = await prefix("+reset-economy", author_id=h.TARGET_ID, author_roles=())

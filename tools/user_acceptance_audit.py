@@ -45,7 +45,7 @@ MEMBER_JOURNEYS = {
         "music shuffle",
     ),
     "jeux_classiques": ("rps", "guess-number", "trivia", "blackjack", "slots"),
-    "jeux_recuperes": ("coinflip", "dice", "luckyroll", "connect4", "adventure", "gameprofile", "gametop", "dailygames"),
+    "jeux_recuperes": ("coinflip", "dice", "luckyroll", "connect4", "mining", "gameprofile", "gametop", "dailygames"),  # adventure supprimé le 28/10/2026
 }
 
 STAFF_JOURNEYS = {
@@ -200,9 +200,13 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         )
         assert not missing_duplicates, "vrais doublons encore chargés: " + ", ".join(missing_duplicates)
 
-        missing_games = sorted(name for name in RECOVERED_GAMES if bot.get_command(name) is None)
+        # Les jeux de utils/unused_commands.SUPPRIMEES ont été retirés le 28/10/2026.
+        from utils.unused_commands import SUPPRIMEES
+        missing_games = sorted(
+            name for name in RECOVERED_GAMES - SUPPRIMEES if bot.get_command(name) is None
+        )
         assert not missing_games, "jeux récupérés absents: " + ", ".join(missing_games)
-        for name in sorted(RECOVERED_GAMES - {"gamesetup"}):
+        for name in sorted(RECOVERED_GAMES - {"gamesetup"} - SUPPRIMEES):
             command = bot.get_command(name)
             assert name in main.PUBLIC_COMMANDS, f"jeu +{name} non public"
             assert help_complete._category_for(command).key == "games", f"jeu +{name} hors catégorie Jeux"
