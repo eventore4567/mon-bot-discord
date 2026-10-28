@@ -144,14 +144,20 @@ def _status_button_text(state: str) -> tuple[str, discord.ButtonStyle]:
 
 
 def _short_state(state: str) -> str:
-    if "CORRIGER" in state:
-        return "🔴 À corriger"
+    # Libellés uniformes du brief V6 (point 7) : Actif, Inactif, Non configuré,
+    # En attente, Erreur, Permissions manquantes — la pastille porte la couleur.
+    if "PERMISSION" in state:
+        return "🟠 Permissions manquantes"
+    if "CORRIGER" in state or "ERREUR" in state:
+        return "🔴 Erreur"
+    if "ATTENTE" in state:
+        return "🟡 En attente"
     if "CONFIGURER" in state or "NON CONFIG" in state:
-        return "🟠 À configurer"
+        return "🟠 Non configuré"
     if "INACTIF" in state:
         return "⚪ Inactif"
     if "ACTIF" in state:
-        return "🟢 Activé"
+        return "🟢 Actif"
     return state or "—"
 
 

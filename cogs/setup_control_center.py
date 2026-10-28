@@ -378,9 +378,10 @@ MODULE_SWITCHES = (
     ("levels", "Niveaux"), ("economy", "Économie"), ("welcome", "Bienvenue"), ("goodbye", "Départs"),
     ("antispam", "Anti-spam"), ("tickets", "Tickets"), ("logs", "Logs"), ("notifications", "Notifications"),
 )
+# Libellés uniformes du brief V6 (point 7), identiques à ceux des pages.
 _SWITCH_LABELS = {
-    "enabled": "ON", "disabled": "OFF", "not_configured": "OFF (non configuré)",
-    "empty": "OFF (aucune protection active)",
+    "enabled": "Actif", "disabled": "Inactif", "not_configured": "Non configuré",
+    "empty": "Inactif (aucune protection active)",
 }
 
 

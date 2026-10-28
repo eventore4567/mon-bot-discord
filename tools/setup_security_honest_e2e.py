@@ -94,7 +94,7 @@ async def main() -> int:
     core.invalidate_module_cache(h.GID)
     bot.get_cog("Automod").automod_cache.clear()
     view = await build(bot, guild, None)
-    check(option_label(view, "security") == "Sécurité — ON",
+    check(option_label(view, "security") == "Sécurité — Actif",
           f"serveur neuf : « {option_label(view, 'security')} » (anti-spam + anti-raid d'office)")
     neuf = await spam_deleted(bot, guild, 5)
     check(neuf >= 6, f"serveur neuf : le spam est supprimé sans rien configurer ({neuf}/8)")
@@ -134,7 +134,7 @@ async def main() -> int:
     check(row is not None and row["antispam"] and row["antiraid"] and row["antinuke"],
           "un clic sur « Sécurité » active anti-spam, anti-raid et anti-nuke")
     view = await build(bot, guild, None)
-    check(option_label(view, "security") == "Sécurité — ON", f"après le clic : « {option_label(view, 'security')} »")
+    check(option_label(view, "security") == "Sécurité — Actif", f"après le clic : « {option_label(view, 'security')} »")
     check("Aucune protection ne tourne" not in texts(view), "après le clic : plus d'avertissement")
     apres = await spam_deleted(bot, guild, 1)
     check(apres >= 6, f"après le clic : le spam est supprimé ({apres}/8)")
