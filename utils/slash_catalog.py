@@ -75,6 +75,9 @@ def _e(path: str, source: str, description: str) -> SlashEntry:
 
 #: Description de chaque racine (et sous-groupe) — affichée sous le nom du groupe.
 GROUP_DESCRIPTIONS: dict[str, str] = {
+    "fun": "Fun interactions with other members.",
+    "music playlist": "Your personal playlists.",
+    "staff manage": "Server diagnosis, backups and safe fixes.",
     "moderation": "Moderation tools for your staff.",
     "security": "Protect the server against spam, raids and scams.",
     "logs": "Choose what SentriX records.",
@@ -226,6 +229,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("tickets transcript", "tickettranscript", "Export a ticket transcript."),
     _e("tickets stats", "ticketstats", "View support ticket statistics."),
     _e("tickets staff", "ticketstaffstats", "View ticket staff activity."),
+    _e("tickets reopen-window", "ticketreopenwindow", "Set how long a closed ticket can be reopened."),
 
     # ----------------------------------------------------------------- Communauté
     _e("suggestions submit", "suggest", "Submit a suggestion."),
@@ -284,11 +288,30 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("levels role-add", "set-level-role", "Reward a level with a role."),
     _e("levels role-remove", "remove-level-role", "Remove a level reward."),
     _e("levels activity-role", "sentrixpro autorole", "Give a role from an activity threshold."),
+    _e("levels check", "levelcheck", "Read-only diagnosis of a member's level."),
+    _e("levels fix", "levelrepair", "Fix a member's level after a certain inconsistency."),
 
     _e("rep give", "rep", "Give a reputation point to a member."),
     _e("rep view", "reputation", "Show a member's reputation."),
     _e("rep leaderboard", "repleaderboard", "Show the reputation leaderboard."),
     _e("rep history", "rephistory", "Show a member's reputation history."),
+    # 28/10/2026 — passage à 100 % « / » : les interactions fun n'avaient que le « + ».
+    _e("fun hug", "hug", "Hug a member."),
+    _e("fun kiss", "kiss", "Kiss a member."),
+    _e("fun cuddle", "cuddle", "Cuddle a member."),
+    _e("fun pat", "pat", "Pat a member."),
+    _e("fun poke", "poke", "Poke a member."),
+    _e("fun tickle", "tickle", "Tickle a member."),
+    _e("fun highfive", "highfive", "High-five a member."),
+    _e("fun wave", "wave", "Wave at a member."),
+    _e("fun dance", "dance", "Dance with a member."),
+    _e("fun slap", "slap", "Slap a member (for fun)."),
+    _e("fun roast", "roast", "Roast a member (for fun)."),
+    _e("fun compliment", "compliment", "Compliment a member."),
+    _e("fun ship", "ship", "Ship two members."),
+    _e("fun aura", "aura", "Read a member's aura."),
+    _e("fun hack", "hack", "Fake-hack a member (for fun)."),
+    _e("fun scan", "scan", "Scan a member (for fun)."),
 
     _e("profile view", "stats", "Show a member's full profile."),
     _e("profile card", "profilecard", "Show your profile card."),
@@ -461,6 +484,21 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("staff report", "report", "Create a staff report."),
     _e("staff absence", "absence", "Manage staff absences."),
     _e("staff remind", "staff-reminder", "Send staff reminders."),
+    # 28/10/2026 — passage à 100 % « / » : le centre d'opérations « +manage ».
+    _e("staff manage health", "manage health", "Full diagnosis of the server configuration."),
+    _e("staff manage setup", "manage setup", "Show what is left to configure."),
+    _e("staff manage security", "manage security", "Security state and suggested fixes."),
+    _e("staff manage permissions", "manage permissions", "Explain permission blocks exactly."),
+    _e("staff manage sanction", "manage sanction", "Explain a member's last SentriX sanction."),
+    _e("staff manage incidents", "manage incidents", "List the latest incidents."),
+    _e("staff manage duplicates", "manage duplicates", "Find duplicate channels and roles."),
+    _e("staff manage fixall", "manage fixall", "Apply only the safe automatic fixes."),
+    _e("staff manage ignore", "manage ignore", "Ignore a diagnosis item on purpose."),
+    _e("staff manage snapshot", "manage snapshot", "Save the current SentriX configuration."),
+    _e("staff manage history", "manage history", "List configuration backups."),
+    _e("staff manage rollback", "manage rollback", "Restore a configuration backup."),
+    _e("staff manage preview", "manage preview", "Preview a configuration without publishing it."),
+    _e("staff manage simulate", "manage simulate", "Simulate an event to test the configuration."),
 
     # Invite tools are actions, not a dozen arbitrary top-level slash names.
     _e("invites members", "invited-list", "Show members invited by a user."),
@@ -490,6 +528,17 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("music queue", "music queue", "Show the queue."),
     _e("music clear", "music clear", "Clear the queue without stopping the song."),
     _e("music remove", "music remove", "Remove a song from the queue."),
+    # 28/10/2026 — passage à 100 % « / » : les playlists n'avaient que le « + ».
+    _e("music playlist create", "music playlist create", "Save the current music and queue as a playlist."),
+    _e("music playlist add", "music playlist add", "Add a song or link to a playlist."),
+    _e("music playlist remove", "music playlist remove", "Remove a song from a playlist."),
+    _e("music playlist clear", "music playlist clear", "Empty a playlist."),
+    _e("music playlist delete", "music playlist delete", "Delete a playlist."),
+    _e("music playlist rename", "music playlist rename", "Rename a playlist."),
+    _e("music playlist list", "music playlist list", "List your playlists."),
+    _e("music playlist show", "music playlist show", "Show a playlist and its songs."),
+    _e("music playlist play", "music playlist play", "Load a playlist in your voice channel."),
+    _e("music playlist import", "music playlist import", "Import a Spotify, YouTube, SoundCloud or Deezer playlist."),
     _e("music shuffle", "music shuffle", "Shuffle the queue."),
     _e("music loop", "music loop", "Repeat the song, the queue, or nothing."),
     _e("music seek", "music seek", "Jump to a position in the song."),
