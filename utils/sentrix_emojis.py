@@ -145,6 +145,12 @@ EQUIVALENCES: dict[str, str] = {
     "⭐": "level", "🌟": "level",
     "ℹ": "info", "ℹ️": "info",
     "📥": "member_join", "📤": "member_leave",
+    # 28/10/2026 : habillage encore en Unicode, relevé sur le bot booté
+    # (+help, +daily, +stats, +remind, +music, +pay). Les pièces de jeu
+    # (fruits des machines à sous, cartes, mains du pierre-feuille-ciseaux)
+    # restent volontairement en Unicode : ce sont des pièces, pas un décor.
+    "👋": "member_join", "📜": "note", "🔥": "level", "🏦": "bank",
+    "⏰": "reminder", "⏰️": "reminder", "🎧": "voice", "➕": "more", "💸": "dollar",
 }
 
 #: Version du pack. À incrémenter dès que les FICHIERS changent d'apparence.

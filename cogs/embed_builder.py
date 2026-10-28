@@ -813,7 +813,7 @@ class EmbedBuilderView(discord.ui.View):
 
     def build_panel_embeds(self) -> list[discord.Embed]:
         status = design_system.create_embed(
-            title="✨ Créateur d'embed SentriX",
+            title="Créateur d'embed SentriX",
             description="Créez et personnalisez votre message professionnel avec les options ci-dessous.\n\n" + self.draft.status_summary(),
             colour=self.draft.colour if self.draft.colour is not None else design_system.COLORS.primary,
         )
