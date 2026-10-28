@@ -187,7 +187,7 @@ async def _live_incidents(bot: commands.Bot, guild_id: int, loops_failed: int):
     return result
 
 
-async def build_health_embed(bot: commands.Bot, guild: discord.Guild) -> discord.Embed:
+async def build_health_embed(bot: commands.Bot, guild: discord.Guild, *, compact: bool = False) -> discord.Embed:
     started = time.perf_counter()
     db_ok = False
     db_ms = 0.0
@@ -269,6 +269,56 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild) -> discord
     )
     incidents = await _live_incidents(bot, guild.id, loops_failed)
 
+    if compact:
+        # Le rapport public/admin reste lisible ; les mesures complètes restent
+        # disponibles pour les autres diagnostics utilisant ce constructeur.
+        ticket_count = int(open_tickets["c"] if open_tickets else 0)
+        e = embeds.neutral("Santé SentriX")
+        e.description = (
+            f"Discord **{latency_ms:.0f} ms** · Base **{db_ms:.0f} ms**"
+            f" ({'OK' if db_ok else 'erreur'})\n"
+            f"Tickets **{ticket_count}** · Logs **{enabled_logs}** · AutoMod **{active_automod}**\n"
+            f"IA **{'prête' if ai_enabled and has_ai_key else 'inactive'}**"
+            f" · Tâches **{loops_total}**"
+        )
+        issues = []
+        if not db_ok:
+            issues.append("Base de données indisponible")
+        if missing:
+            issues.append("Permissions manquantes : " + ", ".join(missing[:3]))
+        if invalid_tickets:
+            issues.append(f"{invalid_tickets} salon(s) de ticket introuvable(s)")
+        if invalid_logs:
+            issues.append(f"{invalid_logs} destination(s) de logs invalides")
+        if loops_failed:
+            issues.append(f"{loops_failed} tâche(s) de fond en erreur")
+        if issues:
+            e.add_field(name="À vérifier", value="\n".join(f"• {item}" for item in issues[:4])[:1024], inline=False)
+
+        slow = [
+            row for row in recent_health
+            if int(row["errors"] or 0) > 0
+            or float(row["max_ms"] or 0) >= SLOW_COMMAND_SECONDS * 1000
+        ][:3]
+        if slow:
+            e.add_field(
+                name="Commandes à surveiller",
+                value="\n".join(
+                    f"• `{row['command_name']}` · {float(row['max_ms'] or 0):.0f} ms"
+                    f" · {int(row['errors'] or 0)} erreur(s)"
+                    for row in slow
+                )[:1024],
+                inline=False,
+            )
+        if incidents:
+            e.add_field(
+                name="Incidents récents",
+                value=", ".join(str(row["source"])[:40] for row in incidents[:3]),
+                inline=False,
+            )
+        e.set_footer(text=f"Diagnostic en {(time.perf_counter() - started) * 1000:.0f} ms")
+        return e
+
     e = embeds.neutral("Diagnostic SentriX V17")
     e.add_field(name="Discord", value=f"Latence : **{latency_ms:.0f} ms**\nBot : {'● connecté' if bot.is_ready() else '○ non prêt'}", inline=True)
     e.add_field(name="Base de données", value=f"{'● OK' if db_ok else '○ Erreur'}\nLatence : **{db_ms:.1f} ms**", inline=True)
@@ -314,7 +364,7 @@ class V17Health(commands.Cog, name="V17Health"):
     async def send_report(self, ctx: commands.Context):
         if ctx.guild is None:
             return await panels.envoyer(ctx, panels.depuis_embed(embeds.error('Diagnostic disponible uniquement sur un serveur.')))
-        e = await build_health_embed(self.bot, ctx.guild)
+        e = await build_health_embed(self.bot, ctx.guild, compact=True)
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(name="healthcheck", description="Diagnostic complet de SentriX sur ce serveur.", with_app_command=False)
