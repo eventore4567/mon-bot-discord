@@ -613,7 +613,7 @@ class GiveawayBuilderView(discord.ui.View):
             f"**Niveau XP** · {state.min_level} min.",
         ]
         if state.custom_condition:
-            rules.append(f"**Condition annoncée** · {escape(state.custom_condition, 350)}")
+            rules.append(f"**Condition annoncée** · {escape(state.custom_condition, 350)} *(indicative, non vérifiée)*")
             rules.append("-# Condition informative : validation manuelle par l'organisateur.")
 
         roles = [
@@ -988,7 +988,8 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
         if state.min_level:
             conditions.append(f"**Niveau XP** · niveau {state.min_level} minimum")
         if state.custom_condition:
-            conditions.append(f"**Condition personnalisée** · {state.custom_condition}")
+            # Brief V6 : une condition libre n'est PAS vérifiée par SentriX — le dire.
+            conditions.append(f"**Condition personnalisée** · {state.custom_condition} *(indicative, non vérifiée)*")
 
         bonus_lines = [
             f"<@&{role_id}> · **x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}**"
