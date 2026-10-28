@@ -395,10 +395,7 @@ async def security_protections_actives(bot, guild_id: int) -> int:
     """
     row = await bot.db.fetchone("SELECT * FROM automod_settings WHERE guild_id = ?", (guild_id,))
     if row is None:
-        # Pas encore de ligne : la première lecture la créera avec ces défauts.
-        from cogs.automod import PROTECTIONS_PAR_DEFAUT
-
-        row = PROTECTIONS_PAR_DEFAUT
+        row = {}
     total = sum(1 for field, _label in AUTOMOD if _get(row, field, 0))
     try:
         v71 = await bot.db.fetchone(
@@ -442,6 +439,18 @@ async def toggle_module_switch(bot, guild_id: int, key: str, actor_id: int | Non
             cache.pop(guild_id, None)
     else:
         await core.set_module_enabled(bot, guild_id, key, nouveau, actor_id=actor_id)
+        if key == "security" and nouveau:
+            # Le profil anti-spam/raid/nuke ne se crée qu'après un clic explicite.
+            row = await bot.db.fetchone(
+                "SELECT * FROM automod_settings WHERE guild_id=?", (guild_id,)
+            )
+            if not any(_get(row, champ, 0) for champ, _label in AUTOMOD):
+                for champ in ("antispam", "antiraid", "antinuke"):
+                    await bot.db.set_automod(guild_id, champ, 1)
+                automod = bot.get_cog("Automod")
+                cache = getattr(automod, "automod_cache", None)
+                if isinstance(cache, dict):
+                    cache.pop(guild_id, None)
     return nouveau
 
 
