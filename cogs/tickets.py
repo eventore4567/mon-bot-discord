@@ -118,6 +118,30 @@ async def save_button_settings(bot, guild_id: int, settings: dict):
     )
 
 
+async def ask_close_reason(bot, guild_id: int) -> bool:
+    """Préférence par serveur : demander un motif (oui par défaut)."""
+    await bot.db.execute(
+        "CREATE TABLE IF NOT EXISTS ticket_close_preferences "
+        "(guild_id INTEGER PRIMARY KEY, ask_reason INTEGER NOT NULL DEFAULT 1)"
+    )
+    row = await bot.db.fetchone(
+        "SELECT ask_reason FROM ticket_close_preferences WHERE guild_id=?", (int(guild_id),)
+    )
+    return row is None or bool(row["ask_reason"])
+
+
+async def set_ask_close_reason(bot, guild_id: int, enabled: bool) -> None:
+    await bot.db.execute(
+        "CREATE TABLE IF NOT EXISTS ticket_close_preferences "
+        "(guild_id INTEGER PRIMARY KEY, ask_reason INTEGER NOT NULL DEFAULT 1)"
+    )
+    await bot.db.execute(
+        "INSERT INTO ticket_close_preferences (guild_id, ask_reason) VALUES (?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET ask_reason=excluded.ask_reason",
+        (int(guild_id), 1 if enabled else 0),
+    )
+
+
 def slugify_channel_name(text: str, fallback: str) -> str:
     text = re.sub(r"[^a-z0-9\-]+", "-", text.lower()).strip("-")
     return (text or fallback)[:90]
@@ -1052,6 +1076,32 @@ class TicketSetupHubView(discord.ui.View):
     async def stats_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.send_stats(interaction)
 
+    @discord.ui.button(label="Motif de fermeture", style=discord.ButtonStyle.secondary, row=1)
+    async def close_reason_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        requested = await ask_close_reason(self.cog.bot, interaction.guild.id)
+        view = discord.ui.View(timeout=90)
+        toggle = discord.ui.Button(
+            label="Ne plus demander" if requested else "Demander un motif",
+            style=discord.ButtonStyle.secondary,
+        )
+
+        async def toggle_cb(inter: discord.Interaction):
+            if inter.user.id != self.author_id:
+                return await inter.response.send_message("Ce réglage est réservé à l'administrateur.", ephemeral=True)
+            new_value = not await ask_close_reason(self.cog.bot, inter.guild.id)
+            await set_ask_close_reason(self.cog.bot, inter.guild.id, new_value)
+            await inter.response.send_message(
+                "Motif demandé à la fermeture." if new_value else "Fermeture directe, sans demander de motif.",
+                ephemeral=True,
+            )
+
+        toggle.callback = toggle_cb
+        view.add_item(toggle)
+        e = embeds.neutral("Motif de fermeture", "Actuellement : demandé." if requested else "Actuellement : non demandé.")
+        await sx_panels.envoyer(
+            interaction.response, sx_panels.avec_composants(sx_panels.depuis_embed(e), view), ephemere=True
+        )
+
     @discord.ui.button(label="Nouveau panel", style=discord.ButtonStyle.success, emoji="➕", row=1)
     async def new_panel_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         modal = discord.ui.Modal(title="➕ Nouveau panel")
@@ -1971,7 +2021,12 @@ class Tickets(commands.Cog):
         )
 
     async def btn_close(self, interaction: discord.Interaction, ticket):
-        await interaction.response.send_modal(CloseReasonModal(self, ticket["id"]))
+        if await ask_close_reason(self.bot, interaction.guild.id):
+            await interaction.response.send_modal(CloseReasonModal(self, ticket["id"]))
+            return
+        # Même circuit de fermeture sécurisé que le modal, sans popup inutile.
+        await interaction.response.defer(ephemeral=True)
+        await self.close_ticket(interaction, ticket["id"], "Non précisée")
 
     # ---------------------------------------------------------------- FERMETURE
 
@@ -2780,6 +2835,7 @@ class Tickets(commands.Cog):
         e.add_field(name="Délai avant suppression après fermeture", value=helpers.format_duration(conf["ticket_delete_delay"] or 30), inline=True)
         e.add_field(name="Transcript envoyé en DM au membre", value="Oui" if conf["ticket_transcript_dm"] else "Non", inline=True)
         e.add_field(name="Note de satisfaction demandée", value="Oui" if conf["ticket_rating_enabled"] else "Non", inline=True)
+        e.add_field(name="Motif de fermeture demandé", value="Oui" if await ask_close_reason(self.bot, ctx.guild.id) else "Non", inline=True)
         e.description = "Utilisez les boutons ci-dessous pour changer ces réglages, ou `+ticketsetup` pour gérer les panels et boutons staff."
         view = discord.ui.View(timeout=180)
 
@@ -2802,6 +2858,20 @@ class Tickets(commands.Cog):
 
         toggle_rating.callback = rating_cb
         view.add_item(toggle_rating)
+
+        toggle_reason = discord.ui.Button(label="Motif de fermeture on/off", style=discord.ButtonStyle.secondary)
+
+        async def reason_cb(inter: discord.Interaction):
+            if inter.user.id != ctx.author.id:
+                return await inter.response.send_message("Ce réglage est réservé à l'administrateur.", ephemeral=True)
+            enabled = not await ask_close_reason(self.bot, ctx.guild.id)
+            await set_ask_close_reason(self.bot, ctx.guild.id, enabled)
+            await inter.response.send_message(
+                "Motif demandé." if enabled else "Fermeture sans motif activée.", ephemeral=True
+            )
+
+        toggle_reason.callback = reason_cb
+        view.add_item(toggle_reason)
 
         await sx_panels.envoyer(ctx, sx_panels.avec_composants(sx_panels.depuis_embed(e), view))
 
