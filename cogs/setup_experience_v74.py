@@ -227,6 +227,45 @@ class IdentiteBotModal(discord.ui.Modal, title="SentriX sur ce serveur"):
         )
 
 
+#: Configuration guidée (brief V6, point 20) : les pages EXISTANTES dans cet
+#: ordre. Ouvrir une page n'active rien ; chaque page garde son propre bouton
+#: d'activation explicite. L'étape est enregistrée : on quitte et on reprend.
+GUIDE: tuple[tuple[str, str], ...] = (
+    ("security", "Sécurité"),
+    ("logs", "Logs"),
+    ("tickets", "Tickets"),
+    ("welcome", "Bienvenue"),
+    ("roles", "Rôles"),
+)
+_GUIDE_SCHEMA = (
+    "CREATE TABLE IF NOT EXISTS setup_guide_progress ("
+    "guild_id INTEGER PRIMARY KEY, step INTEGER NOT NULL, updated_at INTEGER NOT NULL)"
+)
+
+
+async def guide_step_saved(bot, guild_id: int) -> int | None:
+    await bot.db.execute(_GUIDE_SCHEMA)
+    row = await bot.db.fetchone("SELECT step FROM setup_guide_progress WHERE guild_id=?", (int(guild_id),))
+    if row is None:
+        return None
+    step = int(row["step"])
+    return step if 0 <= step < len(GUIDE) else None
+
+
+async def guide_save_step(bot, guild_id: int, step: int | None) -> None:
+    import time as _time
+
+    await bot.db.execute(_GUIDE_SCHEMA)
+    if step is None:
+        await bot.db.execute("DELETE FROM setup_guide_progress WHERE guild_id=?", (int(guild_id),))
+        return
+    await bot.db.execute(
+        "INSERT INTO setup_guide_progress (guild_id, step, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET step=excluded.step, updated_at=excluded.updated_at",
+        (int(guild_id), int(step), int(_time.time())),
+    )
+
+
 class SentriXSetupV74(v73.SentriXSetupV73):
     """Dernière façade du Setup : simple pour la sécurité, complète pour les tickets."""
 
@@ -236,6 +275,7 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.moderation_member_id: int | None = None
         self.moderation_profile = "moderator"
         self.avance = False
+        self.guide_step: int | None = None
 
     async def rebuild(self) -> None:
         await super().rebuild()
@@ -442,7 +482,20 @@ class SentriXSetupV74(v73.SentriXSetupV73):
             await interaction.response.send_modal(IdentiteBotModal(self))
 
         identite.callback = ouvrir_identite
-        container.add_item(discord.ui.ActionRow(identite))
+        sauvegarde = await guide_step_saved(self.bot, self.guild.id)
+        guide = discord.ui.Button(
+            label=(
+                f"Reprendre la configuration guidée ({sauvegarde + 1}/{len(GUIDE)})"
+                if sauvegarde is not None else "Configuration guidée"
+            ),
+            emoji="🧭", style=discord.ButtonStyle.primary,
+        )
+
+        async def ouvrir_guide(interaction: discord.Interaction):
+            await self._guide_aller(interaction, sauvegarde or 0)
+
+        guide.callback = ouvrir_guide
+        container.add_item(discord.ui.ActionRow(guide, identite))
 
         # Ouvrir la page détaillée d'une catégorie (salons, rôles, options).
         options = [
@@ -1177,7 +1230,51 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self._add_navigation(container)
         self.add_item(container)
 
+    async def _guide_aller(self, interaction: discord.Interaction, step: int | None) -> None:
+        """Ouvre l'étape ``step`` du guide (None = quitter) et l'enregistre."""
+        self.guide_step = step
+        await guide_save_step(self.bot, self.guild.id, step)
+        self.page = GUIDE[step][0] if step is not None else None
+        self.backend = self._new_backend(self.page)
+        await self.refresh(interaction)
+
+    def _add_guide_navigation(self, container: discord.ui.Container) -> None:
+        step = int(self.guide_step or 0)
+        cle, libelle = GUIDE[step]
+        suite = GUIDE[step + 1][1] if step + 1 < len(GUIDE) else None
+        container.add_item(discord.ui.Separator())
+        container.add_item(discord.ui.TextDisplay(
+            f"🧭 **Configuration guidée — étape {step + 1}/{len(GUIDE)} : {libelle}**\n"
+            + (f"-# Ensuite : {suite}. Rien n'est activé sans votre clic." if suite
+               else "-# Dernière étape. Rien n'est activé sans votre clic.")
+        ))
+        precedent = discord.ui.Button(label="Étape précédente", style=discord.ButtonStyle.secondary,
+                                      disabled=step == 0)
+        suivant = discord.ui.Button(label="Étape suivante" if suite else "Terminer",
+                                    style=discord.ButtonStyle.primary)
+        quitter = discord.ui.Button(label="Quitter le guide", style=discord.ButtonStyle.secondary)
+
+        async def aller_precedent(interaction: discord.Interaction):
+            await self._guide_aller(interaction, max(0, step - 1))
+
+        async def aller_suivant(interaction: discord.Interaction):
+            await self._guide_aller(interaction, step + 1 if suite else None)
+
+        async def quitter_guide(interaction: discord.Interaction):
+            # L'étape reste enregistrée : « Reprendre » sur l'accueil y ramène.
+            self.guide_step = None
+            self.page = None
+            self.backend = self._new_backend(None)
+            await self.refresh(interaction)
+
+        precedent.callback = aller_precedent
+        suivant.callback = aller_suivant
+        quitter.callback = quitter_guide
+        container.add_item(discord.ui.ActionRow(precedent, suivant, quitter))
+
     def _add_navigation(self, container: discord.ui.Container) -> None:
+        if self.guide_step is not None and self.page == GUIDE[self.guide_step][0]:
+            return self._add_guide_navigation(container)
         back = discord.ui.Button(label="Retour", style=discord.ButtonStyle.primary, emoji="↩️")
         refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, emoji="🔄")
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)

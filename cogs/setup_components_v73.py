@@ -563,6 +563,14 @@ class SentriXSetupV73(discord.ui.LayoutView):
             container.add_item(discord.ui.Separator())
             container.add_item(discord.ui.TextDisplay("Aucun réglage supplémentaire n’est nécessaire sur cette page."))
 
+        # La navigation partagée (V74) sait aussi afficher la configuration
+        # guidée ; sans elle, l'étape Bienvenue du guide perdait ses boutons.
+        partagee = getattr(self, "_add_navigation", None)
+        if partagee is not None:
+            partagee(container)
+            self.add_item(container)
+            return
+
         back = discord.ui.Button(label="Retour", style=discord.ButtonStyle.primary, emoji="↩️")
         refresh = discord.ui.Button(label="Actualiser", style=discord.ButtonStyle.secondary, emoji="🔄")
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
