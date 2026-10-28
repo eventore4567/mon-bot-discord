@@ -743,14 +743,18 @@ class GiveawayBuilderView(discord.ui.View):
 
     @discord.ui.button(label="Publier", style=discord.ButtonStyle.success, row=1)
     async def publish(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if self._publishing:
+            return await interaction.response.send_message("La publication est déjà en cours.", ephemeral=True)
         missing = self.cog.missing_base(self.state)
         if missing:
-            return await interaction.response.send_message("Impossible de publier. Il manque : " + ", ".join(missing) + ".", ephemeral=True)
+            return await interaction.response.send_message("À compléter : " + ", ".join(missing) + ".", ephemeral=True)
+        self._publishing = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             msg = await self.cog.publish(self.ctx.guild, self.state, self.ctx.author)
         except Exception as exc:
-            return await interaction.followup.send(f"Publication impossible : {type(exc).__name__}: {str(exc)[:250]}", ephemeral=True)
+            self._publishing = False
+            return await interaction.followup.send(f"Publication impossible : {str(exc)[:220] or 'réessayez.'}", ephemeral=True)
         for child in self.children:
             child.disabled = True
         if self.message:
@@ -1087,9 +1091,27 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
 
     async def publish(self, guild: discord.Guild, state: BuilderState, author) -> discord.Message:
         await self.ensure_schema()
+        missing = self.missing_base(state)
+        if missing:
+            raise ValueError("informations manquantes : " + ", ".join(missing))
+        if set(state.required_roles) & set(state.excluded_roles):
+            raise ValueError("un rôle ne peut pas être obligatoire et interdit")
         channel = guild.get_channel(int(state.channel_id or 0))
         if not isinstance(channel, (discord.TextChannel, discord.Thread)) and getattr(channel, "send", None) is None:
             raise ValueError("salon de destination introuvable")
+        member = getattr(guild, "me", None)
+        if member is not None and hasattr(channel, "permissions_for"):
+            perms = channel.permissions_for(member)
+            required = {
+                "voir le salon": getattr(perms, "view_channel", False),
+                "envoyer des messages": getattr(perms, "send_messages", False),
+                "intégrer des liens": getattr(perms, "embed_links", False),
+            }
+            if state.image_bytes:
+                required["joindre des fichiers"] = getattr(perms, "attach_files", False)
+            denied = [label for label, ok in required.items() if not ok]
+            if denied:
+                raise ValueError("permissions manquantes dans le salon : " + ", ".join(denied))
         end_at = int(time.time()) + int(state.duration_seconds or 0)
         panel = self.build_public_panel(guild, state, end_at, author, count=0)
 
