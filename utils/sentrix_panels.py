@@ -745,7 +745,10 @@ def _icone_de_famille(famille: str, titre: str) -> str:
     from utils.sentrix_emojis import emoji as _emoji
 
     titre = str(titre or "")
-    if titre.startswith("<:") or titre.startswith("<a:"):
+    # Un titre qui porte déjà son pictogramme — icône SentriX OU emoji
+    # (« ⌨️ Course de vitesse ») — n'en reçoit pas un second (« ℹ️ ⌨️ … »,
+    # relevé sur le bot booté le 28/10/2026).
+    if titre.startswith("<:") or titre.startswith("<a:") or _commence_par_un_emoji(titre):
         return titre
     nom = ICONES_FAMILLES.get(str(famille or ""))
     icone = _emoji(nom) if nom else ""
