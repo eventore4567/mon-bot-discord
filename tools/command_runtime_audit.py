@@ -28,6 +28,7 @@ async def run() -> int:
         import sentrix_command_surface_v110 as surface_v110
         from cogs import (
             command_catalog_cleanup,
+            commandes_retirees,
             command_response_guard,
             help_complete,
             slash_command_budget,
@@ -89,6 +90,10 @@ async def run() -> int:
         bot._prune_redundant_commands()
         command_catalog_cleanup.apply_surface(bot)
         slash_command_budget.finalize(bot)
+        # Le runtime exécute une deuxième passe de retrait une fois prêt :
+        # l'audit hors connexion doit aussi appliquer cette passe après
+        # les couches qui ont restauré certaines commandes historiques.
+        commandes_retirees.retirer(bot)
 
         active = list(bot.walk_commands())
         qualified = [command.qualified_name.casefold() for command in active]
