@@ -187,6 +187,14 @@ async def _live_incidents(bot: commands.Bot, guild_id: int, loops_failed: int):
     return result
 
 
+def mean_command_latency_ms(row) -> float:
+    """Moyenne mesurée par invocation, protégée contre les compteurs vides."""
+    calls = max(0, int(row["calls"] or 0))
+    if not calls:
+        return 0.0
+    return max(0.0, float(row["total_ms"] or 0.0)) / calls
+
+
 async def build_health_embed(bot: commands.Bot, guild: discord.Guild, *, compact: bool = False) -> discord.Embed:
     started = time.perf_counter()
     db_ok = False
@@ -262,7 +270,8 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild, *, compact
 
     loops_total, loops_failed = await _background_loops(bot)
     recent_health = await bot.db.fetchall(
-        "SELECT command_name,SUM(calls) calls,SUM(errors) errors,MAX(max_ms) max_ms "
+        "SELECT command_name,SUM(calls) calls,SUM(errors) errors,"
+        "SUM(total_ms) total_ms,MAX(max_ms) max_ms "
         "FROM v17_command_health WHERE guild_id=? AND hour_bucket>=? GROUP BY command_name "
         "ORDER BY errors DESC,max_ms DESC LIMIT 8",
         (guild.id, int(now() // 3600 * 3600) - 3600),
@@ -304,7 +313,8 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild, *, compact
             e.add_field(
                 name="Commandes à surveiller",
                 value="\n".join(
-                    f"• `{row['command_name']}` · {float(row['max_ms'] or 0):.0f} ms"
+                    f"• `{row['command_name']}` · moy. {mean_command_latency_ms(row):.0f} ms"
+                    f" · max {float(row['max_ms'] or 0):.0f} ms"
                     f" · {int(row['errors'] or 0)} erreur(s)"
                     for row in slow
                 )[:1024],
@@ -334,7 +344,11 @@ async def build_health_embed(bot: commands.Bot, guild: discord.Guild, *, compact
         for row in recent_health:
             calls = int(row["calls"] or 0)
             errors = int(row["errors"] or 0)
-            lines.append(f"• `{row['command_name']}` — {calls} appel(s), {errors} erreur(s), max {float(row['max_ms'] or 0):.0f} ms")
+            lines.append(
+                f"• `{row['command_name']}` — {calls} appel(s), {errors} erreur(s), "
+                f"moy. {mean_command_latency_ms(row):.0f} ms, "
+                f"max {float(row['max_ms'] or 0):.0f} ms"
+            )
         e.add_field(name="Commandes à surveiller (2h)", value="\n".join(lines)[:1024], inline=False)
     if incidents:
         e.add_field(

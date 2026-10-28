@@ -35,3 +35,15 @@ class CompactHealthcheckTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LatencyAggregateTests(unittest.TestCase):
+    def test_avg_command_latency(self):
+        self.assertAlmostEqual(
+            v17_health.mean_command_latency_ms({"calls": 4, "total_ms": 602.0}),
+            150.5,
+        )
+        self.assertEqual(
+            v17_health.mean_command_latency_ms({"calls": 0, "total_ms": 0}),
+            0.0,
+        )
