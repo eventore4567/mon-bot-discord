@@ -1203,53 +1203,14 @@ class _MessageModifie(_MessageDApplication):
 
 
 
-#: Actifs sur tout serveur qui n'a jamais réglé ses protections (Jayden, 27/10/2026).
-PROTECTIONS_PAR_DEFAUT = {"antispam": 1, "antiraid": 1}
-_MIGRATION_PROTECTIONS = "automod_antispam_antiraid_default_v1"
-
-
 def _reglages_par_defaut() -> dict:
-    """Une ligne complète (toutes les colonnes lues par les filtres), défauts appliqués."""
+    """Un serveur jamais configuré ne reçoit aucune protection sans accord."""
     from cogs.setup_control_center import AUTOMOD
 
     ligne = {champ: 0 for champ, _libelle in AUTOMOD}
     ligne.update(antilink_strict=0, escalation=0)
-    ligne.update(PROTECTIONS_PAR_DEFAUT)
     return ligne
 
-
-async def activer_protections_par_defaut(bot) -> int:
-    """Une seule fois : anti-spam + anti-raid sur les serveurs jamais configurés.
-
-    « Jamais configuré » = toutes les protections à 0 ET le module Sécurité pas
-    coupé explicitement. Un serveur qui a choisi ses filtres n'est pas touché.
-    """
-    from cogs import setup_v2_core
-    from cogs.setup_control_center import AUTOMOD
-
-    db = bot.db
-    await setup_v2_core.ensure_schema(bot)
-    await db.execute(
-        "CREATE TABLE IF NOT EXISTS sentrix_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
-    )
-    if await db.fetchone("SELECT name FROM sentrix_migrations WHERE name=?", (_MIGRATION_PROTECTIONS,)):
-        return 0
-    toutes_a_zero = " AND ".join(f"COALESCE({champ}, 0) = 0" for champ, _libelle in AUTOMOD)
-    cibles = await db.fetchall(
-        f"SELECT guild_id FROM automod_settings WHERE {toutes_a_zero} AND guild_id NOT IN "
-        "(SELECT guild_id FROM module_settings WHERE module='security' AND enabled=0)"
-    ) or ()
-    for row in cibles:
-        await db.execute(
-            "UPDATE automod_settings SET antispam=1, antiraid=1 WHERE guild_id=?", (int(row["guild_id"]),)
-        )
-    await db.execute(
-        "INSERT INTO sentrix_migrations (name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING",
-        (_MIGRATION_PROTECTIONS, int(time.time())),
-    )
-    logger.info("Protections par défaut : anti-spam + anti-raid activés sur %s serveur(s) jamais configuré(s).",
-                len(cibles))
-    return len(cibles)
 
 class AutoMod(commands.Cog, name="Automod"):
     def __init__(self, bot: commands.Bot):
@@ -1369,10 +1330,6 @@ class AutoMod(commands.Cog, name="Automod"):
         return row is not None
 
     async def cog_load(self) -> None:
-        try:
-            await activer_protections_par_defaut(self.bot)
-        except Exception:
-            logger.exception("Migration des protections par défaut impossible")
         await self._raid_recovery.ensure_schema()
         self._raid_recovery_task = asyncio.create_task(
             self._run_raid_recovery(),
