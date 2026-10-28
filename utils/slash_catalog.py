@@ -78,6 +78,8 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "fun": "Fun interactions with other members.",
     "music playlist": "Your personal playlists.",
     "staff manage": "Server diagnosis, backups and safe fixes.",
+    "protection guard": "Advanced server guards.",
+    "protection exempt": "Exemptions from SentriX protections.",
     "moderation": "Moderation tools for your staff.",
     "security": "Protect the server against spam, raids and scams.",
     "logs": "Choose what SentriX records.",
@@ -149,6 +151,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("moderation view", "modview", "Open a member's full moderation view."),
     _e("moderation center", "modcenter", "Open the moderation center."),
     _e("moderation history", "sentrixpro history", "Show a member's SentriX history."),
+    _e("moderation sanctions", "modhistory", "Show every sanction a member received."),
     _e("moderation lock", "lock", "Lock this channel."),
     _e("moderation unlock", "unlock", "Unlock this channel."),
     _e("moderation slowmode", "slowmode", "Set this channel's slowmode."),
@@ -213,6 +216,23 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("protection restore", "server-restore", "Restore a server backup."),
     _e("protection role-snapshot", "role-snapshot", "Save a snapshot of server roles."),
     _e("protection role-restore", "role-restore", "Restore previously saved roles."),
+    # 28/10/2026 — lot 2 du passage à 100 % « / » (sécurité).
+    _e("protection lockdown", "lockdown-server", "Lock every text channel of the server."),
+    _e("protection unlock", "unlock-server", "Unlock every text channel of the server."),
+    _e("protection blacklist-unsync", "unsyncbl", "Unban members banned through the shared blacklist."),
+    _e("protection guard join", "join-gate", "Filter suspicious joins."),
+    _e("protection guard permissions", "permission-guard", "Watch dangerous permission grants."),
+    _e("protection guard prune", "prune-guard", "Alert on mass member prunes."),
+    _e("protection guard vanity", "vanity-guard", "Protect the server's custom invite link."),
+    _e("protection guard risk", "risk-engine", "Score members by behaviour to spot risky accounts."),
+    _e("protection guard level", "security-level", "Set the security level and anti-spam reactivity."),
+    _e("protection guard escalation", "automod-escalation", "Turn automatic sanction escalation on or off."),
+    _e("protection guard native-sync", "automod-native-sync", "Sync protections with Discord AutoMod."),
+    _e("protection exempt role-add", "automod-exempt-role-add", "Exempt a role from AutoMod filters."),
+    _e("protection exempt role-remove", "automod-exempt-role-remove", "Remove a role from the AutoMod exemptions."),
+    _e("protection exempt immunity", "immunity", "Turn your personal SentriX immunity on or off."),
+    _e("protection exempt whitelist", "whitelist", "Let a member use staff commands."),
+    _e("protection exempt unwhitelist", "unwhitelist", "Remove a member from the staff command whitelist."),
     _e("security isolate", "quarantine", "Quarantine a risky member."),
     _e("security release", "unquarantine", "Release a quarantined member."),
 
@@ -259,6 +279,10 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("economy give", "give-money", "Give coins to a member."),
     _e("economy reset", "reset-economy", "Reset the whole server economy."),
     _e("economy toggle", "economy-system", "Enable or disable the economy."),
+    _e("economy drop", "drop", "Drop coins: the first click wins them."),
+    _e("economy autodrop", "autodrop", "Configure automatic coin drops."),
+    _e("economy autodrop-off", "autodrop-off", "Stop automatic coin drops."),
+    _e("economy audit", "economy-audit", "Audit the server economy."),
 
     _e("shop view", "shop", "Browse the server shop."),
     _e("shop buy", "buy", "Buy an item from the shop."),
@@ -295,6 +319,10 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("rep view", "reputation", "Show a member's reputation."),
     _e("rep leaderboard", "repleaderboard", "Show the reputation leaderboard."),
     _e("rep history", "rephistory", "Show a member's reputation history."),
+    _e("rep add", "repadd", "Add reputation points to a member."),
+    _e("rep remove", "repremove", "Remove reputation points from a member."),
+    _e("rep reset", "represet", "Reset a member's reputation to zero."),
+    _e("rep cooldown", "repconfig", "Set the reputation cooldown in hours."),
     # 28/10/2026 — passage à 100 % « / » : les interactions fun n'avaient que le « + ».
     _e("fun hug", "hug", "Hug a member."),
     _e("fun kiss", "kiss", "Kiss a member."),
@@ -368,10 +396,25 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("verification example-remove", "proofexample-remove", "Remove an example screenshot."),
     _e("verification examples", "proofexamples", "List the example screenshots."),
     _e("verification restore", "verify-repair", "Restore a missing verification panel."),
+    _e("verification calibration", "verification-calibration", "Measured accuracy of automatic verification."),
+    _e("verification review", "verification-review", "Mark a verified member as legit or suspect."),
 
     _e("config mod-role", "setmodrole", "Set the staff role."),
     _e("config prefix", "setprefix", "Change the text command prefix."),
     _e("config history", "config-history", "See recent setting changes and undo them."),
+    # 28/10/2026 — lot 3 du passage à 100 % « / ».
+    _e("config view", "config-view", "Show the server configuration by topic."),
+    _e("config reset", "config-reset", "Reset the whole server configuration."),
+    _e("config warn-role", "setwarnrole", "Role given automatically on each warning."),
+    _e("config bot-nickname", "set-nickname", "Change SentriX's nickname on this server."),
+    _e("config icons", "iconsetup", "Install the small SentriX icons as server emojis."),
+    _e("config theme", "design-theme", "Choose the SentriX visual theme."),
+    _e("config delete-channel", "delete-channel", "Delete a specific channel."),
+    _e("config ai", "aisetup", "Configure the AI for this server."),
+    _e("config design", "designsetup", "Configure SentriX colours and footer."),
+    _e("config welcome", "welcome-config", "Set the welcome channel and message."),
+    _e("config stats", "statsconfig", "Configure /stats and /level appearance."),
+    _e("config shop", "shopsetup", "How to set up the role shop."),
 
     # -------------------------------------------------------------------- Embeds
     _e("embeds create", "embed create", "Create a new embed template."),
@@ -414,12 +457,14 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("notifications list", "notifs-list", "List the watched social media channels."),
     _e("notifications remove", "notifs-remove", "Stop watching a social media channel."),
     _e("notifications status", "notifs-status", "Check notification delivery status."),
+    _e("notifications preview", "notifs-test", "Preview a notification with real title and thumbnail."),
 
     _e("counter status", "infinit status", "Show the counting game status."),
     _e("counter stop", "infinit stop", "Pause the counting game."),
     _e("counter resume", "infinit resume", "Resume the counting game."),
 
     _e("logs trace", "trace", "Find a staff action by its reference."),
+    _e("logs status", "logs-status", "See which channel receives which logs."),
 
     # Fonctions de cogs/sentrix_plus.py : elles existaient, mais seulement en +,
     # et masquées de l'aide par apply_surface faute de classement (08/10/2026).
@@ -458,6 +503,8 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("ai model", "ai model", "Show the AI model used on this server."),
     _e("ai enable", "ai enable", "Enable AI on this server."),
     _e("ai disable", "ai disable", "Disable AI on this server."),
+    _e("ai check", "aidiag", "Run a real test call to the AI service."),
+    _e("ai rewrite", "rewrite", "Rewrite a text with AI."),
 
     # ----------------------------------------------------------------- À propos
     _e("bot info", "botinfo", "About SentriX."),
@@ -465,6 +512,11 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("bot feedback", "feedback", "Send feedback to the SentriX team."),
     _e("bot bug", "report-bug", "Report a bug to the SentriX team."),
     _e("bot status", "bot-status", "Show the current SentriX status."),
+    _e("bot health", "healthcheck", "Full SentriX diagnosis on this server."),
+    _e("bot privacy", "privacy-policy", "Read the SentriX privacy policy."),
+    _e("bot plus", "sentrix-plus", "Features added by SentriX Plus."),
+    _e("bot tracker", "suivi-bot", "Create a SentriX status tracking panel."),
+    _e("bot about", "about", "What SentriX is and what it offers."),
 
     _e("permissions explain", "permissions explain", "Explain why a command is allowed or denied."),
     _e("permissions list", "permissions liste", "List every command and who can run it."),
@@ -484,6 +536,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("staff report", "report", "Create a staff report."),
     _e("staff absence", "absence", "Manage staff absences."),
     _e("staff remind", "staff-reminder", "Send staff reminders."),
+    _e("staff diagnosis", "staff-diagnostic", "Open the SentriX server diagnosis."),
     # 28/10/2026 — passage à 100 % « / » : le centre d'opérations « +manage ».
     _e("staff manage health", "manage health", "Full diagnosis of the server configuration."),
     _e("staff manage setup", "manage setup", "Show what is left to configure."),
@@ -499,6 +552,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("staff manage rollback", "manage rollback", "Restore a configuration backup."),
     _e("staff manage preview", "manage preview", "Preview a configuration without publishing it."),
     _e("staff manage simulate", "manage simulate", "Simulate an event to test the configuration."),
+    _e("staff manage ask", "manage ask", "Ask a question about the server configuration."),
 
     # Invite tools are actions, not a dozen arbitrary top-level slash names.
     _e("invites members", "invited-list", "Show members invited by a user."),
@@ -621,6 +675,8 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("games leaderboard", "gametop", "Top players by game winnings."),
     _e("games profile", "gameprofile", "A member's full game profile."),
     _e("games details", "gamestats", "A member's detailed game statistics."),
+    _e("games season", "gameseason", "Show the current game season."),
+    _e("games setup", "gamesetup", "Staff panel to configure mini-games."),
 )
 
 
@@ -655,6 +711,27 @@ RETIRED: dict[str, str] = {
     "sentrixpro": "index of tools now published directly",
     "sentrixpro help": "covered by /help",
     "sentrixpro profile": "duplicate of /profile view",
+    "profile-card": "same card as /profile card, hidden since 16/10 (unused)",
+    "member": "duplicate of /moderation view",
+    # 28/10/2026 — passage à 100 % « / » : déjà couvertes par une autre route.
+    **{n: "covered by /giveaway" for n in (
+        "giveaway-create", "giveaway-end", "giveaway-cancel", "giveaway-list",
+        "giveaway-reroll", "giveaway-blacklist", "giveaway-unblacklist")},
+    "leaderboard": "duplicate of /levels leaderboard",
+    "roleinfo": "duplicate of /role info",
+    "play": "duplicate of /music play",
+    "reopenticket": "duplicate of /tickets reopen",
+    "diagnostic": "duplicate of /bot health",
+    "staff-audit": "duplicate of /security permissions",
+    "blacklist-add": "duplicate of /protection word-add",
+    "blacklist-users": "duplicate of /protection blacklist",
+    "logsetup": "covered by /setup",
+    "fun": "group root, its actions are /fun hug, /fun aura...",
+    "alias": "prefix aliases have no meaning in /",
+    # Outils du propriétaire global : à décider avant de retirer le « + ».
+    "bl": "owner tool", "blinfo": "owner tool", "editbl": "owner tool", "unbl": "owner tool",
+    "health": "owner tool", "sync": "owner tool", "syncguild": "owner tool",
+    "reset-logs-all": "owner tool", "wipe-server": "owner tool",
     "sentrixpro module": "module switches live in /setup",
     "sentrixpro modules": "module switches live in /setup",
     "sentrixpro notifications": "status view covered by /setup",

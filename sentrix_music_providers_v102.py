@@ -338,12 +338,16 @@ def _patch_music_cog(bot, cog) -> None:
 def install() -> None:
     """Patche l'ajout du Cog Music sans créer de commande supplémentaire."""
     global _INSTALLED, _ORIGINAL_ADD_COG
-    if _INSTALLED:
+    # Le drapeau suit la CLASSE patchée : railway_boot remplace ensuite
+    # commands.Bot par SentriXAutoShardedBot. Quand sitecustomize installait ce
+    # chargeur avant ce remplacement (PYTHONPATH=racine, comme le CI), le
+    # second appel s'arrêtait ici et le bot réel n'avait jamais +music playlist.
+    if _INSTALLED is commands.Bot:
         return
 
     original = commands.Bot.add_cog
     if getattr(original, "_sentrix_music_v102_loader", False):
-        _INSTALLED = True
+        _INSTALLED = commands.Bot
         return
     _ORIGINAL_ADD_COG = original
 
@@ -362,7 +366,7 @@ def install() -> None:
     add_cog_with_music_v102._sentrix_music_v102_loader = True
     add_cog_with_music_v102.__wrapped__ = original
     commands.Bot.add_cog = add_cog_with_music_v102
-    _INSTALLED = True
+    _INSTALLED = commands.Bot
     logger.info("Chargeur musique V102/V103/V104/V108 préparé avant le chargement des Cogs.")
 
 

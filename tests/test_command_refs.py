@@ -20,11 +20,13 @@ def test_en_slash_le_chemin_publie():
     assert command_refs.reference(SLASH, "dailygames", nom_prefixe="jeuxjour") == "/games today"
     assert command_refs.reference(SLASH, "trivia") == "/play trivia"
     assert command_refs.reference(SLASH, "fight") == "/duel fight"
+    # autodrop n'avait que le « + » jusqu'au 28/10/2026.
+    assert command_refs.reference(SLASH, "autodrop", "#salon") == "/economy autodrop #salon"
 
 
 def test_en_slash_une_commande_non_publiee_reste_en_plus():
     assert command_refs.reference(SLASH, "infinit resume") == "+infinit resume"
-    assert command_refs.reference(SLASH, "autodrop", "#salon") == "+autodrop #salon"
+    assert command_refs.reference(SLASH, "alias", "add") == "+alias add"
 
 
 def test_en_prefixe_le_nom_court_et_le_prefixe_du_serveur():

@@ -175,14 +175,15 @@ def test_exactement_132_routes_slash_sont_masquees_sans_compter_les_parametres()
     routes = {entry.path for entry in sc._MASQUEES_DU_MENU}
     assert len(routes) == 132
     assert len(routes) == len(sc._MASQUEES_DU_MENU)
-    assert len([entry for entry in sc.CATALOG if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 40
+    # 40 → 42 le 28/10/2026 : /games season et /games setup n'avaient que le « + ».
+    assert len([entry for entry in sc.CATALOG if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 42
     assert len([entry for entry in sc._MASQUEES_DU_MENU if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 26
-    # Les 66 routes de jeux restent enregistrées comme sources +, y compris
+    # Les 68 routes de jeux restent enregistrées comme sources +, y compris
     # celles masquées du catalogue slash. Seule la présentation change.
     tous_les_jeux = [entry for entry in (*sc.CATALOG, *sc._MASQUEES_DU_MENU)
                      if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]
-    assert len(tous_les_jeux) == 66
-    assert len({entry.source for entry in tous_les_jeux}) == 66
+    assert len(tous_les_jeux) == 68
+    assert len({entry.source for entry in tous_les_jeux}) == 68
     assert "clear" not in routes
     assert "count" not in routes
 
