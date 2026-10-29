@@ -488,8 +488,9 @@ class SentriXHelpV79(discord.ui.LayoutView):
                 discord.ui.TextDisplay(
                     "# Centre d'aide SentriX\n"
                     "Choisissez une catégorie pour voir ses commandes, ou recherchez une commande.\n"
-                    f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
-                    + (f" · **{slash_only} uniquement en /**" if slash_only else "")
+                    + (f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
+                       + (f" · **{slash_only} uniquement en /**" if slash_only else "")
+                       if _prefixe_actif() else f"**{slash_count} commandes** · tapez `/` pour les voir")
                 ),
                 accessory=setup_v73._thumbnail(self.bot),
             )
@@ -694,6 +695,14 @@ class SentriXHelpV79(discord.ui.LayoutView):
             await _private_error(interaction, "Une erreur est survenue dans le centre d'aide SentriX.")
         except discord.HTTPException:
             pass
+
+
+def _prefixe_actif() -> bool:
+    try:
+        from cogs.prefix_deprecation import prefixe_actif
+    except Exception:  # noqa: BLE001
+        return True
+    return prefixe_actif()
 
 
 async def _send_help_v79(self, target, query: str | None = None):
