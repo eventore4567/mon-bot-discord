@@ -3325,6 +3325,15 @@ class AutoMod(commands.Cog, name="Automod"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.guild and message.author.bot:
+            if getattr(message, "webhook_id", None):
+                # Raid Protect (opt-in) : un webhook qui inonde un salon.
+                try:
+                    from cogs import raid_protect
+
+                    if await raid_protect.surveiller_webhook(self.bot, message):
+                        return
+                except Exception:
+                    logger.exception("Garde des webhooks en échec guild=%s", message.guild.id)
             try:
                 if await self._handle_external_app_message(message):
                     return
@@ -4544,6 +4553,13 @@ class AutoMod(commands.Cog, name="Automod"):
                 return
 
         if conf["antiraid"]:
+            # Raid coordonné (comptes au nom presque identique) : alerte, jamais de sanction.
+            try:
+                from cogs import raid_protect
+
+                await raid_protect.sur_arrivee(self.bot, member)
+            except Exception:
+                logger.exception("Détection de raid coordonné impossible guild=%s", member.guild.id)
             arrivees = fast_count
             arrivees_lentes = slow_count
             seuil = seuil_raid_rapide(getattr(member.guild, "member_count", None))
@@ -4593,6 +4609,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 # freine immédiatement les faux comptes fraîchement créés, sans avoir
                 # à verrouiller manuellement tous les salons.
                 if raid_rapide:
+                    # Raid Protect (opt-in) : pause native des invitations, levée
+                    # automatiquement par Discord ; aucun membre n'est sanctionné.
+                    try:
+                        from cogs import raid_protect
+
+                        await raid_protect.sur_raid_detecte(self.bot, member.guild)
+                    except Exception:
+                        logger.exception("Pause Raid Protect impossible guild=%s", member.guild.id)
                     # Sauvegarde du niveau précédent avant édition et expiration
                     # 15 minutes après le dernier afflux rapide. En cas de
                     # modification manuelle, le snapshot est invalidé.
