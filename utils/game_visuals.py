@@ -22,29 +22,13 @@ import aiohttp
 import discord
 
 
-# Liens d'images GIF (Content-Type: image/gif vérifié sur les liens source GIPHY).
-# Utiliser les liens directs du CDN, PAS les pages giphy.com/gifs ou tenor.com/view.
-# Identifiants tirés de pages GIPHY existantes (Pokémon, Cyberpunk,
-# iQiyi, Apple TV, animations de jeu). Pas de liens de tracking signés/expirables.
-GIFS: dict[str, str] = {
-    "win": "https://media.giphy.com/media/f8Wil9jWfDhTbnw87P/giphy.gif",
-    "loss": "https://media.giphy.com/media/j8HIpI6nyLkNUwxP3w/giphy.gif",
-    "fight": "https://media.giphy.com/media/NY3tXwOBUwQYq7lbXx/giphy.gif",
-    "think": "https://media.giphy.com/media/5kLcdlFiZbv8l2hf5Y/giphy.gif",
-    "coin": "https://media.giphy.com/media/WFvnujC1Tz6VoyPDka/giphy.gif",
-    "race": "https://media.giphy.com/media/xMqYlDtLEIO2nMoF3Z/giphy.gif",
-    "arcade": "https://media.giphy.com/media/7AvMktcyuw9TEpKDvF/giphy.gif",
-    "slap": "https://media.giphy.com/media/90cAvw5mBQHa1QNFG9/giphy.gif",
-    # Vraies scènes de combat : chaque action garde sa propre animation.
-    # Les octets sont vérifiés par _fetch_gif_bytes avant tout envoi Discord.
-    "boss-attack": "https://media.giphy.com/media/rMWtjgMUUwEnsKR9n2/giphy.gif",
-    "boss-power": "https://media.giphy.com/media/j9oeNL144oaZQq2tJO/giphy.gif",
-    "boss-guard": "https://media.giphy.com/media/WDRyxPW1BSpHIDH5Cg/giphy.gif",
-    "boss-counter": "https://media.giphy.com/media/qJyZZ9B6Za6Yjsp69O/giphy.gif",
-    "boss-counter-alt": "https://media.giphy.com/media/CLPSFbwMqpsvf5cRe8/giphy.gif",
-    "doors": "https://media.giphy.com/media/rbpgvZ17l67oKfOODU/giphy.gif",
-    "emojiorder": "https://media.giphy.com/media/LlIrosc9s0AsGEVXtU/giphy.gif",
-}
+# 29/10/2026 (Jayden) : « Supprime tous les GIFs des jeux, y compris ceux des
+# combats, des animations et des résultats ; conserve les jeux. » La table est
+# vide : aucune scène n'a d'image, donc verified_image_for ne télécharge rien,
+# aucune MediaGallery n'est créée, et chaque jeu garde boutons, scores et
+# résultats. Les icônes SentriX animées (assets/sentrix_emojis) ne sont pas
+# concernées. Pour remettre une image, il suffit de la remettre ici.
+GIFS: dict[str, str] = {}
 
 logger = logging.getLogger("bot.game-visuals")
 # La validité dépend de l'accessibilité du CDN *depuis Railway*.
@@ -269,6 +253,9 @@ async def preflight_assets() -> dict[str, bool]:
         "arcade": ("Puissance 4", "C'est votre tour", "primary"),
         "slap": ("Slap", "Prêt à gifler", "primary"),
     }
+    if not GIFS:
+        logger.info("Animations des jeux : aucun GIF (retirés le 29/10/2026).")
+        return {}
     results = {}
     for scene, args in sample.items():
         try:

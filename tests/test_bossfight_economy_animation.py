@@ -65,13 +65,10 @@ async def test_shield_and_magic_have_different_gifs_and_shield_blocks(monkeypatc
             assert view.boss_hp == 13
 
 
-def test_boss_scenes_are_distinct_gifs_and_dont_return_broken_url():
-    choices = ("boss-attack", "boss-power", "boss-guard", "boss-counter")
-    sources = [game_visuals.GIFS[key] for key in choices]
-    assert len(set(sources)) == len(sources)
-    assert all(value.startswith("https://media.giphy.com/media/") for value in sources)
-    assert all(value.endswith("/giphy.gif") for value in sources)
-    assert game_visuals.GIFS["win"] != game_visuals.GIFS["loss"]
+def test_le_combat_de_boss_n_affiche_plus_de_gif():
+    # 29/10/2026 : GIFs des jeux retirés, combats compris.
+    for scene in ("boss-attack", "boss-power", "boss-guard", "boss-counter", "win", "loss"):
+        assert game_visuals.url_de_scene(scene) is None
 
 
 @pytest.mark.asyncio
