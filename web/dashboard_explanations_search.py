@@ -41,7 +41,7 @@ DASHBOARD_HELP_UI = r"""
 <script>
 (() => {
   const guides = {
-    general:{title:"Réglages généraux du serveur",text:"Ces options contrôlent le fonctionnement de base de SentriX.",items:["Le préfixe sert aux commandes écrites comme +help.","Le niveau de sécurité ajuste la sévérité générale des protections.","Le seuil d’avertissements peut déclencher automatiquement un bannissement."],warning:"Cliquez sur Enregistrer après chaque modification. Les changements non enregistrés sont perdus en quittant l’onglet."},
+    general:{title:"Réglages généraux du serveur",text:"Ces options contrôlent le fonctionnement de base de SentriX.",items:["SentriX fonctionne avec les commandes /, comme /help.","Le niveau de sécurité ajuste la sévérité générale des protections.","Le seuil d’avertissements peut déclencher automatiquement un bannissement."],warning:"Cliquez sur Enregistrer après chaque modification. Les changements non enregistrés sont perdus en quittant l’onglet."},
     security:{title:"Sécurité et AutoMod",text:"Activez seulement les protections utiles à votre serveur, puis testez-les dans un salon privé.",items:["Anti-spam et anti-mentions limitent les abus de messages.","Anti-lien, anti-invitation et anti-arnaque contrôlent les contenus dangereux.","Anti-raid et anti-nuke demandent au bot des permissions suffisantes et un rôle bien placé."],warning:"Placez le rôle SentriX au-dessus des rôles qu’il doit sanctionner. Les exemptions se règlent dans le Centre Setup."},
     sanctions:{title:"Historique des sanctions",text:"Cette page affiche les bannissements, mutes et avertissements enregistrés par SentriX.",items:["Utilisez la recherche par ID Discord pour retrouver un membre précis.","Les actions de retrait sont immédiatement appliquées au serveur.","Une raison claire est recommandée pour conserver un historique compréhensible."],warning:"Vérifiez toujours l’ID du membre avant un déban, un démute ou une suppression d’avertissements."},
     logs:{title:"Configuration des logs",text:"Chaque événement peut être envoyé dans un salon différent pour garder les journaux lisibles.",items:["Messages : suppressions et modifications de messages.","Membres, rôles, vocal et serveur : changements administratifs correspondants.","Le salon général sert de solution de secours si une catégorie spécialisée n’est pas configurée."],warning:"Les salons de logs doivent être privés et SentriX doit pouvoir y voir et envoyer des messages."},
@@ -56,7 +56,7 @@ DASHBOARD_HELP_UI = r"""
 
   const fieldHints = {
     prefix:"Entre 1 et 5 caractères. Évitez un préfixe déjà utilisé par plusieurs autres bots.",
-    security_level:"Règle aussi la réactivité de l'anti-spam : faible = 7 messages en 6 s, moyen (recommandé) = 5 en 6 s, élevé = 4 en 5 s. Seuils personnalisés : +security-level personnalise.",
+    security_level:"Règle aussi la réactivité de l'anti-spam : faible = 7 messages en 6 s, moyen (recommandé) = 5 en 6 s, élevé = 4 en 5 s. Seuils personnalisés : /protection guard level personnalise.",
     warn_ban_threshold:"Quand ce nombre est atteint, SentriX peut appliquer la sanction automatique configurée.",
     log_messages:"Choisissez un salon réservé au staff pour les messages supprimés ou modifiés.",
     log_members:"Arrivées, départs et changements concernant les membres.",

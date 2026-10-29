@@ -153,9 +153,9 @@ footer{padding:34px 0;border-top:1px solid rgba(255,255,255,.05);color:var(--mut
 <h2>Commandes slash et préfixe</h2><p>SentriX répond aux deux formes. Les commandes slash s’écrivent avec <code>/</code> et sont proposées par Discord ; les commandes préfixées s’écrivent avec <code>+</code> dans un message normal.</p>
 <div class="doc-grid">
 <div class="doc-card"><b>Slash /</b><p>Autocomplétion Discord, arguments guidés, visibles par tout le monde dans la barre de saisie.</p></div>
-<div class="doc-card"><b>Préfixe +</b><p>Plus rapide à taper pour le staff habitué. Le préfixe se change avec <code>+setprefix</code>.</p></div>
+<div class="doc-card"><b>Commandes /</b><p>SentriX fonctionne uniquement avec les commandes <code>/</code> : tapez <code>/</code> dans Discord pour les voir.</p></div>
 <div class="doc-card"><b>Même logique derrière</b><p>Une commande disponible sous les deux formes exécute le même code et applique les mêmes permissions.</p></div>
-<div class="doc-card"><b>Liste à jour</b><p><code>+help</code> dans Discord, ou la page <a href="/commands">Commandes</a> qui lit les commandes réellement chargées.</p></div>
+<div class="doc-card"><b>Liste à jour</b><p><code>/help</code> dans Discord, ou la page <a href="/commands">Commandes</a> qui lit les commandes réellement chargées.</p></div>
 </div>
 <div class="callout">La page <a href="/commands">/commands</a> n’affiche pas une liste écrite à la main : elle interroge le bot en cours d’exécution. Les nombres qu’elle donne sont donc ceux de l’instance qui répond.</div>
 <div class="anchor-actions"><a class="btn" href="/commands">Voir toutes les commandes</a></div></section>
@@ -171,10 +171,10 @@ footer{padding:34px 0;border-top:1px solid rgba(255,255,255,.05);color:var(--mut
 
 <section class="doc-section" id="faq" data-doc="faq questions fréquentes prefix gratuit données hébergement instance">
 <h2>Questions fréquentes</h2><p>Les réponses ci-dessous décrivent le fonctionnement réel, pas une intention.</p>
-<h3>Le préfixe est-il modifiable ?</h3><p>Oui, avec <code>+setprefix</code>. Les commandes slash restent disponibles quel que soit le préfixe choisi.</p>
-<h3>Pourquoi une commande n’apparaît-elle pas ?</h3><p>Soit elle est réservée à un rôle ou au propriétaire, soit le module correspondant n’est pas activé sur le serveur. <code>+help</code> ne montre que ce qui vous est accessible.</p>
+<h3>Et les commandes avec « + » ?</h3><p>Elles ont été supprimées : toutes les fonctions sont disponibles en commandes <code>/</code>.</p>
+<h3>Pourquoi une commande n’apparaît-elle pas ?</h3><p>Soit elle est réservée à un rôle ou au propriétaire, soit le module correspondant n’est pas activé sur le serveur. <code>/help</code> ne montre que ce qui vous est accessible.</p>
 <h3>Que se passe-t-il pendant un redémarrage ?</h3><p>SentriX fonctionne sur deux instances dont une seule sert à la fois. Pendant une bascule, une page publique peut indiquer que ses données ne sont pas disponibles plutôt que d’afficher un chiffre faux.</p>
-<h3>Comment tout arrêter en urgence ?</h3><p><code>+panic</code> coupe les actions sensibles immédiatement. <code>+setup</code> permet ensuite de revoir la configuration.</p>
+<h3>Comment tout arrêter en urgence ?</h3><p><code>/security panic</code> coupe les actions sensibles immédiatement. <code>/setup</code> permet ensuite de revoir la configuration.</p>
 <div class="anchor-actions"><a class="btn" href="/support">Centre de support</a></div></section>
 
 <section class="doc-section" id="support" data-doc="support aide contact diagnostic problème rapport">

@@ -247,7 +247,7 @@ async def _diagnostic_payload(dashboard, bot, guild: discord.Guild) -> dict:
     modules["economy"] = _status("active", "Le système d'argent est disponible.", configured=True)
 
     # Source unique : l'interrupteur de module (module_settings, le même que /setup et
-    # +level-system). Sans lui le Dashboard disait ACTIF pour un module coupé dans
+    # /levels toggle). Sans lui le Dashboard disait ACTIF pour un module coupé dans
     # Discord, ou pour un module jamais activé dont un salon traînait en base.
     try:
         from cogs import setup_v2_core as core

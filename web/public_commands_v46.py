@@ -212,7 +212,8 @@ def _page(bot, dashboard, request: web.Request) -> str:
     from .marketing_growth_v40 import coquille_publique
 
     slash = _slash_commands(bot)
-    prefix = _prefix_commands(bot)
+    # 30/10/2026 : les commandes « + » sont supprimées, la page ne liste que les « / ».
+    prefix: list = []
     toutes = slash + prefix
     if not toutes:
         # Mesuré en production le 2026-09-26 : l'instance qui ne détient pas le
@@ -229,11 +230,9 @@ def _page(bot, dashboard, request: web.Request) -> str:
         ' placeholder="Rechercher ban, ticket, niveau, IA…"></label>'
         '<div class="cmd-filtres" role="group" aria-label="Filtrer par type de commande">'
         '<button type="button" data-filter="all" aria-pressed="true">Toutes</button>'
-        '<button type="button" data-filter="slash" aria-pressed="false">Slash /</button>'
-        '<button type="button" data-filter="prefix" aria-pressed="false">Préfixe +</button>'
         "</div></div>"
         f'<p class="cmd-compte" id="cmdCompte" role="status" aria-live="polite">'
-        f"{len(toutes)} commandes affichées · {len(slash)} slash / · {len(prefix)} préfixe +</p>"
+        f"{len(toutes)} commandes / affichées</p>"
         f'<section class="cmd-grille" id="cmdGrille">{cartes}</section>'
         '<div class="cmd-vide" id="cmdVide">Aucune commande trouvée.</div>'
     )

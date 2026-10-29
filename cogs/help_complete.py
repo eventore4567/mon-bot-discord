@@ -638,7 +638,7 @@ def install(bot: commands.Bot) -> None:
                 )
                 if matching is None:
                     return await interaction.response.send_message(
-                        "Cette catégorie n’est plus disponible. Relancez `+help`.",
+                        "Cette catégorie n’est plus disponible. Relancez `/help`.",
                         ephemeral=True,
                     )
                 pages = _build_pages(
