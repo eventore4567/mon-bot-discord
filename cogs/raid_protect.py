@@ -104,10 +104,23 @@ async def mettre_en_pause(guild: discord.Guild, minutes: int, *, invitations: bo
     if not champs:
         return False, None, "Rien à mettre en pause."
     try:
-        await guild.edit(reason=f"SentriX Raid Protect : {raison}"[:500], **champs)
+        await _incident_actions(guild, {k: v.isoformat() for k, v in champs.items()})
     except discord.HTTPException as exc:
         return False, None, f"Discord a refusé la pause ({exc.status})."
+    logger.info("Raid Protect : pause %s jusqu'à %s guild=%s (%s)", ",".join(champs), fin.isoformat(), guild.id, raison)
     return True, fin, ""
+
+
+async def _incident_actions(guild: discord.Guild, payload: dict) -> None:
+    """PUT /guilds/{id}/incident-actions seul. ``Guild.edit`` y ajoute un PATCH du
+    serveur et relit toute sa réponse : une pause réussie pouvait être comptée
+    comme un échec. La pause est appliquée à l'objet local tout de suite, sans
+    attendre l'événement GUILD_UPDATE."""
+    data = await guild._state.http.edit_incident_actions(guild.id, payload=payload)
+    try:
+        guild._incidents_data = data or {**(guild._incidents_data or {}), **payload}
+    except Exception:
+        pass
 
 
 async def reprendre(guild: discord.Guild, *, raison: str) -> tuple[bool, str]:
@@ -115,10 +128,10 @@ async def reprendre(guild: discord.Guild, *, raison: str) -> tuple[bool, str]:
     if me is None or not me.guild_permissions.manage_guild:
         return False, "SentriX n'a pas la permission « Gérer le serveur »."
     try:
-        await guild.edit(reason=f"SentriX Raid Protect : {raison}"[:500],
-                         invites_disabled_until=None, dms_disabled_until=None)
+        await _incident_actions(guild, {"invites_disabled_until": None, "dms_disabled_until": None})
     except discord.HTTPException as exc:
         return False, f"Discord a refusé la reprise ({exc.status})."
+    logger.info("Raid Protect : pause levée guild=%s (%s)", guild.id, raison)
     return True, ""
 
 

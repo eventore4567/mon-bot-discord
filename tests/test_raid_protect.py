@@ -39,6 +39,8 @@ def _guild(manage=True):
     g.invites_paused.return_value = False
     g.dms_paused.return_value = False
     g.edit = AsyncMock()
+    g._state.http.edit_incident_actions = AsyncMock(return_value={})
+    g._incidents_data = {}
     return g
 
 
@@ -55,7 +57,7 @@ def test_tout_est_desactive_par_defaut():
 def test_un_raid_ne_met_rien_en_pause_sans_choix_du_serveur():
     g = _guild()
     assert asyncio.run(rp.sur_raid_detecte(_bot(_Db()), g)) is False
-    g.edit.assert_not_awaited()
+    g._state.http.edit_incident_actions.assert_not_awaited()
 
 
 def test_pause_automatique_choisie_suspend_les_invitations_sans_sanction(monkeypatch):
@@ -65,9 +67,9 @@ def test_pause_automatique_choisie_suspend_les_invitations_sans_sanction(monkeyp
     monkeypatch.setattr(rp, "_journal", AsyncMock())
     g = _guild()
     assert asyncio.run(rp.sur_raid_detecte(_bot(db), g)) is True
-    kwargs = g.edit.await_args.kwargs
-    assert "invites_disabled_until" in kwargs and "dms_disabled_until" not in kwargs
-    fin = kwargs["invites_disabled_until"]
+    payload = g._state.http.edit_incident_actions.await_args.kwargs["payload"]
+    assert "invites_disabled_until" in payload and "dms_disabled_until" not in payload
+    fin = dt.datetime.fromisoformat(payload["invites_disabled_until"])
     assert dt.timedelta(minutes=29) < fin - discord.utils.utcnow() <= dt.timedelta(minutes=30)
     # Même vague : pas de seconde pause.
     assert asyncio.run(rp.sur_raid_detecte(_bot(db), g)) is False
@@ -128,3 +130,11 @@ def test_webhook_qui_inonde_est_supprime_sauf_createur_de_confiance(monkeypatch)
     for i in range(7):
         asyncio.run(rp.surveiller_webhook(bot, _message(mid=100 + i)))
     hook.delete.assert_not_awaited()
+
+
+def test_reprise_remet_les_deux_pauses_a_zero():
+    g = _guild()
+    ok, erreur = asyncio.run(rp.reprendre(g, raison="test"))
+    assert ok and not erreur
+    assert g._state.http.edit_incident_actions.await_args.kwargs["payload"] == {
+        "invites_disabled_until": None, "dms_disabled_until": None}
