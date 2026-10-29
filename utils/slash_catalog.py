@@ -59,7 +59,7 @@ logger = logging.getLogger("bot.slash-catalog")
 
 
 #: Racines des jeux : /play (solo, casino, quêtes), /duel, /race, /games (statistiques).
-GAME_ROOTS: tuple[str, ...] = ("play", "duel", "race", "games")
+GAME_ROOTS: tuple[str, ...] = ("play", "duel", "race", "games", "puzzle")
 
 
 @dataclass(frozen=True)
@@ -120,6 +120,8 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     # et six racines le dépassaient — automod et security_tools ne chargeaient plus.
     "protection": "Forbidden words, blacklist, allowed links and bots, anti-nuke trust, backups.",
     "play": "Play a quick game, an activity, a quest or a casino game.",
+    "puzzle": "Memory and logic games.",
+    "role buttons": "Reaction and button role panels.",
     "duel": "Challenge another member.",
     "race": "First to answer wins.",
     "staff": "Staff collaboration and moderation follow-up.",
@@ -190,7 +192,6 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("security panic-off", "panic off", "End the emergency lockdown."),
     _e("security panic-status", "panic status", "Show the emergency lockdown status."),
     _e("security score", "sentrixpro security", "Show the server security score."),
-    _e("security blacklist-sync", "syncbl", "Ban every member on the SentriX blacklist."),
 
     # More specific operations go into subgroups instead of 20 long /security-* names.
     _e("protection blacklist-remove", "blacklist-remove", "Remove a blocked word or phrase."),
@@ -219,6 +220,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     # 28/10/2026 — lot 2 du passage à 100 % « / » (sécurité).
     _e("protection lockdown", "lockdown-server", "Lock every text channel of the server."),
     _e("protection unlock", "unlock-server", "Unlock every text channel of the server."),
+    _e("protection blacklist-sync", "syncbl", "Ban every member on the SentriX blacklist."),
     _e("protection blacklist-unsync", "unsyncbl", "Unban members banned through the shared blacklist."),
     _e("protection guard join", "join-gate", "Filter suspicious joins."),
     _e("protection guard permissions", "permission-guard", "Watch dangerous permission grants."),
@@ -612,7 +614,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("play ghost", "ghost", "Find the door hiding the ghost."),
     _e("play ice", "ice", "Slide the penguin onto the hole."),
     _e("play lava", "lava", "Climb floors and cash out before the lava."),
-    _e("play minesweeper", "minesweeper", "Play minesweeper."),
+    _e("puzzle minesweeper", "minesweeper", "Play minesweeper."),
     _e("play potion", "potion", "Gather ingredients and brew potions."),
     _e("play rocket", "rocket", "Cash out before the rocket explodes."),
     _e("play safe", "safe", "Crack the safe code with clues."),
@@ -649,7 +651,7 @@ CATALOG: tuple[SlashEntry, ...] = (
     _e("play guess", "guess-number", "Guess a number from 1 to 100 as a group."),
     _e("play hangman", "hangman", "Play hangman."),
     _e("play math", "math-quiz", "Solve a quick maths question."),
-    _e("play memory", "memory", "Memorise a sequence of emojis."),
+    _e("puzzle memory", "memory", "Memorise a sequence of emojis."),
     _e("play doors", "doors", "Choose one of three doors to find the treasure."),
     _e("play emojiorder", "emojiorder", "Memorize three symbols and tap them in order."),
     _e("play bossfight", "bossfight", "Fight a boss with attacks, powers and shields."),

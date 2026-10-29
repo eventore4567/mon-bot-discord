@@ -154,32 +154,36 @@ def test_les_options_traduites_ont_une_description():
     assert sans == [], sans
 
 
-def test_les_commandes_jamais_utilisees_quittent_le_menu_mais_restent_tracees():
-    """Décision du 16/10/2026 (utils/unused_commands.py) : masquées du « / »,
-    utilisables en préfixe, et la raison est écrite dans RETIRED."""
+def test_seules_les_commandes_supprimees_restent_hors_du_menu():
+    """16/10/2026 : les commandes jamais utilisées quittaient le « / » et restaient
+    en « + ». 28/10/2026 : passage à 100 % « / » ; une masquée gardée revient dans
+    le menu, sinon le retrait du préfixe la perdrait. Seules les supprimées
+    (unused_commands.SUPPRIMEES) restent dehors, avec leur raison dans RETIRED."""
     from utils import unused_commands
 
     publiees = {e.source for e in sc.CATALOG}
-    assert not (publiees & unused_commands.MASQUEES)
+    assert not (publiees & unused_commands.SUPPRIMEES)
     for entree in sc._MASQUEES_DU_MENU:
+        assert (entree.source in unused_commands.SUPPRIMEES
+                or entree.source.split(" ")[0] in unused_commands.SUPPRIMEES), entree
         assert "unused" in sc.RETIRED[entree.source] or entree.source in sc.RETIRED
+    for revenue in ("pay", "buy", "sell", "shoprole add", "give-money", "reset-economy", "minesweeper"):
+        assert revenue in publiees, revenue
     # La modération et la sécurité ne sont jamais masquées, même sans usage.
     for garde in ("hackban", "tempban", "quarantine", "panic status", "antinuke-whitelist-add",
                   "clearwarnings", "verify-repair", "music skip", "giveaway end"):
         assert not unused_commands.masquee(garde), garde
 
 
-def test_exactement_132_routes_slash_sont_masquees_sans_compter_les_parametres():
-    """Le nombre demandé porte sur les feuilles du catalogue, pas sur les sources
+def test_les_routes_hors_menu_sont_celles_des_commandes_supprimees():
+    """Le nombre porte sur les feuilles du catalogue, pas sur les sources
     préfixées ni sur des valeurs comme le ``100`` accepté par ``/clear count``."""
     routes = {entry.path for entry in sc._MASQUEES_DU_MENU}
-    assert len(routes) == 132
+    # 132 masquées le 16/10/2026 ; les 79 gardées sont revenues le 28/10/2026.
+    assert len(routes) == 53
     assert len(routes) == len(sc._MASQUEES_DU_MENU)
-    # 40 → 42 le 28/10/2026 : /games season et /games setup n'avaient que le « + ».
-    assert len([entry for entry in sc.CATALOG if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 42
-    assert len([entry for entry in sc._MASQUEES_DU_MENU if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 26
-    # Les 68 routes de jeux restent enregistrées comme sources +, y compris
-    # celles masquées du catalogue slash. Seule la présentation change.
+    assert len([entry for entry in sc.CATALOG if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 49
+    assert len([entry for entry in sc._MASQUEES_DU_MENU if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]) == 19
     tous_les_jeux = [entry for entry in (*sc.CATALOG, *sc._MASQUEES_DU_MENU)
                      if entry.path.split()[0] in sc.GAME_ROOTS and ' ' in entry.path]
     assert len(tous_les_jeux) == 68

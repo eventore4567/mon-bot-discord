@@ -68,7 +68,9 @@ def test_new_menu_is_compact_and_within_discord_limits():
     masquees = [e for e in catalog.CATALOG if _unused.masquee(e.source)]
     visibles = len(paths) - len(masquees)
     assert visibles > 0, "le menu « / » ne doit pas être entièrement masqué"
-    assert len(paths) <= 400, f"catalogue hors de proportion : {len(paths)} routes"
+    # 400 → 450 le 28/10/2026 : passage à 100 % « / », chaque commande « + »
+    # gardée a sa route. Discord, lui, accepte 100 racines × 25 × 25.
+    assert len(paths) <= 450, f"catalogue hors de proportion : {len(paths)} routes"
     assert len(catalog.entries_by_root()) <= 100, "Discord plafonne à 100 racines"
     assert len({path.split()[0] for path in paths}) <= 100
     assert all(len(path.split()) <= 3 for path in paths)

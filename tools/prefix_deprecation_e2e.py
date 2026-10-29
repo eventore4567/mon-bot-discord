@@ -50,6 +50,13 @@ async def main() -> int:
     envois = await lancer(bot, guild, "+ping")
     check(not any("retirées" in str(j.get("content") or "") for j in envois), "même personne, même jour : pas de second avis")
 
+    # L'aide le dit en permanence, en tête, même quand l'avis du jour est déjà parti.
+    since = len(h.CALLS)
+    await lancer(bot, guild, "+help")
+    aide = h.visible_text(h.CALLS[since:])
+    check("seront retirées le 30 novembre 2026" in aide and "Centre d'aide" in aide,
+          "l'accueil de +help affiche l'avertissement de retrait", aide[:300])
+
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")
     sys.stdout.flush()
