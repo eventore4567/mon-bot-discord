@@ -314,8 +314,14 @@ async def ban(
     target: discord.Member,
     reason: str,
     dm_text: str | None = None,
+    delete_message_seconds: int = 0,
 ) -> SanctionOutcome:
-    """Pipeline complet du bannissement — voir _run_sanction_pipeline()."""
+    """Bannir en supprimant seulement la période de messages explicitement choisie."""
+    if delete_message_seconds not in (0, 900, 3600, 86400):
+        return SanctionOutcome(
+            executed=False,
+            validation_error="Période de suppression invalide : aucune, 15 minutes, 1 heure ou 24 heures.",
+        )
     return await _run_sanction_pipeline(
         bot,
         guild=guild,
@@ -324,7 +330,9 @@ async def ban(
         reason=reason,
         dm_text=dm_text,
         action="ban",
-        execute=lambda: guild.ban(target, reason=f"{actor} : {reason}", delete_message_seconds=0),
+        execute=lambda: guild.ban(
+            target, reason=f"{actor} : {reason}", delete_message_seconds=delete_message_seconds,
+        ),
     )
 
 
