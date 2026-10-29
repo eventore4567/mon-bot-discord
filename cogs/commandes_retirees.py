@@ -13,14 +13,17 @@ import logging
 
 from discord.ext import commands
 
-from utils.unused_commands import SUPPRIMEES
+from utils.unused_commands import OUTILS_PROPRIETAIRE_RETIRES, SUPPRIMEES
+
+#: Commandes jamais utilisées (28/10) + outils du propriétaire global (29/10).
+A_RETIRER = SUPPRIMEES | OUTILS_PROPRIETAIRE_RETIRES
 
 logger = logging.getLogger("bot.commandes-retirees")
 
 
 def retirer(bot: commands.Bot) -> list[str]:
     retirees = []
-    for nom in sorted(SUPPRIMEES, key=lambda n: -n.count(" ")):
+    for nom in sorted(A_RETIRER, key=lambda n: -n.count(" ")):
         commande = bot.get_command(nom)
         if commande is None or commande.qualified_name != nom:
             continue
@@ -44,9 +47,9 @@ class CommandesRetirees(commands.Cog):
             await asyncio.sleep(1)
         await asyncio.sleep(5)
         retirer(self.bot)
-        restantes = [n for n in SUPPRIMEES if self.bot.get_command(n) is not None
+        restantes = [n for n in A_RETIRER if self.bot.get_command(n) is not None
                      and self.bot.get_command(n).qualified_name == n]
-        logger.info("Commandes retirées : %s/%s absentes.", len(SUPPRIMEES) - len(restantes), len(SUPPRIMEES))
+        logger.info("Commandes retirées : %s/%s absentes.", len(A_RETIRER) - len(restantes), len(A_RETIRER))
 
     def cog_unload(self):
         if self._tache is not None:

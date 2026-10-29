@@ -223,3 +223,14 @@ SUPPRIMEES: frozenset[str] = frozenset({
     "footer", "say", "systemstatus", "logevent", "notifs-list", "notifs-status", "profilecard",
 })
 
+
+#: OUTILS DU PROPRIÉTAIRE GLOBAL retirés (Jayden, 29/10/2026 : « supprime les
+#: trucs owner pour le moment »), avant le passage à 100 % « / ». Les données
+#: restent en base (liste noire globale comprise) et le blocage des utilisateurs
+#: déjà en liste noire continue de s'appliquer ; seules les commandes partent.
+#: « footer » et « theme » étaient déjà dans SUPPRIMEES.
+OUTILS_PROPRIETAIRE_RETIRES: frozenset[str] = frozenset({
+    "bl", "blinfo", "editbl", "unbl",
+    "sync", "syncguild", "health", "reset-logs-all", "wipe-server",
+    "bot-leave", "bot-servers", "set-bot", "setstatus", "status-rotate",
+})

@@ -41,6 +41,11 @@ async def main() -> int:
     check(SUPPRIMEES <= MASQUEES, "toutes viennent des commandes jamais utilisées et déjà masquées")
     encore = [n for n in SUPPRIMEES if (c := bot.get_command(n)) is not None and c.qualified_name == n]
     check(not encore, "aucune commande supprimée n'est encore chargée", str(encore[:8]))
+    from utils.unused_commands import OUTILS_PROPRIETAIRE_RETIRES
+    restants = [n for n in OUTILS_PROPRIETAIRE_RETIRES if (c := bot.get_command(n)) is not None and c.qualified_name == n]
+    check(not restants, "les outils du propriétaire global sont retirés (29/10/2026)", str(restants))
+    check(any(getattr(chk, "__name__", "") == "global_blacklist_check" for chk in bot._checks),
+          "la liste noire globale reste appliquée sans ses commandes")
     perdues = [n for n in GARDEES if bot.get_command(n) is None]
     check(not perdues, "les commandes voisines sont toujours là", str(perdues))
 
