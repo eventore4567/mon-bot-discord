@@ -4472,16 +4472,19 @@ class AutoMod(commands.Cog, name="Automod"):
             if await self._bot_is_allowlisted(member.guild.id, member.id):
                 await self.add_risk_signal(member.guild, member.id, "bot_allowlisted_join", 5, reason="Bot allowlisté ajouté au serveur", target=member)
                 return
+            ajoute_par = await self.get_audit_actor(member.guild, discord.AuditLogAction.bot_add, member.id)
+            erreur = ""
             try:
                 await member.kick(reason="AutoMod : bot non autorisé")
                 await self.add_risk_signal(member.guild, member.id, "bot_suspect", 60, reason="Bot non approuvé ajouté au serveur", target=member)
-                e = embeds.log_entry(
-                    "🛡️ AutoMod - Antibot", config.COLOR_ERROR,
-                    cible=member, cible_label="🤖 Bot expulsé", raison="Bot non autorisé sur ce serveur",
-                )
-                await self.log_action(member.guild, e)
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as exc:
+                erreur = f"Discord a refusé l'expulsion ({exc.status}) : rôle de SentriX trop bas ou permission manquante."
+            await self._journal_arrivee(
+                member, titre="Bot non autorisé", protection="Anti-bots", regle="Bot absent de la liste autorisée",
+                motif="Bot ajouté sans être autorisé (`/protection bot-allow` pour l'autoriser).",
+                action="Bot expulsé", erreur=erreur,
+                extra={"Ajouté par": f"{ajoute_par.mention} · `{ajoute_par.id}`" if ajoute_par else "inconnu"},
+            )
             return
 
         # Le propriétaire et les vrais responsables « Gérer le serveur »
@@ -4544,18 +4547,18 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if conf["antiaccount"]:
             if account_age < 7:
+                erreur = ""
                 try:
                     await member.kick(reason="AutoMod : compte créé il y a moins de 7 jours")
                     await self.add_risk_signal(member.guild, member.id, "recent_account", 50, reason="Compte très récent expulsé", target=member)
-                    e = embeds.log_entry(
-                        "🛡️ AutoMod - Antiaccount", config.COLOR_ERROR,
-                        cible=member, cible_label="👤 Membre expulsé",
-                        raison="Compte créé il y a moins de 7 jours",
-                        extra={"📅 Âge du compte": f"{account_age} jour(s)"},
-                    )
-                    await self.log_action(member.guild, e)
-                except discord.HTTPException:
-                    pass
+                except discord.HTTPException as exc:
+                    erreur = f"Discord a refusé l'expulsion ({exc.status}) : rôle de SentriX trop bas ou permission manquante."
+                await self._journal_arrivee(
+                    member, titre="Compte trop récent", protection="Anti-comptes récents",
+                    regle="Compte créé il y a moins de 7 jours",
+                    motif=f"Compte créé <t:{int(member.created_at.timestamp())}:R> ({account_age} jour(s)).",
+                    action="Membre expulsé (il pourra revenir quand son compte aura 7 jours)", erreur=erreur,
+                )
                 return
 
         if conf["antiraid"]:
@@ -4676,6 +4679,31 @@ class AutoMod(commands.Cog, name="Automod"):
                     # Sinon l'alerte « raid lent » repartirait à chaque arrivée
                     # suivante tant que la fenêtre de dix minutes reste pleine.
                     self.slow_join_tracker.reinitialiser(member.guild.id)
+
+    async def _journal_arrivee(self, member: discord.Member, *, titre: str, protection: str, regle: str,
+                               motif: str, action: str, erreur: str = "", extra: dict | None = None) -> None:
+        """Carte complète d'une protection à l'arrivée : réussite ET échec sont journalisés
+        (avant le 29/10/2026, une expulsion refusée par Discord ne laissait aucune trace)."""
+        maintenant = int(time.time())
+        champs = {
+            "Statut": "Échec — l'action prévue n'a pas pu être appliquée" if erreur
+                      else "Action réussie",
+            # Le membre est souvent déjà expulsé : l'en-tête ne peut plus le résoudre.
+            "Compte": f"{member.mention} · `{member.id}` · créé <t:{int(member.created_at.timestamp())}:R>",
+            "Protection": protection,
+            "Règle": regle,
+            "Motif": motif,
+            "Date": f"<t:{maintenant}:F> · <t:{maintenant}:R>",
+            "Action": f"{action} — non appliquée" if erreur else action,
+            **(extra or {}),
+        }
+        if erreur:
+            champs["Erreur"] = erreur
+        e = embeds.log_entry(titre, config.COLOR_ERROR, cible=member, cible_label="Membre", extra=champs)
+        try:
+            await self.log_action(member.guild, e)
+        except Exception:
+            logger.exception("Journal d'arrivée AutoMod impossible guild=%s", member.guild.id)
 
     # ---------------------------------------------------------------- ANTI-NUKE
 

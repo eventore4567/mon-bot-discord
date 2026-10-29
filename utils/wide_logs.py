@@ -877,7 +877,7 @@ def narrative_body(
             return f"**{libelle or nom}** · {valeur}" if valeur else None
 
         lines.append(f"**{_field_value_exact(embed, 'Statut')}**")
-        incident = [ligne(n) for n in ("Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date")]
+        incident = [ligne(n) for n in ("Compte", "Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date")]
         if any(incident):
             lines.append("### Incident\n" + "\n".join(l for l in incident if l))
         contenu = _field_value_exact(embed, *alias["Contenu"])
@@ -892,7 +892,7 @@ def narrative_body(
         # Tout autre champ (Raid Protect : mesure, fin, webhook, créateur…) reste
         # visible : une information fournie n'est jamais perdue à la mise en page.
         connus = {_normalise_field_name(n) for n in (
-            "Statut", "Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date", "Contenu",
+            "Statut", "Compte", "Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date", "Contenu",
             "Message", "Action", "Sanction", "Durée", "Messages supprimés", "Niveau anti-spam",
             "Infractions (1 h)", "Récidive", "Membre", "Raison",
         )}
