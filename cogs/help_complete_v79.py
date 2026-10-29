@@ -22,7 +22,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from utils import embeds, unused_commands
+from utils import embeds, unused_commands, sentrix_emojis
 from utils import sentrix_panels as panels
 from utils.command_permissions import (
     ADMIN_COGS,
@@ -504,7 +504,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         for key in keys:
             emoji, label, description = v77._meta(key)
             total = len(grouped[key])
-            lignes.append(f"{emoji} **{label}** · {total}")
+            lignes.append(sentrix_emojis.traduire(f"{emoji} **{label}** · {total}"))
             options.append(discord.SelectOption(
                 label=f"{label} ({total})"[:100], value=key, description=str(description or "")[:100],
             ))
@@ -519,7 +519,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         container.add_item(discord.ui.ActionRow(categories))
 
         all_commands = discord.ui.Button(label="Toutes les commandes", style=discord.ButtonStyle.primary)
-        search = discord.ui.Button(label="Rechercher", style=discord.ButtonStyle.secondary, emoji="🔎")
+        search = discord.ui.Button(label="Rechercher", style=discord.ButtonStyle.secondary, emoji=sentrix_emojis.partiel("search"))
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
 
         async def open_all(interaction: discord.Interaction):
@@ -544,13 +544,13 @@ class SentriXHelpV79(discord.ui.LayoutView):
     def _build_list(self) -> None:
         if self.mode == "category" and self.category_key:
             emoji, label, description = v77._meta(self.category_key)
-            title = f"{emoji} {label}"
+            title = sentrix_emojis.traduire(f"{emoji} {label}")
             subtitle = description
         elif self.mode == "all":
-            title = "📚 Toutes les commandes"
+            title = sentrix_emojis.titre("file", "Toutes les commandes")
             subtitle = "Catalogue complet des commandes `+` et `/` enregistrées dans SentriX."
         else:
-            title = "🔎 Recherche"
+            title = sentrix_emojis.titre("search", "Recherche")
             subtitle = f"Résultats pour **{self.query or ''}**"
 
         pages = _chunks(self.rows)
@@ -588,10 +588,10 @@ class SentriXHelpV79(discord.ui.LayoutView):
                     )
                 )
 
-        home = discord.ui.Button(label="Accueil", style=discord.ButtonStyle.primary, emoji="↩️")
+        home = discord.ui.Button(label="Accueil", style=discord.ButtonStyle.primary, emoji=sentrix_emojis.partiel("return"))
         previous = discord.ui.Button(label="Précédent", style=discord.ButtonStyle.secondary, disabled=self.index <= 0)
         next_button = discord.ui.Button(label="Suivant", style=discord.ButtonStyle.secondary, disabled=self.index >= len(pages) - 1)
-        search = discord.ui.Button(label="Rechercher", style=discord.ButtonStyle.secondary, emoji="🔎")
+        search = discord.ui.Button(label="Rechercher", style=discord.ButtonStyle.secondary, emoji=sentrix_emojis.partiel("search"))
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
 
         async def go_home(interaction: discord.Interaction):
@@ -630,6 +630,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
             return self._build_home()
 
         emoji, category_label, _ = v77._meta(entry.category)
+        emoji = sentrix_emojis.traduire(emoji)
         usage_lines: list[str] = []
         slash_usage = _slash_usage(entry)
         prefix_usage = _prefix_usage(entry, self.prefix)
@@ -658,9 +659,9 @@ class SentriXHelpV79(discord.ui.LayoutView):
             )
         )
 
-        back = discord.ui.Button(label="Retour", style=discord.ButtonStyle.primary, emoji="↩️")
+        back = discord.ui.Button(label="Retour", style=discord.ButtonStyle.primary, emoji=sentrix_emojis.partiel("return"))
         home = discord.ui.Button(label="Accueil", style=discord.ButtonStyle.secondary)
-        search = discord.ui.Button(label="Rechercher", style=discord.ButtonStyle.secondary, emoji="🔎")
+        search = discord.ui.Button(label="Rechercher", style=discord.ButtonStyle.secondary, emoji=sentrix_emojis.partiel("search"))
         close = discord.ui.Button(label="Fermer", style=discord.ButtonStyle.danger)
 
         async def go_back(interaction: discord.Interaction):
