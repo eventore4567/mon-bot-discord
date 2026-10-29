@@ -928,7 +928,7 @@ class Moderation(commands.Cog):
         mp_label = (
             "Désactivé par le modérateur" if not envoyer_mp
             else "Désactivé dans /setup" if dm_text is None
-            else "Envoyé" if outcome.dm_sent
+            else "Envoyé" if getattr(outcome, "dm_sent", False)
             else "Non distribué (MP fermés ou indisponibles)"
         )
         message = f"{membre.mention} a été banni.{suffixes[delete_message_seconds]} MP : {mp_label}."
