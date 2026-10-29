@@ -72,12 +72,16 @@ class _BanPurgeSelect(discord.ui.Select):
 class _BanPurgeView(discord.ui.View):
     """Confirmation privée de /ban : Oui -> durée, Non -> ban sans purge."""
 
-    def __init__(self, cog, ctx: commands.Context, target: discord.Member, reason: str):
+    def __init__(
+        self, cog, ctx: commands.Context, target: discord.Member,
+        reason: str, *, envoyer_mp: bool = True,
+    ):
         super().__init__(timeout=150)
         self.cog = cog
         self.ctx = ctx
         self.target = target
         self.reason = reason
+        self.envoyer_mp = envoyer_mp
         self.actor_id = ctx.author.id
         self.guild_id = ctx.guild.id
         self.message = None
@@ -136,6 +140,7 @@ class _BanPurgeView(discord.ui.View):
             result = await self.cog._perform_ban(
                 self.ctx, self.target, self.reason,
                 delete_message_seconds=seconds, send_confirmation=False,
+                envoyer_mp=self.envoyer_mp,
             )
         except discord.Forbidden:
             result = "Bannissement impossible : vérifie les permissions de SentriX."
@@ -843,18 +848,23 @@ class Moderation(commands.Cog):
     # ---------------------------------------------------------------- BAN
 
     @commands.hybrid_command(name="ban", description="Bannir définitivement un membre du serveur.")
-    @app_commands.describe(membre="Membre à bannir", raison="Raison du bannissement")
+    @app_commands.describe(
+        membre="Membre à bannir",
+        raison="Raison du bannissement",
+        envoyer_mp="True : envoyer le MP de sanction avant le ban ; False : aucun MP",
+    )
     # AUTORISATION -> utils/access_matrix.py (matrice unique).
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def ban(
         self, ctx: commands.Context, membre: discord.Member, *,
         raison: str = "Aucune raison fournie",
+        envoyer_mp: bool = True,
     ):
         """Le slash ne bannit qu'après la réponse explicite du modérateur."""
         raison = clean_reason(raison)
         if ctx.interaction is not None:
-            view = _BanPurgeView(self, ctx, membre, raison)
+            view = _BanPurgeView(self, ctx, membre, raison, envoyer_mp=envoyer_mp)
             view.message = await ctx.send(
                 f"**Bannissement de {membre.display_name}**\n"
                 "Veux-tu aussi supprimer ses anciens messages ?",
@@ -866,6 +876,7 @@ class Moderation(commands.Cog):
         await self._ack(ctx)
         result = await self._perform_ban(
             ctx, membre, raison, delete_message_seconds=0, send_confirmation=True,
+            envoyer_mp=envoyer_mp,
         )
         if result != "success":
             await self._reply(ctx, result, ephemere=True)
@@ -873,15 +884,19 @@ class Moderation(commands.Cog):
     async def _perform_ban(
         self, ctx: commands.Context, membre: discord.Member, raison: str, *,
         delete_message_seconds: int, send_confirmation: bool,
+        envoyer_mp: bool = True,
     ) -> str:
-        """Unique exécution métier, quelle que soit l'option de suppression retenue."""
+        """Unique exécution métier ; le MP est facultatif et envoyé AVANT le ban."""
         if delete_message_seconds not in (0, 900, 3600, 86400):
             return "Période invalide : choisis aucune, 15 minutes, 1 heure ou 24 heures."
         if self._sanction_duplicate(ctx, "ban", membre.id):
             return "Cette sanction vient déjà d'être lancée sur ce membre."
 
-        template = await self._get_sanction_dm_template(ctx.guild.id, "ban")
         dm_text = None
+        if envoyer_mp:
+            template = await self._get_sanction_dm_template(ctx.guild.id, "ban")
+        else:
+            template = None
         if template is not None:
             dm_text = self._render_sanction_dm_text(
                 template,
@@ -910,11 +925,20 @@ class Moderation(commands.Cog):
             3600: " Ses messages de la dernière heure ont été supprimés.",
             86400: " Ses messages des 24 dernières heures ont été supprimés.",
         }
-        message = f"{membre.mention} a été banni.{suffixes[delete_message_seconds]}"
+        mp_label = (
+            "Désactivé par le modérateur" if not envoyer_mp
+            else "Désactivé dans /setup" if dm_text is None
+            else "Envoyé" if getattr(outcome, "dm_sent", False)
+            else "Non distribué (MP fermés ou indisponibles)"
+        )
+        message = f"{membre.mention} a été banni.{suffixes[delete_message_seconds]} MP : {mp_label}."
         try:
             await self.log_sanction(
                 ctx, "ban", membre, raison, case_number=outcome.case_number,
-                extra_fields={"Messages supprimés": labels[delete_message_seconds]},
+                extra_fields={
+                    "Messages supprimés": labels[delete_message_seconds],
+                    "Message privé": mp_label,
+                },
             )
         except Exception:
             logger.exception("Le ban a été exécuté mais son log a échoué.")

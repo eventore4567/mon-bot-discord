@@ -30,12 +30,13 @@ class BanPurgeUiTests(unittest.IsolatedAsyncioTestCase):
         cog = Moderation.__new__(Moderation)
         cog.bot = SimpleNamespace()
 
-        await Moderation.ban.callback(cog, ctx, target, raison="spam")
+        await Moderation.ban.callback(cog, ctx, target, raison="spam", envoyer_mp=False)
 
         ctx.send.assert_awaited_once()
         self.assertIs(ctx.send.await_args.kwargs["ephemeral"], True)
         view = ctx.send.await_args.kwargs["view"]
         self.assertIsInstance(view, _BanPurgeView)
+        self.assertIs(view.envoyer_mp, False)
         self.assertEqual({b.label for b in view.children}, {"Oui", "Non", "Annuler"})
 
     async def test_oui_montre_les_durees_sans_bannir(self):
@@ -68,8 +69,27 @@ class BanPurgeUiTests(unittest.IsolatedAsyncioTestCase):
 
         cog._perform_ban.assert_awaited_once_with(
             ctx, target, "spam", delete_message_seconds=0, send_confirmation=False,
+            envoyer_mp=True,
         )
         interaction.edit_original_response.assert_awaited_once()
+
+    async def test_choix_mp_false_est_transmis_sans_envoi(self):
+        ctx, target = _context()
+        cog = Mock()
+        cog._perform_ban = AsyncMock(return_value="Membre banni.")
+        view = _BanPurgeView(cog, ctx, target, "spam", envoyer_mp=False)
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(edit_message=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        no = next(b for b in view.children if b.label == "Non")
+        await no.callback(interaction)
+
+        cog._perform_ban.assert_awaited_once_with(
+            ctx, target, "spam", delete_message_seconds=0,
+            send_confirmation=False, envoyer_mp=False,
+        )
 
     async def test_annuler_ne_bannit_pas(self):
         ctx, target = _context()
