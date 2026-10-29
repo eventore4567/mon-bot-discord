@@ -154,7 +154,8 @@ def test_empty_active_state_has_a_dedicated_message():
     carte = giveaway_center.GiveawayCenter._carte_aucun()
     from utils import sentrix_panels as panels
     texte = panels.texte_complet(carte)
-    assert "Aucun giveaway en cours" in texte and "+giveaway create" in texte
+    # Le « + » est retiré le 30/11/2026 : la carte cite la route « / » (28/10/2026).
+    assert "Aucun giveaway en cours" in texte and "/giveaway create" in texte
 
 def test_giveaway_list_no_longer_steals_canonical_giveaways_alias():
     from cogs import common_command_names

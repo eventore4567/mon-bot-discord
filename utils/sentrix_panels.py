@@ -697,9 +697,73 @@ def _chemins_slash() -> set[str]:
     return _CHEMINS_SLASH
 
 
+_SOURCES_SLASH: dict[str, str] | None = None
+
+
+def _sources_slash() -> dict[str, str]:
+    """Nom préfixé -> chemin « / » publié (utils/slash_catalog.py)."""
+    global _SOURCES_SLASH
+    if _SOURCES_SLASH is None:
+        try:
+            from utils import slash_catalog
+
+            _SOURCES_SLASH = {e.source: e.path for e in slash_catalog.CATALOG}
+        except Exception:  # noqa: BLE001
+            _SOURCES_SLASH = {}
+    return _SOURCES_SLASH
+
+
+#: Vrai pendant l'affichage d'un HISTORIQUE (trace d'une action) : la commande
+#: citée est celle qui a été tapée, la convertir en « / » fausserait le relevé.
+COMMANDES_LITTERALES: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "sentrix_commandes_litterales", default=False
+)
+
+
+@contextlib.contextmanager
+def commandes_litterales():
+    jeton = COMMANDES_LITTERALES.set(True)
+    try:
+        yield
+    finally:
+        COMMANDES_LITTERALES.reset(jeton)
+
+
+def _route_slash(commande: str) -> tuple[str, str] | None:
+    """« +shoprole add @VIP 500 » -> (« shop role-add », « @VIP 500 »), ou None."""
+    if not commande.startswith("+") or COMMANDES_LITTERALES.get():
+        return None
+    mots = commande[1:].split(" ")
+    for n in range(min(3, len(mots)), 0, -1):
+        chemin = _sources_slash().get(" ".join(mots[:n]).casefold())
+        if chemin:
+            return chemin, " ".join(mots[n:])
+    return None
+
+
+def en_slash(commande: str) -> str:
+    """« +shoprole add @VIP 500 » -> « /shop role-add @VIP 500 ».
+
+    Le « + » est retiré le 30/11/2026 (cogs/prefix_deprecation.py) : un texte qui
+    cite une commande montre sa route « / » dès qu'elle est publiée. Sans route
+    publiée, le texte reste tel quel (il marche encore)."""
+    route = _route_slash(commande)
+    if route is None:
+        return commande
+    chemin, reste = route
+    return f"/{chemin}" + (f" {reste}" if reste else "")
+
+
+_CODE_PREFIXE = _re.compile(r"^\+[a-z][a-z0-9-]{1,31}(?: \S.*)?$", _re.S)
+
+
 def _citer(match: "_re.Match[str]") -> str:
     """`/play trivia` en entier quand c'est un chemin publié ; sinon le premier mot."""
     tete, suite = match.group(1), match.group(2) or ""
+    route = _route_slash(tete + suite)
+    if route is not None:
+        chemin, reste = route
+        return f"`/{chemin}`" + (f" {reste}" if reste else "")
     if tete.startswith("/") and suite:
         mots = suite.split()
         for n in range(len(mots), 0, -1):
@@ -720,6 +784,9 @@ def commandes_en_code(texte: str) -> str:
     morceaux = str(texte).split("`")
     for i in range(0, len(morceaux), 2):  # indices pairs : hors des `…`
         morceaux[i] = _COMMANDE_CITEE.sub(_citer, morceaux[i])
+    for i in range(1, len(morceaux) - 1, 2):  # dans les `…` : « `+shoprole add @VIP 500` »
+        if _CODE_PREFIXE.match(morceaux[i]):
+            morceaux[i] = en_slash(morceaux[i])
     return "`".join(morceaux)
 
 
