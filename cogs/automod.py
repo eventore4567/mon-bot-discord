@@ -4680,6 +4680,32 @@ class AutoMod(commands.Cog, name="Automod"):
                     # suivante tant que la fenêtre de dix minutes reste pleine.
                     self.slow_join_tracker.reinitialiser(member.guild.id)
 
+    async def _journal_securite(self, guild: discord.Guild, *, titre: str, auteur, protection: str,
+                                regle: str, motif: str, action: str, echec: bool = False,
+                                extra: dict | None = None) -> discord.Embed:
+        """Carte complète d'une modification dangereuse du serveur (anti-nuke, vanity,
+        prune, permissions) : statut, auteur, règle, motif, date, action réelle."""
+        maintenant = int(time.time())
+        auteur_id = getattr(auteur, "id", auteur)
+        champs = {
+            "Statut": "Échec — l'action prévue n'a pas pu être appliquée" if echec else "Action réussie",
+            "Compte": (f"<@{auteur_id}> · `{auteur_id}` (auteur suspecté)" if auteur_id
+                       else "Auteur introuvable dans le journal d'audit"),
+            "Protection": protection,
+            "Règle": regle,
+            "Motif": motif,
+            "Date": f"<t:{maintenant}:F> · <t:{maintenant}:R>",
+            "Action": action,
+            **(extra or {}),
+        }
+        e = embeds.log_entry(titre, config.COLOR_ERROR, cible=auteur if hasattr(auteur, "id") else None,
+                             cible_label="Membre", extra=champs)
+        try:
+            await self.log_action(guild, e)
+        except Exception:
+            logger.exception("Journal de sécurité impossible guild=%s", guild.id)
+        return e
+
     async def _journal_arrivee(self, member: discord.Member, *, titre: str, protection: str, regle: str,
                                motif: str, action: str, erreur: str = "", extra: dict | None = None) -> None:
         """Carte complète d'une protection à l'arrivée : réussite ET échec sont journalisés
@@ -4789,13 +4815,11 @@ class AutoMod(commands.Cog, name="Automod"):
                     action_taken = "expulsé du serveur (le bot n'a pas la permission de bannir)"
                 except discord.Forbidden:
                     action_taken = "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
-        e = embeds.log_entry(
-            "🚨 ANTI-NUKE DÉCLENCHÉ", config.COLOR_ERROR,
-            cible=member or actor_id, cible_label="👤 Auteur suspecté",
-            raison=reason,
-            extra={"⚔️ Action prise": action_taken, "🔗 ID": f"`{actor_id}`"},
+        e = await self._journal_securite(
+            guild, titre="Anti-nuke déclenché", auteur=member or actor_id, protection="Anti-nuke",
+            regle=f"Plus de {NUKE_ACTION_THRESHOLD - 1} actions destructrices en peu de temps", motif=reason,
+            action=f"Auteur {action_taken}", echec="impossible de le sanctionner" in str(action_taken),
         )
-        await self.log_action(guild, e)
         try:
             owner = guild.owner or await guild.fetch_member(guild.owner_id)
             if owner:
@@ -4846,26 +4870,17 @@ class AutoMod(commands.Cog, name="Automod"):
         if before_code and before_code != after_code:
             try:
                 await after.edit(vanity_code=before_code, reason="SentriX vanity guard : restauration du vanity URL")
-                await self.log_action(
-                    after,
-                    embeds.log_entry(
-                        "🔗 Vanity URL restauré",
-                        config.COLOR_WARNING,
-                        cible=actor,
-                        cible_label="Auteur suspecté",
-                        raison=f"`{after_code or 'aucun'}` → `{before_code}`",
-                    ),
+                await self._journal_securite(
+                    after, titre="Lien d'invitation personnalisé restauré", auteur=actor,
+                    protection="Garde du lien personnalisé", regle="Modification du lien par un compte non autorisé",
+                    motif=f"`{after_code or 'aucun'}` remis en `{before_code}`", action="Ancien lien restauré",
                 )
             except (discord.Forbidden, discord.HTTPException, TypeError):
-                await self.log_action(
-                    after,
-                    embeds.log_entry(
-                        "⚠️ Vanity URL modifié",
-                        config.COLOR_ERROR,
-                        cible=actor,
-                        cible_label="Auteur suspecté",
-                        raison="SentriX a détecté la modification mais Discord a refusé la restauration automatique.",
-                    ),
+                await self._journal_securite(
+                    after, titre="Lien d'invitation personnalisé modifié", auteur=actor,
+                    protection="Garde du lien personnalisé", regle="Modification du lien par un compte non autorisé",
+                    motif=f"`{before_code}` changé en `{after_code or 'aucun'}`",
+                    action="Restauration refusée par Discord : remettez le lien à la main", echec=True,
                 )
 
     @commands.Cog.listener()
@@ -4886,15 +4901,12 @@ class AutoMod(commands.Cog, name="Automod"):
                 signal="member_prune",
                 points=90,
             )
-            await self.log_action(
-                guild,
-                embeds.log_entry(
-                    "🚨 Prune de membres détecté",
-                    config.COLOR_ERROR,
-                    cible=actor,
-                    cible_label="Auteur",
-                    raison="Un prune a été vu dans le journal d'audit Discord.",
-                ),
+            nombre = getattr(getattr(entry, "extra", None), "members_removed", None)
+            await self._journal_securite(
+                guild, titre="Purge de membres détectée", auteur=actor, protection="Garde des purges",
+                regle="Purge de membres inactifs (journal d'audit)",
+                motif=f"{nombre} membres retirés." if nombre else "Purge vue dans le journal d'audit.",
+                action="Auteur signalé au moteur de risque (sanction seulement si le seuil anti-nuke est atteint)",
             )
 
     @commands.Cog.listener()
@@ -4920,16 +4932,13 @@ class AutoMod(commands.Cog, name="Automod"):
             action = "Permissions retirées"
         except (discord.Forbidden, discord.HTTPException):
             action = "Retrait impossible"
-        await self.log_action(
-            role.guild,
-            embeds.log_entry(
-                "🛡️ Garde permissions",
-                config.COLOR_WARNING,
-                cible=actor,
-                cible_label="Auteur suspecté",
-                raison="Rôle créé avec permissions dangereuses",
-                extra={"Rôle": f"{role.mention} (`{role.id}`)", "Permissions": ", ".join(dangerous), "Action": action},
-            ),
+        await self._journal_securite(
+            role.guild, titre="Rôle à permissions dangereuses", auteur=actor, protection="Garde des permissions",
+            regle="Création d'un rôle avec des permissions dangereuses", motif=", ".join(dangerous),
+            action="Permissions dangereuses retirées du rôle" if action == "Permissions retirées"
+                   else "Retrait refusé par Discord : vérifiez le rôle à la main",
+            echec=action != "Permissions retirées",
+            extra={"Rôle": f"{role.mention} · `{role.id}`"},
         )
 
     @commands.Cog.listener()
@@ -5006,16 +5015,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 restored = "oui"
             except (discord.Forbidden, discord.HTTPException):
                 restored = "non"
-            await self.log_action(
-                after.guild,
-                embeds.log_entry(
-                    "🛡️ Permissions dangereuses bloquées",
-                    config.COLOR_WARNING,
-                    cible=actor,
-                    cible_label="Auteur suspecté",
-                    raison=reason,
-                    extra={"Rôle": f"{after.mention} (`{after.id}`)", "Permissions ajoutées": ", ".join(gained), "Restauré": restored},
-                ),
+            await self._journal_securite(
+                after.guild, titre="Permissions dangereuses bloquées", auteur=actor,
+                protection="Garde des permissions", regle="Ajout de permissions dangereuses à un rôle",
+                motif=f"{reason} : {', '.join(gained)}",
+                action="Anciennes permissions du rôle restaurées" if restored == "oui"
+                       else "Restauration refusée par Discord : vérifiez le rôle à la main",
+                echec=restored != "oui",
+                extra={"Rôle": f"{after.mention} · `{after.id}`"},
             )
         if await self.record_nuke_action(after.guild, actor.id):
             await self.punish_nuker(after.guild, actor.id, reason)
