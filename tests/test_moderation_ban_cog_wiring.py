@@ -89,6 +89,19 @@ class BanCogWiringTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited()
         cog.log_action.assert_awaited_once()
 
+    async def test_envoyer_mp_false_bannit_sans_contacter_le_membre(self):
+        cog = _make_cog()
+        ctx, guild, actor, target = _fake_ctx()
+
+        result = await cog._perform_ban(
+            ctx, target, "spam",
+            delete_message_seconds=0, send_confirmation=False, envoyer_mp=False,
+        )
+
+        guild.ban.assert_awaited_once()
+        target.send.assert_not_awaited()
+        self.assertIn("MP : Désactivé par le modérateur", result)
+
     async def test_refus_de_hierarchie_n_appelle_jamais_guild_ban(self):
         cog = _make_cog()
         ctx, guild, actor, target = _fake_ctx(actor_top=1, target_top=20)
