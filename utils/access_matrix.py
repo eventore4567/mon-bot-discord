@@ -395,7 +395,7 @@ CATEGORY_COMMANDS: dict[str, frozenset[str]] = {
     "securite": frozenset({
         # Classees explicitement : elles tombaient en fail-closed, donc admin
         # par accident plutot que par declaration.
-        "whitelist", "unwhitelist",
+        "whitelist", "unwhitelist", "raidprotect",
         "antispam", "antilink", "antilink-strict", "antiinvite", "antimention", "anticaps",
         "antiemoji", "antiraid", "antibot", "antiaccount", "antiscam",
         "antinuke", "antinuke-whitelist-add", "antinuke-whitelist-remove",

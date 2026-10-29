@@ -195,6 +195,16 @@ def _expected(name: str, tier: str, persona: str, module_off: bool, bot_missing:
     """(autorisé|refusé, cause attendue), dans l'ordre réel des gardes : identité/owner,
     module, permission de la persona, puis permission du bot."""
     from cogs.permission_setup_hardening_v65 import CATEGORY_REQUIRED_PERMISSION
+    from cogs.content_filter_policy import _OWNER_ONLY_WHITELIST_COMMANDS
+    # Whitelists et exemptions de sécurité : garde stricte de content_filter_policy,
+    # propriétaire du serveur Discord SEUL — ni admin, ni propriétaire de SentriX.
+    # Ces commandes étaient cachées (fusionnées) donc jamais auditées avant leur
+    # publication en « / » le 28/10/2026.
+    if name in _OWNER_ONLY_WHITELIST_COMMANDS:
+        if persona == "proprietaire-sentrix":
+            return ("refuse", "owner-serveur")
+        if not module_off and persona != "proprietaire-serveur":
+            return ("refuse", "owner-serveur")
     if tier == "owner-global":
         if persona != "proprietaire-sentrix":
             return ("refuse", "owner-sentrix")

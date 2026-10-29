@@ -383,12 +383,14 @@ class Trace(commands.Cog):
                 )
                 for s in suites
             ]))
-        await panels.envoyer(ctx, panels.Panneau(
-            titre=f"Trace {row['ref']}",
-            sous_titre="La même référence figure sur la réponse et sur la carte de log.",
-            sections=sections,
-            kind="info",
-        ))
+        # Un relevé : « +warn » est ce qui a été tapé, pas une consigne à convertir en « / ».
+        with panels.commandes_litterales():
+            await panels.envoyer(ctx, panels.Panneau(
+                titre=f"Trace {row['ref']}",
+                sous_titre="La même référence figure sur la réponse et sur la carte de log.",
+                sections=sections,
+                kind="info",
+            ))
 
 
 async def setup(bot: commands.Bot) -> None:

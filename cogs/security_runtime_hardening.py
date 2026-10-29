@@ -32,6 +32,9 @@ from utils import checks, helpers
 from utils.security_duplicate_window import DuplicateMessageWindow
 
 logger = logging.getLogger("bot.security.hardening")
+
+#: Pause des invitations pendant le mode PANIC (Discord plafonne à 24 h).
+PANIC_PAUSE_MINUTES = 6 * 60
 _COG_NAME = "SecurityHardening"
 
 DANGEROUS_ATTACHMENT_EXTENSIONS = {
@@ -606,6 +609,27 @@ class SecurityHardening(commands.Cog):
                 else:
                     failed.append(channel.mention)
 
+            # 29/10/2026 : les salons verrouillés n'empêchaient pas le raid de continuer
+            # à ARRIVER. Pause native Discord des invitations (Raid Protect), levée
+            # par +panic off ou automatiquement par Discord à l'échéance.
+            pause_fin = None
+            pause_erreur = ""
+            if not guild.invites_paused():
+                try:
+                    from cogs import raid_protect
+
+                    ok, pause_fin, pause_erreur = await raid_protect.mettre_en_pause(
+                        guild, PANIC_PAUSE_MINUTES, invitations=True, raison=f"mode PANIC activé par {ctx.author}",
+                    )
+                    if ok:
+                        state["_invitations"] = "panic"
+                        await self.bot.db.execute(
+                            "UPDATE panic_snapshots SET state_json = ? WHERE guild_id = ?",
+                            (json.dumps(state, separators=(",", ":")), guild.id),
+                        )
+                except Exception:
+                    logger.exception("Pause des invitations PANIC impossible guild=%s", guild.id)
+
             await self._security_event(
                 guild.id,
                 "panic_on",
@@ -616,6 +640,10 @@ class SecurityHardening(commands.Cog):
             embed = _embed_securite('PANIC ACTIVÉ', "Le serveur est placé en mode d'urgence. Les protections recommandées sont actives et l'écriture @everyone a été verrouillée dans les salons textuels.", kind='danger')
             embed.add_field(name="Salons verrouillés", value=str(locked), inline=True)
             embed.add_field(name="Échecs", value=str(len(failed)), inline=True)
+            if pause_fin is not None:
+                embed.add_field(name="Invitations", value=f"en pause jusqu'à <t:{int(pause_fin.timestamp())}:t> (levée par +panic off)", inline=False)
+            elif pause_erreur:
+                embed.add_field(name="Invitations", value=f"non mises en pause : {pause_erreur}", inline=False)
             missing = result.get("missing_permissions", [])
             if missing:
                 embed.add_field(
@@ -625,7 +653,7 @@ class SecurityHardening(commands.Cog):
                 )
             if failed:
                 embed.add_field(name="Salons non verrouillés", value=" ".join(failed)[:1024], inline=False)
-            embed.set_footer(text="SentriX • +panic off pour restaurer exactement les anciens overwrites")
+            embed.set_footer(text="SentriX • /security panic-off rétablit exactement les permissions d'avant")
             await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
     async def _deactivate_panic(self, ctx: commands.Context) -> None:
@@ -663,6 +691,16 @@ class SecurityHardening(commands.Cog):
                     restored += 1
                 except (discord.Forbidden, discord.HTTPException):
                     failed.append(channel.mention)
+
+            # Les invitations mises en pause PAR le mode PANIC sont rétablies ; une pause
+            # posée avant (par l'admin ou Discord) n'est pas touchée.
+            if state.get("_invitations") == "panic":
+                try:
+                    from cogs import raid_protect
+
+                    await raid_protect.reprendre(guild, raison=f"fin du mode PANIC par {ctx.author}")
+                except Exception:
+                    logger.exception("Reprise des invitations PANIC impossible guild=%s", guild.id)
 
             # Si Discord refuse encore certains salons, on garde le snapshot actif pour
             # permettre un second +panic off après correction de la hiérarchie/permissions.

@@ -39,7 +39,7 @@ import logging
 import re
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field as _champ
 from datetime import timedelta
 from urllib.parse import urlsplit
 
@@ -597,6 +597,13 @@ class _Incident:
     #: citée par les suites du staff (« Suite de l'incident AutoMod SX-… »).
     ref: str = ""
     author_id: int = 0
+    #: Carte de log complète (29/10/2026) : heure réelle, message, contenu brut
+    #: (neutralisé à l'affichage), suppression réussie ou non, durée de sanction.
+    created_at: float = _champ(default_factory=time.time)
+    message_id: int = 0
+    raw_content: str = ""
+    deleted_ok: bool | None = None
+    duration_s: int | None = None
 
 
 def _normalize_blocked_link_rule(value: str) -> str:
@@ -891,6 +898,16 @@ _AUTOMOD_LOG_TITLE_LABELS = (
 )
 
 
+def _contenu_brut(message) -> str:
+    """Texte du message et noms des pièces jointes (jamais leurs URL signées)."""
+    contenu = str(getattr(message, "content", "") or "").strip()
+    noms = [str(getattr(a, "filename", "") or "") for a in list(getattr(message, "attachments", ()) or ())[:5]]
+    noms = [n for n in noms if n]
+    if noms:
+        contenu = "\n".join(part for part in (contenu, "Pièces jointes : " + ", ".join(noms)) if part)
+    return contenu
+
+
 def _automod_message_preview(message_or_text, *, limit: int = 900) -> str:
     """Bloc Message lisible pour les logs AutoMod, sans jamais dépasser Discord."""
     if hasattr(message_or_text, "content"):
@@ -982,10 +999,16 @@ def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
         used.add(protection[0])
     ordered.append(("Protection", protection_value[:1024], True))
 
-    sanction_value = sanction[2] if sanction else _automod_default_sanction(log_type, title, protection_value)
+    # Une carte au statut explicite (utils/automod_incident_card, Raid Protect)
+    # dit elle-même ce qui a été fait : ne pas inventer une sanction par défaut.
+    a_un_statut = any(name.casefold().strip() == "statut" for name, _v, _i in fields)
+    sanction_value = sanction[2] if sanction else (
+        "" if a_un_statut else _automod_default_sanction(log_type, title, protection_value)
+    )
     if sanction:
         used.add(sanction[0])
-    ordered.append(("Sanction", sanction_value[:1024], True))
+    if sanction_value:
+        ordered.append(("Sanction", sanction_value[:1024], True))
 
     if reason:
         used.add(reason[0])
@@ -1203,53 +1226,14 @@ class _MessageModifie(_MessageDApplication):
 
 
 
-#: Actifs sur tout serveur qui n'a jamais réglé ses protections (Jayden, 27/10/2026).
-PROTECTIONS_PAR_DEFAUT = {"antispam": 1, "antiraid": 1}
-_MIGRATION_PROTECTIONS = "automod_antispam_antiraid_default_v1"
-
-
 def _reglages_par_defaut() -> dict:
-    """Une ligne complète (toutes les colonnes lues par les filtres), défauts appliqués."""
+    """Un serveur jamais configuré ne reçoit aucune protection sans accord."""
     from cogs.setup_control_center import AUTOMOD
 
     ligne = {champ: 0 for champ, _libelle in AUTOMOD}
     ligne.update(antilink_strict=0, escalation=0)
-    ligne.update(PROTECTIONS_PAR_DEFAUT)
     return ligne
 
-
-async def activer_protections_par_defaut(bot) -> int:
-    """Une seule fois : anti-spam + anti-raid sur les serveurs jamais configurés.
-
-    « Jamais configuré » = toutes les protections à 0 ET le module Sécurité pas
-    coupé explicitement. Un serveur qui a choisi ses filtres n'est pas touché.
-    """
-    from cogs import setup_v2_core
-    from cogs.setup_control_center import AUTOMOD
-
-    db = bot.db
-    await setup_v2_core.ensure_schema(bot)
-    await db.execute(
-        "CREATE TABLE IF NOT EXISTS sentrix_migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
-    )
-    if await db.fetchone("SELECT name FROM sentrix_migrations WHERE name=?", (_MIGRATION_PROTECTIONS,)):
-        return 0
-    toutes_a_zero = " AND ".join(f"COALESCE({champ}, 0) = 0" for champ, _libelle in AUTOMOD)
-    cibles = await db.fetchall(
-        f"SELECT guild_id FROM automod_settings WHERE {toutes_a_zero} AND guild_id NOT IN "
-        "(SELECT guild_id FROM module_settings WHERE module='security' AND enabled=0)"
-    ) or ()
-    for row in cibles:
-        await db.execute(
-            "UPDATE automod_settings SET antispam=1, antiraid=1 WHERE guild_id=?", (int(row["guild_id"]),)
-        )
-    await db.execute(
-        "INSERT INTO sentrix_migrations (name, applied_at) VALUES (?, ?) ON CONFLICT(name) DO NOTHING",
-        (_MIGRATION_PROTECTIONS, int(time.time())),
-    )
-    logger.info("Protections par défaut : anti-spam + anti-raid activés sur %s serveur(s) jamais configuré(s).",
-                len(cibles))
-    return len(cibles)
 
 class AutoMod(commands.Cog, name="Automod"):
     def __init__(self, bot: commands.Bot):
@@ -1369,10 +1353,6 @@ class AutoMod(commands.Cog, name="Automod"):
         return row is not None
 
     async def cog_load(self) -> None:
-        try:
-            await activer_protections_par_defaut(self.bot)
-        except Exception:
-            logger.exception("Migration des protections par défaut impossible")
         await self._raid_recovery.ensure_schema()
         self._raid_recovery_task = asyncio.create_task(
             self._run_raid_recovery(),
@@ -1785,6 +1765,7 @@ class AutoMod(commands.Cog, name="Automod"):
         log_type: str = "automod",
         *,
         suites: discord.ui.View | None = None,
+        file: discord.File | None = None,
     ):
         # Point unique : TOUS les événements AutoMod utilisent le même rendu
         # AutoMod Manage. helpers.send_log -> log_service -> send_wide_log ajoute
@@ -1796,7 +1777,7 @@ class AutoMod(commands.Cog, name="Automod"):
             view = helpers._derive_log_view(styled) or discord.ui.View(timeout=None)
             for item in list(suites.children):
                 view.add_item(item)
-        await helpers.send_log(self.bot, guild, log_type, styled, view=view)
+        await helpers.send_log(self.bot, guild, log_type, styled, view=view, file=file)
 
     # ---------------------------------------------------------------- CACHES
 
@@ -2644,33 +2625,53 @@ class AutoMod(commands.Cog, name="Automod"):
         stats_by_filter = {r["filter_name"]: r["c"] for r in stats_rows}
         total_24h = sum(stats_by_filter.values())
 
-        e = embeds.brand(
+        active = [
+            label for field, label in AUTOMOD_TOGGLE_LABELS.items()
+            if conf and conf[field]
+        ]
+        inactive = [
+            label for field, label in AUTOMOD_TOGGLE_LABELS.items()
+            if not conf or not conf[field]
+        ]
+        e = embeds.neutral(
             "État de l'AutoMod",
-            f"**{total_24h}** action(s) déclenchée(s) sur les dernières 24h. "
-            f"Escalade automatique : {'ACTIVE' if (conf and conf['escalation']) else 'INACTIVE'} "
-            f"(`/automod-escalation`) — les filtres de contenu ne sanctionnent jamais seuls.",
+            f"{len(active)}/{len(AUTOMOD_TOGGLE_LABELS)} filtres configurés · "
+            f"{total_24h} action(s) sur 24 h · "
+            f"Escalade : {'active' if conf and conf['escalation'] else 'inactive'}",
         )
-        lines = []
-        for field, label in AUTOMOD_TOGGLE_LABELS.items():
-            value = conf[field] if conf else 0
-            state = "ACTIF" if value else "INACTIF"
-            count = stats_by_filter.get(field, 0)
-            count_txt = f" — `{count}` déclenchement(s)/24h" if count else ""
-            lines.append(f"**{label}** : {state}{count_txt}")
-        dataset_count = sum(self.moderation_dataset.source_counts.values())
-        dataset_state = "ACTIF" if self.moderation_dataset.loaded else "ERREUR DE CHARGEMENT"
-        dataset_hits = stats_by_filter.get("multilingual_toxicity", 0)
-        dataset_hits_text = f" — `{dataset_hits}` déclenchement(s)/24h" if dataset_hits else ""
-        lines.insert(
-            0,
-            f"**Filtre multilingue ({len(self.moderation_dataset.languages)} langues, "
-            f"{dataset_count} entrées, mute 10 min)** : {dataset_state}{dataset_hits_text}",
+        e.add_field(
+            name="Activés",
+            value=", ".join(active)[:1024] or "Aucun filtre",
+            inline=False,
         )
-        e.add_field(name="Filtres", value="\n".join(lines), inline=False)
+        e.add_field(
+            name="Désactivés",
+            value=", ".join(inactive)[:1024] or "Aucun",
+            inline=False,
+        )
+        events = sorted(
+            ((str(name), int(count)) for name, count in stats_by_filter.items() if count),
+            key=lambda item: (-item[1], item[0]),
+        )
+        if events:
+            labels = dict(AUTOMOD_TOGGLE_LABELS)
+            e.add_field(
+                name="Déclenchements (24 h)",
+                value=" · ".join(
+                    f"{labels.get(name, name)} : {count}" for name, count in events[:5]
+                )[:1024],
+                inline=False,
+            )
+        if not self.moderation_dataset.loaded:
+            e.add_field(name="À vérifier", value="Le filtre multilingue n'a pas pu charger ses données.", inline=False)
         exempt_rows = await self.bot.db.list_automod_exempt_roles(ctx.guild.id)
         if exempt_rows:
-            mentions = ", ".join(f"<@&{r['role_id']}>" for r in exempt_rows)
-            e.add_field(name="Rôles exemptés", value=mentions, inline=False)
+            mentions = [f"<@&{r['role_id']}>" for r in exempt_rows]
+            e.add_field(
+                name="Rôles exemptés",
+                value=", ".join(mentions[:5]) + (f" et {len(mentions) - 5} autre(s)" if len(mentions) > 5 else ""),
+                inline=False,
+            )
         await panels.envoyer(ctx, panels.depuis_embed(e))
 
     @commands.hybrid_command(
@@ -2843,18 +2844,26 @@ class AutoMod(commands.Cog, name="Automod"):
             "Gérer les rôles": perms.manage_roles,
             "Gérer les salons": perms.manage_channels,
         }
-        permission_lines = [f"**{name}** : {'Accordée' if ok else 'Manquante'}" for name, ok in required.items()]
-        filter_lines = [
-            f"**{label}** : {'Actif' if conf and conf[field] else 'Inactif'}"
-            for field, label in AUTOMOD_TOGGLE_LABELS.items()
+        configured = [
+            label for field, label in AUTOMOD_TOGGLE_LABELS.items()
+            if conf and conf[field]
         ]
-        e = embeds.brand(
+        missing = [name for name, granted in required.items() if not granted]
+        e = embeds.neutral(
             "Diagnostic de sécurité",
-            "Ce diagnostic vérifie les réglages enregistrés et les permissions réellement "
-            "accordées au bot. Une permission manquante empêche la protection associée.",
+            f"{len(configured)} protection(s) configurée(s) · "
+            f"{len(missing)} permission(s) manquante(s)",
         )
-        e.add_field(name="Protections", value="\n".join(filter_lines), inline=False)
-        e.add_field(name="Permissions du bot", value="\n".join(permission_lines), inline=False)
+        e.add_field(
+            name="Protections",
+            value=", ".join(configured)[:1024] or "Aucune protection configurée",
+            inline=False,
+        )
+        e.add_field(
+            name="Permissions du bot",
+            value=("Manquante : " + ", ".join(missing)) if missing else "Toutes accordées",
+            inline=False,
+        )
 
         # Jusqu'ici le diagnostic ne regardait que SentriX : ses protections et
         # ses permissions. Il disait si le bot peut travailler, jamais si le
@@ -2874,18 +2883,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 value=security_advisory.resume(constats),
                 inline=False,
             )
-            for nom, valeur, inline in security_advisory.champs(constats, limite=4):
+            for nom, valeur, inline in security_advisory.champs(constats, limite=2):
                 e.add_field(name=nom, value=valeur, inline=inline)
         except Exception:
             logger.exception("Bulletin de sécurité indisponible guild=%s", ctx.guild.id)
 
         e.add_field(
             name="Test conseillé",
-            value=(
-                "Utilisez `+security-level eleve`, puis testez avec un compte qui n'est pas "
-                "propriétaire du serveur, sauf si celui-ci a volontairement désactivé "
-                "son immunité avec +immunity off."
-            ),
+            value="Vérifiez les réglages dans +setup, puis testez avec un membre non staff.",
             inline=False,
         )
         await panels.envoyer(ctx, panels.depuis_embed(e))
@@ -3326,6 +3331,15 @@ class AutoMod(commands.Cog, name="Automod"):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.guild and message.author.bot:
+            if getattr(message, "webhook_id", None):
+                # Raid Protect (opt-in) : un webhook qui inonde un salon.
+                try:
+                    from cogs import raid_protect
+
+                    if await raid_protect.surveiller_webhook(self.bot, message):
+                        return
+                except Exception:
+                    logger.exception("Garde des webhooks en échec guild=%s", message.guild.id)
             try:
                 if await self._handle_external_app_message(message):
                     return
@@ -4011,6 +4025,8 @@ class AutoMod(commands.Cog, name="Automod"):
             reason=reason,
             channel_id=message.channel.id,
             message_preview=_automod_message_preview(message),
+            message_id=int(getattr(message, "id", 0) or 0),
+            raw_content=_contenu_brut(message),
         )
         self.incidents[key] = incident
         if filter_name in SPAM_FILTERS:
@@ -4029,6 +4045,8 @@ class AutoMod(commands.Cog, name="Automod"):
             except Exception:
                 logger.exception("Timeout anti-mentions impossible guild=%s user=%s", message.guild.id, message.author.id)
         await finish_deletion()
+        if deletion.done() and not deletion.cancelled() and deletion.exception() is None:
+            incident.deleted_ok = bool(deletion.result())
 
         await self._record_incident_trace(message, incident)
         try:
@@ -4076,6 +4094,7 @@ class AutoMod(commands.Cog, name="Automod"):
             if filter_name == "antimention":
                 action = mention_action or "mute_failed"
                 spam_duration = SPAM_TIMEOUT_SECONDS
+                incident.duration_s = SPAM_TIMEOUT_SECONDS
                 incident.action_label = "🔇 Mute anti-mentions" if mention_action else "⚠️ Mute anti-mentions non appliqué"
             elif filter_name in SPAM_FILTERS:
                 action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
@@ -4084,6 +4103,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     reason,
                 )
                 incident.spam_stage = spam_stage
+                incident.duration_s = spam_duration or SPAM_TIMEOUT_SECONDS
                 if action == "warning_ping":
                     incident.action_label = "⚠️ Rappel anti-spam"
                 elif action == "warn":
@@ -4111,6 +4131,8 @@ class AutoMod(commands.Cog, name="Automod"):
 
         incident.action = action
         incident.infractions = infraction_count
+        if action == "mute" and incident.duration_s is None:
+            incident.duration_s = MUTE_ESCALATION_SECONDS
         if action and action != "warning_ping":
             try:
                 await self.bot.db.log_automod_action(
@@ -4279,32 +4301,28 @@ class AutoMod(commands.Cog, name="Automod"):
             memory = ""
         try:
             await asyncio.sleep(INCIDENT_LOG_DELAY_SECONDS)
-            title = "🛡️ Action AutoMod"
-            color = config.COLOR_WARNING
-            extra = {
-                "Salon": f"<#{incident.channel_id}>",
-                "Messages supprimés": str(incident.deleted),
-            }
-            if incident.message_preview:
-                extra["Message"] = incident.message_preview
-            if incident.action:
-                title = (
-                    "🚨 Action AutoMod — sanction appliquée"
-                    if incident.action not in ("warning_ping",)
-                    else "🛡️ Action AutoMod — rappel anti-spam"
-                )
-                color = config.COLOR_ERROR if incident.action in ("kick", "ban") else config.COLOR_WARNING
-                extra["Sanction"] = (
-                    incident.action_label
-                    or ESCALATION_LABELS.get(incident.action, incident.action)
-                )
-            if incident.spam_stage:
-                extra["Niveau anti-spam"] = str(incident.spam_stage)
-            if incident.infractions:
-                extra["Infractions (1h)"] = str(incident.infractions)
-            if memory:
-                extra["Mémoire"] = memory
-            e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
+            from utils import automod_incident_card as carte
+
+            # Carte complète (29/10/2026) : statut, protection, règle, motif, salon,
+            # date exacte, contenu neutralisé, action, durée et récidive ; le
+            # contenu trop long part en fichier joint au lieu d'être tronqué.
+            extra, fichier = carte.champs(
+                filter_name=incident.filter_name, reason=incident.reason, guild_id=guild.id,
+                channel_id=incident.channel_id, message_id=incident.message_id,
+                created_at=incident.created_at, contenu=incident.raw_content,
+                deleted=incident.deleted, deleted_ok=incident.deleted_ok, action=incident.action,
+                duree_s=incident.duration_s, infractions=incident.infractions,
+                spam_stage=incident.spam_stage, memoire=memory, ref=incident.ref,
+            )
+            etat = carte.statut(incident.deleted_ok, incident.action)
+            title = {
+                "reussie": "Action AutoMod — sanction appliquée",
+                "bloque": "Action AutoMod — message bloqué",
+                "detection": "Détection AutoMod",
+                "erreur": "Action AutoMod — échec",
+            }[etat]
+            color = config.COLOR_ERROR if etat == "erreur" or incident.action in ("kick", "ban") else config.COLOR_WARNING
+            e = embeds.log_entry(title, color, cible=member, cible_label="Membre", raison=None, extra=extra)
             event_type = {
                 "antiscam": "automod_scam",
                 "antiinvite": "automod_invite",
@@ -4319,7 +4337,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 "antiemoji": "automod_spam",
             }.get(incident.filter_name, "automod")
             if not incident.ref:
-                await self.log_action(guild, e, event_type)
+                await self.log_action(guild, e, event_type, file=fichier)
                 return
             from utils import sentrix_trace
 
@@ -4341,6 +4359,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 await self.log_action(
                     guild, e, event_type,
                     suites=sentrix_trace.suites_view("automod", member.id, incident.ref, english=english),
+                    file=fichier,
                 )
             finally:
                 sentrix_trace.CURRENT.reset(token)
@@ -4453,16 +4472,19 @@ class AutoMod(commands.Cog, name="Automod"):
             if await self._bot_is_allowlisted(member.guild.id, member.id):
                 await self.add_risk_signal(member.guild, member.id, "bot_allowlisted_join", 5, reason="Bot allowlisté ajouté au serveur", target=member)
                 return
+            ajoute_par = await self.get_audit_actor(member.guild, discord.AuditLogAction.bot_add, member.id)
+            erreur = ""
             try:
                 await member.kick(reason="AutoMod : bot non autorisé")
                 await self.add_risk_signal(member.guild, member.id, "bot_suspect", 60, reason="Bot non approuvé ajouté au serveur", target=member)
-                e = embeds.log_entry(
-                    "🛡️ AutoMod - Antibot", config.COLOR_ERROR,
-                    cible=member, cible_label="🤖 Bot expulsé", raison="Bot non autorisé sur ce serveur",
-                )
-                await self.log_action(member.guild, e)
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as exc:
+                erreur = f"Discord a refusé l'expulsion ({exc.status}) : rôle de SentriX trop bas ou permission manquante."
+            await self._journal_arrivee(
+                member, titre="Bot non autorisé", protection="Anti-bots", regle="Bot absent de la liste autorisée",
+                motif="Bot ajouté sans être autorisé (`/protection bot-allow` pour l'autoriser).",
+                action="Bot expulsé", erreur=erreur,
+                extra={"Ajouté par": f"{ajoute_par.mention} · `{ajoute_par.id}`" if ajoute_par else "inconnu"},
+            )
             return
 
         # Le propriétaire et les vrais responsables « Gérer le serveur »
@@ -4525,21 +4547,28 @@ class AutoMod(commands.Cog, name="Automod"):
 
         if conf["antiaccount"]:
             if account_age < 7:
+                erreur = ""
                 try:
                     await member.kick(reason="AutoMod : compte créé il y a moins de 7 jours")
                     await self.add_risk_signal(member.guild, member.id, "recent_account", 50, reason="Compte très récent expulsé", target=member)
-                    e = embeds.log_entry(
-                        "🛡️ AutoMod - Antiaccount", config.COLOR_ERROR,
-                        cible=member, cible_label="👤 Membre expulsé",
-                        raison="Compte créé il y a moins de 7 jours",
-                        extra={"📅 Âge du compte": f"{account_age} jour(s)"},
-                    )
-                    await self.log_action(member.guild, e)
-                except discord.HTTPException:
-                    pass
+                except discord.HTTPException as exc:
+                    erreur = f"Discord a refusé l'expulsion ({exc.status}) : rôle de SentriX trop bas ou permission manquante."
+                await self._journal_arrivee(
+                    member, titre="Compte trop récent", protection="Anti-comptes récents",
+                    regle="Compte créé il y a moins de 7 jours",
+                    motif=f"Compte créé <t:{int(member.created_at.timestamp())}:R> ({account_age} jour(s)).",
+                    action="Membre expulsé (il pourra revenir quand son compte aura 7 jours)", erreur=erreur,
+                )
                 return
 
         if conf["antiraid"]:
+            # Raid coordonné (comptes au nom presque identique) : alerte, jamais de sanction.
+            try:
+                from cogs import raid_protect
+
+                await raid_protect.sur_arrivee(self.bot, member)
+            except Exception:
+                logger.exception("Détection de raid coordonné impossible guild=%s", member.guild.id)
             arrivees = fast_count
             arrivees_lentes = slow_count
             seuil = seuil_raid_rapide(getattr(member.guild, "member_count", None))
@@ -4569,14 +4598,19 @@ class AutoMod(commands.Cog, name="Automod"):
                              "(raid lent, sous le seuil de l'afflux instantané)"
                     ),
                     extra={
-                        f"📊 Arrivées en {RAID_JOIN_WINDOW}s": str(arrivees),
-                        f"📈 Arrivées en {RAID_SLOW_WINDOW // 60} min": str(arrivees_lentes),
-                        "🆕 Comptes de moins de "
-                        f"{RAID_COMPTE_NEUF_JOURS} j": f"{neufs_count} sur {arrivees}",
-                        "🎚️ Seuil du serveur": (
+                        "Statut": "Détection — réponse automatique selon vos réglages",
+                        "Protection": "Anti-raid",
+                        "Règle": "Afflux rapide d'arrivées" if raid_rapide else "Raid lent (arrivées sur 10 min)",
+                        "Date": f"<t:{int(time.time())}:F> · <t:{int(time.time())}:R>",
+                        f"Arrivées en {RAID_JOIN_WINDOW} s": str(arrivees),
+                        f"Arrivées en {RAID_SLOW_WINDOW // 60} min": str(arrivees_lentes),
+                        f"Comptes de moins de {RAID_COMPTE_NEUF_JOURS} j": f"{neufs_count} sur {arrivees}",
+                        "Seuil du serveur": (
                             f"{min(seuil, RAID_JOIN_THRESHOLD)} "
                             f"(vélocité pondérée {velocite:.0f})"
                         ),
+                        "Dernier arrivé": f"{member.mention} · `{member.id}`",
+                        "Mesures possibles": "`/protection raid pause` · `/protection lockdown`",
                     },
                 )
                 if should_log:
@@ -4589,6 +4623,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 # freine immédiatement les faux comptes fraîchement créés, sans avoir
                 # à verrouiller manuellement tous les salons.
                 if raid_rapide:
+                    # Raid Protect (opt-in) : pause native des invitations, levée
+                    # automatiquement par Discord ; aucun membre n'est sanctionné.
+                    try:
+                        from cogs import raid_protect
+
+                        await raid_protect.sur_raid_detecte(self.bot, member.guild)
+                    except Exception:
+                        logger.exception("Pause Raid Protect impossible guild=%s", member.guild.id)
                     # Sauvegarde du niveau précédent avant édition et expiration
                     # 15 minutes après le dernier afflux rapide. En cas de
                     # modification manuelle, le snapshot est invalidé.
@@ -4626,8 +4668,8 @@ class AutoMod(commands.Cog, name="Automod"):
                                     "La vérification du serveur est déjà au maximum, SentriX ne peut "
                                     "pas la relever davantage. Les arrivées continuent d'être notées "
                                     "comme suspectes, mais la protection automatique s'arrête là.\n"
-                                    "À faire maintenant : `+lockdown-server` pour verrouiller les "
-                                    "salons, puis `+unlock-server` une fois la vague passée."
+                                    "À faire maintenant : `/protection lockdown` pour verrouiller les "
+                                    "salons, puis `/protection unlock` une fois la vague passée."
                                 ),
                             ),
                         )
@@ -4637,6 +4679,57 @@ class AutoMod(commands.Cog, name="Automod"):
                     # Sinon l'alerte « raid lent » repartirait à chaque arrivée
                     # suivante tant que la fenêtre de dix minutes reste pleine.
                     self.slow_join_tracker.reinitialiser(member.guild.id)
+
+    async def _journal_securite(self, guild: discord.Guild, *, titre: str, auteur, protection: str,
+                                regle: str, motif: str, action: str, echec: bool = False,
+                                extra: dict | None = None) -> discord.Embed:
+        """Carte complète d'une modification dangereuse du serveur (anti-nuke, vanity,
+        prune, permissions) : statut, auteur, règle, motif, date, action réelle."""
+        maintenant = int(time.time())
+        auteur_id = getattr(auteur, "id", auteur)
+        champs = {
+            "Statut": "Échec — l'action prévue n'a pas pu être appliquée" if echec else "Action réussie",
+            "Compte": (f"<@{auteur_id}> · `{auteur_id}` (auteur suspecté)" if auteur_id
+                       else "Auteur introuvable dans le journal d'audit"),
+            "Protection": protection,
+            "Règle": regle,
+            "Motif": motif,
+            "Date": f"<t:{maintenant}:F> · <t:{maintenant}:R>",
+            "Action": action,
+            **(extra or {}),
+        }
+        e = embeds.log_entry(titre, config.COLOR_ERROR, cible=auteur if hasattr(auteur, "id") else None,
+                             cible_label="Membre", extra=champs)
+        try:
+            await self.log_action(guild, e)
+        except Exception:
+            logger.exception("Journal de sécurité impossible guild=%s", guild.id)
+        return e
+
+    async def _journal_arrivee(self, member: discord.Member, *, titre: str, protection: str, regle: str,
+                               motif: str, action: str, erreur: str = "", extra: dict | None = None) -> None:
+        """Carte complète d'une protection à l'arrivée : réussite ET échec sont journalisés
+        (avant le 29/10/2026, une expulsion refusée par Discord ne laissait aucune trace)."""
+        maintenant = int(time.time())
+        champs = {
+            "Statut": "Échec — l'action prévue n'a pas pu être appliquée" if erreur
+                      else "Action réussie",
+            # Le membre est souvent déjà expulsé : l'en-tête ne peut plus le résoudre.
+            "Compte": f"{member.mention} · `{member.id}` · créé <t:{int(member.created_at.timestamp())}:R>",
+            "Protection": protection,
+            "Règle": regle,
+            "Motif": motif,
+            "Date": f"<t:{maintenant}:F> · <t:{maintenant}:R>",
+            "Action": f"{action} — non appliquée" if erreur else action,
+            **(extra or {}),
+        }
+        if erreur:
+            champs["Erreur"] = erreur
+        e = embeds.log_entry(titre, config.COLOR_ERROR, cible=member, cible_label="Membre", extra=champs)
+        try:
+            await self.log_action(member.guild, e)
+        except Exception:
+            logger.exception("Journal d'arrivée AutoMod impossible guild=%s", member.guild.id)
 
     # ---------------------------------------------------------------- ANTI-NUKE
 
@@ -4722,13 +4815,11 @@ class AutoMod(commands.Cog, name="Automod"):
                     action_taken = "expulsé du serveur (le bot n'a pas la permission de bannir)"
                 except discord.Forbidden:
                     action_taken = "rôles à risque retirés, mais impossible de le sanctionner davantage (permissions insuffisantes)"
-        e = embeds.log_entry(
-            "🚨 ANTI-NUKE DÉCLENCHÉ", config.COLOR_ERROR,
-            cible=member or actor_id, cible_label="👤 Auteur suspecté",
-            raison=reason,
-            extra={"⚔️ Action prise": action_taken, "🔗 ID": f"`{actor_id}`"},
+        e = await self._journal_securite(
+            guild, titre="Anti-nuke déclenché", auteur=member or actor_id, protection="Anti-nuke",
+            regle=f"Plus de {NUKE_ACTION_THRESHOLD - 1} actions destructrices en peu de temps", motif=reason,
+            action=f"Auteur {action_taken}", echec="impossible de le sanctionner" in str(action_taken),
         )
-        await self.log_action(guild, e)
         try:
             owner = guild.owner or await guild.fetch_member(guild.owner_id)
             if owner:
@@ -4779,26 +4870,17 @@ class AutoMod(commands.Cog, name="Automod"):
         if before_code and before_code != after_code:
             try:
                 await after.edit(vanity_code=before_code, reason="SentriX vanity guard : restauration du vanity URL")
-                await self.log_action(
-                    after,
-                    embeds.log_entry(
-                        "🔗 Vanity URL restauré",
-                        config.COLOR_WARNING,
-                        cible=actor,
-                        cible_label="Auteur suspecté",
-                        raison=f"`{after_code or 'aucun'}` → `{before_code}`",
-                    ),
+                await self._journal_securite(
+                    after, titre="Lien d'invitation personnalisé restauré", auteur=actor,
+                    protection="Garde du lien personnalisé", regle="Modification du lien par un compte non autorisé",
+                    motif=f"`{after_code or 'aucun'}` remis en `{before_code}`", action="Ancien lien restauré",
                 )
             except (discord.Forbidden, discord.HTTPException, TypeError):
-                await self.log_action(
-                    after,
-                    embeds.log_entry(
-                        "⚠️ Vanity URL modifié",
-                        config.COLOR_ERROR,
-                        cible=actor,
-                        cible_label="Auteur suspecté",
-                        raison="SentriX a détecté la modification mais Discord a refusé la restauration automatique.",
-                    ),
+                await self._journal_securite(
+                    after, titre="Lien d'invitation personnalisé modifié", auteur=actor,
+                    protection="Garde du lien personnalisé", regle="Modification du lien par un compte non autorisé",
+                    motif=f"`{before_code}` changé en `{after_code or 'aucun'}`",
+                    action="Restauration refusée par Discord : remettez le lien à la main", echec=True,
                 )
 
     @commands.Cog.listener()
@@ -4819,15 +4901,12 @@ class AutoMod(commands.Cog, name="Automod"):
                 signal="member_prune",
                 points=90,
             )
-            await self.log_action(
-                guild,
-                embeds.log_entry(
-                    "🚨 Prune de membres détecté",
-                    config.COLOR_ERROR,
-                    cible=actor,
-                    cible_label="Auteur",
-                    raison="Un prune a été vu dans le journal d'audit Discord.",
-                ),
+            nombre = getattr(getattr(entry, "extra", None), "members_removed", None)
+            await self._journal_securite(
+                guild, titre="Purge de membres détectée", auteur=actor, protection="Garde des purges",
+                regle="Purge de membres inactifs (journal d'audit)",
+                motif=f"{nombre} membres retirés." if nombre else "Purge vue dans le journal d'audit.",
+                action="Auteur signalé au moteur de risque (sanction seulement si le seuil anti-nuke est atteint)",
             )
 
     @commands.Cog.listener()
@@ -4853,16 +4932,13 @@ class AutoMod(commands.Cog, name="Automod"):
             action = "Permissions retirées"
         except (discord.Forbidden, discord.HTTPException):
             action = "Retrait impossible"
-        await self.log_action(
-            role.guild,
-            embeds.log_entry(
-                "🛡️ Garde permissions",
-                config.COLOR_WARNING,
-                cible=actor,
-                cible_label="Auteur suspecté",
-                raison="Rôle créé avec permissions dangereuses",
-                extra={"Rôle": f"{role.mention} (`{role.id}`)", "Permissions": ", ".join(dangerous), "Action": action},
-            ),
+        await self._journal_securite(
+            role.guild, titre="Rôle à permissions dangereuses", auteur=actor, protection="Garde des permissions",
+            regle="Création d'un rôle avec des permissions dangereuses", motif=", ".join(dangerous),
+            action="Permissions dangereuses retirées du rôle" if action == "Permissions retirées"
+                   else "Retrait refusé par Discord : vérifiez le rôle à la main",
+            echec=action != "Permissions retirées",
+            extra={"Rôle": f"{role.mention} · `{role.id}`"},
         )
 
     @commands.Cog.listener()
@@ -4939,16 +5015,14 @@ class AutoMod(commands.Cog, name="Automod"):
                 restored = "oui"
             except (discord.Forbidden, discord.HTTPException):
                 restored = "non"
-            await self.log_action(
-                after.guild,
-                embeds.log_entry(
-                    "🛡️ Permissions dangereuses bloquées",
-                    config.COLOR_WARNING,
-                    cible=actor,
-                    cible_label="Auteur suspecté",
-                    raison=reason,
-                    extra={"Rôle": f"{after.mention} (`{after.id}`)", "Permissions ajoutées": ", ".join(gained), "Restauré": restored},
-                ),
+            await self._journal_securite(
+                after.guild, titre="Permissions dangereuses bloquées", auteur=actor,
+                protection="Garde des permissions", regle="Ajout de permissions dangereuses à un rôle",
+                motif=f"{reason} : {', '.join(gained)}",
+                action="Anciennes permissions du rôle restaurées" if restored == "oui"
+                       else "Restauration refusée par Discord : vérifiez le rôle à la main",
+                echec=restored != "oui",
+                extra={"Rôle": f"{after.mention} · `{after.id}`"},
             )
         if await self.record_nuke_action(after.guild, actor.id):
             await self.punish_nuker(after.guild, actor.id, reason)

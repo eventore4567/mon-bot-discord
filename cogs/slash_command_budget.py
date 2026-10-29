@@ -136,9 +136,17 @@ def finalize(bot: commands.Bot) -> None:
     preferred = _preferred_names()
     excluded = _excluded_names()
 
-    if len(required) > GLOBAL_CHAT_INPUT_BUDGET:
+    # Seules les racines obligatoires PRÉSENTES dans l'arbre prennent une place :
+    # les listes historiques (V110, preuves, staff) citent ~50 noms jamais
+    # publiés, qui faisaient échouer le boot dès la 52e racine du catalogue
+    # (/puzzle, 28/10/2026) alors que Discord n'en voyait que 53.
+    presentes = {
+        str(getattr(item, "name", "") or "").casefold() for item in _global_roots(tree)
+    }
+    obligatoires_presentes = required & presentes
+    if len(obligatoires_presentes) > GLOBAL_CHAT_INPUT_BUDGET:
         raise RuntimeError(
-            f"Budget slash incohérent : {len(required)} racines obligatoires pour "
+            f"Budget slash incohérent : {len(obligatoires_presentes)} racines obligatoires pour "
             f"{GLOBAL_CHAT_INPUT_BUDGET} places."
         )
 

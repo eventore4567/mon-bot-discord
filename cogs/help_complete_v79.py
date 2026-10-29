@@ -490,7 +490,6 @@ class SentriXHelpV79(discord.ui.LayoutView):
                     "Choisissez une catégorie pour voir ses commandes, ou recherchez une commande.\n"
                     f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
                     + (f" · **{slash_only} uniquement en /**" if slash_only else "")
-                    + "\n**Les commandes `+` seront retirées le 30 novembre 2026.** Utilisez les commandes `/`."
                 ),
                 accessory=setup_v73._thumbnail(self.bot),
             )

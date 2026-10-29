@@ -88,35 +88,27 @@ async def main() -> int:
     guild = await h.setup_world(bot)
     from cogs import setup_v2_core as core
 
-    # 27/10/2026 (Jayden) : un serveur neuf a l'anti-spam et l'anti-raid d'office.
+    # Serveur vierge : aucune protection sans activation par un administrateur.
     await bot.db.execute("DELETE FROM module_settings WHERE guild_id=?", (h.GID,))
     await bot.db.execute("DELETE FROM automod_settings WHERE guild_id=?", (h.GID,))
     core.invalidate_module_cache(h.GID)
     bot.get_cog("Automod").automod_cache.clear()
     view = await build(bot, guild, None)
-    check(option_label(view, "security") == "Sécurité — Actif",
-          f"serveur neuf : « {option_label(view, 'security')} » (anti-spam + anti-raid d'office)")
+    check("aucune protection" in option_label(view, "security"),
+          f"serveur neuf : « {option_label(view, 'security')} » (aucune activation implicite)")
+    # Pas de ligne du tout (création paresseuse, cache V14) = aucune protection.
+    row = dict(await bot.db.get_automod(h.GID) or {})
+    check(not row.get("antispam") and not row.get("antiraid") and not row.get("antinuke"),
+          "serveur neuf : anti-spam, anti-raid et anti-nuke à zéro en base")
     neuf = await spam_deleted(bot, guild, 5)
-    check(neuf >= 6, f"serveur neuf : le spam est supprimé sans rien configurer ({neuf}/8)")
+    check(neuf == 0, f"serveur neuf : aucun message supprimé sans choix admin ({neuf}/8)")
 
-    # Migration unique : les serveurs existants jamais configurés (tout à 0) reçoivent
-    # les mêmes défauts ; un serveur dont la Sécurité est coupée n'est pas touché.
-    from cogs import automod as automod_mod
-    zeros = ", ".join(f"{champ}=0" for champ, _l in __import__("cogs.setup_control_center", fromlist=["AUTOMOD"]).AUTOMOD)
-    await bot.db.execute("INSERT INTO automod_settings (guild_id) VALUES (?) ON CONFLICT(guild_id) DO NOTHING", (h.GID,))
-    await bot.db.execute(f"UPDATE automod_settings SET {zeros} WHERE guild_id=?", (h.GID,))
-    await bot.db.execute("DELETE FROM sentrix_migrations WHERE name=?", (automod_mod._MIGRATION_PROTECTIONS,))
-    await core.set_module_enabled(bot, h.GID, "security", False, actor_id=h.ADMIN_ID)
-    await automod_mod.activer_protections_par_defaut(bot)
-    row = await bot.db.fetchone("SELECT antispam FROM automod_settings WHERE guild_id=?", (h.GID,))
-    check(not row["antispam"], "migration : un serveur dont la Sécurité est coupée n'est pas touché")
-    await bot.db.execute("DELETE FROM module_settings WHERE guild_id=?", (h.GID,))
-    await bot.db.execute("DELETE FROM sentrix_migrations WHERE name=?", (automod_mod._MIGRATION_PROTECTIONS,))
-    core.invalidate_module_cache(h.GID)
-    await automod_mod.activer_protections_par_defaut(bot)
-    row = await bot.db.fetchone("SELECT antispam, antiraid, antilink FROM automod_settings WHERE guild_id=?", (h.GID,))
-    check(row["antispam"] and row["antiraid"] and not row["antilink"],
-          "migration : serveur jamais configuré → anti-spam + anti-raid, anti-liens reste coupé")
+    zeros = ", ".join(
+        f"{champ}=0"
+        for champ, _label in __import__(
+            "cogs.setup_control_center", fromlist=["AUTOMOD"]
+        ).AUTOMOD
+    )
 
     # Un admin qui a tout coupé à la main : l'écran le dit et le spam passe.
     await bot.db.execute(f"UPDATE automod_settings SET {zeros} WHERE guild_id=?", (h.GID,))

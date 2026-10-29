@@ -51,11 +51,12 @@ async def main() -> int:
     t = await say("+daily")
     check("pas encore disponible" in t and "<t:" in t, "daily déjà pris : quand revenir", t[:200])
     t = await say("+buy 999")
-    check("n°999" in t and "+shop" in t, "article inconnu : la commande qui liste les articles", t[:200])
+    # Les textes citent la route « / » depuis le 28/10/2026 (retrait du « + » le 30/11).
+    check("n°999" in t and "/shop view" in t, "article inconnu : la commande qui liste les articles", t[:200])
     t = await say("+mbuy 999")
     check("n°999" in t and "+market" in t, "annonce indisponible : pourquoi et où regarder", t[:200])
     t = await say("+joinevent inconnu")
-    check("+event-list" in t, "événement introuvable : la liste des noms exacts", t[:200])
+    check("/events list" in t, "événement introuvable : la liste des noms exacts", t[:200])
     t = await say("+afk pause café")
     check("pause café" in t and "prochain message" in t, "AFK : comment le statut se retire", t[:220])
 

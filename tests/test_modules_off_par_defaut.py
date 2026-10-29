@@ -127,13 +127,11 @@ class ModulesOffParDefautTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(await core.module_enabled(self.bot, NEW_GUILD, module))
         self.assertFalse(await core.module_enabled(self.bot, NEW_GUILD, "ai"))
 
-    async def test_un_serveur_neuf_a_seulement_antispam_et_antiraid(self):
-        # Décision de Jayden du 27/10/2026 : anti-spam et anti-raid actifs dès
-        # l'arrivée ; tout le reste du profil reste un choix de l'admin.
+    async def test_un_serveur_neuf_ne_declenche_aucun_filtre_automod(self):
+        # Sans activation explicite par un administrateur, aucune sanction
+        # automatique ne doit être appliquée à l'arrivée sur un serveur.
         conf = await self.db.get_automod(NEW_GUILD)
-        for key in ("antispam", "antiraid"):
-            self.assertTrue(bool(conf[key]), key)
-        for key in ("antilink", "antiinvite", "antiscam"):
+        for key in ("antispam", "antiraid", "antinuke", "antilink", "antiinvite", "antiscam"):
             self.assertFalse(bool(conf[key]), key)
 
     # ------------------------------------------------------------ trois états

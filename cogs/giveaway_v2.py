@@ -40,6 +40,7 @@ SCHEMA = (
         min_invites INTEGER NOT NULL DEFAULT 0,
         min_account_age_days INTEGER NOT NULL DEFAULT 0,
         min_server_age_days INTEGER NOT NULL DEFAULT 0,
+        min_level INTEGER NOT NULL DEFAULT 0,
         required_roles_json TEXT NOT NULL DEFAULT '[]',
         excluded_roles_json TEXT NOT NULL DEFAULT '[]',
         bonus_roles_json TEXT NOT NULL DEFAULT '{}',
@@ -132,6 +133,7 @@ class BuilderState:
     min_invites: int = 0
     min_account_age_days: int = 0
     min_server_age_days: int = 0
+    min_level: int = 0
     custom_condition: str | None = None
 
 
@@ -174,6 +176,7 @@ class ConditionsModal(discord.ui.Modal, title="Giveaway — conditions facultati
     min_invites = discord.ui.TextInput(label="Invitations minimum", default="0", max_length=6)
     account_age = discord.ui.TextInput(label="Âge minimum du compte (jours)", default="0", max_length=6)
     server_age = discord.ui.TextInput(label="Présence minimum serveur (jours)", default="0", max_length=6)
+    min_level = discord.ui.TextInput(label="Niveau XP minimum", default="0", max_length=6)
     custom = discord.ui.TextInput(label="Condition personnalisée (information)", required=False, max_length=500, style=discord.TextStyle.paragraph)
 
     def __init__(self, owner: "GiveawayBuilderView"):
@@ -182,17 +185,18 @@ class ConditionsModal(discord.ui.Modal, title="Giveaway — conditions facultati
         self.min_invites.default = str(owner.state.min_invites)
         self.account_age.default = str(owner.state.min_account_age_days)
         self.server_age.default = str(owner.state.min_server_age_days)
+        self.min_level.default = str(owner.state.min_level)
         if owner.state.custom_condition:
             self.custom.default = owner.state.custom_condition
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            values = [int(str(x.value).strip() or "0") for x in (self.min_invites, self.account_age, self.server_age)]
+            values = [int(str(x.value).strip() or "0") for x in (self.min_invites, self.account_age, self.server_age, self.min_level)]
         except ValueError:
-            return await interaction.response.send_message("Les trois valeurs numériques doivent être des nombres entiers.", ephemeral=True)
-        if any(value < 0 for value in values):
-            return await interaction.response.send_message("Une condition minimum ne peut pas être négative.", ephemeral=True)
-        self.owner.state.min_invites, self.owner.state.min_account_age_days, self.owner.state.min_server_age_days = values
+            return await interaction.response.send_message("Invitations, ancienneté et niveau doivent être des nombres entiers.", ephemeral=True)
+        if any(value < 0 or value > 100000 for value in values):
+            return await interaction.response.send_message("Les minimums doivent être entre 0 et 100 000.", ephemeral=True)
+        self.owner.state.min_invites, self.owner.state.min_account_age_days, self.owner.state.min_server_age_days, self.owner.state.min_level = values
         self.owner.state.custom_condition = str(self.custom.value).strip() or None
         await self.owner.refresh(interaction)
 
@@ -549,6 +553,8 @@ class GiveawayBuilderView(discord.ui.View):
         self.ctx = ctx
         self.state = BuilderState(author_id=ctx.author.id, guild_id=ctx.guild.id)
         self.message: discord.Message | None = None
+        self._publishing = False
+        self._published_url: str | None = None
         # Les cinq étapes dans un menu, mêmes actions qu'avant (Jayden, 22/10/2026 :
         # moins de boutons) ; restent Aperçu, Publier, Annuler.
         etapes = [
@@ -579,66 +585,113 @@ class GiveawayBuilderView(discord.ui.View):
         return True
 
     def setup_embed(self) -> discord.Embed:
+        """État complet et lisible du brouillon, sans réglage masqué."""
         state = self.state
         guild = self.ctx.guild
         channel = guild.get_channel(state.channel_id) if state.channel_id else None
+        missing = self.cog.missing_base(state)
+        configured = 4 - len(missing)
+        if state.channel_id and channel is None:
+            missing.append("le salon sélectionné a été supprimé")
 
-        essentials = [
-            f"**Lot** — {state.prize or 'À configurer'}",
-            f"**Durée** — {state.duration_text or 'À configurer'}",
-            f"**Gagnants** — {state.winners if state.duration_seconds else 'À configurer'}",
-            f"**Salon** — {channel.mention if channel else 'À configurer'}",
+        def escape(value: object, limit: int = 160) -> str:
+            raw = str(value or "").strip()
+            return discord.utils.escape_markdown(discord.utils.escape_mentions(raw))[:limit] or "Non défini"
+
+        end_at = int(time.time()) + int(state.duration_seconds or 0)
+        main = [
+            f"**Récompense** · {escape(state.prize) if state.prize else 'À configurer'}",
+            f"**Durée** · {escape(state.duration_text, 32) if state.duration_seconds else 'À configurer'}"
+            + (f" (fin <t:{end_at}:R>)" if state.duration_seconds else ""),
+            f"**Gagnants** · {state.winners}",
+            f"**Salon** · {channel.mention if channel else 'À configurer'}",
         ]
+        rules = [
+            f"**Invitations** · {state.min_invites} min.",
+            f"**Ancienneté compte** · {state.min_account_age_days} jour(s)",
+            f"**Présence serveur** · {state.min_server_age_days} jour(s)",
+            f"**Niveau XP** · {state.min_level} min.",
+        ]
+        if state.custom_condition:
+            rules.append(f"**Condition annoncée** · {escape(state.custom_condition, 350)} *(indicative, non vérifiée)*")
+            rules.append("-# Condition informative : validation manuelle par l'organisateur.")
 
-        roles = []
-        if state.required_roles:
-            roles.append("**Obligatoires** — " + ", ".join(f"<@&{x}>" for x in state.required_roles))
-        if state.excluded_roles:
-            roles.append("**Interdits** — " + ", ".join(f"<@&{x}>" for x in state.excluded_roles))
-        if state.bonus_roles:
-            roles.append(
-                "**Bonus** — " + ", ".join(
+        roles = [
+            "**Rôles obligatoires** · " + (", ".join(f"<@&{x}>" for x in state.required_roles) or "Aucun"),
+            "**Rôles exclus** · " + (", ".join(f"<@&{x}>" for x in state.excluded_roles) or "Aucun"),
+            "**Rôles bonus** · " + (
+                ", ".join(
                     f"<@&{role_id}> x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}"
                     for role_id in state.bonus_roles
-                )
-            )
-        if state.ping_role_id:
-            roles.append(f"**Ping** — <@&{state.ping_role_id}>")
-
-        conditions = []
-        if state.min_invites:
-            conditions.append(f"{state.min_invites}+ invitation(s)")
-        if state.min_account_age_days:
-            conditions.append(f"compte âgé de {state.min_account_age_days}+ jour(s)")
-        if state.min_server_age_days:
-            conditions.append(f"présence serveur de {state.min_server_age_days}+ jour(s)")
-        if state.custom_condition:
-            conditions.append(state.custom_condition)
-
-        e = discord.Embed(
-            title="🎉 Giveaway — configuration",
-            description=(
-                "Configurez le concours depuis ce panneau. Les changements sont visibles ici immédiatement, "
-                "sans spammer de nouveaux messages."
+                ) or "Aucun"
             ),
+        ]
+        announce = [
+            "**Ping** · " + (f"<@&{state.ping_role_id}>" if state.ping_role_id else "Aucun"),
+            "**Image / GIF** · " + ("Ajouté" if (state.image_url or state.image_bytes) else "Aucun"),
+            "**Description** · " + (escape(state.description, 260) if state.description else "Aucune"),
+        ]
+        status = (
+            f"**Giveaway publié.** [Ouvrir le concours]({self._published_url})"
+            if self._published_url else (
+                "**Prêt pour l'aperçu et la publication.**"
+                if not missing else "À compléter : **" + ", ".join(missing) + "**."
+            )
+        )
+        e = discord.Embed(
+            title="Giveaway · Configuration",
+            description=f"**{configured}/4** paramètres obligatoires remplis. {status}\n"
+                        "Choisissez une rubrique dans le menu, puis vérifiez l'aperçu.",
             colour=discord.Colour.blurple(),
         )
-        e.add_field(name="Essentiel", value="\n".join(essentials), inline=False)
-        e.add_field(name="Rôles et bonus", value="\n".join(roles) if roles else "Aucun rôle configuré.", inline=False)
-        e.add_field(name="Conditions", value="\n".join(conditions) if conditions else "Aucune condition supplémentaire.", inline=False)
-        e.add_field(name="Média", value="Image / GIF sélectionné depuis Discord." if (state.image_url or state.image_bytes) else "Aucun média.", inline=False)
-        e.set_footer(text="SentriX • Aperçu avant publication disponible")
+        e.add_field(name="Informations principales", value="\n".join(main), inline=False)
+        e.add_field(name="Conditions de participation", value="\n".join(rules), inline=False)
+        e.add_field(name="Rôles et chances", value="\n".join(roles), inline=False)
+        e.add_field(name="Annonce", value="\n".join(announce), inline=False)
+        e.set_footer(text="Les conditions automatiques sont vérifiées à l'entrée et au tirage.")
         return e
 
+    def setup_panel(self) -> panels.Panneau:
+        """Carte Components V2 large, avec un vrai filet horizontal central."""
+        summary = self.setup_embed()
+        fields = list(summary.fields)
+        panneau = panels.Panneau(
+            titre="Giveaway · Configuration",
+            sous_titre=summary.description,
+            kind="evenements",
+            sections=(panels.Section(fields[0].name, texte=str(fields[0].value)),),
+            banniere=True,
+        )
+        container = next(
+            (item for item in panneau.children if isinstance(item, discord.ui.Container)),
+            None,
+        )
+        if container is not None:
+            # Vraie barre pleine largeur, pas une suite de tirets
+            # qui se réorganise mal sur mobile.
+            container.add_item(
+                discord.ui.Separator(spacing=discord.SeparatorSpacing.large)
+            )
+            for section in fields[1:]:
+                container.add_item(
+                    discord.ui.TextDisplay(f"### {section.name}\n{section.value}")
+                )
+            container.add_item(
+                discord.ui.TextDisplay(
+                    "-# Les conditions automatiques sont vérifiées à l'entrée et au tirage."
+                )
+            )
+        return panels.avec_composants(panneau, self)
+
     async def refresh(self, interaction: discord.Interaction):
-        panneau = panels.avec_composants(panels.depuis_embed(self.setup_embed()), self)
+        panneau = self.setup_panel()
         await panels.editer(interaction.response, panneau)
 
     async def sync_main_message(self):
         if self.message is None:
             return
         try:
-            panneau = panels.avec_composants(panels.depuis_embed(self.setup_embed()), self)
+            panneau = self.setup_panel()
             await panels.editer(self.message, panneau)
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             pass
@@ -696,19 +749,24 @@ class GiveawayBuilderView(discord.ui.View):
 
     @discord.ui.button(label="Publier", style=discord.ButtonStyle.success, row=1)
     async def publish(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        if self._publishing:
+            return await interaction.response.send_message("La publication est déjà en cours.", ephemeral=True)
         missing = self.cog.missing_base(self.state)
         if missing:
-            return await interaction.response.send_message("Impossible de publier. Il manque : " + ", ".join(missing) + ".", ephemeral=True)
+            return await interaction.response.send_message("À compléter : " + ", ".join(missing) + ".", ephemeral=True)
+        self._publishing = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             msg = await self.cog.publish(self.ctx.guild, self.state, self.ctx.author)
         except Exception as exc:
-            return await interaction.followup.send(f"Publication impossible : {type(exc).__name__}: {str(exc)[:250]}", ephemeral=True)
+            self._publishing = False
+            return await interaction.followup.send(f"Publication impossible : {str(exc)[:220] or 'réessayez.'}", ephemeral=True)
+        self._published_url = msg.jump_url
         for child in self.children:
             child.disabled = True
         if self.message:
             try:
-                panneau = panels.avec_composants(panels.depuis_embed(self.setup_embed()), self)
+                panneau = self.setup_panel()
                 await panels.editer(self.message, panneau)
             except discord.HTTPException:
                 pass
@@ -875,6 +933,10 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             await self.bot.db.execute(
                 "ALTER TABLE giveaways_v2 ADD COLUMN result_message_id INTEGER"
             )
+        if "min_level" not in column_names:
+            await self.bot.db.execute(
+                "ALTER TABLE giveaways_v2 ADD COLUMN min_level INTEGER NOT NULL DEFAULT 0"
+            )
         self._schema_ready = True
 
     def missing_base(self, state: BuilderState) -> list[str]:
@@ -887,7 +949,7 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
 
     async def open_builder(self, ctx: commands.Context):
         view = GiveawayBuilderView(self, ctx)
-        panneau = panels.avec_composants(panels.depuis_embed(view.setup_embed()), view)
+        panneau = view.setup_panel()
         msg = await panels.envoyer(ctx, panneau)
         view.message = msg
 
@@ -923,8 +985,11 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             conditions.append(f"**Âge du compte** · {state.min_account_age_days} jour(s) minimum")
         if state.min_server_age_days:
             conditions.append(f"**Présence serveur** · {state.min_server_age_days} jour(s) minimum")
+        if state.min_level:
+            conditions.append(f"**Niveau XP** · niveau {state.min_level} minimum")
         if state.custom_condition:
-            conditions.append(f"**Condition personnalisée** · {state.custom_condition}")
+            # Brief V6 : une condition libre n'est PAS vérifiée par SentriX — le dire.
+            conditions.append(f"**Condition personnalisée** · {state.custom_condition} *(indicative, non vérifiée)*")
 
         bonus_lines = [
             f"<@&{role_id}> · **x{state.bonus_multipliers.get(role_id, state.bonus_multiplier)}**"
@@ -996,6 +1061,7 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             min_invites=int(row["min_invites"] or 0),
             min_account_age_days=int(row["min_account_age_days"] or 0),
             min_server_age_days=int(row["min_server_age_days"] or 0),
+            min_level=int(row["min_level"] or 0) if "min_level" in row.keys() else 0,
             custom_condition=row["custom_condition"],
             image_url=row["image_url"],
             description=row["description"],
@@ -1033,9 +1099,27 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
 
     async def publish(self, guild: discord.Guild, state: BuilderState, author) -> discord.Message:
         await self.ensure_schema()
+        missing = self.missing_base(state)
+        if missing:
+            raise ValueError("informations manquantes : " + ", ".join(missing))
+        if set(state.required_roles) & set(state.excluded_roles):
+            raise ValueError("un rôle ne peut pas être obligatoire et interdit")
         channel = guild.get_channel(int(state.channel_id or 0))
         if not isinstance(channel, (discord.TextChannel, discord.Thread)) and getattr(channel, "send", None) is None:
             raise ValueError("salon de destination introuvable")
+        member = getattr(guild, "me", None)
+        if member is not None and hasattr(channel, "permissions_for"):
+            perms = channel.permissions_for(member)
+            required = {
+                "voir le salon": getattr(perms, "view_channel", False),
+                "envoyer des messages": getattr(perms, "send_messages", False),
+                "intégrer des liens": getattr(perms, "embed_links", False),
+            }
+            if state.image_bytes:
+                required["joindre des fichiers"] = getattr(perms, "attach_files", False)
+            denied = [label for label, ok in required.items() if not ok]
+            if denied:
+                raise ValueError("permissions manquantes dans le salon : " + ", ".join(denied))
         end_at = int(time.time()) + int(state.duration_seconds or 0)
         panel = self.build_public_panel(guild, state, end_at, author, count=0)
 
@@ -1050,6 +1134,28 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
                 if str(getattr(attachment, "filename", "")) == state.image_filename:
                     published_image_url = str(attachment.url)
                     break
+        bonus_map = {
+            str(role_id): int(state.bonus_multipliers.get(role_id, state.bonus_multiplier))
+            for role_id in state.bonus_roles
+        }
+        try:
+            await self.bot.db.execute(
+                "INSERT INTO giveaways_v2 (guild_id,channel_id,message_id,prize,winners_count,end_at,status,created_by,created_at,ping_role_id,image_url,description,custom_condition,min_invites,min_account_age_days,min_server_age_days,min_level,required_roles_json,excluded_roles_json,bonus_roles_json,winners_json) VALUES (?,?,?,?,?,?,'actif',?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    guild.id, channel.id, msg.id, state.prize, state.winners, end_at,
+                    author.id, int(time.time()), state.ping_role_id, published_image_url, state.description,
+                    state.custom_condition, state.min_invites, state.min_account_age_days, state.min_server_age_days,
+                    state.min_level, json.dumps(state.required_roles), json.dumps(state.excluded_roles), json.dumps(bonus_map), "[]",
+                ),
+            )
+        except Exception:
+            # Panneau publié mais non enregistré = bouton de participation mort.
+            # On supprime ce message avant de signaler l'échec à l'administrateur.
+            try:
+                await msg.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException, AttributeError):
+                pass
+            raise
         if state.ping_role_id:
             try:
                 await channel.send(
@@ -1062,19 +1168,6 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             except discord.HTTPException:
                 pass
 
-        bonus_map = {
-            str(role_id): int(state.bonus_multipliers.get(role_id, state.bonus_multiplier))
-            for role_id in state.bonus_roles
-        }
-        await self.bot.db.execute(
-            "INSERT INTO giveaways_v2 (guild_id,channel_id,message_id,prize,winners_count,end_at,status,created_by,created_at,ping_role_id,image_url,description,custom_condition,min_invites,min_account_age_days,min_server_age_days,required_roles_json,excluded_roles_json,bonus_roles_json,winners_json) VALUES (?,?,?,?,?,?,'actif',?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                guild.id, channel.id, msg.id, state.prize, state.winners, end_at,
-                author.id, int(time.time()), state.ping_role_id, published_image_url, state.description,
-                state.custom_condition, state.min_invites, state.min_account_age_days, state.min_server_age_days,
-                json.dumps(state.required_roles), json.dumps(state.excluded_roles), json.dumps(bonus_map), "[]",
-            ),
-        )
         return msg
 
     async def _eligibility(self, row, member: discord.Member) -> tuple[bool, str | None, int]:
@@ -1102,6 +1195,11 @@ class GiveawayV2(commands.Cog, name="GiveawayV2"):
             breakdown = await self.bot.db.get_invite_breakdown(member.guild.id, member.id)
             if int(breakdown.get("credited", 0)) < int(row["min_invites"]):
                 return False, f"Il faut au moins **{row['min_invites']}** invitation(s) créditée(s).", 1
+        if int(row["min_level"] or 0):
+            level_row = await self.bot.db.get_level(member.guild.id, member.id)
+            level = int(level_row["level"] or 0) if level_row else 0
+            if level < int(row["min_level"]):
+                return False, f"Il faut être niveau **{row['min_level']}** minimum (actuel : {level}).", 1
         age = (discord.utils.utcnow() - member.created_at).days
         if age < int(row["min_account_age_days"] or 0):
             return False, f"Votre compte doit avoir au moins **{row['min_account_age_days']} jour(s)**.", 1

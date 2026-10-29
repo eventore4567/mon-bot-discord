@@ -28,10 +28,12 @@ async def run() -> int:
         import sentrix_command_surface_v110 as surface_v110
         from cogs import (
             command_catalog_cleanup,
+            commandes_retirees,
             command_response_guard,
             help_complete,
             slash_command_budget,
         )
+        from utils.unused_commands import OUTILS_PROPRIETAIRE_RETIRES, SUPPRIMEES
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -88,6 +90,10 @@ async def run() -> int:
         bot._prune_redundant_commands()
         command_catalog_cleanup.apply_surface(bot)
         slash_command_budget.finalize(bot)
+        # Le runtime exécute une deuxième passe de retrait une fois prêt :
+        # l'audit hors connexion doit aussi appliquer cette passe après
+        # les couches qui ont restauré certaines commandes historiques.
+        commandes_retirees.retirer(bot)
 
         active = list(bot.walk_commands())
         qualified = [command.qualified_name.casefold() for command in active]
@@ -110,7 +116,7 @@ async def run() -> int:
 
         missing_direct = sorted(
             name for name in command_catalog_cleanup.NORMAL_DIRECT_COMMANDS
-            if bot.get_command(name) is None
+            if name not in SUPPRIMEES and bot.get_command(name) is None
         )
         if missing_direct:
             errors.append("commandes directes normales absentes: " + ", ".join(missing_direct))
@@ -124,10 +130,18 @@ async def run() -> int:
 
         missing_admin = sorted(
             name for name in command_catalog_cleanup.ADMIN_DIRECT_COMMANDS
-            if bot.get_command(name) is None
+            # Outils du propriétaire retirés le 29/10/2026 (unused_commands.OUTILS_PROPRIETAIRE_RETIRES).
+            if name not in SUPPRIMEES and name not in OUTILS_PROPRIETAIRE_RETIRES
+            and bot.get_command(name) is None
         )
         if missing_admin:
             errors.append("commandes admin directes absentes: " + ", ".join(missing_admin))
+
+        # Les retraits V6 sont une décision produit, pas une régression runtime.
+        # À l'inverse, un retrait revenu par mégarde doit faire échouer l'audit.
+        restored = sorted(name for name in SUPPRIMEES if bot.get_command(name) is not None)
+        if restored:
+            errors.append("commandes supprimées réapparues: " + ", ".join(restored))
 
         missing_proof = sorted(
             name for name in command_catalog_cleanup.PROOF_VISIBLE_COMMANDS
@@ -152,9 +166,13 @@ async def run() -> int:
                 + ", ".join(removed_still_present)
             )
 
+        # Depuis le 28/10/2026 (passage à 100 % « / »), une fusionnée que le catalogue
+        # publie (/tickets reopen, /protection trust…) est la route officielle : visible.
+        publiees_en_slash = command_catalog_cleanup._catalog_root_sources()
         merged_visible = sorted(
             name for name in command_catalog_cleanup.MERGED_COMMANDS
             if name not in command_catalog_cleanup.HELP_VISIBLE_EXTRA_COMMANDS
+            and name not in publiees_en_slash
             and (command := bot.get_command(name)) is not None and not command.hidden
         )
         if merged_visible:

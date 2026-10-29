@@ -181,7 +181,17 @@ MASQUEES: frozenset[str] = frozenset({
 
 
 def masquee(nom: str) -> bool:
-    return str(nom or "").strip().casefold() in MASQUEES
+    """Hors de l'aide et du menu « / » : seules les commandes supprimées.
+
+    Le 28/10/2026, Jayden décide de passer à 100 % « / » : « transforme les
+    commandes qui n'ont pas encore d'équivalent / pour ne perdre aucune
+    fonctionnalité ». Une masquée gardée n'existait plus qu'en « + » ; elle
+    revient dans le menu, sinon le retrait du préfixe la rendrait inaccessible.
+    ``MASQUEES`` reste le relevé d'usage du 16/10.
+    """
+    nom = str(nom or "").strip().casefold()
+    # « logevent on » : sous-commande d'une racine supprimée, disparue avec elle.
+    return nom in MASQUEES and (nom in SUPPRIMEES or nom.split(" ")[0] in SUPPRIMEES)
 
 
 __all__ = ["MASQUEES", "masquee", "RELEVE", "PERIODE"]
@@ -213,3 +223,14 @@ SUPPRIMEES: frozenset[str] = frozenset({
     "footer", "say", "systemstatus", "logevent", "notifs-list", "notifs-status", "profilecard",
 })
 
+
+#: OUTILS DU PROPRIÉTAIRE GLOBAL retirés (Jayden, 29/10/2026 : « supprime les
+#: trucs owner pour le moment »), avant le passage à 100 % « / ». Les données
+#: restent en base (liste noire globale comprise) et le blocage des utilisateurs
+#: déjà en liste noire continue de s'appliquer ; seules les commandes partent.
+#: « footer » et « theme » étaient déjà dans SUPPRIMEES.
+OUTILS_PROPRIETAIRE_RETIRES: frozenset[str] = frozenset({
+    "bl", "blinfo", "editbl", "unbl",
+    "sync", "syncguild", "health", "reset-logs-all", "wipe-server",
+    "bot-leave", "bot-servers", "set-bot", "setstatus", "status-rotate",
+})

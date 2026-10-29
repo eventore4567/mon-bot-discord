@@ -14,13 +14,24 @@ from utils import game_visuals, sentrix_panels as panels
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_curated_media_are_real_direct_animated_gif_links():
-    assert len(game_visuals.GIFS) >= 7
-    assert len(set(game_visuals.GIFS.values())) == len(game_visuals.GIFS)
-    assert all(
-        "giphy.com/media/" in url and url.endswith("/giphy.gif")
-        for url in game_visuals.GIFS.values()
-    )
+def test_les_jeux_n_ont_plus_aucun_gif(monkeypatch):
+    """29/10/2026 (Jayden) : tous les GIFs des jeux sont retirés, les jeux restent."""
+    assert game_visuals.GIFS == {}
+
+    async def jamais(url):
+        raise AssertionError(f"aucun téléchargement attendu : {url}")
+    monkeypatch.setattr(game_visuals, "_fetch_gif_bytes", jamais)
+
+    async def run():
+        for titre, kind in (("Duel", "primary"), ("Combat de boss", "success"), ("Pile ou face", "primary"),
+                            ("Course", "primary"), ("Victoire", "success"), ("Défaite", "danger")):
+            assert await game_visuals.verified_image_for(titre, "", kind) is None
+            for scene in ("win", "loss", "fight", "boss-attack", "coin"):
+                assert await game_visuals.verified_image_for(titre, "", kind, scene=scene) is None
+            embed = await game_visuals.decorate_embed_checked(discord.Embed(title=titre), title=titre, kind=kind)
+            assert not embed.image.url
+        assert await game_visuals.preflight_assets() == {}
+    asyncio.run(run())
 
 
 def test_each_game_family_chooses_relevant_anime_scene():
@@ -123,28 +134,6 @@ def test_verified_media_skips_broken_html_and_never_creates_blank_gallery(monkey
     game_visuals._MEDIA_STATE.clear()
 
 
-def test_verified_media_uses_only_checked_gif_and_caches_good_result(monkeypatch):
-    calls = []
-    async def works(url):
-        calls.append(url)
-        return b"GIF89a" + b"test-data" + b";"
-    monkeypatch.setattr(game_visuals, "_fetch_gif_bytes", works)
-    game_visuals._MEDIA_STATE.clear()
-    game_visuals._MEDIA_BYTES.clear()
-
-    async def run():
-        for _ in range(3):
-            embed = discord.Embed(title="Pile ou face", description="PILE — vous aviez vu juste !")
-            result = await game_visuals.decorate_embed_checked(
-                embed, title="Pile ou face", description=embed.description,
-            )
-            assert result.image.url == "attachment://sentrix_game_coin.gif"
-    asyncio.run(run())
-    assert calls == [game_visuals.GIFS["coin"]]
-    game_visuals._MEDIA_STATE.clear()
-    game_visuals._MEDIA_BYTES.clear()
-
-
 def test_200_html_is_rejected_even_if_http_success(monkeypatch):
     class FakeBody:
         async def read(self, size):
@@ -160,7 +149,7 @@ def test_200_html_is_rejected_even_if_http_success(monkeypatch):
         async def __aexit__(self, *args): return False
         def get(self, *args, **kwargs): return Response()
     monkeypatch.setattr(game_visuals.aiohttp, "ClientSession", lambda **kwargs: Session())
-    assert asyncio.run(game_visuals._probe_gif(game_visuals.GIFS["win"])) is False
+    assert asyncio.run(game_visuals._probe_gif("https://media.example/scene.gif")) is False
 
 
 def test_real_gif_signature_is_accepted(monkeypatch):
@@ -178,7 +167,7 @@ def test_real_gif_signature_is_accepted(monkeypatch):
         async def __aexit__(self, *args): return False
         def get(self, *args, **kwargs): return Response()
     monkeypatch.setattr(game_visuals.aiohttp, "ClientSession", lambda **kwargs: Session())
-    assert asyncio.run(game_visuals._probe_gif(game_visuals.GIFS["win"])) is True
+    assert asyncio.run(game_visuals._probe_gif("https://media.example/scene.gif")) is True
 
 
 def test_panel_edit_sends_validated_gif_as_attachment_not_remote_link():

@@ -158,8 +158,8 @@ async def main() -> int:
     submit = leaves.get("submit")
     check(submit is not None and submit.callback.__module__ == "cogs.suggestions",
           "/suggestions submit est la commande native (formulaire sans defer)")
-    check(not (getattr(bot, "_sentrix_slash_catalog_report", {}) or {}).get("missing"),
-          "le catalogue ne signale aucune source manquante")
+    manquantes = (getattr(bot, "_sentrix_slash_catalog_report", {}) or {}).get("missing")
+    check(not manquantes, "le catalogue ne signale aucune source manquante", str(manquantes)[:300])
 
     # 2 — Avant configuration : refus clair, aucun salon créé.
     since = await slash(bot, "suggestions", "submit", "membre")
