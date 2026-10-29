@@ -284,14 +284,19 @@ def apply_surface(bot: commands.Bot) -> None:
     # Une commande publiée en « / » par le catalogue doit aussi être visible dans
     # l'aide : sinon les deux surfaces se contredisent. C'est ce qui masquait
     # +tempban et +case, alors que /tempban et /case étaient publiées.
-    direct = direct | _catalog_root_sources()
+    catalogue = _catalog_root_sources()
+    direct = direct | catalogue
     for command in bot.commands:
         name = command.name.casefold()
         if name in EXPLICITLY_REMOVED_COMMANDS:
             command.hidden = True
         elif name in PRIVATE_OWNER_COMMANDS:
             command.hidden = True
-        elif name in MERGED_COMMAND_TARGETS and name not in HELP_VISIBLE_EXTRA_COMMANDS:
+        # 28/10/2026 (passage à 100 % « / ») : une commande fusionnée que le
+        # catalogue publie explicitement (/tickets reopen, /protection blacklist…)
+        # doit rester visible, sinon le catalogue la saute et le « / » n'existe pas.
+        elif (name in MERGED_COMMAND_TARGETS and name not in HELP_VISIBLE_EXTRA_COMMANDS
+              and name not in catalogue):
             # Les anciennes routes fusionnées restent exécutables avec +nom,
             # mais leur présence dans le catalogue slash ne doit pas les
             # réafficher par erreur dans +help.

@@ -185,10 +185,14 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
         # Compatibilité : les anciennes commandes fusionnées peuvent encore fonctionner
         # en préfixe pour les habitués, mais elles doivent être cachées de +help et leur
         # destination canonique doit toujours exister.
+        # Depuis le 28/10/2026 (passage à 100 % « / »), une fusionnée que le catalogue
+        # publie (/logs status, /tickets reopen…) est la route officielle : visible.
+        publiees_en_slash = command_catalog_cleanup._catalog_root_sources()
         merged_checked = 0
         for old_name, target in command_catalog_cleanup.MERGED_COMMAND_TARGETS.items():
             old_command = bot.get_command(old_name)
-            if old_command is not None and old_name not in command_catalog_cleanup.HELP_VISIBLE_EXTRA_COMMANDS:
+            if (old_command is not None and old_name not in command_catalog_cleanup.HELP_VISIBLE_EXTRA_COMMANDS
+                    and old_name not in publiees_en_slash):
                 assert old_command.hidden, f"ancienne commande fusionnée +{old_name} encore visible"
             target_root = target.split()[0]
             assert bot.get_command(target_root) is not None, f"destination +{target_root} absente pour +{old_name}"

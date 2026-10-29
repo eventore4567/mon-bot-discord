@@ -64,6 +64,7 @@ def test_giveaway_dashboard_is_one_panel_with_complete_create_fields():
         'id="minInvites"',
         'id="accountAge"',
         'id="serverAge"',
+        'id="minLevel"',
         'id="customCondition"',
     ):
         assert control in html

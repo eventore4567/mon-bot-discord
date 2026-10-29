@@ -58,11 +58,10 @@ async def main() -> int:
     await slash("sticky", "set", ADMIN, channel=h.CID, message="Lisez le règlement")
     row = await db.fetchone("SELECT content, every_messages FROM sentrix_sticky WHERE channel_id=?", (h.CID,))
     check(row is not None and row["content"] == "Lisez le règlement", "/sticky set enregistre le message")
-    # /sticky frequency a quitté le menu « / » (utils/unused_commands.py) :
-    # la fréquence se règle avec +sticky-every.
-    await prefix(f"+sticky-every <#{h.CID}> 3", ADMIN)
+    # /sticky frequency : masquée du « / » le 16/10, revenue le 28/10/2026.
+    await slash("sticky", "frequency", ADMIN, channel=h.CID, every=3)
     row = await db.fetchone("SELECT every_messages FROM sentrix_sticky WHERE channel_id=?", (h.CID,))
-    check(row is not None and int(row["every_messages"]) == 3, "+sticky-every enregistre la fréquence")
+    check(row is not None and int(row["every_messages"]) == 3, "/sticky frequency enregistre la fréquence")
     bot.get_cog("SentriXPlus")._no_sticky.clear()
     since = len(h.CALLS)
     for index in range(3):
@@ -81,10 +80,9 @@ async def main() -> int:
     await slash("schedule", "send", ADMIN, delay="10m", channel=h.CID, message="Réunion ce soir")
     row = await db.fetchone("SELECT id, status FROM sentrix_scheduled_messages WHERE content=?", ("Réunion ce soir",))
     check(row is not None and row["status"] == "pending", "/schedule send programme le message")
-    # /schedule list et /starboard off ont quitté le menu « / »
-    # (utils/unused_commands.py) : leur version préfixe reste disponible.
-    shown = await prefix("+schedule-list", ADMIN)
-    check(row is not None and f"#{row['id']}" in shown and "Réunion ce soir" in shown, "+schedule-list le montre", shown[:160])
+    # /schedule list et /starboard off : masquées le 16/10, revenues le 28/10/2026.
+    shown = await slash("schedule", "list", ADMIN)
+    check(row is not None and f"#{row['id']}" in shown and "Réunion ce soir" in shown, "/schedule list le montre", shown[:160])
     await slash("schedule", "cancel", ADMIN, id=row["id"] if row else 0)
     left = await db.fetchone("SELECT status FROM sentrix_scheduled_messages WHERE id=?", (row["id"] if row else 0,))
     check(left is None or left["status"] != "pending", "/schedule cancel l'annule", str(dict(left) if left else None))
@@ -94,9 +92,9 @@ async def main() -> int:
     row = await db.fetchone("SELECT channel_id, threshold FROM sentrix_starboard_config WHERE guild_id=?", (h.GID,))
     check(row is not None and int(row["channel_id"]) == h.LOGCID and int(row["threshold"]) == 4,
           "/starboard setup enregistre salon et seuil")
-    await prefix("+starboard-off", ADMIN)
+    await slash("starboard", "off", ADMIN)
     check(await db.fetchone("SELECT 1 FROM sentrix_starboard_config WHERE guild_id=?", (h.GID,)) is None,
-          "+starboard-off le coupe")
+          "/starboard off le coupe")
 
     # 4 — Même décision qu'en préfixe : un membre est refusé, avec le même motif.
     in_slash = await slash("schedule", "send", MEMBER, delay="10m", channel=h.CID, message="spam")
@@ -107,10 +105,13 @@ async def main() -> int:
     check("Gérer le serveur" in in_slash, "membre : /starboard setup refusé (Gérer le serveur)", in_slash[:120])
 
     # 5 — Vocaux : un membre sans salon temporaire reçoit l'explication, pas un refus de permission.
-    # /voice rename a quitté le menu « / » : +voice-name reste disponible.
+    # /voice rename : masquée le 16/10, revenue le 28/10/2026 ; le « + » marche encore.
+    shown = await slash("voice", "rename", MEMBER, name="Mon salon")
+    check("propriétaire" in shown and "Permission" not in shown,
+          "membre : /voice rename explique qu'il faut posséder un vocal temporaire", shown[:140])
     shown = await prefix("+voice-name Mon salon", MEMBER)
     check("propriétaire" in shown and "Permission" not in shown,
-          "membre : +voice-name explique qu'il faut posséder un vocal temporaire", shown[:140])
+          "membre : +voice-name donne la même explication", shown[:140])
 
     failed = [r for r in RESULTS if not r[0]]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} étapes réussies.")

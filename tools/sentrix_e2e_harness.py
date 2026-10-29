@@ -346,6 +346,10 @@ async def boot(*, quiet: bool = True):
         logging.disable(logging.WARNING)
     import sentrix_v98_ha_product_boot_v8  # noqa: F401  (chaîne d'installs identique à la prod)
     import main
+    # Avis de retrait du préfixe : un message de plus après chaque « + », que les
+    # parcours prendraient pour le panneau du bot. Allumé par prefix_deprecation_e2e.
+    if os.environ.get("SENTRIX_E2E_AVIS_PREFIXE") != "1":
+        os.environ["SENTRIX_AVIS_PREFIXE"] = "0"
     from discord.ext import commands as _commands
 
     # La recherche d'un membre par la passerelle Discord (REQUEST_GUILD_MEMBERS) n'existe

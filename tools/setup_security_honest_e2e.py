@@ -96,8 +96,9 @@ async def main() -> int:
     view = await build(bot, guild, None)
     check("aucune protection" in option_label(view, "security"),
           f"serveur neuf : « {option_label(view, 'security')} » (aucune activation implicite)")
-    row = await bot.db.get_automod(h.GID)
-    check(not row["antispam"] and not row["antiraid"] and not row["antinuke"],
+    # Pas de ligne du tout (création paresseuse, cache V14) = aucune protection.
+    row = dict(await bot.db.get_automod(h.GID) or {})
+    check(not row.get("antispam") and not row.get("antiraid") and not row.get("antinuke"),
           "serveur neuf : anti-spam, anti-raid et anti-nuke à zéro en base")
     neuf = await spam_deleted(bot, guild, 5)
     check(neuf == 0, f"serveur neuf : aucun message supprimé sans choix admin ({neuf}/8)")

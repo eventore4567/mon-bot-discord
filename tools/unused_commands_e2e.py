@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Commandes masquées faute d'usage (utils/unused_commands.py), sur le bot booté.
 
-Masquer n'est pas supprimer : hors de l'aide et du menu « / », mais utilisables
-en préfixe avec les mêmes contrôles, et « +help nom » montre toujours la fiche.
+16/10/2026 : hors de l'aide et du menu « / », utilisables en préfixe.
+28/10/2026 : passage à 100 % « / » ; les masquées gardées reviennent dans le
+menu avec les mêmes contrôles. Seules les supprimées restent dehors.
 
     python3 tools/unused_commands_e2e.py
 """
@@ -60,10 +61,13 @@ async def main() -> int:
     v79 = sys.modules["cogs.help_complete_v79"]
     visibles = {e.key for e in v79._catalog(bot)} | {c.qualified_name for c in helpmod._visible(bot)}
     accueil = await prefix("+help")
-    check("jamais utilisées" in accueil and "535 commandes uniques" not in accueil,
-          "l'accueil de l'aide servie dit que des commandes sont masquées", accueil[:300])
-    check(not (visibles & unused_commands.MASQUEES), "l'aide ne liste plus les commandes masquées",
-          str(sorted(visibles & unused_commands.MASQUEES)[:5]))
+    check("jamais utilisées" not in accueil and "535 commandes uniques" not in accueil,
+          "l'accueil de l'aide ne renvoie plus vers des commandes « + » masquées", accueil[:300])
+    hors_menu = {n for n in unused_commands.MASQUEES if unused_commands.masquee(n)}
+    check(not (visibles & hors_menu), "l'aide ne liste aucune commande supprimée",
+          str(sorted(visibles & hors_menu)[:5]))
+    for revenue in ("pay", "buy", "shoprole add", "minesweeper"):
+        check(revenue in visibles, f"« {revenue} » est revenue dans l'aide")
     for garde in ("ban", "hackban", "tempban", "quarantine", "music skip", "giveaway end", "setup"):
         check(garde in visibles, f"« {garde} » reste dans l'aide")
 
@@ -71,6 +75,8 @@ async def main() -> int:
     masked_paths = {e.path for e in slash_catalog._MASQUEES_DU_MENU}
     check(not (paths & masked_paths) and "market view" not in paths and "ban" in paths,
           f"le menu « / » ne publie plus les {len(masked_paths)} chemins masqués", str(sorted(paths & masked_paths)[:5]))
+    check({"economy pay", "shop buy", "shop role-add", "puzzle minesweeper"} <= paths,
+          "les masquées gardées sont publiées en « / »", str(sorted({"economy pay", "shop buy", "shop role-add", "puzzle minesweeper"} - paths)))
 
     # Les SUPPRIMEES (28/10/2026) ont quitté le bot ; les autres masquées restent en +.
     from cogs import commandes_retirees

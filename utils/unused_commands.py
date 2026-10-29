@@ -181,7 +181,17 @@ MASQUEES: frozenset[str] = frozenset({
 
 
 def masquee(nom: str) -> bool:
-    return str(nom or "").strip().casefold() in MASQUEES
+    """Hors de l'aide et du menu « / » : seules les commandes supprimées.
+
+    Le 28/10/2026, Jayden décide de passer à 100 % « / » : « transforme les
+    commandes qui n'ont pas encore d'équivalent / pour ne perdre aucune
+    fonctionnalité ». Une masquée gardée n'existait plus qu'en « + » ; elle
+    revient dans le menu, sinon le retrait du préfixe la rendrait inaccessible.
+    ``MASQUEES`` reste le relevé d'usage du 16/10.
+    """
+    nom = str(nom or "").strip().casefold()
+    # « logevent on » : sous-commande d'une racine supprimée, disparue avec elle.
+    return nom in MASQUEES and (nom in SUPPRIMEES or nom.split(" ")[0] in SUPPRIMEES)
 
 
 __all__ = ["MASQUEES", "masquee", "RELEVE", "PERIODE"]

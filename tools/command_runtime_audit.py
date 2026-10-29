@@ -164,9 +164,13 @@ async def run() -> int:
                 + ", ".join(removed_still_present)
             )
 
+        # Depuis le 28/10/2026 (passage à 100 % « / »), une fusionnée que le catalogue
+        # publie (/tickets reopen, /protection trust…) est la route officielle : visible.
+        publiees_en_slash = command_catalog_cleanup._catalog_root_sources()
         merged_visible = sorted(
             name for name in command_catalog_cleanup.MERGED_COMMANDS
             if name not in command_catalog_cleanup.HELP_VISIBLE_EXTRA_COMMANDS
+            and name not in publiees_en_slash
             and (command := bot.get_command(name)) is not None and not command.hidden
         )
         if merged_visible:

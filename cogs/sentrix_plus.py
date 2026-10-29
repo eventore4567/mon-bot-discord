@@ -365,15 +365,17 @@ class SentriXPlus(commands.Cog, name="SentriXPlus"):
 
     @commands.command(name="voice-name", help="Renommer votre vocal temporaire.")
     @commands.guild_only()
-    async def voice_name(self, ctx: commands.Context, *, name: str):
+    async def voice_name(self, ctx: commands.Context, *, nom: str):
+        # « nom » et non « name » : V18 et V76 prennent « name » pour un paramètre
+        # interne de wrapper et reconstruisent le parseur à l'appel (audit 28/10/2026).
         channel, row = await self._owned_voice(ctx)
         if channel is None or row is None:
             return await panels.envoyer(ctx, _reponse("Salon vocal", "Vous devez être propriétaire d'un vocal temporaire SentriX.", kind="danger"))
-        name = str(name).strip()[:90]
-        if len(name) < 2:
+        nom = str(nom).strip()[:90]
+        if len(nom) < 2:
             return await panels.envoyer(ctx, _reponse("Salon vocal", 'Choisissez un nom de salon plus long.', kind="danger"))
-        await channel.edit(name=name, reason=f"VoiceHub : renommage par {ctx.author}")
-        await panels.envoyer(ctx, _reponse("Salon vocal", f"Votre vocal s'appelle maintenant « {name} ».", kind="success"))
+        await channel.edit(name=nom, reason=f"VoiceHub : renommage par {ctx.author}")
+        await panels.envoyer(ctx, _reponse("Salon vocal", f"Votre vocal s'appelle maintenant « {nom} ».", kind="success"))
 
     @commands.command(name="voice-limit", help="Limiter le nombre de membres dans votre vocal (0 = illimité).")
     @commands.guild_only()

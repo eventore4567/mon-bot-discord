@@ -27,6 +27,11 @@ class _Router:
     def add_get(self, path, _handler):
         self._paths.add(path)
 
+    # Le vrai routeur aiohttp l'a : la visionneuse de transcriptions (d95bd875)
+    # enregistre POST /transcripts/view, et l'absence faisait échouer les 3 essais.
+    def add_post(self, path, _handler):
+        self._paths.add(path)
+
 
 class _App(dict):
     def __init__(self):
