@@ -678,7 +678,7 @@ SETUP_JS = r"""
         <section class="setup-card"><h3>Panneau des rôles de notification</h3><p>Publie un menu avec les rôles contenant Ping ou Notifications dans leur nom.</p><select class="select" id="setupRolePanelChannel">${setupChannelOptions("",["text","news"])}</select><input id="setupRolePanelTitle" maxlength="256" value="Choisissez vos notifications"><button type="button" class="btn primary" data-setup-action="role-panel">Publier le panneau</button></section>
         <section class="setup-card"><h3>Gestionnaires du bot</h3><p>Autorisez un membre sans lui donner accès aux autres serveurs.</p><input id="setupManagerUser" inputmode="numeric" placeholder="ID Discord du membre"><div class="setup-checks">${Object.entries(d.manager_categories).map(([key,label])=>`<label class="setup-check"><input class="setupManagerCategory" type="checkbox" value="${esc(key)}" ${key==="complete"?"checked":""}>${esc(label)}</label>`).join("")}</div><button type="button" class="btn primary" data-setup-action="add-manager">Ajouter / mettre à jour</button>${managerList}</section>
         <section class="setup-card full"><h3>Historique du Setup</h3><p>Dernières modifications enregistrées depuis Discord et le dashboard.</p>${history}</section>
-        <section class="setup-card full setup-danger"><h3>Réinitialiser une configuration</h3><p>Équivalent de +config-reset. Cette action est irréversible. Écrivez exactement le nom du serveur pour confirmer.</p><div class="setup-row"><select class="select" id="setupResetScope"><option value="commands">Commandes désactivées</option><option value="ignored">Salons ignorés</option><option value="games">Mini-jeux</option><option value="security">Sécurité</option><option value="all">Toute la configuration SentriX</option></select><input id="setupResetConfirm" placeholder="${esc(state.guildData.guild.name)}"><button type="button" class="btn danger" data-setup-action="reset">Réinitialiser</button></div></section>
+        <section class="setup-card full setup-danger"><h3>Réinitialiser une configuration</h3><p>Équivalent de /config reset. Cette action est irréversible. Écrivez exactement le nom du serveur pour confirmer.</p><div class="setup-row"><select class="select" id="setupResetScope"><option value="commands">Commandes désactivées</option><option value="ignored">Salons ignorés</option><option value="games">Mini-jeux</option><option value="security">Sécurité</option><option value="all">Toute la configuration SentriX</option></select><input id="setupResetConfirm" placeholder="${esc(state.guildData.guild.name)}"><button type="button" class="btn danger" data-setup-action="reset">Réinitialiser</button></div></section>
       </div>`;
       bindSetupButtons();$("saveStatus").textContent="Configuration chargée";state.dirty=false;
     }
@@ -727,7 +727,7 @@ def _patch_html(html: str) -> str:
     )
     old_tabs_end = '      ].map(x=>({key:x[0],label:x[1],type:x[2]}))}\n    };'
     new_tabs_end = '''      ].map(x=>({key:x[0],label:x[1],type:x[2]}))},
-      gamesSetup:{title:"Configuration des mini-jeux",description:"Toutes les options de +gamesetup directement depuis le dashboard.",gamesSetup:true,fields:[]},
+      gamesSetup:{title:"Configuration des mini-jeux",description:"Toutes les options de /games setup directement depuis le dashboard.",gamesSetup:true,fields:[]},
       setupTools:{title:"Setup avancé",description:"Commandes de configuration absentes des autres onglets.",setupTools:true,fields:[]}
     };'''
     html = _replace_once(html, old_tabs_end, new_tabs_end, "tabs")

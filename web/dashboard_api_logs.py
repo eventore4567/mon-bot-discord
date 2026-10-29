@@ -101,7 +101,7 @@ def register(app: web.Application, dashboard) -> None:
             enabled=enabled,
         )
 
-        # Le dashboard doit garantir la même chose que reset-logs/+setup : une route
+        # Le dashboard doit garantir la même chose que reset-logs et /setup : une route
         # marquée active doit avoir réellement réussi un envoi Components V2. Cela
         # détecte immédiatement un salon sans pièce jointe, une bannière manquante,
         # une erreur de renderer ou un refus Discord au lieu d'afficher « Actif » à tort.

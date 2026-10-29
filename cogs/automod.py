@@ -2594,7 +2594,7 @@ class AutoMod(commands.Cog, name="Automod"):
             acteur_label="🛠️ Verrouillé par", extra={"📊 Salons verrouillés": str(count)},
         )
         await self.log_action(ctx.guild, e)
-        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🔒 {count} salon(s) verrouillé(s). Utilisez `/unlock-server` pour déverrouiller.')))
+        await panels.envoyer(ctx, panels.depuis_embed(embeds.success(f'🔒 {count} salon(s) verrouillé(s). Utilisez `/protection unlock` pour déverrouiller.')))
 
     @commands.hybrid_command(name="unlock-server", description="[Sécurité] Déverrouiller tous les salons textuels du serveur.")
     @checks.is_owner_or_admin_for("securite")

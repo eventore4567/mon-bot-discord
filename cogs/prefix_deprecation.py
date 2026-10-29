@@ -53,6 +53,23 @@ def actif() -> bool:
     return os.environ.get("SENTRIX_AVIS_PREFIXE", "1") != "0"
 
 
+def prefixe_actif() -> bool:
+    """30/10/2026 (Jayden) : « personne n'utilise le +, supprime maintenant ».
+    En production, un message « +commande » n'exécute plus rien. Les commandes
+    restent chargées : elles sont la source des routes « / ». Le harnais de test
+    rallume le « + » (SENTRIX_PREFIXE_ACTIF=1) pour les parcours existants."""
+    import os
+
+    return os.environ.get("SENTRIX_PREFIXE_ACTIF", "0") == "1"
+
+
+def texte_retire(membre: discord.abc.User) -> str:
+    return (
+        f"**{membre.mention} Les commandes avec le préfixe `+` ont été supprimées. "
+        "Utilise les commandes `/` (tape `/` pour voir la liste).**"
+    )
+
+
 def texte_avis(membre: discord.abc.User) -> str:
     return (
         f"**{membre.mention} Les commandes avec le préfixe `+` seront bientôt supprimées. "
@@ -121,7 +138,7 @@ async def avertir(bot: commands.Bot, ctx: commands.Context) -> None:
     jeton = panels.TEXTE_BRUT.set(True)
     try:
         await ctx.channel.send(
-            texte_avis(ctx.author),
+            texte_avis(ctx.author) if prefixe_actif() else texte_retire(ctx.author),
             allowed_mentions=discord.AllowedMentions(
                 everyone=False, roles=False, users=[ctx.author], replied_user=False
             ),
@@ -147,6 +164,13 @@ class PrefixDeprecation(commands.Cog):
         bot = self.bot
 
         async def invoke(ctx: commands.Context, /):
+            if ctx.interaction is None and not prefixe_actif():
+                # « + » retiré : rien n'est exécuté, seul le rappel (2/jour) part.
+                try:
+                    await avertir(bot, ctx)
+                except Exception:
+                    logger.debug("Avis de retrait du préfixe ignoré.", exc_info=True)
+                return None
             try:
                 return await original(ctx)
             finally:

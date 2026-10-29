@@ -86,6 +86,15 @@ async def main() -> int:
     envois = await lancer(bot, guild, "+market", uid=h.TARGET_ID)
     check(len(avis_dans(envois)) == 1, "ancienne commande +market : l'avis part aussi")
 
+    # 4b — « + » retiré (production) : rien n'est exécuté, seul le rappel part.
+    os.environ["SENTRIX_PREFIXE_ACTIF"] = "0"
+    await bot.db.execute("DELETE FROM sentrix_prefix_notices")
+    envois = await lancer(bot, guild, "+ping", uid=h.SECOND_ID)
+    textes = [str(j.get("content") or "") + h.visible_text([("POST", "", j)]) for j in envois]
+    check(len(envois) == 1 and "ont été supprimées" in textes[0] and f"<@{h.SECOND_ID}>" in textes[0],
+          "« + » retiré : un seul message, le rappel, et la commande n'est pas exécutée", str(textes)[:300])
+    os.environ["SENTRIX_PREFIXE_ACTIF"] = "1"
+
     # 5 — Les commandes « / » ne déclenchent jamais l'avis.
     since = len(h.CALLS)
     await asyncio.wait_for(h.run_slash(bot, guild, "ping"), 15)

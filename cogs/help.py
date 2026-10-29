@@ -1,6 +1,6 @@
 """Centre d'aide officiel SentriX.
 
-+help et /help partagent la même logique. L'accueil reste volontairement léger :
+/help partage la même logique. L'accueil reste volontairement léger :
 il sert à trouver une commande, pas à configurer le serveur.
 """
 from __future__ import annotations
@@ -126,14 +126,14 @@ def _visible(bot: commands.Bot, _member=None) -> list[commands.Command]:
             continue
         # Les commandes globales du propriétaire sont des outils internes.
         # Elles restent exécutables par l'owner pour la maintenance, mais ne
-        # polluent ni / ni les pages publiques de +help.
+        # polluent ni / ni les pages publiques de /help.
         root_name = name_key.split(" ", 1)[0]
         if root_name in access_matrix.OWNER_ONLY_COMMANDS or root_name in {
             "unsyncbl", "alias", "set-nickname",
         }:
             continue
         # Jamais utilisées en production (utils/unused_commands.py) : hors des
-        # pages, mais « +help nom » affiche toujours leur fiche.
+        # pages, mais « /help nom » affiche toujours leur fiche.
         if unused_commands.masquee(name_key):
             continue
 
@@ -269,7 +269,7 @@ def _home(bot: commands.Bot, member=None) -> discord.Embed:
     panel.add_field(name="Catégories", value="\n".join(lines), inline=False)
     panel.add_field(
         name="Recherche rapide",
-        value="Tapez `+help ban`, `/help command:ban` ou utilisez **Rechercher**.",
+        value="Tapez `/help command:ban` ou utilisez **Rechercher**.",
         inline=False,
     )
     panel.add_field(
@@ -596,7 +596,7 @@ def _sections_accueil(bot: commands.Bot, member=None) -> list[panels.Section]:
         panels.Section(
             "Trouver une commande",
             [
-                panels.Ligne("Par son nom", "`/help command:ban` ou `+help ban`"),
+                panels.Ligne("Par son nom", "`/help command:ban`"),
                 panels.Ligne("Par catégorie", "Le menu déroulant ci-dessous"),
                 panels.Ligne("Par mot-clé", "Le bouton **Rechercher**"),
             ],

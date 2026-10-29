@@ -61,7 +61,7 @@ DEEPLINK_RUNTIME_JS = r"""
       tabButton.click();
     }
 
-    // Sélectionne ensuite le serveur précis depuis lequel +setup a été exécuté.
+    // Sélectionne ensuite le serveur précis depuis lequel /setup a été exécuté.
     if (serverSelect && targetGuild) {
       const optionExists = Array.from(serverSelect.options).some(option => option.value === targetGuild);
       if (optionExists && serverSelect.value !== targetGuild) {

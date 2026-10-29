@@ -139,7 +139,7 @@ def _catalog(bot: commands.Bot, *, avec_masquees: bool = False) -> list[HelpEntr
 
     for slash_name, slash_command in _walk_slash(bot):
         # Rapprocher par la commande SOURCE d'abord : depuis utils/slash_catalog.py,
-        # « /economy balance » exécute +balance. Rapprocher par nom seulement en
+        # « /economy balance » exécute /economy balance. Rapprocher par nom seulement en
         # faisait deux commandes, et l'aide annonçait « 741 commandes uniques,
         # 239 uniquement en / » pour 502 commandes réelles.
         source = getattr(getattr(slash_command, "callback", None), "_sentrix_original_command", None)
@@ -213,9 +213,9 @@ def _title(entry: HelpEntry, prefix: str = "+") -> str:
         from utils import slash_ids
 
         parts.append(slash_ids.mention(entry.slash_name))
-    if entry.prefix_command is not None:
+    if entry.prefix_command is not None and (_prefixe_actif() or not parts):
         # Nom court conseillé (cogs/common_command_names.py) ; le nom interne reste
-        # tapable et apparaît dans la ligne Alias.
+        # tapable et apparaît dans la ligne Alias. « + » retiré : plus affiché.
         parts.append(f"{prefix}{_short_name(entry.prefix_command)}")
     return " · ".join(parts) or entry.name
 
@@ -237,7 +237,7 @@ def _slash_usage(entry: HelpEntry) -> str | None:
 
 
 def _prefix_usage(entry: HelpEntry, prefix: str) -> str | None:
-    if entry.prefix_command is None:
+    if entry.prefix_command is None or not _prefixe_actif():
         return None
     return _with_short_name(entry.prefix_command, legacy._usage(entry.prefix_command, prefix), prefix)
 
@@ -251,7 +251,7 @@ def _with_short_name(command: commands.Command, text: str, prefix: str) -> str:
 
 
 def _example(entry: HelpEntry, prefix: str) -> str:
-    if entry.prefix_command is not None:
+    if entry.prefix_command is not None and (_prefixe_actif() or not entry.slash_name):
         return _with_short_name(entry.prefix_command, command_example(entry.prefix_command, prefix), prefix)
     return _slash_usage(entry) or f"/{entry.slash_name or entry.name}"
 
@@ -466,7 +466,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
         elif self.mode == "closed":
             self.add_item(
                 discord.ui.Container(
-                    discord.ui.TextDisplay("# Aide fermée\nRelancez `+help` ou `/help` pour rouvrir le centre d'aide."),
+                    discord.ui.TextDisplay("# Aide fermée\nRelancez `/help` pour rouvrir le centre d'aide."),
                 )
             )
         else:
@@ -488,8 +488,9 @@ class SentriXHelpV79(discord.ui.LayoutView):
                 discord.ui.TextDisplay(
                     "# Centre d'aide SentriX\n"
                     "Choisissez une catégorie pour voir ses commandes, ou recherchez une commande.\n"
-                    f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
-                    + (f" · **{slash_only} uniquement en /**" if slash_only else "")
+                    + (f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
+                       + (f" · **{slash_only} uniquement en /**" if slash_only else "")
+                       if _prefixe_actif() else f"**{slash_count} commandes** · tapez `/` pour les voir")
                 ),
                 accessory=setup_v73._thumbnail(self.bot),
             )
@@ -655,7 +656,7 @@ class SentriXHelpV79(discord.ui.LayoutView):
                 + f"\n\n### Permission nécessaire\n{_permission(entry)}"
                 + f"\n\n### Catégorie\n{emoji} {category_label}"
                 + f"\n\n### Exemple\n`{_example(entry, self.prefix)}`"
-                + f"\n\n### Alias\n{_aliases(entry)}"
+                + (f"\n\n### Alias\n{_aliases(entry)}" if _prefixe_actif() else "")
             )
         )
 
@@ -696,6 +697,14 @@ class SentriXHelpV79(discord.ui.LayoutView):
             pass
 
 
+def _prefixe_actif() -> bool:
+    try:
+        from cogs.prefix_deprecation import prefixe_actif
+    except Exception:  # noqa: BLE001
+        return True
+    return prefixe_actif()
+
+
 async def _send_help_v79(self, target, query: str | None = None):
     member = getattr(target, "author", None) or getattr(target, "user", None)
     if member is None:
@@ -732,7 +741,7 @@ def install(bot: commands.Bot) -> None:
 
     bot._sentrix_help_complete_v79 = True
     logger.info(
-        "%s installé : +help et /help listent désormais toutes les commandes + et /, y compris slash-only.",
+        "%s installé : /help liste toutes les commandes.",
         RUNTIME_MARKER,
     )
 

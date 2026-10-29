@@ -222,7 +222,10 @@ class MemberPicker(discord.ui.UserSelect):
         super().__init__(placeholder="Choisir un membre", min_values=1, max_values=1, row=0)
 
     async def callback(self, interaction: discord.Interaction):
-        view: ModView = self.view
+        # self.view est le Panneau Components V2 qui a relogé ce menu : l'état
+        # (target_id, sync) vit sur la ModView d'origine (bug du 29/10/2026 :
+        # « 'Panneau' object has no attribute 'sync' » dès le choix d'un membre).
+        view: ModView = panels.vue_source(self)
         selected = self.values[0]
         member = selected if isinstance(selected, discord.Member) else None
         if member is None:
@@ -234,9 +237,7 @@ class MemberPicker(discord.ui.UserSelect):
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Membre introuvable.')), ephemere=True)
         view.target_id = member.id
         view.sync()
-        await interaction.response.edit_message(
-            embed=await view.cog.build_member_mod_embed(interaction.guild, member), view=view
-        )
+        await panels.editer(interaction.response, await view.panneau(interaction.guild, member))
 
 
 class ModAction(discord.ui.Button):
@@ -247,7 +248,7 @@ class ModAction(discord.ui.Button):
         self.action = action
 
     async def callback(self, interaction: discord.Interaction):
-        view: ModView = self.view
+        view: ModView = panels.vue_source(self)
         if view.target_id is None:
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.warning('Choisissez un membre.')), ephemere=True)
         if not await view.cog.can_staff_interaction(interaction, self.PERMS[self.action]):
@@ -260,11 +261,11 @@ class ModRefresh(discord.ui.Button):
         super().__init__(label="Actualiser", style=discord.ButtonStyle.secondary, row=1, disabled=True)
 
     async def callback(self, interaction: discord.Interaction):
-        view: ModView = self.view
+        view: ModView = panels.vue_source(self)
         member = interaction.guild.get_member(view.target_id) if view.target_id else None
         if member is None:
             return await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error('Membre introuvable.')), ephemere=True)
-        await interaction.response.edit_message(embed=await view.cog.build_member_mod_embed(interaction.guild, member), view=view)
+        await panels.editer(interaction.response, await view.panneau(interaction.guild, member))
 
 
 class ModView(design_system.SentriXView):
@@ -282,6 +283,13 @@ class ModView(design_system.SentriXView):
         for item in self.children:
             if isinstance(item, (ModAction, ModRefresh)):
                 item.disabled = self.target_id is None
+
+    async def panneau(self, guild: discord.Guild, member: discord.Member):
+        """Le panneau Components V2 du membre choisi, avec les boutons de cette vue.
+        Un message Components V2 ne peut pas recevoir d'embed : edit_message(embed=…)
+        était refusé par Discord."""
+        embed = await self.cog.build_member_mod_embed(guild, member)
+        return panels.avec_composants(panels.depuis_embed(embed), self)
 
 
 class SanctionModal(discord.ui.Modal):
@@ -597,8 +605,8 @@ class SentriXV2(commands.Cog, name="SentriXV2"):
             else: await panels.envoyer(interaction.response, panels.depuis_embed(embeds.error("Discord a refusé l'action.")), ephemere=True)
         finally:
             try:
-                if interaction.message:
-                    await interaction.message.edit(embed=await self.build_member_mod_embed(guild, member), view=view)
+                if interaction.message and isinstance(view, ModView):
+                    await panels.editer(interaction.message, await view.panneau(guild, member))
             except Exception:
                 logger.warning("Étape non critique ignorée dans run_mod_action", exc_info=True)
 

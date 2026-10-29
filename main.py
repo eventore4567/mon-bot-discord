@@ -1118,7 +1118,7 @@ class BotAllInOne(commands.Bot):
                 logger.warning("Vérification de persistance (on_ready) impossible :\n" + traceback.format_exc())
 
         await self.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.watching, name=f"{config.DEFAULT_PREFIX}help")
+            activity=discord.Activity(type=discord.ActivityType.watching, name="/help")
         )
         embeds.set_footer_icon(self.user.display_avatar.url)
 

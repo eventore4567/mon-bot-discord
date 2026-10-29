@@ -599,7 +599,7 @@ function enhanceWelcomeExperience() {
   const s=settings();
   experienceInsertAfterCommand(experienceSummary(
     'Accueil des membres',
-    'Bienvenue et départs utilisent les mêmes réglages que les commandes /setup et +setup.',
+    'Bienvenue et départs utilisent les mêmes réglages que la commande /setup.',
     [
       {label:'Bienvenue',value:s.welcome_channel?(channelName(s.welcome_channel)||'Configuré'):'Aucun salon',note:s.welcome_mode==='text'?'message simple':'embed'},
       {label:'Départs',value:s.goodbye_channel?(channelName(s.goodbye_channel)||'Configuré'):'Aucun salon',note:s.goodbye_mode==='text'?'message simple':'embed'},

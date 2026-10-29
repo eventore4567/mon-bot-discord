@@ -1,12 +1,12 @@
 """Panneau DM du Dashboard : message privé à UN membre, au nom du serveur.
 
 Ce module n'implémente aucun moteur d'envoi : il appelle
-``cogs.direct_message.envoyer_prive`` — exactement le chemin de ``+dm``. La diffusion à
+``cogs.direct_message.envoyer_prive`` — exactement le chemin de ``/user dm``. La diffusion à
 tout le serveur (ancienne commande de diffusion et sa route) a été retirée.
 
 Sécurité : l'autorisation est vérifiée **côté serveur** à chaque appel. Cacher le bouton
 dans le navigateur ne protège rien — la route reste appelable directement. Seuls le
-propriétaire du serveur et le propriétaire de SentriX peuvent écrire, comme pour ``+dm``.
+propriétaire du serveur et le propriétaire de SentriX peuvent écrire, comme pour ``/user dm``.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class _PorteurId:  # petit porteur d'ID, suffisant pour Bot.is_owner
 
 
 async def _peut_ecrire(request: web.Request, guild) -> bool:
-    """Propriétaire du serveur ou propriétaire de SentriX, comme +dm."""
+    """Propriétaire du serveur ou propriétaire de SentriX, comme /user dm."""
     session = request.get("sentrix_session") or {}
     try:
         user_id = int(session.get("user", {}).get("id"))

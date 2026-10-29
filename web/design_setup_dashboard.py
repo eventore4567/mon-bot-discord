@@ -1,4 +1,4 @@
-"""Extension du dashboard SentriX : réglages de +designsetup."""
+"""Extension du dashboard SentriX : réglages de /config design."""
 
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ DESIGN_JS = r"""
       const g=await loadDesignSetup();if(state.tab!=="designSetup")return;
       const colours=[["primary_color","Couleur principale"],["secondary_color","Couleur secondaire"],["success_color","Couleur succès"],["warning_color","Couleur avertissement"],["danger_color","Couleur erreur"]];
       $("fields").innerHTML=`<div class="design-setup-grid">
-        <section class="setup-card full"><h3>Couleurs de SentriX</h3><p>Tous les réglages de +designsetup sont séparés pour ce serveur.</p><div class="design-colours">${colours.map(([key,label])=>{const value=designHex(g[key]);return `<div class="field"><label>${label}</label><div class="design-colour-input"><input id="design_picker_${key}" data-design-picker="${key}" type="color" value="${value}"><input id="design_${key}" data-design-key="${key}" value="${value}" maxlength="7"></div></div>`;}).join("")}</div></section>
+        <section class="setup-card full"><h3>Couleurs de SentriX</h3><p>Tous les réglages de /config design sont séparés pour ce serveur.</p><div class="design-colours">${colours.map(([key,label])=>{const value=designHex(g[key]);return `<div class="field"><label>${label}</label><div class="design-colour-input"><input id="design_picker_${key}" data-design-picker="${key}" type="color" value="${value}"><input id="design_${key}" data-design-key="${key}" value="${value}" maxlength="7"></div></div>`;}).join("")}</div></section>
         <div class="field full"><label>Footer</label><input id="design_footer" data-design-key="footer" maxlength="100" value="${esc(g.footer||"SentriX")}"></div>
         <div class="field"><label>Longueur de la barre de progression</label><input id="design_progress_length" data-design-key="progress_length" type="number" min="3" max="30" value="${esc(g.progress_length||10)}"></div>
         <div class="field"><label>Symbole rempli</label><input id="design_progress_filled" data-design-key="progress_filled" maxlength="16" value="${esc(g.progress_filled||"🟪")}"></div>
@@ -172,8 +172,8 @@ def _patch_html(html: str) -> str:
     )
     html = _replace_once(
         html,
-        '      gamesSetup:{title:"Configuration des mini-jeux",description:"Toutes les options de +gamesetup directement depuis le dashboard.",gamesSetup:true,fields:[]},\n      setupTools:',
-        '      gamesSetup:{title:"Configuration des mini-jeux",description:"Toutes les options de +gamesetup directement depuis le dashboard.",gamesSetup:true,fields:[]},\n      designSetup:{title:"Design de SentriX",description:"Couleurs, footer, progression et options de +designsetup.",designSetup:true,fields:[]},\n      setupTools:',
+        '      gamesSetup:{title:"Configuration des mini-jeux",description:"Toutes les options de /games setup directement depuis le dashboard.",gamesSetup:true,fields:[]},\n      setupTools:',
+        '      gamesSetup:{title:"Configuration des mini-jeux",description:"Toutes les options de /games setup directement depuis le dashboard.",gamesSetup:true,fields:[]},\n      designSetup:{title:"Design de SentriX",description:"Couleurs, footer, progression et options de /config design.",designSetup:true,fields:[]},\n      setupTools:',
         "tab",
     )
     html = _replace_once(html, "    function renderTab(){", DESIGN_JS + "\n    function renderTab(){", "javascript")
@@ -219,4 +219,4 @@ def install(dashboard, setup_dashboard) -> None:
         return app
 
     dashboard.build_app = build_app
-    logger.info("Configuration +designsetup du dashboard chargée.")
+    logger.info("Configuration /config design du dashboard chargée.")

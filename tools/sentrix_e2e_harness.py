@@ -348,6 +348,9 @@ async def boot(*, quiet: bool = True):
     import main
     # Avis de retrait du préfixe : un message de plus après chaque « + », que les
     # parcours prendraient pour le panneau du bot. Allumé par prefix_deprecation_e2e.
+    # Le « + » est retiré en production (cogs/prefix_deprecation.prefixe_actif) ;
+    # les parcours de test existants le rallument.
+    os.environ.setdefault("SENTRIX_PREFIXE_ACTIF", "1")
     if os.environ.get("SENTRIX_E2E_AVIS_PREFIXE") != "1":
         os.environ["SENTRIX_AVIS_PREFIXE"] = "0"
     from discord.ext import commands as _commands
