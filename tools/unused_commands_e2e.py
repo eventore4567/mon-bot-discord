@@ -81,7 +81,8 @@ async def main() -> int:
     # Les SUPPRIMEES (28/10/2026) ont quitté le bot ; les autres masquées restent en +.
     from cogs import commandes_retirees
     commandes_retirees.retirer(bot)
-    supprimees = unused_commands.SUPPRIMEES
+    # + outils du propriétaire global retirés le 29/10/2026.
+    supprimees = unused_commands.SUPPRIMEES | unused_commands.OUTILS_PROPRIETAIRE_RETIRES
     for nom in unused_commands.MASQUEES - supprimees:
         if nom.split(" ")[0] in supprimees:
             continue  # sous-commande d'une racine supprimée (logevent on/off)
