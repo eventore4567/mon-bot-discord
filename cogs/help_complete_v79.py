@@ -490,7 +490,6 @@ class SentriXHelpV79(discord.ui.LayoutView):
                     "Choisissez une catégorie pour voir ses commandes, ou recherchez une commande.\n"
                     f"**{len(entries)} commandes** · **{prefix_count} en +** · **{slash_count} en /**"
                     + (f" · **{slash_only} uniquement en /**" if slash_only else "")
-                    + _avis_retrait_prefixe()
                 ),
                 accessory=setup_v73._thumbnail(self.bot),
             )
@@ -694,19 +693,6 @@ class SentriXHelpV79(discord.ui.LayoutView):
             await _private_error(interaction, "Une erreur est survenue dans le centre d'aide SentriX.")
         except discord.HTTPException:
             pass
-
-
-def _avis_retrait_prefixe() -> str:
-    """Avertissement permanent en tête de l'aide (cogs/prefix_deprecation.py)."""
-    try:
-        from cogs import prefix_deprecation as avis
-    except Exception:  # noqa: BLE001
-        return ""
-    if not avis.actif():
-        return ""
-    horodatage = int(avis.DATE_RETRAIT.timestamp())
-    return (f"\n⚠️ **Les commandes `+` seront retirées le {avis.DATE_LISIBLE}** "
-            f"(<t:{horodatage}:R>). Utilisez les commandes `/`.")
 
 
 async def _send_help_v79(self, target, query: str | None = None):
