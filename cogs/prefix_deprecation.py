@@ -63,11 +63,52 @@ def prefixe_actif() -> bool:
     return os.environ.get("SENTRIX_PREFIXE_ACTIF", "0") == "1"
 
 
-def texte_retire(membre: discord.abc.User) -> str:
-    return (
-        f"**{membre.mention} Les commandes avec le préfixe `+` ont été supprimées. "
-        "Utilise les commandes `/` (tape `/` pour voir la liste).**"
-    )
+def commande_slash(texte: str) -> str | None:
+    """« +clear 10 » -> mention cliquable de /clear (catalogue), ou None."""
+    from utils import sentrix_panels as panels, slash_ids
+
+    route = panels._route_slash(" ".join(str(texte or "").split()[:3]))
+    if route is None:
+        return None
+    try:
+        return slash_ids.mention(route[0])
+    except Exception:
+        return f"`/{route[0]}`"
+
+
+def texte_retire(membre: discord.abc.User, slash: str | None = None) -> str:
+    conseil = f"Utilise {slash} à la place." if slash else "Tape `/` pour voir la liste des commandes."
+    return f"**{membre.mention} Les commandes avec le préfixe `+` ont été supprimées. {conseil}**"
+
+
+#: « + » retiré : une réponse à CHAQUE essai (sinon rien ne se passe), 10 s
+#: d'écart par personne contre le spam, effacée après une minute.
+_dernier_essai: dict[int, float] = {}
+
+
+async def repondre_retire(ctx: commands.Context) -> None:
+    if ctx.guild is None or getattr(ctx.author, "bot", False) or not _concerne(ctx):
+        return
+    maintenant = time.monotonic()
+    if maintenant - _dernier_essai.get(ctx.author.id, -1e9) < 10:
+        return
+    _dernier_essai[ctx.author.id] = maintenant
+    if len(_dernier_essai) > 50_000:
+        _dernier_essai.clear()
+    from utils import sentrix_panels as panels
+
+    jeton = panels.TEXTE_BRUT.set(True)
+    try:
+        await ctx.channel.send(
+            texte_retire(ctx.author, commande_slash("+" + ctx.message.content[len(ctx.prefix or ""):])),
+            delete_after=60,
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=[ctx.author],
+                                                     replied_user=False),
+        )
+    except (discord.Forbidden, discord.HTTPException):
+        logger.debug("Réponse « + retiré » non envoyée.", exc_info=True)
+    finally:
+        panels.TEXTE_BRUT.reset(jeton)
 
 
 def texte_avis(membre: discord.abc.User) -> str:
@@ -165,9 +206,9 @@ class PrefixDeprecation(commands.Cog):
 
         async def invoke(ctx: commands.Context, /):
             if ctx.interaction is None and not prefixe_actif():
-                # « + » retiré : rien n'est exécuté, seul le rappel (2/jour) part.
+                # « + » retiré : rien n'est exécuté ; on dit quelle commande « / » utiliser.
                 try:
-                    await avertir(bot, ctx)
+                    await repondre_retire(ctx)
                 except Exception:
                     logger.debug("Avis de retrait du préfixe ignoré.", exc_info=True)
                 return None
