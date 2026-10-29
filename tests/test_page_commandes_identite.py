@@ -80,7 +80,8 @@ def test_la_page_recupere_la_navigation_du_site():
 
 def test_les_chiffres_affiches_sont_les_vrais():
     """Jayden : chiffres réels uniquement. 2 slash + 3 préfixe = 5."""
-    assert "5 commandes affichées · 2 slash / · 3 préfixe +" in _rendre()
+    # 30/10/2026 : commandes « + » supprimées, la page ne compte que les « / ».
+    assert "2 commandes / affichées" in _rendre()
 
 
 def test_la_recherche_est_utilisable_au_clavier_et_annoncee():
@@ -88,7 +89,7 @@ def test_la_recherche_est_utilisable_au_clavier_et_annoncee():
     assert 'class="sx-sr"' in corps, "le champ de recherche n'a pas de label"
     assert 'aria-live="polite"' in corps, "le nombre de résultats n'est pas annoncé"
     boutons = re.findall(r"<button[^>]*>", corps)
-    assert len(boutons) == 3, "les trois filtres ne sont pas rendus"
+    assert len(boutons) == 1, "seul le filtre « Toutes » reste (plus de « + »)"
     assert all("aria-pressed" in b for b in boutons), "les filtres n'exposent pas leur état"
     assert ":focus-visible" in corps
 
@@ -104,7 +105,7 @@ def test_les_cartes_de_commandes_ne_portent_pas_l_inclinaison():
     corps = _rendre()
     grille = corps[corps.index('class="cmd-grille"') :]
     assert 'class="card"' not in grille
-    assert grille.count('class="cmd"') == 5
+    assert grille.count('class="cmd"') == 2
 
 
 def test_la_page_reste_indexable():
