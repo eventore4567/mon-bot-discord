@@ -238,7 +238,8 @@ class SlashOptionsContracts(unittest.TestCase):
         slash = Moderation.ban.app_command
         self.assertIsNotNone(slash)
         options = {parameter.name: parameter for parameter in slash.parameters}
-        self.assertEqual(set(options), {"membre", "raison"})
+        self.assertEqual(set(options), {"membre", "raison", "envoyer_mp"})
+        self.assertIs(options["envoyer_mp"].default, True)
         select = _BanPurgeSelect()
         self.assertEqual([int(x.value) for x in select.options], [900, 3600, 86400])
 
