@@ -56,11 +56,11 @@ async def run() -> int:
         explicit_removed = set(
             getattr(command_catalog_cleanup, "EXPLICITLY_REMOVED_COMMANDS", frozenset())
         )
-        # Contrat actuel : 97 commandes directes historiques moins les deux retraits
-        # produit blacklist-add/blacklist-users = 95. L'ancien alias `me` est aussi
-        # marqué retiré, mais n'appartenait pas à ces 97 commandes directes : sa surface
+        # Contrat actuel : 99 commandes directes présentes, dont deux ajouts récents, après les retraits
+        # produit blacklist-add/blacklist-users. L'ancien alias `me` est aussi
+        # marqué retiré, mais n'appartenait pas à ces commandes directes : sa surface
         # canonique est désormais `stats`, qui reste directe.
-        expected_normal_direct = 97
+        expected_normal_direct = 99
         if len(command_catalog_cleanup.NORMAL_DIRECT_COMMANDS) != expected_normal_direct:
             errors.append(
                 "la surface normale doit contenir exactement "
