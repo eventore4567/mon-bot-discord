@@ -653,7 +653,7 @@ class SecurityHardening(commands.Cog):
                 )
             if failed:
                 embed.add_field(name="Salons non verrouillés", value=" ".join(failed)[:1024], inline=False)
-            embed.set_footer(text="SentriX • +panic off pour restaurer exactement les anciens overwrites")
+            embed.set_footer(text="SentriX • /security panic-off rétablit exactement les permissions d'avant")
             await panels.envoyer(ctx, panels.depuis_embed(embed, kind="securite"))
 
     async def _deactivate_panic(self, ctx: commands.Context) -> None:
