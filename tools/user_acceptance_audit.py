@@ -177,9 +177,14 @@ async def runtime_journey(path: str) -> dict[str, int | float]:
                 assert category.key != "other", f"parcours staff {journey}: +{name} mal classé dans +help"
                 staff_checked += 1
 
+        # 29/10/2026 (Jayden) : outils du propriétaire global retirés « pour le moment ».
+        # Le contrat devient : retirés, et toujours déclarés owner-only au cas où ils
+        # reviendraient (jamais publics par accident).
+        from utils.unused_commands import OUTILS_PROPRIETAIRE_RETIRES
         for name in OWNER_JOURNEYS:
             command = bot.get_command(name)
-            assert command is not None, f"commande propriétaire +{name} absente"
+            assert name in OUTILS_PROPRIETAIRE_RETIRES, f"+{name} n'est plus dans les outils retirés"
+            assert command is None, f"outil propriétaire retiré +{name} encore chargé"
             assert name in main.OWNER_ONLY_COMMANDS, f"commande propriétaire +{name} n'est plus owner-only"
 
         # Compatibilité : les anciennes commandes fusionnées peuvent encore fonctionner

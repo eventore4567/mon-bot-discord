@@ -865,6 +865,44 @@ def narrative_body(
         reference = _field_value(embed, "référence", "reference")
         if reference:
             lines.append(f"**Référence :** {reference}")
+    elif (event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_")) \
+            and _field_value_exact(embed, "Statut"):
+        # Carte d'incident complète (utils/automod_incident_card, 29/10/2026) :
+        # chaque information sur sa ligne, en sections, rien de tronqué en silence.
+        # _style_automod_log renomme « Action » en « Sanction » et « Contenu » en « Message ».
+        alias = {"Action": ("Action", "Sanction"), "Contenu": ("Contenu", "Message")}
+
+        def ligne(nom: str, libelle: str | None = None) -> str | None:
+            valeur = _field_value_exact(embed, *alias.get(nom, (nom,)))
+            return f"**{libelle or nom}** · {valeur}" if valeur else None
+
+        lines.append(f"**{_field_value_exact(embed, 'Statut')}**")
+        incident = [ligne(n) for n in ("Compte", "Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date")]
+        if any(incident):
+            lines.append("### Incident\n" + "\n".join(l for l in incident if l))
+        contenu = _field_value_exact(embed, *alias["Contenu"])
+        if contenu:
+            lines.append("### Contenu détecté\n" + contenu)
+        action = [ligne(n) for n in ("Action", "Durée", "Messages supprimés", "Niveau anti-spam")]
+        if any(action):
+            lines.append("### Action\n" + "\n".join(l for l in action if l))
+        suivi = [ligne(n) for n in ("Infractions (1 h)", "Récidive")]
+        if any(suivi):
+            lines.append("### Récidive\n" + "\n".join(l for l in suivi if l))
+        # Tout autre champ (Raid Protect : mesure, fin, webhook, créateur…) reste
+        # visible : une information fournie n'est jamais perdue à la mise en page.
+        connus = {_normalise_field_name(n) for n in (
+            "Statut", "Compte", "Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date", "Contenu",
+            "Message", "Action", "Sanction", "Durée", "Messages supprimés", "Niveau anti-spam",
+            "Infractions (1 h)", "Récidive", "Membre", "Raison",
+        )}
+        autres = [f"**{nom}** · {valeur}" for nom, valeur in _field_map(embed)
+                  if _normalise_field_name(nom) not in connus]
+        if reason and not _field_value_exact(embed, "Motif"):
+            autres.insert(0, f"**Motif** · {reason}")
+        if autres:
+            lines.append("### Contexte\n" + "\n".join(autres))
+        return "\n\n".join(part for part in lines if part.strip())[:3900]
     elif event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"):
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
         lines.append(base or f"Une protection SentriX s'est déclenchée pour {member or 'un membre'}.")

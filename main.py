@@ -182,6 +182,7 @@ EXTENSIONS = [
     "cogs.commandes_retirees",
     # Avis de retrait des commandes « + » (100 % « / » le 30/11/2026).
     "cogs.prefix_deprecation",
+    "cogs.raid_protect",
     # cogs.visual_experience_v5 declenche finalize_runtime() et doit rester
     # DERNIERE : une extension chargee apres elle echappe a toute la pile de
     # style.

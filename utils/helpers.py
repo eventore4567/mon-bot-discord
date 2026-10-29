@@ -97,6 +97,7 @@ async def send_log(
     *,
     view: discord.ui.View | None = None,
     event_key: str | None = None,
+    file: discord.File | None = None,
 ) -> None:
     """Point de compatibilité : tous les anciens appelants passent par le logger officiel."""
     from utils import log_service
@@ -111,6 +112,7 @@ async def send_log(
         embed,
         view=view,
         event_key=event_key,
+        file=file,
     )
 
 

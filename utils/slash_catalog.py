@@ -79,6 +79,7 @@ GROUP_DESCRIPTIONS: dict[str, str] = {
     "music playlist": "Your personal playlists.",
     "staff manage": "Server diagnosis, backups and safe fixes.",
     "protection guard": "Advanced server guards.",
+    "protection raid": "Raid Protect: emergency pause and raid responses.",
     "protection exempt": "Exemptions from SentriX protections.",
     "moderation": "Moderation tools for your staff.",
     "security": "Protect the server against spam, raids and scams.",
@@ -220,6 +221,12 @@ CATALOG: tuple[SlashEntry, ...] = (
     # 28/10/2026 — lot 2 du passage à 100 % « / » (sécurité).
     _e("protection lockdown", "lockdown-server", "Lock every text channel of the server."),
     _e("protection unlock", "unlock-server", "Unlock every text channel of the server."),
+    # 29/10/2026 — Raid Protect (cogs/raid_protect.py), tout désactivé par défaut.
+    _e("protection raid status", "raidprotect status", "Raid Protect settings and current pause."),
+    _e("protection raid auto-pause", "raidprotect auto-pause", "Pause joins automatically during a fast raid."),
+    _e("protection raid pause", "raidprotect pause", "Emergency: pause invites (and DMs) now."),
+    _e("protection raid resume", "raidprotect resume", "Lift the invite and DM pause."),
+    _e("protection raid webhook-guard", "raidprotect webhook-guard", "Delete a webhook that floods a channel."),
     _e("protection blacklist-sync", "syncbl", "Ban every member on the SentriX blacklist."),
     _e("protection blacklist-unsync", "unsyncbl", "Unban members banned through the shared blacklist."),
     _e("protection guard join", "join-gate", "Filter suspicious joins."),

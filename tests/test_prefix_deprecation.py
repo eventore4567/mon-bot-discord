@@ -1,51 +1,76 @@
-"""Avis de retrait des commandes « + » (28/10/2026 : SentriX passe à 100 % « / »)."""
+"""Avis de retrait des commandes « + ».
+
+28/10/2026 : SentriX passe à 100 % « / ». 29/10/2026 : message séparé, en gras,
+avec mention, au plus deux fois par jour et par personne, compteur persistant,
+sans date fixée.
+"""
 from __future__ import annotations
 
+import asyncio
 import os
+import sqlite3
+from types import SimpleNamespace
 
 os.environ.setdefault("DISCORD_TOKEN", "ci.fake.token")
 
-import discord
-from discord.ext import commands
-
-from cogs import prefix_deprecation as avis
+from cogs import prefix_deprecation as avis  # noqa: E402
 
 
-def _bot() -> commands.Bot:
-    bot = commands.Bot(command_prefix="+", intents=discord.Intents.none())
+class _Db:
+    """Base SQLite réelle (même SQL qu'en production), interface de bot.db."""
 
-    @bot.command(name="clear")
-    async def clear(ctx):
-        pass
+    def __init__(self, path=":memory:"):
+        self.conn = sqlite3.connect(path)
+        self.conn.row_factory = sqlite3.Row
 
-    @bot.tree.command(name="clear", description="x")
-    async def clear_slash(interaction):
-        pass
+    async def execute(self, sql, params=()):
+        self.conn.execute(sql, params)
+        self.conn.commit()
 
-    @bot.command(name="vieux")
-    async def vieux(ctx):
-        pass
-
-    return bot
+    async def fetchone(self, sql, params=()):
+        return self.conn.execute(sql, params).fetchone()
 
 
-def test_avis_donne_la_date_le_temps_restant_et_la_commande_slash():
-    bot = _bot()
-    texte = avis.texte_avis(bot, bot.get_command("clear"))
-    assert "30 novembre 2026" in texte
-    assert f"<t:{int(avis.DATE_RETRAIT.timestamp())}:R>" in texte
-    assert "/clear" in texte
+def _db(path=":memory:"):
+    db = _Db(path)
+    asyncio.run(db.execute(avis.TABLE))
+    return db
 
 
-def test_sans_equivalent_slash_l_avis_reste_general():
-    bot = _bot()
-    assert "Utilisez les commandes `/`." in avis.texte_avis(bot, bot.get_command("vieux"))
+def test_message_demande_en_gras_avec_mention_et_sans_date():
+    texte = avis.texte_avis(SimpleNamespace(mention="<@42>"))
+    assert texte == ("**<@42> Les commandes avec le préfixe `+` seront bientôt supprimées. "
+                     "Nous te conseillons de passer aux commandes `/` dès maintenant.**")
+    assert "novembre" not in texte and "<t:" not in texte
 
 
-def test_une_seule_fois_par_jour_et_par_personne():
-    avis._dernier_avis.clear()
+def test_deux_rappels_par_jour_au_plus_toutes_commandes_confondues():
+    db = _db()
     t = 1_790_000_000.0
-    assert avis.doit_avertir(1, 2, t) is True
-    assert avis.doit_avertir(1, 2, t + 3600) is False
-    assert avis.doit_avertir(1, 3, t + 3600) is True
-    assert avis.doit_avertir(1, 2, t + avis.INTERVALLE_S + 1) is True
+    assert asyncio.run(avis.reserver(db, 7, t)) is True
+    assert asyncio.run(avis.reserver(db, 7, t + 60)) is False, "écart minimum entre deux rappels"
+    assert asyncio.run(avis.reserver(db, 7, t + avis.ECART_MIN_S)) is True
+    assert asyncio.run(avis.reserver(db, 7, t + 3 * avis.ECART_MIN_S)) is False, "troisième rappel du jour"
+    assert asyncio.run(avis.reserver(db, 8, t + 60)) is True, "une autre personne a son propre compteur"
+    assert asyncio.run(avis.reserver(db, 7, t + 86_400)) is True, "nouveau jour"
+
+
+def test_le_compteur_survit_a_un_redemarrage(tmp_path):
+    chemin = str(tmp_path / "avis.db")
+    t = 1_790_000_000.0
+    db = _db(chemin)
+    assert asyncio.run(avis.reserver(db, 7, t)) is True
+    assert asyncio.run(avis.reserver(db, 7, t + avis.ECART_MIN_S)) is True
+    avis._verrous.clear()
+    relance = _Db(chemin)
+    assert asyncio.run(avis.reserver(relance, 7, t + 3 * avis.ECART_MIN_S)) is False
+
+
+def test_deux_commandes_simultanees_ne_donnent_qu_un_rappel():
+    db = _db()
+
+    async def deux():
+        return await asyncio.gather(avis.reserver(db, 9, 1_790_000_000.0),
+                                    avis.reserver(db, 9, 1_790_000_000.0))
+
+    assert sorted(asyncio.run(deux())) == [False, True]

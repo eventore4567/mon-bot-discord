@@ -33,7 +33,7 @@ async def run() -> int:
             help_complete,
             slash_command_budget,
         )
-        from utils.unused_commands import SUPPRIMEES
+        from utils.unused_commands import OUTILS_PROPRIETAIRE_RETIRES, SUPPRIMEES
 
         bot = main.BotAllInOne()
         await bot.db.connect()
@@ -130,7 +130,9 @@ async def run() -> int:
 
         missing_admin = sorted(
             name for name in command_catalog_cleanup.ADMIN_DIRECT_COMMANDS
-            if name not in SUPPRIMEES and bot.get_command(name) is None
+            # Outils du propriétaire retirés le 29/10/2026 (unused_commands.OUTILS_PROPRIETAIRE_RETIRES).
+            if name not in SUPPRIMEES and name not in OUTILS_PROPRIETAIRE_RETIRES
+            and bot.get_command(name) is None
         )
         if missing_admin:
             errors.append("commandes admin directes absentes: " + ", ".join(missing_admin))

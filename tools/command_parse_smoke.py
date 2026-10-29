@@ -60,10 +60,12 @@ async def run() -> int:
 
         # command name -> (raw user input after command name, expected parsed value)
         cases = {
-            "gamble": ("10", 10),
+            # « montant » est du texte depuis que « +gamble all » est accepté :
+            # la conversion en entier se fait dans la commande (user_facing_hygiene).
+            "gamble": ("10", "10"),
             "deposit": ("100", "100"),
             "withdraw": ("50", "50"),
-            "roll": ("6", 6),
+            # « roll » : supprimée le 28/10/2026 (utils/unused_commands.SUPPRIMEES).
         }
         for name, (raw, expected) in cases.items():
             command = bot.get_command(name)

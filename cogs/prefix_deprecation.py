@@ -1,16 +1,20 @@
 """Avertit chaque utilisateur de commandes « + » que le préfixe va disparaître.
 
-28/10/2026 (Jayden) : SentriX passe à 100 % de commandes « / ». Chaque personne
-qui lance une commande « + » voit, une fois par jour au plus, une ligne courte
-dans le style des avis Discord : la date de retrait, le temps restant (horodatage
-relatif Discord) et la commande « / » à utiliser quand elle existe.
+28/10/2026 (Jayden) : SentriX passe à 100 % de commandes « / ».
+29/10/2026 (Jayden) : l'avis quitte le panneau d'aide. C'est un message Discord
+séparé, en gras, sans carte ni embed, qui mentionne la personne concernée — au
+plus deux fois par jour et par personne, toutes commandes confondues, compteur
+gardé en base pour survivre aux redémarrages. Aucune date : le retrait ne sera
+fixé que lorsque toutes les commandes « / » seront disponibles et testées.
 
 Branché sur ``bot.invoke`` (le passage obligé des commandes préfixées ; les
 commandes « / » n'y passent pas) plutôt que sur un écouteur de plus : le budget
-d'écouteurs est plafonné (tests/test_runtime_hygiene_gates).
+d'écouteurs est plafonné (tests/test_runtime_hygiene_gates). Couvre +help,
++setup, toutes les commandes « + », et les anciennes commandes supprimées.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 import time
@@ -20,15 +24,22 @@ from discord.ext import commands
 
 logger = logging.getLogger("bot.prefix-deprecation")
 
-#: Date annoncée du retrait des commandes « + » (UTC).
-DATE_RETRAIT = dt.datetime(2026, 11, 30, tzinfo=dt.timezone.utc)
-DATE_LISIBLE = "30 novembre 2026"
-#: Une fois par jour et par personne : un avis, pas un harcèlement.
-INTERVALLE_S = 24 * 3600
-#: L'avis s'efface seul, comme une notification.
-EFFACER_APRES_S = 120
+#: Au plus deux rappels par jour (UTC) et par personne, toutes commandes confondues.
+MAX_PAR_JOUR = 2
+#: Deux commandes « + » d'affilée ne donnent pas deux rappels d'affilée.
+ECART_MIN_S = 3600
 
-_dernier_avis: dict[tuple[int, int], float] = {}
+TABLE = """
+CREATE TABLE IF NOT EXISTS sentrix_prefix_notices (
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    last_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day)
+)
+"""
+
+_verrous: dict[int, asyncio.Lock] = {}
 
 
 def actif() -> bool:
@@ -42,63 +53,78 @@ def actif() -> bool:
     return os.environ.get("SENTRIX_AVIS_PREFIXE", "1") != "0"
 
 
-def equivalent_slash(bot: commands.Bot, commande: commands.Command) -> str | None:
-    """La commande « / » à proposer, en mention cliquable si possible."""
-    from utils import slash_ids
-    from utils.access_matrix import MIRROR_TARGETS
-
-    nom = commande.qualified_name
-    # +logsearch → /logs search : la correspondance inverse de MIRROR_TARGETS.
-    inverse = {cible: chemin for chemin, cible in MIRROR_TARGETS.items()}
-    chemin = inverse.get(nom, nom)
-    racine = chemin.split(" ")[0]
-    if bot.tree.get_command(racine) is None:
-        return None
-    return slash_ids.mention(chemin)
-
-
-def texte_avis(bot: commands.Bot, commande: commands.Command | None) -> str:
-    horodatage = int(DATE_RETRAIT.timestamp())
-    suite = None
-    if commande is not None:
-        try:
-            suite = equivalent_slash(bot, commande)
-        except Exception:
-            logger.debug("Équivalent / introuvable pour %s", getattr(commande, "qualified_name", "?"), exc_info=True)
-    conseil = f"Utilisez {suite} à la place." if suite else "Utilisez les commandes `/`."
+def texte_avis(membre: discord.abc.User) -> str:
     return (
-        f"⚠️ **Les commandes `+` seront retirées le {DATE_LISIBLE}** (<t:{horodatage}:R>). {conseil}"
+        f"**{membre.mention} Les commandes avec le préfixe `+` seront bientôt supprimées. "
+        "Nous te conseillons de passer aux commandes `/` dès maintenant.**"
     )
 
 
-def doit_avertir(guild_id: int, user_id: int, maintenant: float | None = None) -> bool:
+def jour(maintenant: float) -> str:
+    return dt.datetime.fromtimestamp(maintenant, dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+def peut_avertir(compte: int, dernier: int, maintenant: float) -> bool:
+    return compte < MAX_PAR_JOUR and maintenant - dernier >= ECART_MIN_S
+
+
+async def reserver(db, user_id: int, maintenant: float | None = None) -> bool:
+    """Réserve un rappel pour ``user_id`` aujourd'hui ; False si la limite est atteinte.
+
+    Le verrou par personne évite deux rappels pour deux commandes simultanées ;
+    l'écriture précède l'envoi : un échec d'envoi coûte un rappel, jamais un doublon."""
     maintenant = time.time() if maintenant is None else maintenant
-    if maintenant >= DATE_RETRAIT.timestamp() + 7 * 86400:
-        return False
-    cle = (int(guild_id), int(user_id))
-    if maintenant - _dernier_avis.get(cle, 0.0) < INTERVALLE_S:
-        return False
-    _dernier_avis[cle] = maintenant
-    if len(_dernier_avis) > 50_000:
-        _dernier_avis.clear()
+    cle = jour(maintenant)
+    verrou = _verrous.setdefault(int(user_id), asyncio.Lock())
+    async with verrou:
+        row = await db.fetchone(
+            "SELECT count, last_at FROM sentrix_prefix_notices WHERE user_id=? AND day=?",
+            (int(user_id), cle),
+        )
+        compte = int(row["count"]) if row else 0
+        dernier = int(row["last_at"]) if row else 0
+        if not peut_avertir(compte, dernier, maintenant):
+            return False
+        await db.execute(
+            "INSERT INTO sentrix_prefix_notices(user_id, day, count, last_at) VALUES(?,?,1,?) "
+            "ON CONFLICT(user_id, day) DO UPDATE SET count=sentrix_prefix_notices.count+1, "
+            "last_at=excluded.last_at",
+            (int(user_id), cle, int(maintenant)),
+        )
+    if len(_verrous) > 50_000:
+        _verrous.clear()
     return True
 
 
+def _concerne(ctx: commands.Context) -> bool:
+    """Une commande « + » réelle, ou une ancienne commande supprimée tapée en « + »."""
+    if ctx.interaction is not None or ctx.guild is None or getattr(ctx.author, "bot", False):
+        return False
+    if ctx.command is not None:
+        return True
+    from utils.unused_commands import SUPPRIMEES
+
+    tape = str(ctx.invoked_with or "").casefold()
+    return bool(tape) and tape in SUPPRIMEES
+
+
 async def avertir(bot: commands.Bot, ctx: commands.Context) -> None:
-    if not actif() or ctx.interaction is not None or ctx.guild is None or ctx.command is None:
+    if not actif() or not _concerne(ctx):
         return
-    if getattr(ctx.author, "bot", False) or not doit_avertir(ctx.guild.id, ctx.author.id):
+    db = getattr(bot, "db", None)
+    if db is None or not await reserver(db, ctx.author.id):
         return
     from utils import sentrix_panels as panels
 
-    # Texte brut, comme l'avis Discord de la capture : sans le signal, la couche
-    # des cartes en ferait un panneau titré.
+    # Texte brut, demandé explicitement : sans le signal, la couche des cartes
+    # en ferait un panneau titré.
     jeton = panels.TEXTE_BRUT.set(True)
     try:
         await ctx.channel.send(
-            texte_avis(bot, ctx.command),
-            delete_after=EFFACER_APRES_S,
-            allowed_mentions=discord.AllowedMentions.none(),
+            texte_avis(ctx.author),
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False, roles=False, users=[ctx.author], replied_user=False
+            ),
         )
     except (discord.Forbidden, discord.HTTPException):
         logger.debug("Avis de retrait du préfixe non envoyé.", exc_info=True)
@@ -112,6 +138,9 @@ class PrefixDeprecation(commands.Cog):
         self._original = None
 
     async def cog_load(self) -> None:
+        db = getattr(self.bot, "db", None)
+        if db is not None:
+            await db.execute(TABLE)
         original = self.bot.invoke
         if getattr(original, "_sentrix_avis_prefixe", False):
             return
@@ -121,7 +150,7 @@ class PrefixDeprecation(commands.Cog):
             try:
                 return await original(ctx)
             finally:
-                if ctx.command is not None and ctx.interaction is None:
+                if ctx.interaction is None:
                     try:
                         await avertir(bot, ctx)
                     except Exception:

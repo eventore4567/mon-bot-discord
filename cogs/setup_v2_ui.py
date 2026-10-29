@@ -2312,7 +2312,7 @@ def _patch_build_embed() -> None:
                 inline=False,
             )
             panel.add_field(name="Groupe", value=SCOPE_LABELS.get(self.selected_permission_scope, self.selected_permission_scope), inline=True)
-            panel.add_field(name="Commande", value=f"`+{command_name}` / `/{command_name}`" if command_name else "Choisissez une commande", inline=True)
+            panel.add_field(name="Commande", value=f"`{panels.en_slash('+' + command_name)}`" if command_name else "Choisissez une commande", inline=True)
             panel.add_field(name="Accès", value=decision_text, inline=True)
             panel.add_field(
                 name="Règle importante",

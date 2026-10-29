@@ -131,7 +131,8 @@ async def test_une_rafale_de_30_messages_produit_une_seule_sanction_un_avertisse
     assert sum(1 for m in messages if m.delete.await_count) == 30
     fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
     assert fields["Messages supprimés"] == "30", fields
-    assert "Rappel anti-spam" in fields["Sanction"], fields
+    # Carte complète du 29/10/2026 : « Action » (et non plus « Sanction »).
+    assert "Rappel anti-spam" in fields["Action"], fields
     note = court.await_args.args[1]
     assert "<@7>" in note and "spam" in note
 
@@ -147,7 +148,8 @@ async def test_la_recidive_de_spam_mute_une_seule_fois():
     assert court.await_count == 1
     assert cog.log_action.await_count == 1
     fields = {f.name: f.value for f in cog.log_action.await_args.args[1].fields}
-    assert "Mute" in fields["Sanction"], fields
+    assert "Exclusion temporaire" in fields["Action"], fields
+    assert fields["Durée"].startswith(("10 min", "30 min", "1 h")), fields
     assert fields["Niveau anti-spam"] == "3"
     assert "mute" in court.await_args.args[1]
 

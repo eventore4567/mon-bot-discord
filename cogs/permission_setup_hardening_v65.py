@@ -22,6 +22,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from utils import sentrix_panels as panels
+
 from utils import access_matrix as matrix
 from utils import embeds
 from . import permission_guard
@@ -608,7 +610,7 @@ def _patch_setup_surface() -> None:
             panel.add_field(name="Groupe", value=SCOPE_LABELS.get(scope, scope.title()), inline=True)
             panel.add_field(
                 name="Commande",
-                value=f"`+{name}` / `/{name}`" if name else "Choisissez une commande",
+                value=f"`{panels.en_slash('+' + name)}`" if name else "Choisissez une commande",
                 inline=True,
             )
             panel.add_field(
