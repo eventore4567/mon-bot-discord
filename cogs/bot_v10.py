@@ -283,6 +283,12 @@ class BotV10(commands.Cog, name="BotV10"):
   while queue and queue[0]<current-JOIN_BURST_WINDOW: queue.popleft()
   if len(queue)==JOIN_BURST_THRESHOLD:
    await self.record_signal(member.guild.id,"join_burst",severity="high",target_id=member.id,score=min(100,45+len(queue)*5),details={"joins_60s":len(queue)})
+   # Pas de carte en double : l'anti-raid AutoMod, s'il est actif, envoie déjà
+   # une alerte complète (29/10/2026). Le signal reste enregistré ci-dessus.
+   try:
+    conf=await self.bot.db.get_automod(member.guild.id)
+    if conf and dict(conf).get("antiraid"): return
+   except Exception: pass
    try: await helpers.send_log(self.bot,member.guild,"automod",discord.Embed(title="Afflux inhabituel détecté",description=f"**{len(queue)} arrivées** en moins de {int(JOIN_BURST_WINDOW)} secondes. Signal pour revue staff; aucune sanction supplémentaire n'est appliquée par V10.",colour=discord.Colour.orange()))
    except Exception: pass
 

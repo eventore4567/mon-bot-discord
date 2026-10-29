@@ -999,10 +999,16 @@ def _style_automod_log(embed: discord.Embed, log_type: str) -> discord.Embed:
         used.add(protection[0])
     ordered.append(("Protection", protection_value[:1024], True))
 
-    sanction_value = sanction[2] if sanction else _automod_default_sanction(log_type, title, protection_value)
+    # Une carte au statut explicite (utils/automod_incident_card, Raid Protect)
+    # dit elle-même ce qui a été fait : ne pas inventer une sanction par défaut.
+    a_un_statut = any(name.casefold().strip() == "statut" for name, _v, _i in fields)
+    sanction_value = sanction[2] if sanction else (
+        "" if a_un_statut else _automod_default_sanction(log_type, title, protection_value)
+    )
     if sanction:
         used.add(sanction[0])
-    ordered.append(("Sanction", sanction_value[:1024], True))
+    if sanction_value:
+        ordered.append(("Sanction", sanction_value[:1024], True))
 
     if reason:
         used.add(reason[0])
@@ -4589,14 +4595,19 @@ class AutoMod(commands.Cog, name="Automod"):
                              "(raid lent, sous le seuil de l'afflux instantané)"
                     ),
                     extra={
-                        f"📊 Arrivées en {RAID_JOIN_WINDOW}s": str(arrivees),
-                        f"📈 Arrivées en {RAID_SLOW_WINDOW // 60} min": str(arrivees_lentes),
-                        "🆕 Comptes de moins de "
-                        f"{RAID_COMPTE_NEUF_JOURS} j": f"{neufs_count} sur {arrivees}",
-                        "🎚️ Seuil du serveur": (
+                        "Statut": "Détection — réponse automatique selon vos réglages",
+                        "Protection": "Anti-raid",
+                        "Règle": "Afflux rapide d'arrivées" if raid_rapide else "Raid lent (arrivées sur 10 min)",
+                        "Date": f"<t:{int(time.time())}:F> · <t:{int(time.time())}:R>",
+                        f"Arrivées en {RAID_JOIN_WINDOW} s": str(arrivees),
+                        f"Arrivées en {RAID_SLOW_WINDOW // 60} min": str(arrivees_lentes),
+                        f"Comptes de moins de {RAID_COMPTE_NEUF_JOURS} j": f"{neufs_count} sur {arrivees}",
+                        "Seuil du serveur": (
                             f"{min(seuil, RAID_JOIN_THRESHOLD)} "
                             f"(vélocité pondérée {velocite:.0f})"
                         ),
+                        "Dernier arrivé": f"{member.mention} · `{member.id}`",
+                        "Mesures possibles": "`/protection raid pause` · `/protection lockdown`",
                     },
                 )
                 if should_log:
@@ -4654,8 +4665,8 @@ class AutoMod(commands.Cog, name="Automod"):
                                     "La vérification du serveur est déjà au maximum, SentriX ne peut "
                                     "pas la relever davantage. Les arrivées continuent d'être notées "
                                     "comme suspectes, mais la protection automatique s'arrête là.\n"
-                                    "À faire maintenant : `+lockdown-server` pour verrouiller les "
-                                    "salons, puis `+unlock-server` une fois la vague passée."
+                                    "À faire maintenant : `/protection lockdown` pour verrouiller les "
+                                    "salons, puis `/protection unlock` une fois la vague passée."
                                 ),
                             ),
                         )

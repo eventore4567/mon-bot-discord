@@ -124,14 +124,18 @@ async def reprendre(guild: discord.Guild, *, raison: str) -> tuple[bool, str]:
 
 async def _journal(bot, guild: discord.Guild, titre: str, raison: str, extra: dict) -> None:
     automod = bot.get_cog("Automod")
+    maintenant = int(time.time())
+    extra = {"Statut": extra.get("Statut", "Détection seule"), "Protection": "Raid Protect",
+             "Date": f"<t:{maintenant}:F> · <t:{maintenant}:R>",
+             **{k: v for k, v in extra.items() if k != "Statut"}}
     embed = embeds.log_entry(titre, config.COLOR_WARNING, raison=raison, extra=extra)
     try:
         if automod is not None:
-            await automod.log_action(guild, embed, "antiraid")
+            await automod.log_action(guild, embed, "automod")
         else:
             from utils import helpers
 
-            await helpers.send_log(bot, guild, "antiraid", embed)
+            await helpers.send_log(bot, guild, "automod", embed)
     except Exception:
         logger.exception("Journal Raid Protect impossible guild=%s", guild.id)
 

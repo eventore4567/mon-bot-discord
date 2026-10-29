@@ -878,15 +878,30 @@ def narrative_body(
 
         lines.append(f"**{_field_value_exact(embed, 'Statut')}**")
         incident = [ligne(n) for n in ("Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date")]
-        lines.append("### Incident\n" + "\n".join(l for l in incident if l))
+        if any(incident):
+            lines.append("### Incident\n" + "\n".join(l for l in incident if l))
         contenu = _field_value_exact(embed, *alias["Contenu"])
         if contenu:
             lines.append("### Contenu détecté\n" + contenu)
         action = [ligne(n) for n in ("Action", "Durée", "Messages supprimés", "Niveau anti-spam")]
-        lines.append("### Action\n" + "\n".join(l for l in action if l))
+        if any(action):
+            lines.append("### Action\n" + "\n".join(l for l in action if l))
         suivi = [ligne(n) for n in ("Infractions (1 h)", "Récidive")]
         if any(suivi):
             lines.append("### Récidive\n" + "\n".join(l for l in suivi if l))
+        # Tout autre champ (Raid Protect : mesure, fin, webhook, créateur…) reste
+        # visible : une information fournie n'est jamais perdue à la mise en page.
+        connus = {_normalise_field_name(n) for n in (
+            "Statut", "Protection", "Règle", "Motif", "Élément détecté", "Salon", "Date", "Contenu",
+            "Message", "Action", "Sanction", "Durée", "Messages supprimés", "Niveau anti-spam",
+            "Infractions (1 h)", "Récidive", "Membre", "Raison",
+        )}
+        autres = [f"**{nom}** · {valeur}" for nom, valeur in _field_map(embed)
+                  if _normalise_field_name(nom) not in connus]
+        if reason and not _field_value_exact(embed, "Motif"):
+            autres.insert(0, f"**Motif** · {reason}")
+        if autres:
+            lines.append("### Contexte\n" + "\n".join(autres))
         return "\n\n".join(part for part in lines if part.strip())[:3900]
     elif event_type in {"automod", "antiraid", "spam", "raid"} or event_type.startswith("automod_"):
         base = _strip_identity_prelude(_clean_lines(embed.description), identity_name, identity_id)
