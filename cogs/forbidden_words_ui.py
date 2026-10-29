@@ -87,6 +87,9 @@ class ForbiddenWordsUI(commands.Cog):
                 filter_name=filter_name,
                 reason=reason,
                 channel_id=message.channel.id,
+                message_id=int(getattr(message, "id", 0) or 0),
+                raw_content=automod_module._contenu_brut(message),
+                deleted_ok=deleted,
             )
             runtime.incidents[key] = incident
             if len(runtime.incidents) > 5000:
@@ -117,6 +120,10 @@ class ForbiddenWordsUI(commands.Cog):
             )
             incident.action = action
             incident.infractions = infraction_count
+            if action == "mute":
+                incident.duration_s = automod_module.MUTE_ESCALATION_SECONDS
+            # Même référence SX- et mêmes suites que les autres incidents AutoMod.
+            await runtime._record_incident_trace(message, incident)
             if action:
                 await runtime.bot.db.log_automod_action(
                     message.guild.id,
@@ -133,7 +140,7 @@ class ForbiddenWordsUI(commands.Cog):
             if action == "mute":
                 description += (
                     " Exclusion temporaire de "
-                    + automod_module.helpers.format_duration(automod_module.SPAM_TIMEOUT_SECONDS)
+                    + automod_module.helpers.format_duration(automod_module.MUTE_ESCALATION_SECONDS)
                     + "."
                 )
             try:

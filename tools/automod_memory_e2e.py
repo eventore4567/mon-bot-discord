@@ -47,17 +47,19 @@ async def main() -> int:
         return h.visible_text([c for c in h.CALLS[since:] if c[1] == f"/channels/{h.LOGCID}/messages"])
 
     shown = await post(LINK, h.TARGET_ID)
-    check("**Mémoire :** 1er incident AutoMod en 30 j" in shown, "premier incident : « 1er incident AutoMod en 30 j »",
+    check("**Récidive** · 1er incident AutoMod en 30 j" in shown, "premier incident : « 1er incident AutoMod en 30 j »",
           shown[-260:])
     check("sur le serveur depuis" in shown, "la mémoire AutoMod reprend le contexte du membre", shown[-260:])
 
-    # La carte telle que la voit le staff : le message supprimé, le nombre, la vraie
-    # sanction — perdus auparavant (« action » attrapait « Infractions »).
-    check("> regarde ça https://exemple-douteux.example/offre" in shown, "le message supprimé figure sur la carte",
-          shown[-300:])
-    check("Messages supprimés : **1**" in shown and "Sanction : **Suppression du message**" in shown
-          and "Infractions (1h) : 1" in shown, "nombre de messages, sanction réelle et infractions sont affichés",
-          shown[-300:])
+    # La carte telle que la voit le staff (format complet du 29/10/2026) : statut,
+    # protection, règle, contenu neutralisé (lien non cliquable), action réelle.
+    check("regarde ça hxxps://exemple-douteux[.]example/offre" in shown
+          and "https://exemple-douteux.example" not in shown,
+          "le message supprimé figure sur la carte, lien neutralisé", shown[-400:])
+    check("**Message bloqué — retiré, sans sanction**" in shown and "**Protection** · Anti-liens" in shown
+          and "**Action** · Message supprimé" in shown and "**Infractions (1 h)** · 1" in shown
+          and "**Date** · <t:" in shown,
+          "statut, protection, action réelle, date et infractions sont affichés", shown[-500:])
 
     shown = await post(INVITE, h.TARGET_ID)
     check("2e incident AutoMod en 30 j (1 invitation, 1 lien)" in shown,

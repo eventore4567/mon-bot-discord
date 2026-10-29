@@ -39,7 +39,7 @@ import logging
 import re
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field as _champ
 from datetime import timedelta
 from urllib.parse import urlsplit
 
@@ -597,6 +597,13 @@ class _Incident:
     #: citée par les suites du staff (« Suite de l'incident AutoMod SX-… »).
     ref: str = ""
     author_id: int = 0
+    #: Carte de log complète (29/10/2026) : heure réelle, message, contenu brut
+    #: (neutralisé à l'affichage), suppression réussie ou non, durée de sanction.
+    created_at: float = _champ(default_factory=time.time)
+    message_id: int = 0
+    raw_content: str = ""
+    deleted_ok: bool | None = None
+    duration_s: int | None = None
 
 
 def _normalize_blocked_link_rule(value: str) -> str:
@@ -889,6 +896,16 @@ _AUTOMOD_LOG_TITLE_LABELS = (
     ("garde permissions", "Garde permissions dangereuses"),
     ("immunité", "Immunité AutoMod"),
 )
+
+
+def _contenu_brut(message) -> str:
+    """Texte du message et noms des pièces jointes (jamais leurs URL signées)."""
+    contenu = str(getattr(message, "content", "") or "").strip()
+    noms = [str(getattr(a, "filename", "") or "") for a in list(getattr(message, "attachments", ()) or ())[:5]]
+    noms = [n for n in noms if n]
+    if noms:
+        contenu = "\n".join(part for part in (contenu, "Pièces jointes : " + ", ".join(noms)) if part)
+    return contenu
 
 
 def _automod_message_preview(message_or_text, *, limit: int = 900) -> str:
@@ -1742,6 +1759,7 @@ class AutoMod(commands.Cog, name="Automod"):
         log_type: str = "automod",
         *,
         suites: discord.ui.View | None = None,
+        file: discord.File | None = None,
     ):
         # Point unique : TOUS les événements AutoMod utilisent le même rendu
         # AutoMod Manage. helpers.send_log -> log_service -> send_wide_log ajoute
@@ -1753,7 +1771,7 @@ class AutoMod(commands.Cog, name="Automod"):
             view = helpers._derive_log_view(styled) or discord.ui.View(timeout=None)
             for item in list(suites.children):
                 view.add_item(item)
-        await helpers.send_log(self.bot, guild, log_type, styled, view=view)
+        await helpers.send_log(self.bot, guild, log_type, styled, view=view, file=file)
 
     # ---------------------------------------------------------------- CACHES
 
@@ -3992,6 +4010,8 @@ class AutoMod(commands.Cog, name="Automod"):
             reason=reason,
             channel_id=message.channel.id,
             message_preview=_automod_message_preview(message),
+            message_id=int(getattr(message, "id", 0) or 0),
+            raw_content=_contenu_brut(message),
         )
         self.incidents[key] = incident
         if filter_name in SPAM_FILTERS:
@@ -4010,6 +4030,8 @@ class AutoMod(commands.Cog, name="Automod"):
             except Exception:
                 logger.exception("Timeout anti-mentions impossible guild=%s user=%s", message.guild.id, message.author.id)
         await finish_deletion()
+        if deletion.done() and not deletion.cancelled() and deletion.exception() is None:
+            incident.deleted_ok = bool(deletion.result())
 
         await self._record_incident_trace(message, incident)
         try:
@@ -4057,6 +4079,7 @@ class AutoMod(commands.Cog, name="Automod"):
             if filter_name == "antimention":
                 action = mention_action or "mute_failed"
                 spam_duration = SPAM_TIMEOUT_SECONDS
+                incident.duration_s = SPAM_TIMEOUT_SECONDS
                 incident.action_label = "🔇 Mute anti-mentions" if mention_action else "⚠️ Mute anti-mentions non appliqué"
             elif filter_name in SPAM_FILTERS:
                 action, spam_stage, spam_duration, spam_public_text = await self._spam_progressive_action(
@@ -4065,6 +4088,7 @@ class AutoMod(commands.Cog, name="Automod"):
                     reason,
                 )
                 incident.spam_stage = spam_stage
+                incident.duration_s = spam_duration or SPAM_TIMEOUT_SECONDS
                 if action == "warning_ping":
                     incident.action_label = "⚠️ Rappel anti-spam"
                 elif action == "warn":
@@ -4092,6 +4116,8 @@ class AutoMod(commands.Cog, name="Automod"):
 
         incident.action = action
         incident.infractions = infraction_count
+        if action == "mute" and incident.duration_s is None:
+            incident.duration_s = MUTE_ESCALATION_SECONDS
         if action and action != "warning_ping":
             try:
                 await self.bot.db.log_automod_action(
@@ -4260,32 +4286,28 @@ class AutoMod(commands.Cog, name="Automod"):
             memory = ""
         try:
             await asyncio.sleep(INCIDENT_LOG_DELAY_SECONDS)
-            title = "🛡️ Action AutoMod"
-            color = config.COLOR_WARNING
-            extra = {
-                "Salon": f"<#{incident.channel_id}>",
-                "Messages supprimés": str(incident.deleted),
-            }
-            if incident.message_preview:
-                extra["Message"] = incident.message_preview
-            if incident.action:
-                title = (
-                    "🚨 Action AutoMod — sanction appliquée"
-                    if incident.action not in ("warning_ping",)
-                    else "🛡️ Action AutoMod — rappel anti-spam"
-                )
-                color = config.COLOR_ERROR if incident.action in ("kick", "ban") else config.COLOR_WARNING
-                extra["Sanction"] = (
-                    incident.action_label
-                    or ESCALATION_LABELS.get(incident.action, incident.action)
-                )
-            if incident.spam_stage:
-                extra["Niveau anti-spam"] = str(incident.spam_stage)
-            if incident.infractions:
-                extra["Infractions (1h)"] = str(incident.infractions)
-            if memory:
-                extra["Mémoire"] = memory
-            e = embeds.log_entry(title, color, cible=member, cible_label="👤 Membre", raison=incident.reason, extra=extra)
+            from utils import automod_incident_card as carte
+
+            # Carte complète (29/10/2026) : statut, protection, règle, motif, salon,
+            # date exacte, contenu neutralisé, action, durée et récidive ; le
+            # contenu trop long part en fichier joint au lieu d'être tronqué.
+            extra, fichier = carte.champs(
+                filter_name=incident.filter_name, reason=incident.reason, guild_id=guild.id,
+                channel_id=incident.channel_id, message_id=incident.message_id,
+                created_at=incident.created_at, contenu=incident.raw_content,
+                deleted=incident.deleted, deleted_ok=incident.deleted_ok, action=incident.action,
+                duree_s=incident.duration_s, infractions=incident.infractions,
+                spam_stage=incident.spam_stage, memoire=memory, ref=incident.ref,
+            )
+            etat = carte.statut(incident.deleted_ok, incident.action)
+            title = {
+                "reussie": "Action AutoMod — sanction appliquée",
+                "bloque": "Action AutoMod — message bloqué",
+                "detection": "Détection AutoMod",
+                "erreur": "Action AutoMod — échec",
+            }[etat]
+            color = config.COLOR_ERROR if etat == "erreur" or incident.action in ("kick", "ban") else config.COLOR_WARNING
+            e = embeds.log_entry(title, color, cible=member, cible_label="Membre", raison=None, extra=extra)
             event_type = {
                 "antiscam": "automod_scam",
                 "antiinvite": "automod_invite",
@@ -4300,7 +4322,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 "antiemoji": "automod_spam",
             }.get(incident.filter_name, "automod")
             if not incident.ref:
-                await self.log_action(guild, e, event_type)
+                await self.log_action(guild, e, event_type, file=fichier)
                 return
             from utils import sentrix_trace
 
@@ -4322,6 +4344,7 @@ class AutoMod(commands.Cog, name="Automod"):
                 await self.log_action(
                     guild, e, event_type,
                     suites=sentrix_trace.suites_view("automod", member.id, incident.ref, english=english),
+                    file=fichier,
                 )
             finally:
                 sentrix_trace.CURRENT.reset(token)
