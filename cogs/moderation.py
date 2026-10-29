@@ -48,6 +48,111 @@ logger = logging.getLogger("bot.moderation")
 _CASE_NUMBER_UNSET = object()
 
 
+class _BanMessagePeriod(discord.ui.Select):
+    """Le sélecteur n'apparaît qu'après la réponse « Oui »."""
+
+    def __init__(self):
+        super().__init__(
+            placeholder="Choisir la période des messages à supprimer",
+            min_values=1,
+            max_values=1,
+            options=[
+                discord.SelectOption(label="15 minutes", value="900"),
+                discord.SelectOption(label="1 heure", value="3600"),
+                discord.SelectOption(label="24 heures", value="86400"),
+            ],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.view.execute(interaction, int(self.values[0]))
+
+
+class _BanDeletionView(discord.ui.View):
+    """Demande la suppression séparément du motif et de la durée du ban."""
+
+    def __init__(self, cog, ctx: commands.Context, target: discord.Member, reason: str):
+        super().__init__(timeout=150)
+        self.cog = cog
+        self.ctx = ctx
+        self.target = target
+        self.reason = reason
+        self.author_id = ctx.author.id
+        self.guild_id = ctx.guild.id
+        self.message = None
+        self.executing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id or not interaction.guild or interaction.guild.id != self.guild_id:
+            await interaction.response.send_message(
+                "Seul le modérateur ayant lancé cette commande peut répondre.", ephemeral=True,
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Oui", style=discord.ButtonStyle.primary)
+    async def yes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.clear_items()
+        self.add_item(_BanMessagePeriod())
+        cancel = discord.ui.Button(label="Annuler", style=discord.ButtonStyle.secondary)
+        cancel.callback = self.cancel
+        self.add_item(cancel)
+        await interaction.response.edit_message(
+            content=(
+                f"**Bannissement de {self.target.display_name}**\n"
+                "Quelle période de ses anciens messages veux-tu supprimer ?\n"
+                "Cette période ne change pas la durée du bannissement."
+            ),
+            view=self,
+        )
+
+    @discord.ui.button(label="Non", style=discord.ButtonStyle.secondary)
+    async def no(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.execute(interaction, 0)
+
+    @discord.ui.button(label="Annuler", style=discord.ButtonStyle.danger)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cancel(interaction)
+
+    async def cancel(self, interaction: discord.Interaction):
+        self.stop()
+        await interaction.response.edit_message(
+            content="Bannissement annulé. Aucun message supprimé.", view=None,
+        )
+
+    async def execute(self, interaction: discord.Interaction, delete_message_seconds: int):
+        if self.executing:
+            await interaction.response.send_message("Ce bannissement est déjà en cours.", ephemeral=True)
+            return
+        self.executing = True
+        self.stop()
+        await interaction.response.edit_message(content="Bannissement en cours…", view=None)
+        try:
+            result = await self.cog._perform_ban(
+                self.ctx, self.target, self.reason,
+                delete_message_seconds=delete_message_seconds,
+            )
+        except discord.Forbidden:
+            result = "Bannissement refusé par Discord : permissions insuffisantes."
+        except discord.HTTPException:
+            logger.exception("Bannissement refusé par l'API Discord.")
+            result = "Le bannissement a échoué. Vérifie les permissions de SentriX."
+        except Exception:
+            logger.exception("Erreur inattendue pendant un bannissement confirmé.")
+            result = "Le résultat du bannissement n'a pas pu être confirmé. Vérifie les logs."
+        try:
+            await interaction.edit_original_response(content=result, view=None)
+        except discord.HTTPException:
+            logger.warning("Impossible de mettre à jour le panneau de bannissement.", exc_info=True)
+
+    async def on_timeout(self):
+        self.stop()
+        if self.message is not None and not self.executing:
+            try:
+                await self.message.edit(content="Choix expiré : aucun bannissement exécuté.", view=None)
+            except discord.HTTPException:
+                pass
+
+
 class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -486,18 +591,31 @@ class Moderation(commands.Cog):
     # VALIDATION METIER -> le bot doit réellement posséder la permission Discord.
     @checks.action_validation(bot_permissions=("ban_members",), target="member_moderation")
     async def ban(self, ctx: commands.Context, membre: discord.Member, *, raison: str = "Aucune raison fournie"):
-        """Core V2, Phase 2 (docs/core-v2-plan.md) : première commande de sanction
-        migrée vers services/moderation.py::ban(). Ce corps ne fait plus que
-        l'adaptation Discord (parser ctx, préparer le texte du MP, rendre le
-        résultat) ; hiérarchie, exécution et persistance vivent dans le service,
-        testé sans Discord dans tests/test_services_moderation_ban.py — y compris
-        la correction d'un vrai trou trouvé pendant l'extraction : une exception de
-        persistance ne fait plus jamais passer une sanction réellement appliquée
-        pour un échec de commande."""
+        """Le slash demande avant le ban si l'historique doit être supprimé."""
         raison = clean_reason(raison)
-        if self._sanction_duplicate(ctx, "ban", membre.id):
-            return await self._reply(ctx, "Cette sanction vient déjà d'être lancée sur ce membre.", ephemere=True)
+        if ctx.interaction is not None:
+            view = _BanDeletionView(self, ctx, membre, raison)
+            view.message = await ctx.send(
+                f"**Bannissement de {membre.display_name}**\n"
+                "Veux-tu aussi supprimer les anciens messages de ce membre ?",
+                view=view,
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            return
+
+        # Compatibilité : la commande préfixée conserve le ban sans purge.
         await self._ack(ctx)
+        result = await self._perform_ban(ctx, membre, raison, delete_message_seconds=0)
+        await self._reply(ctx, result)
+
+    async def _perform_ban(
+        self, ctx: commands.Context, membre: discord.Member, raison: str, *,
+        delete_message_seconds: int = 0,
+    ) -> str:
+        """Un seul pipeline pour le ban immédiat et le ban confirmé via boutons."""
+        if self._sanction_duplicate(ctx, "ban", membre.id):
+            return "Cette sanction vient déjà d'être lancée sur ce membre."
 
         template = await self._get_sanction_dm_template(ctx.guild.id, "ban")
         dm_text = None
@@ -513,13 +631,19 @@ class Moderation(commands.Cog):
             )
 
         outcome = await moderation_service.ban(
-            self.bot, guild=ctx.guild, actor=ctx.author, target=membre, reason=raison, dm_text=dm_text,
+            self.bot, guild=ctx.guild, actor=ctx.author, target=membre,
+            reason=raison, dm_text=dm_text,
+            delete_message_seconds=delete_message_seconds,
         )
         if not outcome.executed:
-            return await self._reply(ctx, outcome.hierarchy_error, ephemere=True)
+            return outcome.rejection_reason or "Ce membre ne peut pas être banni."
 
-        await self.log_sanction(ctx, "ban", membre, raison, case_number=outcome.case_number)
-        await self._reply(ctx, f"{membre.mention} a été banni.")
+        try:
+            await self.log_sanction(ctx, "ban", membre, raison, case_number=outcome.case_number)
+        except Exception:
+            logger.exception("Le bannissement a réussi mais l'envoi de son log a échoué.")
+            return f"{membre.mention} a été banni (journalisation indisponible)."
+        return f"{membre.mention} a été banni."
 
     @commands.hybrid_command(name="tempban", description="Bannir temporairement un membre (ex: 1h, 2j).", with_app_command=False)
     @app_commands.describe(membre="Le membre à bannir", duree="Durée (ex: 30m, 2h, 1j)", raison="La raison")
