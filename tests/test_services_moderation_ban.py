@@ -152,6 +152,30 @@ class SuccessfulBanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["delete_message_seconds"], 0)
 
 
+    async def test_fenetre_de_suppression_des_messages_explicitement_choisie(self):
+        for seconds in (900, 3600, 86400):
+            with self.subTest(seconds=seconds):
+                bot, guild, actor, target = _setup()
+                outcome = await moderation_service.ban(
+                    bot, guild=guild, actor=actor, target=target,
+                    reason="spam", delete_message_seconds=seconds,
+                )
+                self.assertTrue(outcome.executed)
+                self.assertEqual(guild.ban.await_args.kwargs["delete_message_seconds"], seconds)
+
+    async def test_une_periode_non_proposee_est_refusee_sans_ban(self):
+        bot, guild, actor, target = _setup()
+        outcome = await moderation_service.ban(
+            bot, guild=guild, actor=actor, target=target,
+            reason="spam", delete_message_seconds=4 * 86400,
+        )
+        self.assertFalse(outcome.executed)
+        self.assertIn("Période de suppression invalide", outcome.rejection_reason)
+        guild.ban.assert_not_awaited()
+        target.send.assert_not_awaited()
+
+
+
 class PersistenceFailureNeverUndoesSuccessTests(unittest.IsolatedAsyncioTestCase):
     """Le test qui verrouille la correction du vrai trou trouvé en extrayant ce
     code : bot.db.record_sanction() n'était protégé par aucun try/except."""
