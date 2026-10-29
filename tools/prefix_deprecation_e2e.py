@@ -91,8 +91,12 @@ async def main() -> int:
     await bot.db.execute("DELETE FROM sentrix_prefix_notices")
     envois = await lancer(bot, guild, "+ping", uid=h.SECOND_ID)
     textes = [str(j.get("content") or "") + h.visible_text([("POST", "", j)]) for j in envois]
-    check(len(envois) == 1 and "ont été supprimées" in textes[0] and f"<@{h.SECOND_ID}>" in textes[0],
-          "« + » retiré : un seul message, le rappel, et la commande n'est pas exécutée", str(textes)[:300])
+    check(len(envois) == 1 and "ont été supprimées" in textes[0] and f"<@{h.SECOND_ID}>" in textes[0]
+          and "/ping" in textes[0],
+          "« + » retiré : un seul message qui donne la commande / à utiliser, rien d'exécuté", str(textes)[:300])
+    envois = await lancer(bot, guild, "+clear 5", uid=h.ADMIN_ID)
+    textes = [str(j.get("content") or "") for j in envois]
+    check(len(envois) == 1 and "/clear" in textes[0], "+clear : « Utilise /clear à la place »", str(textes)[:300])
     os.environ["SENTRIX_PREFIXE_ACTIF"] = "1"
 
     # 5 — Les commandes « / » ne déclenchent jamais l'avis.
