@@ -194,7 +194,9 @@ class SequenceButton(discord.ui.Button):
         self.symbol = symbol
 
     async def callback(self, interaction: discord.Interaction):
-        view = self.view
+        # Relogé dans un panneau Components V2, self.view serait le Panneau et le
+        # clic ne ferait rien : la vue métier se retrouve par panels.vue_source.
+        view = panels.vue_source(self)
         if not isinstance(view, VerificationSequenceView):
             return
         await view.press(interaction, self.symbol)
