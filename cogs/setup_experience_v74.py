@@ -530,6 +530,13 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         options.append(
             discord.SelectOption(
+                label="Commandes personnalisées",
+                value="custom_commands",
+                description="Créer, modifier, supprimer et gérer les actions des commandes du serveur.",
+            )
+        )
+        options.append(
+            discord.SelectOption(
                 label="Automatisations",
                 value="automation",
                 emoji="⚙️",
@@ -646,6 +653,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.add_item(container)
 
     async def _build_page(self, page: str) -> None:
+        if page == "custom_commands":
+            from . import setup_custom_commands
+            return await setup_custom_commands.build_page(self)
         if page == "rules_access":
             return await self._build_rules_access()
         if page == "automation":
