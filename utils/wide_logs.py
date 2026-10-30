@@ -898,7 +898,7 @@ def narrative_body(
         decision = _field_value_exact(embed, "Décision")
         original = _clean_lines(embed.description)
         scores = re.search(
-            r"(\d+(?:[.,]\d+)?)\s*/\s*20\s*[•·—-]\s*seuil\s*\*{0,2}(\d+(?:[.,]\d+)?)\s*/\s*20",
+            r"(\d+(?:[.,]\d+)?)\s*/\s*20\*{0,2}\s*[•·—-]\s*seuil\s*\*{0,2}(\d+(?:[.,]\d+)?)\s*/\s*20",
             original, flags=re.IGNORECASE,
         )
         lines.append("**Contrôle d'entrée du compte**")
