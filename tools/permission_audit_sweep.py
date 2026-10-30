@@ -63,11 +63,9 @@ GENERIC_PERMISSION_PHRASES = (
     "réservée aux administrateurs",
 )
 # Commandes dont la validation dépend d'une pièce jointe : non générable par l'audit.
-# « presentation » : commande « / » NATIVE (PR #555). L'audit ne neutralise que les
-# corps des commandes construites depuis une source « + » ; une native s'exécute
-# vraiment (la présentation est publiée) et l'audit la croit « refusée ».
-# Vérifié à la main le 30/10/2026 : admin et propriétaire du serveur la reçoivent.
-SKIP_COMMANDS = frozenset({"embed import", "presentation"})
+# Les commandes natives sont neutralisées par _patch_native_command_bodies.
+# Ne jamais exclure /presentation : ses permissions doivent être auditées.
+SKIP_COMMANDS = frozenset({"embed import"})
 # Commandes servies par leur propre transport slash (pas par Command.callback) : une
 # réponse suffit à prouver l'accès.
 NATIVE_TRANSPORT = frozenset({"setup", "aide"})
@@ -143,6 +141,35 @@ def _patch_command_body() -> None:
         return stub
 
     commands.Command.callback = property(getter, original.fset)
+
+
+def _patch_native_command_bodies(bot) -> None:
+    """Neutralise le métier des slash NATIVE sans contourner les gardes Discord.
+
+    30/10/2026 : /presentation est native et ne possède pas de Command
+    préfixe. L'ancien audit l'excluait pour éviter l'envoi d'un vrai message.
+    On conserve la vérification des permissions jusqu'au dispatch et on
+    intercepte seulement le callback final sur l'instance de test.
+    """
+    import functools
+
+    for command in bot.tree.walk_commands():
+        if not isinstance(command, app_commands.Command):
+            continue
+        original = getattr(command, "_callback", None)
+        if original is None or getattr(original, "_sentrix_audit_native_stub", False):
+            continue
+        # Le transport aliasé à une commande historique est déjà neutralisé
+        # par _patch_command_body : conserver ce chemin sans le modifier.
+        if getattr(original, "_sentrix_original_command", None):
+            continue
+
+        @functools.wraps(original)
+        async def audit_stub(*args, **kwargs):
+            _Audit.reached = True
+
+        audit_stub._sentrix_audit_native_stub = True
+        command._callback = audit_stub
 
 
 def _reset_throttles(bot, command) -> None:
@@ -393,6 +420,7 @@ async def audit(
     PERSONAS["proprietaire-sentrix"]["author_id"] = PRIMARY_CREATOR_ID
     guild._add_member(discord.Member(data=harness.member_payload(PRIMARY_CREATOR_ID, "jayden-owner", [harness.MEMBER_ROLE_ID]), guild=guild, state=bot._connection))
     _patch_command_body()
+    _patch_native_command_bodies(bot)
     _patch_error_capture()
     _Audit.active = True
 
