@@ -68,7 +68,10 @@ async def _close_runtime(bot) -> None:
 # événements n'existent pas dans le journal d'audit. Les bans surveillés, eux,
 # passent par on_audit_log_entry_create : on_member_ban n'a pas bougé.
 BUDGETS: dict[str, int] = {
-    "on_message": 24,
+    # 24 → 25 (30/10/2026) : PlatformV4.on_message (commandes personnalisées)
+    # était chargé au démarrage du dashboard, hors de ce relevé ; il est
+    # maintenant chargé avec le bot (cogs/custom_commands).
+    "on_message": 25,
     "on_ready": 38,
     "on_member_join": 18,
     "on_command_completion": 14,

@@ -974,7 +974,7 @@ def narrative_body(
     # porte sur le CORPS du bloc, pas sur le bloc entier : "**Contenu**\n```texte```"
     # et "```texte```" désignent la même information, et le contenu d'un message
     # supprimé sortait donc deux fois.
-    extras = compact_fields(embed, limit=1800)
+    extras = compact_fields(embed, limit=3000)
     if extras:
         existing = "\n\n".join(lines)
         for block in extras.split("\n\n"):

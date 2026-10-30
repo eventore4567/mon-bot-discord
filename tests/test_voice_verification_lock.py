@@ -92,9 +92,11 @@ def test_already_private_or_connect_denied_voice_is_not_opened():
     denied = Channel(22, "General", kind="voice", can_connect=False)
     guild, _, verified = fixtures(hidden, denied)
     plan = plan_access(guild, verification_channel_id=99, verified_role=verified)
-    assert not plan.gate
-    assert [x.id for x in plan.voice_already_locked] == [21, 22]
-    assert "Vocaux déjà restreints : 2" in plan.preview()
+    # 30/10/2026 : un vocal membre fermé à TOUS (vérifiés compris) est rouvert au
+    # rôle Vérifié ; un vocal qui interdit déjà la connexion reste intact.
+    assert [x.id for x in plan.gate] == [21] and [x.id for x in plan.closed_opened] == [21]
+    assert [x.id for x in plan.voice_already_locked] == [22]
+    assert "Vocaux déjà restreints : 1" in plan.preview()
 
 
 def test_staff_voice_is_never_selected_even_when_public():

@@ -537,6 +537,19 @@ class PlatformV4(commands.Cog):
         )
         if not row:
             return
+        # Actions (rôles, rôle temporaire, argent, XP) et suppression du message
+        # déclencheur : cogs/custom_commands (30/10/2026).
+        try:
+            from cogs import custom_commands
+
+            await custom_commands.executer_actions(self.bot, message, name)
+            if await custom_commands.supprimer_declencheur(self.bot.db, message.guild.id):
+                try:
+                    await message.delete()
+                except discord.HTTPException:
+                    pass
+        except Exception:
+            logger.exception("Actions de commande personnalisée impossibles guild=%s", message.guild.id)
         response = str(row["response"] or "")
         response = response.replace("{user}", message.author.mention).replace("{server}", message.guild.name).replace("{args}", args[:1000])
         try:

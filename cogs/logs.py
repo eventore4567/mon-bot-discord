@@ -149,7 +149,9 @@ def _role_ref(role_id: int) -> str:
 #: disant, plutôt que de laisser l'API refuser la carte entière. La marge
 #: couvre la mention de fin (« N autre(s) cible(s) modifiée(s) »).
 _BUDGET_PERMS = 900
-_MAX_PERMS_PAR_CIBLE = 10
+#: 30/10/2026 (Jayden : « fais que ça montre tout, plus de “et N autres” ») :
+#: toutes les permissions d'une cible (Discord en compte une cinquantaine).
+_MAX_PERMS_PAR_CIBLE = 60
 
 
 def _est_categorie(salon) -> bool:
@@ -249,17 +251,19 @@ _ETATS_DEROGATION = (
 )
 
 
-def _bloc_derogation(cible, autorises, refuses, neutres) -> str:
+def _bloc_derogation(cible, autorises, refuses, neutres, *, limite: int = _MAX_PERMS_PAR_CIBLE) -> str:
     """Une cible : sa mention, puis ses permissions une par une dans un cadre."""
     entrees = [
         (signe, etat, libelle)
         for (signe, etat), valeurs in zip(_ETATS_DEROGATION, (autorises, refuses, neutres))
         for libelle in valeurs
     ]
-    visibles = entrees[:_MAX_PERMS_PAR_CIBLE]
-    largeur = max(len(libelle) for _, _, libelle in visibles)
+    visibles = entrees[:limite]
+    # Ligne courte : le signe (+ vert, - rouge, visible aussi sur mobile) dit
+    # l'état ; « autorisée / refusée » et l'alignement doublaient la longueur
+    # et faisaient couper la liste. « par défaut » reste écrit.
     lignes = [
-        f"{signe} {libelle.replace('`', '').ljust(largeur)}  {etat}"
+        f"{signe} {libelle.replace('`', '')}" + ("  par défaut" if signe == " " else "")
         for signe, etat, libelle in visibles
     ]
     reste = len(entrees) - len(visibles)
@@ -268,6 +272,50 @@ def _bloc_derogation(cible, autorises, refuses, neutres) -> str:
     total = len(entrees)
     entete = f"{_nom_derogation(cible)} · {total} permission{'s' if total > 1 else ''}"
     return entete + "\n```diff\n" + "\n".join(lignes) + "\n```"
+
+
+def _champs_derogations(change) -> list[tuple[str, str, bool]]:
+    """Toutes les permissions, un ou plusieurs champs par cible (1024 caractères
+    chacun), chaque champ avec son propre cadre ```diff complet."""
+    champs: list[tuple[str, str, bool]] = []
+    for cible, autorises, refuses, neutres in change[:20]:
+        bloc = _bloc_derogation(cible, autorises, refuses, neutres)
+        entete, _, reste = bloc.partition("\n```diff\n")
+        lignes = reste.rsplit("\n```", 1)[0].splitlines()
+        morceau: list[str] = []
+        partie = 0
+
+        def vider():
+            nonlocal morceau, partie
+            if not morceau:
+                return
+            partie += 1
+            tete = entete if partie == 1 else f"{entete} (suite)"
+            champs.append((
+                "Permissions" if not champs else f"Permissions ({len(champs) + 1})",
+                tete + "\n```diff\n" + "\n".join(morceau) + "\n```", False,
+            ))
+            morceau = []
+
+        for ligne in lignes:
+            if len(entete) + 30 + sum(len(l) + 1 for l in morceau) + len(ligne) > 1000:
+                vider()
+            morceau.append(ligne)
+        vider()
+    # La carte entière tient dans ~3000 caractères : au-delà, on n'affiche que
+    # des cadres complets et on dit combien de cibles restent (jamais de coupe
+    # au milieu d'un ```diff, qui casserait toute la carte).
+    gardes, total, cibles_vues = [], 0, set()
+    for champ in champs:
+        if gardes and total + len(champ[1]) > 2600:
+            break
+        gardes.append(champ)
+        total += len(champ[1])
+        cibles_vues.add(champ[1].split(" · ", 1)[0])
+    restantes = len(change) - len(cibles_vues)
+    if restantes > 0:
+        gardes.append(("Autres cibles", f"{restantes} autre(s) cible(s) modifiée(s) : détail dans le journal d'audit Discord.", False))
+    return gardes
 
 
 def _texte_derogations(change) -> str:
@@ -282,7 +330,7 @@ def _texte_derogations(change) -> str:
     lignes: list[str] = []
     budget = _BUDGET_PERMS
     for rang, (cible, autorises, refuses, neutres) in enumerate(change):
-        bloc = _bloc_derogation(cible, autorises, refuses, neutres)
+        bloc = _bloc_derogation(cible, autorises, refuses, neutres, limite=10)
         # Toujours garder la première cible : une carte qui ne nomme personne
         # ne vaudrait rien, même si son bloc dépasse à lui seul le budget.
         if rang and len(bloc) + 1 > budget:
@@ -1494,9 +1542,7 @@ class Logs(commands.Cog, name="Logs"):
                 )
                 return
         if change_perms:
-            fields.append(
-                ("Permissions", _short(_texte_derogations(change_perms), 1000), False)
-            )
+            fields.extend(_champs_derogations(change_perms))
             if est_categorie and getattr(after, "channels", None):
                 synchronises = sum(
                     1 for salon in after.channels
