@@ -356,6 +356,15 @@ class VerificationSetupView(discord.ui.View):
             await security_v71.update_setting(
                 self.bot, self.guild_id, field, value, interaction.user.id
             )
+        if enabled:
+            # Un portail installé alors que le module Sécurité global est OFF
+            # bloquait toujours les nouveaux arrivants sans ouvrir le CAPTCHA.
+            # Cette activation est explicite et ne coche aucun autre filtre.
+            from . import setup_v2_core as core
+            await core.set_module_enabled(
+                self.bot, self.guild_id, "security", True,
+                actor_id=interaction.user.id,
+            )
         security_v71._invalidate_automod(self.bot, self.guild_id)
 
     async def _render(self, interaction: discord.Interaction) -> None:
