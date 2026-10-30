@@ -91,15 +91,12 @@ async def _selected_protections(view: v74.SentriXSetupV74) -> set[str]:
         logger.debug("Lecture des réglages sécurité V71 impossible", exc_info=True)
         advanced = {}
 
-    # Le salon piège et la vérification reposent sur le système de vérification
-    # (salons et rôles). Sans lui, ils ne font rien : ne pas les montrer cochés.
-    if (
-        advanced.get("honeypot_enabled") or advanced.get("verification_enabled")
-    ) and await _honeypot_resources_ready(view):
-        if bool(advanced.get("honeypot_enabled", False)):
-            selected.add("honeypot")
-        if bool(advanced.get("verification_enabled", False)):
-            selected.add("verification")
+    # La vérification peut fonctionner sans le salon piège (mode 1).
+    # Ne pas cacher son état simplement parce que stay-muted est absent.
+    if advanced.get("verification_enabled") and await _honeypot_resources_ready(view):
+        selected.add("verification")
+    if advanced.get("honeypot_enabled") and await _honeypot_resources_ready(view, require_trap=True):
+        selected.add("honeypot")
     return selected
 
 
@@ -109,10 +106,13 @@ EXTRAS_NOT_INSTALLED = (
 )
 
 
-async def _honeypot_resources_ready(view: v74.SentriXSetupV74) -> bool:
-    """Vrai uniquement si toutes les ressources Honeypot existent déjà.
+async def _honeypot_resources_ready(
+    view: v74.SentriXSetupV74, *, require_trap: bool = False,
+) -> bool:
+    """Portail seul (mode 1) ou portail + salon piège (mode 2).
 
-    SentriX ne crée ni rôle, ni catégorie, ni salon depuis le Setup.
+    Ce contrôle ne crée rien ; la création du Honeypot se fait toujours dans
+    l'assistant explicite « Vérification & Honeypot ».
     """
     honeypot = view.bot.get_cog("HoneypotVerification")
     if honeypot is None:
@@ -136,7 +136,7 @@ async def _honeypot_resources_ready(view: v74.SentriXSetupV74) -> bool:
         and isinstance(verified, discord.Role)
         and isinstance(category, discord.CategoryChannel)
         and isinstance(verify_channel, discord.TextChannel)
-        and isinstance(trap_channel, discord.TextChannel)
+        and (not require_trap or isinstance(trap_channel, discord.TextChannel))
     )
 
 
@@ -177,16 +177,24 @@ async def _save_protections(
 
     await security_v71.ensure_schema(view.bot)
     notice = None
-    if chosen & {"honeypot", "verification"} and not await _honeypot_resources_ready(view):
-        # Cochées sans système de vérification, ces deux protections s'affichaient
-        # actives et ne faisaient rien (signalé le 15/10/2026).
-        chosen.discard("honeypot")
+    if "verification" in chosen and not await _honeypot_resources_ready(view):
         chosen.discard("verification")
+        chosen.discard("honeypot")
         notice = (
-            "Salon piège et Vérification n'ont pas été activés : le système de vérification "
-            "n'est pas installé, et SentriX ne crée rien automatiquement. Utilisez "
-            "« Ouvrir l'installation de la vérification » sur cette page."
+            "Portail de vérification absent : ouvrez « Vérification & Honeypot » "
+            "et activez le mode de votre choix avant d'utiliser ce filtre."
         )
+    if "honeypot" in chosen:
+        if not await _honeypot_resources_ready(view, require_trap=True):
+            chosen.discard("honeypot")
+            notice = (
+                "Le salon Honeypot n'existe pas. Activez d'abord "
+                "« Vérification + Honeypot » dans l'assistant ; rien n'a été créé."
+            )
+        else:
+            # Le Honeypot est toujours un supplément au portail web, pas un
+            # troisième mode piège indépendant et incohérent.
+            chosen.add("verification")
     honeypot_enabled = int("honeypot" in chosen)
     verification_enabled = int("verification" in chosen)
     await security_v71.update_setting(
@@ -230,11 +238,18 @@ async def _save_protections(
         except Exception:
             logger.exception("Setup sécurité : désactivation Honeypot impossible guild=%s", view.guild.id)
 
-    # Si l'admin conserve la vérification mais coupe le piège, le salon
-    # technique doit devenir invisible pour les nouveaux arrivants.
+    # Le même moteur V5 gère aussi le mode choisi et retire les anciens
+    # panneaux piège. Une simple mise à jour AutoMod ne doit jamais
+    # réactiver stay-muted ou recréer des salons à l'insu de l'admin.
     if honeypot is not None and chosen & {"honeypot", "verification"}:
         try:
-            await honeypot.ensure_verified_panel_hidden(view.guild)
+            active_trap = "honeypot" in chosen
+            await honeypot.ensure_verified_panel_hidden(
+                view.guild, honeypot_enabled=active_trap,
+            )
+            await honeypot.refresh_existing_panels(
+                view.guild, honeypot_enabled=active_trap,
+            )
         except Exception:
             logger.exception("Impossible de synchroniser les permissions du Honeypot.")
     await _refresh_security_runtime(view)
