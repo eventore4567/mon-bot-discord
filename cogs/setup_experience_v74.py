@@ -530,6 +530,20 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         )
         options.append(
             discord.SelectOption(
+                label="Messages enregistrés",
+                value="snippets",
+                description="Créer et gérer les textes réutilisables du staff.",
+            )
+        )
+        options.append(
+            discord.SelectOption(
+                label="Messages récurrents",
+                value="recurring_messages",
+                description="Publications périodiques, en pause tant que non activées.",
+            )
+        )
+        options.append(
+            discord.SelectOption(
                 label="Automatisations",
                 value="automation",
                 emoji="⚙️",
@@ -646,6 +660,9 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         self.add_item(container)
 
     async def _build_page(self, page: str) -> None:
+        if page in {"snippets", "word_reactions", "recurring_messages"}:
+            from . import setup_automation_extras
+            return await setup_automation_extras.build_page(self, page)
         if page == "rules_access":
             return await self._build_rules_access()
         if page == "automation":
@@ -1128,6 +1145,16 @@ class SentriXSetupV74(v73.SentriXSetupV73):
         reactions_button.callback = open_reactions
         rules_button.callback = open_rules
         container.add_item(discord.ui.ActionRow(reactions_button, rules_button))
+
+        word_button = discord.ui.Button(
+            label="Réactions à des mots",
+            style=discord.ButtonStyle.secondary,
+        )
+        async def open_word_reactions(interaction: discord.Interaction):
+            self.page = "word_reactions"
+            await self.refresh(interaction)
+        word_button.callback = open_word_reactions
+        container.add_item(discord.ui.ActionRow(word_button))
         self._add_navigation(container)
         self.add_item(container)
 
