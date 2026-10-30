@@ -5,7 +5,7 @@ import inspect
 from cogs import guild_arrival
 
 
-EXPECTED_HOME = "https://sentrix-standby-production.up.railway.app/home"
+EXPECTED_HOME = "https://sentrixbot.up.railway.app/home"
 
 
 def test_owner_onboarding_uses_exact_public_home_url():

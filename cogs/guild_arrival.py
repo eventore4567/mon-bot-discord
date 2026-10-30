@@ -21,7 +21,7 @@ OFFICIAL_SUPPORT_URL = "https://discord.gg/5P5Bqjqu5t"
 SUPPORT_URL = (os.getenv("SUPPORT_SERVER_URL") or OFFICIAL_SUPPORT_URL).strip()
 PUBLIC_HOME_URL = (
     os.getenv("SENTRIX_PUBLIC_HOME_URL")
-    or "https://sentrix-standby-production.up.railway.app/home"
+    or "https://sentrixbot.up.railway.app/home"
 ).strip()
 
 
@@ -134,7 +134,7 @@ class GuildArrivalView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-        dashboard = _safe_url(getattr(config, "DASHBOARD_APP_URL", None))
+        dashboard = _dashboard_url()
         if dashboard:
             self.add_item(
                 discord.ui.Button(
@@ -341,7 +341,7 @@ class GuildArrival(commands.Cog):
         avatar = getattr(getattr(bot_user, "display_avatar", None), "url", None)
         if avatar:
             embed.set_thumbnail(url=str(avatar))
-        embed.set_footer(text=f"SentriX • {guild.name} • sentrix-standby-production.up.railway.app")
+        embed.set_footer(text=f"SentriX • {guild.name} • sentrixbot.up.railway.app")
 
         view = discord.ui.View(timeout=None)
         public_home = _safe_url(PUBLIC_HOME_URL)

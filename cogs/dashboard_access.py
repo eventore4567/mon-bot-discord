@@ -34,7 +34,7 @@ def dashboard_url() -> str:
     for suffix in ("/oauth/callback", "/app"):
         if base.endswith(suffix):
             base = base[: -len(suffix)].rstrip("/")
-    return f"{base}/app" if base else "https://sentrix-standby-production.up.railway.app/app"
+    return f"{base}/app" if base else "https://sentrixbot.up.railway.app/app"
 
 
 def _profile_description(current: str) -> str:

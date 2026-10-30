@@ -178,7 +178,7 @@ class HomeView(design_system.SentriXView):
         staff_button.disabled = not staff
         self.add_item(staff_button)
         self.add_item(CheckinButton())
-        self.add_item(discord.ui.Button(label="Dashboard", url=config.DASHBOARD_APP_URL, row=1))
+        self.add_item(discord.ui.Button(label="Dashboard", url=config.DASHBOARD_SHARE_URL, row=1))
 
 
 class GameButton(discord.ui.Button):
