@@ -40,7 +40,12 @@ def test_final_security_setup_never_bootstraps_honeypot_resources():
     source = _source("cogs/setup_security_choice_v75.py")
     assert "create_or_refresh_system" not in source
     assert "def _honeypot_resources_ready" in source
-    assert "SentriX ne crée rien automatiquement" in source
+    # Le Setup Sécurité ne crée aucune ressource : il refuse l'activation
+    # d'un Honeypot sans salon et renvoie vers l'installateur explicite.
+    assert 'if "honeypot" in chosen:' in source
+    assert 'chosen.discard("honeypot")' in source
+    assert "Vérification + Honeypot" in source
+    assert "create_or_refresh_system" not in source
     assert "v74.v73.poser_banniere(container)" in source
     assert "SENTRIX CORE · Configuration · setup" not in source
 

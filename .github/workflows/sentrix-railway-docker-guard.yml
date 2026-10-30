@@ -1,0 +1,24 @@
+name: SentriX Railway Docker Build Guard
+
+on:
+  pull_request:
+    branches:
+      - dashboard-refonte-2026-09
+    paths:
+      - "Dockerfile"
+      - "cogs/**"
+      - "core/**"
+      - "utils/**"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/sentrix-railway-docker-guard.yml"
+  workflow_dispatch:
+
+jobs:
+  railway-docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the exact Railway production image and execute its full pytest gate
+        run: docker build --progress=plain -t sentrix-railway-ci .
