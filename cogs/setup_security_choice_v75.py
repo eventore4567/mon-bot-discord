@@ -242,6 +242,42 @@ async def _effective_states_v75(self: v74.SentriXSetupV74) -> dict[str, str]:
     return states
 
 
+# Inspiré de la lisibilité des familles RaidProtect, mais sans modifier le
+# moteur existant ni les sanctions choisies par le serveur. Chaque filtre
+# conserve son interrupteur propre et reste OFF sans activation explicite.
+AUTOMOD_FAMILLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Messages et mentions", ("antispam", "antimention", "anticaps", "antiemoji", "antiinsult")),
+    ("Liens et arnaques", ("antilink", "antiinvite", "antiscam")),
+    ("Arrivées et raids", ("antiraid", "antibot", "antiaccount", "join_gate", "risk_engine")),
+    ("Intégrité du serveur", ("antinuke", "security_vanity", "security_prune", "security_permissions")),
+)
+
+
+def _resume_familles_automod(
+    selected: set[str],
+    options: list[tuple[str, str, str]],
+) -> str:
+    """Synthèse visuelle, uniquement des états réellement enregistrés."""
+    available = {key: label for key, label, _description in options}
+    lines = ["### AutoMod par famille", "Chaque filtre se règle individuellement. Aucune protection n'est activée automatiquement."]
+    for title, keys in AUTOMOD_FAMILLES:
+        valid = [key for key in keys if key in available]
+        if not valid:
+            continue
+        enabled = [available[key] for key in valid if key in selected]
+        lines.append(
+            f"**{title}** · {len(enabled)}/{len(valid)} actifs"
+            + (f"\n-# Activés : {', '.join(enabled)}" if enabled else "\n-# Aucun filtre actif")
+        )
+    others = [key for key in available if not any(key in keys for _title, keys in AUTOMOD_FAMILLES)]
+    if others:
+        lines.append(
+            f"**Autres protections** · {sum(key in selected for key in others)}/{len(others)} actifs"
+        )
+    lines.append("-# Seuils, rôles exemptés, salons stricts et sanctions : Centre de sécurité.")
+    return "\n\n".join(lines)[:3000]
+
+
 async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
     selected = await _selected_protections(self)
     _ok, missing = v74._bot_permission_audit(self.guild)
@@ -326,7 +362,11 @@ async def _build_security_v75(self: v74.SentriXSetupV74) -> None:
         container.add_item(discord.ui.TextDisplay("\n".join(lignes)))
         container.add_item(discord.ui.Separator())
 
-    container.add_item(discord.ui.TextDisplay("### Protections actives"))
+    container.add_item(discord.ui.TextDisplay(
+        _resume_familles_automod(selected, option_specs)
+    ))
+    container.add_item(discord.ui.Separator())
+    container.add_item(discord.ui.TextDisplay("### Choisir les protections"))
 
     protection_select = discord.ui.Select(
         placeholder="Choisir les protections anti à activer",
