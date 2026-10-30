@@ -255,7 +255,7 @@ def _remove_old_management_commands(bot: commands.Bot) -> None:
 def _install_commands(bot: commands.Bot) -> None:
     _remove_old_management_commands(bot)
 
-    @commands.command(name="whitelist", aliases=["wl"])
+    @commands.command(name="whitelist", aliases=["wl"], help="Afficher ou ajouter les membres autorisés dans la whitelist globale SentriX.")
     async def whitelist_command(ctx: commands.Context, membre: discord.Member | None = None):
         if not await _can_manage(ctx):
             return
@@ -301,7 +301,7 @@ def _install_commands(bot: commands.Bot) -> None:
             ),
         )
 
-    @commands.command(name="unwhitelist", aliases=["unwl"])
+    @commands.command(name="unwhitelist", aliases=["unwl"], help="Retirer un membre de la whitelist globale SentriX.")
     async def unwhitelist_command(ctx: commands.Context, membre: discord.Member):
         if not await _can_manage(ctx):
             return
