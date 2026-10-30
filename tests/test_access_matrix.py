@@ -314,8 +314,16 @@ class GuildOwnerTests(unittest.TestCase):
 class GlobalOwnerTests(unittest.TestCase):
     def test_global_owner_keeps_global_commands(self):
         b = FakeBackend()
-        for cmd in sorted(M.OWNER_ONLY_COMMANDS):
+        for cmd in sorted(M.OWNER_ONLY_COMMANDS - {"auditbot"}):
             self.assertTrue(decide(b, global_owner(), cmd).allowed, cmd)
+
+    def test_auditbot_reserved_to_primary_creator_even_from_other_global_owners(self):
+        from database.db import PRIMARY_CREATOR_ID
+
+        b = FakeBackend()
+        self.assertFalse(decide(b, global_owner(), "auditbot").allowed)
+        self.assertFalse(decide(b, guild_owner(), "auditbot").allowed)
+        self.assertTrue(decide(b, Member(PRIMARY_CREATOR_ID), "auditbot").allowed)
 
     def test_global_owner_passes_even_when_a_module_is_off(self):
         b = FakeBackend(modules={"moderation": False, "economy": False})
