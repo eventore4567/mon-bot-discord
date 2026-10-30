@@ -57,7 +57,7 @@ async def is_reserved_channel(bot, channel: discord.TextChannel) -> bool:
         return True
     row = await bot.db.fetchone(
         "SELECT 1 AS configured FROM log_config "
-        "WHERE guild_id=? AND channel_id=? AND enabled=1 LIMIT 1",
+        "WHERE guild_id=? AND channel_id=? LIMIT 1",
         (channel.guild.id, channel.id),
     )
     return bool(row)
@@ -83,7 +83,9 @@ async def process_due(bot) -> int:
     sent = 0
     for row in rows:
         channel = bot.get_channel(int(row["channel_id"]))
-        if not isinstance(channel, discord.TextChannel) or await is_reserved_channel(bot, channel):
+        if (not isinstance(channel, discord.TextChannel)
+                or channel.guild.id != int(row["guild_id"])
+                or await is_reserved_channel(bot, channel)):
             await bot.db.execute("UPDATE recurring_messages SET enabled=0 WHERE id=?", (row["id"],))
             logger.warning("Message récurrent %s désactivé : salon supprimé ou journal.", row["id"])
             continue
