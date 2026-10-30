@@ -227,6 +227,8 @@ SUBCOMMAND_TIERS: dict[str, str] = {
 }
 
 DISCORD_PERMISSION_COMMANDS: dict[str, str] = {
+    # Seul +auditbot reste accessible avec le préfixe désactivé : accès admin.
+    "auditbot": "administrator",
     # Le fil SentriX (cogs/trace.py) : relire une action du staff, comme on lit
     # le journal d'audit de Discord.
     "trace": "view_audit_log",
