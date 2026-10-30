@@ -82,6 +82,6 @@ def test_command_inspection_never_invokes_the_callback():
 
 def test_report_does_not_include_secrets_or_message_history():
     report = AuditReport(123)
-    assert "token" in report.markdown().lower()  # explanation, not token values
+    assert "Aucun secret ou contenu de message" in report.markdown()
     assert "messages" in report.markdown().lower()
     assert "bot.get_channel" not in report.markdown()
