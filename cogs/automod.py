@@ -1508,8 +1508,15 @@ class AutoMod(commands.Cog, name="Automod"):
                 ("Action", "Blocage du message (autre sanction non confirmée)", False),
             ],
         )
+        actions = discord.ui.View(timeout=None)
+        if channel_id:
+            actions.add_item(discord.ui.Button(
+                label="Accéder au salon",
+                style=discord.ButtonStyle.link,
+                url=f"https://discord.com/channels/{guild_id}/{channel_id}",
+            ))
         try:
-            await self.log_action(guild, panel, "automod")
+            await self.log_action(guild, panel, "automod", suites=actions)
         except (discord.HTTPException, OSError):
             logger.exception(
                 "Log AutoMod Discord indisponible guild=%s rule=%s user=%s",
