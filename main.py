@@ -165,6 +165,7 @@ EXTENSIONS = [
     # exactement comme pour toute autre commande déjà classée dans
     # utils/access_matrix.py::OWNER_ONLY_COMMANDS.
     "cogs.core_diagnostics",
+    "cogs.auditbot",  # Diagnostic complet a la demande, exception préfixe +auditbot uniquement.
     # Core V2, Phase 3 (docs/core-v2-plan.md) : /permissions explain, pas de check
     # local (public, restriction "autre membre" gérée dans le corps).
     "cogs.permissions_explain",
