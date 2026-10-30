@@ -78,6 +78,24 @@ async def test_native_automod_ignores_unrelated_and_unknown_server_events():
     audit.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_explicitly_disabled_log_category_stays_disabled_without_channel(monkeypatch):
+    bot = SimpleNamespace()
+    guild = SimpleNamespace(id=123)
+    get_setting = AsyncMock(return_value={"enabled": False, "channel_id": None})
+    monkeypatch.setattr(delivery.log_service, "get_log_setting", get_setting)
+
+    def fail_discovery(*args):
+        raise AssertionError("disabled log route must never trigger auto-discovery")
+
+    monkeypatch.setattr(delivery, "_discover_channel", fail_discovery)
+    ok = await delivery.send_log_v5(
+        bot, guild, "voice_move", discord.Embed(title="Déplacement vocal"),
+    )
+    assert ok is False
+    assert bot.live_log_delivery_v5_state["last_result"] == "explicitly_disabled"
+
+
 def test_missing_channel_warning_throttled_by_category():
     delivery._MISSING_CHANNEL_WARNED_AT.clear()
     assert delivery._should_warn_missing_channel(123, "voice", 1000.0)
